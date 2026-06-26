@@ -1,0 +1,13 @@
+[package]
+name = "flux-sys"
+description = "Raw FFI bindings to flux (libflux), generated from the flux public headers incl. <flux/vulkan.h>"
+links = "flux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[build-dependencies]
+bindgen = "0.70"
+pkg-config = "0.3"

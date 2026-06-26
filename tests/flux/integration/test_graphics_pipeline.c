@@ -1,0 +1,140 @@
+/*
+ * flux_graphics_pipeline lifecycle. Builds a real pipeline against
+ * the embedded test triangle shaders, exercises retain/release, and
+ * covers the rejection paths. Skips if no Vulkan device.
+ */
+#include "test_helpers.h"
+#include <flux/flux.h>
+#include <flux/vulkan.h>
+
+#include <stdalign.h>
+
+alignas(uint32_t) static const unsigned char vert_spv[] = {
+#embed "triangle.vert.spv"
+};
+alignas(uint32_t) static const unsigned char frag_spv[] = {
+#embed "triangle.frag.spv"
+};
+
+static flux_graphics_pipeline_desc base_desc(void) {
+    flux_graphics_pipeline_desc desc = FLUX_GRAPHICS_PIPELINE_DESC_INIT;
+    desc.vertex_spirv = (const uint32_t *)vert_spv;
+    desc.vertex_spirv_word_count = sizeof(vert_spv) / sizeof(uint32_t);
+    desc.fragment_spirv = (const uint32_t *)frag_spv;
+    desc.fragment_spirv_word_count = sizeof(frag_spv) / sizeof(uint32_t);
+    desc.topology = FLUX_TOPOLOGY_TRIANGLE_LIST;
+    desc.cull = FLUX_CULL_NONE;
+    desc.blend = FLUX_BLEND_PRESET_NONE;
+    desc.depth = FLUX_DEPTH_NONE;
+    desc.color_format = FLUX_FORMAT_BGRA8_UNORM;
+    desc.depth_format = FLUX_FORMAT_UNDEFINED;
+    return desc;
+}
+
+int main(void) {
+    /* --- NULL rejection without a device --- */
+    {
+        flux_graphics_pipeline *p = nullptr;
+        EXPECT(flux_graphics_pipeline_create(nullptr, nullptr, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+    }
+
+    flux_device *d = test_helpers_make_headless_device();
+    if (!d) {
+        fprintf(stderr, "test_graphics_pipeline: no Vulkan device; skipping\n");
+        TEST_SUMMARY();
+    }
+
+    /* --- happy path --- */
+    {
+        flux_graphics_pipeline_desc desc = base_desc();
+        flux_graphics_pipeline *p = nullptr;
+        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
+        EXPECT(p != nullptr);
+        EXPECT(flux_graphics_pipeline_vk_pipeline(p) != VK_NULL_HANDLE);
+        EXPECT(flux_graphics_pipeline_vk_layout(p) != VK_NULL_HANDLE);
+
+        EXPECT(flux_graphics_pipeline_retain(p) == p);
+        flux_graphics_pipeline_release(p); /* drop the retain */
+        flux_graphics_pipeline_release(p); /* final */
+    }
+
+    /* --- blend presets cover the same shader without re-error --- */
+    {
+        for (int bp = FLUX_BLEND_PRESET_NONE; bp <= FLUX_BLEND_PRESET_ADDITIVE; ++bp) {
+            flux_graphics_pipeline_desc desc = base_desc();
+            desc.blend = (flux_blend_preset)bp;
+            flux_graphics_pipeline *p = nullptr;
+            EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
+            flux_graphics_pipeline_release(p);
+        }
+    }
+
+    /* --- depth-tested pipeline with depth format --- */
+    {
+        flux_graphics_pipeline_desc desc = base_desc();
+        desc.depth = FLUX_DEPTH_TEST_AND_WRITE;
+        desc.depth_format = FLUX_FORMAT_D32_SFLOAT;
+        flux_graphics_pipeline *p = nullptr;
+        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
+        flux_graphics_pipeline_release(p);
+    }
+
+    /* --- vertex binding with attributes --- */
+    {
+        flux_vertex_attribute attrs[2] = {
+            {.location = 0, .format = FLUX_FORMAT_RGB32_SFLOAT, .offset = 0},
+            {.location = 1, .format = FLUX_FORMAT_RG32_SFLOAT, .offset = 12},
+        };
+        flux_vertex_binding binding = {
+            .stride = 20,
+            .attribute_count = 2,
+            .attributes = attrs,
+        };
+        flux_graphics_pipeline_desc desc = base_desc();
+        desc.vertex_binding = &binding;
+        flux_graphics_pipeline *p = nullptr;
+        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
+        flux_graphics_pipeline_release(p);
+    }
+
+    /* --- wrong sType --- */
+    {
+        flux_graphics_pipeline_desc desc = base_desc();
+        desc.type = FLUX_TYPE_UNKNOWN;
+        flux_graphics_pipeline *p = nullptr;
+        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* --- missing shaders rejected --- */
+    {
+        flux_graphics_pipeline_desc desc = base_desc();
+        desc.vertex_spirv = nullptr;
+        flux_graphics_pipeline *p = nullptr;
+        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* --- missing colour format rejected --- */
+    {
+        flux_graphics_pipeline_desc desc = base_desc();
+        desc.color_format = FLUX_FORMAT_UNDEFINED;
+        flux_graphics_pipeline *p = nullptr;
+        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* --- push constants over device cap rejected --- */
+    {
+        flux_graphics_pipeline_desc desc = base_desc();
+        desc.push_constant_bytes = 1u << 20; /* 1 MiB — no driver allows */
+        flux_graphics_pipeline *p = nullptr;
+        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* --- NULL-safe accessors and release --- */
+    EXPECT(flux_graphics_pipeline_vk_pipeline(nullptr) == VK_NULL_HANDLE);
+    EXPECT(flux_graphics_pipeline_vk_layout(nullptr) == VK_NULL_HANDLE);
+    EXPECT(flux_graphics_pipeline_retain(nullptr) == nullptr);
+    flux_graphics_pipeline_release(nullptr);
+
+    flux_device_release(d);
+    TEST_SUMMARY();
+}

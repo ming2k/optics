@@ -1,0 +1,10 @@
+option('canvas',   type : 'boolean', value : true,  description : 'Build the flux canvas module')
+option('scene',    type : 'boolean', value : true,  description : 'Build the flux scene module')
+option('compute',  type : 'boolean', value : true,  description : 'Build the flux compute module')
+option('effect',   type : 'boolean', value : true,  description : 'Build the flux image effect module')
+
+option('text',        type : 'boolean', value : true, description : 'Build the flux-text sibling')
+option('scene-graph', type : 'boolean', value : true, description : 'Build the flux-scene-graph sibling')
+
+option('examples', type : 'boolean', value : false, description : 'Build all C examples across all modules')
+option('tests',    type : 'boolean', value : false, description : 'Build all C tests across all modules')

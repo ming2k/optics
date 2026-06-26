@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/flux-sys",
+  "crates/flux",
+  "crates/flux-text-sys",
+  "crates/flux-text",
+  "crates/flux-text-layout",
+]
+
+[workspace.package]
+version = "0.1.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ming2k/flux-rs"
+rust-version = "1.74"
+
+[profile.dev]
+opt-level = 0

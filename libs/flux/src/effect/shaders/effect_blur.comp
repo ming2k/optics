@@ -1,0 +1,82 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+/*
+ * Separable Gaussian blur. One shader, axis selected via push
+ * constant — host code dispatches it twice (horizontal, then
+ * vertical) with a ping-pong target between them.
+ *
+ * Bindless layout (matches the device-wide heap):
+ *   set 0, binding 0 — SAMPLED_IMAGE[]
+ *   set 0, binding 1 — STORAGE_IMAGE[]
+ *   set 0, binding 2 — SAMPLER[]
+ *
+ * Sampling reads use the user-supplied sampler (typically the
+ * device default: linear, clamp-to-edge). Edge handling is
+ * therefore clamp-to-edge regardless of caller sampler choice
+ * because we drive uv into [0,1] via texelFetch-style integer
+ * offsets and rely on the sampler for the fractional case.
+ */
+
+layout(set = 0, binding = 0) uniform texture2D u_sampled[];
+layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+layout(set = 0, binding = 2) uniform sampler   u_samplers[];
+
+layout(push_constant) uniform PC {
+    uint  in_handle;       /* sampled image bindless slot   */
+    uint  sampler_handle;  /* sampler bindless slot         */
+    uint  out_handle;      /* storage image bindless slot   */
+    uint  width;           /* output extent in pixels       */
+    uint  height;          /* output extent in pixels       */
+    int   radius;          /* kernel half-width in pixels   */
+    float sigma;           /* Gaussian sigma in pixels      */
+    uint  axis;            /* 0 = horizontal, 1 = vertical  */
+} pc;
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+void main()
+{
+    uvec2 p = gl_GlobalInvocationID.xy;
+    if (p.x >= pc.width || p.y >= pc.height) return;
+
+    uint ih = pc.in_handle      & 0x0FFFFFFFu;
+    uint sh = pc.sampler_handle & 0x0FFFFFFFu;
+    uint oh = pc.out_handle     & 0x0FFFFFFFu;
+
+    /* Sample via combined image/sampler. clamp-to-edge sampler is
+     * the caller contract; out-of-range texel fetches collapse to
+     * the edge texel. */
+    vec2 inv_size = 1.0 / vec2(pc.width, pc.height);
+    vec2 base_uv  = (vec2(p) + 0.5) * inv_size;
+
+    /* radius==0 (sigma==0) collapses to a copy. Guards against the
+     * 0/0 the weight formula would otherwise produce. */
+    if (pc.radius == 0) {
+        vec4 c = texture(
+            sampler2D(u_sampled[nonuniformEXT(ih)],
+                      u_samplers[nonuniformEXT(sh)]), base_uv);
+        imageStore(u_storage[nonuniformEXT(oh)], ivec2(p), c);
+        return;
+    }
+
+    float two_sigma_sq = 2.0 * pc.sigma * pc.sigma;
+    float weight_sum   = 0.0;
+    vec4  colour_sum   = vec4(0.0);
+
+    for (int i = -pc.radius; i <= pc.radius; ++i) {
+        vec2 off = (pc.axis == 0u) ? vec2(float(i), 0.0) : vec2(0.0, float(i));
+        vec2 uv  = base_uv + off * inv_size;
+        float w  = exp(-float(i * i) / two_sigma_sq);
+        vec4  c  = texture(
+            sampler2D(
+                u_sampled[nonuniformEXT(ih)],
+                u_samplers[nonuniformEXT(sh)]
+            ), uv);
+        colour_sum += c * w;
+        weight_sum += w;
+    }
+
+    vec4 result = colour_sum / weight_sum;
+    imageStore(u_storage[nonuniformEXT(oh)], ivec2(p), result);
+}

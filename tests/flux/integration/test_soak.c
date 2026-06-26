@@ -1,0 +1,109 @@
+/*
+ * Soak test: long-running create/destroy churn for every refcounted
+ * resource. Catches bindless-slot drift, allocator drift, and
+ * (when run under ASAN with detect_leaks=1) any persistent leak that
+ * a per-test single-shot run would miss.
+ *
+ * Per-iteration: one image, one buffer (host-visible), one sampler,
+ * one graphics pipeline. Across 256 iterations: 1024 bindless
+ * register/release pairs total, exercising the slot pool. Skips if
+ * no Vulkan device.
+ */
+#include "test_helpers.h"
+#include <flux/flux.h>
+#include <flux/vulkan.h>
+
+#include <stdalign.h>
+#include <string.h>
+
+alignas(uint32_t) static const unsigned char vert_spv[] = {
+#embed "triangle.vert.spv"
+};
+alignas(uint32_t) static const unsigned char frag_spv[] = {
+#embed "triangle.frag.spv"
+};
+
+#define ITERATIONS 256
+#define IMG_W 8
+#define IMG_H 8
+
+int main(void) {
+    flux_device *d = test_helpers_make_headless_device();
+    if (!d) {
+        fprintf(stderr, "test_soak: no Vulkan device; skipping\n");
+        TEST_SUMMARY();
+    }
+
+    uint32_t pixels[IMG_W * IMG_H];
+    memset(pixels, 0xAB, sizeof(pixels));
+
+    for (int i = 0; i < ITERATIONS; ++i) {
+        /* Image — exercises bindless SAMPLED_IMAGE slot + memory alloc. */
+        flux_image_desc id = FLUX_IMAGE_DESC_INIT;
+        id.width = IMG_W;
+        id.height = IMG_H;
+        id.format = FLUX_FORMAT_RGBA8_UNORM;
+        id.initial_data = pixels;
+        flux_image *img = nullptr;
+        EXPECT(flux_image_create(d, &id, &img) == FLUX_OK);
+
+        /* Sampler — exercises bindless SAMPLER slot. */
+        flux_sampler_desc sd = FLUX_SAMPLER_DESC_INIT;
+        sd.min_filter = FLUX_FILTER_LINEAR;
+        sd.mag_filter = FLUX_FILTER_LINEAR;
+        sd.mipmap_mode = FLUX_FILTER_LINEAR;
+        sd.address_u = FLUX_ADDRESS_REPEAT;
+        sd.address_v = FLUX_ADDRESS_REPEAT;
+        sd.address_w = FLUX_ADDRESS_REPEAT;
+        flux_sampler *smp = nullptr;
+        EXPECT(flux_sampler_create(d, &sd, &smp) == FLUX_OK);
+
+        /* Buffer — host-visible w/ BDA. */
+        flux_buffer_desc bd = FLUX_BUFFER_DESC_INIT;
+        bd.size = 4096;
+        bd.usage = FLUX_BUFFER_USAGE_STORAGE;
+        bd.location = FLUX_BUFFER_HOST_VISIBLE;
+        bd.device_address = true;
+        flux_buffer *buf = nullptr;
+        EXPECT(flux_buffer_create(d, &bd, &buf) == FLUX_OK);
+
+        /* Graphics pipeline — exercises shader-module path + pipeline cache. */
+        flux_graphics_pipeline_desc pd = FLUX_GRAPHICS_PIPELINE_DESC_INIT;
+        pd.vertex_spirv = (const uint32_t *)vert_spv;
+        pd.vertex_spirv_word_count = sizeof(vert_spv) / sizeof(uint32_t);
+        pd.fragment_spirv = (const uint32_t *)frag_spv;
+        pd.fragment_spirv_word_count = sizeof(frag_spv) / sizeof(uint32_t);
+        pd.topology = FLUX_TOPOLOGY_TRIANGLE_LIST;
+        pd.cull = FLUX_CULL_NONE;
+        pd.blend = FLUX_BLEND_PRESET_NONE;
+        pd.depth = FLUX_DEPTH_NONE;
+        pd.color_format = FLUX_FORMAT_BGRA8_UNORM;
+        pd.depth_format = FLUX_FORMAT_UNDEFINED;
+        flux_graphics_pipeline *gp = nullptr;
+        EXPECT(flux_graphics_pipeline_create(d, &pd, &gp) == FLUX_OK);
+
+        /* Release in reverse — verifies the orderings don't snag. */
+        flux_graphics_pipeline_release(gp);
+        flux_buffer_release(buf);
+        flux_sampler_release(smp);
+        flux_image_release(img);
+
+        /* Belt-and-braces: every 64 iterations, also exercise an
+         * in-flight retain to make sure refcount ordering survives
+         * the cycle. */
+        if ((i & 63) == 0) {
+            flux_image_desc id2 = FLUX_IMAGE_DESC_INIT;
+            id2.width = IMG_W;
+            id2.height = IMG_H;
+            id2.format = FLUX_FORMAT_RGBA8_UNORM;
+            flux_image *im2 = nullptr;
+            EXPECT(flux_image_create(d, &id2, &im2) == FLUX_OK);
+            EXPECT(flux_image_retain(im2) == im2);
+            flux_image_release(im2);
+            flux_image_release(im2);
+        }
+    }
+
+    flux_device_release(d);
+    TEST_SUMMARY();
+}

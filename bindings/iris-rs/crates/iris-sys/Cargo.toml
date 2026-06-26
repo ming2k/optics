@@ -1,0 +1,13 @@
+[package]
+name = "iris-sys"
+description = "Raw FFI bindings to iris (libiris), generated from <iris/iris.h>"
+links = "iris"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[build-dependencies]
+bindgen = "0.70"
+pkg-config = "0.3"

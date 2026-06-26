@@ -1,0 +1,309 @@
+/*
+ * mineradio_fx — an interactive particle stage inspired by Mineradio.
+ *
+ * This example tests the engine's ability to render an interactive
+ * audio-reactive-style particle stage, responding to mouse inputs and
+ * rendering additive glowing particles efficiently.
+ */
+#include <flux/flux.h>
+#include <flux/math.h>
+#include <flux/scene.h>
+#include <flux/vulkan.h>
+
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+
+#include "pipeline_cache.h"
+
+#include <math.h>
+#include <stdalign.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+alignas(uint32_t) static const unsigned char fx_vert_spv[] = {
+#embed "mineradio_fx.vert.spv"
+};
+alignas(uint32_t) static const unsigned char fx_frag_spv[] = {
+#embed "mineradio_fx.frag.spv"
+};
+
+#define DEPTH_FORMAT VK_FORMAT_D32_SFLOAT
+#define FLUX_DEPTH_FORMAT FLUX_FORMAT_D32_SFLOAT
+
+#define GRID 200
+#define POINT_COUNT (GRID * GRID)
+
+typedef struct mineradio_push {
+    float mvp[16];
+    float time;
+    float point_size;
+    float mouse_x;
+    float mouse_y;
+} mineradio_push;
+
+static flux_target *depth_ensure(flux_target *t, flux_device *device, uint32_t w, uint32_t h) {
+    if (t && flux_target_width(t) == w && flux_target_height(t) == h)
+        return t;
+    if (t) {
+        vkDeviceWaitIdle(flux_device_vk_device(device));
+        flux_target_release(t);
+    }
+    flux_target_desc ddesc = {
+        .type = FLUX_TYPE_TARGET_DESC,
+        .usage = FLUX_TARGET_DEPTH,
+        .format = FLUX_DEPTH_FORMAT,
+        .width = w,
+        .height = h,
+    };
+    flux_target *nt = nullptr;
+    if (flux_target_create(device, &ddesc, &nt) != FLUX_OK) {
+        flux_error_info ei;
+        flux_get_last_error(&ei);
+        fprintf(stderr, "flux_target_create (depth) failed: %s\n", ei.message ? ei.message : "?");
+        return nullptr;
+    }
+    return nt;
+}
+
+static void on_resize(GLFWwindow *win, int w, int h) {
+    flux_surface *surface = glfwGetWindowUserPointer(win);
+    if (surface && w > 0 && h > 0)
+        (void)flux_surface_resize(surface, (uint32_t)w, (uint32_t)h);
+}
+
+int main(void) {
+    if (!glfwInit()) {
+        return 1;
+    }
+    if (!glfwVulkanSupported()) {
+        glfwTerminate();
+        return 1;
+    }
+
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    GLFWwindow *win = glfwCreateWindow(960, 540, "flux Mineradio FX", nullptr, nullptr);
+    if (!win) {
+        glfwTerminate();
+        return 1;
+    }
+
+    uint32_t ext_count = 0;
+    const char **req_exts = glfwGetRequiredInstanceExtensions(&ext_count);
+    const char *device_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+
+    flux_pipeline_cache_file cache = FLUX_PIPELINE_CACHE_FILE_INIT;
+    flux_pipeline_cache_file_set_default_path(&cache, "mineradio_fx.bin");
+
+    flux_device_desc ddesc = {
+        .type = FLUX_TYPE_DEVICE_DESC,
+        .log = flux_console_logger,
+        .validation = FLUX_VALIDATION_AUTO,
+        .required_instance_extensions = req_exts,
+        .required_instance_extension_count = ext_count,
+        .required_device_extensions = device_exts,
+        .required_device_extension_count = sizeof(device_exts) / sizeof(*device_exts),
+        .frames_in_flight = 2,
+        .pipeline_cache_load = flux_pipeline_cache_file_load,
+        .pipeline_cache_save = flux_pipeline_cache_file_save,
+        .pipeline_cache_userdata = &cache,
+    };
+    flux_device *device = nullptr;
+    flux_result r = flux_device_create(&ddesc, &device);
+    if (r != FLUX_OK) {
+        glfwDestroyWindow(win);
+        glfwTerminate();
+        return (int)r;
+    }
+
+    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
+    if (glfwCreateWindowSurface(flux_device_vk_instance(device), win, nullptr, &vk_surface) !=
+        VK_SUCCESS) {
+        flux_device_release(device);
+        glfwDestroyWindow(win);
+        glfwTerminate();
+        return 1;
+    }
+
+    int fbw = 0, fbh = 0;
+    glfwGetFramebufferSize(win, &fbw, &fbh);
+    flux_surface_desc sdesc = {
+        .type = FLUX_TYPE_SURFACE_DESC,
+        .vk_surface_khr = vk_surface,
+        .width = (uint32_t)fbw,
+        .height = (uint32_t)fbh,
+        .vsync = true,
+    };
+    flux_surface *surface = nullptr;
+    r = flux_surface_create(device, &sdesc, &surface);
+    if (r != FLUX_OK) {
+        vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
+        flux_device_release(device);
+        glfwDestroyWindow(win);
+        glfwTerminate();
+        return (int)r;
+    }
+    glfwSetWindowUserPointer(win, surface);
+    glfwSetFramebufferSizeCallback(win, on_resize);
+
+    flux_graphics_pipeline_desc pdesc = FLUX_GRAPHICS_PIPELINE_DESC_INIT;
+    pdesc.vertex_spirv = (const uint32_t *)fx_vert_spv;
+    pdesc.vertex_spirv_word_count = sizeof(fx_vert_spv) / sizeof(uint32_t);
+    pdesc.fragment_spirv = (const uint32_t *)fx_frag_spv;
+    pdesc.fragment_spirv_word_count = sizeof(fx_frag_spv) / sizeof(uint32_t);
+    pdesc.topology = FLUX_TOPOLOGY_POINT_LIST;
+    pdesc.cull = FLUX_CULL_NONE;
+    pdesc.blend = FLUX_BLEND_PRESET_ADDITIVE;
+    pdesc.depth = FLUX_DEPTH_TEST_AND_WRITE;
+    pdesc.color_format = flux_format_from_vk(flux_surface_vk_format(surface));
+    pdesc.depth_format = FLUX_DEPTH_FORMAT;
+    pdesc.push_constant_bytes = sizeof(mineradio_push);
+
+    flux_graphics_pipeline *pipe = nullptr;
+    if (flux_graphics_pipeline_create(device, &pdesc, &pipe) != FLUX_OK) {
+        goto teardown_surface;
+    }
+
+    flux_target *depth = nullptr;
+
+    while (!glfwWindowShouldClose(win)) {
+        glfwPollEvents();
+
+        flux_frame *frame = nullptr;
+        r = flux_surface_begin_frame(surface, nullptr, &frame);
+        if (r == FLUX_ERROR_SURFACE_LOST) {
+            int w, h;
+            glfwGetFramebufferSize(win, &w, &h);
+            if (w > 0 && h > 0)
+                (void)flux_surface_resize(surface, (uint32_t)w, (uint32_t)h);
+            continue;
+        }
+        if (r == FLUX_ERROR_INVALID_STATE)
+            continue;
+        if (r != FLUX_OK) {
+            break;
+        }
+
+        flux_surface_info info;
+        flux_surface_get_info(surface, &info);
+
+        depth = depth_ensure(depth, device, info.width, info.height);
+        if (!depth)
+            break;
+
+        VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
+        {
+            VkImageMemoryBarrier2 b = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                .srcAccessMask = 0,
+                .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                .dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                .image = flux_target_vk_image(depth),
+                .subresourceRange =
+                    {
+                        .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                        .levelCount = 1,
+                        .layerCount = 1,
+                    },
+            };
+            VkDependencyInfo di = {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .imageMemoryBarrierCount = 1,
+                .pImageMemoryBarriers = &b,
+            };
+            vkCmdPipelineBarrier2(cmd, &di);
+        }
+
+        flux_pass_attachment color = {
+            .view = VK_NULL_HANDLE,
+            .load_op = FLUX_LOAD_CLEAR,
+            .store_op = FLUX_STORE_STORE,
+            .clear_color = {0.05f, 0.05f, 0.08f, 1.0f},
+        };
+        flux_pass_depth_attachment depth_att = {
+            .view = flux_target_vk_view(depth),
+            .format = DEPTH_FORMAT,
+            .load_op = FLUX_LOAD_CLEAR,
+            .store_op = FLUX_STORE_DONT_CARE,
+            .clear_depth = 1.0f,
+        };
+        flux_pass_desc pass = {
+            .type = FLUX_TYPE_PASS_DESC,
+            .color_attachment_count = 1,
+            .color_attachments = &color,
+            .depth = &depth_att,
+        };
+        flux_frame_begin_pass(frame, &pass);
+
+        VkViewport vp = {
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = (float)info.width,
+            .height = (float)info.height,
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        VkRect2D sc = {.offset = {0, 0}, .extent = {info.width, info.height}};
+        vkCmdSetViewport(cmd, 0, 1, &vp);
+        vkCmdSetScissor(cmd, 0, 1, &sc);
+
+        float t = (float)glfwGetTime();
+
+        double mx = -999.0, my = -999.0;
+        if (glfwGetWindowAttrib(win, GLFW_HOVERED)) {
+            glfwGetCursorPos(win, &mx, &my);
+            mx = (mx / info.width) * 2.0 - 1.0;
+            my = (my / info.height) * 2.0 - 1.0;
+        }
+
+        flux_camera cam;
+        flux_camera_perspective(&cam, 1.0f, (float)info.width / (float)info.height, 0.1f, 100.0f);
+        flux_camera_look_at(&cam, (flux_vec3){0.0f, 10.0f, 10.0f}, (flux_vec3){0.0f, 0.0f, 0.0f},
+                            (flux_vec3){0.0f, 1.0f, 0.0f});
+
+        flux_mat4 view_proj = flux_mat4_multiply(cam.projection, cam.view);
+        flux_mat4 mvp = flux_mat4_multiply(view_proj, flux_mat4_identity());
+
+        mineradio_push pc;
+        memcpy(pc.mvp, mvp.m, sizeof(pc.mvp));
+        pc.time = t;
+        pc.point_size = 4.0f;
+        // Map screen mouse position roughly to our plane
+        pc.mouse_x = (float)mx;
+        pc.mouse_y = (float)my;
+        flux_graphics_pipeline_bind(frame, pipe, &pc, sizeof(pc));
+
+        vkCmdDraw(cmd, POINT_COUNT, 1, 0, 0);
+
+        flux_frame_end_pass(frame);
+        r = flux_frame_submit(frame);
+        if (r != FLUX_OK) {
+            break;
+        }
+        r = flux_frame_present(frame);
+        if (r == FLUX_ERROR_SURFACE_LOST) {
+            int w, h;
+            glfwGetFramebufferSize(win, &w, &h);
+            if (w > 0 && h > 0)
+                (void)flux_surface_resize(surface, (uint32_t)w, (uint32_t)h);
+        } else if (r != FLUX_OK) {
+            break;
+        }
+    }
+
+    flux_device_wait_idle(device);
+    flux_target_release(depth);
+    flux_graphics_pipeline_release(pipe);
+teardown_surface:
+    flux_surface_release(surface);
+    vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
+    flux_device_release(device);
+    glfwDestroyWindow(win);
+    glfwTerminate();
+    return 0;
+}

@@ -1,0 +1,29 @@
+# Build directories
+build/
+builddir/
+build_examples/
+
+# Object files and libraries
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cache/
+
+# Meson / Ninja
+compile_commands.json
+.ninja_deps
+.ninja_log
+
+# Python cache
+__pycache__/
+*.pyc

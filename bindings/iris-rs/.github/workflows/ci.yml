@@ -1,0 +1,94 @@
+name: build-and-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust bindings (${{ matrix.iris_ref }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pin the iris + lens + flux revisions these bindings are tracked
+        # against. Bump when the C surface changes in a way the bindings
+        # must follow.
+        iris_ref: [main]
+    env:
+      IRIS_SOURCE_DIR: ${{ github.workspace }}/iris
+      IRIS_BUILD_DIR: ${{ github.workspace }}/iris/build
+      LENS_SOURCE_DIR: ${{ github.workspace }}/lens
+      LENS_BUILD_DIR: ${{ github.workspace }}/lens/build
+      FLUX_SOURCE_DIR: ${{ github.workspace }}/flux
+      FLUX_BUILD_DIR: ${{ github.workspace }}/flux/build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout flux C library
+        uses: actions/checkout@v4
+        with:
+          repository: ming2k/flux
+          path: flux
+
+      - name: Checkout lens C library
+        uses: actions/checkout@v4
+        with:
+          repository: ming2k/lens
+          path: lens
+
+      - name: Checkout iris C library
+        uses: actions/checkout@v4
+        with:
+          repository: ming2k/iris
+          ref: ${{ matrix.iris_ref }}
+          path: iris
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential meson ninja-build pkg-config python3 \
+            glslang-dev glslangValidator \
+            vulkan-headers libvulkan-dev \
+            mesa-vulkan-drivers vulkan-validationlayers \
+            libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
+            libwayland-dev wayland-protocols \
+            libxkbcommon-dev libsystemd-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Configure + compile flux
+        run: |
+          meson setup flux/build flux -Dtests=false -Dexamples=false
+          meson compile -C flux/build
+
+      - name: Configure + compile lens
+        run: |
+          meson setup lens/build lens -Dtests=false -Dexamples=false
+          meson compile -C lens/build
+
+      - name: Configure + compile iris
+        run: |
+          meson setup iris/build iris -Dtests=false -Dexamples=false
+          meson compile -C iris/build
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo check
+        run: cargo check --workspace --all-targets
+
+      - name: cargo test
+        run: cargo test --workspace

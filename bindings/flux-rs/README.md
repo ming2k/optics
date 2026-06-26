@@ -1,0 +1,64 @@
+# flux-rs
+
+Rust bindings to [**flux**][flux] — the C23, Vulkan-first 2D/3D graphics
+library. Five crates wrap flux's C surface with the standard two-tier
+FFI split (`openssl` / `openssl-sys`, `rusqlite` / `libsqlite3-sys`
+convention):
+
+| Crate              | Role                                                          |
+|--------------------|---------------------------------------------------------------|
+| [`flux-sys`]       | Raw bindgen FFI to `libflux`. Owns `links = "flux"`.          |
+| [`flux`]           | Safe wrapper: RAII handles, `Result<T, Error>`.              |
+| [`flux-text-sys`]  | Raw bindgen FFI to `libflux-text` (HarfBuzz shaping sibling). |
+| [`flux-text`]      | Safe wrapper over `flux-text-sys`, Layer-0 shaping surface.  |
+| [`flux-text-layout`] | Pure-Rust Layer-1 line wrapping on top of `flux-text`.     |
+
+[flux]: https://github.com/ming2k/flux
+[`flux-sys`]: crates/flux-sys/
+[`flux`]: crates/flux/
+[`flux-text-sys`]: crates/flux-text-sys/
+[`flux-text`]: crates/flux-text/
+[`flux-text-layout`]: crates/flux-text-layout/
+
+This repository is **separate** from the C library by design — it
+follows the industry convention (openssl, sqlite, curl, gtk all keep
+their Rust bindings out of the C source tree). The C library has its
+own release cadence and ABI stability policy; these bindings track it
+via pkg-config.
+
+## Prerequisites
+
+Build and install flux first:
+
+```sh
+git clone https://github.com/ming2k/flux.git /path/to/flux
+meson setup /path/to/flux/build /path/to/flux
+meson compile -C /path/to/flux/build
+meson install -C /path/to/flux/build     # puts flux.pc on PKG_CONFIG_PATH
+```
+
+Then:
+
+```sh
+cargo build
+cargo test --workspace
+```
+
+## Dev mode (against a non-installed flux build)
+
+Skip `meson install` and link a meson build tree directly:
+
+```sh
+export FLUX_SOURCE_DIR=/path/to/flux
+export FLUX_BUILD_DIR=/path/to/flux/build
+cargo test --workspace
+```
+
+`FLUX_BUILD_DIR/meson-uninstalled/flux-uninstalled.pc` must exist (meson
+creates it at `meson setup` time). `FLUX_SOURCE_DIR/include/` is
+prepended to bindgen's include path so the generated bindings match
+that exact checkout.
+
+## License
+
+MIT, same as flux. See [LICENSE](LICENSE).

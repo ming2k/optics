@@ -1,0 +1,266 @@
+/*
+ * hello_triangle — the smallest complete flux render loop.
+ *
+ * Device, surface, one graphics pipeline, present loop. Start here: the
+ * other windowed examples reuse this exact bootstrap. Shaders are
+ * compiled to SPIR-V by meson + glslangValidator at build time and
+ * embedded via C23 #embed, then handed to the public graphics-pipeline
+ * API — no raw Vulkan pipeline-state boilerplate in user code.
+ *
+ * Teaches:
+ *   - device + surface creation; the begin_frame/submit/present loop
+ *   - building a graphics pipeline from embedded SPIR-V
+ *   - swapchain resize handling and per-frame GPU timestamps
+ * Key flux APIs:  flux_device_create, flux_surface_create,
+ *                 flux_graphics_pipeline_create/_bind,
+ *                 flux_surface_begin_frame, flux_frame_submit/_present
+ * Plumbing (raw Vulkan, not flux): GLFW window + VkSurfaceKHR creation,
+ *   viewport/scissor, the vkCmdDraw itself.
+ */
+#include <flux/flux.h>
+#include <flux/vulkan.h>
+
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+
+#include "pipeline_cache.h"
+
+#include <math.h>
+#include <stdalign.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* SPIR-V — uint32_t-aligned so Vulkan can read it as code words. */
+alignas(uint32_t) static const unsigned char triangle_vert_spv[] = {
+#embed "triangle.vert.spv"
+};
+alignas(uint32_t) static const unsigned char triangle_frag_spv[] = {
+#embed "triangle.frag.spv"
+};
+
+/* ------------------------------------------------------------------ */
+/*  Window                                                            */
+/* ------------------------------------------------------------------ */
+
+static void on_resize(GLFWwindow *win, int w, int h) {
+    flux_surface *surface = glfwGetWindowUserPointer(win);
+    if (surface && w > 0 && h > 0)
+        (void)flux_surface_resize(surface, (uint32_t)w, (uint32_t)h);
+}
+
+int main(void) {
+    int major, minor, patch;
+    flux_version(&major, &minor, &patch);
+    printf("flux %d.%d.%d (%s)\n", major, minor, patch, flux_version_string());
+
+    if (!glfwInit()) {
+        fprintf(stderr, "glfwInit failed\n");
+        return 1;
+    }
+    if (!glfwVulkanSupported()) {
+        fprintf(stderr, "no Vulkan via GLFW\n");
+        glfwTerminate();
+        return 1;
+    }
+
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    GLFWwindow *win = glfwCreateWindow(960, 540, "flux hello", nullptr, nullptr);
+    if (!win) {
+        glfwTerminate();
+        return 1;
+    }
+
+    uint32_t ext_count = 0;
+    const char **req_exts = glfwGetRequiredInstanceExtensions(&ext_count);
+    const char *device_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+
+    /* Pipeline-cache persistence is consumer-owned (Skia PersistentCache
+     * model): flux never touches the filesystem. The example resolves a
+     * path itself and wires load/save callbacks into the device desc. */
+    flux_pipeline_cache_file cache = FLUX_PIPELINE_CACHE_FILE_INIT;
+    flux_pipeline_cache_file_set_default_path(&cache, "hello_triangle.bin");
+
+    flux_device_desc ddesc = {
+        .type = FLUX_TYPE_DEVICE_DESC,
+        .log = flux_console_logger,
+        .validation = FLUX_VALIDATION_AUTO,
+        .required_instance_extensions = req_exts,
+        .required_instance_extension_count = ext_count,
+        .required_device_extensions = device_exts,
+        .required_device_extension_count = sizeof(device_exts) / sizeof(*device_exts),
+        .frames_in_flight = 2,
+        .pipeline_cache_load = flux_pipeline_cache_file_load,
+        .pipeline_cache_save = flux_pipeline_cache_file_save,
+        .pipeline_cache_userdata = &cache,
+    };
+    flux_device *device = nullptr;
+    flux_result r = flux_device_create(&ddesc, &device);
+    if (r != FLUX_OK) {
+        flux_error_info ei;
+        flux_get_last_error(&ei);
+        fprintf(stderr, "flux_device_create -> %s\n  %s\n", flux_result_string(r),
+                ei.message ? ei.message : "(no info)");
+        glfwDestroyWindow(win);
+        glfwTerminate();
+        return (int)r;
+    }
+
+    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
+    if (glfwCreateWindowSurface(flux_device_vk_instance(device), win, nullptr, &vk_surface) !=
+        VK_SUCCESS) {
+        fprintf(stderr, "glfwCreateWindowSurface failed\n");
+        flux_device_release(device);
+        glfwDestroyWindow(win);
+        glfwTerminate();
+        return 1;
+    }
+
+    int fbw = 0, fbh = 0;
+    glfwGetFramebufferSize(win, &fbw, &fbh);
+    flux_surface_desc sdesc = {
+        .type = FLUX_TYPE_SURFACE_DESC,
+        .vk_surface_khr = vk_surface,
+        .width = (uint32_t)fbw,
+        .height = (uint32_t)fbh,
+        .vsync = true,
+    };
+    flux_surface *surface = nullptr;
+    r = flux_surface_create(device, &sdesc, &surface);
+    if (r != FLUX_OK) {
+        flux_error_info ei;
+        flux_get_last_error(&ei);
+        fprintf(stderr, "flux_surface_create -> %s\n  %s\n", flux_result_string(r),
+                ei.message ? ei.message : "(no info)");
+        vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
+        flux_device_release(device);
+        glfwDestroyWindow(win);
+        glfwTerminate();
+        return (int)r;
+    }
+    glfwSetWindowUserPointer(win, surface);
+    glfwSetFramebufferSizeCallback(win, on_resize);
+
+    /* ===== end shared bootstrap (window + device + surface) =====
+     * Everything below is what this example is actually about: a
+     * graphics pipeline and the draw/present loop. */
+    flux_graphics_pipeline_desc pdesc = FLUX_GRAPHICS_PIPELINE_DESC_INIT;
+    pdesc.vertex_spirv = (const uint32_t *)triangle_vert_spv;
+    pdesc.vertex_spirv_word_count = sizeof(triangle_vert_spv) / sizeof(uint32_t);
+    pdesc.fragment_spirv = (const uint32_t *)triangle_frag_spv;
+    pdesc.fragment_spirv_word_count = sizeof(triangle_frag_spv) / sizeof(uint32_t);
+    pdesc.topology = FLUX_TOPOLOGY_TRIANGLE_LIST;
+    pdesc.cull = FLUX_CULL_NONE;
+    pdesc.blend = FLUX_BLEND_PRESET_NONE;
+    pdesc.depth = FLUX_DEPTH_NONE;
+    pdesc.color_format = flux_format_from_vk(flux_surface_vk_format(surface));
+    pdesc.depth_format = FLUX_FORMAT_UNDEFINED;
+    flux_graphics_pipeline *pipe = nullptr;
+    if (flux_graphics_pipeline_create(device, &pdesc, &pipe) != FLUX_OK) {
+        flux_error_info ei;
+        flux_get_last_error(&ei);
+        fprintf(stderr, "flux_graphics_pipeline_create failed: %s\n",
+                ei.message ? ei.message : "?");
+        flux_surface_release(surface);
+        vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
+        flux_device_release(device);
+        glfwDestroyWindow(win);
+        glfwTerminate();
+        return 1;
+    }
+    printf("pipeline ready (vert %zu bytes, frag %zu bytes embedded)\n", sizeof(triangle_vert_spv),
+           sizeof(triangle_frag_spv));
+
+    int frame_no = 0;
+    while (!glfwWindowShouldClose(win)) {
+        glfwPollEvents();
+
+        flux_frame *frame = nullptr;
+        r = flux_surface_begin_frame(surface, nullptr, &frame);
+        if (r == FLUX_ERROR_SURFACE_LOST) {
+            int w, h;
+            glfwGetFramebufferSize(win, &w, &h);
+            if (w > 0 && h > 0)
+                (void)flux_surface_resize(surface, (uint32_t)w, (uint32_t)h);
+            continue;
+        }
+        if (r == FLUX_ERROR_INVALID_STATE)
+            continue;
+        if (r != FLUX_OK) {
+            fprintf(stderr, "begin_frame -> %s\n", flux_result_string(r));
+            break;
+        }
+
+        flux_pass_attachment att = {
+            .view = VK_NULL_HANDLE,
+            .load_op = FLUX_LOAD_CLEAR,
+            .store_op = FLUX_STORE_STORE,
+            .clear_color = {0.04f, 0.04f, 0.06f, 1.0f},
+        };
+        flux_pass_desc pass = {
+            .type = FLUX_TYPE_PASS_DESC,
+            .color_attachment_count = 1,
+            .color_attachments = &att,
+        };
+        flux_frame_timestamp_begin(frame, "frame");
+        flux_frame_begin_pass(frame, &pass);
+
+        VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
+        flux_surface_info info;
+        flux_surface_get_info(surface, &info);
+        VkViewport viewport = {
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = (float)info.width,
+            .height = (float)info.height,
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        VkRect2D scissor = {.offset = {0, 0}, .extent = {info.width, info.height}};
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        flux_graphics_pipeline_bind(frame, pipe, nullptr, 0);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+
+        flux_frame_end_pass(frame);
+        flux_frame_timestamp_end(frame);
+
+        r = flux_frame_submit(frame);
+        if (r != FLUX_OK) {
+            fprintf(stderr, "submit -> %s\n", flux_result_string(r));
+            break;
+        }
+        r = flux_frame_present(frame);
+        if (r == FLUX_ERROR_SURFACE_LOST) {
+            int w, h;
+            glfwGetFramebufferSize(win, &w, &h);
+            if (w > 0 && h > 0)
+                (void)flux_surface_resize(surface, (uint32_t)w, (uint32_t)h);
+        } else if (r != FLUX_OK) {
+            fprintf(stderr, "present -> %s\n", flux_result_string(r));
+            break;
+        }
+
+        if (++frame_no == 1)
+            printf("first triangle presented (extent %ux%u)\n", info.width, info.height);
+
+        if (frame_no % 60 == 0) {
+            flux_timestamp_result ts[8];
+            uint32_t ts_count = 8;
+            if (flux_frame_collect_timestamps(frame, ts, &ts_count) == FLUX_OK) {
+                for (uint32_t i = 0; i < ts_count && i < 8; ++i)
+                    printf("  gpu[%s] = %.3f ms\n", ts[i].label, ts[i].ms);
+            }
+        }
+    }
+
+    flux_device_wait_idle(device);
+    flux_graphics_pipeline_release(pipe);
+    flux_surface_release(surface);
+    vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
+    flux_device_release(device);
+    glfwDestroyWindow(win);
+    glfwTerminate();
+    return 0;
+}

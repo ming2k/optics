@@ -1,0 +1,67 @@
+name: build-and-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust bindings (${{ matrix.flux_ref }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pin the flux revision these bindings are tracked against.
+        # Bump when the C surface changes in a way the bindings must follow.
+        flux_ref: [main]
+    env:
+      FLUX_SOURCE_DIR: ${{ github.workspace }}/flux
+      FLUX_BUILD_DIR: ${{ github.workspace }}/flux/build
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout flux C library
+        uses: actions/checkout@v4
+        with:
+          repository: ming2k/flux
+          ref: ${{ matrix.flux_ref }}
+          path: flux
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential meson ninja-build glslang-dev glslangValidator \
+            vulkan-headers libvulkan-dev \
+            mesa-vulkan-drivers vulkan-validationlayers \
+            libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
+            pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Configure C library
+        run: meson setup flux/build flux -Dtests=false -Dexamples=false
+
+      - name: Compile C library
+        run: meson compile -C flux/build
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo check
+        run: cargo check --workspace --all-targets
+
+      - name: cargo test
+        run: cargo test --workspace

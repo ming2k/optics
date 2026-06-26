@@ -1,0 +1,11 @@
+[package]
+name = "flux"
+description = "Safe Rust bindings to flux: a Vulkan-first 2D/3D graphics library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+flux-sys = { path = "../flux-sys", version = "0.1.0" }

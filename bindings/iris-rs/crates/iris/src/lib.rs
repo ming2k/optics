@@ -1,0 +1,579 @@
+//! Safe Rust bindings to **iris** — the L3 application toolkit of the
+//! flux/lens stack.
+//!
+//! iris owns the window, GPU device, and event loop. Each frame it runs two
+//! host callbacks:
+//!
+//! 1. **build** ([`Frame`] + [`Input`]) — inside an open `lens_begin/end`
+//!    pair. The host builds its chrome (immediate-mode lens widgets) and
+//!    reads the per-frame [`Input`] snapshot to drive anything lens itself
+//!    does not own.
+//! 2. **paint** ([`PaintHost`]) — inside an open `flux_canvas_begin/end`
+//!    pair, *before* lens renders its widget layer. Anything drawn here
+//!    composites under the chrome. Use it for surfaces lens cannot describe
+//!    (a document canvas, an image, a custom render path).
+//!
+//! Either closure may be `None` — a pure-chrome app skips `paint`, a
+//! pure-canvas demo skips `build`.
+//!
+//! ```no_run
+//! use iris::{Application, Config};
+//!
+//! Application::run(
+//!     Config::new("Demo").unwrap(),
+//!     |_frame, _input| { /* build chrome */ },
+//!     Some(|_canvas| { /* paint document surface */ }),
+//! ).unwrap();
+//! ```
+//!
+//! Outside `Application::run`, this crate also exposes:
+//! - [`system_prefers_dark`] / [`ColorScheme`] — query the desktop's
+//!   colour-scheme preference at startup.
+//! - [`pick_file`] — open the host desktop's native file picker via
+//!   xdg-desktop-portal.
+
+#![deny(rust_2018_idioms)]
+
+use std::ffi::CString;
+use std::os::raw::c_int;
+
+pub use iris_sys as sys;
+
+pub use lens::key;
+pub use lens::mods;
+pub use lens::{
+    Align, Color, Frame, Icon, Input, LayoutOpts, MouseButton, OverlayOpts, Rect, Response,
+    TextBuf, Theme, Ui,
+};
+
+/// A thin wrapper over the raw pointers iris hands to the paint
+/// callback: the canvas (live inside an open `flux_canvas_begin/end`
+/// pair), the device iris owns for this app, and the current device-
+/// pixel ratio. All three borrows are valid only inside the paint call.
+///
+/// Hosts that need a `flux::Device`-shaped handle (e.g. to create a
+/// `flux::text::Text` context) **must** borrow `device()` rather than
+/// opening their own — two `flux_device`s in one process is unsupported
+/// and crashes.
+///
+/// Hosts drawing canvas content directly should wrap their draw in
+/// `canvas.save / canvas.scale(s, s) / ... / canvas.restore` and call
+/// `flux_text_set_scale(text, s)` so glyphs rasterise crisply on HiDPI.
+/// lens applies the same scale to its own chrome internally; the host
+/// only scales the document-surface portion.
+pub struct PaintHost {
+    canvas: *mut std::ffi::c_void,
+    device: *mut std::ffi::c_void,
+    scale: f32,
+}
+
+impl PaintHost {
+    /// The raw `flux_canvas*`. Hand it to `flux`-aware code that expects
+    /// a borrowed canvas pointer (e.g. cast to `*mut flux_sys::flux_canvas`
+    /// and wrap in your own borrowed handle).
+    pub fn canvas(&self) -> *mut std::ffi::c_void {
+        self.canvas
+    }
+
+    /// The raw `flux_device*` iris owns. Use this to construct any
+    /// device-dependent context (text shaper, image uploader, …) rather
+    /// than creating a second `flux::Device`.
+    pub fn device(&self) -> *mut std::ffi::c_void {
+        self.device
+    }
+
+    /// The current device-pixel ratio (Wayland
+    /// `wl_surface.preferred_buffer_scale`). Always ≥1; 1 on a 1:1 logical
+    /// display, 2 on a typical HiDPI laptop panel.
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+}
+
+/// Alias kept for back-compat with the prior single-pointer signature; new
+/// code should use [`PaintHost`], which also exposes the device.
+pub type PaintCanvas = PaintHost;
+
+/// Errors returned by [`Application::run`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunError {
+    /// The platform returned a non-zero exit code.
+    Platform(i32),
+    /// The config contained a NULL byte in the title.
+    BadTitle,
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RunError::Platform(rc) => write!(f, "iris_app_run exited with code {rc}"),
+            RunError::BadTitle => write!(f, "window title contains an interior NUL byte"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {}
+
+/// Application configuration handed to [`Application::run`].
+pub struct Config {
+    title: CString,
+    width: i32,
+    height: i32,
+    dark: bool,
+    log_raw: bool,
+}
+
+impl Config {
+    /// A default-sized window with the given title that follows the system
+    /// colour scheme.
+    pub fn new(title: impl Into<String>) -> Result<Config, RunError> {
+        let title = CString::new(title.into()).map_err(|_| RunError::BadTitle)?;
+        Ok(Config {
+            title,
+            width: 960,
+            height: 640,
+            dark: false,
+            log_raw: false,
+        })
+    }
+
+    /// Set the initial window size (logical pixels).
+    pub fn size(mut self, width: i32, height: i32) -> Self {
+        self.width = width;
+        self.height = height;
+        self
+    }
+
+    /// Force the dark theme instead of following the system preference.
+    pub fn force_dark(mut self) -> Self {
+        self.dark = true;
+        self
+    }
+
+    /// Log raw platform input events to stderr (debugging).
+    pub fn log_raw(mut self) -> Self {
+        self.log_raw = true;
+        self
+    }
+}
+
+/// The application entry point.
+///
+/// Wraps `iris_app_run`. `build` runs once per frame inside an open
+/// `lens_begin/end` pair, with `input` being the same [`Input`] snapshot
+/// lens is consuming this frame. `paint` (if `Some`) runs once per frame
+/// inside an open `flux_canvas_begin/end` pair, *before* lens renders its
+/// widget layer — so anything it draws lands under the chrome. Blocks the
+/// calling thread until the window is closed.
+pub struct Application;
+
+impl Application {
+    pub fn run<B, P>(config: Config, build: B, paint: Option<P>) -> Result<(), RunError>
+    where
+        B: FnMut(&mut Frame, &Input),
+        P: FnMut(PaintHost) + 'static,
+    {
+        // Box the closures so they have a stable address to pass through the
+        // C trampoline. Each gets its own box; both share the `user` pointer
+        // via a small wrapper struct.
+        let build_box: Box<B> = Box::new(build);
+        let paint_box: Option<Box<P>> = paint.map(Box::new);
+
+        // SAFETY: the trampolines cast `user` back to the right box type and
+        // call it. The boxes outlive `iris_app_run` (held by `run_state`
+        // until the call returns).
+        let mut run_state = RunState {
+            build: build_box,
+            paint: paint_box,
+        };
+
+        extern "C" fn build_trampoline<B: FnMut(&mut Frame, &Input)>(
+            ui: *mut sys::lens,
+            in_: *const sys::lens_input,
+            user: *mut std::os::raw::c_void,
+        ) {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let run = unsafe { &mut *(user as *mut RunState<B, fn(PaintHost)>) };
+                // Cast the iris_sys view of `lens` / `lens_input` to lens's
+                // own bindgen view. Both come from the same C declaration, so
+                // the layouts are identical; the types are just nominally
+                // distinct because they came from two `-sys` crates.
+                let lens_ui = ui as *mut lens::sys::lens;
+                let mut frame = unsafe { Frame::from_raw(lens_ui) };
+                let input_ptr = in_ as *const lens::sys::lens_input;
+                let input = unsafe { Input::from_raw_ref(input_ptr) };
+                (run.build)(&mut frame, input);
+            }));
+        }
+
+        extern "C" fn paint_trampoline<P: FnMut(PaintHost)>(
+            canvas: *mut sys::flux_canvas,
+            device: *mut sys::flux_device,
+            scale: f32,
+            user: *mut std::os::raw::c_void,
+        ) {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let run = unsafe { &mut *(user as *mut RunState<fn(&mut Frame, &Input), P>) };
+                if let Some(p) = run.paint.as_mut() {
+                    p(PaintHost {
+                        canvas: canvas as *mut std::ffi::c_void,
+                        device: device as *mut std::ffi::c_void,
+                        scale,
+                    });
+                }
+            }));
+        }
+
+        // Monomorphise two trampolines for the actual (B, P) pair. When
+        // `paint` is `None` we still need *a* paint fn pointer to satisfy
+        // the C signature; passing NULL lets the C side skip the call
+        // entirely, so this branch is a pure no-op.
+        let (build_fn, paint_fn, user_ptr): (
+            sys::iris_build_fn,
+            sys::iris_paint_fn,
+            *mut std::os::raw::c_void,
+        ) = if run_state.paint.is_some() {
+            let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
+            (
+                Some(build_trampoline::<B>),
+                Some(paint_trampoline::<P>),
+                user_ptr,
+            )
+        } else {
+            // paint is None — cast the run state to a B-only shape for the
+            // build trampoline (the paint slot is never read).
+            let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
+            (Some(build_trampoline::<B>), None, user_ptr)
+        };
+
+        let cfg = sys::iris_app_config {
+            title: config.title.as_ptr(),
+            width: config.width,
+            height: config.height,
+            dark: config.dark,
+            log_raw: config.log_raw,
+            build: build_fn,
+            paint: paint_fn,
+            user: user_ptr,
+        };
+
+        let rc = unsafe { sys::iris_app_run(&cfg) };
+        if rc != 0 {
+            return Err(RunError::Platform(rc));
+        }
+        Ok(())
+    }
+}
+
+/// Holds both closures through the C trampoline. Generic over `B` and `P`
+/// so each trampoline can cast the opaque `user` pointer back to a type
+/// that knows the concrete closure shapes. When `P` is absent the second
+/// slot is `None` and the paint trampoline is never installed.
+struct RunState<B: FnMut(&mut Frame, &Input), P: FnMut(PaintHost)> {
+    build: Box<B>,
+    paint: Option<Box<P>>,
+}
+
+/// System colour-scheme preference (queried at startup).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorScheme {
+    NoPreference,
+    PreferDark,
+    PreferLight,
+}
+
+impl From<sys::iris_color_scheme> for ColorScheme {
+    fn from(s: sys::iris_color_scheme) -> Self {
+        use sys::iris_color_scheme::*;
+        match s {
+            IRIS_COLOR_SCHEME_NO_PREFERENCE => ColorScheme::NoPreference,
+            IRIS_COLOR_SCHEME_PREFER_DARK => ColorScheme::PreferDark,
+            IRIS_COLOR_SCHEME_PREFER_LIGHT => ColorScheme::PreferLight,
+        }
+    }
+}
+
+/// Read the system colour-scheme preference.
+pub fn query_system_color_scheme() -> ColorScheme {
+    unsafe { sys::iris_query_system_color_scheme() }.into()
+}
+
+/// Convenience: returns true when the system prefers dark OR no preference
+/// (we default to dark when the user is silent).
+pub fn system_prefers_dark() -> bool {
+    unsafe { sys::iris_system_prefers_dark() }
+}
+
+/// Callback fired by [`watch_system_color_scheme`] whenever the desktop
+/// colour-scheme preference changes.
+pub type ColorSchemeChangedFn =
+    extern "C" fn(scheme: sys::iris_color_scheme, user: *mut std::os::raw::c_void);
+
+/// Begin watching the system colour scheme. Returns `Ok(())` on success and
+/// an `Err` when live watching is unavailable (no libsystemd at build time,
+/// or D-Bus / portal unreachable). On success, drain
+/// [`color_scheme_watcher_fd`] in your event loop and call
+/// [`pump_color_scheme_watcher`] when readable.
+///
+/// # Safety
+///
+/// `user` must be a valid pointer (or null) for the lifetime of the watch —
+/// it is passed verbatim to the C callback and dereferenced there. Most
+/// applications do not call this directly: when driven by
+/// [`Application::run`] with [`Config::force_dark`] unset, the Wayland
+/// backend wires the watcher into its poll loop automatically.
+pub unsafe fn watch_system_color_scheme(
+    cb: ColorSchemeChangedFn,
+    user: *mut std::os::raw::c_void,
+) -> Result<(), WatchError> {
+    let rc = unsafe { sys::iris_watch_system_color_scheme(Some(cb), user) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(WatchError::Unavailable)
+    }
+}
+
+/// Error from [`watch_system_color_scheme`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchError {
+    /// Live watching is unavailable on this build/host.
+    Unavailable,
+}
+
+impl std::fmt::Display for WatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WatchError::Unavailable => write!(
+                f,
+                "live theme watching unavailable (need libsystemd + xdg-desktop-portal)"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for WatchError {}
+
+/// The fd to poll(2) for readability when watching, or `None` when not.
+pub fn color_scheme_watcher_fd() -> Option<std::os::unix::io::RawFd> {
+    let fd = unsafe { sys::iris_color_scheme_watcher_fd() };
+    if fd < 0 {
+        None
+    } else {
+        Some(fd)
+    }
+}
+
+/// Drain pending D-Bus messages and fire the callback registered via
+/// [`watch_system_color_scheme`] if the colour scheme changed. Safe to call
+/// spuriously.
+pub fn pump_color_scheme_watcher() {
+    unsafe { sys::iris_pump_color_scheme_watcher() }
+}
+
+/// Stop watching and release D-Bus resources.
+pub fn stop_color_scheme_watcher() {
+    unsafe { sys::iris_stop_color_scheme_watcher() }
+}
+
+/// Cursor appearance the host wants iris to show over its window.
+///
+/// This is an L3 concern: iris owns the window and the cursor surface,
+/// so it owns cursor appearance too. Hosts call [`set_cursor`] when their
+/// hover state changes (e.g. an editor showing an I-beam over its text
+/// area).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(i32)]
+pub enum Cursor {
+    /// Arrow — the platform default. Also what unknown values fall back to.
+    #[default]
+    Default,
+    /// I-beam — over text the user can edit.
+    Text,
+    /// Pointing hand — over clickable elements.
+    Pointer,
+    /// Hourglass / spinner — the app is busy.
+    Busy,
+    /// Precise selection (e.g. image crop).
+    Crosshair,
+    /// Forbidden action.
+    NotAllowed,
+    /// Horizontal resize.
+    ResizeEw,
+    /// Vertical resize.
+    ResizeNs,
+}
+
+impl Cursor {
+    fn raw(self) -> sys::iris_cursor {
+        use sys::iris_cursor::*;
+        match self {
+            Cursor::Default => IRIS_CURSOR_DEFAULT,
+            Cursor::Text => IRIS_CURSOR_TEXT,
+            Cursor::Pointer => IRIS_CURSOR_POINTER,
+            Cursor::Busy => IRIS_CURSOR_BUSY,
+            Cursor::Crosshair => IRIS_CURSOR_CROSSHAIR,
+            Cursor::NotAllowed => IRIS_CURSOR_NOT_ALLOWED,
+            Cursor::ResizeEw => IRIS_CURSOR_RESIZE_EW,
+            Cursor::ResizeNs => IRIS_CURSOR_RESIZE_NS,
+        }
+    }
+}
+
+/// Set the cursor the next pointer motion will show. Idempotent; passing
+/// the same value twice does no work.
+///
+/// No-op when iris was built without `wayland-cursor` (the compositor's
+/// default arrow stays) or before [`Application::run`] starts. Thread-
+/// affine: call from the same thread that drives the run loop.
+pub fn set_cursor(cursor: Cursor) {
+    unsafe { sys::iris_set_cursor(cursor.raw()) }
+}
+
+/// Open the host desktop's native file picker. Returns the selected file
+/// URI (e.g. `"file:///home/user/foo.txt"`) or `None` if the user cancelled
+/// or the portal is unavailable.
+pub fn pick_file(title: Option<&str>) -> Option<String> {
+    let title_c = title.and_then(|t| CString::new(t).ok());
+    let opts = sys::iris_file_dialog_opts {
+        title: title_c
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null()),
+    };
+    let mut buf = vec![0u8; 4096];
+    let rc = unsafe { sys::iris_pick_file(&opts, buf.as_mut_ptr() as *mut i8, buf.len()) };
+    if rc != 0 {
+        return None;
+    }
+    let len = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+    buf.truncate(len);
+    String::from_utf8(buf).ok()
+}
+
+/// Library version string ("0.1.0" at the time of writing).
+pub fn version() -> &'static str {
+    unsafe {
+        std::ffi::CStr::from_ptr(sys::iris_version_string())
+            .to_str()
+            .unwrap_or("?")
+    }
+}
+
+// Re-export so callers can address the raw c_int return convention if needed.
+#[allow(dead_code)]
+fn _keep_c_int_in_scope(_: c_int) {}
+
+// =====================================================================
+//  Tests
+//
+//  Every test here runs headless: no Wayland compositor, no GPU surface.
+//  The cases that touch the C library (version, colour-scheme query) call
+//  entry points that either do no I/O or degrade gracefully when the
+//  desktop integration (gsettings, portal) is absent. Application::run is
+//  intentionally NOT exercised here — it owns a window and event loop.
+// =====================================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_new_rejects_interior_nul() {
+        assert!(matches!(Config::new("a\0b"), Err(RunError::BadTitle)));
+        assert!(matches!(Config::new("\0"), Err(RunError::BadTitle)));
+    }
+
+    #[test]
+    fn config_new_defaults() {
+        let cfg = Config::new("Demo").unwrap();
+        assert_eq!(cfg.title.to_str().unwrap(), "Demo");
+        assert_eq!((cfg.width, cfg.height), (960, 640));
+        assert!(!cfg.dark);
+        assert!(!cfg.log_raw);
+    }
+
+    #[test]
+    fn config_builders_set_fields() {
+        let cfg = Config::new("x")
+            .unwrap()
+            .size(720, 480)
+            .force_dark()
+            .log_raw();
+        assert_eq!((cfg.width, cfg.height), (720, 480));
+        assert!(cfg.dark);
+        assert!(cfg.log_raw);
+    }
+
+    #[test]
+    fn run_error_display() {
+        assert_eq!(
+            RunError::Platform(7).to_string(),
+            "iris_app_run exited with code 7"
+        );
+        assert_eq!(
+            RunError::BadTitle.to_string(),
+            "window title contains an interior NUL byte"
+        );
+    }
+
+    #[test]
+    fn watch_error_display() {
+        assert_eq!(
+            WatchError::Unavailable.to_string(),
+            "live theme watching unavailable (need libsystemd + xdg-desktop-portal)"
+        );
+    }
+
+    #[test]
+    fn color_scheme_from_sys_roundtrip() {
+        use sys::iris_color_scheme::*;
+        assert_eq!(
+            ColorScheme::from(IRIS_COLOR_SCHEME_NO_PREFERENCE),
+            ColorScheme::NoPreference
+        );
+        assert_eq!(
+            ColorScheme::from(IRIS_COLOR_SCHEME_PREFER_DARK),
+            ColorScheme::PreferDark
+        );
+        assert_eq!(
+            ColorScheme::from(IRIS_COLOR_SCHEME_PREFER_LIGHT),
+            ColorScheme::PreferLight
+        );
+    }
+
+    #[test]
+    fn color_scheme_derives_eq() {
+        assert_eq!(ColorScheme::PreferDark, ColorScheme::PreferDark);
+        assert_ne!(ColorScheme::PreferDark, ColorScheme::PreferLight);
+    }
+
+    #[test]
+    fn version_is_nonempty_numeric() {
+        let v = version();
+        assert!(!v.is_empty());
+        assert!(v.chars().next().unwrap().is_ascii_digit());
+    }
+
+    #[test]
+    fn query_color_scheme_returns_valid_discriminant() {
+        // No assertions on the specific value: in a headless / CI box the
+        // gsettings + GTK_THEME probes miss and we get the safe PREFER_DARK
+        // default; on a desktop with a light theme we'd get PreferLight.
+        // Either way it must be one of the three known variants.
+        let s = query_system_color_scheme();
+        assert!(matches!(
+            s,
+            ColorScheme::NoPreference | ColorScheme::PreferDark | ColorScheme::PreferLight
+        ));
+    }
+
+    #[test]
+    fn system_prefers_dark_is_consistent_with_query() {
+        let dark = system_prefers_dark();
+        let scheme = query_system_color_scheme();
+        assert_eq!(
+            dark,
+            matches!(scheme, ColorScheme::PreferDark | ColorScheme::NoPreference)
+        );
+    }
+}

@@ -1,0 +1,51 @@
+/* fonts.c — text rendering showcase.
+ *
+ * Renders the fontconfig-resolved system font (XDG search; override with
+ * $FLUX_TEXT_FONT, e.g. FLUX_TEXT_FONT="JetBrains Mono") at a range of sizes
+ * on a native Wayland, HiDPI-aware window. Text is shaped with HarfBuzz,
+ * rasterised with FreeType, and blitted as a premultiplied glyph atlas
+ * through flux_canvas_draw_image.
+ *
+ *   FLUX_TEXT_FONT="DejaVu Serif" ./build/examples/fonts
+ */
+
+#include <iris/app.h>
+#include <lens/lens.h>
+
+#include <stdio.h>
+
+/* lens_label uses the theme font size, so we re-theme per line to show a
+ * size ramp. (A per-call size parameter is future API; for now the
+ * theme carries it.) */
+static void line(lens *ui, float size, const char *text) {
+    lens_theme th = lens_get_theme(ui);
+    th.font_size = size;
+    lens_set_theme(ui, th);
+    lens_size(ui, 0, size * 1.6f);
+    lens_label(ui, text);
+}
+
+static void build(lens *ui, const lens_input *in, void *user) {
+    (void)user;
+    lens_column_ex(ui, (lens_layout_opts){.pad = 28,
+                                          .gap = 6,
+                                          .cross = LENS_START,
+                                          .bg = flux_color_rgba(0x1e, 0x1e, 0x24, 0xff)});
+
+    line(ui, 40.0f, "iris text");
+    line(ui, 22.0f, "The quick brown fox jumps over the lazy dog.");
+    line(ui, 18.0f, "Shaped with HarfBuzz, rasterised with FreeType.");
+    line(ui, 16.0f, "Counters render correctly: a e o g B R 8 @ & %");
+    line(ui, 14.0f, "abcdefghijklmnopqrstuvwxyz  0123456789");
+    line(ui, 14.0f, "ABCDEFGHIJKLMNOPQRSTUVWXYZ  ()[]{}<>/\\");
+    line(ui, 12.0f, "Tiny 12px body text stays legible at HiDPI.");
+
+    lens_close(ui);
+}
+
+int main(void) {
+    printf("iris fonts demo. Font via fontconfig (XDG search);\n"
+           "override with $FLUX_TEXT_FONT. Esc quits.\n\n");
+    return iris_app_run(&(iris_app_config){
+        .title = "iris — fonts", .width = 760, .height = 460, .dark = true, .build = build});
+}

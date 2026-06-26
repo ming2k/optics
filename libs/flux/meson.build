@@ -1,0 +1,249 @@
+# Single first-party library: libflux. The C source tree sits at the repo
+# root (`src/`, `include/`, `tests/`, `examples/`). Content layers that feed
+# flux's draw primitives live in `libs/` as siblings (ADR-0016): `flux-text`
+# (HarfBuzz shaping, feeds flux_canvas_draw_glyph_run) and `flux-scene-graph`
+# (glTF, feeds flux_scene_draw_mesh). md is removed (out of scope). Rust
+# bindings live in the separate flux-rs repository.
+
+vulkan_dep  = dependency('vulkan',  version : '>=1.3', required : true)
+threads_dep = dependency('threads')
+
+opt_canvas  = get_option('canvas')
+opt_scene   = get_option('scene')
+opt_compute = get_option('compute')
+opt_effect  = get_option('effect')
+
+if opt_effect and not opt_canvas
+  error('effect module requires canvas (flux_image) — pass -Dcanvas=true with -Deffect=true')
+endif
+if opt_effect and not opt_compute
+  error('effect module requires compute (flux_compute_pipeline) — pass -Dcompute=true with -Deffect=true')
+endif
+
+flux_inc = include_directories('include')
+
+flux_sources = files(
+  'src/core/device.c',
+  'src/core/surface.c',
+  'src/core/memory.c',
+  'src/core/oneshot.c',
+  'src/core/frame.c',
+  'src/core/result.c',
+  'src/core/version.c',
+  'src/core/log.c',
+  'src/core/format.c',
+  'src/core/sampler.c',
+  'src/core/buffer.c',
+  'src/core/target.c',
+  'src/core/graphics_pipeline.c',
+  'src/core/vk_allocator.c',
+  'src/math/vec.c',
+  'src/math/mat.c',
+  'src/math/quat.c',
+  'src/math/color.c',
+  'src/math/arena.c',
+)
+flux_extra_inputs = []
+
+flux_c_args = ['-DFLUX_BUILDING=1']
+if opt_canvas
+  flux_sources += files(
+    'src/canvas/canvas.c',
+    'src/canvas/path.c',
+    'src/canvas/paint.c',
+    'src/canvas/geometry_flatten.c',
+    'src/canvas/geometry_tess.c',
+    'src/canvas/geometry_stroke.c',
+    'src/canvas/image.c',
+    'src/canvas/dmabuf.c',
+    'src/canvas/renderer.c',
+  )
+  flux_c_args += '-DFLUX_HAVE_CANVAS=1'
+
+  glslang = find_program('glslangValidator', required : true)
+  canvas_solid_vert_spv = custom_target('canvas_solid.vert.spv',
+    input   : 'src/canvas/shaders/canvas_solid.vert',
+    output  : 'canvas_solid.vert.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  canvas_solid_frag_spv = custom_target('canvas_solid.frag.spv',
+    input   : 'src/canvas/shaders/canvas_solid.frag',
+    output  : 'canvas_solid.frag.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  canvas_gradient_frag_spv = custom_target('canvas_gradient.frag.spv',
+    input   : 'src/canvas/shaders/canvas_gradient.frag',
+    output  : 'canvas_gradient.frag.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  canvas_image_frag_spv = custom_target('canvas_image.frag.spv',
+    input   : 'src/canvas/shaders/canvas_image.frag',
+    output  : 'canvas_image.frag.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  canvas_glyph_frag_spv = custom_target('canvas_glyph.frag.spv',
+    input   : 'src/canvas/shaders/canvas_glyph.frag',
+    output  : 'canvas_glyph.frag.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  canvas_sdf_frag_spv = custom_target('canvas_sdf.frag.spv',
+    input   : 'src/canvas/shaders/canvas_sdf.frag',
+    output  : 'canvas_sdf.frag.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  flux_extra_inputs += [canvas_solid_vert_spv, canvas_solid_frag_spv,
+                        canvas_gradient_frag_spv, canvas_image_frag_spv,
+                        canvas_glyph_frag_spv, canvas_sdf_frag_spv]
+  flux_c_args += '--embed-dir=' + meson.current_build_dir()
+endif
+if opt_scene
+  flux_sources += files('src/scene/scene.c')
+  flux_c_args += '-DFLUX_HAVE_SCENE=1'
+
+  if not is_variable('glslang')
+    glslang = find_program('glslangValidator', required : true)
+  endif
+  scene_unlit_vert_spv = custom_target('scene_unlit.vert.spv',
+    input   : 'src/scene/shaders/scene_unlit.vert',
+    output  : 'scene_unlit.vert.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  scene_unlit_frag_spv = custom_target('scene_unlit.frag.spv',
+    input   : 'src/scene/shaders/scene_unlit.frag',
+    output  : 'scene_unlit.frag.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  scene_phong_vert_spv = custom_target('scene_phong.vert.spv',
+    input   : 'src/scene/shaders/scene_phong.vert',
+    output  : 'scene_phong.vert.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  scene_phong_frag_spv = custom_target('scene_phong.frag.spv',
+    input   : 'src/scene/shaders/scene_phong.frag',
+    output  : 'scene_phong.frag.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  flux_extra_inputs += [scene_unlit_vert_spv, scene_unlit_frag_spv,
+                        scene_phong_vert_spv, scene_phong_frag_spv]
+  if not flux_c_args.contains('--embed-dir=' + meson.current_build_dir())
+    flux_c_args += '--embed-dir=' + meson.current_build_dir()
+  endif
+endif
+if opt_compute
+  flux_sources += files('src/compute/compute.c')
+  flux_c_args += '-DFLUX_HAVE_COMPUTE=1'
+endif
+if opt_effect
+  flux_sources += files('src/effect/effect.c')
+  flux_c_args += '-DFLUX_HAVE_EFFECT=1'
+
+  if not is_variable('glslang')
+    glslang = find_program('glslangValidator', required : true)
+  endif
+  effect_blur_comp_spv = custom_target('effect_blur.comp.spv',
+    input   : 'src/effect/shaders/effect_blur.comp',
+    output  : 'effect_blur.comp.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  flux_extra_inputs += [effect_blur_comp_spv]
+  if not flux_c_args.contains('--embed-dir=' + meson.current_build_dir())
+    flux_c_args += '--embed-dir=' + meson.current_build_dir()
+  endif
+endif
+
+# Text shaping lives in the flux-text sibling (ADR-0016); libflux itself
+# depends on Vulkan + threads only. The glyph-blit primitive
+# flux_canvas_draw_glyph_run remains in the canvas module — flux-text feeds it.
+
+# SO version is the numeric X.Y.Z core of the project version. The
+# project version string (which may include pre-release suffixes)
+# lives on the .pc file and in flux_version_string().
+flux_so_version = meson.project_version()
+
+flux_lib = library('flux',
+  flux_sources,
+  flux_extra_inputs,
+  include_directories   : flux_inc,
+  c_args                : flux_c_args,
+  dependencies          : [vulkan_dep, threads_dep, m_dep],
+  gnu_symbol_visibility : 'hidden',
+  version               : flux_so_version,
+  install               : true,
+)
+
+install_headers(
+  'include/flux/flux.h',
+  'include/flux/core.h',
+  'include/flux/math.h',
+  'include/flux/vulkan.h',
+  subdir : 'flux',
+)
+if opt_canvas
+  install_headers('include/flux/canvas.h', subdir : 'flux')
+  install_headers('include/flux/dmabuf.h', subdir : 'flux')
+endif
+if opt_scene
+  install_headers('include/flux/scene.h', subdir : 'flux')
+endif
+if opt_compute
+  install_headers('include/flux/compute.h', subdir : 'flux')
+endif
+if opt_effect
+  install_headers('include/flux/effect.h', subdir : 'flux')
+endif
+# Text header lives in the flux-text sibling (ADR-0016); not installed here.
+
+# Public defines propagated to every consumer so the umbrella header
+# (<flux/flux.h>) knows which optional module headers to pull in.
+flux_public_defines = []
+if opt_canvas
+  flux_public_defines += '-DFLUX_HAVE_CANVAS=1'
+endif
+if opt_scene
+  flux_public_defines += '-DFLUX_HAVE_SCENE=1'
+endif
+if opt_compute
+  flux_public_defines += '-DFLUX_HAVE_COMPUTE=1'
+endif
+if opt_effect
+  flux_public_defines += '-DFLUX_HAVE_EFFECT=1'
+endif
+
+flux_dep = declare_dependency(
+  link_with             : flux_lib,
+  include_directories   : flux_inc,
+  compile_args          : flux_public_defines,
+  dependencies          : [vulkan_dep],
+)
+
+pkg.generate(
+  libraries   : flux_lib,
+  name        : 'flux',
+  filebase    : 'flux',
+  description  : 'C23 Vulkan-first graphics library (canvas, scene, compute, effect)',
+  version      : meson.project_version(),
+  extra_cflags : flux_public_defines,
+)
+
+glfw_dep = dependency('glfw3', required : false)
+
+# Sibling content libraries (ADR-0016): they link libflux and feed its
+# draw primitives. Each is a separate shared library with its own .pc.
+if get_option('text')
+  subdir('text')
+else
+  # Always defined so tests/examples can reference it unconditionally; empty
+  # when the sibling is off (and FLUX_TEXT_HAVE_FTHB is then absent, so the
+  # integration test's text path compiles out).
+  flux_text_dep = declare_dependency()
+endif
+if get_option('scene-graph')
+  subdir('scene_graph')
+endif
+
+if get_option('examples')
+  
+endif
+if get_option('tests')
+  
+endif

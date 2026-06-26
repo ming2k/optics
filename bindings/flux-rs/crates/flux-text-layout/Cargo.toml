@@ -1,0 +1,18 @@
+[package]
+name = "flux-text-layout"
+description = "Layer-1 text layout (line wrapping) on top of flux-text's Layer-0 shaper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+flux-text = { path = "../flux-text", version = "0.1.0" }
+# flux-text-sys is a direct dep so its `links = "flux-text"` metadata
+# (DEP_FLUX_TEXT_RPATHS) is visible to this crate's build.rs, which relays the
+# meson-build-tree rpath to the wrap unit-test binary. Not used in source.
+flux-text-sys = { path = "../flux-text-sys", version = "0.1.0" }
+# flux-sys stays a direct dep so DEP_FLUX_RPATHS (libflux.so dir) is visible
+# too; libflux_text.so depends on libflux.so at runtime.
+flux-sys = { path = "../flux-sys", version = "0.1.0" }
