@@ -58,58 +58,51 @@ static void on_resize(GLFWwindow *win, int w, int h) {
 /* Draw the chaotic scene into whatever canvas pass is currently active
  * (used both for the sharp backdrop and — via the capture target — for
  * the blurred glass content). `t` animates the blobs. */
-static void draw_chaos(flux_canvas *c, flux_arena *arena, float W, float H, float t) {
-    /* Base gradient wash. */
+static void draw_chaos(flux_canvas *c, flux_arena *arena, float W, float H, flux_image *noise_img) {
+    /* Base warm gradient wash. */
     {
-        flux_gradient_stop stops[3] = {
-            {0.0f, flux_color_rgba_premul(30, 10, 50, 255)},
-            {0.5f, flux_color_rgba_premul(10, 30, 60, 255)},
-            {1.0f, flux_color_rgba_premul(50, 15, 40, 255)},
+        flux_gradient_stop stops[2] = {
+            {0.0f, flux_color_rgba_premul(235, 205, 175, 255)}, // top-leftish warm beige
+            {1.0f, flux_color_rgba_premul(110, 60, 100, 255)},  // bottom-rightish dark magenta
         };
-        flux_paint g = flux_paint_linear_gradient((flux_point){0, 0}, (flux_point){W, H}, stops, 3);
+        flux_paint g = flux_paint_linear_gradient((flux_point){0, 0}, (flux_point){W, H}, stops, 2);
         flux_canvas_fill_rect(c, (flux_rect){0, 0, W, H}, &g);
     }
 
-    /* Travelling saturated blobs — high-frequency detail so the blur reads. */
-    for (int i = 0; i < 5; ++i) {
-        float ph = (float)i * 1.7f;
-        float bx = W * (0.15f + 0.7f * (0.5f + 0.5f * sinf(t * 0.6f + ph)));
-        float by = H * (0.15f + 0.7f * (0.5f + 0.5f * cosf(t * 0.45f + ph * 1.3f)));
-        float br = 60.0f + 30.0f * sinf(t * 1.1f + ph);
-        flux_path *blob = nullptr;
-        (void)flux_path_create(&blob, arena);
-        if (!blob)
-            continue;
-        flux_path_add_circle(blob, bx, by, br);
-        float hue = fmodf(ph * 0.27f, 1.0f);
-        uint8_t cr = (uint8_t)(255.0f * (0.5f + 0.5f * sinf(hue * 6.28f)));
-        uint8_t cg = (uint8_t)(255.0f * (0.5f + 0.5f * sinf(hue * 6.28f + 2.1f)));
-        uint8_t cb = (uint8_t)(255.0f * (0.5f + 0.5f * sinf(hue * 6.28f + 4.2f)));
-        flux_paint p = flux_paint_radial_gradient(
-            (flux_point){bx, by}, br,
-            (flux_gradient_stop[2]){{0.0f, flux_color_rgba_premul(cr, cg, cb, 235)},
-                                    {1.0f, flux_color_rgba_premul(cr, cg, cb, 0)}},
-            2);
-        flux_canvas_fill_path(c, blob, &p);
+    /* Top right orange/red radial */
+    {
+        flux_gradient_stop stops[2] = {
+            {0.0f, flux_color_rgba_premul(210, 80, 50, 200)},
+            {1.0f, flux_color_rgba_premul(210, 80, 50, 0)},
+        };
+        flux_paint g = flux_paint_radial_gradient((flux_point){W * 0.85f, H * 0.15f}, W * 0.6f, stops, 2);
+        flux_path *p = nullptr; flux_path_create(&p, arena);
+        if (p) {
+            flux_path_add_rect(p, (flux_rect){0, 0, W, H});
+            flux_canvas_fill_path(c, p, &g);
+        }
     }
 
-    /* Diagonal stripes for extra high-frequency contrast. */
+    /* Bottom left purple/blue radial */
     {
-        flux_path *str = nullptr;
-        (void)flux_path_create(&str, arena);
-        if (str) {
-            flux_path_add_rect(str, (flux_rect){0, 0, W, H});
-            flux_gradient_stop stops[6] = {
-                {0.00f, flux_color_rgba_premul(255, 255, 255, 18)},
-                {0.16f, flux_color_rgba_premul(255, 255, 255, 0)},
-                {0.33f, flux_color_rgba_premul(255, 255, 255, 18)},
-                {0.50f, flux_color_rgba_premul(255, 255, 255, 0)},
-                {0.66f, flux_color_rgba_premul(255, 255, 255, 18)},
-                {0.83f, flux_color_rgba_premul(255, 255, 255, 0)},
-            };
-            flux_paint g = flux_paint_linear_gradient((flux_point){0, 0},
-                                                      (flux_point){W + H, W + H}, stops, 6);
-            flux_canvas_fill_path(c, str, &g);
+        flux_gradient_stop stops[2] = {
+            {0.0f, flux_color_rgba_premul(80, 70, 140, 200)},
+            {1.0f, flux_color_rgba_premul(80, 70, 140, 0)},
+        };
+        flux_paint g = flux_paint_radial_gradient((flux_point){W * 0.15f, H * 0.85f}, W * 0.6f, stops, 2);
+        flux_path *p = nullptr; flux_path_create(&p, arena);
+        if (p) {
+            flux_path_add_rect(p, (flux_rect){0, 0, W, H});
+            flux_canvas_fill_path(c, p, &g);
+        }
+    }
+
+    /* Noise overlay */
+    if (noise_img) {
+        for (float y = 0; y < H; y += 256.0f) {
+            for (float x = 0; x < W; x += 256.0f) {
+                flux_canvas_draw_image(c, noise_img, (flux_rect){x, y, 256.0f, 256.0f}, nullptr);
+            }
         }
     }
 }
@@ -232,6 +225,28 @@ int main(void) {
         fprintf(stderr, "render-target create failed\n");
         return 1;
     }
+    /* Create static noise texture for grain. */
+    flux_image *noise_img = nullptr;
+    {
+        uint8_t *noise_data = (uint8_t*)malloc(256 * 256 * 4);
+        if (noise_data) {
+            for (int i = 0; i < 256 * 256 * 4; i += 4) {
+                uint8_t v = rand() % 256;
+                uint8_t a = 10 + (rand() % 15);
+                noise_data[i] = (uint8_t)((v * a) / 255);
+                noise_data[i+1] = (uint8_t)((v * a) / 255);
+                noise_data[i+2] = (uint8_t)((v * a) / 255);
+                noise_data[i+3] = a;
+            }
+            flux_image_desc ndesc = FLUX_IMAGE_DESC_INIT;
+            ndesc.width = 256; ndesc.height = 256;
+            ndesc.format = FLUX_FORMAT_RGBA8_UNORM;
+            ndesc.initial_data = noise_data;
+            flux_image_create(device, &ndesc, &noise_img);
+            free(noise_data);
+        }
+    }
+    
 
     int frame_no = 0;
     while (!glfwWindowShouldClose(win)) {
@@ -251,6 +266,14 @@ int main(void) {
         if (r != FLUX_OK)
             break;
 
+        /* Recycle last frame's effect transients now. begin_frame's
+         * fence wait guarantees the previous frame's GPU work —
+         * including the draw_image that sampled last frame's
+         * `blurred` — has completed, so releasing those transients
+         * here is safe. Doing it before submit (the old location)
+         * freed them while the GPU still needed to read them. */
+        flux_effect_reset(device);
+
         flux_surface_get_info(surface, &info);
         float W = (float)info.width;
         float H = (float)info.height;
@@ -264,7 +287,7 @@ int main(void) {
                 fprintf(stderr, "begin_target: %s\n", flux_result_string(r));
                 break;
             }
-            draw_chaos(canvas, &arena, W, H, t);
+            draw_chaos(canvas, &arena, W, H, noise_img);
             flux_arena_reset(&arena);
             flux_canvas_end_target(canvas);
         }
@@ -291,15 +314,16 @@ int main(void) {
         if (r != FLUX_OK)
             break;
 
+        
         /* Sharp backdrop: draw the captured scene. */
         flux_canvas_draw_image(canvas, capture, (flux_rect){0, 0, W, H}, nullptr);
 
-        /* Glass panel geometry, gently orbiting the centre. */
-        float gw = fminf(W, H) * 0.46f;
-        float gh = gw * 0.62f;
-        float gx = W * 0.5f - gw * 0.5f + 70.0f * cosf(t * 0.4f);
-        float gy = H * 0.5f - gh * 0.5f + 40.0f * sinf(t * 0.6f);
-        float gr = gh * 0.30f;
+        /* Toggle switch (pill shape) centered. */
+        float gw = 340.0f;
+        float gh = 100.0f;
+        float gx = W * 0.5f - gw * 0.5f;
+        float gy = H * 0.5f - gh * 0.5f;
+        float gr = gh * 0.5f;
         flux_rect glass = {gx, gy, gw, gh};
         float cx = gx + gw * 0.5f;
         float cy = gy + gh * 0.5f;
@@ -309,95 +333,155 @@ int main(void) {
             flux_path *sh = nullptr;
             (void)flux_path_create(&sh, &arena);
             if (sh) {
-                flux_path_add_round_rect(sh, (flux_rect){gx + 6.0f, gy + 12.0f, gw, gh}, gr);
+                flux_path_add_round_rect(sh, (flux_rect){gx + 4.0f, gy + 8.0f, gw, gh}, gr);
                 flux_paint p = flux_paint_default();
-                p.color = flux_color_rgba_premul(0, 0, 0, 90);
+                p.color = flux_color_rgba_premul(0, 0, 0, 40);
                 flux_canvas_fill_path(canvas, sh, &p);
             }
         }
 
-        /* Blurred backdrop, scoped to the glass region (clip_rect replaces
-         * the scissor, so we scope with save/restore). */
+        /* Blurred backdrop, scoped to the glass region. */
         flux_canvas_save(canvas);
         flux_canvas_clip_rect(canvas, glass);
         if (blurred) {
             flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, W, H}, nullptr);
         }
-        flux_canvas_restore(canvas);
-
-        /* Build the rounded glass shape once, reuse for all gradient fills. */
+        
+        /* Build the rounded glass shape once, reuse. */
         flux_path *shape = nullptr;
         (void)flux_path_create(&shape, &arena);
         if (shape)
             flux_path_add_round_rect(shape, glass, gr);
 
-        /* L1 VOLUME / THICKNESS: cool frosted centre, thinner rim. */
+        /* Volume / Color tint. Warm pinkish-purple glass tint. */
         if (shape) {
             flux_gradient_stop stops[4] = {
-                {0.00f, flux_color_rgba_premul(115, 130, 150, 205)},
-                {0.50f, flux_color_rgba_premul(95, 110, 132, 175)},
-                {0.85f, flux_color_rgba_premul(78, 92, 116, 130)},
-                {1.00f, flux_color_rgba_premul(60, 74, 98, 80)},
+                {0.00f, flux_color_rgba_premul(170, 110, 140, 160)},
+                {0.50f, flux_color_rgba_premul(150, 90, 130, 130)},
+                {0.85f, flux_color_rgba_premul(130, 80, 120, 100)},
+                {1.00f, flux_color_rgba_premul(110, 70, 110, 70)},
             };
-            float rad = fmaxf(gw, gh) * 0.62f;
-            flux_paint vol = flux_paint_radial_gradient((flux_point){cx, cy}, rad, stops, 4);
+            flux_paint vol = flux_paint_radial_gradient((flux_point){cx, cy}, gw * 0.6f, stops, 4);
             flux_canvas_fill_path(canvas, shape, &vol);
         }
 
-        /* L2 FRESNEL EDGE: bright glossy rim. */
+        /* Active thumb indicator (behind Sun icon). */
+        {
+            float thumb_w = 100.0f;
+            float thumb_h = gh - 12.0f;
+            flux_rect thumb = {gx + 6.0f, gy + 6.0f, thumb_w, thumb_h};
+            flux_path *tp = nullptr;
+            (void)flux_path_create(&tp, &arena);
+            if (tp) {
+                flux_path_add_round_rect(tp, thumb, thumb_h * 0.5f);
+                flux_paint pt = flux_paint_default();
+                pt.color = flux_color_rgba_premul(255, 230, 220, 140);
+                flux_canvas_fill_path(canvas, tp, &pt);
+            }
+        }
+        flux_canvas_restore(canvas);
+
+        /* Fresnel Edge & Specular */
         if (shape) {
             flux_gradient_stop stops[4] = {
-                {0.50f, flux_color_rgba_premul(0, 0, 0, 0)},
-                {0.78f, flux_color_rgba_premul(255, 255, 255, 40)},
-                {0.93f, flux_color_rgba_premul(255, 255, 255, 160)},
-                {1.00f, flux_color_rgba_premul(255, 255, 255, 235)},
+                {0.60f, flux_color_rgba_premul(0, 0, 0, 0)},
+                {0.85f, flux_color_rgba_premul(255, 230, 240, 30)},
+                {0.96f, flux_color_rgba_premul(255, 240, 250, 120)},
+                {1.00f, flux_color_rgba_premul(255, 255, 255, 200)},
             };
-            float rad = fmaxf(gw, gh) * 0.55f;
-            flux_paint fres = flux_paint_radial_gradient((flux_point){cx, cy}, rad, stops, 4);
+            flux_paint fres = flux_paint_radial_gradient((flux_point){cx, cy}, gw * 0.55f, stops, 4);
             flux_canvas_fill_path(canvas, shape, &fres);
-        }
-
-        /* L3 SPECULAR SHEEN: bright band across the top. */
-        if (shape) {
-            flux_gradient_stop stops[3] = {
-                {0.00f, flux_color_rgba_premul(255, 255, 255, 110)},
-                {0.45f, flux_color_rgba_premul(255, 255, 255, 30)},
+            
+            flux_gradient_stop s_stops[3] = {
+                {0.00f, flux_color_rgba_premul(255, 255, 255, 90)},
+                {0.45f, flux_color_rgba_premul(255, 255, 255, 20)},
                 {1.00f, flux_color_rgba_premul(0, 0, 0, 0)},
             };
-            flux_paint sheen = flux_paint_linear_gradient(
-                (flux_point){gx, gy}, (flux_point){gx, gy + gh * 0.55f}, stops, 3);
+            flux_paint sheen = flux_paint_linear_gradient((flux_point){gx, gy}, (flux_point){gx, gy + gh * 0.45f}, s_stops, 3);
             flux_canvas_fill_path(canvas, shape, &sheen);
         }
 
-        /* L4/L5 edge dispersion hint + crisp hairline. */
+        /* Border hairlines */
         {
-            flux_path *rim = nullptr;
-            (void)flux_path_create(&rim, &arena);
-            if (rim) {
-                flux_path_add_round_rect(
-                    rim, (flux_rect){gx + 1.0f, gy + 1.0f, gw - 2.0f, gh - 2.0f}, gr - 1.0f);
-                flux_paint sp = flux_paint_default();
-                sp.color = flux_color_rgba_premul(255, 235, 210, 55);
-                sp.stroke_width = 1.0f;
-                sp.join = FLUX_JOIN_ROUND;
-                sp.cap = FLUX_CAP_ROUND;
-                flux_canvas_stroke_path(canvas, rim, &sp);
-            }
             flux_path *hair = nullptr;
             (void)flux_path_create(&hair, &arena);
             if (hair) {
                 flux_path_add_round_rect(hair, glass, gr);
                 flux_paint sp = flux_paint_default();
-                sp.color = flux_color_rgba_premul(255, 255, 255, 150);
+                sp.color = flux_color_rgba_premul(255, 255, 255, 120);
                 sp.stroke_width = 1.0f;
                 sp.join = FLUX_JOIN_ROUND;
                 flux_canvas_stroke_path(canvas, hair, &sp);
             }
         }
 
+        /* Icons */
+        flux_color icon_col = flux_color_rgba_premul(30, 20, 50, 220);
+        float ix_sun = gx + gh * 0.5f + 6.0f;
+        float ix_moon = cx;
+        float ix_sunrise = gx + gw - gh * 0.5f - 6.0f;
+        float iy = cy;
+
+        flux_paint sp_icon = flux_paint_default();
+        sp_icon.color = icon_col;
+        sp_icon.stroke_width = 2.5f;
+        sp_icon.cap = FLUX_CAP_ROUND;
+        sp_icon.join = FLUX_JOIN_ROUND;
+
+        /* Sun icon */
+        flux_path *p_sun = nullptr; flux_path_create(&p_sun, &arena);
+        if (p_sun) {
+            flux_path_add_circle(p_sun, ix_sun, iy, 7.0f);
+            for (int i=0; i<8; i++) {
+                float a = i * 3.14159f / 4.0f;
+                flux_path_move_to(p_sun, ix_sun + cosf(a)*11.0f, iy + sinf(a)*11.0f);
+                flux_path_line_to(p_sun, ix_sun + cosf(a)*15.0f, iy + sinf(a)*15.0f);
+            }
+            flux_canvas_stroke_path(canvas, p_sun, &sp_icon);
+        }
+
+        /* Moon icon */
+        flux_path *p_moon = nullptr; flux_path_create(&p_moon, &arena);
+        if (p_moon) {
+            float mr = 13.0f;
+            flux_path_move_to(p_moon, ix_moon + mr*0.3f, iy - mr);
+            flux_path_cubic_to(p_moon, ix_moon - mr*1.2f, iy - mr, ix_moon - mr*1.2f, iy + mr, ix_moon + mr*0.3f, iy + mr);
+            flux_path_cubic_to(p_moon, ix_moon - mr*0.2f, iy + mr*0.5f, ix_moon - mr*0.2f, iy - mr*0.5f, ix_moon + mr*0.3f, iy - mr);
+            flux_canvas_stroke_path(canvas, p_moon, &sp_icon);
+        }
+
+        /* Sunrise icon */
+        flux_path *p_sunrise = nullptr; flux_path_create(&p_sunrise, &arena);
+        if (p_sunrise) {
+            float r = 10.0f;
+            float k = r * 0.55228f;
+            float ry = iy + 3.0f;
+            flux_path_move_to(p_sunrise, ix_sunrise - r, ry);
+            flux_path_cubic_to(p_sunrise, ix_sunrise - r, ry - k, ix_sunrise - k, ry - r, ix_sunrise, ry - r);
+            flux_path_cubic_to(p_sunrise, ix_sunrise + k, ry - r, ix_sunrise + r, ry - k, ix_sunrise + r, ry);
+            flux_path_move_to(p_sunrise, ix_sunrise - r - 4.0f, ry + 4.0f);
+            flux_path_line_to(p_sunrise, ix_sunrise + r + 4.0f, ry + 4.0f);
+            flux_path_move_to(p_sunrise, ix_sunrise - r + 2.0f, ry + 9.0f);
+            flux_path_line_to(p_sunrise, ix_sunrise + r - 2.0f, ry + 9.0f);
+            
+            flux_path_move_to(p_sunrise, ix_sunrise - 12.0f, ry - 12.0f);
+            flux_path_line_to(p_sunrise, ix_sunrise - 16.0f, ry - 16.0f);
+            flux_path_move_to(p_sunrise, ix_sunrise, ry - 14.0f);
+            flux_path_line_to(p_sunrise, ix_sunrise, ry - 19.0f);
+            flux_path_move_to(p_sunrise, ix_sunrise + 12.0f, ry - 12.0f);
+            flux_path_line_to(p_sunrise, ix_sunrise + 16.0f, ry - 16.0f);
+            
+            flux_canvas_stroke_path(canvas, p_sunrise, &sp_icon);
+        }
+
         flux_arena_reset(&arena);
         flux_canvas_end(canvas);
-        flux_effect_reset(device);
+        /* flux_effect_reset is deferred to after the next begin_frame's
+         * fence wait, so the transient `blurred` (sampled by the
+         * draw_image above) survives until the GPU has actually
+         * consumed it. Resetting here would free the image + its
+         * bindless slot before flux_frame_submit even runs — a
+         * use-after-free that hangs the present wait on frame 1. */
 
         r = flux_frame_submit(frame);
         if (r != FLUX_OK)
@@ -416,6 +500,7 @@ int main(void) {
     }
 
     flux_device_wait_idle(device);
+    if (noise_img) flux_image_release(noise_img);
     if (capture)
         flux_image_release(capture);
     flux_arena_destroy(&arena);

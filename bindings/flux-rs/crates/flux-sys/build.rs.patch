@@ -1,0 +1,15 @@
+--- build.rs
++++ build.rs
+@@ -42,6 +42,11 @@
+     let build_dir = env::var_os("FLUX_BUILD_DIR").map(PathBuf::from);
+     let source_dir = env::var_os("FLUX_SOURCE_DIR").map(PathBuf::from);
+ 
++    let default_source_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../../");
++    let source_dir = source_dir.unwrap_or(default_source_dir);
++    
++    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
++    let default_build_dir = out_dir.join("meson-build");
++    let build_dir = build_dir.or(Some(default_build_dir));
++
+     // 1. Decide how to find flux.
+     //    - Dev: FLUX_BUILD_DIR points at a meson build tree whose

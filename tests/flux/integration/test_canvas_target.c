@@ -78,12 +78,18 @@ int main(void) {
         flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
         flux_canvas_end(canvas);
 
-        flux_effect_reset(d);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
 
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+
+        /* Safe point: flux_surface_read_pixels waited on this frame's
+         * fence, so the GPU has finished sampling `blurred`. Resetting
+         * before submit/present freed the transient (and its bindless
+         * slot) while the draw_image still referenced it — a
+         * use-after-free that hangs the present wait. */
+        flux_effect_reset(d);
 
         /* The sharp captured edge, after sigma=6 blur + composite, should
          * be softened at the midpoint. */

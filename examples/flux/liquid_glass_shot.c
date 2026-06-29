@@ -18,53 +18,51 @@
 #define SHOT_W 960
 #define SHOT_H 600
 
-static void draw_chaos(flux_canvas *c, flux_arena *arena, float W, float H, float t) {
+static void draw_chaos(flux_canvas *c, flux_arena *arena, float W, float H, flux_image *noise_img) {
+    /* Base warm gradient wash. */
     {
-        flux_gradient_stop stops[3] = {
-            {0.0f, flux_color_rgba_premul(30, 10, 50, 255)},
-            {0.5f, flux_color_rgba_premul(10, 30, 60, 255)},
-            {1.0f, flux_color_rgba_premul(50, 15, 40, 255)},
+        flux_gradient_stop stops[2] = {
+            {0.0f, flux_color_rgba_premul(235, 205, 175, 255)}, // top-leftish warm beige
+            {1.0f, flux_color_rgba_premul(110, 60, 100, 255)},  // bottom-rightish dark magenta
         };
-        flux_paint g = flux_paint_linear_gradient((flux_point){0, 0}, (flux_point){W, H}, stops, 3);
+        flux_paint g = flux_paint_linear_gradient((flux_point){0, 0}, (flux_point){W, H}, stops, 2);
         flux_canvas_fill_rect(c, (flux_rect){0, 0, W, H}, &g);
     }
-    for (int i = 0; i < 5; ++i) {
-        float ph = (float)i * 1.7f;
-        float bx = W * (0.15f + 0.7f * (0.5f + 0.5f * sinf(t * 0.6f + ph)));
-        float by = H * (0.15f + 0.7f * (0.5f + 0.5f * cosf(t * 0.45f + ph * 1.3f)));
-        float br = 60.0f + 30.0f * sinf(t * 1.1f + ph);
-        flux_path *blob = nullptr;
-        (void)flux_path_create(&blob, arena);
-        if (!blob)
-            continue;
-        flux_path_add_circle(blob, bx, by, br);
-        float hue = fmodf(ph * 0.27f, 1.0f);
-        uint8_t cr = (uint8_t)(255.0f * (0.5f + 0.5f * sinf(hue * 6.28f)));
-        uint8_t cg = (uint8_t)(255.0f * (0.5f + 0.5f * sinf(hue * 6.28f + 2.1f)));
-        uint8_t cb = (uint8_t)(255.0f * (0.5f + 0.5f * sinf(hue * 6.28f + 4.2f)));
-        flux_paint p = flux_paint_radial_gradient(
-            (flux_point){bx, by}, br,
-            (flux_gradient_stop[2]){{0.0f, flux_color_rgba_premul(cr, cg, cb, 235)},
-                                    {1.0f, flux_color_rgba_premul(cr, cg, cb, 0)}},
-            2);
-        flux_canvas_fill_path(c, blob, &p);
-    }
+
+    /* Top right orange/red radial */
     {
-        flux_path *str = nullptr;
-        (void)flux_path_create(&str, arena);
-        if (str) {
-            flux_path_add_rect(str, (flux_rect){0, 0, W, H});
-            flux_gradient_stop stops[6] = {
-                {0.00f, flux_color_rgba_premul(255, 255, 255, 18)},
-                {0.16f, flux_color_rgba_premul(255, 255, 255, 0)},
-                {0.33f, flux_color_rgba_premul(255, 255, 255, 18)},
-                {0.50f, flux_color_rgba_premul(255, 255, 255, 0)},
-                {0.66f, flux_color_rgba_premul(255, 255, 255, 18)},
-                {0.83f, flux_color_rgba_premul(255, 255, 255, 0)},
-            };
-            flux_paint g = flux_paint_linear_gradient((flux_point){0, 0},
-                                                      (flux_point){W + H, W + H}, stops, 6);
-            flux_canvas_fill_path(c, str, &g);
+        flux_gradient_stop stops[2] = {
+            {0.0f, flux_color_rgba_premul(210, 80, 50, 200)},
+            {1.0f, flux_color_rgba_premul(210, 80, 50, 0)},
+        };
+        flux_paint g = flux_paint_radial_gradient((flux_point){W * 0.85f, H * 0.15f}, W * 0.6f, stops, 2);
+        flux_path *p = nullptr; flux_path_create(&p, arena);
+        if (p) {
+            flux_path_add_rect(p, (flux_rect){0, 0, W, H});
+            flux_canvas_fill_path(c, p, &g);
+        }
+    }
+
+    /* Bottom left purple/blue radial */
+    {
+        flux_gradient_stop stops[2] = {
+            {0.0f, flux_color_rgba_premul(80, 70, 140, 200)},
+            {1.0f, flux_color_rgba_premul(80, 70, 140, 0)},
+        };
+        flux_paint g = flux_paint_radial_gradient((flux_point){W * 0.15f, H * 0.85f}, W * 0.6f, stops, 2);
+        flux_path *p = nullptr; flux_path_create(&p, arena);
+        if (p) {
+            flux_path_add_rect(p, (flux_rect){0, 0, W, H});
+            flux_canvas_fill_path(c, p, &g);
+        }
+    }
+
+    /* Noise overlay */
+    if (noise_img) {
+        for (float y = 0; y < H; y += 256.0f) {
+            for (float x = 0; x < W; x += 256.0f) {
+                flux_canvas_draw_image(c, noise_img, (flux_rect){x, y, 256.0f, 256.0f}, nullptr);
+            }
         }
     }
 }
@@ -119,6 +117,28 @@ int main(void) {
         }
         return 1;
     }
+    /* Create static noise texture for grain. */
+    flux_image *noise_img = nullptr;
+    {
+        uint8_t *noise_data = (uint8_t*)malloc(256 * 256 * 4);
+        if (noise_data) {
+            for (int i = 0; i < 256 * 256 * 4; i += 4) {
+                uint8_t v = rand() % 256;
+                uint8_t a = 10 + (rand() % 15);
+                noise_data[i] = (uint8_t)((v * a) / 255);
+                noise_data[i+1] = (uint8_t)((v * a) / 255);
+                noise_data[i+2] = (uint8_t)((v * a) / 255);
+                noise_data[i+3] = a;
+            }
+            flux_image_desc ndesc = FLUX_IMAGE_DESC_INIT;
+            ndesc.width = 256; ndesc.height = 256;
+            ndesc.format = FLUX_FORMAT_RGBA8_UNORM;
+            ndesc.initial_data = noise_data;
+            flux_image_create(device, &ndesc, &noise_img);
+            free(noise_data);
+        }
+    }
+    
 
     float W = (float)SHOT_W, H = (float)SHOT_H, t = 1.3f;
 
@@ -137,7 +157,7 @@ int main(void) {
             fprintf(stderr, "begin_target: %s\n", flux_result_string(r));
             return 1;
         }
-        draw_chaos(canvas, &arena, W, H, t);
+        draw_chaos(canvas, &arena, W, H, noise_img);
         flux_arena_reset(&arena);
         flux_canvas_end_target(canvas);
     }

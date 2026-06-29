@@ -30,6 +30,9 @@ fn main() {
     let use_installed = env::var_os("FLUX_USE_INSTALLED").is_some();
     let build_dir = env::var_os("FLUX_BUILD_DIR").map(PathBuf::from);
     let source_dir = env::var_os("FLUX_SOURCE_DIR").map(PathBuf::from);
+    let default_source_dir =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../../");
+    let source_dir = source_dir.or(Some(default_source_dir));
 
     let dev_mode = if let Some(dir) = &build_dir {
         if use_installed {
@@ -39,10 +42,11 @@ fn main() {
             let pc = uninstalled.join("flux-text-uninstalled.pc");
             let exists = pc.exists();
             if exists {
-                // libflux_text.so is built under libs/flux-text/ (meson subdir),
-                // not the build root like libflux.so.
-                let probe = dir.join("libs/flux-text/libflux_text.so");
-                if !probe.exists() {
+                // libflux_text.so is built under libs/flux/text/ (meson subdir),
+                // but earlier versions built it in the root or libs/flux-text/.
+                let probe_old = dir.join("libs/flux-text/libflux_text.so");
+                let probe_new = dir.join("libs/flux/text/libflux_text.so");
+                if !probe_old.exists() && !probe_new.exists() {
                     panic!(
                         "stale or incomplete meson build dir at {}\n\
                          Its `flux-text-uninstalled.pc` exists but \
@@ -112,9 +116,9 @@ fn main() {
     if let Some(src) = &source_dir {
         clang_args.insert(
             0,
-            format!("-I{}", src.join("libs/flux-text/include").display()),
+            format!("-I{}", src.join("libs/flux/text/include").display()),
         );
-        clang_args.insert(0, format!("-I{}", src.join("include").display()));
+        clang_args.insert(0, format!("-I{}", src.join("libs/flux/include").display()));
     }
 
     let bindings = bindgen::Builder::default()
@@ -141,7 +145,7 @@ fn main() {
     if let Some(src) = &source_dir {
         println!(
             "cargo:rerun-if-changed={}",
-            src.join("libs/flux-text/include/flux-text/text.h")
+            src.join("libs/flux/text/include/flux-text/text.h")
                 .display()
         );
     }

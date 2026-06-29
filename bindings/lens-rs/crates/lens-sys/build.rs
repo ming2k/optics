@@ -40,8 +40,14 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 
     let use_installed = env::var_os("LENS_USE_INSTALLED").is_some();
-    let build_dir = env::var_os("LENS_BUILD_DIR").map(PathBuf::from);
-    let source_dir = env::var_os("LENS_SOURCE_DIR").map(PathBuf::from);
+    let checkout_root = discover_optics_checkout("lens");
+    let build_dir = env::var_os("LENS_BUILD_DIR")
+        .map(PathBuf::from)
+        .or_else(|| checkout_root.as_ref().map(|root| root.join("build")))
+        .filter(|dir| dir.join("meson-uninstalled/lens-uninstalled.pc").exists());
+    let source_dir = env::var_os("LENS_SOURCE_DIR")
+        .map(PathBuf::from)
+        .or_else(|| checkout_root.clone());
 
     // 1. Decide how to find lens.
     let dev_mode = if let Some(dir) = &build_dir {
@@ -74,12 +80,11 @@ fn main() {
         // so lens's `Requires: flux >= 0.1.0` resolves to the matching
         // freshly-built libflux rather than any stale system copy.
         let mut search = dir.join("meson-uninstalled").display().to_string();
-        if let Some(flux_build_dir) = env::var_os("FLUX_BUILD_DIR") {
-            let flux_uninstalled = PathBuf::from(&flux_build_dir).join("meson-uninstalled");
-            if flux_uninstalled.exists() {
-                search.push(':');
-                search.push_str(&flux_uninstalled.display().to_string());
-            }
+        let flux_build_dir = env::var_os("FLUX_BUILD_DIR")
+            .map(PathBuf::from)
+            .or_else(|| checkout_root.as_ref().map(|root| root.join("build")));
+        if let Some(flux_build_dir) = flux_build_dir {
+            append_uninstalled_dir(&mut search, &flux_build_dir);
         }
         if let Some(existing) = env::var_os("PKG_CONFIG_PATH") {
             search.push(':');
@@ -165,5 +170,27 @@ fn main() {
                 src.join("libs/lens/include/lens").join(h).display()
             );
         }
+    }
+}
+
+fn discover_optics_checkout(component: &str) -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
+    for ancestor in manifest_dir.ancestors() {
+        if ancestor
+            .join(format!("libs/{component}/include/{component}"))
+            .exists()
+            && ancestor.join("build/meson-uninstalled").exists()
+        {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
+fn append_uninstalled_dir(search: &mut String, build_dir: &std::path::Path) {
+    let uninstalled = build_dir.join("meson-uninstalled");
+    if uninstalled.exists() {
+        search.push(':');
+        search.push_str(&uninstalled.display().to_string());
     }
 }

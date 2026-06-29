@@ -38,8 +38,14 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 
     let use_installed = env::var_os("FLUX_USE_INSTALLED").is_some();
-    let build_dir = env::var_os("FLUX_BUILD_DIR").map(PathBuf::from);
-    let source_dir = env::var_os("FLUX_SOURCE_DIR").map(PathBuf::from);
+    let checkout_root = discover_optics_checkout();
+    let build_dir = env::var_os("FLUX_BUILD_DIR")
+        .map(PathBuf::from)
+        .or_else(|| checkout_root.as_ref().map(|root| root.join("build")))
+        .filter(|dir| dir.join("meson-uninstalled/flux-uninstalled.pc").exists());
+    let source_dir = env::var_os("FLUX_SOURCE_DIR")
+        .map(PathBuf::from)
+        .or_else(|| checkout_root.as_ref().map(|root| root.join("libs/flux")));
 
     // 1. Decide how to find flux.
     //    - Dev: FLUX_BUILD_DIR points at a meson build tree whose
@@ -60,8 +66,9 @@ fn main() {
                 // A stale dir (repo moved/copied after `meson setup`) still
                 // has the .pc but no library; surface it early instead of
                 // letting pkg-config / bindgen emit confusing errors.
-                let probe = dir.join("libflux.so");
-                if !probe.exists() {
+                let probe_root = dir.join("libflux.so");
+                let probe_libs = dir.join("libs/flux/libflux.so");
+                if !probe_root.exists() && !probe_libs.exists() {
                     panic!(
                         "stale or incomplete meson build dir at {}\n\
                          Its `flux-uninstalled.pc` exists but `libflux.so` is \
@@ -194,4 +201,16 @@ fn main() {
             );
         }
     }
+}
+
+fn discover_optics_checkout() -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
+    for ancestor in manifest_dir.ancestors() {
+        if ancestor.join("libs/flux/include/flux").exists()
+            && ancestor.join("build/meson-uninstalled").exists()
+        {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
 }

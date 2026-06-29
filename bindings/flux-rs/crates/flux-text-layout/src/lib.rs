@@ -191,9 +191,7 @@ pub fn wrap_with(
             line_first = idx;
             line_w = atom_w[idx];
             line_last_end = atoms[idx].end;
-        } else if line_w + gap_w + atom_w[idx] <= max_width
-            || no_start[idx] || no_end[idx - 1]
-        {
+        } else if line_w + gap_w + atom_w[idx] <= max_width || no_start[idx] || no_end[idx - 1] {
             // Extend the line — either the atom fits, or kinsoku forbids
             // breaking here: atoms[idx] is a no-start char (。，、）》」…)
             // that must not begin a line, or atoms[idx-1] is a no-end
@@ -348,7 +346,15 @@ pub fn wrap_optimal_with(
         // Segment = atoms[seg_start..=seg_end]; `na` atoms, local idx 0..=na-1.
         let na = seg_end - seg_start + 1;
         knuth_plass_segment(
-            seg_start, na, &atoms, &natural, &no_start, &no_end, em, max_width, &line_metrics,
+            seg_start,
+            na,
+            &atoms,
+            &natural,
+            &no_start,
+            &no_end,
+            em,
+            max_width,
+            &line_metrics,
             &mut out,
         );
         seg_start = seg_end + 1;
@@ -393,9 +399,7 @@ fn knuth_plass_segment(
         // (unless j is the segment's final line) atom j may begin one.
         // Leaving dp[j] at INF makes the DP span over j — the atoms around
         // j join a longer line that ends at a legal break point.
-        if j < na
-            && (no_end[seg_start + j - 1] || no_start[seg_start + j])
-        {
+        if j < na && (no_end[seg_start + j - 1] || no_start[seg_start + j]) {
             continue;
         }
         for i in (0..j).rev() {
@@ -429,7 +433,11 @@ fn knuth_plass_segment(
                     if pcost >= inf {
                         continue;
                     }
-                    let even = if cprev == class { 0.0 } else { KP_CLASS_DEMERIT };
+                    let even = if cprev == class {
+                        0.0
+                    } else {
+                        KP_CLASS_DEMERIT
+                    };
                     let cost = pcost + even;
                     if cost < best {
                         best = cost;
@@ -612,10 +620,7 @@ fn is_cjk(ch: char) -> bool {
 /// its input from the single source of truth (the codepoint), matching how
 /// the C shaper derives the same fact from `run->script`.
 fn atom_is_cjk(input: &str, atom: Atom) -> bool {
-    input[atom.start..]
-        .chars()
-        .next()
-        .map_or(false, is_cjk)
+    input[atom.start..].chars().next().map_or(false, is_cjk)
 }
 
 /// The `(width, is_hard_break)` of the gap between atoms `idx - 1` and
@@ -644,10 +649,28 @@ fn gap_cost(input: &str, atoms: &[Atom], idx: usize, space_w: f32, size_px: f32)
 /// immediately before one would strand it at a line start, so kinsoku shori
 /// forbids such breaks (the char is pulled back onto the previous line).
 fn is_no_start(ch: char) -> bool {
-    matches!(ch,
-        '〉' | '》' | '」' | '』' | '】' | '〕' | '〗' | '〙' | '〟'
-        | '）' | '］' | '｝' | '｠'
-        | '、' | '。' | '，' | '．' | '：' | '；' | '！' | '？'
+    matches!(
+        ch,
+        '〉' | '》'
+            | '」'
+            | '』'
+            | '】'
+            | '〕'
+            | '〗'
+            | '〙'
+            | '〟'
+            | '）'
+            | '］'
+            | '｝'
+            | '｠'
+            | '、'
+            | '。'
+            | '，'
+            | '．'
+            | '：'
+            | '；'
+            | '！'
+            | '？'
     )
 }
 
@@ -656,15 +679,18 @@ fn is_no_start(ch: char) -> bool {
 /// end, separated from what it opens, so kinsoku forbids such breaks (the
 /// bracket is pushed onto the next line).
 fn is_no_end(ch: char) -> bool {
-    matches!(ch,
-        '〈' | '《' | '「' | '『' | '【' | '〔' | '〖' | '〚' | '〝'
-        | '（' | '［' | '｛' | '｟'
+    matches!(
+        ch,
+        '〈' | '《' | '「' | '『' | '【' | '〔' | '〖' | '〚' | '〝' | '（' | '［' | '｛' | '｟'
     )
 }
 
 /// Whether `atom`'s first character is no-start (must not begin a line).
 fn atom_no_start(input: &str, atom: Atom) -> bool {
-    input[atom.start..].chars().next().map_or(false, is_no_start)
+    input[atom.start..]
+        .chars()
+        .next()
+        .map_or(false, is_no_start)
 }
 
 /// Whether `atom`'s last character is no-end (must not end a line).
@@ -716,7 +742,10 @@ mod tests {
             let slice = &para[l.lo..l.hi];
             let atoms = super::split_atoms(slice);
             let w = engine.measure(slice, &st).width;
-            assert!(atoms.len() == 1 || w <= max_w + 0.5, "overflow {w} > {max_w}: {slice:?}");
+            assert!(
+                atoms.len() == 1 || w <= max_w + 0.5,
+                "overflow {w} > {max_w}: {slice:?}"
+            );
         }
     }
 
