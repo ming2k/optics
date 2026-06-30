@@ -465,6 +465,32 @@ FLUX_API void flux_surface_get_info(const flux_surface *s, flux_surface_info *ou
 FLUX_NODISCARD FLUX_API flux_result flux_surface_read_pixels(flux_surface *s, void *dst,
                                                              size_t bytes);
 
+/* Offscreen surfaces only (and only when the device had the dma-buf
+ * extensions enabled at creation): export the most recently submitted
+ * frame's image memory as a Linux dma-buf file descriptor. The caller
+ * owns and must close() the returned fd. Zero-copy: no GPU->CPU pixel
+ * transfer; the fd is a handle to the same GPU memory the compositor
+ * composites directly. Waits for the frame's GPU work to complete first.
+ *
+ * flux_surface_exportable() reports whether the surface was created
+ * exportable (device had the needed extensions + a suitable modifier was
+ * found). flux_surface_dmabuf_modifier() / _stride() return the DRM
+ * modifier and row stride the host pairs with the fd when building a
+ * zwp_linux_buffer_params_v1.
+ *
+ * Returns FLUX_ERROR_UNSUPPORTED on a windowed or non-exportable surface,
+ * FLUX_ERROR_INVALID_STATE before the first submitted frame. */
+FLUX_API bool flux_surface_exportable(const flux_surface *s);
+FLUX_API uint64_t flux_surface_dmabuf_modifier(const flux_surface *s);
+FLUX_API uint32_t flux_surface_dmabuf_stride(const flux_surface *s);
+FLUX_NODISCARD FLUX_API flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd);
+
+/* Offscreen surfaces: the frame slot index of the most recently submitted
+ * frame (0..frames_in_flight-1), or UINT32_MAX before the first submit.
+ * The host uses this to align a per-slot dma-buf buffer pool with the
+ * image whose memory flux_surface_export_dmabuf will export. */
+FLUX_API uint32_t flux_surface_last_slot(const flux_surface *s);
+
 /* ================================================================== */
 /*  Frame                                                             */
 /* ================================================================== */

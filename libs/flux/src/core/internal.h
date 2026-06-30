@@ -283,6 +283,18 @@ flux_result flux_vk_alloc_image(flux_device *d, const VkImageCreateInfo *ici,
                                 VkMemoryPropertyFlags props, VkImage *out_image,
                                 flux_vk_alloc *out_alloc);
 
+/* Dedicated-allocate an image whose VkImageCreateInfo pNext chain already
+ * carries the external-memory / DRM-modifier structs. Unlike
+ * flux_vk_alloc_image (slab sub-alloc), this always issues a dedicated
+ * VkDeviceMemory so the bound memory can be exported as a dma-buf fd via
+ * VK_KHR_external_memory_fd. `export_info` (may be NULL) is spliced into
+ * the VkMemoryAllocateInfo pNext chain — pass a VkMemoryDedicatedAllocateInfo
+ * or any external handle-type info the caller needs. */
+flux_result flux_vk_alloc_image_dedicated(flux_device *d, const VkImageCreateInfo *ici,
+                                          VkMemoryPropertyFlags props,
+                                          const void *export_info,
+                                          VkImage *out_image, flux_vk_alloc *out_alloc);
+
 /* One-shot host -> device upload via a graphics-queue command buffer
  * (uses the graphics queue rather than transfer to avoid queue-family
  * ownership transfer plumbing in this simple path). Allocates a host-
@@ -391,6 +403,14 @@ struct flux_surface {
     VkImage images[FLUX_MAX_SWAPCHAIN_IMAGES];
     VkImageView image_views[FLUX_MAX_SWAPCHAIN_IMAGES];
     flux_vk_alloc image_allocs[FLUX_MAX_SWAPCHAIN_IMAGES]; /* offscreen only */
+    /* Offscreen dmabuf-export metadata (ADR-0040 follow-on). When
+     * offscreen images are created exportable (external-memory + DRM
+     * modifier), these record the negotiated modifier so the host can
+     * build a matching zwp_linux_buffer_params. exportable == false for
+     * windowed surfaces and when the device lacks the needed extensions. */
+    bool offscreen_exportable;
+    uint64_t offscreen_modifier; /* DRM_FORMAT_MOD_* (0 = invalid) */
+    uint32_t offscreen_stride;   /* bytes per row of plane 0 */
     bool hdr_actual;
 
     /* Offscreen: slot of the most recently submitted frame, or

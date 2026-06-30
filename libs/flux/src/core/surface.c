@@ -11,6 +11,16 @@
  * live in memory.c and oneshot.c.
  */
 #include "internal.h"
+
+#include <flux/dmabuf.h>
+
+#include <errno.h>
+#include <unistd.h>
+
+/* FLUX_DRM_FORMAT_MOD_LINEAR == 0 (see drm_fourcc.h). We avoid the libdrm header
+ * dependency here because the modifier value is all we need for export, and
+ * dmabuf.c (the import side) already keeps the same convention. */
+#define FLUX_DRM_FORMAT_MOD_LINEAR 0ULL
 #include <flux/vulkan.h>
 
 #include <stdlib.h>
@@ -308,20 +318,133 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
 
     offscreen_destroy_images(s);
 
-    s->format = VK_FORMAT_R8G8B8A8_UNORM;
+    s->format = VK_FORMAT_B8G8R8A8_UNORM;
     s->color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     s->extent = (VkExtent2D){w, h};
     s->hdr_actual = false;
 
+    /* Decide whether offscreen images should be exportable as dma-buf. This
+     * requires the device's external-memory / DRM-modifier extensions and a
+     * linear-tiling modifier that supports colour-attachment + transfer. When
+     * the host wants zero-copy presentation via linux-dmabuf, it enables the
+     * extensions at flux_device_create and we pick the exportable path here.
+     * Otherwise we fall back to the original OPTIMAL-tiling slab-allocated
+     * image (read back via flux_surface_read_pixels). */
+    flux_device *d = s->device;
+    bool want_export = flux_dmabuf_supported(d);
+    s->offscreen_exportable = false;
+    s->offscreen_modifier = 0;
+    s->offscreen_stride = 0;
+
+    uint64_t chosen_modifier = 0;
+    bool use_modifier = false;
+    if (want_export) {
+        /* Query which modifiers support rendering + readback for BGRA8. We
+         * prefer LINEAR (portable, single-plane, always present on the
+         * export side); fall back to the first supported modifier. */
+        VkDrmFormatModifierPropertiesListEXT list = {
+            .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
+        };
+        VkFormatProperties2 fprops = {
+            .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2,
+            .pNext = &list,
+        };
+        vkGetPhysicalDeviceFormatProperties2(d->physical_device, s->format, &fprops);
+        if (list.drmFormatModifierCount > 0) {
+            VkDrmFormatModifierPropertiesEXT *mods =
+                flux_internal_alloc(d, sizeof(*mods) * list.drmFormatModifierCount);
+            if (mods) {
+                list.pDrmFormatModifierProperties = mods;
+                vkGetPhysicalDeviceFormatProperties2(d->physical_device, s->format, &fprops);
+                const uint32_t need = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                                      VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+                                      VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+                bool found_linear = false;
+                bool found_any = false;
+                for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {
+                    if ((mods[i].drmFormatModifierTilingFeatures & need) != need)
+                        continue;
+                    if (mods[i].drmFormatModifier == FLUX_DRM_FORMAT_MOD_LINEAR) {
+                        found_linear = true;
+                        break;
+                    }
+                    if (!found_any) {
+                        chosen_modifier = mods[i].drmFormatModifier;
+                        found_any = true;
+                    }
+                }
+                if (found_linear)
+                    chosen_modifier = FLUX_DRM_FORMAT_MOD_LINEAR;
+                use_modifier = found_linear || found_any;
+                flux_internal_free(d, mods);
+            }
+        }
+    }
+
+    if (use_modifier) {
+        /* Validate the chosen modifier is actually exportable as a dma-buf. */
+        VkPhysicalDeviceExternalImageFormatInfo eifi = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
+            .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
+        };
+        VkPhysicalDeviceImageDrmFormatModifierInfoEXT mfi = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT,
+            .pNext = &eifi,
+            .drmFormatModifier = chosen_modifier,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        VkPhysicalDeviceImageFormatInfo2 ifi = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+            .pNext = &mfi,
+            .format = s->format,
+            .type = VK_IMAGE_TYPE_2D,
+            .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        };
+        VkExternalImageFormatProperties efp = {
+            .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES,
+        };
+        VkImageFormatProperties2 ifp = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+            .pNext = &efp,
+        };
+        VkResult vr = vkGetPhysicalDeviceImageFormatProperties2(d->physical_device, &ifi, &ifp);
+        bool exportable = (vr == VK_SUCCESS) &&
+                          (efp.externalMemoryProperties.externalMemoryFeatures &
+                           VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
+        if (!exportable)
+            use_modifier = false;
+    }
+
+    s->offscreen_exportable = use_modifier;
+    if (use_modifier)
+        s->offscreen_modifier = chosen_modifier;
+
+    /* Image create-info. The modifier path chains an external-memory + DRM-
+     * modifier pair; the fallback path uses plain OPTIMAL tiling. */
+    VkExternalMemoryImageCreateInfo ext_mem = {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
+    };
+    VkImageDrmFormatModifierListCreateInfoEXT mod_list = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT,
+        .pNext = use_modifier ? &ext_mem : nullptr,
+        .drmFormatModifierCount = 1,
+        .pDrmFormatModifiers = &chosen_modifier,
+    };
+
     VkImageCreateInfo ici = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = use_modifier ? &mod_list : nullptr,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = s->format,
         .extent = {w, h, 1},
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .tiling = use_modifier ? VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT
+                               : VK_IMAGE_TILING_OPTIMAL,
         .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -329,13 +452,90 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
     };
 
     for (uint32_t i = 0; i < s->frames_in_flight; ++i) {
-        flux_result r = flux_vk_alloc_image(s->device, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                                            &s->images[i], &s->image_allocs[i]);
-        if (r != FLUX_OK) {
-            offscreen_destroy_images(s);
-            return r;
+        if (use_modifier) {
+            /* Exportable path: create image, then dedicated-allocate memory
+             * bound to it so the VkDeviceMemory can be exported as a dma-buf. */
+            VkResult vr = vkCreateImage(d->device, &ici, nullptr, &s->images[i]);
+            if (vr != VK_SUCCESS) {
+                FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "exportable vkCreateImage", vr);
+                offscreen_destroy_images(s);
+                return FLUX_ERROR_BACKEND_FAILURE;
+            }
+            s->image_count = i + 1;
+
+            VkMemoryDedicatedAllocateInfo dedicated = {
+                .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
+                .image = s->images[i],
+            };
+            VkMemoryRequirements2 mreq = {.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
+            VkImageMemoryRequirementsInfo2 mri = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
+                .image = s->images[i],
+            };
+            vkGetImageMemoryRequirements2(d->device, &mri, &mreq);
+            uint32_t mt = flux_vk_find_memory_type(
+                d, mreq.memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            if (mt == UINT32_MAX)
+                mt = flux_vk_find_memory_type(d, mreq.memoryRequirements.memoryTypeBits, 0);
+            if (mt == UINT32_MAX) {
+                offscreen_destroy_images(s);
+                FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "no memory type for exportable image");
+                return FLUX_ERROR_UNSUPPORTED;
+            }
+            VkMemoryAllocateInfo mai = {
+                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .pNext = &dedicated,
+                .allocationSize = mreq.memoryRequirements.size,
+                .memoryTypeIndex = mt,
+            };
+            VkDeviceMemory mem = VK_NULL_HANDLE;
+            vr = vkAllocateMemory(d->device, &mai, nullptr, &mem);
+            if (vr != VK_SUCCESS) {
+                offscreen_destroy_images(s);
+                FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "exportable vkAllocateMemory", vr);
+                return FLUX_ERROR_BACKEND_FAILURE;
+            }
+            vr = vkBindImageMemory(d->device, s->images[i], mem, 0);
+            if (vr != VK_SUCCESS) {
+                vkFreeMemory(d->device, mem, nullptr);
+                offscreen_destroy_images(s);
+                FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "exportable vkBindImageMemory", vr);
+                return FLUX_ERROR_BACKEND_FAILURE;
+            }
+            s->image_allocs[i].memory = mem;
+            s->image_allocs[i].offset = 0;
+            s->image_allocs[i].size = mreq.memoryRequirements.size;
+            s->image_allocs[i].mapped = NULL;
+            s->image_allocs[i].block = NULL;
+            flux_vk_allocator *a = &d->mem_allocator;
+            pthread_mutex_lock(&a->lock);
+            a->bytes_in_use += mreq.memoryRequirements.size;
+            a->bytes_reserved += mreq.memoryRequirements.size;
+            a->live_allocations++;
+            pthread_mutex_unlock(&a->lock);
+
+            /* Record the stride from memory-plane 0. For DRM-modifier images
+             * the aspect must be VK_IMAGE_ASPECT_MEMORY_PLANE_i_BIT_EXT, not
+             * COLOR — the memory-plane layout is what the dma-buf consumer
+             * sees. BGRA8 is single-plane, so plane 0 is the only one. */
+            if (s->offscreen_stride == 0) {
+                VkImageSubresource plane0 = {
+                    .aspectMask = VK_IMAGE_ASPECT_MEMORY_PLANE_0_BIT_EXT,
+                };
+                VkSubresourceLayout layout;
+                vkGetImageSubresourceLayout(d->device, s->images[i], &plane0, &layout);
+                s->offscreen_stride = (uint32_t)layout.rowPitch;
+            }
+        } else {
+            /* Non-exportable path: slab-allocated OPTIMAL-tiling image. */
+            flux_result r = flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                                &s->images[i], &s->image_allocs[i]);
+            if (r != FLUX_OK) {
+                offscreen_destroy_images(s);
+                return r;
+            }
+            s->image_count = i + 1;
         }
-        s->image_count = i + 1;
 
         VkImageViewCreateInfo ivci = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -349,7 +549,7 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
                     .layerCount = 1,
                 },
         };
-        VkResult vr = vkCreateImageView(s->device->device, &ivci, nullptr, &s->image_views[i]);
+        VkResult vr = vkCreateImageView(d->device, &ivci, nullptr, &s->image_views[i]);
         if (vr != VK_SUCCESS) {
             FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "offscreen vkCreateImageView failed", vr);
             offscreen_destroy_images(s);
@@ -701,6 +901,84 @@ out:
     if (staging_alloc.memory)
         flux_vk_deallocate(d, &staging_alloc);
     return r;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Offscreen dma-buf export (ADR-0040 follow-on)                     */
+/* ------------------------------------------------------------------ */
+
+bool flux_surface_exportable(const flux_surface *s) {
+    return s && s->offscreen && s->offscreen_exportable;
+}
+
+uint32_t flux_surface_last_slot(const flux_surface *s) {
+    return s ? s->last_submitted_slot : UINT32_MAX;
+}
+
+uint64_t flux_surface_dmabuf_modifier(const flux_surface *s) {
+    return s ? s->offscreen_modifier : 0;
+}
+
+uint32_t flux_surface_dmabuf_stride(const flux_surface *s) {
+    return s ? s->offscreen_stride : 0;
+}
+
+/* Export the most recently submitted frame's image memory as a dma-buf fd.
+ * The caller owns the returned fd and must close() it. Waits for the frame's
+ * GPU work to complete first (same fence as flux_surface_read_pixels), so the
+ * written pixels are visible. No GPU->CPU pixel copy occurs — this is a zero-
+ * copy handle export. Returns FLUX_ERROR_UNSUPPORTED if the surface was not
+ * created exportable. */
+flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
+    if (!s || !out_fd)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_fd = -1;
+    if (!s->offscreen || !s->offscreen_exportable) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                  "flux_surface_export_dmabuf needs an exportable offscreen surface");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    if (s->last_submitted_slot == UINT32_MAX) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "no frame has been submitted to export");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+
+    flux_device *d = s->device;
+    uint32_t slot = s->last_submitted_slot;
+    flux_per_frame *pf = &s->frames[slot];
+
+    /* Wait for the frame's GPU work to finish before handing the memory to a
+     * foreign consumer. Same fence wait as flux_surface_read_pixels. */
+    VkResult vr =
+        vkWaitForFences(d->device, 1, &pf->in_flight, VK_TRUE, FLUX_DEFAULT_FRAME_TIMEOUT_NS);
+    if (vr == VK_TIMEOUT)
+        return FLUX_ERROR_TIMEOUT;
+    if (vr != VK_SUCCESS) {
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "export_dmabuf fence wait failed", vr);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+
+    PFN_vkGetMemoryFdKHR pGetMemoryFd =
+        (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(d->device, "vkGetMemoryFdKHR");
+    if (!pGetMemoryFd) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "vkGetMemoryFdKHR entry point missing");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+
+    VkMemoryGetFdInfoKHR fd_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
+        .memory = s->image_allocs[slot].memory,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
+    };
+    int fd = -1;
+    vr = pGetMemoryFd(d->device, &fd_info, &fd);
+    if (vr != VK_SUCCESS) {
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkGetMemoryFdKHR failed", vr);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+
+    *out_fd = fd;
+    return FLUX_OK;
 }
 
 /* ------------------------------------------------------------------ */
