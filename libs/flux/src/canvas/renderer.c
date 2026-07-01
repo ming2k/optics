@@ -1,6 +1,7 @@
 /*
  * Canvas renderer — pipelines, shader modules, draw submission.
  */
+#include "backend.h"
 #include "internal.h"
 
 #include <stdalign.h>
@@ -419,10 +420,8 @@ void push_vertex(flux_canvas_vertex *v, flux_point p, flux_mat3x2 tx, flux_color
  * the gradient fields are zeroed (the solid shader ignores them).
  * For gradients, copies endpoint + stops. */
 void build_push(flux_canvas *c, const flux_paint *paint, flux_canvas_push *out) {
-    flux_surface_info info;
-    flux_surface_get_info(c->surface, &info);
     *out = (flux_canvas_push){
-        .inv_window_size = {2.0f / (float)info.width, 2.0f / (float)info.height},
+        .inv_window_size = {2.0f / (float)c->fb_width, 2.0f / (float)c->fb_height},
         .kind = (uint32_t)(paint ? paint->kind : FLUX_PAINT_SOLID),
     };
     if (!paint)
@@ -464,19 +463,10 @@ void build_push(flux_canvas *c, const flux_paint *paint, flux_canvas_push *out) 
 }
 
 /* Bind the pipeline for the internal id lazily; skip the call if
- * it's already bound from a previous draw in the same pass. */
+ * it's already bound from a previous draw in the same pass. Delegates
+ * to the active backend (the seam where Vulkan binding lives). */
 bool ensure_pipeline_bound_id(flux_canvas *c, canvas_pipe_id id) {
-    VkPipelineLayout layout;
-    VkPipeline pipeline;
-    if (get_canvas_pipeline_id(c->device, c->color_format, id, &layout, &pipeline) != FLUX_OK) {
-        return false;
-    }
-    if (c->bound_pipeline != pipeline) {
-        VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        c->bound_pipeline = pipeline;
-    }
-    return true;
+    return c->backend->bind_program(c->backend, c, id);
 }
 
 bool ensure_pipeline_bound(flux_canvas *c, flux_paint_kind kind) {
@@ -488,31 +478,16 @@ bool ensure_pipeline_bound(flux_canvas *c, flux_paint_kind kind) {
     return ensure_pipeline_bound_id(c, id);
 }
 
+/* Front end for a triangle batch: assemble the backend-neutral push block
+ * from the paint and hand the batch to the active backend, which owns vertex
+ * transport and the draw itself. */
 void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id id,
                          const flux_canvas_vertex *verts, uint32_t vertex_count) {
     if (!c->recording || vertex_count == 0)
         return;
-    if (!ensure_pipeline_bound_id(c, id))
-        return;
-
-    flux_transient slice;
-    flux_result r = flux_frame_alloc_transient(c->frame, vertex_count * sizeof(flux_canvas_vertex),
-                                               alignof(flux_canvas_vertex), &slice);
-    if (r != FLUX_OK) {
-        c->dropped_draws++;
-        return;
-    }
-    memcpy(slice.cpu, verts, vertex_count * sizeof(flux_canvas_vertex));
-
     flux_canvas_push pc;
     build_push(c, paint, &pc);
-    pc.verts_address = slice.gpu_address;
-
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
-    vkCmdSetScissor(cmd, 0, 1, &c->states[c->state_top].scissor);
-    vkCmdPushConstants(cmd, c->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                       sizeof(pc), &pc);
-    vkCmdDraw(cmd, vertex_count, 1, 0, 0);
+    c->backend->submit(c->backend, c, id, &pc, verts, vertex_count);
 }
 
 void submit_triangles(flux_canvas *c, const flux_paint *paint, const flux_canvas_vertex *verts,

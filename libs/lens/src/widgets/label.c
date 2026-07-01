@@ -55,3 +55,32 @@ void lens_label_ex(lens *ui, const char *text, float size) {
 
     ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
 }
+
+void lens_label_compact_ex(lens *ui, const char *text, float size) {
+    lens_id id = lensi_gen_widget_id(ui, text);
+    lens_node *n = lensi_store_touch(ui, id);
+    if (!n)
+        return;
+    lensi_link_child(ui, n);
+    n->is_container = false;
+
+    lens_text_metrics tm = lensi_text_measure_label(ui, text, size, 0.0f);
+    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width;
+    float h = (n->fixed_h > 0) ? n->fixed_h : tm.height;
+    n->measured = (flux_point){w, h};
+
+    lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
+
+    float y = (h - tm.height) * 0.5f;
+    if (y < 0.0f)
+        y = 0.0f;
+    lensi_drawlist_push(ui, n,
+                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
+                                        .rel = {0, y, 0, 0},
+                                        .color = ui->theme.color_fg,
+                                        .text = text,
+                                        .text_size = size,
+                                        .text_weight = 0.0f});
+
+    ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
+}

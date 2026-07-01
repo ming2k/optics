@@ -4,8 +4,10 @@
  * Heavy geometry work (flattening, tessellation, stroking) lives in
  * geometry_*.c; pipeline caching and draw submission live in renderer.c.
  */
+#include "backend.h"
 #include "internal.h"
 
+#include <flux/canvas_cpu.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +17,48 @@
 /*  Lifecycle                                                         */
 /* ------------------------------------------------------------------ */
 
+/* Allocation shims: a GPU canvas uses the device's tracked allocator; a
+ * headless CPU canvas (device == NULL) falls back to the C allocator. Both
+ * return zeroed memory. Shared by the GPU and CPU constructors. */
+void *flux_canvas_alloc(flux_device *d, size_t n) {
+    if (d)
+        return flux_internal_alloc(d, n);
+    return calloc(1, n);
+}
+void flux_canvas_free(flux_device *d, void *p) {
+    if (d)
+        flux_internal_free(d, p);
+    else
+        free(p);
+}
+
+bool flux_canvas_alloc_scratch(flux_canvas *c) {
+    flux_device *d = c->device;
+    c->scratch_pts = flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_pts));
+    c->scratch_verts =
+        flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * 3 * sizeof(*c->scratch_verts));
+    c->scratch_contours =
+        flux_canvas_alloc(d, FLUX_CANVAS_MAX_CONTOURS * sizeof(*c->scratch_contours));
+    c->scratch_lnk_prev =
+        flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_lnk_prev));
+    c->scratch_lnk_next =
+        flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_lnk_next));
+    c->scratch_frames =
+        flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_frames));
+    return c->scratch_pts && c->scratch_verts && c->scratch_contours && c->scratch_lnk_prev &&
+           c->scratch_lnk_next && c->scratch_frames;
+}
+
+void flux_canvas_free_scratch(flux_canvas *c) {
+    flux_device *d = c->device;
+    flux_canvas_free(d, c->scratch_pts);
+    flux_canvas_free(d, c->scratch_verts);
+    flux_canvas_free(d, c->scratch_contours);
+    flux_canvas_free(d, c->scratch_lnk_prev);
+    flux_canvas_free(d, c->scratch_lnk_next);
+    flux_canvas_free(d, c->scratch_frames);
+}
+
 flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) {
     if (!desc || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -22,8 +66,17 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_CANVAS_DESC");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
+
+    /* Backend selection (Skia SkSurface-style factory). AUTO => GPU when a
+     * surface is given, else the software backend. */
+    flux_canvas_backend_kind kind = desc->backend;
+    if (kind == FLUX_CANVAS_BACKEND_AUTO)
+        kind = desc->surface ? FLUX_CANVAS_BACKEND_GPU : FLUX_CANVAS_BACKEND_CPU;
+    if (kind == FLUX_CANVAS_BACKEND_CPU)
+        return flux_canvas_create_cpu(desc->width, desc->height, desc->scale, out);
+
     if (!desc->surface) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "canvas requires a surface");
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "GPU canvas requires a surface");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
     *out = nullptr;
@@ -35,68 +88,27 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
     atomic_init(&c->ref_count, 1u);
     c->device = flux_device_retain(device);
     c->surface = flux_surface_retain(desc->surface);
+    c->backend = flux_canvas_backend_vk();
 
     /* Content scale (device-pixel ratio); the base transform applies it. */
     c->content_scale = (desc->scale > 0.0f) ? desc->scale : 1.0f;
     c->states[0].transform = flux_mat3x2_scale(c->content_scale, c->content_scale);
     c->state_top = 0;
 
-    /* Shared device-cached layout, keyed by surface format. The
-     * canvas borrows it (the device owns it). Pipelines are looked
-     * up on demand based on paint kind. */
-    c->color_format = flux_surface_vk_format(desc->surface);
-    c->stencil_format = flux_canvas_stencil_format(device);
-    void *st = canvas_state_get_or_init(device);
-    if (!st) {
+    /* Backend-private GPU state: pipeline-cache warm, colour/stencil formats,
+     * and the owned MSAA/stencil targets. Kept entirely inside the backend so
+     * struct flux_canvas carries no Vulkan types. */
+    flux_result br = c->backend->canvas_init(c->backend, c);
+    if (br != FLUX_OK) {
         flux_surface_release(c->surface);
         flux_device_release(c->device);
         flux_internal_free(device, c);
-        return FLUX_ERROR_OUT_OF_MEMORY;
-    }
-    /* Warm the cache (so canvas_create can fail fast on shader/layout
-     * problems rather than first-draw). Build every pipeline kind for
-     * this surface's color format up front: the glyph pipeline in
-     * particular pulls in SPIR-V JIT work on first use that can take
-     * ~0.5-1.5 s on Mesa/Intel, which trips the IME daemon's 3 s
-     * watchdog on the first indicator banner render. Warming every
-     * kind here keeps the cost inside canvas_create (no watchdog
-     * oversight at typio's App::init stage) and turns first-draw
-     * into a hot path. The on-disk VkPipelineCache makes restarts
-     * cheaper. */
-    for (int id = 0; id < CANVAS_PIPE_COUNT; id++) {
-        VkPipeline warm;
-        flux_result r =
-            get_canvas_pipeline_id(device, c->color_format, (canvas_pipe_id)id, &c->layout, &warm);
-        if (r != FLUX_OK) {
-            flux_surface_release(c->surface);
-            flux_device_release(c->device);
-            flux_internal_free(device, c);
-            return r;
-        }
+        return br;
     }
 
-    /* Per-instance scratch (was a function-static; moved here for
-     * reentrancy — two canvases on two threads now isolate cleanly). */
-    c->scratch_pts =
-        flux_internal_alloc(device, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_pts));
-    c->scratch_verts =
-        flux_internal_alloc(device, FLUX_CANVAS_PATH_SCRATCH_CAP * 3 * sizeof(*c->scratch_verts));
-    c->scratch_contours =
-        flux_internal_alloc(device, FLUX_CANVAS_MAX_CONTOURS * sizeof(*c->scratch_contours));
-    c->scratch_lnk_prev =
-        flux_internal_alloc(device, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_lnk_prev));
-    c->scratch_lnk_next =
-        flux_internal_alloc(device, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_lnk_next));
-    c->scratch_frames =
-        flux_internal_alloc(device, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_frames));
-    if (!c->scratch_pts || !c->scratch_verts || !c->scratch_contours || !c->scratch_lnk_prev ||
-        !c->scratch_lnk_next || !c->scratch_frames) {
-        flux_internal_free(device, c->scratch_pts);
-        flux_internal_free(device, c->scratch_verts);
-        flux_internal_free(device, c->scratch_contours);
-        flux_internal_free(device, c->scratch_lnk_prev);
-        flux_internal_free(device, c->scratch_lnk_next);
-        flux_internal_free(device, c->scratch_frames);
+    if (!flux_canvas_alloc_scratch(c)) {
+        flux_canvas_free_scratch(c);
+        c->backend->canvas_destroy(c->backend, c);
         flux_surface_release(c->surface);
         flux_device_release(c->device);
         flux_internal_free(device, c);
@@ -107,317 +119,77 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
     return FLUX_OK;
 }
 
-/* Canvas-owned stencil attachment (ADR-0014), sized to the surface
- * and recreated on extent change. Sized resources are safe to drop
- * here without a wait: the only extent-change path is
- * flux_surface_resize, which stalls the device first. */
-static void canvas_stencil_destroy(flux_canvas *c) {
-    flux_device *d = c->device;
-    if (c->stencil_view)
-        vkDestroyImageView(d->device, c->stencil_view, nullptr);
-    if (c->stencil_image)
-        vkDestroyImage(d->device, c->stencil_image, nullptr);
-    if (c->stencil_alloc.memory)
-        flux_vk_deallocate(d, &c->stencil_alloc);
-    c->stencil_view = VK_NULL_HANDLE;
-    c->stencil_image = VK_NULL_HANDLE;
-    c->stencil_alloc = (flux_vk_alloc){0};
-    c->stencil_extent = (VkExtent2D){0, 0};
-}
-
-static bool canvas_stencil_ensure(flux_canvas *c, uint32_t w, uint32_t h) {
-    if (c->stencil_format == VK_FORMAT_UNDEFINED || w == 0 || h == 0)
-        return false;
-    if (c->stencil_view && c->stencil_extent.width == w && c->stencil_extent.height == h)
-        return true;
-
-    canvas_stencil_destroy(c);
-
-    flux_device *d = c->device;
-    VkImageCreateInfo ici = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = c->stencil_format,
-        .extent = {w, h, 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = FLUX_CANVAS_SAMPLES, /* match the MSAA colour target */
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-    if (flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &c->stencil_image,
-                            &c->stencil_alloc) != FLUX_OK) {
-        return false;
-    }
-    VkImageViewCreateInfo ivci = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = c->stencil_image,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = c->stencil_format,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    if (vkCreateImageView(d->device, &ivci, nullptr, &c->stencil_view) != VK_SUCCESS) {
-        canvas_stencil_destroy(c);
-        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas stencil view failed");
-        return false;
-    }
-    c->stencil_extent = (VkExtent2D){w, h};
-    return true;
-}
-
-/* Canvas-owned multisample colour target, sized to the surface and recreated
- * on extent change (same lifecycle rules as the stencil above). */
-static void canvas_msaa_destroy(flux_canvas *c) {
-    flux_device *d = c->device;
-    if (c->msaa_view)
-        vkDestroyImageView(d->device, c->msaa_view, nullptr);
-    if (c->msaa_image)
-        vkDestroyImage(d->device, c->msaa_image, nullptr);
-    if (c->msaa_alloc.memory)
-        flux_vk_deallocate(d, &c->msaa_alloc);
-    c->msaa_view = VK_NULL_HANDLE;
-    c->msaa_image = VK_NULL_HANDLE;
-    c->msaa_alloc = (flux_vk_alloc){0};
-    c->msaa_extent = (VkExtent2D){0, 0};
-}
-
-static bool canvas_msaa_ensure(flux_canvas *c, uint32_t w, uint32_t h) {
-    if (c->color_format == VK_FORMAT_UNDEFINED || w == 0 || h == 0)
-        return false;
-    if (c->msaa_view && c->msaa_extent.width == w && c->msaa_extent.height == h)
-        return true;
-
-    canvas_msaa_destroy(c);
-
-    flux_device *d = c->device;
-    VkImageCreateInfo ici = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = c->color_format,
-        .extent = {w, h, 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = FLUX_CANVAS_SAMPLES,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        /* Only ever rendered-to and resolved-from within a pass; never
-         * sampled or stored, so it can stay device-local and transient. */
-        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-    if (flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &c->msaa_image,
-                            &c->msaa_alloc) != FLUX_OK) {
-        return false;
-    }
-    VkImageViewCreateInfo ivci = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = c->msaa_image,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = c->color_format,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    if (vkCreateImageView(d->device, &ivci, nullptr, &c->msaa_view) != VK_SUCCESS) {
-        canvas_msaa_destroy(c);
-        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas msaa view failed");
-        return false;
-    }
-    c->msaa_extent = (VkExtent2D){w, h};
-    return true;
-}
-
 void flux_canvas_destroy(flux_canvas *c) {
     if (!c)
         return;
-    /* The owned attachments may still be referenced by in-flight frames. */
-    if (c->stencil_image || c->msaa_image) {
-        flux_device_wait_idle(c->device);
-        canvas_stencil_destroy(c);
-        canvas_msaa_destroy(c);
-    }
-    /* Pipeline + layout are owned by the device's canvas cache; we
-     * just drop our borrowed references. flux_device_release frees
-     * the cache via canvas_state_destroy. */
+    /* Backend owns all GPU resources (and any in-flight-frame wait). */
+    c->backend->canvas_destroy(c->backend, c);
+
     flux_device *dev = c->device;
-    flux_internal_free(dev, c->scratch_pts);
-    flux_internal_free(dev, c->scratch_verts);
-    flux_internal_free(dev, c->scratch_contours);
-    flux_internal_free(dev, c->scratch_lnk_prev);
-    flux_internal_free(dev, c->scratch_lnk_next);
-    flux_internal_free(dev, c->scratch_frames);
-    flux_surface_release(c->surface);
-    flux_internal_free(dev, c);
-    flux_device_release(dev);
+    flux_canvas_free_scratch(c);
+    if (c->surface)
+        flux_surface_release(c->surface);
+    flux_canvas_free(dev, c);
+    if (dev)
+        flux_device_release(dev);
 }
 
 /* ------------------------------------------------------------------ */
 /*  Pass envelope                                                     */
 /* ------------------------------------------------------------------ */
 
-flux_result flux_canvas_begin(flux_canvas *c, flux_frame *f, const flux_color *clear) {
-    if (!c || !f)
+flux_result flux_canvas_begin_frame(flux_canvas *c, flux_frame *f, const flux_color *clear) {
+    if (!c)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (c->recording) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "flux_canvas_begin called twice without _end");
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "flux_canvas_begin_frame called twice without _end");
         return FLUX_ERROR_INVALID_STATE;
     }
+    /* A GPU canvas records into a frame's command buffer; a CPU canvas has
+     * none. `c->device != NULL` distinguishes them. */
+    if (c->device && !f) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "GPU canvas requires an open frame");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     c->frame = f;
-    c->recording = true;
     c->state_top = 0;
     c->states[0].transform = flux_mat3x2_scale(c->content_scale, c->content_scale);
 
-    /* Clear value is interpreted in the swapchain's storage colour
-     * space. We negotiate a UNORM (non-_SRGB) format, so the hardware
-     * does NOT linearise on write — the value goes straight to bytes
-     * and the user sees it as-is. Linearising here would darken the
-     * cleared area below every premultiplied colour drawn into it. */
-    flux_vec4 cc = {0, 0, 0, 0};
-    if (clear) {
-        uint8_t r8, g8, b8, a8;
-        flux_color_unpack(*clear, &r8, &g8, &b8, &a8);
-        cc.x = (float)r8 / 255.0f;
-        cc.y = (float)g8 / 255.0f;
-        cc.z = (float)b8 / 255.0f;
-        cc.w = (float)a8 / 255.0f;
+    flux_result r = c->backend->begin_pass(c->backend, c, f, nullptr, clear);
+    if (r != FLUX_OK) {
+        c->frame = nullptr;
+        return r;
     }
-    flux_pass_attachment att = {
-        .view = VK_NULL_HANDLE, /* swapchain image */
-        .load_op = clear ? FLUX_LOAD_CLEAR : FLUX_LOAD_LOAD,
-        .store_op = FLUX_STORE_STORE,
-        .clear_color = cc,
-    };
-    flux_pass_desc pass = {
-        .type = FLUX_TYPE_PASS_DESC,
-        .color_attachment_count = 1,
-        .color_attachments = &att,
-    };
-
-    flux_surface_info info;
-    flux_surface_get_info(c->surface, &info);
-
-    /* Render to the owned multisample colour target and resolve to the
-     * surface image, so vector fills are anti-aliased. */
-    if (canvas_msaa_ensure(c, info.width, info.height)) {
-        VkCommandBuffer pre_cmd = flux_frame_vk_command_buffer(f);
-        VkImageMemoryBarrier2 b = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, /* contents cleared at load */
-            .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .image = c->msaa_image,
-            .subresourceRange =
-                {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .levelCount = 1,
-                    .layerCount = 1,
-                },
-        };
-        VkDependencyInfo di = {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &b,
-        };
-        vkCmdPipelineBarrier2(pre_cmd, &di);
-
-        att.view = c->msaa_view;
-        att.format = c->color_format;
-        att.resolve_to_surface = true;
-    }
-
-    /* Canvas-owned stencil attachment (ADR-0014). The canvas
-     * pipelines all declare this format, so when the device has one
-     * the pass must carry it — even if no fill ends up needing the
-     * stencil fallback this frame. Cleared at load; the cover pass
-     * re-zeroes whatever it consumed, so the attachment stays clean
-     * across fills within the pass. */
-    flux_pass_depth_attachment stencil_att;
-    if (canvas_stencil_ensure(c, info.width, info.height)) {
-        VkCommandBuffer pre_cmd = flux_frame_vk_command_buffer(f);
-        VkImageMemoryBarrier2 b = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            .srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            .dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, /* contents cleared at load */
-            .newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            .image = c->stencil_image,
-            .subresourceRange =
-                {
-                    .aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT,
-                    .levelCount = 1,
-                    .layerCount = 1,
-                },
-        };
-        VkDependencyInfo di = {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &b,
-        };
-        vkCmdPipelineBarrier2(pre_cmd, &di);
-
-        stencil_att = (flux_pass_depth_attachment){
-            .view = c->stencil_view,
-            .format = c->stencil_format,
-            .load_op = FLUX_LOAD_CLEAR,
-            .store_op = FLUX_STORE_DONT_CARE,
-            .clear_stencil = 0,
-        };
-        pass.stencil = &stencil_att;
-    }
-
-    flux_frame_begin_pass(f, &pass);
-    c->pass_active = true;
-    VkViewport vp = {
-        .x = 0.0f,
-        .y = 0.0f,
-        .width = (float)info.width,
-        .height = (float)info.height,
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f,
-    };
-    VkRect2D sc = {.offset = {0, 0}, .extent = {info.width, info.height}};
-    c->states[0].scissor = sc;
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
-    vkCmdSetViewport(cmd, 0, 1, &vp);
-    vkCmdSetScissor(cmd, 0, 1, &sc);
-    /* Don't pre-bind a pipeline — each draw picks the right one for
-     * its paint kind. We do bind the bindless set now though; it's
-     * pipeline-layout-scoped and shared across canvas pipelines. */
-    c->bound_pipeline = VK_NULL_HANDLE;
-    VkDescriptorSet bindless = flux_device_bindless_set(c->device);
-    if (bindless != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, c->layout, 0, 1, &bindless, 0,
-                                nullptr);
-    }
+    c->recording = true;
     return FLUX_OK;
 }
 
-void flux_canvas_end(flux_canvas *c) {
+void flux_canvas_end_frame(flux_canvas *c) {
     if (!c || !c->recording)
         return;
-    if (c->pass_active) {
-        flux_frame_end_pass(c->frame);
-        c->pass_active = false;
-    }
+    c->backend->end_pass(c->backend, c);
     c->frame = nullptr;
     c->recording = false;
+}
+
+/* GPU-spelled compatibility wrappers. */
+flux_result flux_canvas_begin(flux_canvas *c, flux_frame *f, const flux_color *clear) {
+    if (c && !f) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "flux_canvas_begin requires a frame");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    return flux_canvas_begin_frame(c, f, clear);
+}
+
+void flux_canvas_end(flux_canvas *c) {
+    flux_canvas_end_frame(c);
+}
+
+const uint8_t *flux_canvas_read_pixels(flux_canvas *c, uint32_t *width, uint32_t *height,
+                                       uint32_t *stride) {
+    if (!c || !c->backend->read_pixels)
+        return nullptr;
+    return c->backend->read_pixels(c->backend, c, width, height, stride);
 }
 
 /* ------------------------------------------------------------------ */
@@ -434,224 +206,28 @@ flux_result flux_canvas_begin_target(flux_canvas *c, flux_frame *f, flux_image *
                   "flux_canvas_begin_target while a pass is already active");
         return FLUX_ERROR_INVALID_STATE;
     }
-    /* v1: target format must match the canvas pipelines' baked-in colour
-     * format (the pipeline cache is keyed on colour format only). */
-    VkFormat target_fmt = flux_format_to_vk(target->format);
-    if (target_fmt != c->color_format) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "target colour format != canvas colour format");
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    }
-    /* v1: target extent must match the surface extent, because
-     * flux_frame_begin_pass hardwires the render area to s->extent and the
-     * canvas-owned MSAA/stencil attachments are surface-sized. */
-    flux_surface_info info;
-    flux_surface_get_info(c->surface, &info);
-    if (target->width != info.width || target->height != info.height) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
-                  "target extent != surface extent (unsupported in v1)");
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    }
 
     c->frame = f;
-    c->recording = true;
     c->state_top = 0;
     c->states[0].transform = flux_mat3x2_scale(c->content_scale, c->content_scale);
 
-    /* Transition target SHADER_READ_ONLY_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL
-     * in the frame's command stream (it is the MSAA resolve destination). */
-    {
-        VkCommandBuffer pre_cmd = flux_frame_vk_command_buffer(f);
-        VkImageMemoryBarrier2 b = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            .srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .dstAccessMask =
-                VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .image = target->image,
-            .subresourceRange =
-                {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .levelCount = 1,
-                    .layerCount = 1,
-                },
-        };
-        VkDependencyInfo di = {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &b,
-        };
-        vkCmdPipelineBarrier2(pre_cmd, &di);
-        target->current_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    /* Format/extent validation and all GPU work (target transition, MSAA +
+     * stencil, resolve into `target`) live in the backend. */
+    flux_result r = c->backend->begin_pass(c->backend, c, f, target, clear);
+    if (r != FLUX_OK) {
+        c->frame = nullptr;
+        return r;
     }
-
-    /* Clear value in UNORM/byte space (same convention as canvas_begin). */
-    flux_vec4 cc = {0, 0, 0, 0};
-    if (clear) {
-        uint8_t r8, g8, b8, a8;
-        flux_color_unpack(*clear, &r8, &g8, &b8, &a8);
-        cc.x = (float)r8 / 255.0f;
-        cc.y = (float)g8 / 255.0f;
-        cc.z = (float)b8 / 255.0f;
-        cc.w = (float)a8 / 255.0f;
-    }
-
-    /* Canvas pipelines are built with rasterizationSamples = FLUX_CANVAS_SAMPLES
-     * (4x) AND declare a stencil attachment format, so the target pass must:
-     *   - render into the canvas-owned 4x MSAA image, resolving into `target`
-     *   - carry the canvas-owned stencil attachment (pipeline/pass match, ADR-0014)
-     * This mirrors canvas_begin exactly, except the resolve destination is the
-     * caller's target image instead of the swapchain. */
-    flux_pass_attachment att = {
-        .format = target_fmt,
-        .load_op = clear ? FLUX_LOAD_CLEAR : FLUX_LOAD_LOAD,
-        .store_op = FLUX_STORE_DONT_CARE, /* MSAA colour is discarded after resolve */
-        .clear_color = cc,
-        .resolve_view = target->view, /* resolve into the capture target */
-    };
-
-    if (canvas_msaa_ensure(c, info.width, info.height)) {
-        VkCommandBuffer pre_cmd = flux_frame_vk_command_buffer(f);
-        VkImageMemoryBarrier2 b = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, /* contents cleared at load */
-            .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .image = c->msaa_image,
-            .subresourceRange =
-                {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .levelCount = 1,
-                    .layerCount = 1,
-                },
-        };
-        VkDependencyInfo di = {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &b,
-        };
-        vkCmdPipelineBarrier2(pre_cmd, &di);
-        att.view = c->msaa_view;
-    }
-
-    /* Stencil attachment (ADR-0014): the canvas pipelines declare this format,
-     * so the pass must carry it or pipeline/pass compatibility breaks and no
-     * draws render. Sized to the surface (== target extent in v1). */
-    flux_pass_depth_attachment stencil_att;
-    if (canvas_stencil_ensure(c, info.width, info.height)) {
-        VkCommandBuffer pre_cmd = flux_frame_vk_command_buffer(f);
-        VkImageMemoryBarrier2 b = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            .srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            .dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, /* contents cleared at load */
-            .newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            .image = c->stencil_image,
-            .subresourceRange =
-                {
-                    .aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT,
-                    .levelCount = 1,
-                    .layerCount = 1,
-                },
-        };
-        VkDependencyInfo di = {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &b,
-        };
-        vkCmdPipelineBarrier2(pre_cmd, &di);
-
-        stencil_att = (flux_pass_depth_attachment){
-            .view = c->stencil_view,
-            .format = c->stencil_format,
-            .load_op = FLUX_LOAD_CLEAR,
-            .store_op = FLUX_STORE_DONT_CARE,
-            .clear_stencil = 0,
-        };
-    }
-
-    flux_pass_desc pass = {
-        .type = FLUX_TYPE_PASS_DESC,
-        .color_attachment_count = 1,
-        .color_attachments = &att,
-    };
-    if (c->stencil_view) {
-        pass.stencil = &stencil_att;
-    }
-
-    flux_frame_begin_pass(f, &pass);
-    c->pass_active = true;
-    c->target_pass = true;
-    c->target = target;
-
-    VkViewport vp = {
-        .x = 0.0f,
-        .y = 0.0f,
-        .width = (float)target->width,
-        .height = (float)target->height,
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f,
-    };
-    VkRect2D sc = {.offset = {0, 0}, .extent = {target->width, target->height}};
-    c->states[0].scissor = sc;
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
-    vkCmdSetViewport(cmd, 0, 1, &vp);
-    vkCmdSetScissor(cmd, 0, 1, &sc);
-    c->bound_pipeline = VK_NULL_HANDLE;
-    VkDescriptorSet bindless = flux_device_bindless_set(c->device);
-    if (bindless != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, c->layout, 0, 1, &bindless, 0,
-                                nullptr);
-    }
+    c->recording = true;
     return FLUX_OK;
 }
 
 void flux_canvas_end_target(flux_canvas *c) {
     if (!c || !c->target_pass)
         return;
-
-    if (c->pass_active) {
-        flux_frame_end_pass(c->frame);
-        c->pass_active = false;
-    }
-
-    /* Trailing barrier: COLOR_ATTACHMENT_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
-     * so the following flux_effect_blur / draw_image needs no caller sync. */
-    flux_image *t = c->target;
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
-    VkImageMemoryBarrier2 b = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .image = t->image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    VkDependencyInfo di = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &b,
-    };
-    vkCmdPipelineBarrier2(cmd, &di);
-    t->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
+    /* end_pass emits the trailing COLOR_ATTACHMENT -> SHADER_READ transition
+     * so a following flux_effect_blur / draw_image needs no caller sync. */
+    c->backend->end_pass(c->backend, c);
     c->target = nullptr;
     c->target_pass = false;
     c->frame = nullptr;
@@ -692,10 +268,7 @@ void flux_canvas_restore(flux_canvas *c) {
     if (!c || c->state_top == 0)
         return;
     c->state_top--;
-    if (c->pass_active) {
-        VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
-        vkCmdSetScissor(cmd, 0, 1, &c->states[c->state_top].scissor);
-    }
+    c->backend->set_scissor(c->backend, c, c->states[c->state_top].scissor);
 }
 
 void flux_canvas_translate(flux_canvas *c, float x, float y) {
@@ -752,12 +325,9 @@ void flux_canvas_clip_rect(flux_canvas *c, flux_rect r) {
     int32_t y = (int32_t)r.y;
     uint32_t w = (uint32_t)(r.w > 0.0f ? r.w : 0.0f);
     uint32_t h = (uint32_t)(r.h > 0.0f ? r.h : 0.0f);
-    VkRect2D sc = {.offset = {x, y}, .extent = {w, h}};
+    flux_recti sc = {x, y, w, h};
     c->states[c->state_top].scissor = sc;
-    if (c->pass_active) {
-        VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
-        vkCmdSetScissor(cmd, 0, 1, &sc);
-    }
+    c->backend->set_scissor(c->backend, c, sc);
 }
 
 /* ------------------------------------------------------------------ */
@@ -794,21 +364,10 @@ void flux_canvas_fill_rect_color(flux_canvas *c, flux_rect r, flux_color color) 
 static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux_bindless_handle sh,
                                            flux_rect dst, flux_rect src, flux_color tint,
                                            uint32_t kind) {
-    if (sh == FLUX_BINDLESS_INVALID)
+    /* Image draws need a GPU-resident texture (img->bindless): unsupported on
+     * a headless CPU canvas. */
+    if (!c->device || sh == FLUX_BINDLESS_INVALID)
         return;
-
-    /* Force the image pipeline for this draw. */
-    VkPipelineLayout layout;
-    VkPipeline pipeline;
-    if (get_canvas_pipeline(c->device, c->color_format, (flux_paint_kind)0xff, &layout,
-                            &pipeline) != FLUX_OK) {
-        return;
-    }
-    if (c->bound_pipeline != pipeline) {
-        VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        c->bound_pipeline = pipeline;
-    }
 
     flux_mat3x2 tx = c->states[c->state_top].transform;
     flux_point p0 = {dst.x, dst.y};
@@ -828,15 +387,8 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
     push_vertex(&v[4], p2, tx, tint);
     push_vertex(&v[5], p3, tx, tint);
 
-    flux_transient slice;
-    if (flux_frame_alloc_transient(c->frame, sizeof(v), alignof(flux_canvas_vertex), &slice) !=
-        FLUX_OK)
-        return;
-    memcpy(slice.cpu, v, sizeof(v));
-
     flux_canvas_push pc;
     build_push(c, nullptr, &pc);
-    pc.verts_address = slice.gpu_address;
     pc.kind = kind;
     pc.image_handle = img->bindless;
     pc.sampler_handle = sh;
@@ -856,11 +408,7 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
     pc.image_src[2] = src.w;
     pc.image_src[3] = src.h;
 
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
-    vkCmdSetScissor(cmd, 0, 1, &c->states[c->state_top].scissor);
-    vkCmdPushConstants(cmd, c->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                       sizeof(pc), &pc);
-    vkCmdDraw(cmd, 6, 1, 0, 0);
+    c->backend->submit(c->backend, c, CANVAS_PIPE_IMAGE, &pc, v, 6);
 }
 
 /* ------------------------------------------------------------------ */
@@ -875,18 +423,6 @@ static void draw_sdf_rrect(flux_canvas *c, flux_rect r, float radius, flux_color
                            float stroke_hw) {
     if (!c || !c->recording || r.w <= 0.0f || r.h <= 0.0f)
         return;
-
-    VkPipelineLayout layout;
-    VkPipeline pipeline;
-    if (get_canvas_pipeline_id(c->device, c->color_format, CANVAS_PIPE_SDF, &layout, &pipeline) !=
-        FLUX_OK) {
-        return;
-    }
-    if (c->bound_pipeline != pipeline) {
-        VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        c->bound_pipeline = pipeline;
-    }
 
     flux_mat3x2 tx = c->states[c->state_top].transform;
     float s = flux_canvas_mat3x2_pixel_scale(tx);
@@ -921,16 +457,8 @@ static void draw_sdf_rrect(flux_canvas *c, flux_rect r, float radius, flux_color
         v[i]._pad = 0;
     }
 
-    flux_transient slice;
-    if (flux_frame_alloc_transient(c->frame, sizeof(v), alignof(flux_canvas_vertex), &slice) !=
-        FLUX_OK) {
-        return;
-    }
-    memcpy(slice.cpu, v, sizeof(v));
-
     flux_canvas_push pc;
     build_push(c, nullptr, &pc);
-    pc.verts_address = slice.gpu_address;
     /* SDF params share the image_dst / image_src push slots (screen pixels). */
     pc.image_dst[0] = cp.x;
     pc.image_dst[1] = cp.y;
@@ -941,11 +469,7 @@ static void draw_sdf_rrect(flux_canvas *c, flux_rect r, float radius, flux_color
     pc.image_src[2] = 0.0f;
     pc.image_src[3] = 0.0f;
 
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
-    vkCmdSetScissor(cmd, 0, 1, &c->states[c->state_top].scissor);
-    vkCmdPushConstants(cmd, c->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                       sizeof(pc), &pc);
-    vkCmdDraw(cmd, 6, 1, 0, 0);
+    c->backend->submit(c->backend, c, CANVAS_PIPE_SDF, &pc, v, 6);
 }
 
 void flux_canvas_fill_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color) {
@@ -1018,6 +542,10 @@ static uint32_t pack_uv(float u, float v) {
 void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc) {
     if (!c || !c->recording || !desc)
         return;
+    /* Glyph runs sample a GPU atlas texture: unsupported on a headless CPU
+     * canvas. */
+    if (!c->device)
+        return;
     if (desc->type != FLUX_TYPE_GLYPH_RUN_DESC) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_GLYPH_RUN_DESC");
         return;
@@ -1034,9 +562,6 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
     if (sh == FLUX_BINDLESS_INVALID || desc->atlas->bindless == FLUX_BINDLESS_INVALID)
         return;
 
-    if (!ensure_pipeline_bound_id(c, CANVAS_PIPE_GLYPH))
-        return;
-
     flux_mat3x2 tx = c->states[c->state_top].transform;
     float inv_w = 1.0f / (float)desc->atlas->width;
     float inv_h = 1.0f / (float)desc->atlas->height;
@@ -1045,8 +570,6 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
     build_push(c, nullptr, &pc);
     pc.image_handle = desc->atlas->bindless;
     pc.sampler_handle = sh;
-
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
 
     /* Chunked so a run of any length works within the scratch vertex
      * buffer; each chunk is still one draw. */
@@ -1084,20 +607,7 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
             v_count += 6;
         }
 
-        flux_transient slice;
-        if (flux_frame_alloc_transient(c->frame, v_count * sizeof(*verts),
-                                       alignof(flux_canvas_vertex), &slice) != FLUX_OK) {
-            c->dropped_draws++;
-            return;
-        }
-        memcpy(slice.cpu, verts, v_count * sizeof(*verts));
-        pc.verts_address = slice.gpu_address;
-
-        vkCmdSetScissor(cmd, 0, 1, &c->states[c->state_top].scissor);
-        vkCmdPushConstants(cmd, c->layout,
-                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc),
-                           &pc);
-        vkCmdDraw(cmd, v_count, 1, 0, 0);
+        c->backend->submit(c->backend, c, CANVAS_PIPE_GLYPH, &pc, verts, v_count);
     }
 }
 

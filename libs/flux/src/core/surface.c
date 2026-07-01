@@ -892,7 +892,18 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
         }
     }
 
-    memcpy(dst, staging_alloc.mapped, needed);
+    if (s->format == VK_FORMAT_B8G8R8A8_UNORM || s->format == VK_FORMAT_B8G8R8A8_SRGB) {
+        const uint8_t *src = (const uint8_t *)staging_alloc.mapped;
+        uint8_t *out_px = (uint8_t *)dst;
+        for (size_t i = 0; i < (size_t)s->extent.width * s->extent.height; ++i) {
+            out_px[i * 4u + 0u] = src[i * 4u + 2u];
+            out_px[i * 4u + 1u] = src[i * 4u + 1u];
+            out_px[i * 4u + 2u] = src[i * 4u + 0u];
+            out_px[i * 4u + 3u] = src[i * 4u + 3u];
+        }
+    } else {
+        memcpy(dst, staging_alloc.mapped, needed);
+    }
     r = FLUX_OK;
 
 out:

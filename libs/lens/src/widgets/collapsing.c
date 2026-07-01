@@ -1,4 +1,4 @@
-/* collapsing.c — expandable header panel (ADR-0008). */
+/* collapsing.c — lightweight expandable section header (ADR-0008). */
 
 #include "../internal.h"
 
@@ -13,11 +13,12 @@ bool lens_collapsing(lens *ui, const char *label) {
         return false;
     lensi_link_child(ui, n);
 
-    float label_size = t->font_size * 0.88f;
-    lens_text_metrics tm = lensi_text_measure_label(ui, label, label_size, 700.0f);
-    float arrow = tm.height;
-    float h = tm.height + 2.0f * t->padding;
-    float w = 2.0f * t->padding + arrow + 6.0f + tm.width;
+    float label_size = t->font_size * 0.86f;
+    lens_text_metrics tm = lensi_text_measure_label(ui, label, label_size, 400.0f);
+    float arrow = tm.height * 0.82f;
+    float icon_gap = 6.0f;
+    float h = tm.height + 6.0f;
+    float w = tm.width + icon_gap + arrow;
     if (n->fixed_w > 0)
         w = n->fixed_w;
     if (n->fixed_h > 0)
@@ -43,45 +44,41 @@ bool lens_collapsing(lens *ui, const char *label) {
 
     float dt = ui->input.dt_seconds;
     if (!disabled) {
-        n->hover_t = lensi_approach(ui, n->hover_t, r.hovered ? 1.f : 0.f, dt, 12.f);
+        n->hover_t = r.hovered ? 1.f : 0.f;
         n->active_t = lensi_approach(ui, n->active_t, (ui->active_id == id) ? 1.f : 0.f, dt, 18.f);
     }
 
-    /* header background */
-    flux_color bg =
-        disabled ? t->color_bg : lensi_lerp_color(t->color_bg, t->color_hover, n->hover_t);
-    lensi_drawlist_push(
-        ui, n,
-        (lens_draw_cmd){
-            .kind = LENS_DRAW_RECT, .rel = {0, 0, 0, h}, .color = bg, .radius = t->corner_radius});
+    float glow = n->hover_t > 0.0f ? 0.72f : 0.42f;
+    flux_color fg = disabled ? t->color_disabled : lensi_lerp_color(t->color_disabled, t->color_fg, glow);
 
-    /* SVG-derived chevron disclosure indicator. */
-    float arrow_x = t->padding;
+    /* label */
+    float text_y = (h - tm.height) * 0.5f;
+    if (text_y < 0.0f)
+        text_y = 0.0f;
+    lensi_drawlist_push(ui, n,
+                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
+                                        .rel = {0, text_y, 0, 0},
+                                        .color = fg,
+                                        .text = label,
+                                        .text_size = label_size,
+                                        .text_weight = 400.0f});
+
+    /* SVG-derived chevron disclosure indicator, placed after the label. */
+    float arrow_x = tm.width + icon_gap;
     float arrow_y = (h - arrow) * 0.5f;
-    flux_color arrow_color =
-        disabled ? t->color_disabled : (open ? t->color_accent : t->color_border);
     lensi_drawlist_push(
         ui, n,
         (lens_draw_cmd){.kind = LENS_DRAW_ICON,
-                        .rel = {arrow_x + 2.0f, arrow_y + 2.0f, arrow - 4.0f, arrow - 4.0f},
-                        .color = arrow_color,
-                        .width = 2.0f * ((arrow - 4.0f) / 24.0f),
+                        .rel = {arrow_x, arrow_y, arrow, arrow},
+                        .color = fg,
+                        .width = 1.8f * (arrow / 24.0f),
                         .icon_id = open ? LENS_ICON_CHEVRON_DOWN : LENS_ICON_CHEVRON_RIGHT});
-
-    /* label */
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {arrow_x + arrow + 6.0f, t->padding, 0, 0},
-                                        .color = t->color_fg,
-                                        .text = label,
-                                        .text_size = label_size,
-                                        .text_weight = 700.0f});
 
     if (open) {
         n->is_container = true;
         n->axis = LENS_COLUMN;
-        n->gap = t->gap;
-        n->pad = t->padding;
+        n->gap = t->gap * 0.5f;
+        n->pad = 0.0f;
         lensi_open_container_push(ui, n);
 
         /* Reserve header height with an invisible spacer child so body

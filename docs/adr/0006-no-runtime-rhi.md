@@ -2,6 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-05-19
+- Narrowed by: ADR-0019 (a 2D-canvas software/CPU backend behind a
+  canvas-scoped vtable). ADR-0019 does not reintroduce a cross-GPU-API RHI —
+  the ban below on that shape still stands; see its "Relationship to ADR-0006".
 
 ## Context
 

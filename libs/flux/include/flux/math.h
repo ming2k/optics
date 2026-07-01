@@ -133,7 +133,7 @@ FLUX_API flux_vec3 flux_quat_rotate(flux_quat q, flux_vec3 v);
 FLUX_API flux_quat flux_quat_slerp(flux_quat a, flux_quat b, float t);
 
 /* ================================================================== */
-/*  Colour — packed BGRA premultiplied, 8-bit per channel             */
+/*  Colour — packed AARRGGBB premultiplied, 8-bit per channel         */
 /* ================================================================== */
 
 typedef uint32_t flux_color;

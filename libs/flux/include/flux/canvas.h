@@ -188,19 +188,34 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_update_region(flux_image *image, 
 /*  Canvas lifecycle + drawing                                        */
 /* ------------------------------------------------------------------ */
 
+/* Backend selection for flux_canvas_create (Skia SkSurface-style: the factory
+ * binds the backend, then the same drawing API is used regardless). AUTO picks
+ * GPU when a surface is provided, otherwise the software (CPU) backend. */
+typedef enum flux_canvas_backend_kind {
+    FLUX_CANVAS_BACKEND_AUTO = 0,
+    FLUX_CANVAS_BACKEND_GPU = 1,
+    FLUX_CANVAS_BACKEND_CPU = 2,
+} flux_canvas_backend_kind;
+
 typedef struct flux_canvas_desc {
     flux_struct_type type; /* FLUX_TYPE_CANVAS_DESC */
     const void *next;
-    flux_surface *surface; /* retained */
+    flux_surface *surface; /* GPU: required (retained). CPU: ignored. */
     float scale;           /* content scale (device-pixel ratio); 0 => 1.0.
                               The canvas draws in logical units scaled onto
                               the physical surface by this factor; flux_text
                               reads it to rasterise glyphs crisply at HiDPI.
                               Change later with flux_canvas_set_scale. */
+    flux_canvas_backend_kind backend; /* default AUTO */
+    uint32_t width, height;           /* CPU framebuffer size (physical px);
+                                         ignored for the GPU backend. */
 } flux_canvas_desc;
 
 #define FLUX_CANVAS_DESC_INIT {.type = FLUX_TYPE_CANVAS_DESC}
 
+/* Create a canvas on the selected backend. GPU canvases need desc->surface;
+ * CPU canvases need desc->width/height (see flux/canvas_cpu.h for a convenience
+ * wrapper and pixel readback). Destroy with flux_canvas_destroy. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_create(const flux_canvas_desc *desc,
                                                        flux_canvas **out);
 FLUX_API void flux_canvas_destroy(flux_canvas *c);
@@ -215,11 +230,28 @@ FLUX_API void flux_canvas_destroy(flux_canvas *c);
 FLUX_API void flux_canvas_set_scale(flux_canvas *c, float scale);
 FLUX_API float flux_canvas_get_scale(const flux_canvas *c);
 
-/* Begin / end a recording session bound to a frame.
- * clear_color: if non-NULL, surface is cleared to it; else loaded. */
+/* Begin / end a recording session. `f` is the open frame for a GPU canvas
+ * (from flux_surface_begin_frame); for a CPU canvas pass NULL. This is the
+ * unified, backend-agnostic pass bracket — the same drawing code runs on
+ * either backend between begin_frame and end_frame.
+ * clear_color: if non-NULL, the target is cleared to it; else loaded. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_frame(flux_canvas *c, flux_frame *f,
+                                                            const flux_color *clear_color);
+FLUX_API void flux_canvas_end_frame(flux_canvas *c);
+
+/* GPU-specific spelling of begin_frame/end_frame (f is required). Kept for
+ * source compatibility; equivalent to flux_canvas_begin_frame with a frame. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin(flux_canvas *c, flux_frame *f,
                                                       const flux_color *clear_color);
 FLUX_API void flux_canvas_end(flux_canvas *c);
+
+/* Snapshot the canvas' pixels as premultiplied RGBA8 (row-major; *stride is
+ * bytes/row). Backend-polymorphic: implemented by the CPU backend (returns its
+ * framebuffer); returns NULL on the GPU backend (use flux_canvas_begin_target
+ * to render into a readable flux_image instead). width/height/stride are
+ * optional out-params. The buffer is owned by the canvas. */
+FLUX_API const uint8_t *flux_canvas_read_pixels(flux_canvas *c, uint32_t *width, uint32_t *height,
+                                                uint32_t *stride);
 
 /* Render the draws between begin_target/end_target into `target`
  * (a flux_image from flux_image_create_render_target) instead of the

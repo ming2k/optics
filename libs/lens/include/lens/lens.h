@@ -429,12 +429,15 @@ LENS_API void lens_spacer(lens *ui, float size);     /* fixed empty main-axis ga
 
 LENS_API bool lens_button(lens *ui, const char *label);
 /* A borderless, full-width list / nav item (VS Code-style). Transparent at
- * rest, subtle hover fill, and a steady highlight when `selected`. Returns
- * true on the frame it is clicked. Use it for sidebar lists where a stack of
- * filled lens_buttons would read as bordered pills. */
+ * rest, subtle hover fill, and a steady rounded highlight when `selected`.
+ * The selected accent bar follows theme.active_indicator_width. Returns true
+ * on the frame it is clicked. Use it for sidebar lists where a stack of filled
+ * lens_buttons would read as bordered pills. */
 LENS_API bool lens_selectable(lens *ui, const char *label, bool selected);
+LENS_API bool lens_selectable_icon(lens *ui, lens_icon_id icon, const char *label, bool selected);
 LENS_API void lens_label(lens *ui, const char *text);
 LENS_API void lens_label_ex(lens *ui, const char *text, float size);
+LENS_API void lens_label_compact_ex(lens *ui, const char *text, float size);
 LENS_API void lens_title(lens *ui, const char *text);
 LENS_API void lens_heading(lens *ui, const char *text, int level);
 LENS_API bool lens_checkbox(lens *ui, const char *label, bool *value);

@@ -404,7 +404,7 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
                 stalled = true;
             }
         }
-        if (stalled && c->stencil_view != VK_NULL_HANDLE) {
+        if (stalled && c->stencil_available) {
             fill_path_stencil_cover(c, paint, tx, pts, infos, fm.contour_count);
             return;
         }
@@ -545,7 +545,7 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
         }
     }
 
-    if (stalled && c->stencil_view != VK_NULL_HANDLE) {
+    if (stalled && c->stencil_available) {
         /* Drop the partial triangulation and redo the whole fill via
          * stencil winding — it handles holes natively, so the merged
          * pieces that DID triangulate are simply superseded. */

@@ -27,6 +27,14 @@ test_canvas_paint = executable('test_canvas_paint',
 )
 test('canvas_paint', test_canvas_paint, suite : 'unit')
 
+# Headless software-canvas render test: exercises the CPU backend
+# (flux_canvas_backend_cpu) end to end with no Vulkan device.
+test_canvas_cpu = executable('test_canvas_cpu',
+  'test_canvas_cpu.c',
+  dependencies : [test_helpers_dep],
+)
+test('canvas_cpu', test_canvas_cpu, suite : 'unit')
+
 test_canvas_path = executable('test_canvas_path',
   'test_canvas_path.c',
   dependencies : [test_helpers_dep],

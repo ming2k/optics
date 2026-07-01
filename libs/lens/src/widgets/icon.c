@@ -85,9 +85,8 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active) {
                          (active ? LENS_A11Y_CHECKED : 0);
     lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, sem_flags);
 
-    float dt = ui->input.dt_seconds;
     if (!disabled)
-        n->hover_t = lensi_approach(ui, n->hover_t, r.hovered ? 1.f : 0.f, dt, 12.f);
+        n->hover_t = r.hovered ? 1.f : 0.f;
 
     /* Background tint: transparent at rest, hover tint when hovered, and a
      * steady slightly-stronger tint when active. This is always drawn the

@@ -189,6 +189,7 @@ fn main() {
             "core.h",
             "math.h",
             "canvas.h",
+            "canvas_cpu.h",
             "vulkan.h",
             "dmabuf.h",
             "scene.h",

@@ -6,7 +6,7 @@ Optics is a unified C23 graphics and UI stack. It is structured as a monolithic 
 
 The stack consists of three closely integrated libraries located in `libs/`:
 
-1. **flux**: The foundational Vulkan rendering engine. Provides core 2D/3D drawing primitives (canvas, scene-graph) and compute pipelines.
+1. **flux**: The foundational Vulkan rendering engine. Provides core 2D/3D drawing primitives (canvas, scene-graph) and compute pipelines. The 2D `canvas` additionally ships a headless **software (CPU) backend** (`<flux/canvas_cpu.h>`) for GPU-free rendering — see [ADR-0019](docs/adr/0019-canvas-backend-seam-and-cpu-backend.md).
 2. **lens**: An immediate-mode UI engine built on top of `flux`. It is headless by design and purely focuses on layout, state (retained trees), and emitting draw calls.
 3. **iris**: The application L3 toolkit. It handles Wayland/OS integration, window management, event loops, and feeds OS inputs into `lens`.
 

@@ -5,6 +5,12 @@
 //! drives flux's device, surface, canvas, and the raw-Vulkan accessors needed
 //! to interoperate with a `VkSurfaceKHR` and to import client buffers.
 //!
+//! [`Canvas`] is backend-agnostic: create it on the GPU from a [`Surface`]
+//! ([`Canvas::new`]) or headless on the **software (CPU)** backend
+//! ([`Canvas::new_cpu`]) — no GPU or window needed — then drive both with the
+//! same drawing calls between [`Canvas::begin_frame`] and [`Canvas::end`].
+//! CPU pixels come back via [`Canvas::read_pixels`].
+//!
 //! Coverage grows demand-first; today it covers device creation and the raw
 //! handle accessors required to bring up a nested surface.
 
@@ -277,6 +283,22 @@ impl Canvas {
         Ok(Canvas { raw: out })
     }
 
+    /// Create a headless **software (CPU)** canvas with a `width`x`height`
+    /// framebuffer (physical pixels) and content `scale`. No GPU, device, or
+    /// surface required. Record between [`begin_cpu`](Self::begin_cpu) /
+    /// [`begin_frame`](Self::begin_frame) (pass `None` for the frame) and
+    /// [`end`](Self::end), then read the result with
+    /// [`read_pixels`](Self::read_pixels).
+    ///
+    /// Supported: solid fills, paths, rounded rects, gradients, clipping.
+    /// Image and glyph (text) draws are ignored on a CPU canvas — they need a
+    /// GPU-resident texture.
+    pub fn new_cpu(width: u32, height: u32, scale: f32) -> Result<Canvas, Error> {
+        let mut out: *mut sys::flux_canvas = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_canvas_create_cpu(width, height, scale, &mut out) })?;
+        Ok(Canvas { raw: out })
+    }
+
     /// Begin recording. `clear` clears the surface to a packed color; `None`
     /// loads the existing contents.
     pub fn begin(&self, frame: &Frame, clear: Option<u32>) -> Result<(), Error> {
@@ -288,8 +310,42 @@ impl Canvas {
         Error::check(unsafe { sys::flux_canvas_begin(self.raw, frame.raw, ptr) })
     }
 
+    /// Unified, backend-agnostic pass bracket. Pass `Some(frame)` for a GPU
+    /// canvas and `None` for a CPU canvas; the drawing code in between is
+    /// identical either way. `clear` clears to a packed color, `None` loads.
+    pub fn begin_frame(&self, frame: Option<&Frame>, clear: Option<u32>) -> Result<(), Error> {
+        let fptr = frame.map(|f| f.raw).unwrap_or(std::ptr::null_mut());
+        let ptr = clear
+            .as_ref()
+            .map(|c| c as *const u32)
+            .unwrap_or(std::ptr::null());
+        Error::check(unsafe { sys::flux_canvas_begin_frame(self.raw, fptr, ptr) })
+    }
+
+    /// Begin recording on a CPU canvas (equivalent to `begin_frame(None, clear)`).
+    pub fn begin_cpu(&self, clear: Option<u32>) -> Result<(), Error> {
+        self.begin_frame(None, clear)
+    }
+
     pub fn end(&self) {
         unsafe { sys::flux_canvas_end(self.raw) };
+    }
+
+    /// Snapshot the canvas' pixels as premultiplied RGBA8 (row-major). Returns
+    /// `(width, height, stride_bytes, pixels)` on the CPU backend; `None` on the
+    /// GPU backend (use an offscreen surface / target for GPU readback). The
+    /// slice borrows canvas-owned memory, valid until the next call or drop.
+    pub fn read_pixels(&self) -> Option<(u32, u32, u32, &[u8])> {
+        let (mut w, mut h, mut stride) = (0u32, 0u32, 0u32);
+        let ptr = unsafe { sys::flux_canvas_read_pixels(self.raw, &mut w, &mut h, &mut stride) };
+        if ptr.is_null() {
+            return None;
+        }
+        let len = (h as usize) * (stride as usize);
+        // SAFETY: ptr is a valid buffer of `len` bytes owned by the canvas and
+        // stable until the next read_pixels / destroy.
+        let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+        Some((w, h, stride, slice))
     }
 
     /// Set the content scale (device-pixel ratio). The canvas then draws in
@@ -331,6 +387,13 @@ impl Canvas {
     pub fn fill_rect(&self, x: f32, y: f32, w: f32, h: f32, color: u32) {
         let r = sys::flux_rect { x, y, w, h };
         unsafe { sys::flux_canvas_fill_rect_color(self.raw, r, color) };
+    }
+
+    /// Fill a rounded rectangle with a packed solid color (analytic-AA SDF).
+    /// Works on both backends.
+    pub fn fill_rrect(&self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
+        let r = sys::flux_rect { x, y, w, h };
+        unsafe { sys::flux_canvas_fill_rrect(self.raw, r, radius, color) };
     }
 
     /// Draw an image into the destination rectangle (pixel space).

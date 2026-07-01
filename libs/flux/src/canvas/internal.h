@@ -20,10 +20,21 @@
  * agree on this value. */
 #define FLUX_CANVAS_SAMPLES VK_SAMPLE_COUNT_4_BIT
 
+/* Integer clip rectangle in physical pixels. Backend-neutral (the Vulkan
+ * backend converts it to VkRect2D at scissor time). */
+typedef struct flux_recti {
+    int32_t x, y;
+    uint32_t w, h;
+} flux_recti;
+
 typedef struct flux_canvas_state {
     flux_mat3x2 transform;
-    VkRect2D scissor;
+    flux_recti scissor;
 } flux_canvas_state;
+
+/* Rendering backend vtable (defined in backend.h). The canvas holds a
+ * borrowed pointer to a stateless singleton; see backend_vk.c. */
+typedef struct flux_canvas_backend flux_canvas_backend;
 
 /* Forward declared so flux_canvas can hold a pointer-array to it
  * without depending on geometry layout. */
@@ -39,16 +50,30 @@ struct flux_canvas {
     flux_device *device;   /* retained */
     flux_surface *surface; /* retained */
 
-    VkPipelineLayout layout; /* borrowed from device canvas cache */
-    VkFormat color_format;   /* surface format at canvas-create time */
+    /* Rendering backend (borrowed singleton) plus its private per-canvas
+     * state. All GPU resources (pipelines, MSAA/stencil targets, formats)
+     * live in backend_data; the front end never dereferences it. See
+     * backend.h / backend_vk.c. */
+    const flux_canvas_backend *backend;
+    void *backend_data;
 
     /* Active recording state */
     flux_frame *frame;
     bool recording;
     bool pass_active;
-    bool target_pass;          /* true: active pass renders into target, not the frame */
-    flux_image *target;        /* borrowed during begin_target..end_target */
-    VkPipeline bound_pipeline; /* last pipeline bound this pass     */
+    bool target_pass;   /* true: active pass renders into target, not the frame */
+    flux_image *target; /* borrowed during begin_target..end_target */
+
+    /* Stencil-then-cover availability (ADR-0014). Set by the backend at
+     * begin_pass: true when a stencil attachment is present this pass, so
+     * self-intersecting fills may use the stencil fallback; false keeps the
+     * old bail-out behaviour. Replaces a direct peek at the GPU stencil view. */
+    bool stencil_available;
+
+    /* Physical framebuffer size of the active pass, set by the backend at
+     * begin_pass. build_push reads it for the NDC transform, so the front end
+     * needs no surface handle while recording (the CPU backend has none). */
+    uint32_t fb_width, fb_height;
 
     /* Content scale (device-pixel ratio). The base transform at index 0 is
      * this scale, so callers draw in logical units; 1.0 means logical ==
@@ -72,25 +97,6 @@ struct flux_canvas {
     /* Diagnostics: cumulative count of draw calls dropped due to
      * transient ring exhaustion. Reset to 0 at canvas creation. */
     uint64_t dropped_draws;
-
-    /* Stencil-then-cover support (ADR-0014). Canvas-owned stencil
-     * attachment sized to the surface; recreated on extent change at
-     * canvas_begin. VK_FORMAT_UNDEFINED format means the device has
-     * no usable stencil format and self-intersecting fills keep the
-     * old bail-out behavior. */
-    VkImage stencil_image;
-    flux_vk_alloc stencil_alloc;
-    VkImageView stencil_view;
-    VkFormat stencil_format;
-    VkExtent2D stencil_extent;
-
-    /* Canvas-owned multisample colour target. Rendering goes here at
-     * FLUX_CANVAS_SAMPLES and is resolved to the surface image each pass.
-     * Sized to the surface and recreated on extent change, like the stencil. */
-    VkImage msaa_image;
-    flux_vk_alloc msaa_alloc;
-    VkImageView msaa_view;
-    VkExtent2D msaa_extent;
 };
 
 /* Vertex layout matches std430 buffer_reference in
@@ -206,6 +212,13 @@ flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format, c
 VkFormat flux_canvas_stencil_format(flux_device *d);
 
 void *canvas_state_get_or_init(flux_device *d);
+
+/* Allocation shims + scratch lifecycle shared by the GPU and CPU canvas
+ * constructors (canvas.c). A NULL device routes to the C allocator. */
+void *flux_canvas_alloc(flux_device *d, size_t n);
+void flux_canvas_free(flux_device *d, void *p);
+bool flux_canvas_alloc_scratch(flux_canvas *c);
+void flux_canvas_free_scratch(flux_canvas *c);
 
 void push_vertex(flux_canvas_vertex *v, flux_point p, flux_mat3x2 tx, flux_color c);
 void build_push(flux_canvas *c, const flux_paint *paint, flux_canvas_push *out);

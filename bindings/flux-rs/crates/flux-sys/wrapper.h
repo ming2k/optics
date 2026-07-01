@@ -14,6 +14,7 @@
  * generated output to flux_* plus only the Vk* types those signatures touch.
  */
 #include <flux/canvas.h>
+#include <flux/canvas_cpu.h>
 #include <flux/compute.h>
 #include <flux/core.h>
 #include <flux/dmabuf.h>

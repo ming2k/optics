@@ -559,6 +559,27 @@ impl Frame {
         }
     }
 
+    /// A persistent floating layer placed exactly at `rect`. Unlike
+    /// [`Frame::overlay`], a layer is always entered (no open/close state) and
+    /// is never auto-dismissed: use it for chrome that stays on screen every
+    /// frame — a dock, a status bar, a notification stack, per-window title
+    /// bars. `rect.w`/`rect.h` are a minimum; the layer grows to fit its body.
+    pub fn layer(
+        &mut self,
+        id: &str,
+        rect: Rect,
+        opts: &OverlayOpts,
+        body: impl FnOnce(&mut Frame),
+    ) {
+        let c = cstr(id);
+        // SAFETY: ui is live; c outlives the call. lens_layer_begin always
+        // returns true, so the body always builds and lens_layer_end is always
+        // paired.
+        unsafe { sys::lens_layer_begin(self.ui, c.as_ptr(), rect.to_raw(), opts.to_raw()) };
+        body(self);
+        unsafe { sys::lens_layer_end(self.ui) };
+    }
+
     // ---- widgets ----------------------------------------------------------
 
     /// A button. Returns `true` on the frame it is clicked.
@@ -583,6 +604,14 @@ impl Frame {
         unsafe { sys::lens_selectable(self.ui, c.as_ptr(), selected) }
     }
 
+    /// A selectable row with a leading icon. It has one full-row hit target
+    /// and draws icon, text, hover, and selected background as one widget.
+    pub fn selectable_icon(&mut self, icon: Icon, label: &str, selected: bool) -> bool {
+        let c = cstr(label);
+        // SAFETY: ui is live; c outlives the call.
+        unsafe { sys::lens_selectable_icon(self.ui, icon.raw(), c.as_ptr(), selected) }
+    }
+
     /// A text label.
     pub fn label(&mut self, text: &str) {
         let c = cstr(text);
@@ -595,6 +624,14 @@ impl Frame {
         let c = cstr(text);
         // SAFETY: ui is live; c outlives the call.
         unsafe { sys::lens_label_ex(self.ui, c.as_ptr(), size) };
+    }
+
+    /// A text label without the theme padding. Use inside fixed-height chrome
+    /// such as status bars where the regular label would overflow.
+    pub fn label_compact_sized(&mut self, text: &str, size: f32) {
+        let c = cstr(text);
+        // SAFETY: ui is live; c outlives the call.
+        unsafe { sys::lens_label_compact_ex(self.ui, c.as_ptr(), size) };
     }
 
     /// A title (larger, emphasized label).

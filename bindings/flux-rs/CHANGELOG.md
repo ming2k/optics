@@ -5,6 +5,21 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Software (CPU) canvas backend.** `Canvas::new_cpu(w, h, scale)` creates a
+  headless canvas that renders on the CPU — no GPU, device, or window — mapped
+  onto the C `flux_canvas_create_cpu` / `<flux/canvas_cpu.h>` (flux ≥ 0.2.4).
+- **Backend-agnostic pass + readback.** `Canvas::begin_frame(Option<&Frame>,
+  clear)` / `Canvas::end` drive GPU and CPU canvases with the same drawing
+  code; `Canvas::begin_cpu(clear)` is the CPU shorthand. `Canvas::read_pixels`
+  returns the CPU framebuffer as premultiplied RGBA8 (`None` on GPU). Also
+  `Canvas::fill_rrect`.
+- `flux-sys` now binds `<flux/canvas_cpu.h>` (the `flux_canvas_*_cpu`,
+  `flux_canvas_begin_frame`/`end_frame`/`read_pixels` functions and the
+  `flux_canvas_backend_kind` enum).
+- Integration test `tests/cpu_canvas.rs` renders headless and checks pixels.
+
 ## [0.1.1] - 2026-06-25
 
 ### Added

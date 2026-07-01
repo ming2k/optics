@@ -23,3 +23,5 @@ a decision, write a new ADR and update the old one's status to
 | 0015 | [Text layering — Layer-0 shaping in libflux, Layer-1 layout in flux-text-layout](0015-text-layering.md) | Superseded by ADR-0016 |
 | 0016 | [Pure RHI and draw primitives — text and scene content move to sibling libraries](0016-pure-rhi-and-draw-primitives.md) | Accepted |
 | 0017 | [Canvas render-target capture for real backdrop effects](0017-canvas-render-target-capture.md) | Accepted |
+| 0018 | [Obsolete iris meson subprojects](0018-obsolete-iris-meson-subprojects.md) | Accepted |
+| 0019 | [Canvas rendering backend seam + software (CPU) backend](0019-canvas-backend-seam-and-cpu-backend.md) | Accepted |

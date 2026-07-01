@@ -13,6 +13,7 @@ for what's planned next, see [`dev/roadmap.md`](../dev/roadmap.md).
 | `<flux/math.h>`       | Yes              | Vector, matrix, quaternion, colour, arena. No Vulkan dependency.      |
 | `<flux/vulkan.h>`     | Yes              | Raw Vulkan handle accessors, sampler, graphics pipeline, pass.        |
 | `<flux/canvas.h>`     | Iff `-Dcanvas=true`  | 2D drawing: image, path, paint, canvas.                            |
+| `<flux/canvas_cpu.h>` | Iff `-Dcanvas=true`  | Headless software (CPU) canvas: `flux_canvas_create_cpu`, pixel readback. No Vulkan. |
 | `<flux/dmabuf.h>`     | Iff `-Dcanvas=true`  | Linux dma-buf import into sampled `flux_image` objects.            |
 | `<flux/scene.h>`      | Iff `-Dscene=true`   | 3D primitives: camera, mesh, material, draw.                       |
 | `<flux/compute.h>`    | Iff `-Dcompute=true` | Compute pipeline + dispatch.                                       |

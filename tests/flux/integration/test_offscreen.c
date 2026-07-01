@@ -7,8 +7,10 @@
  * — everything before it stubbed the submit. Layout under test:
  *
  *   clear (20, 40, 60, 255), then an opaque white fill_rect covering
- *   the centre quarter. Corner pixels keep the clear colour; centre
- *   pixels are white.
+ *   the centre quarter and a blue swatch near the top-right. Corner
+ *   pixels keep the clear colour; centre pixels are white; the swatch
+ *   verifies that readback returns RGBA bytes even when the offscreen
+ *   attachment uses a native BGRA format.
  *
  * Also covers: validation (windowed-only API misuse, short buffer,
  * read-before-submit), present-loop compatibility (begin → submit →
@@ -51,6 +53,8 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas) {
 
     flux_canvas_fill_rect_color(canvas, (flux_rect){W / 4.0f, H / 4.0f, W / 2.0f, H / 2.0f},
                                 flux_color_rgba(255, 255, 255, 255));
+    flux_canvas_fill_rect_color(canvas, (flux_rect){W - 12.0f, 4.0f, 8.0f, 8.0f},
+                                flux_color_rgba(0, 64, 255, 255));
     flux_canvas_end(canvas);
 
     r = flux_frame_submit(frame);
@@ -125,6 +129,12 @@ int main(void) {
 
         const uint8_t *centre = px_at(px, W / 2, H / 2);
         EXPECT(centre[0] == 255 && centre[1] == 255 && centre[2] == 255);
+
+        const uint8_t *blue = px_at(px, W - 8, 8);
+        EXPECT(blue[0] < 5);
+        EXPECT(near8(blue[1], 64));
+        EXPECT(blue[2] > 250);
+        EXPECT(blue[3] == 255);
 
         /* just inside each rect edge is white; just outside is clear */
         EXPECT(px_at(px, W / 4 + 1, H / 2)[0] == 255);

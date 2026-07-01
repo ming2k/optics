@@ -59,6 +59,26 @@ creates it at `meson setup` time). `FLUX_SOURCE_DIR/include/` is
 prepended to bindgen's include path so the generated bindings match
 that exact checkout.
 
+## Headless (CPU) rendering
+
+`Canvas::new_cpu` renders on the CPU — no GPU, device, or window — and
+`read_pixels` returns premultiplied RGBA8. The drawing calls are the same
+ones a GPU canvas uses; only create, the (absent) frame, and readback differ.
+
+```rust
+use flux::{rgba, Canvas};
+
+let c = Canvas::new_cpu(256, 256, 1.0)?;
+c.begin_cpu(Some(rgba(20, 20, 30, 255)))?;      // clear (or begin_frame(None, ..))
+c.fill_rrect(16.0, 16.0, 224.0, 224.0, 24.0, rgba(255, 90, 40, 255));
+c.end();
+let (w, h, stride, px) = c.read_pixels().expect("CPU pixels");
+// … encode `px` (RGBA8) to PNG, hash it, upload it, …
+```
+
+Vector only: image and glyph (text) draws are ignored on a CPU canvas
+(they need a GPU-resident texture). See `tests/cpu_canvas.rs`.
+
 ## License
 
 MIT, same as flux. See [LICENSE](LICENSE).
