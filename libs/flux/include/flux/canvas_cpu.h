@@ -9,10 +9,11 @@
  * frame-based flux_canvas_begin / _end.
  *
  * Supported: solid fills, linear/radial gradients, rounded-rect fills and
- * strokes (SDF), arbitrary path fills and strokes, clipping. Anti-aliasing is
- * 4x supersampled; blending is premultiplied SRC_OVER — matching the GPU
- * backend. NOT supported: image and glyph draws (they need GPU-resident
- * textures); those calls are silently ignored on a CPU canvas.
+ * strokes (SDF), arbitrary path fills and strokes, clipping, and glyph runs.
+ * Anti-aliasing is 4x supersampled; blending is premultiplied SRC_OVER —
+ * matching the GPU backend. Glyph runs use a host-resident R8 coverage atlas
+ * (ADR-0019): pass flux_glyph_run_desc::host_coverage on a CPU canvas. NOT
+ * supported: image draws (they need a GPU-resident texture) — silently ignored.
  *
  * Example:
  *   flux_canvas *c;

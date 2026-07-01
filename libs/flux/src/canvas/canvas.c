@@ -542,34 +542,58 @@ static uint32_t pack_uv(float u, float v) {
 void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc) {
     if (!c || !c->recording || !desc)
         return;
-    /* Glyph runs sample a GPU atlas texture: unsupported on a headless CPU
-     * canvas. */
-    if (!c->device)
-        return;
     if (desc->type != FLUX_TYPE_GLYPH_RUN_DESC) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_GLYPH_RUN_DESC");
         return;
     }
-    if (!desc->atlas || (!desc->quads && desc->quad_count > 0)) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "glyph run needs an atlas and quads");
-        return;
-    }
     if (desc->quad_count == 0)
         return;
-
-    flux_bindless_handle sh = desc->sampler ? flux_sampler_bindless_handle(desc->sampler)
-                                            : flux_device_default_sampler_handle(c->device);
-    if (sh == FLUX_BINDLESS_INVALID || desc->atlas->bindless == FLUX_BINDLESS_INVALID)
+    if (!desc->quads) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "glyph run needs quads");
         return;
+    }
+
+    /* Two atlas sources, mutually exclusive (ADR-0019):
+     *   - GPU:   `atlas` (flux_image, bindless). Requires a device.
+     *   - Host:  `host_coverage` (R8 buffer). Device-less CPU canvas. */
+    const bool host = (desc->host_coverage != NULL && desc->host_atlas_w > 0 && desc->host_atlas_h > 0);
+
+    flux_bindless_handle sh = FLUX_BINDLESS_INVALID;
+    uint32_t atlas_w = 0, atlas_h = 0;
+
+    if (host) {
+        if (c->device) {
+            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                      "host_coverage is for device-less canvases; use atlas on a GPU canvas");
+            return;
+        }
+        atlas_w = desc->host_atlas_w;
+        atlas_h = desc->host_atlas_h;
+        c->pending_host_atlas = desc->host_coverage;
+        c->pending_host_atlas_w = atlas_w;
+        c->pending_host_atlas_h = atlas_h;
+    } else {
+        /* GPU path needs a device + a bindless atlas image. */
+        if (!c->device || !desc->atlas)
+            return;
+        sh = desc->sampler ? flux_sampler_bindless_handle(desc->sampler)
+                           : flux_device_default_sampler_handle(c->device);
+        if (sh == FLUX_BINDLESS_INVALID || desc->atlas->bindless == FLUX_BINDLESS_INVALID)
+            return;
+        atlas_w = desc->atlas->width;
+        atlas_h = desc->atlas->height;
+    }
 
     flux_mat3x2 tx = c->states[c->state_top].transform;
-    float inv_w = 1.0f / (float)desc->atlas->width;
-    float inv_h = 1.0f / (float)desc->atlas->height;
+    float inv_w = 1.0f / (float)atlas_w;
+    float inv_h = 1.0f / (float)atlas_h;
 
     flux_canvas_push pc;
     build_push(c, nullptr, &pc);
-    pc.image_handle = desc->atlas->bindless;
-    pc.sampler_handle = sh;
+    if (!host) {
+        pc.image_handle = desc->atlas->bindless;
+        pc.sampler_handle = sh;
+    }
 
     /* Chunked so a run of any length works within the scratch vertex
      * buffer; each chunk is still one draw. */
@@ -608,6 +632,14 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
         }
 
         c->backend->submit(c->backend, c, CANVAS_PIPE_GLYPH, &pc, verts, v_count);
+    }
+
+    if (host) {
+        /* Drop the borrow so a subsequent non-glyph draw never sees a stale
+         * host atlas pointer. */
+        c->pending_host_atlas = NULL;
+        c->pending_host_atlas_w = 0;
+        c->pending_host_atlas_h = 0;
     }
 }
 

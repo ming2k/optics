@@ -356,7 +356,18 @@ typedef struct flux_glyph_quad {
 typedef struct flux_glyph_run_desc {
     flux_struct_type type; /* FLUX_TYPE_GLYPH_RUN_DESC */
     const void *next;
-    flux_image *atlas;     /* caller-owned; R8 coverage (.r × tint) */
+    flux_image *atlas;     /* caller-owned; R8 coverage (.r × tint).
+                             * NULL on a device-less CPU canvas — set
+                             * host_coverage instead. */
+    /* Host-resident R8 coverage atlas, the CPU-backend alternative to
+     * `atlas` (ADR-0019): when non-NULL the CPU rasteriser samples
+     * coverage straight from this buffer with no GPU image, so a
+     * device-less canvas (flux_canvas_create_cpu) can render glyph runs.
+     * Ignored when a device/atlas is present. `host_atlas_w/h` are the
+     * buffer's texel extent (0 when unused). */
+    const uint8_t *host_coverage;
+    uint32_t host_atlas_w;
+    uint32_t host_atlas_h;
     flux_sampler *sampler; /* optional; NULL = canvas default (linear).
                             * Pass a NEAREST sampler for crisp blits. */
     const flux_glyph_quad *quads;
@@ -371,7 +382,12 @@ typedef struct flux_glyph_run_desc {
  * flux_image_update_region. The atlas's R channel is alpha coverage
  * multiplied by each quad's premultiplied tint, blended SRC_OVER —
  * the same contract as flux_canvas_draw_image_coverage, minus the
- * per-glyph draw-call cost. */
+ * per-glyph draw-call cost.
+ *
+ * On a device-less CPU canvas (flux_canvas_create_cpu) there is no
+ * GPU image to bind, so `atlas` is ignored and `host_coverage` is used
+ * instead: a host-resident R8 coverage buffer of host_atlas_w×host_atlas_h
+ * texels (ADR-0019). The CPU rasteriser samples coverage directly from it. */
 FLUX_API void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc);
 
 /* Cumulative count of draw calls dropped due to transient ring exhaustion

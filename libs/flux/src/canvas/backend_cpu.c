@@ -11,10 +11,11 @@
  * path uses 4x MSAA); blending is premultiplied SRC_OVER, matching the Vulkan
  * pipeline's blend state.
  *
- * Unsupported (they need GPU-resident textures): image and glyph draws. The
- * front end already drops those on a device-less canvas; submit() ignores them
- * defensively.
- */
+ * Unsupported (they need GPU-resident textures): image draws. Glyph draws
+ * ARE supported on a device-less canvas via a host-resident R8 coverage
+ * atlas (ADR-0019): the caller sets flux_glyph_run_desc::host_coverage
+ * instead of `atlas`, and the CPU rasteriser samples coverage directly
+ * from it. Only image draws remain unsupported on CPU. */
 #include "backend.h"
 
 #include <flux/canvas_cpu.h>
@@ -188,8 +189,7 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
             case CANVAS_PIPE_STENCIL_WRITE:
                 continue; /* colour-write masked off */
             case CANVAS_PIPE_IMAGE:
-            case CANVAS_PIPE_GLYPH:
-                return; /* textured: unsupported on CPU */
+                return; /* textured image: unsupported on CPU */
             default:    /* SOLID / COVER_SOLID */
                 frag = (vec4f){w0 * ca.r + w1 * cb.r + w2 * cc.r, w0 * ca.g + w1 * cb.g + w2 * cc.g,
                                w0 * ca.b + w1 * cb.b + w2 * cc.b, w0 * ca.a + w1 * cb.a + w2 * cc.a};
@@ -202,6 +202,182 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
             dst[1] = frag.g + dst[1] * inv;
             dst[2] = frag.b + dst[2] * inv;
             dst[3] = frag.a + dst[3] * inv;
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Glyph run blit (host atlas — ADR-0019)                             */
+/* ------------------------------------------------------------------ */
+
+/* Unpack the UV that draw_glyph_run stored as unorm16x2 in vertex::_pad. */
+static inline void unpack_uv(uint32_t pad, float *u, float *v) {
+    *u = (float)(pad & 0xFFFFu) / 65535.0f;
+    *v = (float)(pad >> 16) / 65535.0f;
+}
+
+/* Sample the host R8 coverage atlas bilinearly at normalised (u,v) in
+ * [0,1]. Returns coverage in [0,1]. CLAMP_TO_EDGE matches the atlas
+ * sampler configured in txt_engine_init. */
+static inline float sample_cov(const uint8_t *atlas, uint32_t aw, uint32_t ah, float u, float v) {
+    float fx = u * (float)aw - 0.5f;
+    float fy = v * (float)ah - 0.5f;
+    int x0 = (int)floorf(fx);
+    int y0 = (int)floorf(fy);
+    float tx = fx - (float)x0;
+    float ty = fy - (float)y0;
+    int x1 = x0 + 1;
+    int y1 = y0 + 1;
+    /* CLAMP_TO_EDGE */
+    if (x0 < 0)
+        x0 = 0;
+    if (y0 < 0)
+        y0 = 0;
+    if (x1 < 0)
+        x1 = 0;
+    if (y1 < 0)
+        y1 = 0;
+    if (x0 > (int)aw - 1)
+        x0 = (int)aw - 1;
+    if (y0 > (int)ah - 1)
+        y0 = (int)ah - 1;
+    if (x1 > (int)aw - 1)
+        x1 = (int)aw - 1;
+    if (y1 > (int)ah - 1)
+        y1 = (int)ah - 1;
+    float c00 = atlas[(size_t)y0 * aw + x0];
+    float c10 = atlas[(size_t)y0 * aw + x1];
+    float c01 = atlas[(size_t)y1 * aw + x0];
+    float c11 = atlas[(size_t)y1 * aw + x1];
+    float c0 = c00 + (c10 - c00) * tx;
+    float c1 = c01 + (c11 - c01) * tx;
+    return (c0 + (c1 - c0) * ty) * (1.0f / 255.0f);
+}
+
+/* Rasterise one glyph quad (two triangles, indices 0..5 share color + an
+ * axis-aligned screen rect) by sampling the host R8 atlas at each supersample
+ * and premultiplied SRC_OVER blending into the float framebuffer. Each sample
+ * is blended independently, so supersampled edges anti-alias and overlapping
+ * runs compose correctly — the same model raster_tri uses for fills. */
+static void raster_glyph_quad(flux_cpu_canvas *v, flux_recti clip, const flux_canvas_vertex *verts,
+                              const uint8_t *atlas, uint32_t aw, uint32_t ah) {
+    const float ss = (float)FLUX_CPU_SS;
+    /* The quad's six vertices form an axis-aligned rect (draw_glyph_run
+     * emits p0,p1,p2,p3 = TL,TR,BR,BL). Use min/max over all six for
+     * robustness against winding. Positions are already in output pixels. */
+    float minx = verts[0].pos[0], maxx = minx;
+    float miny = verts[0].pos[1], maxy = miny;
+    for (int i = 1; i < 6; i++) {
+        float x = verts[i].pos[0], y = verts[i].pos[1];
+        if (x < minx)
+            minx = x;
+        if (x > maxx)
+            maxx = x;
+        if (y < miny)
+            miny = y;
+        if (y > maxy)
+            maxy = y;
+    }
+
+    int cx0 = clip.x * FLUX_CPU_SS, cy0 = clip.y * FLUX_CPU_SS;
+    int cx1 = (clip.x + (int)clip.w) * FLUX_CPU_SS, cy1 = (clip.y + (int)clip.h) * FLUX_CPU_SS;
+
+    int sx0 = (int)floorf(minx * ss);
+    int sy0 = (int)floorf(miny * ss);
+    int sx1 = (int)ceilf(maxx * ss);
+    int sy1 = (int)ceilf(maxy * ss);
+    if (sx0 < cx0)
+        sx0 = cx0;
+    if (sy0 < cy0)
+        sy0 = cy0;
+    if (sx1 > cx1)
+        sx1 = cx1;
+    if (sy1 > cy1)
+        sy1 = cy1;
+    if (sx0 < 0)
+        sx0 = 0;
+    if (sy0 < 0)
+        sy0 = 0;
+    if (sx1 > (int)v->sw)
+        sx1 = (int)v->sw;
+    if (sy1 > (int)v->sh)
+        sy1 = (int)v->sh;
+
+    vec4f tint = unpack_premul(verts[0].color);
+
+    /* Triangle A = 0,1,2 ; Triangle B = 3,4,5. Precompute SS-space verts. */
+    const flux_canvas_vertex *ta[3] = {&verts[0], &verts[1], &verts[2]};
+    const flux_canvas_vertex *tb[3] = {&verts[3], &verts[4], &verts[5]};
+    float tax[3], tay[3], tbx[3], tby[3];
+    for (int i = 0; i < 3; i++) {
+        tax[i] = ta[i]->pos[0] * ss;
+        tay[i] = ta[i]->pos[1] * ss;
+        tbx[i] = tb[i]->pos[0] * ss;
+        tby[i] = tb[i]->pos[1] * ss;
+    }
+    float area_a = edge(tax[0], tay[0], tax[1], tay[1], tax[2], tay[2]);
+    float area_b = edge(tbx[0], tby[0], tbx[1], tby[1], tbx[2], tby[2]);
+    bool use_a = fabsf(area_a) > 1e-7f;
+    bool use_b = fabsf(area_b) > 1e-7f;
+    if (!use_a && !use_b)
+        return;
+
+    for (int sy = sy0; sy < sy1; ++sy) {
+        for (int sx = sx0; sx < sx1; ++sx) {
+            float fx = (float)sx + 0.5f;
+            float fy = (float)sy + 0.5f;
+            /* Find which triangle covers this sample and its barycentric UV. */
+            float w0 = 0, w1 = 0, w2 = 0;
+            float u = 0.0f, vv = 0.0f;
+            bool hit = false;
+            if (use_a) {
+                float ia = 1.0f / area_a;
+                w0 = edge(tax[1], tay[1], tax[2], tay[2], fx, fy) * ia;
+                w1 = edge(tax[2], tay[2], tax[0], tay[0], fx, fy) * ia;
+                w2 = edge(tax[0], tay[0], tax[1], tay[1], fx, fy) * ia;
+                if (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f) {
+                    float u0, v0, u1, v1, u2, v2;
+                    unpack_uv(ta[0]->_pad, &u0, &v0);
+                    unpack_uv(ta[1]->_pad, &u1, &v1);
+                    unpack_uv(ta[2]->_pad, &u2, &v2);
+                    u = w0 * u0 + w1 * u1 + w2 * u2;
+                    vv = w0 * v0 + w1 * v1 + w2 * v2;
+                    hit = true;
+                }
+            }
+            if (!hit && use_b) {
+                float ib = 1.0f / area_b;
+                w0 = edge(tbx[1], tby[1], tbx[2], tby[2], fx, fy) * ib;
+                w1 = edge(tbx[2], tby[2], tbx[0], tby[0], fx, fy) * ib;
+                w2 = edge(tbx[0], tby[0], tbx[1], tby[1], fx, fy) * ib;
+                if (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f) {
+                    float u3, v3, u4, v4, u5, v5;
+                    unpack_uv(tb[0]->_pad, &u3, &v3);
+                    unpack_uv(tb[1]->_pad, &u4, &v4);
+                    unpack_uv(tb[2]->_pad, &u5, &v5);
+                    u = w0 * u3 + w1 * u4 + w2 * u5;
+                    vv = w0 * v3 + w1 * v4 + w2 * v5;
+                    hit = true;
+                }
+            }
+            if (!hit)
+                continue;
+
+            float cov = sample_cov(atlas, aw, ah, u, vv);
+            if (cov <= 0.0f)
+                continue;
+
+            /* premultiplied tint × coverage, SRC_OVER (one sample). */
+            float *dst = &v->fb[((size_t)sy * v->sw + sx) * 4];
+            float pr = tint.r * cov;
+            float pg = tint.g * cov;
+            float pb = tint.b * cov;
+            float pa = tint.a * cov;
+            float inv = 1.0f - pa;
+            dst[0] = pr + dst[0] * inv;
+            dst[1] = pg + dst[1] * inv;
+            dst[2] = pb + dst[2] * inv;
+            dst[3] = pa + dst[3] * inv;
         }
     }
 }
@@ -294,11 +470,26 @@ static void cpu_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_p
     (void)self;
     if (!c->recording || vertex_count < 3)
         return;
-    if (id == CANVAS_PIPE_IMAGE || id == CANVAS_PIPE_GLYPH)
-        return; /* textured draws unsupported on CPU */
 
     flux_cpu_canvas *v = cpu(c);
     flux_recti clip = c->states[c->state_top].scissor;
+
+    /* Glyph runs sample a host R8 atlas on the CPU backend (ADR-0019). Each
+     * quad is six vertices (two tris); blit them directly. Image draws still
+     * have no host source, so they stay unsupported. */
+    if (id == CANVAS_PIPE_GLYPH) {
+        const uint8_t *atlas = c->pending_host_atlas;
+        uint32_t aw = c->pending_host_atlas_w;
+        uint32_t ah = c->pending_host_atlas_h;
+        if (!atlas || aw == 0 || ah == 0)
+            return;
+        for (uint32_t i = 0; i + 6 <= vertex_count; i += 6)
+            raster_glyph_quad(v, clip, &verts[i], atlas, aw, ah);
+        return;
+    }
+    if (id == CANVAS_PIPE_IMAGE)
+        return; /* textured image draws unsupported on CPU */
+
     for (uint32_t i = 0; i + 3 <= vertex_count; i += 3)
         raster_tri(v, clip, id, push, &verts[i], &verts[i + 1], &verts[i + 2]);
 }

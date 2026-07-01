@@ -35,6 +35,14 @@ test_canvas_cpu = executable('test_canvas_cpu',
 )
 test('canvas_cpu', test_canvas_cpu, suite : 'unit')
 
+# Headless CPU-canvas GLYPH run test (ADR-0019): draws text on a device-less
+# canvas via the host R8 coverage atlas path. Links flux-text for shaping.
+test_canvas_cpu_text = executable('test_canvas_cpu_text',
+  'test_canvas_cpu_text.c',
+  dependencies : [test_helpers_dep, flux_text_dep],
+)
+test('canvas_cpu_text', test_canvas_cpu_text, suite : 'unit')
+
 test_canvas_path = executable('test_canvas_path',
   'test_canvas_path.c',
   dependencies : [test_helpers_dep],

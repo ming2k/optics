@@ -28,11 +28,19 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 
     let use_installed = env::var_os("FLUX_USE_INSTALLED").is_some();
-    let build_dir = env::var_os("FLUX_BUILD_DIR").map(PathBuf::from);
-    let source_dir = env::var_os("FLUX_SOURCE_DIR").map(PathBuf::from);
-    let default_source_dir =
-        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../../");
-    let source_dir = source_dir.or(Some(default_source_dir));
+    let checkout_root = discover_optics_checkout();
+    let build_dir = env::var_os("FLUX_BUILD_DIR")
+        .map(PathBuf::from)
+        .or_else(|| checkout_root.as_ref().map(|root| root.join("build")))
+        .filter(|dir| dir.join("meson-uninstalled/flux-text-uninstalled.pc").exists());
+    let source_dir = env::var_os("FLUX_SOURCE_DIR").map(PathBuf::from).or_else(|| {
+        checkout_root
+            .as_ref()
+            .map(|root| root.join("libs/flux"))
+            .or_else(|| {
+                Some(PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../../"))
+            })
+    });
 
     let dev_mode = if let Some(dir) = &build_dir {
         if use_installed {
@@ -149,4 +157,20 @@ fn main() {
                 .display()
         );
     }
+}
+
+/// Walk up from this crate's manifest dir looking for the optics checkout:
+/// identified by `libs/flux/include/flux` plus a meson `build/` tree. Mirrors
+/// `flux-sys/build.rs` so out-of-tree consumers (e.g. typio) auto-discover a
+/// dev build tree without setting FLUX_BUILD_DIR.
+fn discover_optics_checkout() -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
+    for ancestor in manifest_dir.ancestors() {
+        if ancestor.join("libs/flux/include/flux").exists()
+            && ancestor.join("build/meson-uninstalled").exists()
+        {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
 }

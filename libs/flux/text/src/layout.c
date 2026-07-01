@@ -425,7 +425,10 @@ flux_text_metrics flux_text_measure(flux_text *t, const char *utf8, size_t len,
 void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
                     const char *utf8, size_t len, const flux_text_style *style) {
     (void)arena;
-    if (!t || !canvas || !t->has_backend || !t->atlas || !utf8 || len == 0)
+    /* `atlas` is NULL on a device-less CPU canvas, but the host R8 coverage
+     * buffer `atlas_pixels` is still live (txt_atlas_init allocates it
+     * unconditionally). The run desc routes via host_coverage then. */
+    if (!t || !canvas || !t->has_backend || !t->atlas_pixels || !utf8 || len == 0)
         return;
 
     float size_px, weight;
@@ -457,6 +460,13 @@ void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float 
     flux_glyph_quad quads[TEXT_RUN_BATCH];
     flux_glyph_run_desc run = FLUX_GLYPH_RUN_DESC_INIT;
     run.atlas = t->atlas;
+    if (!t->atlas) {
+        /* Device-less CPU canvas (ADR-0019): feed the host R8 coverage buffer
+         * straight to the CPU rasteriser instead of a GPU image. */
+        run.host_coverage = t->atlas_pixels;
+        run.host_atlas_w = ATLAS_W;
+        run.host_atlas_h = ATLAS_H;
+    }
     run.quads = quads;
 
     uint32_t n = 0;

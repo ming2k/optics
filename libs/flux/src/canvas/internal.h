@@ -97,6 +97,15 @@ struct flux_canvas {
     /* Diagnostics: cumulative count of draw calls dropped due to
      * transient ring exhaustion. Reset to 0 at canvas creation. */
     uint64_t dropped_draws;
+
+    /* Transient host-resident glyph atlas for the CPU backend
+     * (ADR-0019). draw_glyph_run sets this right before emitting GLYPH
+     * batches so cpu_submit can sample coverage from a host R8 buffer on
+     * a device-less canvas; it is cleared after the run and ignored by
+     * the Vulkan backend. NULL outside a host glyph run. */
+    const uint8_t *pending_host_atlas;
+    uint32_t pending_host_atlas_w;
+    uint32_t pending_host_atlas_h;
 };
 
 /* Vertex layout matches std430 buffer_reference in
