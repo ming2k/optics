@@ -235,6 +235,12 @@ impl Frame {
         Theme(unsafe { sys::lens_get_theme(self.ui) })
     }
 
+    /// Replace the active theme token set for subsequent widgets in this frame.
+    pub fn set_theme(&mut self, theme: Theme) {
+        // SAFETY: ui is live inside a frame; theme is a value type.
+        unsafe { sys::lens_set_theme(self.ui, theme.0) };
+    }
+
     // ---- containers -------------------------------------------------------
 
     /// Open a horizontal container, run `body`, then close it.

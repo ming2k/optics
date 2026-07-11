@@ -49,9 +49,15 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// A flux device: the root GPU object. Refcounted in C; this handle owns one
-/// reference and releases it on drop.
+/// reference and releases it on drop — unless it was constructed via
+/// [`Device::borrow_raw`], in which case it is a non-owning view and `Drop`
+/// is a no-op.
 pub struct Device {
     raw: *mut sys::flux_device,
+    /// When `true`, this handle does **not** own a reference and must not
+    /// release it on drop. Set by [`Device::borrow_raw`] for views over a
+    /// device another owner created (e.g. iris's `PaintHost::device`).
+    borrowed: bool,
 }
 
 impl Device {
@@ -92,7 +98,28 @@ impl Device {
         let rc = unsafe { sys::flux_device_create(&desc, &mut out) };
         Error::check(rc)?;
         debug_assert!(!out.is_null());
-        Ok(Device { raw: out })
+        Ok(Device { raw: out, borrowed: false })
+    }
+
+    /// Wrap a raw `flux_device*` as a non-owning view. Use this to obtain a
+    /// `&Device` for a device another owner created and retains — the
+    /// canonical case being iris's `PaintHost::device()`, which hands the
+    /// app the device iris owns for its window. Opening a second device is
+    /// unsupported and crashes, so a host that needs a `flux_text::Text`
+    /// context (or any `&Device` consumer) inside iris's paint callback
+    /// **must** borrow iris's device rather than creating its own.
+    ///
+    /// The returned `Device` does not release on drop: the borrow is valid
+    /// only as long as the real owner keeps the device alive (for iris, the
+    /// app's lifetime).
+    ///
+    /// # Safety
+    /// `raw` must be a live `flux_device*` obtained from the flux C API (or
+    /// from another binding's ABI-identical opaque pointer, such as iris's
+    /// `PaintHost::device()`), and must remain valid for as long as the
+    /// returned `Device` (or any `&Device` derived from it) is used.
+    pub unsafe fn borrow_raw(raw: *mut sys::flux_device) -> Device {
+        Device { raw, borrowed: true }
     }
 
     /// The underlying raw `flux_device` pointer. Borrowed; the `Device` retains
@@ -133,8 +160,12 @@ impl Device {
 
 impl Drop for Device {
     fn drop(&mut self) {
-        // SAFETY: we own one reference taken at create.
-        unsafe { sys::flux_device_release(self.raw) };
+        // Only release when this handle actually owns a reference. A view
+        // constructed via `borrow_raw` leaves the real owner in charge.
+        if !self.borrowed {
+            // SAFETY: we own one reference taken at create.
+            unsafe { sys::flux_device_release(self.raw) };
+        }
     }
 }
 
@@ -269,6 +300,28 @@ impl Frame {
 /// [`Canvas::begin`] and [`Canvas::end`].
 pub struct Canvas {
     raw: *mut sys::flux_canvas,
+    /// When `true`, this handle does **not** own the canvas and must not
+    /// destroy it on drop. Set by [`Canvas::borrow_raw`] for views over a
+    /// canvas another owner created and retains (e.g. iris's paint callback).
+    borrowed: bool,
+}
+
+impl Canvas {
+    /// Wrap a raw `flux_canvas*` as a non-owning view. The returned handle does
+    /// **not** call `flux_canvas_destroy` on drop — the real owner (e.g. iris,
+    /// for its window's canvas) stays in charge. Use this when a host hands
+    /// you a live `flux_canvas*` that is already inside an open
+    /// `flux_canvas_begin/end` pair and you want to issue draws through the
+    /// safe surface without taking ownership.
+    ///
+    /// # Safety
+    /// `raw` must be a live `flux_canvas*` obtained from the flux C API (or an
+    /// ABI-identical pointer from a sibling binding), and must remain valid for
+    /// as long as the returned `Canvas` (or any `&Canvas` derived from it) is
+    /// used.
+    pub unsafe fn borrow_raw(raw: *mut sys::flux_canvas) -> Canvas {
+        Canvas { raw, borrowed: true }
+    }
 }
 
 impl Canvas {
@@ -280,7 +333,7 @@ impl Canvas {
         };
         let mut out: *mut sys::flux_canvas = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_canvas_create(&desc, &mut out) })?;
-        Ok(Canvas { raw: out })
+        Ok(Canvas { raw: out, borrowed: false })
     }
 
     /// Create a headless **software (CPU)** canvas with a `width`x`height`
@@ -296,7 +349,7 @@ impl Canvas {
     pub fn new_cpu(width: u32, height: u32, scale: f32) -> Result<Canvas, Error> {
         let mut out: *mut sys::flux_canvas = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_canvas_create_cpu(width, height, scale, &mut out) })?;
-        Ok(Canvas { raw: out })
+        Ok(Canvas { raw: out, borrowed: false })
     }
 
     /// Begin recording. `clear` clears the surface to a packed color; `None`
@@ -441,7 +494,11 @@ impl Canvas {
 
 impl Drop for Canvas {
     fn drop(&mut self) {
-        unsafe { sys::flux_canvas_destroy(self.raw) };
+        // Only destroy when this handle actually owns the canvas. A view built
+        // via `borrow_raw` leaves the real owner in charge.
+        if !self.borrowed {
+            unsafe { sys::flux_canvas_destroy(self.raw) };
+        }
     }
 }
 

@@ -29,20 +29,28 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
         memcpy(ov_label + l, "##ov", 5);
     }
 
+    bool open = lens_overlay_is_open(ui, ov_label);
+    lens_response r = lensi_interact(ui, n, true, disabled);
+    if (r.clicked) {
+        if (open) {
+            lens_overlay_close(ui, ov_label);
+            open = false;
+        } else {
+            lens_overlay_open(ui, ov_label);
+            open = true;
+        }
+    }
+
     const char *preview =
         (selected && *selected >= 0 && *selected < count) ? items[*selected] : label;
 
     char buf[256];
-    snprintf(buf, sizeof buf, "%s ▼", preview);
+    snprintf(buf, sizeof buf, "%s %s", preview, open ? "▲" : "▼");
 
     lens_text_metrics tm = lensi_text_measure_label(ui, buf, t->font_size, 0.0f);
     float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * t->padding;
     float h = (n->fixed_h > 0) ? n->fixed_h : t->font_size + 2.0f * t->padding;
     n->measured = (flux_point){w, h};
-
-    lens_response r = lensi_interact(ui, n, true, disabled);
-    if (r.clicked)
-        lens_overlay_open(ui, ov_label);
 
     float dt = ui->input.dt_seconds;
     if (!disabled) {
@@ -74,7 +82,7 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
 
     bool changed = false;
 
-    if (lens_overlay_is_open(ui, ov_label)) {
+    if (open) {
         /* Keyboard navigation inside the open dropdown */
         for (uint32_t i = 0; i < ui->input.key_count; i++) {
             const lens_key_event *k = &ui->input.keys[i];

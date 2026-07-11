@@ -8,9 +8,9 @@
 //! binaries find libflux_text.so (and libflux.so) without LD_LIBRARY_PATH.
 //!
 //! Override points (env) — same shape as flux-sys:
-//!   FLUX_SOURCE_DIR    absolute path to the flux C source checkout; its
-//!                      `include/` and `libs/flux-text/include/` are
-//!                      preferred for bindgen.
+//!   FLUX_SOURCE_DIR    absolute path to either the optics checkout root or
+//!                      its `libs/flux` subtree; flux and flux-text headers
+//!                      are preferred for bindgen.
 //!   FLUX_BUILD_DIR     absolute path to a meson build tree of that
 //!                      checkout; its `meson-uninstalled/` subdir must
 //!                      contain flux-text-uninstalled.pc.
@@ -32,15 +32,17 @@ fn main() {
     let build_dir = env::var_os("FLUX_BUILD_DIR")
         .map(PathBuf::from)
         .or_else(|| checkout_root.as_ref().map(|root| root.join("build")))
-        .filter(|dir| dir.join("meson-uninstalled/flux-text-uninstalled.pc").exists());
-    let source_dir = env::var_os("FLUX_SOURCE_DIR").map(PathBuf::from).or_else(|| {
-        checkout_root
-            .as_ref()
-            .map(|root| root.join("libs/flux"))
-            .or_else(|| {
-                Some(PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../../"))
-            })
-    });
+        .filter(|dir| {
+            dir.join("meson-uninstalled/flux-text-uninstalled.pc")
+                .exists()
+        });
+    let source_dir = env::var_os("FLUX_SOURCE_DIR")
+        .map(PathBuf::from)
+        .or_else(|| checkout_root.as_ref().map(|root| root.join("libs/flux")))
+        .or_else(|| {
+            Some(PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../../"))
+        })
+        .map(normalize_flux_source_dir);
 
     let dev_mode = if let Some(dir) = &build_dir {
         if use_installed {
@@ -122,11 +124,8 @@ fn main() {
     // Source-checkout headers first when requested — reliable regardless of
     // any stale -I baked into the uninstalled .pc.
     if let Some(src) = &source_dir {
-        clang_args.insert(
-            0,
-            format!("-I{}", src.join("libs/flux/text/include").display()),
-        );
-        clang_args.insert(0, format!("-I{}", src.join("libs/flux/include").display()));
+        clang_args.insert(0, format!("-I{}", src.join("text/include").display()));
+        clang_args.insert(0, format!("-I{}", src.join("include").display()));
     }
 
     let bindings = bindgen::Builder::default()
@@ -153,9 +152,16 @@ fn main() {
     if let Some(src) = &source_dir {
         println!(
             "cargo:rerun-if-changed={}",
-            src.join("libs/flux/text/include/flux-text/text.h")
-                .display()
+            src.join("text/include/flux-text/text.h").display()
         );
+    }
+}
+
+fn normalize_flux_source_dir(dir: PathBuf) -> PathBuf {
+    if dir.join("libs/flux/include/flux").exists() {
+        dir.join("libs/flux")
+    } else {
+        dir
     }
 }
 

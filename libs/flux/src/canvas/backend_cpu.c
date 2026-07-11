@@ -216,42 +216,24 @@ static inline void unpack_uv(uint32_t pad, float *u, float *v) {
     *v = (float)(pad >> 16) / 65535.0f;
 }
 
-/* Sample the host R8 coverage atlas bilinearly at normalised (u,v) in
- * [0,1]. Returns coverage in [0,1]. CLAMP_TO_EDGE matches the atlas
- * sampler configured in txt_engine_init. */
+/* Sample the host R8 coverage atlas at normalised (u,v) in [0,1] with
+ * NEAREST filtering, matching the GPU path's atlas sampler (txt_engine_init
+ * creates a NEAREST sampler for crisp blits). The atlas is rasterised at the
+ * device pixel grid, so bilinear here would only blur already-aligned ink;
+ * edge anti-aliasing comes from the 2x2 framebuffer supersampling in
+ * raster_glyph_quad, not from filtering the coverage map. CLAMP_TO_EDGE. */
 static inline float sample_cov(const uint8_t *atlas, uint32_t aw, uint32_t ah, float u, float v) {
-    float fx = u * (float)aw - 0.5f;
-    float fy = v * (float)ah - 0.5f;
-    int x0 = (int)floorf(fx);
-    int y0 = (int)floorf(fy);
-    float tx = fx - (float)x0;
-    float ty = fy - (float)y0;
-    int x1 = x0 + 1;
-    int y1 = y0 + 1;
-    /* CLAMP_TO_EDGE */
-    if (x0 < 0)
-        x0 = 0;
-    if (y0 < 0)
-        y0 = 0;
-    if (x1 < 0)
-        x1 = 0;
-    if (y1 < 0)
-        y1 = 0;
-    if (x0 > (int)aw - 1)
-        x0 = (int)aw - 1;
-    if (y0 > (int)ah - 1)
-        y0 = (int)ah - 1;
-    if (x1 > (int)aw - 1)
-        x1 = (int)aw - 1;
-    if (y1 > (int)ah - 1)
-        y1 = (int)ah - 1;
-    float c00 = atlas[(size_t)y0 * aw + x0];
-    float c10 = atlas[(size_t)y0 * aw + x1];
-    float c01 = atlas[(size_t)y1 * aw + x0];
-    float c11 = atlas[(size_t)y1 * aw + x1];
-    float c0 = c00 + (c10 - c00) * tx;
-    float c1 = c01 + (c11 - c01) * tx;
-    return (c0 + (c1 - c0) * ty) * (1.0f / 255.0f);
+    int x = (int)(u * (float)aw);
+    int y = (int)(v * (float)ah);
+    if (x < 0)
+        x = 0;
+    if (y < 0)
+        y = 0;
+    if (x > (int)aw - 1)
+        x = (int)aw - 1;
+    if (y > (int)ah - 1)
+        y = (int)ah - 1;
+    return atlas[(size_t)y * aw + x] * (1.0f / 255.0f);
 }
 
 /* Rasterise one glyph quad (two triangles, indices 0..5 share color + an
