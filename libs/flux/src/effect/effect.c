@@ -60,15 +60,18 @@ typedef struct intermediate_entry {
     uint32_t height;
     flux_format format;
     flux_image *image;
+    bool leased;
     struct intermediate_entry *next;
 } intermediate_entry;
 
-/* Output transients are appended on every blur call and released
- * en masse on flux_effect_reset. The list grows to the high-water
- * mark of concurrent live outputs; callers reset between frames
- * to recycle. */
+/* Intermediate and output slots are exclusively leased within one reset epoch.
+ * They are returned to the pool only at a caller-proven GPU quiescent point. */
 typedef struct output_entry {
+    uint32_t width;
+    uint32_t height;
+    flux_format format;
     flux_image *image;
+    bool leased;
     struct output_entry *next;
 } output_entry;
 
@@ -107,15 +110,36 @@ static void effect_state_destroy(flux_device *d) {
 }
 
 static effect_state *effect_state_get_or_init(flux_device *d) {
-    if (d->effect_state)
-        return d->effect_state;
-    effect_state *st = flux_internal_alloc(d, sizeof(*st));
-    if (!st)
+    pthread_mutex_lock(&d->module_state_lock);
+    effect_state *published = d->effect_state;
+    pthread_mutex_unlock(&d->module_state_lock);
+    if (published)
+        return published;
+
+    effect_state *candidate = flux_internal_alloc(d, sizeof(*candidate));
+    if (!candidate)
         return nullptr;
-    pthread_mutex_init(&st->lock, nullptr);
-    d->effect_state = st;
-    d->effect_state_destroy = effect_state_destroy;
-    return st;
+    if (pthread_mutex_init(&candidate->lock, nullptr) != 0) {
+        flux_internal_free(d, candidate);
+        return nullptr;
+    }
+
+    pthread_mutex_lock(&d->module_state_lock);
+    if (!d->effect_state) {
+        d->effect_state = candidate;
+        d->effect_state_destroy = effect_state_destroy;
+        published = candidate;
+        candidate = nullptr;
+    } else {
+        published = d->effect_state;
+    }
+    pthread_mutex_unlock(&d->module_state_lock);
+
+    if (candidate) {
+        pthread_mutex_destroy(&candidate->lock);
+        flux_internal_free(d, candidate);
+    }
+    return published;
 }
 
 /* ------------------------------------------------------------------ */
@@ -125,10 +149,13 @@ static effect_state *effect_state_get_or_init(flux_device *d) {
 /* Look up or allocate the intermediate for this key. Returned image
  * is owned by the pool and lives until reset. */
 static flux_result acquire_intermediate(flux_device *d, effect_state *st, uint32_t w, uint32_t h,
-                                        flux_format fmt, flux_image **out) {
+                                        flux_format fmt, flux_image **out,
+                                        intermediate_entry **out_lease) {
     for (intermediate_entry *e = st->intermediates; e; e = e->next) {
-        if (e->width == w && e->height == h && e->format == fmt) {
+        if (!e->leased && e->width == w && e->height == h && e->format == fmt) {
+            e->leased = true;
             *out = e->image;
+            *out_lease = e;
             return FLUX_OK;
         }
     }
@@ -146,15 +173,25 @@ static flux_result acquire_intermediate(flux_device *d, effect_state *st, uint32
     e->height = h;
     e->format = fmt;
     e->image = img;
+    e->leased = true;
     e->next = st->intermediates;
     st->intermediates = e;
     *out = img;
+    *out_lease = e;
     return FLUX_OK;
 }
 
-/* Allocate a fresh output transient and link it into the pool. */
+/* Lease a same-key output, growing the pool to the epoch high-water mark. */
 static flux_result acquire_output(flux_device *d, effect_state *st, uint32_t w, uint32_t h,
-                                  flux_format fmt, flux_image **out) {
+                                  flux_format fmt, flux_image **out, output_entry **out_lease) {
+    for (output_entry *o = st->outputs; o; o = o->next) {
+        if (!o->leased && o->width == w && o->height == h && o->format == fmt) {
+            o->leased = true;
+            *out = o->image;
+            *out_lease = o;
+            return FLUX_OK;
+        }
+    }
     flux_image *img = nullptr;
     flux_result r = flux_image_create_compute_writable(d, w, h, fmt, &img);
     if (r != FLUX_OK)
@@ -165,10 +202,15 @@ static flux_result acquire_output(flux_device *d, effect_state *st, uint32_t w, 
         flux_image_release(img);
         return FLUX_ERROR_OUT_OF_MEMORY;
     }
+    o->width = w;
+    o->height = h;
+    o->format = fmt;
     o->image = img;
+    o->leased = true;
     o->next = st->outputs;
     st->outputs = o;
     *out = img;
+    *out_lease = o;
     return FLUX_OK;
 }
 
@@ -286,18 +328,23 @@ flux_result flux_effect_blur(VkCommandBuffer cmd, const flux_effect_blur_desc *d
     }
 
     flux_image *intermediate = nullptr;
-    r = acquire_intermediate(d, st, in->width, in->height, in->format, &intermediate);
+    intermediate_entry *intermediate_lease = nullptr;
+    r = acquire_intermediate(d, st, in->width, in->height, in->format, &intermediate,
+                             &intermediate_lease);
     if (r != FLUX_OK) {
         pthread_mutex_unlock(&st->lock);
         return r;
     }
 
     flux_image *output = nullptr;
-    r = acquire_output(d, st, in->width, in->height, in->format, &output);
+    output_entry *output_lease = nullptr;
+    r = acquire_output(d, st, in->width, in->height, in->format, &output, &output_lease);
     if (r != FLUX_OK) {
+        intermediate_lease->leased = false;
         pthread_mutex_unlock(&st->lock);
         return r;
     }
+    (void)output_lease;
 
     pthread_mutex_unlock(&st->lock);
 
@@ -344,31 +391,12 @@ flux_result flux_effect_blur(VkCommandBuffer cmd, const flux_effect_blur_desc *d
 static flux_result promote_copy_submit(flux_device *d, VkImage src_image, VkImage dst_image,
                                        uint32_t width, uint32_t height) {
     VkCommandPool pool = VK_NULL_HANDLE;
-    VkCommandPoolCreateInfo pci = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .queueFamilyIndex = d->graphics_family,
-        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-    };
-    if (vkCreateCommandPool(d->device, &pci, nullptr, &pool) != VK_SUCCESS)
-        return FLUX_ERROR_BACKEND_FAILURE;
-
     VkCommandBuffer cmd = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo cbai = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = pool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-    if (vkAllocateCommandBuffers(d->device, &cbai, &cmd) != VK_SUCCESS) {
-        vkDestroyCommandPool(d->device, pool, nullptr);
+    VkResult vr = flux_vk_new_transient_cmd(d, d->graphics_family, &pool, &cmd);
+    if (vr != VK_SUCCESS) {
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "promote command buffer allocation failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
-
-    VkCommandBufferBeginInfo cbbi = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    vkBeginCommandBuffer(cmd, &cbbi);
 
     VkImageSubresourceRange subres = {
         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -451,44 +479,17 @@ static flux_result promote_copy_submit(flux_device *d, VkImage src_image, VkImag
     };
     vkCmdPipelineBarrier2(cmd, &post_di);
 
-    vkEndCommandBuffer(cmd);
-
-    VkCommandBufferSubmitInfo cbsi = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = cmd,
-    };
-    VkSubmitInfo2 si = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &cbsi,
-    };
-    VkFence fence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    vkCreateFence(d->device, &fci, nullptr, &fence);
-
-    /* Queue submits are externally synchronised; flux frame submits
-     * acquire d->queue_lock too, so promote contends with them via
-     * the same mutex. */
-    pthread_mutex_lock(&d->queue_lock);
-    VkResult vr = vkQueueSubmit2(d->graphics_queue, 1, &si, fence);
-    pthread_mutex_unlock(&d->queue_lock);
-
-    if (vr == VK_SUCCESS) {
-        VkResult wr = vkWaitForFences(d->device, 1, &fence, VK_TRUE, FLUX_DEFAULT_FRAME_TIMEOUT_NS);
-        if (wr == VK_TIMEOUT) {
-            vkDestroyFence(d->device, fence, nullptr);
-            vkDestroyCommandPool(d->device, pool, nullptr);
-            FLUX_FAIL(FLUX_ERROR_TIMEOUT, "promote queue wait timed out");
-            return FLUX_ERROR_TIMEOUT;
-        }
-    }
-
-    vkDestroyFence(d->device, fence, nullptr);
+    vr = vkEndCommandBuffer(cmd);
+    if (vr == VK_SUCCESS)
+        vr = flux_vk_submit_one_shot_and_wait(d, cmd);
     vkDestroyCommandPool(d->device, pool, nullptr);
 
     if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "promote queue submit failed", vr);
-        return FLUX_ERROR_BACKEND_FAILURE;
+        flux_result r = vr == VK_TIMEOUT             ? FLUX_ERROR_TIMEOUT
+                        : vr == VK_ERROR_DEVICE_LOST ? FLUX_ERROR_DEVICE_LOST
+                                                     : FLUX_ERROR_BACKEND_FAILURE;
+        FLUX_FAIL_VK(r, "promote copy submit failed", vr);
+        return r;
     }
     return FLUX_OK;
 }
@@ -527,19 +528,17 @@ flux_result flux_effect_promote(flux_image *transient, flux_image **out) {
 /* ------------------------------------------------------------------ */
 
 void flux_effect_reset(flux_device *d) {
-    if (!d || !d->effect_state)
+    if (!d)
         return;
+    pthread_mutex_lock(&d->module_state_lock);
     effect_state *st = d->effect_state;
+    pthread_mutex_unlock(&d->module_state_lock);
+    if (!st)
+        return;
     pthread_mutex_lock(&st->lock);
-    for (output_entry *o = st->outputs; o;) {
-        output_entry *next = o->next;
-        if (o->image)
-            flux_image_release(o->image);
-        flux_internal_free(d, o);
-        o = next;
-    }
-    st->outputs = nullptr;
-    /* Intermediates are kept across resets — they're a cache, not
-     * an exposed transient. They go away with the device. */
+    for (output_entry *o = st->outputs; o; o = o->next)
+        o->leased = false;
+    for (intermediate_entry *e = st->intermediates; e; e = e->next)
+        e->leased = false;
     pthread_mutex_unlock(&st->lock);
 }

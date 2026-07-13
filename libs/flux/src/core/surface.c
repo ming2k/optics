@@ -26,6 +26,91 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct flux_surface_image_storage {
+    uint32_t capacity;
+    VkImage *images;
+    VkImageView *views;
+    VkImageLayout *layouts;
+    bool *foreign_owned;
+    VkSemaphore *render_finished;
+    flux_vk_alloc *allocs;
+} flux_surface_image_storage;
+
+static void image_storage_free(flux_device *d, flux_surface_image_storage *storage) {
+    if (!storage)
+        return;
+    flux_internal_free(d, storage->images);
+    flux_internal_free(d, storage->views);
+    flux_internal_free(d, storage->layouts);
+    flux_internal_free(d, storage->foreign_owned);
+    flux_internal_free(d, storage->render_finished);
+    flux_internal_free(d, storage->allocs);
+    *storage = (flux_surface_image_storage){0};
+}
+
+static void *image_storage_alloc_array(flux_device *d, uint32_t count, size_t element_size) {
+    size_t bytes = 0;
+    if (__builtin_mul_overflow((size_t)count, element_size, &bytes))
+        return nullptr;
+    return flux_internal_alloc(d, bytes);
+}
+
+static bool image_storage_alloc(flux_device *d, uint32_t count,
+                                flux_surface_image_storage *storage) {
+    *storage = (flux_surface_image_storage){0};
+    if (count == 0)
+        return false;
+
+    storage->images = image_storage_alloc_array(d, count, sizeof(*storage->images));
+    storage->views = image_storage_alloc_array(d, count, sizeof(*storage->views));
+    storage->layouts = image_storage_alloc_array(d, count, sizeof(*storage->layouts));
+    storage->foreign_owned = image_storage_alloc_array(d, count, sizeof(*storage->foreign_owned));
+    storage->render_finished =
+        image_storage_alloc_array(d, count, sizeof(*storage->render_finished));
+    storage->allocs = image_storage_alloc_array(d, count, sizeof(*storage->allocs));
+    if (!storage->images || !storage->views || !storage->layouts || !storage->foreign_owned ||
+        !storage->render_finished || !storage->allocs) {
+        image_storage_free(d, storage);
+        return false;
+    }
+    storage->capacity = count;
+    return true;
+}
+
+static void surface_take_image_storage(flux_surface *s, flux_surface_image_storage *storage,
+                                       uint32_t count) {
+    s->image_count = count;
+    s->image_capacity = storage->capacity;
+    s->images = storage->images;
+    s->image_views = storage->views;
+    s->image_layouts = storage->layouts;
+    s->image_foreign_owned = storage->foreign_owned;
+    s->render_finished = storage->render_finished;
+    s->image_allocs = storage->allocs;
+    *storage = (flux_surface_image_storage){0};
+}
+
+static void surface_free_image_storage(flux_surface *s) {
+    flux_surface_image_storage storage = {
+        .capacity = s->image_capacity,
+        .images = s->images,
+        .views = s->image_views,
+        .layouts = s->image_layouts,
+        .foreign_owned = s->image_foreign_owned,
+        .render_finished = s->render_finished,
+        .allocs = s->image_allocs,
+    };
+    image_storage_free(s->device, &storage);
+    s->image_count = 0;
+    s->image_capacity = 0;
+    s->images = nullptr;
+    s->image_views = nullptr;
+    s->image_layouts = nullptr;
+    s->image_foreign_owned = nullptr;
+    s->render_finished = nullptr;
+    s->image_allocs = nullptr;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Swapchain format / present-mode selection                          */
 /* ------------------------------------------------------------------ */
@@ -132,13 +217,10 @@ static VkPresentModeKHR pick_present_mode(VkPhysicalDevice pd, VkSurfaceKHR srf,
 /*  Per-frame binary semaphore reset                                  */
 /* ------------------------------------------------------------------ */
 
-/* Destroy + recreate every per-frame binary semaphore. A binary
- * semaphore signalled by an acquire whose submit was discarded by
- * VK_ERROR_OUT_OF_DATE_KHR remains signalled with no consumer; the
- * next acquire that signals it is undefined behaviour. The only
- * portable cure is to recycle the semaphores when the swapchain is
- * recreated. Caller must have already waited the device idle.
- * Returns true on success; false if any semaphore creation failed. */
+/* Destroy + recreate acquire semaphores after swapchain failure. A binary
+ * semaphore signalled by an acquire whose submit was discarded cannot be
+ * reused. Caller must have already waited the device idle. Present-wait
+ * semaphores are owned by swapchain image and recreated by swapchain setup. */
 static bool reset_frame_semaphores(flux_surface *s) {
     VkDevice vkd = s->device->device;
     VkSemaphoreCreateInfo sem = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
@@ -146,20 +228,11 @@ static bool reset_frame_semaphores(flux_surface *s) {
         flux_per_frame *f = &s->frames[i];
         if (f->image_acquired)
             vkDestroySemaphore(vkd, f->image_acquired, nullptr);
-        if (f->render_finished)
-            vkDestroySemaphore(vkd, f->render_finished, nullptr);
         f->image_acquired = VK_NULL_HANDLE;
-        f->render_finished = VK_NULL_HANDLE;
 
         VkResult vr = vkCreateSemaphore(vkd, &sem, nullptr, &f->image_acquired);
         if (vr != VK_SUCCESS) {
             FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkCreateSemaphore (image_acquired) failed",
-                         vr);
-            return false;
-        }
-        vr = vkCreateSemaphore(vkd, &sem, nullptr, &f->render_finished);
-        if (vr != VK_SUCCESS) {
-            FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkCreateSemaphore (render_finished) failed",
                          vr);
             return false;
         }
@@ -203,11 +276,11 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
         pick_format(s->device->physical_device, s->vk_surface, s->hdr_preferred);
     VkPresentModeKHR pmode = pick_present_mode(s->device->physical_device, s->vk_surface, s->vsync);
 
-    uint32_t image_count = caps.minImageCount + 1;
+    uint32_t image_count = caps.minImageCount;
+    if (image_count < UINT32_MAX)
+        image_count++;
     if (caps.maxImageCount > 0 && image_count > caps.maxImageCount)
         image_count = caps.maxImageCount;
-    if (image_count > FLUX_MAX_SWAPCHAIN_IMAGES)
-        image_count = FLUX_MAX_SWAPCHAIN_IMAGES;
 
     VkSwapchainCreateInfoKHR sci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -233,43 +306,49 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
-    /* Destroy any prior image views before swapchain handle. */
-    for (uint32_t i = 0; i < s->image_count; ++i) {
-        if (s->image_views[i])
-            vkDestroyImageView(s->device->device, s->image_views[i], nullptr);
-        s->image_views[i] = VK_NULL_HANDLE;
-        s->images[i] = VK_NULL_HANDLE;
-    }
-    if (s->swapchain)
-        vkDestroySwapchainKHR(s->device->device, s->swapchain, nullptr);
-
-    s->swapchain = new_swapchain;
-    s->format = fmt.format;
-    s->color_space = fmt.colorSpace;
-    s->extent = extent;
-    s->hdr_actual = (fmt.colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
-
     uint32_t got = 0;
-    vr = vkGetSwapchainImagesKHR(s->device->device, s->swapchain, &got, nullptr);
+    vr = vkGetSwapchainImagesKHR(s->device->device, new_swapchain, &got, nullptr);
     if (vr != VK_SUCCESS || got == 0) {
+        vkDestroySwapchainKHR(s->device->device, new_swapchain, nullptr);
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkGetSwapchainImagesKHR failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
-    if (got > FLUX_MAX_SWAPCHAIN_IMAGES)
-        got = FLUX_MAX_SWAPCHAIN_IMAGES;
-    s->image_count = got;
-    vr = vkGetSwapchainImagesKHR(s->device->device, s->swapchain, &got, s->images);
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkGetSwapchainImagesKHR failed", vr);
+    flux_surface_image_storage storage = {0};
+    uint32_t new_count = 0;
+    for (uint32_t attempt = 0; attempt < 3; ++attempt) {
+        if (!image_storage_alloc(s->device, got, &storage)) {
+            vkDestroySwapchainKHR(s->device->device, new_swapchain, nullptr);
+            FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "swapchain image metadata allocation failed");
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        }
+        new_count = got;
+        vr = vkGetSwapchainImagesKHR(s->device->device, new_swapchain, &new_count, storage.images);
+        if (vr == VK_SUCCESS)
+            break;
+        image_storage_free(s->device, &storage);
+        if (vr != VK_INCOMPLETE ||
+            vkGetSwapchainImagesKHR(s->device->device, new_swapchain, &got, nullptr) !=
+                VK_SUCCESS ||
+            got == 0) {
+            vkDestroySwapchainKHR(s->device->device, new_swapchain, nullptr);
+            FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkGetSwapchainImagesKHR failed", vr);
+            return FLUX_ERROR_BACKEND_FAILURE;
+        }
+    }
+    if (vr != VK_SUCCESS || !storage.images) {
+        image_storage_free(s->device, &storage);
+        vkDestroySwapchainKHR(s->device->device, new_swapchain, nullptr);
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "swapchain image count did not stabilise", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
-    for (uint32_t i = 0; i < s->image_count; ++i) {
+    VkSemaphoreCreateInfo sem_ci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    for (uint32_t i = 0; i < new_count; ++i) {
         VkImageViewCreateInfo ivci = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = s->images[i],
+            .image = storage.images[i],
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = s->format,
+            .format = fmt.format,
             .subresourceRange =
                 {
                     .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -279,14 +358,44 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
                     .layerCount = 1,
                 },
         };
-        vr = vkCreateImageView(s->device->device, &ivci, nullptr, &s->image_views[i]);
+        vr = vkCreateImageView(s->device->device, &ivci, nullptr, &storage.views[i]);
         if (vr != VK_SUCCESS) {
             FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkCreateImageView failed", vr);
-            return FLUX_ERROR_BACKEND_FAILURE;
+            goto new_swapchain_fail;
+        }
+        vr = vkCreateSemaphore(s->device->device, &sem_ci, nullptr, &storage.render_finished[i]);
+        if (vr != VK_SUCCESS) {
+            FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkCreateSemaphore (render_finished) failed",
+                         vr);
+            goto new_swapchain_fail;
         }
     }
 
+    /* Commit only after every image-side resource for the new swapchain exists. */
+    flux_surface_destroy_swapchain(s);
+    s->swapchain = new_swapchain;
+    s->format = fmt.format;
+    s->color_space = fmt.colorSpace;
+    s->extent = extent;
+    s->hdr_actual = (fmt.colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+    surface_take_image_storage(s, &storage, new_count);
+    for (uint32_t i = 0; i < new_count; ++i) {
+        s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
+        s->image_foreign_owned[i] = false;
+    }
+
     return FLUX_OK;
+
+new_swapchain_fail:
+    for (uint32_t i = 0; i < new_count; ++i) {
+        if (storage.render_finished[i])
+            vkDestroySemaphore(s->device->device, storage.render_finished[i], nullptr);
+        if (storage.views[i])
+            vkDestroyImageView(s->device->device, storage.views[i], nullptr);
+    }
+    image_storage_free(s->device, &storage);
+    vkDestroySwapchainKHR(s->device->device, new_swapchain, nullptr);
+    return FLUX_ERROR_BACKEND_FAILURE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -303,9 +412,11 @@ static void offscreen_destroy_images(flux_surface *s) {
             flux_vk_deallocate(s->device, &s->image_allocs[i]);
         s->image_views[i] = VK_NULL_HANDLE;
         s->images[i] = VK_NULL_HANDLE;
+        s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
+        s->image_foreign_owned[i] = false;
         s->image_allocs[i] = (flux_vk_alloc){0};
     }
-    s->image_count = 0;
+    surface_free_image_storage(s);
 }
 
 /* One color image per frame slot; image index == frame slot, so the
@@ -317,6 +428,13 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
     }
 
     offscreen_destroy_images(s);
+
+    flux_surface_image_storage storage = {0};
+    if (!image_storage_alloc(s->device, s->frames_in_flight, &storage)) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "offscreen image metadata allocation failed");
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    surface_take_image_storage(s, &storage, 0);
 
     s->format = VK_FORMAT_B8G8R8A8_UNORM;
     s->color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
@@ -364,6 +482,8 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
                 for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {
                     if ((mods[i].drmFormatModifierTilingFeatures & need) != need)
                         continue;
+                    if (mods[i].drmFormatModifierPlaneCount != 1)
+                        continue;
                     if (mods[i].drmFormatModifier == FLUX_DRM_FORMAT_MOD_LINEAR) {
                         found_linear = true;
                         break;
@@ -385,7 +505,7 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
         /* Validate the chosen modifier is actually exportable as a dma-buf. */
         VkPhysicalDeviceExternalImageFormatInfo eifi = {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
-            .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
+            .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
         };
         VkPhysicalDeviceImageDrmFormatModifierInfoEXT mfi = {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT,
@@ -410,9 +530,9 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
             .pNext = &efp,
         };
         VkResult vr = vkGetPhysicalDeviceImageFormatProperties2(d->physical_device, &ifi, &ifp);
-        bool exportable = (vr == VK_SUCCESS) &&
-                          (efp.externalMemoryProperties.externalMemoryFeatures &
-                           VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
+        bool exportable =
+            (vr == VK_SUCCESS) && (efp.externalMemoryProperties.externalMemoryFeatures &
+                                   VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
         if (!exportable)
             use_modifier = false;
     }
@@ -425,7 +545,7 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
      * modifier pair; the fallback path uses plain OPTIMAL tiling. */
     VkExternalMemoryImageCreateInfo ext_mem = {
         .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
-        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
     };
     VkImageDrmFormatModifierListCreateInfoEXT mod_list = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT,
@@ -443,8 +563,7 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = use_modifier ? VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT
-                               : VK_IMAGE_TILING_OPTIMAL,
+        .tiling = use_modifier ? VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT : VK_IMAGE_TILING_OPTIMAL,
         .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -463,8 +582,13 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
             }
             s->image_count = i + 1;
 
+            VkExportMemoryAllocateInfo export_info = {
+                .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
+                .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+            };
             VkMemoryDedicatedAllocateInfo dedicated = {
                 .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
+                .pNext = &export_info,
                 .image = s->images[i],
             };
             VkMemoryRequirements2 mreq = {.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
@@ -473,8 +597,8 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
                 .image = s->images[i],
             };
             vkGetImageMemoryRequirements2(d->device, &mri, &mreq);
-            uint32_t mt = flux_vk_find_memory_type(
-                d, mreq.memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            uint32_t mt = flux_vk_find_memory_type(d, mreq.memoryRequirements.memoryTypeBits,
+                                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
             if (mt == UINT32_MAX)
                 mt = flux_vk_find_memory_type(d, mreq.memoryRequirements.memoryTypeBits, 0);
             if (mt == UINT32_MAX) {
@@ -518,12 +642,18 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
              * the aspect must be VK_IMAGE_ASPECT_MEMORY_PLANE_i_BIT_EXT, not
              * COLOR — the memory-plane layout is what the dma-buf consumer
              * sees. BGRA8 is single-plane, so plane 0 is the only one. */
-            if (s->offscreen_stride == 0) {
-                VkImageSubresource plane0 = {
-                    .aspectMask = VK_IMAGE_ASPECT_MEMORY_PLANE_0_BIT_EXT,
-                };
-                VkSubresourceLayout layout;
-                vkGetImageSubresourceLayout(d->device, s->images[i], &plane0, &layout);
+            VkImageSubresource plane0 = {
+                .aspectMask = VK_IMAGE_ASPECT_MEMORY_PLANE_0_BIT_EXT,
+            };
+            VkSubresourceLayout layout;
+            vkGetImageSubresourceLayout(d->device, s->images[i], &plane0, &layout);
+            if (layout.offset != 0 || layout.rowPitch > UINT32_MAX ||
+                (s->offscreen_stride != 0 && s->offscreen_stride != layout.rowPitch)) {
+                /* The v1 public API can describe only one plane at offset 0
+                 * with one common 32-bit stride. Keep the image usable but do
+                 * not advertise an export contract it cannot express. */
+                s->offscreen_exportable = false;
+            } else {
                 s->offscreen_stride = (uint32_t)layout.rowPitch;
             }
         } else {
@@ -555,6 +685,8 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
             offscreen_destroy_images(s);
             return FLUX_ERROR_BACKEND_FAILURE;
         }
+        s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
+        s->image_foreign_owned[i] = false;
     }
     return FLUX_OK;
 }
@@ -565,10 +697,15 @@ void flux_surface_destroy_swapchain(flux_surface *s) {
     for (uint32_t i = 0; i < s->image_count; ++i) {
         if (s->image_views[i])
             vkDestroyImageView(s->device->device, s->image_views[i], nullptr);
+        if (s->render_finished[i])
+            vkDestroySemaphore(s->device->device, s->render_finished[i], nullptr);
         s->image_views[i] = VK_NULL_HANDLE;
         s->images[i] = VK_NULL_HANDLE;
+        s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
+        s->image_foreign_owned[i] = false;
+        s->render_finished[i] = VK_NULL_HANDLE;
     }
-    s->image_count = 0;
+    surface_free_image_storage(s);
     if (s->swapchain) {
         vkDestroySwapchainKHR(s->device->device, s->swapchain, nullptr);
         s->swapchain = VK_NULL_HANDLE;
@@ -614,12 +751,6 @@ static flux_result init_per_frame(flux_surface *s, uint32_t slot) {
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkCreateSemaphore failed", vr);
         goto fail;
     }
-    vr = vkCreateSemaphore(s->device->device, &sem, nullptr, &f->render_finished);
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkCreateSemaphore failed", vr);
-        goto fail;
-    }
-
     VkFenceCreateInfo fci = {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT,
@@ -655,8 +786,6 @@ static void destroy_per_frame(flux_surface *s, uint32_t slot) {
         vkDestroyQueryPool(d, f->query_pool, nullptr);
     if (f->in_flight)
         vkDestroyFence(d, f->in_flight, nullptr);
-    if (f->render_finished)
-        vkDestroySemaphore(d, f->render_finished, nullptr);
     if (f->image_acquired)
         vkDestroySemaphore(d, f->image_acquired, nullptr);
     if (f->pool)
@@ -771,6 +900,9 @@ flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h) {
         return FLUX_ERROR_INVALID_ARGUMENT;
 
     vkDeviceWaitIdle(s->device->device);
+    s->frame_active = false;
+    s->frame_slot.state = FLUX_FRAME_STATE_INVALID;
+    s->needs_recreate = false;
     if (s->offscreen) {
         s->current_frame = 0;
         s->last_submitted_slot = UINT32_MAX; /* old contents are gone */
@@ -822,6 +954,11 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
     flux_device *d = s->device;
     uint32_t slot = s->last_submitted_slot;
     flux_per_frame *pf = &s->frames[slot];
+    if (s->image_foreign_owned[slot]) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "offscreen image is still owned by an external dma-buf consumer");
+        return FLUX_ERROR_INVALID_STATE;
+    }
 
     /* flux_frame_submit's barrier left the image in TRANSFER_SRC_OPTIMAL;
      * the fence wait makes that write visible to this copy. */
@@ -969,6 +1106,53 @@ flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
+    if (!s->image_foreign_owned[slot]) {
+        VkCommandPool pool = VK_NULL_HANDLE;
+        VkCommandBuffer cmd = VK_NULL_HANDLE;
+        vr = flux_vk_new_transient_cmd(d, d->graphics_family, &pool, &cmd);
+        if (vr != VK_SUCCESS) {
+            FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "export_dmabuf command buffer failed", vr);
+            return FLUX_ERROR_BACKEND_FAILURE;
+        }
+        VkImageMemoryBarrier2 release = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            .srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
+            .dstAccessMask = 0,
+            .oldLayout = s->image_layouts[slot],
+            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = d->graphics_family,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT,
+            .image = s->images[slot],
+            .subresourceRange =
+                {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .levelCount = 1,
+                    .layerCount = 1,
+                },
+        };
+        VkDependencyInfo di = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &release,
+        };
+        vkCmdPipelineBarrier2(cmd, &di);
+        vr = vkEndCommandBuffer(cmd);
+        if (vr == VK_SUCCESS)
+            vr = flux_vk_submit_one_shot_and_wait(d, cmd);
+        vkDestroyCommandPool(d->device, pool, nullptr);
+        if (vr != VK_SUCCESS) {
+            flux_result r = vr == VK_TIMEOUT             ? FLUX_ERROR_TIMEOUT
+                            : vr == VK_ERROR_DEVICE_LOST ? FLUX_ERROR_DEVICE_LOST
+                                                         : FLUX_ERROR_BACKEND_FAILURE;
+            FLUX_FAIL_VK(r, "export_dmabuf ownership release failed", vr);
+            return r;
+        }
+        s->image_layouts[slot] = VK_IMAGE_LAYOUT_GENERAL;
+        s->image_foreign_owned[slot] = true;
+    }
+
     PFN_vkGetMemoryFdKHR pGetMemoryFd =
         (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(d->device, "vkGetMemoryFdKHR");
     if (!pGetMemoryFd) {
@@ -979,7 +1163,7 @@ flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
     VkMemoryGetFdInfoKHR fd_info = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
         .memory = s->image_allocs[slot].memory,
-        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
     };
     int fd = -1;
     vr = pGetMemoryFd(d->device, &fd_info, &fd);

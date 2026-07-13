@@ -221,8 +221,56 @@ static int score_device(VkPhysicalDevice pd) {
     }
 }
 
+static bool device_meets_requirements(VkPhysicalDevice pd, const flux_device_desc *desc) {
+    uint32_t qcount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, nullptr);
+    if (qcount == 0)
+        return false;
+    VkQueueFamilyProperties *queues = calloc(qcount, sizeof(*queues));
+    if (!queues)
+        return false;
+    vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, queues);
+    bool has_graphics = false;
+    for (uint32_t i = 0; i < qcount; ++i)
+        has_graphics |= (queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
+    free(queues);
+    if (!has_graphics)
+        return false;
+
+    if (desc->required_device_extension_count > 0) {
+        uint32_t count = 0;
+        if (vkEnumerateDeviceExtensionProperties(pd, nullptr, &count, nullptr) != VK_SUCCESS ||
+            count == 0)
+            return false;
+        VkExtensionProperties *available = calloc(count, sizeof(*available));
+        if (!available)
+            return false;
+        VkResult vr = vkEnumerateDeviceExtensionProperties(pd, nullptr, &count, available);
+        bool supported = vr == VK_SUCCESS;
+        for (uint32_t i = 0; supported && i < desc->required_device_extension_count; ++i)
+            supported = has_extension(available, count, desc->required_device_extensions[i]);
+        free(available);
+        if (!supported)
+            return false;
+    }
+
+    VkPhysicalDeviceVulkan13Features have13 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+    };
+    VkPhysicalDeviceVulkan12Features have12 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = &have13,
+    };
+    VkPhysicalDeviceFeatures2 have2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &have12,
+    };
+    vkGetPhysicalDeviceFeatures2(pd, &have2);
+    return have13.dynamicRendering && have13.synchronization2 && have12.timelineSemaphore &&
+           have12.bufferDeviceAddress && have12.descriptorIndexing && have12.hostQueryReset;
+}
+
 static flux_result pick_physical_device(flux_device *d, const flux_device_desc *desc) {
-    (void)desc;
     uint32_t count = 0;
     VkResult vr = vkEnumeratePhysicalDevices(d->instance, &count, nullptr);
     if (vr != VK_SUCCESS) {
@@ -247,6 +295,8 @@ static flux_result pick_physical_device(flux_device *d, const flux_device_desc *
     VkPhysicalDevice best = VK_NULL_HANDLE;
     int best_score = -1;
     for (uint32_t i = 0; i < count; ++i) {
+        if (!device_meets_requirements(pds[i], desc))
+            continue;
         int s = score_device(pds[i]);
         if (s > best_score) {
             best_score = s;
@@ -256,7 +306,8 @@ static flux_result pick_physical_device(flux_device *d, const flux_device_desc *
     free(pds);
 
     if (best == VK_NULL_HANDLE || best_score < 0) {
-        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "no Vulkan 1.3 capable GPU available");
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                  "no Vulkan device satisfies the required features and extensions");
         return FLUX_ERROR_UNSUPPORTED;
     }
 
@@ -539,22 +590,31 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
 /*  strategy; this just bridges Vulkan's blob out to the callback.    */
 /* ------------------------------------------------------------------ */
 
-static void flush_pipeline_cache(const flux_device *d) {
+static void flush_pipeline_cache(flux_device *d) {
     if (!d->pipeline_cache_save || !d->pipeline_cache)
         return;
 
+    flux_device_vk_pipeline_cache_lock(d);
     size_t size = 0;
-    if (vkGetPipelineCacheData(d->device, d->pipeline_cache, &size, nullptr) != VK_SUCCESS)
+    if (vkGetPipelineCacheData(d->device, d->pipeline_cache, &size, nullptr) != VK_SUCCESS) {
+        flux_device_vk_pipeline_cache_unlock(d);
         return;
-    if (size == 0)
+    }
+    if (size == 0) {
+        flux_device_vk_pipeline_cache_unlock(d);
         return;
+    }
     void *buf = malloc(size);
-    if (!buf)
+    if (!buf) {
+        flux_device_vk_pipeline_cache_unlock(d);
         return;
+    }
     if (vkGetPipelineCacheData(d->device, d->pipeline_cache, &size, buf) != VK_SUCCESS) {
+        flux_device_vk_pipeline_cache_unlock(d);
         free(buf);
         return;
     }
+    flux_device_vk_pipeline_cache_unlock(d);
     d->pipeline_cache_save(d->pipeline_cache_userdata, buf, size);
     free(buf);
 }
@@ -569,6 +629,23 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
     if (desc->type != FLUX_TYPE_DEVICE_DESC) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_DEVICE_DESC");
         return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if ((desc->required_instance_extension_count && !desc->required_instance_extensions) ||
+        (desc->required_device_extension_count && !desc->required_device_extensions)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "extension count requires a non-null name array");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    for (uint32_t i = 0; i < desc->required_instance_extension_count; ++i) {
+        if (!desc->required_instance_extensions[i]) {
+            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "instance extension name is null");
+            return FLUX_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    for (uint32_t i = 0; i < desc->required_device_extension_count; ++i) {
+        if (!desc->required_device_extensions[i]) {
+            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "device extension name is null");
+            return FLUX_ERROR_INVALID_ARGUMENT;
+        }
     }
     *out = nullptr;
 
@@ -632,6 +709,18 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
         goto fail;
     }
     d->queue_lock_initialized = true;
+    if (pthread_mutex_init(&d->pipeline_cache_lock, nullptr) != 0) {
+        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "pipeline cache lock init failed");
+        r = FLUX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->pipeline_cache_lock_initialized = true;
+    if (pthread_mutex_init(&d->module_state_lock, nullptr) != 0) {
+        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "module state lock init failed");
+        r = FLUX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->module_state_lock_initialized = true;
     r = flux_vk_allocator_init(d);
     if (r != FLUX_OK)
         goto fail;
@@ -656,6 +745,14 @@ fail:
     /* Tear down partial state. */
     flux_bindless_heap_destroy(d);
     flux_vk_allocator_destroy(d);
+    if (d->module_state_lock_initialized) {
+        pthread_mutex_destroy(&d->module_state_lock);
+        d->module_state_lock_initialized = false;
+    }
+    if (d->pipeline_cache_lock_initialized) {
+        pthread_mutex_destroy(&d->pipeline_cache_lock);
+        d->pipeline_cache_lock_initialized = false;
+    }
     if (d->queue_lock_initialized) {
         pthread_mutex_destroy(&d->queue_lock);
         d->queue_lock_initialized = false;
@@ -700,12 +797,20 @@ void flux_device_release(flux_device *d) {
         d->effect_state_destroy(d);
     if (d->canvas_state_destroy)
         d->canvas_state_destroy(d);
+    if (d->module_state_lock_initialized) {
+        pthread_mutex_destroy(&d->module_state_lock);
+        d->module_state_lock_initialized = false;
+    }
 
     if (d->default_sampler)
         vkDestroySampler(d->device, d->default_sampler, nullptr);
     flux_bindless_heap_destroy(d);
     flux_vk_allocator_destroy(d);
     flush_pipeline_cache(d);
+    if (d->pipeline_cache_lock_initialized) {
+        pthread_mutex_destroy(&d->pipeline_cache_lock);
+        d->pipeline_cache_lock_initialized = false;
+    }
     if (d->queue_lock_initialized) {
         pthread_mutex_destroy(&d->queue_lock);
         d->queue_lock_initialized = false;
@@ -801,6 +906,14 @@ uint32_t flux_device_vk_transfer_family(const flux_device *d) {
 }
 VkPipelineCache flux_device_vk_pipeline_cache(const flux_device *d) {
     return d ? d->pipeline_cache : VK_NULL_HANDLE;
+}
+void flux_device_vk_pipeline_cache_lock(flux_device *d) {
+    if (d && d->pipeline_cache_lock_initialized)
+        pthread_mutex_lock(&d->pipeline_cache_lock);
+}
+void flux_device_vk_pipeline_cache_unlock(flux_device *d) {
+    if (d && d->pipeline_cache_lock_initialized)
+        pthread_mutex_unlock(&d->pipeline_cache_lock);
 }
 
 /* ------------------------------------------------------------------ */

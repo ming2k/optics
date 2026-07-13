@@ -121,6 +121,16 @@ static inline float edge(float ax, float ay, float bx, float by, float px, float
     return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
 }
 
+/* Match Vulkan's top-left fill convention in the canvas's y-down coordinate
+ * system. For a positive-area triangle, top edges run left-to-right and left
+ * edges run bottom-to-top. Exactly one of two oppositely directed shared edges
+ * is therefore inclusive. */
+static inline bool edge_is_top_left(float ax, float ay, float bx, float by) {
+    float dy = by - ay;
+    float dx = bx - ax;
+    return dy < 0.0f || (dy == 0.0f && dx > 0.0f);
+}
+
 /* Rasterize one triangle into the sample buffer, one blended sample per
  * hi-res texel. Vertex positions are in canvas (output) space; they are scaled
  * by SS here. Fragment shaders evaluate at the equivalent canvas coordinate. */
@@ -128,14 +138,34 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
                        const flux_canvas_push *pc, const flux_canvas_vertex *a,
                        const flux_canvas_vertex *b, const flux_canvas_vertex *c) {
     const float ss = (float)FLUX_CPU_SS;
-    float ax = a->pos[0] * ss, ay = a->pos[1] * ss;
-    float bx = b->pos[0] * ss, by = b->pos[1] * ss;
-    float cx = c->pos[0] * ss, cy = c->pos[1] * ss;
+    const flux_canvas_vertex *va = a;
+    const flux_canvas_vertex *vb = b;
+    const flux_canvas_vertex *vc = c;
+    float ax = va->pos[0] * ss, ay = va->pos[1] * ss;
+    float bx = vb->pos[0] * ss, by = vb->pos[1] * ss;
+    float cx = vc->pos[0] * ss, cy = vc->pos[1] * ss;
     float area = edge(ax, ay, bx, by, cx, cy);
     if (fabsf(area) < 1e-7f)
         return;
+    if (area < 0.0f) {
+        const flux_canvas_vertex *tmp_v = vb;
+        vb = vc;
+        vc = tmp_v;
+        float tmp = bx;
+        bx = cx;
+        cx = tmp;
+        tmp = by;
+        by = cy;
+        cy = tmp;
+        area = -area;
+    }
     float inv_area = 1.0f / area;
-    vec4f ca = unpack_premul(a->color), cb = unpack_premul(b->color), cc = unpack_premul(c->color);
+    vec4f ca = unpack_premul(va->color), cb = unpack_premul(vb->color),
+          cc = unpack_premul(vc->color);
+
+    bool edge0_inclusive = edge_is_top_left(bx, by, cx, cy);
+    bool edge1_inclusive = edge_is_top_left(cx, cy, ax, ay);
+    bool edge2_inclusive = edge_is_top_left(ax, ay, bx, by);
 
     /* Clip is in output pixels; scale to sample space. */
     int cx0 = clip.x * FLUX_CPU_SS, cy0 = clip.y * FLUX_CPU_SS;
@@ -166,11 +196,15 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
         for (int sx = minx; sx < maxx; ++sx) {
             float fx = (float)sx + 0.5f;
             float fy = (float)sy + 0.5f;
-            float w0 = edge(bx, by, cx, cy, fx, fy) * inv_area;
-            float w1 = edge(cx, cy, ax, ay, fx, fy) * inv_area;
-            float w2 = edge(ax, ay, bx, by, fx, fy) * inv_area;
-            if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f)
-                continue; /* outside (barycentrics normalised to +area) */
+            float e0 = edge(bx, by, cx, cy, fx, fy);
+            float e1 = edge(cx, cy, ax, ay, fx, fy);
+            float e2 = edge(ax, ay, bx, by, fx, fy);
+            if (e0 < 0.0f || (e0 == 0.0f && !edge0_inclusive) || e1 < 0.0f ||
+                (e1 == 0.0f && !edge1_inclusive) || e2 < 0.0f || (e2 == 0.0f && !edge2_inclusive))
+                continue;
+            float w0 = e0 * inv_area;
+            float w1 = e1 * inv_area;
+            float w2 = e2 * inv_area;
 
             /* Fragment shaders operate in canvas (output) coordinates. */
             float px = fx / ss, py = fy / ss;
@@ -191,8 +225,9 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
             case CANVAS_PIPE_IMAGE:
                 return; /* textured image: unsupported on CPU */
             default:    /* SOLID / COVER_SOLID */
-                frag = (vec4f){w0 * ca.r + w1 * cb.r + w2 * cc.r, w0 * ca.g + w1 * cb.g + w2 * cc.g,
-                               w0 * ca.b + w1 * cb.b + w2 * cc.b, w0 * ca.a + w1 * cb.a + w2 * cc.a};
+                frag =
+                    (vec4f){w0 * ca.r + w1 * cb.r + w2 * cc.r, w0 * ca.g + w1 * cb.g + w2 * cc.g,
+                            w0 * ca.b + w1 * cb.b + w2 * cc.b, w0 * ca.a + w1 * cb.a + w2 * cc.a};
                 break;
             }
 
@@ -370,13 +405,25 @@ static void raster_glyph_quad(flux_cpu_canvas *v, flux_recti clip, const flux_ca
 
 static flux_result cpu_canvas_init(const flux_canvas_backend *self, flux_canvas *c) {
     (void)self;
+    if (c->fb_width == 0 || c->fb_height == 0 || c->fb_width > UINT32_MAX / FLUX_CPU_SS ||
+        c->fb_height > UINT32_MAX / FLUX_CPU_SS) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "CPU canvas dimensions overflow sample buffer");
+        return FLUX_ERROR_OUT_OF_RANGE;
+    }
+    uint32_t sw = c->fb_width * FLUX_CPU_SS;
+    uint32_t sh = c->fb_height * FLUX_CPU_SS;
+    if ((size_t)sw > SIZE_MAX / (size_t)sh / 4u / sizeof(float)) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "CPU canvas framebuffer size overflow");
+        return FLUX_ERROR_OUT_OF_RANGE;
+    }
+
     flux_cpu_canvas *v = calloc(1, sizeof(*v));
     if (!v)
         return FLUX_ERROR_OUT_OF_MEMORY;
     v->width = c->fb_width;
     v->height = c->fb_height;
-    v->sw = v->width * FLUX_CPU_SS;
-    v->sh = v->height * FLUX_CPU_SS;
+    v->sw = sw;
+    v->sh = sh;
     v->fb = calloc((size_t)v->sw * v->sh * 4, sizeof(float));
     if (!v->fb) {
         free(v);
@@ -481,6 +528,8 @@ static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canv
     (void)self;
     flux_cpu_canvas *v = cpu(c);
     if (!v->rgba8) {
+        if ((size_t)v->width > SIZE_MAX / (size_t)v->height / 4u)
+            return nullptr;
         v->rgba8 = malloc((size_t)v->width * v->height * 4);
         if (!v->rgba8)
             return nullptr;

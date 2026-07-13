@@ -24,6 +24,34 @@ typedef struct {
     int completed;
 } worker_arg;
 
+typedef struct {
+    flux_device *d;
+    pthread_barrier_t *start;
+    int completed;
+} canvas_worker_arg;
+
+/* Race the first device-level canvas module-state publication. Each thread
+ * owns its surface/canvas; only the lazily-created device cache is shared. */
+static void *canvas_init_worker(void *p) {
+    canvas_worker_arg *a = p;
+    pthread_barrier_wait(a->start);
+    flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+    sd.width = 16;
+    sd.height = 16;
+    flux_surface *surface = NULL;
+    if (flux_surface_create(a->d, &sd, &surface) != FLUX_OK)
+        return NULL;
+    flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
+    cd.surface = surface;
+    flux_canvas *canvas = NULL;
+    if (flux_canvas_create(&cd, &canvas) == FLUX_OK) {
+        a->completed = 1;
+        flux_canvas_destroy(canvas);
+    }
+    flux_surface_release(surface);
+    return NULL;
+}
+
 /* Each worker iteration creates a small image and a small mesh,
  * then immediately releases them. This drives the buffer + image
  * pools simultaneously from multiple threads. */
@@ -67,6 +95,27 @@ int main(void) {
     if (!d) {
         fprintf(stderr, "test_allocator: no Vulkan device available; skipping\n");
         return 0;
+    }
+
+    /* --- concurrent first-use publication of the canvas module state --- */
+    {
+        enum { N_THREADS = 4 };
+        pthread_t threads[N_THREADS];
+        canvas_worker_arg args[N_THREADS] = {0};
+        pthread_barrier_t start;
+        pthread_barrier_init(&start, NULL, N_THREADS);
+        for (int i = 0; i < N_THREADS; ++i) {
+            args[i].d = d;
+            args[i].start = &start;
+            pthread_create(&threads[i], NULL, canvas_init_worker, &args[i]);
+        }
+        int total = 0;
+        for (int i = 0; i < N_THREADS; ++i) {
+            pthread_join(threads[i], NULL);
+            total += args[i].completed;
+        }
+        pthread_barrier_destroy(&start);
+        EXPECT(total == N_THREADS);
     }
 
     /* --- single image create/release round-trip --- */

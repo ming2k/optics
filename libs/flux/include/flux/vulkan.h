@@ -41,7 +41,13 @@ FLUX_API VkQueue flux_device_vk_graphics_queue(const flux_device *d);
 FLUX_API uint32_t flux_device_vk_graphics_family(const flux_device *d);
 FLUX_API VkQueue flux_device_vk_transfer_queue(const flux_device *d);
 FLUX_API uint32_t flux_device_vk_transfer_family(const flux_device *d);
+/* The returned cache is shared by Flux's canvas/scene/compute/core pipeline
+ * creation. Vulkan requires external synchronisation for every cache access.
+ * Callers that pass this handle to Vulkan must hold this lock for the complete
+ * Vulkan call; always pair lock/unlock on the same thread. */
 FLUX_API VkPipelineCache flux_device_vk_pipeline_cache(const flux_device *d);
+FLUX_API void flux_device_vk_pipeline_cache_lock(flux_device *d);
+FLUX_API void flux_device_vk_pipeline_cache_unlock(flux_device *d);
 
 FLUX_API VkSurfaceKHR flux_surface_vk_handle(const flux_surface *s);
 FLUX_API VkSwapchainKHR flux_surface_vk_swapchain(const flux_surface *s);

@@ -20,8 +20,10 @@
 
 #include <fribidi/fribidi.h>
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define ITEMIZE_STACK_CP 256
 
@@ -79,17 +81,29 @@ static bool runs_reserve(flux_text *t, int need) {
     if (need <= t->runs_cap)
         return true;
     int cap = t->runs_cap ? t->runs_cap : TXT_RUNS_INIT;
-    while (cap < need)
+    while (cap < need) {
+        if (cap > INT_MAX / 2)
+            return false;
         cap *= 2;
-    text_run *r = realloc(t->runs_buf, (size_t)cap * sizeof *r);
+    }
+
+    /* Grow transactionally: two independent realloc calls cannot preserve
+     * both old buffers if only one succeeds and moves its allocation. */
+    text_run *r = malloc((size_t)cap * sizeof *r);
     /* int8_t and FriBidiLevel (signed char) are binary-compatible; this
      * buffer is handed to fribidi via a cast at the reorder call. */
-    int8_t *l = realloc(t->run_levels_buf, (size_t)cap * sizeof *l);
+    int8_t *l = malloc((size_t)cap * sizeof *l);
     if (!r || !l) {
         free(r);
         free(l);
         return false;
     }
+    if (t->runs_cap > 0) {
+        memcpy(r, t->runs_buf, (size_t)t->runs_cap * sizeof *r);
+        memcpy(l, t->run_levels_buf, (size_t)t->runs_cap * sizeof *l);
+    }
+    free(t->runs_buf);
+    free(t->run_levels_buf);
     t->runs_buf = r;
     t->run_levels_buf = l;
     t->runs_cap = cap;

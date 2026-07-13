@@ -8,17 +8,14 @@
 #include "test_helpers.h"
 #include <lens/lens.h>
 
-/* Default theme: font_size 14, padding 8, gap 6. */
-#define PAD 8.0f
-#define GAP 6.0f
-
 static float btn_w(lens *ui, const char *s) {
-    return lens_text_measure(ui, NULL, s, 14.0f).width + 2.0f * PAD;
+    lens_theme theme = lens_get_theme(ui);
+    return lens_text_measure(ui, theme.font, s, theme.font_size).width + 2.0f * theme.padding;
 }
 static float btn_h(lens *ui, const char *s) {
-    (void)ui;
     (void)s;
-    return 14.0f + 2.0f * PAD; /* button height = font_size + 2*padding */
+    lens_theme theme = lens_get_theme(ui);
+    return theme.font_size + 2.0f * theme.padding;
 }
 
 static void test_row_packs_children(void) {
@@ -27,6 +24,7 @@ static void test_row_packs_children(void) {
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
     float wa = btn_w(ui, "A"), h = btn_h(ui, "A");
+    float gap = lens_get_theme(ui).gap;
 
     lens_begin(ui, &in);
     lens_row(ui);
@@ -51,7 +49,7 @@ static void test_row_packs_children(void) {
     CHECK_NEAR(ra.x, 0.0f, 0.5f);
     CHECK_NEAR(ra.w, wa, 0.5f);
     CHECK_NEAR(ra.h, h, 0.5f);
-    CHECK_NEAR(rb.x, wa + GAP, 0.5f);
+    CHECK_NEAR(rb.x, wa + gap, 0.5f);
 
     lens_destroy(ui);
 }
@@ -93,6 +91,7 @@ static void test_column_stacks_children(void) {
     lens_input in = {.display_size = {200, 200}, .dt_seconds = 0.016f};
 
     float h = btn_h(ui, "A");
+    float gap = lens_get_theme(ui).gap;
 
     lens_begin(ui, &in);
     (void)lens_button(ui, "A"); /* direct children of the root column */
@@ -107,8 +106,8 @@ static void test_column_stacks_children(void) {
     flux_rect rb = lens_node_bounds(b);
 
     CHECK_NEAR(ra.y, 0.0f, 0.5f);
-    CHECK_NEAR(rb.y, h + GAP, 0.5f); /* stacked with gap = 6 */
-    CHECK_NEAR(ra.w, 200.0f, 0.5f);  /* stretched across */
+    CHECK_NEAR(rb.y, h + gap, 0.5f);
+    CHECK_NEAR(ra.w, 200.0f, 0.5f); /* stretched across */
 
     lens_destroy(ui);
 }

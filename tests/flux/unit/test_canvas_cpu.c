@@ -66,6 +66,19 @@ int main(void) {
     px(fb, stride, 50, 32, p); /* outside clip → untouched black */
     EXPECT(p[0] < 5 && p[3] > 250);
 
+    /* ---- Shared triangle edge is covered once, not blended twice ---- */
+    EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
+    flux_color half_red = flux_color_rgba_premul(255, 0, 0, 128);
+    flux_canvas_fill_rect_color(c, (flux_rect){16, 16, 32, 32}, half_red);
+    flux_canvas_cpu_end(c);
+    fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
+    px(fb, stride, 32, 32, p); /* exactly on the quad's shared diagonal */
+    EXPECT(p[0] >= 126 && p[0] <= 130);
+    EXPECT(p[3] >= 126 && p[3] <= 130);
+    px(fb, stride, 30, 32, p); /* ordinary interior sample has the same alpha */
+    EXPECT(p[0] >= 126 && p[0] <= 130);
+    EXPECT(p[3] >= 126 && p[3] <= 130);
+
     flux_canvas_destroy(c);
 
     /* ---- Linear gradient ---- */
@@ -85,6 +98,12 @@ int main(void) {
     px(fb, stride, 61, 32, p); /* right → blue end */
     EXPECT(p[2] > 200 && p[0] < 60);
     flux_canvas_destroy(c);
+
+    /* Dimensions that overflow the supersample buffer are rejected before any
+     * allocation or wrapped size calculation. */
+    c = nullptr;
+    EXPECT(flux_canvas_create_cpu(UINT32_MAX, 1, 1.0f, &c) == FLUX_ERROR_OUT_OF_RANGE);
+    EXPECT(c == nullptr);
 
     /* ---- Unified factory + pass API (Skia SkSurface-style) ---- */
     flux_canvas_desc d = FLUX_CANVAS_DESC_INIT;

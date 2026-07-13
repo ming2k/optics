@@ -282,6 +282,58 @@ int main(void) {
         }
     }
 
+    /* --- same-key calls in one epoch get exclusive writable slots --- */
+    {
+        flux_effect_blur_desc bdesc = FLUX_EFFECT_BLUR_DESC_INIT;
+        bdesc.input = input;
+        bdesc.sigma = 2.0f;
+        flux_image *a = nullptr;
+        flux_image *b = nullptr;
+
+        VkCommandPool pool = VK_NULL_HANDLE;
+        VkCommandPoolCreateInfo pci = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .queueFamilyIndex = flux_device_vk_graphics_family(d),
+            .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+        };
+        vkCreateCommandPool(vk, &pci, nullptr, &pool);
+        VkCommandBuffer cmd = VK_NULL_HANDLE;
+        VkCommandBufferAllocateInfo cbai = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = pool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+        };
+        vkAllocateCommandBuffers(vk, &cbai, &cmd);
+        VkCommandBufferBeginInfo cbbi = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        };
+        vkBeginCommandBuffer(cmd, &cbbi);
+        EXPECT(flux_effect_blur(cmd, &bdesc, &a) == FLUX_OK);
+        EXPECT(flux_effect_blur(cmd, &bdesc, &b) == FLUX_OK);
+        EXPECT(a != nullptr && b != nullptr && a != b);
+        vkEndCommandBuffer(cmd);
+
+        VkCommandBufferSubmitInfo cbsi = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            .commandBuffer = cmd,
+        };
+        VkSubmitInfo2 si = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+            .commandBufferInfoCount = 1,
+            .pCommandBufferInfos = &cbsi,
+        };
+        VkFence fence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        vkCreateFence(vk, &fci, nullptr, &fence);
+        vkQueueSubmit2(flux_device_vk_graphics_queue(d), 1, &si, fence);
+        vkWaitForFences(vk, 1, &fence, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(vk, fence, nullptr);
+        vkDestroyCommandPool(vk, pool, nullptr);
+        flux_effect_reset(d);
+    }
+
     /* --- promote: transient → caller-owned image with the same bytes --- */
     {
         memset(mapped, 0xCD, BYTES);

@@ -187,13 +187,16 @@ impl Application {
             paint: paint_box,
         };
 
-        extern "C" fn build_trampoline<B: FnMut(&mut Frame, &Input)>(
+        extern "C" fn build_trampoline<B, P>(
             ui: *mut sys::lens,
             in_: *const sys::lens_input,
             user: *mut std::os::raw::c_void,
-        ) {
+        ) where
+            B: FnMut(&mut Frame, &Input),
+            P: FnMut(PaintHost),
+        {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, fn(PaintHost)>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P>) };
                 // Cast the iris_sys view of `lens` / `lens_input` to lens's
                 // own bindgen view. Both come from the same C declaration, so
                 // the layouts are identical; the types are just nominally
@@ -206,14 +209,17 @@ impl Application {
             }));
         }
 
-        extern "C" fn paint_trampoline<P: FnMut(PaintHost)>(
+        extern "C" fn paint_trampoline<B, P>(
             canvas: *mut sys::flux_canvas,
             device: *mut sys::flux_device,
             scale: f32,
             user: *mut std::os::raw::c_void,
-        ) {
+        ) where
+            B: FnMut(&mut Frame, &Input),
+            P: FnMut(PaintHost),
+        {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<fn(&mut Frame, &Input), P>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P>) };
                 if let Some(p) = run.paint.as_mut() {
                     p(PaintHost {
                         canvas: canvas as *mut std::ffi::c_void,
@@ -235,15 +241,13 @@ impl Application {
         ) = if run_state.paint.is_some() {
             let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
             (
-                Some(build_trampoline::<B>),
-                Some(paint_trampoline::<P>),
+                Some(build_trampoline::<B, P>),
+                Some(paint_trampoline::<B, P>),
                 user_ptr,
             )
         } else {
-            // paint is None — cast the run state to a B-only shape for the
-            // build trampoline (the paint slot is never read).
             let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
-            (Some(build_trampoline::<B>), None, user_ptr)
+            (Some(build_trampoline::<B, P>), None, user_ptr)
         };
 
         let cfg = sys::iris_app_config {

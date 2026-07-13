@@ -111,6 +111,23 @@ int main(void) {
         EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
     }
 
+    /* --- frame state machine: recording -> submitted -> presented --- */
+    {
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        flux_transient tr = {0};
+        EXPECT(flux_frame_alloc_transient(frame, 16, 3, &tr) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(tr.cpu == nullptr);
+        EXPECT(flux_frame_alloc_transient(frame, 16, 512, &tr) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_frame_alloc_transient(frame, 16, 16, &tr) == FLUX_OK);
+        EXPECT(tr.cpu != nullptr && tr.alignment == 16);
+        EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_submit(frame) == FLUX_ERROR_INVALID_STATE);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
+    }
+
     /* --- first frame: clear + centre rect --- */
     {
         EXPECT(render_frame(s, canvas) == FLUX_OK);
@@ -141,6 +158,31 @@ int main(void) {
         EXPECT(near8(px_at(px, W / 4 - 2, H / 2)[0], CLEAR_R));
         EXPECT(px_at(px, W / 2, H / 4 + 1)[0] == 255);
         EXPECT(near8(px_at(px, W / 2, H / 4 - 2)[0], CLEAR_R));
+    }
+
+    /* --- Canvas LOAD overlays without discarding the selected image --- */
+    {
+        flux_surface_info info;
+        flux_surface_get_info(s, &info);
+        /* Offscreen surfaces have one image per frame slot. Seed every image
+         * before wrapping around to the one selected by the LOAD frame. */
+        for (uint32_t i = 0; i < info.image_count; ++i)
+            EXPECT(render_frame(s, canvas) == FLUX_OK);
+
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        EXPECT(flux_canvas_begin(canvas, frame, nullptr) == FLUX_OK);
+        flux_canvas_fill_rect_color(canvas, (flux_rect){2, 2, 8, 8},
+                                    flux_color_rgba_premul(0, 255, 0, 255));
+        flux_canvas_end(canvas);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        const uint8_t *overlay = px_at(px, 5, 5);
+        EXPECT(overlay[0] < 5 && overlay[1] > 250 && overlay[2] < 5);
+        EXPECT(near8(px_at(px, 12, 12)[0], CLEAR_R));
+        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
     }
 
     /* --- frame ring reuse: render several frames back-to-back --- */

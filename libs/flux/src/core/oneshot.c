@@ -22,12 +22,15 @@
 /*  Shared with surface.c (readback). Bodies file-local.              */
 /* ------------------------------------------------------------------ */
 
-/* Submit `cmd` on `queue` with optional wait/signal semaphores, then
- * wait on a fresh fence with a finite timeout. Returns VK_TIMEOUT if
- * the GPU does not complete within FLUX_DEFAULT_FRAME_TIMEOUT_NS. */
-static VkResult submit_and_wait(flux_device *d, VkQueue queue, VkCommandBuffer cmd,
-                                VkSemaphore wait_sem, VkPipelineStageFlags2 wait_stage,
-                                VkSemaphore signal_sem, VkPipelineStageFlags2 signal_stage) {
+/* Submit `cmd` on `queue` with optional wait/signal semaphores, then wait on a
+ * fresh fence. A finite timeout is still reported to the caller, but before
+ * returning we wait the queue idle so every object referenced by the submit is
+ * safe to destroy. This trades a potentially longer stall on a wedged driver
+ * for correct Vulkan object lifetimes; a future asynchronous retire queue can
+ * restore strict timeout latency without reintroducing use-after-submit. */
+VkResult flux_vk_submit_and_wait(flux_device *d, VkQueue queue, VkCommandBuffer cmd,
+                                 VkSemaphore wait_sem, VkPipelineStageFlags2 wait_stage,
+                                 VkSemaphore signal_sem, VkPipelineStageFlags2 signal_stage) {
     VkFence fence = VK_NULL_HANDLE;
     VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VkResult fr = vkCreateFence(d->device, &fci, nullptr, &fence);
@@ -62,6 +65,15 @@ static VkResult submit_and_wait(flux_device *d, VkQueue queue, VkCommandBuffer c
     pthread_mutex_unlock(&d->queue_lock);
     if (vr == VK_SUCCESS) {
         vr = vkWaitForFences(d->device, 1, &fence, VK_TRUE, FLUX_DEFAULT_FRAME_TIMEOUT_NS);
+        if (vr != VK_SUCCESS && vr != VK_ERROR_DEVICE_LOST) {
+            VkResult wait_result = vr;
+            pthread_mutex_lock(&d->queue_lock);
+            VkResult idle = vkQueueWaitIdle(queue);
+            pthread_mutex_unlock(&d->queue_lock);
+            /* Preserve timeout/error semantics once completion is proven. If
+             * idle itself fails, surface the stronger backend/device error. */
+            vr = idle == VK_SUCCESS ? wait_result : idle;
+        }
     }
     vkDestroyFence(d->device, fence, nullptr);
     return vr;
@@ -69,7 +81,17 @@ static VkResult submit_and_wait(flux_device *d, VkQueue queue, VkCommandBuffer c
 
 /* Convenience for the common single-queue case. */
 VkResult flux_vk_submit_one_shot_and_wait(flux_device *d, VkCommandBuffer cmd) {
-    return submit_and_wait(d, d->graphics_queue, cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0);
+    return flux_vk_submit_and_wait(d, d->graphics_queue, cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0);
+}
+
+static flux_result submit_result(VkResult vr) {
+    if (vr == VK_SUCCESS)
+        return FLUX_OK;
+    if (vr == VK_TIMEOUT)
+        return FLUX_ERROR_TIMEOUT;
+    if (vr == VK_ERROR_DEVICE_LOST)
+        return FLUX_ERROR_DEVICE_LOST;
+    return FLUX_ERROR_BACKEND_FAILURE;
 }
 
 /* Pick the queue family + queue for one-shot uploads. When a
@@ -229,14 +251,14 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
             goto fail;
         }
         /* Submit transfer-then-graphics with the handoff semaphore. */
-        vr = submit_and_wait(d, d->transfer_queue, xfer_cmd, VK_NULL_HANDLE, 0, handoff,
-                             VK_PIPELINE_STAGE_2_COPY_BIT);
+        vr = flux_vk_submit_and_wait(d, d->transfer_queue, xfer_cmd, VK_NULL_HANDLE, 0, handoff,
+                                     VK_PIPELINE_STAGE_2_COPY_BIT);
         if (vr != VK_SUCCESS) {
             FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "transfer-queue submit failed", vr);
             goto fail;
         }
-        vr = submit_and_wait(d, d->graphics_queue, gfx_cmd, handoff,
-                             VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0);
+        vr = flux_vk_submit_and_wait(d, d->graphics_queue, gfx_cmd, handoff,
+                                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0);
         if (vr != VK_SUCCESS) {
             FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "graphics-queue acquire submit failed", vr);
             goto fail;
@@ -260,7 +282,7 @@ fail:
         vkDestroyBuffer(d->device, staging, nullptr);
     if (staging_alloc.memory)
         flux_vk_deallocate(d, &staging_alloc);
-    return vr == VK_SUCCESS ? FLUX_OK : FLUX_ERROR_BACKEND_FAILURE;
+    return submit_result(vr);
 }
 
 /* ------------------------------------------------------------------ */
@@ -461,14 +483,14 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
             FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkEndCommandBuffer (acquire) failed", vr);
             goto fail;
         }
-        vr = submit_and_wait(d, d->transfer_queue, xfer_cmd, VK_NULL_HANDLE, 0, handoff,
-                             VK_PIPELINE_STAGE_2_COPY_BIT);
+        vr = flux_vk_submit_and_wait(d, d->transfer_queue, xfer_cmd, VK_NULL_HANDLE, 0, handoff,
+                                     VK_PIPELINE_STAGE_2_COPY_BIT);
         if (vr != VK_SUCCESS) {
             FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "transfer-queue image submit failed", vr);
             goto fail;
         }
-        vr = submit_and_wait(d, d->graphics_queue, gfx_cmd, handoff,
-                             VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0);
+        vr = flux_vk_submit_and_wait(d, d->graphics_queue, gfx_cmd, handoff,
+                                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0);
         if (vr != VK_SUCCESS) {
             FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "graphics-queue image acquire failed", vr);
             goto fail;
@@ -492,7 +514,7 @@ fail:
         vkDestroyBuffer(d->device, staging, nullptr);
     if (staging_alloc.memory)
         flux_vk_deallocate(d, &staging_alloc);
-    return vr == VK_SUCCESS ? FLUX_OK : FLUX_ERROR_BACKEND_FAILURE;
+    return submit_result(vr);
 }
 
 /* ------------------------------------------------------------------ */
@@ -571,8 +593,9 @@ fail:
     if (pool)
         vkDestroyCommandPool(d->device, pool, nullptr);
     if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "image layout transition failed", vr);
-        return FLUX_ERROR_BACKEND_FAILURE;
+        flux_result r = submit_result(vr);
+        FLUX_FAIL_VK(r, "image layout transition failed", vr);
+        return r;
     }
     return FLUX_OK;
 }

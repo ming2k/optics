@@ -219,6 +219,17 @@ struct flux_device {
     pthread_mutex_t queue_lock;
     bool queue_lock_initialized;
 
+    /* Protects publication of lazily-created per-module state slots. The lock
+     * is held only while reading or publishing pointers and hooks; allocation,
+     * Vulkan calls, and module locks must remain outside it. */
+    pthread_mutex_t module_state_lock;
+    bool module_state_lock_initialized;
+
+    /* Vulkan requires external synchronisation for every operation that reads
+     * or mutates the shared VkPipelineCache, including pipeline creation and
+     * vkGetPipelineCacheData. Raw-cache users lock it through vulkan.h. */
+    pthread_mutex_t pipeline_cache_lock;
+    bool pipeline_cache_lock_initialized;
     VkPipelineCache pipeline_cache;
 
     /* Consumer-supplied pipeline-cache persistence hooks (Skia
@@ -291,8 +302,7 @@ flux_result flux_vk_alloc_image(flux_device *d, const VkImageCreateInfo *ici,
  * the VkMemoryAllocateInfo pNext chain — pass a VkMemoryDedicatedAllocateInfo
  * or any external handle-type info the caller needs. */
 flux_result flux_vk_alloc_image_dedicated(flux_device *d, const VkImageCreateInfo *ici,
-                                          VkMemoryPropertyFlags props,
-                                          const void *export_info,
+                                          VkMemoryPropertyFlags props, const void *export_info,
                                           VkImage *out_image, flux_vk_alloc *out_alloc);
 
 /* One-shot host -> device upload via a graphics-queue command buffer
@@ -324,6 +334,13 @@ flux_result flux_vk_transition_image_layout(flux_device *d, VkImage img, VkImage
 bool flux_vk_prefer_transfer_queue(const flux_device *d);
 VkResult flux_vk_new_transient_cmd(flux_device *d, uint32_t family, VkCommandPool *out_pool,
                                    VkCommandBuffer *out_cmd);
+/* Submit and wait helpers guarantee that, once they return, the submitted
+ * command buffer and synchronization objects are no longer pending and may be
+ * destroyed. A finite fence timeout falls back to queue-idle before cleanup;
+ * the original VK_TIMEOUT is preserved for the caller. */
+VkResult flux_vk_submit_and_wait(flux_device *d, VkQueue queue, VkCommandBuffer cmd,
+                                 VkSemaphore wait_sem, VkPipelineStageFlags2 wait_stage,
+                                 VkSemaphore signal_sem, VkPipelineStageFlags2 signal_stage);
 VkResult flux_vk_submit_one_shot_and_wait(flux_device *d, VkCommandBuffer cmd);
 
 /* Allocator helpers — routed through device->allocator if set, else
@@ -338,7 +355,6 @@ void flux_internal_free(flux_device *d, void *ptr);
 /*  Surface + per-frame state                                         */
 /* ------------------------------------------------------------------ */
 
-#define FLUX_MAX_SWAPCHAIN_IMAGES 8
 #define FLUX_MAX_FRAMES_IN_FLIGHT 3
 #define FLUX_MAX_TIMESTAMPS_PER_FRAME 64
 
@@ -351,9 +367,8 @@ typedef struct flux_timestamp_scope {
 typedef struct flux_per_frame {
     VkCommandPool pool;
     VkCommandBuffer cmd;
-    VkSemaphore image_acquired;  /* binary; signalled by acquire */
-    VkSemaphore render_finished; /* binary; signalled by submit  */
-    VkFence in_flight;           /* CPU waits here before reuse  */
+    VkSemaphore image_acquired; /* binary; signalled by acquire */
+    VkFence in_flight;          /* CPU waits here before reuse  */
 
     /* Timestamp queries: this frame's region in the pool is
      * [slot * MAX, (slot+1) * MAX). begin/end use even/odd indices. */
@@ -379,11 +394,18 @@ typedef struct flux_transient_ring {
     VkDeviceSize cursor[FLUX_MAX_FRAMES_IN_FLIGHT];
 } flux_transient_ring;
 
+typedef enum flux_frame_state {
+    FLUX_FRAME_STATE_INVALID = 0,
+    FLUX_FRAME_STATE_RECORDING,
+    FLUX_FRAME_STATE_SUBMITTED,
+    FLUX_FRAME_STATE_PRESENTED,
+} flux_frame_state;
+
 struct flux_frame {
     flux_surface *surface; /* not retained — surface owns the frame slot */
     uint32_t slot;         /* 0..frames_in_flight-1; matches per_frame[] */
-    bool recording;        /* true between begin_frame and submit */
-    bool pass_active;      /* true between begin_pass and end_pass */
+    flux_frame_state state;
+    bool pass_active; /* true between begin_pass and end_pass */
 };
 
 struct flux_surface {
@@ -400,9 +422,19 @@ struct flux_surface {
     VkColorSpaceKHR color_space;
     VkExtent2D extent;
     uint32_t image_count;
-    VkImage images[FLUX_MAX_SWAPCHAIN_IMAGES];
-    VkImageView image_views[FLUX_MAX_SWAPCHAIN_IMAGES];
-    flux_vk_alloc image_allocs[FLUX_MAX_SWAPCHAIN_IMAGES]; /* offscreen only */
+    uint32_t image_capacity;
+    VkImage *images;
+    VkImageView *image_views;
+    VkImageLayout *image_layouts;
+    /* Exportable offscreen images are released to FOREIGN on export. The host
+     * must not let a frame slot be reused until its external consumer has
+     * released the dma-buf; begin_frame then records the matching acquire. */
+    bool *image_foreign_owned;
+    /* Present-wait semaphores are indexed by acquired swapchain image, not by
+     * frame slot. Reacquiring an image proves its prior presentation has
+     * finished consuming the corresponding semaphore. */
+    VkSemaphore *render_finished;
+    flux_vk_alloc *image_allocs; /* offscreen only */
     /* Offscreen dmabuf-export metadata (ADR-0040 follow-on). When
      * offscreen images are created exportable (external-memory + DRM
      * modifier), these record the negotiated modifier so the host can
@@ -430,6 +462,10 @@ struct flux_surface {
      * frame per surface, so one slot per surface is enough. */
     struct flux_frame frame_slot;
     bool frame_active;
+    /* Set when a windowed frame fails after acquiring a swapchain image. Such
+     * an image/semaphore pair cannot be portably abandoned; resize recreates
+     * the swapchain synchronization before recording resumes. */
+    bool needs_recreate;
 
     /* Transient memory ring (host-visible, mapped). */
     flux_transient_ring transient;

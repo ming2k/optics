@@ -25,15 +25,31 @@
 /*  Layout transitions (sync2 barriers)                               */
 /* ------------------------------------------------------------------ */
 
-static void barrier_to_color_attachment(VkCommandBuffer cmd, VkImage img) {
+static void barrier_to_color_attachment(VkCommandBuffer cmd, VkImage img, VkImageLayout old_layout,
+                                        bool foreign_owned, uint32_t graphics_family) {
+    VkPipelineStageFlags2 src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+    VkAccessFlags2 src_access = 0;
+    if (old_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        src_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        src_access = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+        src_stage = VK_PIPELINE_STAGE_2_COPY_BIT;
+        src_access = VK_ACCESS_2_TRANSFER_READ_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR || foreign_owned) {
+        src_stage = VK_PIPELINE_STAGE_2_NONE;
+    }
     VkImageMemoryBarrier2 b = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        .srcAccessMask = 0,
+        .srcStageMask = src_stage,
+        .srcAccessMask = src_access,
         .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .dstAccessMask =
+            VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = old_layout,
         .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex =
+            foreign_owned ? VK_QUEUE_FAMILY_FOREIGN_EXT : VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = foreign_owned ? graphics_family : VK_QUEUE_FAMILY_IGNORED,
         .image = img,
         .subresourceRange =
             {
@@ -64,6 +80,8 @@ static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen) {
         .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .newLayout =
             offscreen ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .image = img,
         .subresourceRange =
             {
@@ -95,6 +113,8 @@ flux_result flux_surface_begin_frame(flux_surface *s, const flux_frame_begin_des
                   "flux_surface_begin_frame called while a frame is already in flight");
         return FLUX_ERROR_INVALID_STATE;
     }
+    if (s->needs_recreate)
+        return FLUX_ERROR_SURFACE_LOST;
     if (s->extent.width == 0 || s->extent.height == 0) {
         /* Minimised — nothing to render to. */
         return FLUX_ERROR_INVALID_STATE;
@@ -144,9 +164,16 @@ flux_result flux_surface_begin_frame(flux_surface *s, const flux_frame_begin_des
 acquired:
     s->current_image = image_index;
 
-    /* Reset and re-record. */
-    vkResetFences(vkd, 1, &pf->in_flight);
-    vkResetCommandPool(vkd, pf->pool, 0);
+    /* Reset command recording while the slot fence remains signalled. The
+     * fence is reset only immediately before queue submission, so a recording
+     * failure cannot leave a permanently-unsignalled slot. */
+    vr = vkResetCommandPool(vkd, pf->pool, 0);
+    if (vr != VK_SUCCESS) {
+        if (!s->offscreen)
+            s->needs_recreate = true;
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkResetCommandPool failed", vr);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
 
     /* Recycle this slot's transient ring slice. */
     s->transient.cursor[slot] = 0;
@@ -194,11 +221,14 @@ acquired:
     };
     vr = vkBeginCommandBuffer(pf->cmd, &cbbi);
     if (vr != VK_SUCCESS) {
+        if (!s->offscreen)
+            s->needs_recreate = true;
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkBeginCommandBuffer failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
-    barrier_to_color_attachment(pf->cmd, s->images[image_index]);
+    barrier_to_color_attachment(pf->cmd, s->images[image_index], s->image_layouts[image_index],
+                                s->image_foreign_owned[image_index], s->device->graphics_family);
 
     /* Surface-owned frame slot. Stable pointer for the caller's
      * lifetime of this frame; cleared by flux_frame_present. Safe
@@ -207,7 +237,7 @@ acquired:
     s->frame_slot = (struct flux_frame){
         .surface = s,
         .slot = slot,
-        .recording = true,
+        .state = FLUX_FRAME_STATE_RECORDING,
     };
     s->frame_active = true;
     *out = &s->frame_slot;
@@ -219,7 +249,7 @@ acquired:
 /* ------------------------------------------------------------------ */
 
 void flux_frame_begin_pass(flux_frame *f, const flux_pass_desc *desc) {
-    if (!f || !f->surface || !f->recording)
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
         return;
     flux_surface *s = f->surface;
     flux_per_frame *pf = &s->frames[f->slot];
@@ -320,7 +350,7 @@ void flux_frame_begin_pass(flux_frame *f, const flux_pass_desc *desc) {
 }
 
 void flux_frame_end_pass(flux_frame *f) {
-    if (!f || !f->surface || !f->recording || !f->pass_active)
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING || !f->pass_active)
         return;
     flux_per_frame *pf = &f->surface->frames[f->slot];
     vkCmdEndRendering(pf->cmd);
@@ -331,8 +361,36 @@ void flux_frame_end_pass(flux_frame *f) {
 /*  Submit + present                                                  */
 /* ------------------------------------------------------------------ */
 
+/* Restore a signalled slot fence after vkQueueSubmit2 rejects a submission.
+ * The old fence was reset immediately before submit, but no queue operation
+ * will signal it on failure. */
+static bool restore_signalled_fence(flux_surface *s, flux_per_frame *pf) {
+    if (pf->in_flight)
+        vkDestroyFence(s->device->device, pf->in_flight, nullptr);
+    pf->in_flight = VK_NULL_HANDLE;
+    VkFenceCreateInfo fci = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+    };
+    return vkCreateFence(s->device->device, &fci, nullptr, &pf->in_flight) == VK_SUCCESS;
+}
+
+static flux_result frame_submit_failure(flux_frame *f, VkResult vr, const char *message) {
+    flux_surface *s = f->surface;
+    flux_per_frame *pf = &s->frames[f->slot];
+    bool restored = restore_signalled_fence(s, pf);
+    f->state = FLUX_FRAME_STATE_INVALID;
+    s->frame_active = false;
+    if (!s->offscreen)
+        s->needs_recreate = true;
+    flux_result r = vr == VK_ERROR_DEVICE_LOST || !restored ? FLUX_ERROR_DEVICE_LOST
+                                                            : FLUX_ERROR_BACKEND_FAILURE;
+    FLUX_FAIL_VK(r, message, vr);
+    return r;
+}
+
 flux_result flux_frame_submit(flux_frame *f) {
-    if (!f || !f->surface || !f->recording)
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
         return FLUX_ERROR_INVALID_STATE;
     flux_surface *s = f->surface;
     flux_per_frame *pf = &s->frames[f->slot];
@@ -347,7 +405,21 @@ flux_result flux_frame_submit(flux_frame *f) {
 
     VkResult vr = vkEndCommandBuffer(pf->cmd);
     if (vr != VK_SUCCESS) {
+        f->state = FLUX_FRAME_STATE_INVALID;
+        s->frame_active = false;
+        if (!s->offscreen)
+            s->needs_recreate = true;
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkEndCommandBuffer failed", vr);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+
+    vr = vkResetFences(s->device->device, 1, &pf->in_flight);
+    if (vr != VK_SUCCESS) {
+        f->state = FLUX_FRAME_STATE_INVALID;
+        s->frame_active = false;
+        if (!s->offscreen)
+            s->needs_recreate = true;
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkResetFences failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
@@ -366,17 +438,18 @@ flux_result flux_frame_submit(flux_frame *f) {
         pthread_mutex_lock(&s->device->queue_lock);
         vr = vkQueueSubmit2(s->device->graphics_queue, 1, &osi, pf->in_flight);
         pthread_mutex_unlock(&s->device->queue_lock);
-        if (vr != VK_SUCCESS) {
-            FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkQueueSubmit2 failed", vr);
-            return FLUX_ERROR_BACKEND_FAILURE;
-        }
+        if (vr != VK_SUCCESS)
+            return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
         s->last_submitted_slot = f->slot;
-        f->recording = false;
+        s->image_layouts[s->current_image] = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        s->image_foreign_owned[s->current_image] = false;
+        f->state = FLUX_FRAME_STATE_SUBMITTED;
         return FLUX_OK;
     }
 
-    /* Windowed path: signal the per-slot render_finished semaphore so
-     * the synchronous flux_frame_present below can wait on it. */
+    /* Windowed path: signal the acquired image's render-finished semaphore.
+     * Indexing by image (rather than frame slot) makes reuse safe with respect
+     * to the presentation engine. */
     VkSemaphoreSubmitInfo wait = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = pf->image_acquired,
@@ -384,8 +457,8 @@ flux_result flux_frame_submit(flux_frame *f) {
     };
     VkSemaphoreSubmitInfo signal = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = pf->render_finished,
-        .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .semaphore = s->render_finished[s->current_image],
+        .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
     };
     VkCommandBufferSubmitInfo cb = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -403,39 +476,38 @@ flux_result flux_frame_submit(flux_frame *f) {
     pthread_mutex_lock(&s->device->queue_lock);
     vr = vkQueueSubmit2(s->device->graphics_queue, 1, &si, pf->in_flight);
     pthread_mutex_unlock(&s->device->queue_lock);
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkQueueSubmit2 failed", vr);
-        return FLUX_ERROR_BACKEND_FAILURE;
-    }
-    f->recording = false;
+    if (vr != VK_SUCCESS)
+        return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
+    s->image_layouts[s->current_image] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    f->state = FLUX_FRAME_STATE_SUBMITTED;
     return FLUX_OK;
 }
 
 flux_result flux_frame_present(flux_frame *f) {
-    if (!f || !f->surface)
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_SUBMITTED)
         return FLUX_ERROR_INVALID_STATE;
     flux_surface *s = f->surface;
-    flux_per_frame *pf = &s->frames[f->slot];
 
     if (s->offscreen) {
         /* Nothing to present (ADR-0013); complete the frame so the
          * caller's begin → submit → present loop works unchanged. */
         s->current_frame = (s->current_frame + 1u) % s->frames_in_flight;
         s->frame_active = false;
+        f->state = FLUX_FRAME_STATE_PRESENTED;
         return FLUX_OK;
     }
 
     /* Synchronous present on the calling (main) thread. Mesa's WSI
      * dispatches Wayland events inside vkQueuePresentKHR; running it on
      * the same thread as the window event loop (e.g. glfwPollEvents)
-     * keeps the wl_display single-threaded. The per-slot render_finished
+     * keeps the wl_display single-threaded. The per-image render_finished
      * semaphore signalled by flux_frame_submit gates the present on
      * rendering completion. queue_lock serialises vs concurrent submits
      * on the same queue. */
     VkPresentInfoKHR pi = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &pf->render_finished,
+        .pWaitSemaphores = &s->render_finished[s->current_image],
         .swapchainCount = 1,
         .pSwapchains = &s->swapchain,
         .pImageIndices = &s->current_image,
@@ -446,6 +518,7 @@ flux_result flux_frame_present(flux_frame *f) {
 
     s->current_frame = (s->current_frame + 1u) % s->frames_in_flight;
     s->frame_active = false;
+    f->state = FLUX_FRAME_STATE_PRESENTED;
 
     if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR)
         return FLUX_ERROR_SURFACE_LOST;
@@ -462,24 +535,33 @@ flux_result flux_frame_present(flux_frame *f) {
 
 flux_result flux_frame_alloc_transient(flux_frame *f, size_t bytes, size_t alignment,
                                        flux_transient *out) {
-    if (!f || !f->surface || !out || !f->recording)
+    if (!f || !f->surface || !out || f->state != FLUX_FRAME_STATE_RECORDING)
         return FLUX_ERROR_INVALID_STATE;
+    *out = (flux_transient){0};
     if (alignment == 0)
         alignment = 16; /* sensible default */
+    if (alignment > 256 || (alignment & (alignment - 1)) != 0) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                  "transient alignment must be a power of two in [1, 256]");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
 
     flux_transient_ring *r = &f->surface->transient;
     VkDeviceSize base = (VkDeviceSize)f->slot * r->per_frame_size;
-    VkDeviceSize mask = (VkDeviceSize)alignment - 1;
     VkDeviceSize cur = r->cursor[f->slot];
-    VkDeviceSize abs = base + cur;
-    VkDeviceSize alg = (abs + mask) & ~mask;
-    VkDeviceSize end = alg + (VkDeviceSize)bytes;
-    if (end > base + r->per_frame_size) {
-        *out = (flux_transient){0};
-        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "transient ring exhausted for this frame");
-        return FLUX_ERROR_OUT_OF_MEMORY;
+    VkDeviceSize mask = (VkDeviceSize)alignment - 1;
+    if (cur > r->per_frame_size || cur > UINT64_MAX - mask) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "transient ring cursor overflow");
+        return FLUX_ERROR_OUT_OF_RANGE;
     }
-    r->cursor[f->slot] = end - base;
+    VkDeviceSize alg_rel = (cur + mask) & ~mask;
+    if (alg_rel > r->per_frame_size || (VkDeviceSize)bytes > r->per_frame_size - alg_rel) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "transient ring exhausted for this frame");
+        return FLUX_ERROR_OUT_OF_RANGE;
+    }
+    VkDeviceSize alg = base + alg_rel;
+    VkDeviceSize end = alg_rel + (VkDeviceSize)bytes;
+    r->cursor[f->slot] = end;
 
     *out = (flux_transient){
         .cpu = r->mapped + alg,
@@ -495,7 +577,7 @@ uint32_t flux_frame_index(const flux_frame *f) {
 }
 
 void flux_frame_timestamp_begin(flux_frame *f, const char *label) {
-    if (!f || !f->surface || !f->recording)
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
         return;
     flux_per_frame *pf = &f->surface->frames[f->slot];
     if (!pf->query_pool)
@@ -519,7 +601,7 @@ void flux_frame_timestamp_begin(flux_frame *f, const char *label) {
 }
 
 void flux_frame_timestamp_end(flux_frame *f) {
-    if (!f || !f->surface || !f->recording)
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
         return;
     flux_per_frame *pf = &f->surface->frames[f->slot];
     if (!pf->query_pool || pf->ts_open_top == 0)

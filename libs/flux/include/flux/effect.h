@@ -7,12 +7,11 @@
  * frame, the caller supplies a one-shot command buffer.
  *
  * Output ownership and lifetime
- *   The effect owns the output image. It is allocated from a
- *   per-device transient pool keyed by (format, width, height).
- *   The returned flux_image * is valid until *either* the next
- *   effect submission on the same device reuses the same slot,
- *   *or* flux_effect_reset(device) is called, *or* the device is
- *   destroyed — whichever comes first.
+ *   The effect owns the output image. It is leased exclusively from a
+ *   per-device pool keyed by (format, width, height). A writable intermediate
+ *   or output is never reused by another command buffer in the same reset
+ *   epoch. The returned flux_image * remains valid until
+ *   flux_effect_reset(device) or device destruction.
  *
  *   To take a long-lived copy, run the effect and then copy the
  *   result into a caller-owned flux_image via the canvas/image
@@ -100,12 +99,12 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_promote(flux_image *transient, f
 /*  Lifecycle                                                         */
 /* ------------------------------------------------------------------ */
 
-/* Release every transient output image the effect module is
- * currently holding for `device`. Safe to call between frames
- * (do not call while a command buffer that references a
- * transient output is still in flight). Callers that don't
- * reset eventually will see the per-device pool grow to the
- * high-water mark of concurrent live transient outputs. */
+/* End the current effect lease epoch and return its intermediate/output slots
+ * to the per-device pool. Every command buffer that references an effect image
+ * must already have completed, and no recorded command buffer that references
+ * one may be submitted later. With multiple frames in flight, a CPU frame
+ * boundary is not sufficient; wait all relevant fences or call
+ * flux_device_wait_idle first. Old output pointers are invalid after reset. */
 FLUX_API void flux_effect_reset(flux_device *device);
 
 #ifdef __cplusplus

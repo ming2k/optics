@@ -60,19 +60,18 @@ lens_node *lens_node_next_sibling(const lens_node *n) {
 void *lens_node_state(lens_node *n, size_t bytes) {
     if (!n || bytes == 0)
         return NULL;
-    if (n->state && n->state_bytes >= bytes)
-        return n->state;
-    /* Allocate (or grow) through the owning context's persistent
-     * allocator; zero-init on first allocation (ADR-0004). Freed at
-     * reap or lens_destroy. */
+    if (n->state) {
+        /* The API promises a stable address for the lifetime of the node.
+         * Growing would invalidate previously-borrowed pointers, so callers
+         * must use one fixed state type/size for a given node id. */
+        return n->state_bytes == bytes ? n->state : NULL;
+    }
+    /* Allocate through the owning context's persistent allocator and zero-init
+     * on first touch (ADR-0004). Freed at reap or lens_destroy. */
     void *mem = lensi_alloc(n->ui, bytes);
     if (!mem)
         return NULL;
     memset(mem, 0, bytes);
-    if (n->state) {
-        memcpy(mem, n->state, n->state_bytes < bytes ? n->state_bytes : bytes);
-        lensi_free(n->ui, n->state);
-    }
     n->state = mem;
     n->state_bytes = bytes;
     return n->state;

@@ -261,7 +261,9 @@ flux_result flux_graphics_pipeline_create(flux_device *d, const flux_graphics_pi
         .pDynamicState = &dyn,
         .layout = p->layout,
     };
+    flux_device_vk_pipeline_cache_lock(d);
     vr = vkCreateGraphicsPipelines(d->device, d->pipeline_cache, 1, &gpci, nullptr, &p->pipeline);
+    flux_device_vk_pipeline_cache_unlock(d);
     vkDestroyShaderModule(d->device, vs, nullptr);
     vkDestroyShaderModule(d->device, fs, nullptr);
     if (vr != VK_SUCCESS) {

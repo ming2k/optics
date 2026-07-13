@@ -104,9 +104,8 @@ flux_result flux_vk_alloc_image(flux_device *d, const VkImageCreateInfo *ici,
  * `export_info` (VkMemoryDedicatedAllocateInfo etc.) is appended after our
  * flags-info so the memory is dedicated to this image and exportable. */
 flux_result flux_vk_alloc_image_dedicated(flux_device *d, const VkImageCreateInfo *ici,
-                                          VkMemoryPropertyFlags props,
-                                          const void *export_info, VkImage *out_image,
-                                          flux_vk_alloc *out_alloc) {
+                                          VkMemoryPropertyFlags props, const void *export_info,
+                                          VkImage *out_image, flux_vk_alloc *out_alloc) {
     *out_image = VK_NULL_HANDLE;
     *out_alloc = (flux_vk_alloc){0};
 
@@ -190,6 +189,10 @@ flux_result flux_transient_ring_init(flux_transient_ring *r, flux_device *d,
     memset(r, 0, sizeof(*r));
     if (per_frame == 0)
         per_frame = 16ull * 1024 * 1024; /* 16 MiB default */
+    if (d->frames_in_flight == 0 || per_frame > UINT64_MAX / d->frames_in_flight) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "transient ring size overflow");
+        return FLUX_ERROR_OUT_OF_RANGE;
+    }
     r->per_frame_size = per_frame;
     r->total_size = per_frame * d->frames_in_flight;
 

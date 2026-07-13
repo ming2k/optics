@@ -109,6 +109,10 @@ int main(void) {
         EXPECT(flux_device_vk_device(d) != VK_NULL_HANDLE);
         EXPECT(flux_device_vk_graphics_queue(d) != VK_NULL_HANDLE);
         EXPECT(flux_device_vk_pipeline_cache(d) != VK_NULL_HANDLE);
+        flux_device_vk_pipeline_cache_lock(d);
+        flux_device_vk_pipeline_cache_unlock(d);
+        flux_device_vk_pipeline_cache_lock(nullptr);
+        flux_device_vk_pipeline_cache_unlock(nullptr);
         EXPECT(flux_device_bindless_set(d) != VK_NULL_HANDLE);
         EXPECT(flux_device_bindless_layout(d) != VK_NULL_HANDLE);
     }

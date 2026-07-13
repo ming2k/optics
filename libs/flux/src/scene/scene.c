@@ -355,8 +355,10 @@ static flux_result create_material_pipeline(flux_material *mat, VkFormat color_f
         .pDynamicState = &dyn,
         .layout = mat->layout,
     };
+    flux_device_vk_pipeline_cache_lock(mat->device);
     vr = vkCreateGraphicsPipelines(d, mat->device->pipeline_cache, 1, &gpci, nullptr,
                                    &mat->pipeline);
+    flux_device_vk_pipeline_cache_unlock(mat->device);
     vkDestroyShaderModule(d, vs, nullptr);
     vkDestroyShaderModule(d, fs, nullptr);
     if (vr != VK_SUCCESS) {

@@ -100,7 +100,9 @@ flux_result flux_compute_pipeline_create(flux_device *d, const flux_compute_pipe
         .stage = stage,
         .layout = p->layout,
     };
+    flux_device_vk_pipeline_cache_lock(d);
     vr = vkCreateComputePipelines(d->device, d->pipeline_cache, 1, &cpci, nullptr, &p->pipeline);
+    flux_device_vk_pipeline_cache_unlock(d);
     vkDestroyShaderModule(d->device, module, nullptr);
     if (vr != VK_SUCCESS) {
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkCreateComputePipelines failed", vr);

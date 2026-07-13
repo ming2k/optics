@@ -30,14 +30,24 @@ static void test_split_builds(void) {
 
 /* Seeding the ratio sizes the first pane accordingly. Verify via the
  * accessibility walk (post-layout bounds). */
+typedef struct pane_width_search {
+    const char *name;
+    float width;
+} pane_width_search;
+
+static void find_pane_width(const lens_semantics *semantics, flux_rect bounds, lens_id id,
+                            lens_id parent, void *user) {
+    (void)id;
+    (void)parent;
+    pane_width_search *search = user;
+    if (semantics->name && strcmp(semantics->name, search->name) == 0)
+        search->width = bounds.w;
+}
+
 static float pane_w_via_a11y(lens *ui, const char *want) {
-    float found = -1;
-    void visit(const lens_semantics *s, flux_rect b, lens_id id, lens_id p, void *u) {
-        if (s->name && strcmp(s->name, want) == 0)
-            *(float *)u = b.w;
-    }
-    lens_accessibility_walk(ui, visit, &found);
-    return found;
+    pane_width_search search = {.name = want, .width = -1.0f};
+    lens_accessibility_walk(ui, find_pane_width, &search);
+    return search.width;
 }
 
 static void test_ratio_sizes_panes(void) {

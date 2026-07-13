@@ -48,22 +48,36 @@ static VkShaderModule make_module(VkDevice d, const void *bytes, size_t len) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Device-cached pipeline (per swapchain format)                     */
+/*  Device-cached pipeline (per swapchain format and sample count)    */
 /*                                                                    */
 /*  flux_canvas_create previously built a fresh VkPipeline per        */
 /*  canvas (~ms each). With multiple short-lived canvases (typical    */
 /*  for flux-ui-style UIs) that cost added up. The pipeline depends   */
-/*  only on (color_format), so we cache one per format on the device  */
+/*  only on (color_format, samples), so we cache it on the device     */
 /*  and share it across canvases. Pipelines outlive any individual    */
 /*  canvas; the device's canvas_state_destroy hook frees them.        */
 /* ------------------------------------------------------------------ */
 
 #define CANVAS_PIPELINE_CACHE_CAP 8
+#define CANVAS_SAMPLE_VARIANT_COUNT 2
+
+enum canvas_sample_variant {
+    CANVAS_SAMPLE_SINGLE = 0,
+    CANVAS_SAMPLE_MSAA,
+};
+
+static int canvas_sample_variant(VkSampleCountFlagBits samples) {
+    if (samples == VK_SAMPLE_COUNT_1_BIT)
+        return CANVAS_SAMPLE_SINGLE;
+    if (samples == FLUX_CANVAS_SAMPLES)
+        return CANVAS_SAMPLE_MSAA;
+    return -1;
+}
 
 typedef struct canvas_cache_entry {
     VkFormat color_format; /* VK_FORMAT_UNDEFINED = unused slot */
     VkPipelineLayout layout;
-    VkPipeline pipelines[CANVAS_PIPE_COUNT];
+    VkPipeline pipelines[CANVAS_SAMPLE_VARIANT_COUNT][CANVAS_PIPE_COUNT];
 } canvas_cache_entry;
 
 typedef struct canvas_module_state {
@@ -79,10 +93,10 @@ static void canvas_state_destroy(flux_device *d) {
         return;
     for (uint32_t i = 0; i < CANVAS_PIPELINE_CACHE_CAP; ++i) {
         canvas_cache_entry *e = &st->entries[i];
-        for (uint32_t k = 0; k < CANVAS_PIPE_COUNT; ++k) {
-            if (e->pipelines[k])
-                vkDestroyPipeline(d->device, e->pipelines[k], nullptr);
-        }
+        for (uint32_t sample = 0; sample < CANVAS_SAMPLE_VARIANT_COUNT; ++sample)
+            for (uint32_t k = 0; k < CANVAS_PIPE_COUNT; ++k)
+                if (e->pipelines[sample][k])
+                    vkDestroyPipeline(d->device, e->pipelines[sample][k], nullptr);
         if (e->layout)
             vkDestroyPipelineLayout(d->device, e->layout, nullptr);
     }
@@ -93,15 +107,36 @@ static void canvas_state_destroy(flux_device *d) {
 }
 
 void *canvas_state_get_or_init(flux_device *d) {
-    if (d->canvas_state)
-        return d->canvas_state;
-    canvas_module_state *st = flux_internal_alloc(d, sizeof(*st));
-    if (!st)
+    pthread_mutex_lock(&d->module_state_lock);
+    canvas_module_state *published = d->canvas_state;
+    pthread_mutex_unlock(&d->module_state_lock);
+    if (published)
+        return published;
+
+    canvas_module_state *candidate = flux_internal_alloc(d, sizeof(*candidate));
+    if (!candidate)
         return nullptr;
-    pthread_mutex_init(&st->lock, nullptr);
-    d->canvas_state = st;
-    d->canvas_state_destroy = canvas_state_destroy;
-    return st;
+    if (pthread_mutex_init(&candidate->lock, nullptr) != 0) {
+        flux_internal_free(d, candidate);
+        return nullptr;
+    }
+
+    pthread_mutex_lock(&d->module_state_lock);
+    if (!d->canvas_state) {
+        d->canvas_state = candidate;
+        d->canvas_state_destroy = canvas_state_destroy;
+        published = candidate;
+        candidate = nullptr;
+    } else {
+        published = d->canvas_state;
+    }
+    pthread_mutex_unlock(&d->module_state_lock);
+
+    if (candidate) {
+        pthread_mutex_destroy(&candidate->lock);
+        flux_internal_free(d, candidate);
+    }
+    return published;
 }
 
 /* Probe the stencil attachment format once per device. Every canvas
@@ -140,8 +175,9 @@ VkFormat flux_canvas_stencil_format(flux_device *d) {
 }
 
 static flux_result build_canvas_pipeline(flux_device *device, VkFormat color_format,
-                                         VkFormat stencil_format, canvas_pipe_id id,
-                                         VkPipelineLayout layout, VkPipeline *out_pipeline);
+                                         VkFormat stencil_format, VkSampleCountFlagBits samples,
+                                         canvas_pipe_id id, VkPipelineLayout layout,
+                                         VkPipeline *out_pipeline);
 
 static flux_result build_canvas_layout(flux_device *device, VkPipelineLayout *out_layout) {
     /* Pipeline layout shared by every canvas pipeline. Push constants
@@ -170,8 +206,14 @@ static flux_result build_canvas_layout(flux_device *device, VkPipelineLayout *ou
 /* Returns the cached layout for this format (always set) plus the
  * pipeline for the requested internal id (built lazily). Pipelines
  * are owned by the device. */
-flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format, canvas_pipe_id id,
+flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
+                                   VkSampleCountFlagBits samples, canvas_pipe_id id,
                                    VkPipelineLayout *out_layout, VkPipeline *out_pipeline) {
+    int sample_variant = canvas_sample_variant(samples);
+    if (sample_variant < 0 || id < 0 || id >= CANVAS_PIPE_COUNT) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid canvas pipeline sample count or id");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     canvas_module_state *st = canvas_state_get_or_init(device);
     if (!st)
         return FLUX_ERROR_OUT_OF_MEMORY;
@@ -210,16 +252,16 @@ flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format, c
     }
     *out_layout = slot->layout;
 
-    if (!slot->pipelines[id]) {
+    if (!slot->pipelines[sample_variant][id]) {
         flux_result r =
-            build_canvas_pipeline(device, color_format, stencil_format_locked(device, st), id,
-                                  slot->layout, &slot->pipelines[id]);
+            build_canvas_pipeline(device, color_format, stencil_format_locked(device, st), samples,
+                                  id, slot->layout, &slot->pipelines[sample_variant][id]);
         if (r != FLUX_OK) {
             pthread_mutex_unlock(&st->lock);
             return r;
         }
     }
-    *out_pipeline = slot->pipelines[id];
+    *out_pipeline = slot->pipelines[sample_variant][id];
     pthread_mutex_unlock(&st->lock);
     return FLUX_OK;
 }
@@ -227,19 +269,21 @@ flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format, c
 /* Paint-kind front end kept for canvas.c call sites. The internal
  * 0xff code selects the image pipeline (images are dispatched via
  * flux_canvas_draw_image, not paint.kind). */
-flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format, flux_paint_kind kind,
+flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format,
+                                VkSampleCountFlagBits samples, flux_paint_kind kind,
                                 VkPipelineLayout *out_layout, VkPipeline *out_pipeline) {
     canvas_pipe_id id = CANVAS_PIPE_SOLID;
     if ((uint32_t)kind == 0xffu)
         id = CANVAS_PIPE_IMAGE;
     else if (kind == FLUX_PAINT_LINEAR_GRADIENT || kind == FLUX_PAINT_RADIAL_GRADIENT)
         id = CANVAS_PIPE_GRADIENT;
-    return get_canvas_pipeline_id(device, color_format, id, out_layout, out_pipeline);
+    return get_canvas_pipeline_id(device, color_format, samples, id, out_layout, out_pipeline);
 }
 
 static flux_result build_canvas_pipeline(flux_device *device, VkFormat color_format,
-                                         VkFormat stencil_format, canvas_pipe_id id,
-                                         VkPipelineLayout layout, VkPipeline *out_pipeline) {
+                                         VkFormat stencil_format, VkSampleCountFlagBits samples,
+                                         canvas_pipe_id id, VkPipelineLayout layout,
+                                         VkPipeline *out_pipeline) {
     VkDevice d = device->device;
 
     const unsigned char *frag_spv = canvas_solid_frag_spv;
@@ -308,7 +352,7 @@ static flux_result build_canvas_pipeline(flux_device *device, VkFormat color_for
     };
     VkPipelineMultisampleStateCreateInfo ms = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = FLUX_CANVAS_SAMPLES,
+        .rasterizationSamples = samples,
     };
     /* Premultiplied SRC_OVER. The stencil-write pass masks all color
      * channels off — it only touches the stencil attachment. */
@@ -393,8 +437,10 @@ static flux_result build_canvas_pipeline(flux_device *device, VkFormat color_for
         .layout = layout,
     };
 
+    flux_device_vk_pipeline_cache_lock(device);
     VkResult vr =
         vkCreateGraphicsPipelines(d, device->pipeline_cache, 1, &gpci, nullptr, out_pipeline);
+    flux_device_vk_pipeline_cache_unlock(device);
     vkDestroyShaderModule(d, vs, nullptr);
     vkDestroyShaderModule(d, fs, nullptr);
     if (vr != VK_SUCCESS) {

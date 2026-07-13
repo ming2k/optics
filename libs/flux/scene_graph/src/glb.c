@@ -12,6 +12,8 @@
 #include <flux/scene.h>
 
 #include <float.h>
+#include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -49,23 +51,26 @@ static flux_result glb_parse(const void *bytes, size_t len, glb *out) {
     if (magic != GLB_MAGIC || version != GLB_VERSION2 || total > len)
         return FLUX_ERROR_INVALID_ARGUMENT;
 
-    const uint8_t *q = p + 12;
-    const uint8_t *end = p + total;
+    size_t offset = 12;
     memset(out, 0, sizeof(*out));
-    while (q + 8 <= end) {
+    while ((size_t)total - offset >= 8) {
+        const uint8_t *q = p + offset;
         uint32_t clen = rd_u32(q);
         uint32_t ctype = rd_u32(q + 4);
-        if (q + 8 + clen > end)
+        offset += 8;
+        if ((size_t)clen > (size_t)total - offset)
             return FLUX_ERROR_INVALID_ARGUMENT;
         if (ctype == CHUNK_JSON && !out->json) {
-            out->json = q + 8;
+            out->json = p + offset;
             out->json_len = clen;
         } else if (ctype == CHUNK_BIN && !out->bin) {
-            out->bin = q + 8;
+            out->bin = p + offset;
             out->bin_len = clen;
         }
-        q += 8 + clen;
+        offset += clen;
     }
+    if (offset != total)
+        return FLUX_ERROR_INVALID_ARGUMENT;
     if (!out->json)
         return FLUX_ERROR_INVALID_ARGUMENT;
     return FLUX_OK;
@@ -82,47 +87,83 @@ static flux_result glb_parse(const void *bytes, size_t len, glb *out) {
 #define CT_UINT 5125
 #define CT_FLOAT 5126
 
-/* Resolve accessor `idx` to a raw pointer into `bin`, its element component
- * type, its component count per element (1..4), its element count, and the
- * byte stride between consecutive elements (0 == tight). Returns NULL if the
- * accessor is outside the supported subset. */
+static size_t comp_size(int comp) {
+    switch (comp) {
+    case CT_BYTE:
+    case CT_UBYTE:
+        return 1;
+    case CT_SHORT:
+    case CT_USHORT:
+        return 2;
+    case CT_UINT:
+    case CT_FLOAT:
+        return 4;
+    default:
+        return 0;
+    }
+}
+
+static bool json_size(const jv *v, size_t fallback, size_t *out) {
+    double n = v ? jv_num(v, -1.0) : (double)fallback;
+    if (!isfinite(n) || n < 0.0 || n >= (double)SIZE_MAX)
+        return false;
+    size_t value = (size_t)n;
+    if ((double)value != n)
+        return false;
+    *out = value;
+    return true;
+}
+
+/* Resolve accessor `idx` to a fully bounds-checked span in its bufferView.
+ * Returns NULL for malformed data as well as unsupported accessor forms. */
 static const uint8_t *accessor_data(const jv *root, int idx, const uint8_t *bin, size_t bin_len,
                                     const uint8_t **base, size_t base_len, int *comp, int *comps,
                                     size_t *count, size_t *stride) {
+    if (idx < 0)
+        return NULL;
     const jv *accs = jv_obj_get(root, "accessors");
     const jv *bvws = jv_obj_get(root, "bufferViews");
     const jv *acc = jv_arr_at(accs, (size_t)idx);
     if (!acc)
         return NULL;
 
-    int bv_idx = (int)jv_num(jv_obj_get(acc, "bufferView"), -1);
-    const jv *bv = jv_arr_at(bvws, (size_t)bv_idx);
+    size_t bv_idx;
+    if (!json_size(jv_obj_get(acc, "bufferView"), SIZE_MAX, &bv_idx) || bv_idx == SIZE_MAX)
+        return NULL;
+    const jv *bv = jv_arr_at(bvws, bv_idx);
     if (!bv)
         return NULL;
 
-    /* buffer must be the embedded BIN chunk (index 0) when present. If a
-     * bufferView names another buffer, this loader cannot resolve it. */
-    int buf = (int)jv_num(jv_obj_get(bv, "buffer"), 0);
-    size_t bv_off = (size_t)jv_num(jv_obj_get(bv, "byteOffset"), 0);
-    size_t bv_stride = (size_t)jv_num(jv_obj_get(bv, "byteStride"), 0);
-    size_t a_off = (size_t)jv_num(jv_obj_get(acc, "byteOffset"), 0);
+    size_t buf_idx;
+    if (!json_size(jv_obj_get(bv, "buffer"), 0, &buf_idx) || buf_idx > INT_MAX)
+        return NULL;
+    int buf = (int)buf_idx;
+    size_t bv_off, bv_len, bv_stride, a_off;
+    if (!json_size(jv_obj_get(bv, "byteOffset"), 0, &bv_off) ||
+        !json_size(jv_obj_get(bv, "byteLength"), 0, &bv_len) ||
+        !json_size(jv_obj_get(bv, "byteStride"), 0, &bv_stride) ||
+        !json_size(jv_obj_get(acc, "byteOffset"), 0, &a_off))
+        return NULL;
 
     const uint8_t *seg = NULL;
     size_t seglen = 0;
     if (buf == 0 && bin) {
         seg = bin;
         seglen = bin_len;
-    } else if (base) {
+    } else if (base && *base) {
         seg = *base;
         seglen = base_len;
     }
-    if (!seg)
-        return NULL;
-    if (bv_off + a_off > seglen)
+    if (!seg || bv_off > seglen || bv_len > seglen - bv_off || a_off > bv_len)
         return NULL;
 
-    *comp = (int)jv_num(jv_obj_get(acc, "componentType"), 0);
-    *count = (size_t)jv_num(jv_obj_get(acc, "count"), 0);
+    size_t comp_value;
+    if (!json_size(jv_obj_get(acc, "componentType"), 0, &comp_value) || comp_value > INT_MAX)
+        return NULL;
+    *comp = (int)comp_value;
+    size_t csize = comp_size(*comp);
+    if (csize == 0 || !json_size(jv_obj_get(acc, "count"), 0, count) || *count == 0)
+        return NULL;
 
     const char *type = NULL;
     const jv *tv = jv_obj_get(acc, "type");
@@ -137,30 +178,20 @@ static const uint8_t *accessor_data(const jv *root, int idx, const uint8_t *bin,
     else if (type && strcmp(type, "VEC4") == 0)
         *comps = 4;
     else
-        *comps = 0;
-    if (*comps == 0 || *count == 0)
         return NULL;
 
-    if (bv_stride == 0) {
-        /* Tight packing: stride is the element size. */
-        size_t csize = (*comp == CT_FLOAT) ? 4 : (*comp == CT_USHORT ? 2 : 4);
-        bv_stride = csize * (size_t)*comps;
-    }
+    size_t element_size = csize * (size_t)*comps;
+    if (bv_stride == 0)
+        bv_stride = element_size;
+    if (bv_stride < element_size)
+        return NULL;
+
+    size_t available = bv_len - a_off;
+    if (element_size > available || *count - 1 > (available - element_size) / bv_stride)
+        return NULL;
+
     *stride = bv_stride;
     return seg + bv_off + a_off;
-}
-
-static size_t comp_size(int comp) {
-    switch (comp) {
-    case CT_BYTE:
-    case CT_UBYTE:
-        return 1;
-    case CT_SHORT:
-    case CT_USHORT:
-        return 2;
-    default:
-        return 4; /* CT_UINT, CT_FLOAT */
-    }
 }
 
 /* Read one accessor element as up to 4 floats (normalising integer types to
@@ -170,24 +201,30 @@ static void read_floats(const uint8_t *ptr, int comp, int comps, float *out) {
     for (int i = 0; i < comps; ++i) {
         const uint8_t *e = ptr + (size_t)i * comp_size(comp);
         switch (comp) {
-        case CT_FLOAT:
-            memcpy(&out[i], e, 4);
+        case CT_FLOAT: {
+            uint32_t bits = rd_u32(e);
+            memcpy(&out[i], &bits, sizeof(bits));
             break;
+        }
         case CT_USHORT:
-            out[i] = (float)*(const uint16_t *)e;
+            out[i] = (float)((uint16_t)e[0] | ((uint16_t)e[1] << 8));
             break;
         case CT_UINT:
-            out[i] = (float)*(const uint32_t *)e;
+            out[i] = (float)rd_u32(e);
             break;
         case CT_UBYTE:
             out[i] = (float)*e;
             break;
         case CT_BYTE:
-            out[i] = (float)*(const int8_t *)e;
+            out[i] = (float)(int8_t)*e;
             break;
-        case CT_SHORT:
-            out[i] = (float)*(const int16_t *)e;
+        case CT_SHORT: {
+            uint16_t bits = (uint16_t)e[0] | ((uint16_t)e[1] << 8);
+            int16_t value;
+            memcpy(&value, &bits, sizeof(value));
+            out[i] = (float)value;
             break;
+        }
         default:
             out[i] = 0.0f;
             break;
@@ -232,6 +269,8 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
                                           : NULL;
     bool have_uv = uv_ptr && ucomp == CT_FLOAT && ucomps == 2 && ucount == pcount;
 
+    if (pcount > UINT32_MAX || pcount > SIZE_MAX / sizeof(flux_vertex))
+        return false;
     flux_vertex *verts = malloc(pcount * sizeof(flux_vertex));
     if (!verts)
         return false;
@@ -289,19 +328,37 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
             free(verts);
             return false;
         }
+        if (icomp != CT_UBYTE && icomp != CT_USHORT && icomp != CT_UINT) {
+            free(verts);
+            return false;
+        }
+        if (icount > UINT32_MAX || icount > SIZE_MAX / sizeof(uint32_t)) {
+            free(verts);
+            return false;
+        }
         idx = malloc(icount * sizeof(uint32_t));
         if (!idx) {
             free(verts);
             return false;
         }
         for (size_t i = 0; i < icount; ++i) {
-            float v = 0;
-            read_floats(ip + i * istride, icomp, 1, &v);
-            idx[i] = (uint32_t)v;
+            const uint8_t *value = ip + i * istride;
+            idx[i] = icomp == CT_UBYTE    ? value[0]
+                     : icomp == CT_USHORT ? ((uint32_t)value[0] | ((uint32_t)value[1] << 8))
+                                          : rd_u32(value);
+            if (idx[i] >= pcount) {
+                free(idx);
+                free(verts);
+                return false;
+            }
         }
         idx_count = icount;
     } else {
         idx_count = pcount;
+        if (idx_count > SIZE_MAX / sizeof(uint32_t)) {
+            free(verts);
+            return false;
+        }
         idx = malloc(idx_count * sizeof(uint32_t));
         if (!idx) {
             free(verts);
@@ -434,7 +491,6 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
         const jv *prims_arr = jv_obj_get(mesh, "primitives");
         uint32_t pc = (prims_arr && prims_arr->kind == J_ARR) ? (uint32_t)prims_arr->arr.count : 0;
         mesh_prim_start[mi] = (int)prim_n;
-        mesh_prim_count[mi] = (int)pc;
         for (uint32_t pi = 0; pi < pc; ++pi) {
             if (prim_n == prim_cap) {
                 prim_cap *= 2;
@@ -449,6 +505,7 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
             }
             prim_n++;
         }
+        mesh_prim_count[mi] = (int)(prim_n - (size_t)mesh_prim_start[mi]);
     }
 
     if (prim_n == 0) {
@@ -501,10 +558,14 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
     if (scene_nodes && scene_nodes->kind == J_ARR) {
         root_n = (uint32_t)scene_nodes->arr.count;
         roots = root_n ? malloc(root_n * sizeof(int)) : NULL;
+        if (root_n && !roots)
+            goto oom;
         for (uint32_t i = 0; i < root_n; ++i)
             roots[i] = (int)jv_num(jv_arr_at(scene_nodes, i), -1);
     } else if (node_count) {
         roots = malloc(node_count * sizeof(int));
+        if (!roots)
+            goto oom;
         for (uint32_t ni = 0; ni < node_count; ++ni)
             if (narr[ni].parent < 0 && root_n < node_count)
                 roots[root_n++] = (int)ni;

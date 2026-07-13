@@ -20,7 +20,7 @@ the effect header in automatically.
 | Aspect             | Detail                                                                                                         |
 |--------------------|----------------------------------------------------------------------------------------------------------------|
 | Allocator          | Effect-internal transient pool, per-device, keyed by `(format, width, height)`.                                |
-| Lifetime           | Valid until the next call that reuses the slot, or `flux_effect_reset(device)`, or device destruction — first. |
+| Lifetime           | Exclusively leased until `flux_effect_reset(device)` or device destruction.                                    |
 | Bindless           | Output is registered into both SAMPLED and STORAGE bindless slots; sample with `flux_image_bindless_handle`.    |
 | Layout             | `VK_IMAGE_LAYOUT_GENERAL` after the trailing barrier the effect emits.                                          |
 
@@ -114,16 +114,17 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_promote(
 FLUX_API void flux_effect_reset(flux_device *device);
 ```
 
-Release every transient output image currently held for `device`.
-Cached intermediates are kept (they're an implementation detail of
-the separable blur and never exposed to callers). Safe to call:
+End the current lease epoch and return its output and intermediate slots to the
+keyed pool. Old output pointers become invalid. Safe to call:
 
 - On a device with no effect state allocated (no-op).
 - Repeatedly with no calls between.
-- Between frames.
+- After every command buffer referencing an effect image has completed.
 
-Do **not** call while a command buffer that still references a
-transient output is in flight.
+Do **not** call merely because CPU recording moved to another frame. With
+multiple frames in flight, wait every relevant fence or call
+`flux_device_wait_idle(device)`. Recorded-but-not-submitted command buffers also
+keep their referenced slots live.
 
 ## Threading
 

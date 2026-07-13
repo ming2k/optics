@@ -17,6 +17,7 @@
 #![deny(rust_2018_idioms)]
 
 use std::fmt;
+use std::marker::PhantomData;
 
 pub use flux_sys as sys;
 
@@ -98,7 +99,10 @@ impl Device {
         let rc = unsafe { sys::flux_device_create(&desc, &mut out) };
         Error::check(rc)?;
         debug_assert!(!out.is_null());
-        Ok(Device { raw: out, borrowed: false })
+        Ok(Device {
+            raw: out,
+            borrowed: false,
+        })
     }
 
     /// Wrap a raw `flux_device*` as a non-owning view. Use this to obtain a
@@ -119,7 +123,10 @@ impl Device {
     /// `PaintHost::device()`), and must remain valid for as long as the
     /// returned `Device` (or any `&Device` derived from it) is used.
     pub unsafe fn borrow_raw(raw: *mut sys::flux_device) -> Device {
-        Device { raw, borrowed: true }
+        Device {
+            raw,
+            borrowed: true,
+        }
     }
 
     /// The underlying raw `flux_device` pointer. Borrowed; the `Device` retains
@@ -206,7 +213,7 @@ impl Surface {
     /// Create an OFFSCREEN surface (no window, no swapchain): flux owns RGBA8
     /// colour images at `width` x `height`. The frame loop is unchanged
     /// ([`Surface::begin_frame`] → record → [`Frame::submit`] →
-    /// [`Frame::present`]); `present` completes the frame without presenting,
+    /// [`SubmittedFrame::present`]); `present` completes the frame without presenting,
     /// and [`Surface::read_pixels`] reads the result back. Both dimensions must
     /// be non-zero. Requires a headless or windowed device equally.
     pub fn offscreen(device: &Device, width: u32, height: u32) -> Result<Surface, Error> {
@@ -238,7 +245,7 @@ impl Surface {
     }
 
     /// Recreate the swapchain at a new extent. Safe to call from a resize event.
-    pub fn resize(&self, width: u32, height: u32) -> Result<(), Error> {
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), Error> {
         Error::check(unsafe { sys::flux_surface_resize(self.raw, width, height) })
     }
 
@@ -251,7 +258,7 @@ impl Surface {
 
     /// Acquire the next frame. Returns the backend result so callers can handle
     /// `SURFACE_LOST` / out-of-date by resizing.
-    pub fn begin_frame(&self) -> Result<Frame, Error> {
+    pub fn begin_frame(&self) -> Result<Frame<'_>, Error> {
         let desc = sys::flux_frame_begin_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_FRAME_BEGIN_DESC,
             timeout_ns: 0,
@@ -259,7 +266,10 @@ impl Surface {
         };
         let mut out: *mut sys::flux_frame = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_surface_begin_frame(self.raw, &desc, &mut out) })?;
-        Ok(Frame { raw: out })
+        Ok(Frame {
+            raw: out,
+            _surface: PhantomData,
+        })
     }
 
     pub fn as_raw(&self) -> *mut sys::flux_surface {
@@ -273,21 +283,45 @@ impl Drop for Surface {
     }
 }
 
-/// A transient per-frame handle obtained from [`Surface::begin_frame`]. Not
-/// refcounted: valid until [`Frame::present`]; it is a borrow into the
-/// surface's swapchain ring.
-pub struct Frame {
+/// A recording frame obtained from [`Surface::begin_frame`]. It borrows the
+/// surface because the underlying C frame is stored inside that surface rather
+/// than being independently refcounted.
+///
+/// The frame API uses typestate: submission consumes this value and returns a
+/// [`SubmittedFrame`], which is the only type that can be presented. Duplicate
+/// and out-of-order transitions therefore cannot be expressed through safe
+/// Rust.
+#[must_use = "a frame must be submitted and then presented"]
+pub struct Frame<'surface> {
     raw: *mut sys::flux_frame,
+    _surface: PhantomData<&'surface Surface>,
 }
 
-impl Frame {
-    /// Submit recorded work to the GPU.
-    pub fn submit(&self) -> Result<(), Error> {
-        Error::check(unsafe { sys::flux_frame_submit(self.raw) })
+impl<'surface> Frame<'surface> {
+    /// Submit recorded work to the GPU and advance to the submitted state.
+    pub fn submit(self) -> Result<SubmittedFrame<'surface>, Error> {
+        Error::check(unsafe { sys::flux_frame_submit(self.raw) })?;
+        Ok(SubmittedFrame {
+            raw: self.raw,
+            _surface: PhantomData,
+        })
     }
 
-    /// Present the submitted frame to the surface.
-    pub fn present(&self) -> Result<(), Error> {
+    pub fn as_raw(&self) -> *mut sys::flux_frame {
+        self.raw
+    }
+}
+
+/// A successfully submitted frame waiting to be presented.
+#[must_use = "a submitted frame must be presented"]
+pub struct SubmittedFrame<'surface> {
+    raw: *mut sys::flux_frame,
+    _surface: PhantomData<&'surface Surface>,
+}
+
+impl SubmittedFrame<'_> {
+    /// Present the frame and consume the surface-owned frame-slot borrow.
+    pub fn present(self) -> Result<(), Error> {
         Error::check(unsafe { sys::flux_frame_present(self.raw) })
     }
 
@@ -320,7 +354,10 @@ impl Canvas {
     /// as long as the returned `Canvas` (or any `&Canvas` derived from it) is
     /// used.
     pub unsafe fn borrow_raw(raw: *mut sys::flux_canvas) -> Canvas {
-        Canvas { raw, borrowed: true }
+        Canvas {
+            raw,
+            borrowed: true,
+        }
     }
 }
 
@@ -333,7 +370,10 @@ impl Canvas {
         };
         let mut out: *mut sys::flux_canvas = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_canvas_create(&desc, &mut out) })?;
-        Ok(Canvas { raw: out, borrowed: false })
+        Ok(Canvas {
+            raw: out,
+            borrowed: false,
+        })
     }
 
     /// Create a headless **software (CPU)** canvas with a `width`x`height`
@@ -349,12 +389,15 @@ impl Canvas {
     pub fn new_cpu(width: u32, height: u32, scale: f32) -> Result<Canvas, Error> {
         let mut out: *mut sys::flux_canvas = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_canvas_create_cpu(width, height, scale, &mut out) })?;
-        Ok(Canvas { raw: out, borrowed: false })
+        Ok(Canvas {
+            raw: out,
+            borrowed: false,
+        })
     }
 
     /// Begin recording. `clear` clears the surface to a packed color; `None`
     /// loads the existing contents.
-    pub fn begin(&self, frame: &Frame, clear: Option<u32>) -> Result<(), Error> {
+    pub fn begin(&self, frame: &Frame<'_>, clear: Option<u32>) -> Result<(), Error> {
         let color = clear; // flux_color is a packed u32
         let ptr = color
             .as_ref()
@@ -366,7 +409,7 @@ impl Canvas {
     /// Unified, backend-agnostic pass bracket. Pass `Some(frame)` for a GPU
     /// canvas and `None` for a CPU canvas; the drawing code in between is
     /// identical either way. `clear` clears to a packed color, `None` loads.
-    pub fn begin_frame(&self, frame: Option<&Frame>, clear: Option<u32>) -> Result<(), Error> {
+    pub fn begin_frame(&self, frame: Option<&Frame<'_>>, clear: Option<u32>) -> Result<(), Error> {
         let fptr = frame.map(|f| f.raw).unwrap_or(std::ptr::null_mut());
         let ptr = clear
             .as_ref()
@@ -556,6 +599,21 @@ impl Drop for Arena {
     }
 }
 
+fn image_data_len(width: u32, height: u32, format: Format) -> Result<usize, Error> {
+    let bytes_per_pixel = match format {
+        Format::FLUX_FORMAT_R8_UNORM => 1usize,
+        Format::FLUX_FORMAT_RGBA8_UNORM
+        | Format::FLUX_FORMAT_BGRA8_UNORM
+        | Format::FLUX_FORMAT_RGBA8_SRGB
+        | Format::FLUX_FORMAT_BGRA8_SRGB => 4usize,
+        _ => return Err(Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED)),
+    };
+    (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
+        .ok_or(Error(sys::flux_result::FLUX_ERROR_OUT_OF_RANGE))
+}
+
 /// A GPU texture sampled by the canvas. Refcounted in C; this handle owns one
 /// reference.
 pub struct Image {
@@ -573,6 +631,11 @@ impl Image {
         format: Format,
         data: &[u8],
     ) -> Result<Image, Error> {
+        let expected = image_data_len(width, height, format)?;
+        if data.len() != expected {
+            return Err(Error(sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT));
+        }
+
         let desc = sys::flux_image_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_IMAGE_DESC,
             width,
@@ -674,3 +737,24 @@ pub const DMABUF_DEVICE_EXTENSIONS: [&std::ffi::CStr; 5] = [
     c"VK_EXT_image_drm_format_modifier",
     c"VK_EXT_queue_family_foreign",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_data_len_validates_supported_formats() {
+        assert_eq!(
+            image_data_len(3, 2, Format::FLUX_FORMAT_R8_UNORM).unwrap(),
+            6
+        );
+        assert_eq!(
+            image_data_len(3, 2, Format::FLUX_FORMAT_RGBA8_UNORM).unwrap(),
+            24
+        );
+        assert_eq!(
+            image_data_len(1, 1, Format::FLUX_FORMAT_RGBA16_SFLOAT).unwrap_err(),
+            Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED)
+        );
+    }
+}

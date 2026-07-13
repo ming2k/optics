@@ -189,37 +189,7 @@ static flux_result dmabuf_transition_image_layout(flux_device *d, VkImage img,
                                                   VkSemaphore acquire_sem) {
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
-    VkFence fence = VK_NULL_HANDLE;
-    VkResult vr;
-
-    VkCommandPoolCreateInfo pci = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .queueFamilyIndex = d->graphics_family,
-        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-    };
-    vr = vkCreateCommandPool(d->device, &pci, nullptr, &pool);
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dma-buf transition command pool failed", vr);
-        goto fail;
-    }
-
-    VkCommandBufferAllocateInfo cbai = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = pool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-    vr = vkAllocateCommandBuffers(d->device, &cbai, &cmd);
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dma-buf transition command buffer failed", vr);
-        goto fail;
-    }
-
-    VkCommandBufferBeginInfo cbbi = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    vr = vkBeginCommandBuffer(cmd, &cbbi);
+    VkResult vr = flux_vk_new_transient_cmd(d, d->graphics_family, &pool, &cmd);
     if (vr != VK_SUCCESS) {
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dma-buf transition begin failed", vr);
         goto fail;
@@ -256,53 +226,19 @@ static flux_result dmabuf_transition_image_layout(flux_device *d, VkImage img,
         goto fail;
     }
 
-    VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    vr = vkCreateFence(d->device, &fci, nullptr, &fence);
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dma-buf transition fence failed", vr);
-        goto fail;
-    }
-
-    VkCommandBufferSubmitInfo cbsi = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = cmd,
-    };
-    VkSemaphoreSubmitInfo wait = {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = acquire_sem,
-        .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-    };
-    VkSubmitInfo2 si = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .waitSemaphoreInfoCount = acquire_sem ? 1u : 0u,
-        .pWaitSemaphoreInfos = acquire_sem ? &wait : nullptr,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &cbsi,
-    };
-
-    pthread_mutex_lock(&d->queue_lock);
-    vr = vkQueueSubmit2(d->graphics_queue, 1, &si, fence);
-    pthread_mutex_unlock(&d->queue_lock);
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dma-buf transition submit failed", vr);
-        goto fail;
-    }
-    vr = vkWaitForFences(d->device, 1, &fence, VK_TRUE, FLUX_DEFAULT_FRAME_TIMEOUT_NS);
-    if (vr == VK_TIMEOUT) {
-        FLUX_FAIL(FLUX_ERROR_TIMEOUT, "dma-buf transition wait timed out");
-        goto fail;
-    }
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dma-buf transition wait failed", vr);
-        goto fail;
-    }
+    vr = flux_vk_submit_and_wait(d, d->graphics_queue, cmd, acquire_sem,
+                                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0);
 
 fail:
-    if (fence)
-        vkDestroyFence(d->device, fence, nullptr);
     if (pool)
         vkDestroyCommandPool(d->device, pool, nullptr);
-    return vr == VK_SUCCESS ? FLUX_OK : FLUX_ERROR_BACKEND_FAILURE;
+    if (vr == VK_SUCCESS)
+        return FLUX_OK;
+    flux_result r = vr == VK_TIMEOUT             ? FLUX_ERROR_TIMEOUT
+                    : vr == VK_ERROR_DEVICE_LOST ? FLUX_ERROR_DEVICE_LOST
+                                                 : FLUX_ERROR_BACKEND_FAILURE;
+    FLUX_FAIL_VK(r, "dma-buf transition submit failed", vr);
+    return r;
 }
 
 bool flux_dmabuf_supported(const flux_device *d) {

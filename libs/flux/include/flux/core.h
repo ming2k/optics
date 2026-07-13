@@ -478,6 +478,15 @@ FLUX_NODISCARD FLUX_API flux_result flux_surface_read_pixels(flux_surface *s, vo
  * modifier and row stride the host pairs with the fd when building a
  * zwp_linux_buffer_params_v1.
  *
+ * Export releases the selected image from the graphics queue family to
+ * VK_QUEUE_FAMILY_FOREIGN_EXT. Before that frame slot is reused, the host must
+ * wait until the external consumer has released the buffer (for Wayland,
+ * wl_buffer.release or a signalled explicit-sync release fence). Calling
+ * begin_frame early is a caller error the library cannot observe. Likewise,
+ * resize/release requires every exported buffer to be back from its consumer.
+ * The v1 export contract is one plane, offset 0, BGRA8, with the returned
+ * modifier and stride; surfaces that cannot meet it are not exportable.
+ *
  * Returns FLUX_ERROR_UNSUPPORTED on a windowed or non-exportable surface,
  * FLUX_ERROR_INVALID_STATE before the first submitted frame. */
 FLUX_API bool flux_surface_exportable(const flux_surface *s);
@@ -513,6 +522,10 @@ FLUX_NODISCARD FLUX_API flux_result flux_surface_begin_frame(flux_surface *s,
                                                              const flux_frame_begin_desc *desc,
                                                              flux_frame **out_frame);
 
+/* Frames follow a strict single-use state machine:
+ * begin_frame -> submit -> present. Calling either transition out of order or
+ * more than once returns FLUX_ERROR_INVALID_STATE. The frame pointer is a
+ * surface-owned borrow and becomes invalid when present returns. */
 FLUX_NODISCARD FLUX_API flux_result flux_frame_submit(flux_frame *f);
 FLUX_NODISCARD FLUX_API flux_result flux_frame_present(flux_frame *f);
 

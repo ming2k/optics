@@ -36,7 +36,9 @@ int main(void) {
     CHECK(lens_node_phase_of(n2) == LENS_NODE_STABLE);
     int *s2 = (int *)lens_node_state(n2, sizeof(int));
     CHECK(s2 == s);
-    CHECK(*s2 == 42); /* persisted */
+    CHECK(*s2 == 42);                                    /* persisted */
+    CHECK(lens_node_state(n2, sizeof(int) + 1) == NULL); /* fixed type/size */
+    CHECK(lens_node_state(n2, sizeof(int)) == s);        /* address remains stable */
 
     /* stop building it: it should leave, then reap after the grace window */
     bool present_during_grace = false;

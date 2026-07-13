@@ -354,4 +354,4 @@ transient-output lifetime rules.
 |--------|-------------|
 | `flux_effect_blur` | Records a separable two-pass Gaussian blur into `cmd`. Sigma is clamped to `[0, FLUX_EFFECT_BLUR_SIGMA_MAX]`; sigma 0 degenerates to a copy. The output image is effect-owned and transient. |
 | `flux_effect_promote` | Synchronously copies a transient effect output into a fresh caller-owned `flux_image` with the regular refcounted lifecycle. |
-| `flux_effect_reset` | Releases every transient output the effect module holds for the device. Do not call while a command buffer referencing one is in flight. |
+| `flux_effect_reset` | Ends an effect lease epoch after every command buffer referencing its images has completed; old output pointers become invalid. |

@@ -103,6 +103,32 @@ int main(void) {
         printf("capture+blur+composite edge: left=%u right=%u (softened)\n", edge_left, edge_right);
     }
 
+    /* --- LOAD a captured target, overlay, then composite it unchanged --- */
+    {
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+
+        EXPECT(flux_canvas_begin_target(canvas, frame, target, nullptr) == FLUX_OK);
+        flux_canvas_fill_rect_color(canvas, (flux_rect){2, 2, 8, 8},
+                                    flux_color_rgba_premul(0, 255, 0, 255));
+        flux_canvas_end_target(canvas);
+
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        flux_canvas_draw_image(canvas, target, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        flux_canvas_end(canvas);
+
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+
+        const uint8_t *overlay = &px[(5 * W + 5) * 4];
+        EXPECT(overlay[0] < 5 && overlay[1] > 250 && overlay[2] < 5);
+        EXPECT(px[(H / 2 * W + 4) * 4] < 16);
+        EXPECT(px[(H / 2 * W + (W - 4)) * 4] > 240);
+    }
+
     /* --- nesting rejected: begin_target inside an active frame pass --- */
     {
         flux_frame *frame = nullptr;

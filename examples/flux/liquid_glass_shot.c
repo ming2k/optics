@@ -35,8 +35,10 @@ static void draw_chaos(flux_canvas *c, flux_arena *arena, float W, float H, flux
             {0.0f, flux_color_rgba_premul(210, 80, 50, 200)},
             {1.0f, flux_color_rgba_premul(210, 80, 50, 0)},
         };
-        flux_paint g = flux_paint_radial_gradient((flux_point){W * 0.85f, H * 0.15f}, W * 0.6f, stops, 2);
-        flux_path *p = nullptr; flux_path_create(&p, arena);
+        flux_paint g =
+            flux_paint_radial_gradient((flux_point){W * 0.85f, H * 0.15f}, W * 0.6f, stops, 2);
+        flux_path *p = nullptr;
+        flux_path_create(&p, arena);
         if (p) {
             flux_path_add_rect(p, (flux_rect){0, 0, W, H});
             flux_canvas_fill_path(c, p, &g);
@@ -49,8 +51,10 @@ static void draw_chaos(flux_canvas *c, flux_arena *arena, float W, float H, flux
             {0.0f, flux_color_rgba_premul(80, 70, 140, 200)},
             {1.0f, flux_color_rgba_premul(80, 70, 140, 0)},
         };
-        flux_paint g = flux_paint_radial_gradient((flux_point){W * 0.15f, H * 0.85f}, W * 0.6f, stops, 2);
-        flux_path *p = nullptr; flux_path_create(&p, arena);
+        flux_paint g =
+            flux_paint_radial_gradient((flux_point){W * 0.15f, H * 0.85f}, W * 0.6f, stops, 2);
+        flux_path *p = nullptr;
+        flux_path_create(&p, arena);
         if (p) {
             flux_path_add_rect(p, (flux_rect){0, 0, W, H});
             flux_canvas_fill_path(c, p, &g);
@@ -120,25 +124,25 @@ int main(void) {
     /* Create static noise texture for grain. */
     flux_image *noise_img = nullptr;
     {
-        uint8_t *noise_data = (uint8_t*)malloc(256 * 256 * 4);
+        uint8_t *noise_data = (uint8_t *)malloc(256 * 256 * 4);
         if (noise_data) {
             for (int i = 0; i < 256 * 256 * 4; i += 4) {
                 uint8_t v = rand() % 256;
                 uint8_t a = 10 + (rand() % 15);
                 noise_data[i] = (uint8_t)((v * a) / 255);
-                noise_data[i+1] = (uint8_t)((v * a) / 255);
-                noise_data[i+2] = (uint8_t)((v * a) / 255);
-                noise_data[i+3] = a;
+                noise_data[i + 1] = (uint8_t)((v * a) / 255);
+                noise_data[i + 2] = (uint8_t)((v * a) / 255);
+                noise_data[i + 3] = a;
             }
             flux_image_desc ndesc = FLUX_IMAGE_DESC_INIT;
-            ndesc.width = 256; ndesc.height = 256;
+            ndesc.width = 256;
+            ndesc.height = 256;
             ndesc.format = FLUX_FORMAT_RGBA8_UNORM;
             ndesc.initial_data = noise_data;
             flux_image_create(device, &ndesc, &noise_img);
             free(noise_data);
         }
     }
-    
 
     float W = (float)SHOT_W, H = (float)SHOT_H, t = 1.3f;
 
@@ -276,7 +280,6 @@ int main(void) {
 
     flux_arena_reset(&arena);
     flux_canvas_end(canvas);
-    flux_effect_reset(device);
 
     int rc = 0;
     r = flux_frame_submit(frame);
@@ -333,6 +336,7 @@ int main(void) {
 
 fail:
     flux_device_wait_idle(device);
+    flux_effect_reset(device);
     flux_arena_destroy(&arena);
     flux_image_release(capture);
     flux_canvas_destroy(canvas);

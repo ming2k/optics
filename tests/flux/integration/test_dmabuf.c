@@ -95,6 +95,27 @@ int main(void) {
     flux_device *dd = test_helpers_make_dmabuf_device();
     if (dd) {
         EXPECT(flux_dmabuf_supported(dd) == true);
+
+        flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+        sd.width = 16;
+        sd.height = 16;
+        flux_surface *surface = nullptr;
+        flux_result sr = flux_surface_create(dd, &sd, &surface);
+        if (sr == FLUX_OK) {
+            if (flux_surface_exportable(surface)) {
+                flux_frame *frame = nullptr;
+                EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+                EXPECT(flux_frame_submit(frame) == FLUX_OK);
+                EXPECT(flux_frame_present(frame) == FLUX_OK);
+                int exported = -1;
+                EXPECT(flux_surface_export_dmabuf(surface, &exported) == FLUX_OK);
+                EXPECT(fd_is_open(exported));
+                if (exported >= 0)
+                    close(exported);
+            }
+            flux_surface_release(surface);
+        }
+
         int dmabuf_fd = try_dma_heap_alloc(64u * 64u * 4u);
         if (dmabuf_fd >= 0) {
             flux_dmabuf_image_desc real = FLUX_DMABUF_IMAGE_DESC_INIT;

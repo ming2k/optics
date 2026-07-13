@@ -32,12 +32,11 @@ must have `-Deffect=true` (default).
 ## Lifetime — pick one
 
 `blurred` comes from the effect module's per-device transient pool.
-It is valid until the *next* effect submission on the same device
-reuses the same slot, or until `flux_effect_reset(d)` is called.
+It is exclusively leased and valid until `flux_effect_reset(d)` is called.
 
 | Need                                                          | Do this                                                         |
 |---------------------------------------------------------------|-----------------------------------------------------------------|
-| Consume immediately and discard                               | Use it before the next blur call, then `flux_effect_reset(d)` between frames. |
+| Consume immediately and discard                               | Submit, wait for every referencing command buffer, then call `flux_effect_reset(d)`. |
 | Keep across frames (cache a blurred background, prepared art) | Submit + wait, then `flux_effect_promote(blurred, &owned)`. Release with `flux_image_release(owned)`. |
 
 The promote helper records its own one-shot graphics-queue submission
@@ -76,11 +75,11 @@ is fine.
 
 ## End-of-frame housekeeping
 
-Call `flux_effect_reset(d)` between frames to release the transient
-outputs the effect module is holding. Cached intermediates stay (they
-are an implementation detail of the separable blur and not exposed
-to you). Forgetting to reset is not a crash — the pool just grows
-to the high-water mark of concurrent live transient outputs.
+After all command buffers that reference this epoch's images have completed,
+call `flux_effect_reset(d)` to return their leases to the pool. A CPU frame
+boundary alone is not sufficient when multiple frames are in flight; waiting
+the device idle is the simplest conservative choice. The pool grows only to
+the high-water mark of simultaneously leased keyed images.
 
 ## See also
 

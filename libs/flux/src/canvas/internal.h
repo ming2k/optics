@@ -209,9 +209,11 @@ typedef enum canvas_pipe_id {
     CANVAS_PIPE_COUNT,
 } canvas_pipe_id;
 
-flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format, flux_paint_kind kind,
+flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format,
+                                VkSampleCountFlagBits samples, flux_paint_kind kind,
                                 VkPipelineLayout *out_layout, VkPipeline *out_pipeline);
-flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format, canvas_pipe_id id,
+flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
+                                   VkSampleCountFlagBits samples, canvas_pipe_id id,
                                    VkPipelineLayout *out_layout, VkPipeline *out_pipeline);
 
 /* Stencil format every canvas pipeline (and the canvas's stencil

@@ -807,8 +807,10 @@ LENS_API lens_node_phase lens_node_phase_of(const lens_node *n);
 LENS_API lens_node *lens_node_parent(const lens_node *n);
 LENS_API lens_node *lens_node_first_child(const lens_node *n);
 LENS_API lens_node *lens_node_next_sibling(const lens_node *n);
-/* Borrow (allocating + zeroing on first touch) persistent per-node
- * state. The same pointer returns every frame the id survives. */
+/* Borrow (allocating + zeroing on first touch) persistent per-node state. The
+ * same pointer returns every frame the id survives. A node id has one fixed
+ * state type: after first allocation, requesting a different byte size returns
+ * NULL rather than moving the allocation and invalidating prior borrows. */
 LENS_API void *lens_node_state(lens_node *n, size_t bytes);
 
 #ifdef __cplusplus
