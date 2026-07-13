@@ -106,6 +106,11 @@ ADR, and are called out so the seam is designed to absorb them:
   clipped to the rounded outline instead of a bounding box. Independent
   of capture; orthogonal quality win.
 
+Implementation update (2026-07-13): gap 2 is now closed for solid paint
+colour/opacity. Image quads also carry per-vertex UVs, so canvas affine
+transforms no longer distort their sampling. Paint blend-mode selection and
+path clipping remain separate follow-ups.
+
 ## Consequences
 
 Positive:

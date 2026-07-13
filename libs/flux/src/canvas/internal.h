@@ -137,15 +137,15 @@ typedef struct flux_canvas_push {
     float grad_radius;        /* offset 48 */
     float _pad1;              /* offset 52 */
     flux_canvas_gradient_stop_pc stops[FLUX_GRADIENT_MAX_STOPS]; /* offset 56, size 64 */
-    /* Image draw extension (read by the image fragment shader).
-     * image_dst maps v_pos (pixel space) to UV in [0,1]:
-     *   uv = (v_pos - image_dst.xy) / image_dst.zw */
+    /* Image draw extension (read by the image and SDF fragment shaders).
+     * Image UVs are carried per vertex; image_dst remains shared storage for
+     * the SDF rounded-rectangle pipeline's screen-space box parameters. */
     uint32_t image_handle;   /* offset 120 */
     uint32_t sampler_handle; /* offset 124 */
-    float image_dst[4];      /* offset 128 — x, y, w, h pre-transform */
+    float image_dst[4];      /* offset 128 — SDF box / reserved for images */
     /* image_src selects the sampled sub-rectangle in NORMALISED texture
-     * coordinates (u, v, du, dv). The local [0,1] coverage of image_dst is
-     * remapped into it: uv = image_src.xy + clamp(local) * image_src.zw.
+     * coordinates (u, v, du, dv). The per-vertex [0,1] UV is remapped into
+     * it: uv = image_src.xy + v_uv * image_src.zw.
      * For whole-image draws this is {0,0,1,1}; a glyph atlas passes the
      * glyph's sub-rect so one texture serves every glyph. */
     float image_src[4]; /* offset 144 — u, v, du, dv (normalised) */

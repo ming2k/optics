@@ -361,6 +361,14 @@ void flux_canvas_fill_rect_color(flux_canvas *c, flux_rect r, flux_color color) 
     flux_canvas_fill_rect(c, r, &p);
 }
 
+/* Pack a normalised UV pair into the vertex `_pad` field as unorm16x2.
+ * canvas_solid.vert expands it into v_uv for both image quads and glyphs. */
+static uint32_t pack_uv(float u, float v) {
+    uint32_t pu = (uint32_t)(fminf(fmaxf(u, 0.0f), 1.0f) * 65535.0f + 0.5f);
+    uint32_t pv = (uint32_t)(fminf(fmaxf(v, 0.0f), 1.0f) * 65535.0f + 0.5f);
+    return pu | (pv << 16);
+}
+
 static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux_bindless_handle sh,
                                            flux_rect dst, flux_rect src, flux_color tint,
                                            uint32_t kind) {
@@ -375,10 +383,10 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
     flux_point p2 = {dst.x + dst.w, dst.y + dst.h};
     flux_point p3 = {dst.x, dst.y + dst.h};
 
-    /* Vertices carry pre-transform position; the fragment shader reads
-     * v_pos and derives UV from image_dst. The colour field is ignored
-     * for a plain image (kind 3) but carries the premultiplied tint for
-     * a coverage glyph (kind 4). */
+    /* UVs live on the vertices instead of being reconstructed from the
+     * destination's screen-space AABB. That keeps sampling correct under
+     * every affine canvas transform, including rotation and skew. The colour
+     * carries a premultiplied tint for plain images and coverage glyphs. */
     flux_canvas_vertex v[6];
     push_vertex(&v[0], p0, tx, tint);
     push_vertex(&v[1], p1, tx, tint);
@@ -386,23 +394,18 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
     push_vertex(&v[3], p0, tx, tint);
     push_vertex(&v[4], p2, tx, tint);
     push_vertex(&v[5], p3, tx, tint);
+    v[0]._pad = pack_uv(0.0f, 0.0f);
+    v[1]._pad = pack_uv(1.0f, 0.0f);
+    v[2]._pad = pack_uv(1.0f, 1.0f);
+    v[3]._pad = pack_uv(0.0f, 0.0f);
+    v[4]._pad = pack_uv(1.0f, 1.0f);
+    v[5]._pad = pack_uv(0.0f, 1.0f);
 
     flux_canvas_push pc;
     build_push(c, nullptr, &pc);
     pc.kind = kind;
     pc.image_handle = img->bindless;
     pc.sampler_handle = sh;
-    /* image_dst is the post-transform rect (because v_pos is also
-     * post-transform from the vertex shader's perspective). The
-     * vertex shader passes raw position from push verts → so we use
-     * the transformed corners' bounds. For now (no rotation in
-     * draw_image) the rect-axis-aligned case maps cleanly. */
-    flux_point t0 = flux_mat3x2_transform_point(tx, p0);
-    flux_point t2 = flux_mat3x2_transform_point(tx, p2);
-    pc.image_dst[0] = fminf(t0.x, t2.x);
-    pc.image_dst[1] = fminf(t0.y, t2.y);
-    pc.image_dst[2] = fabsf(t2.x - t0.x);
-    pc.image_dst[3] = fabsf(t2.y - t0.y);
     pc.image_src[0] = src.x;
     pc.image_src[1] = src.y;
     pc.image_src[2] = src.w;
@@ -488,27 +491,28 @@ static const flux_rect FLUX_SRC_WHOLE = {0.0f, 0.0f, 1.0f, 1.0f};
 
 void flux_canvas_draw_image(flux_canvas *c, flux_image *img, flux_rect dst,
                             const flux_paint *paint) {
-    (void)paint; /* Stage 4.2.4 doesn't honour tint/blend yet */
     if (!c || !c->recording || !img)
         return;
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, sh, dst, FLUX_SRC_WHOLE, 0u, 3u);
+    flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
+    draw_image_with_sampler_handle(c, img, sh, dst, FLUX_SRC_WHOLE, tint, 3u);
 }
 
 void flux_canvas_draw_image_sub(flux_canvas *c, flux_image *img, flux_rect dst, flux_rect src) {
     if (!c || !c->recording || !img)
         return;
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, sh, dst, src, 0u, 3u);
+    draw_image_with_sampler_handle(c, img, sh, dst, src, flux_color_rgba_premul(255, 255, 255, 255),
+                                   3u);
 }
 
 void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *img, flux_sampler *sampler,
                                     flux_rect dst, const flux_paint *paint) {
-    (void)paint;
     if (!c || !c->recording || !img || !sampler)
         return;
     flux_bindless_handle sh = flux_sampler_bindless_handle(sampler);
-    draw_image_with_sampler_handle(c, img, sh, dst, FLUX_SRC_WHOLE, 0u, 3u);
+    flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
+    draw_image_with_sampler_handle(c, img, sh, dst, FLUX_SRC_WHOLE, tint, 3u);
 }
 
 void flux_canvas_draw_image_coverage(flux_canvas *c, flux_image *img, flux_rect dst,
@@ -530,14 +534,6 @@ void flux_canvas_draw_image_coverage_sub(flux_canvas *c, flux_image *img, flux_r
 /* ------------------------------------------------------------------ */
 /*  Glyph runs (ADR-0010)                                             */
 /* ------------------------------------------------------------------ */
-
-/* Pack a normalised UV pair into the vertex `_pad` field as unorm16x2
- * (canvas_solid.vert unpacks it for the glyph fragment shader). */
-static uint32_t pack_uv(float u, float v) {
-    uint32_t pu = (uint32_t)(fminf(fmaxf(u, 0.0f), 1.0f) * 65535.0f + 0.5f);
-    uint32_t pv = (uint32_t)(fminf(fmaxf(v, 0.0f), 1.0f) * 65535.0f + 0.5f);
-    return pu | (pv << 16);
-}
 
 void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc) {
     if (!c || !c->recording || !desc)

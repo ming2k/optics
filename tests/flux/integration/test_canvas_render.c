@@ -78,6 +78,22 @@ static void draw_glyph_run(flux_canvas *canvas, void *user) {
     flux_canvas_draw_glyph_run(canvas, user);
 }
 
+typedef struct image_transform_case {
+    flux_image *image;
+    flux_sampler *sampler;
+    flux_paint paint;
+} image_transform_case;
+
+static void draw_rotated_image(flux_canvas *canvas, void *user) {
+    image_transform_case *tc = user;
+    flux_canvas_save(canvas);
+    flux_canvas_translate(canvas, W / 2.0f, H / 2.0f);
+    flux_canvas_rotate(canvas, 1.57079632679f);
+    flux_canvas_draw_image_sampled(canvas, tc->image, tc->sampler,
+                                   (flux_rect){-32.0f, -16.0f, 64.0f, 32.0f}, &tc->paint);
+    flux_canvas_restore(canvas);
+}
+
 #if defined(FLUX_TEXT_HAVE_FTHB)
 typedef struct text_family_case {
     flux_text *text;
@@ -273,6 +289,59 @@ int main(void) {
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
         EXPECT(px_at(px, 2, 2)[0] < 20);
+    }
+
+    /* --- affine image transform + paint opacity --- */
+    {
+        /* A 2×2 quadrant image, rotated 90 degrees. Regression coverage for
+         * per-vertex image UVs: the former screen-AABB UV reconstruction
+         * sampled the wrong quadrant after rotation. A half-alpha white
+         * paint simultaneously verifies image tint/opacity modulation. */
+        uint32_t image_px[4] = {
+            0xFF0000FFu, 0xFF00FF00u, /* red, green */
+            0xFFFFFFFFu, 0xFFFF0000u, /* white, blue */
+        };
+        flux_image_desc idesc = FLUX_IMAGE_DESC_INIT;
+        idesc.width = 2;
+        idesc.height = 2;
+        idesc.format = FLUX_FORMAT_RGBA8_UNORM;
+        idesc.initial_data = image_px;
+        flux_image *image = nullptr;
+        EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
+
+        flux_sampler_desc sdesc = FLUX_SAMPLER_DESC_INIT;
+        sdesc.min_filter = FLUX_FILTER_NEAREST;
+        sdesc.mag_filter = FLUX_FILTER_NEAREST;
+        sdesc.address_u = FLUX_ADDRESS_CLAMP_TO_EDGE;
+        sdesc.address_v = FLUX_ADDRESS_CLAMP_TO_EDGE;
+        flux_sampler *nearest = nullptr;
+        EXPECT(flux_sampler_create(d, &sdesc, &nearest) == FLUX_OK);
+
+        image_transform_case tc = {
+            .image = image,
+            .sampler = nearest,
+            .paint = flux_paint_solid(flux_color_rgba_premul(255, 255, 255, 128)),
+        };
+        EXPECT(render_frame(s, canvas, draw_rotated_image, &tc) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+
+        const uint8_t *top_right = px_at(px, 72, 48);    /* source top-left: red */
+        const uint8_t *bottom_right = px_at(px, 72, 80); /* source top-right: green */
+        const uint8_t *bottom_left = px_at(px, 56, 80);  /* source bottom-right: blue */
+        const uint8_t *top_left = px_at(px, 56, 48);     /* source bottom-left: white */
+        EXPECT(top_right[0] > 112 && top_right[0] < 144 && top_right[1] < 8 &&
+               top_right[2] < 8);
+        EXPECT(bottom_right[0] < 8 && bottom_right[1] > 112 && bottom_right[1] < 144 &&
+               bottom_right[2] < 8);
+        EXPECT(bottom_left[0] < 8 && bottom_left[1] < 8 && bottom_left[2] > 112 &&
+               bottom_left[2] < 144);
+        EXPECT(top_left[0] > 112 && top_left[0] < 144 && top_left[1] > 112 &&
+               top_left[1] < 144 && top_left[2] > 112 && top_left[2] < 144);
+        EXPECT(px_at(px, 40, 64)[0] < 8); /* outside the rotated 32×64 quad */
+
+        flux_sampler_release(nearest);
+        flux_image_release(image);
     }
 
     /* --- batched glyph run (ADR-0010): two quads, one atlas, one

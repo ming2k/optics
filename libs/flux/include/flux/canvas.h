@@ -297,6 +297,10 @@ FLUX_API void flux_canvas_stroke_path(flux_canvas *c, const flux_path *p, const 
 FLUX_API void flux_canvas_fill_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color);
 FLUX_API void flux_canvas_stroke_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color,
                                        float width);
+/* Draw an RGBA image. When `optional_paint` is non-NULL, its premultiplied
+ * solid `color` modulates the image; opaque white preserves it and white with
+ * a lower alpha fades it. Other paint fields are currently ignored. Canvas
+ * transforms, including rotation and non-uniform scale, apply to the quad. */
 FLUX_API void flux_canvas_draw_image(flux_canvas *c, flux_image *image, flux_rect dst,
                                      const flux_paint *optional_paint);
 

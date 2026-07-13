@@ -5,8 +5,8 @@
 /*
  * Canvas image fragment shader. Bindless textures + sampler.
  *
- * UV derived from v_pos and the destination rect carried in push
- * constants: uv = (v_pos - image_dst.xy) / image_dst.zw.
+ * UV comes from the image quad's vertices. This keeps texture mapping
+ * affine-correct when the canvas rotates, scales, or skews the quad.
  *
  * Bindless layout:
  *   set 0, binding 0 — SAMPLED_IMAGE[]   (FLUX_BINDLESS_BIND_SAMPLED_IMAGE)
@@ -38,22 +38,19 @@ layout(push_constant) uniform PC {
     GradStop stops[8];
     uint     image_handle;
     uint     sampler_handle;
-    vec4     image_dst;     /* x, y, w, h — pre-transform pixel rect */
+    vec4     image_dst;     /* reserved (shared push layout with SDF pipeline) */
     vec4     image_src;     /* u, v, du, dv — sampled sub-rect (normalised) */
 } pc;
 
 layout(location = 0) in  vec4 v_color;
 layout(location = 1) in  vec2 v_pos;
+layout(location = 2) in  vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
 void main()
 {
-    /* Local [0,1] coverage of the destination rect, then remapped into the
-     * sampled sub-rect (image_src). Whole-image draws pass {0,0,1,1}, so this
-     * reduces to plain UV; a glyph atlas passes the glyph's sub-rect. */
-    vec2 local = (v_pos - pc.image_dst.xy) / pc.image_dst.zw;
-    local = clamp(local, vec2(0.0), vec2(1.0));
-    vec2 uv = pc.image_src.xy + local * pc.image_src.zw;
+    /* Remap the quad-local [0,1] UV into the requested source sub-rect. */
+    vec2 uv = pc.image_src.xy + v_uv * pc.image_src.zw;
     uint ih = pc.image_handle  & 0x0FFFFFFFu;
     uint sh = pc.sampler_handle & 0x0FFFFFFFu;
     vec4 texel = texture(
@@ -71,6 +68,9 @@ void main()
          * texture and no re-upload when the highlight moves. */
         out_color = v_color * texel.r;
     } else {
-        out_color = texel;
+        /* Plain RGBA image (kind 3): v_color is a premultiplied tint.
+         * Opaque white preserves the source; white with lower alpha is the
+         * usual fade/cross-fade control. */
+        out_color = texel * v_color;
     }
 }

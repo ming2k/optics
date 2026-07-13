@@ -53,9 +53,8 @@ void main()
 
     v_pos = v.pos;
 
-    /* Per-vertex UV packed as unorm16x2 in `_pad`. Only the glyph
-     * fragment shader consumes it (ADR-0010); every other pipeline
-     * writes 0 there and ignores the varying. */
+    /* Per-vertex UV packed as unorm16x2 in `_pad`. Image and glyph
+     * fragment shaders consume it; other pipelines ignore the varying. */
     v_uv = vec2(float(v._pad & 0xFFFFu),
                 float(v._pad >> 16)) / 65535.0;
 }

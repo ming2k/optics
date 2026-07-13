@@ -30,3 +30,9 @@ To run the Vulkan rendering demo:
 ```bash
 ./build/examples/flux/scene_cube
 ```
+
+To run the image-animation demo (bounce, squash/stretch, spin/pulse,
+cross-fade, and sprite-sheet playback):
+```bash
+./build/examples/flux/image_animation
+```

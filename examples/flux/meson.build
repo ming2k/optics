@@ -42,6 +42,11 @@ executable('canvas_hello',
   dependencies : [flux_dep, glfw_dep, m_dep],
 )
 
+executable('image_animation',
+  'image_animation.c',
+  dependencies : [flux_dep, glfw_dep, m_dep],
+)
+
 # Liquid-glass backdrop-blur demo. Needs the effect module's Gaussian
 # blur (flux_effect_blur), so it is gated on -Deffect=true.
 if opt_effect

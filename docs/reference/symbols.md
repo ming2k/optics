@@ -297,7 +297,7 @@ are `void`-returning; segments dropped on arena exhaustion are counted.
 | `flux_canvas_fill_rect_color` | Fills a rectangle with a solid color, no paint struct needed. |
 | `flux_canvas_fill_path` | Fills a path. Concave and multi-contour (holes) tessellate on the CPU; self-intersecting input falls back to GPU stencil-then-cover under the nonzero winding rule (ADR-0014). |
 | `flux_canvas_stroke_path` | Strokes a path using the paint's width, cap, join, and miter limit. |
-| `flux_canvas_draw_image` | Draws an image into `dst` with the default linear sampler; `optional_paint` tints/blends. |
+| `flux_canvas_draw_image` | Draws an image into `dst` with the default linear sampler; `optional_paint.color` modulates its premultiplied colour/opacity. Canvas affine transforms apply to the image quad. |
 | `flux_canvas_draw_image_sampled` | Draws an image sampled through a caller-supplied `flux_sampler` (borrowed for the call). |
 | `flux_canvas_draw_image_coverage` | Draws an R8 image as alpha coverage multiplied by a premultiplied `tint` (glyph rendering). |
 | `flux_canvas_draw_image_coverage_sub` | Coverage draw from a normalized sub-rectangle of a glyph atlas. |
