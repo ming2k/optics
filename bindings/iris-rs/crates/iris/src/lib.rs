@@ -43,7 +43,7 @@ pub use lens::key;
 pub use lens::mods;
 pub use lens::{
     Align, Color, Frame, Icon, Input, LayoutOpts, MouseButton, OverlayOpts, Rect, Response,
-    TextBuf, Theme, Ui,
+    TableColumn, TableOpts, TableResult, TextBuf, Theme, Ui,
 };
 
 /// A thin wrapper over the raw pointers iris hands to the paint
@@ -101,6 +101,8 @@ pub enum RunError {
     Platform(i32),
     /// The config contained a NULL byte in the title.
     BadTitle,
+    /// The config contained a NULL byte in the desktop application ID.
+    BadAppId,
 }
 
 impl std::fmt::Display for RunError {
@@ -108,6 +110,7 @@ impl std::fmt::Display for RunError {
         match self {
             RunError::Platform(rc) => write!(f, "iris_app_run exited with code {rc}"),
             RunError::BadTitle => write!(f, "window title contains an interior NUL byte"),
+            RunError::BadAppId => write!(f, "application ID contains an interior NUL byte"),
         }
     }
 }
@@ -117,6 +120,7 @@ impl std::error::Error for RunError {}
 /// Application configuration handed to [`Application::run`].
 pub struct Config {
     title: CString,
+    app_id: CString,
     width: i32,
     height: i32,
     dark: bool,
@@ -130,11 +134,19 @@ impl Config {
         let title = CString::new(title.into()).map_err(|_| RunError::BadTitle)?;
         Ok(Config {
             title,
+            app_id: CString::new("ai.opencode.iris").expect("static app ID is valid"),
             width: 960,
             height: 640,
             dark: false,
             log_raw: false,
         })
+    }
+
+    /// Set the stable desktop application ID used by Wayland compositors
+    /// for window grouping, launcher matching, and icon lookup.
+    pub fn app_id(mut self, app_id: impl Into<String>) -> Result<Self, RunError> {
+        self.app_id = CString::new(app_id.into()).map_err(|_| RunError::BadAppId)?;
+        Ok(self)
     }
 
     /// Set the initial window size (logical pixels).
@@ -252,6 +264,7 @@ impl Application {
 
         let cfg = sys::iris_app_config {
             title: config.title.as_ptr(),
+            app_id: config.app_id.as_ptr(),
             width: config.width,
             height: config.height,
             dark: config.dark,
@@ -438,6 +451,16 @@ pub fn set_cursor(cursor: Cursor) {
 /// URI (e.g. `"file:///home/user/foo.txt"`) or `None` if the user cancelled
 /// or the portal is unavailable.
 pub fn pick_file(title: Option<&str>) -> Option<String> {
+    pick_path(title, false)
+}
+
+/// Open the host desktop's native folder picker. Returns the selected folder
+/// URI or `None` if the user cancelled or the portal is unavailable.
+pub fn pick_folder(title: Option<&str>) -> Option<String> {
+    pick_path(title, true)
+}
+
+fn pick_path(title: Option<&str>, folder: bool) -> Option<String> {
     let title_c = title.and_then(|t| CString::new(t).ok());
     let opts = sys::iris_file_dialog_opts {
         title: title_c
@@ -446,7 +469,13 @@ pub fn pick_file(title: Option<&str>) -> Option<String> {
             .unwrap_or(std::ptr::null()),
     };
     let mut buf = vec![0u8; 4096];
-    let rc = unsafe { sys::iris_pick_file(&opts, buf.as_mut_ptr() as *mut i8, buf.len()) };
+    let rc = unsafe {
+        if folder {
+            sys::iris_pick_folder(&opts, buf.as_mut_ptr().cast(), buf.len())
+        } else {
+            sys::iris_pick_file(&opts, buf.as_mut_ptr().cast(), buf.len())
+        }
+    };
     if rc != 0 {
         return None;
     }
@@ -491,6 +520,7 @@ mod tests {
     fn config_new_defaults() {
         let cfg = Config::new("Demo").unwrap();
         assert_eq!(cfg.title.to_str().unwrap(), "Demo");
+        assert_eq!(cfg.app_id.to_str().unwrap(), "ai.opencode.iris");
         assert_eq!((cfg.width, cfg.height), (960, 640));
         assert!(!cfg.dark);
         assert!(!cfg.log_raw);
@@ -500,10 +530,13 @@ mod tests {
     fn config_builders_set_fields() {
         let cfg = Config::new("x")
             .unwrap()
+            .app_id("io.example.Demo")
+            .unwrap()
             .size(720, 480)
             .force_dark()
             .log_raw();
         assert_eq!((cfg.width, cfg.height), (720, 480));
+        assert_eq!(cfg.app_id.to_str().unwrap(), "io.example.Demo");
         assert!(cfg.dark);
         assert!(cfg.log_raw);
     }
@@ -518,6 +551,18 @@ mod tests {
             RunError::BadTitle.to_string(),
             "window title contains an interior NUL byte"
         );
+        assert_eq!(
+            RunError::BadAppId.to_string(),
+            "application ID contains an interior NUL byte"
+        );
+    }
+
+    #[test]
+    fn config_rejects_interior_nul_in_app_id() {
+        assert!(matches!(
+            Config::new("Demo").unwrap().app_id("io.example\0Demo"),
+            Err(RunError::BadAppId)
+        ));
     }
 
     #[test]

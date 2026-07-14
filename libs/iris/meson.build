@@ -3,7 +3,7 @@
 # Today's surface is intentionally small: iris_app_run drives a windowed
 # Wayland event loop and dispatches per-frame build callbacks into lens.
 # Theme query reads GNOME / freedesktop colour scheme at startup. File
-# dialog shells out to xdg-desktop-portal. The a11y seam is a no-op stub
+# dialogs use xdg-desktop-portal over sd-bus. The a11y seam is a no-op stub
 # whose contract documents future AT-SPI work.
 #
 # Wayland-specific code lives in src/app_wayland.c; when a Win32 or Cocoa

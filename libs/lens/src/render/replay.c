@@ -68,13 +68,22 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
      * blit cached subtrees instead of replaying draw commands. */
     (void)n->subtree_changed; /* hash still computed for future use */
 
+    /* Draw commands can nest logical clips (table viewport -> body -> cell).
+     * Flux's clip_rect sets an absolute scissor rather than intersecting it,
+     * so replay owns the intersection stack and always submits the effective
+     * device-space rectangle. */
+    flux_rect command_clip = clip;
+    flux_rect command_clip_stack[16];
+    uint32_t command_clip_depth = 0;
     for (uint32_t i = 0; i < n->cmd_count; i++) {
         const lens_draw_cmd *c = &n->cmds[i];
         flux_rect r = offset_rel(box, c->rel);
         r = snap_rect(r, scale);
 
-        /* Skip draw commands that lie entirely outside the clip. */
-        if (!rect_overlaps(r, clip))
+        bool is_clip_cmd = c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP;
+        /* Clip commands must stay balanced even if their rectangle is empty;
+         * regular draws outside the current effective clip can be culled. */
+        if (!is_clip_cmd && !rect_overlaps(r, command_clip))
             continue;
 
         /* Path tessellation and glyph shaping below allocate transient
@@ -180,8 +189,28 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
                 flux_canvas_draw_image(canvas, c->image, r, NULL);
             break;
 
-        case LENS_DRAW_CLIP_PUSH:
+        case LENS_DRAW_CLIP_PUSH: {
+            if (command_clip_depth >= 16) {
+                ui->overflow = true;
+                break;
+            }
+            command_clip_stack[command_clip_depth++] = command_clip;
+            command_clip = rect_intersect(command_clip, r);
+            flux_canvas_save(canvas);
+            if (scale != 1.0f) {
+                flux_rect device_clip = {command_clip.x * scale, command_clip.y * scale,
+                                         command_clip.w * scale, command_clip.h * scale};
+                flux_canvas_clip_rect(canvas, device_clip);
+            } else {
+                flux_canvas_clip_rect(canvas, command_clip);
+            }
+            break;
+        }
         case LENS_DRAW_CLIP_POP:
+            if (command_clip_depth > 0) {
+                flux_canvas_restore(canvas);
+                command_clip = command_clip_stack[--command_clip_depth];
+            }
             break;
 
         case LENS_DRAW_ICON: {
@@ -241,6 +270,10 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
         }
 
         ui->arena.used = arena_mark; /* free this command's scratch */
+    }
+    while (command_clip_depth > 0) {
+        flux_canvas_restore(canvas);
+        command_clip_depth--;
     }
 
     bool pushed_canvas_clip = false;

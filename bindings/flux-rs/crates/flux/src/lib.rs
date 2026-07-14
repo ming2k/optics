@@ -479,6 +479,17 @@ impl Canvas {
         unsafe { sys::flux_canvas_scale(self.raw, sx, sy) };
     }
 
+    /// Rotate subsequent drawing by `radians` around the current origin.
+    pub fn rotate(&self, radians: f32) {
+        unsafe { sys::flux_canvas_rotate(self.raw, radians) };
+    }
+
+    /// Intersect subsequent drawing with an axis-aligned clip rectangle.
+    pub fn clip_rect(&self, x: f32, y: f32, w: f32, h: f32) {
+        let rect = sys::flux_rect { x, y, w, h };
+        unsafe { sys::flux_canvas_clip_rect(self.raw, rect) };
+    }
+
     /// Fill a rectangle with a packed solid color.
     pub fn fill_rect(&self, x: f32, y: f32, w: f32, h: f32, color: u32) {
         let r = sys::flux_rect { x, y, w, h };
@@ -490,6 +501,90 @@ impl Canvas {
     pub fn fill_rrect(&self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
         let r = sys::flux_rect { x, y, w, h };
         unsafe { sys::flux_canvas_fill_rrect(self.raw, r, radius, color) };
+    }
+
+    /// Stroke an analytic rounded rectangle with a premultiplied colour.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stroke_rrect(
+        &self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        radius: f32,
+        color: u32,
+        width: f32,
+    ) {
+        let rect = sys::flux_rect { x, y, w, h };
+        unsafe { sys::flux_canvas_stroke_rrect(self.raw, rect, radius, color, width) };
+    }
+
+    /// Fill a rectangle with a linear gradient in canvas pixel space.
+    ///
+    /// Flux supports at most eight stops; additional stops are ignored.
+    pub fn fill_rect_linear_gradient(
+        &self,
+        rect: (f32, f32, f32, f32),
+        from: (f32, f32),
+        to: (f32, f32),
+        stops: &[GradientStop],
+    ) {
+        let raw_stops = gradient_stops(stops);
+        if raw_stops.is_empty() {
+            return;
+        }
+        let paint = unsafe {
+            sys::flux_paint_linear_gradient(
+                sys::flux_point {
+                    x: from.0,
+                    y: from.1,
+                },
+                sys::flux_point { x: to.0, y: to.1 },
+                raw_stops.as_ptr(),
+                u32::try_from(raw_stops.len()).unwrap_or(8),
+            )
+        };
+        let rect = sys::flux_rect {
+            x: rect.0,
+            y: rect.1,
+            w: rect.2,
+            h: rect.3,
+        };
+        unsafe { sys::flux_canvas_fill_rect(self.raw, rect, &paint) };
+    }
+
+    /// Fill a rectangle with a radial gradient in canvas pixel space.
+    ///
+    /// Flux supports at most eight stops; additional stops are ignored.
+    pub fn fill_rect_radial_gradient(
+        &self,
+        rect: (f32, f32, f32, f32),
+        center: (f32, f32),
+        radius: f32,
+        stops: &[GradientStop],
+    ) {
+        let raw_stops = gradient_stops(stops);
+        if raw_stops.is_empty() {
+            return;
+        }
+        let paint = unsafe {
+            sys::flux_paint_radial_gradient(
+                sys::flux_point {
+                    x: center.0,
+                    y: center.1,
+                },
+                radius.max(0.0),
+                raw_stops.as_ptr(),
+                u32::try_from(raw_stops.len()).unwrap_or(8),
+            )
+        };
+        let rect = sys::flux_rect {
+            x: rect.0,
+            y: rect.1,
+            w: rect.2,
+            h: rect.3,
+        };
+        unsafe { sys::flux_canvas_fill_rect(self.raw, rect, &paint) };
     }
 
     /// Draw an image into the destination rectangle (pixel space).
@@ -535,6 +630,38 @@ impl Canvas {
     }
 }
 
+/// One colour sample in a canvas gradient.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GradientStop {
+    pub offset: f32,
+    pub color: u32,
+}
+
+impl GradientStop {
+    /// Create a stop, clamping its offset to the gradient's `[0, 1]` domain.
+    pub fn new(offset: f32, color: u32) -> Self {
+        Self {
+            offset: if offset.is_finite() {
+                offset.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+            color,
+        }
+    }
+}
+
+fn gradient_stops(stops: &[GradientStop]) -> Vec<sys::flux_gradient_stop> {
+    stops
+        .iter()
+        .take(8)
+        .map(|stop| sys::flux_gradient_stop {
+            t: stop.offset,
+            color: stop.color,
+        })
+        .collect()
+}
+
 impl Drop for Canvas {
     fn drop(&mut self) {
         // Only destroy when this handle actually owns the canvas. A view built
@@ -545,9 +672,15 @@ impl Drop for Canvas {
     }
 }
 
-/// Pack an RGBA color (0–255 components) into a `flux_color`.
+/// Convert straight RGBA components (0–255) into flux's premultiplied
+/// `flux_color` representation.
+///
+/// Canvas blending is premultiplied SRC_OVER, so public callers should pass
+/// ordinary straight-alpha colour components here and let the binding enforce
+/// the storage contract. Calling the raw `flux_color_rgba` packer with a
+/// translucent colour would otherwise create bright opaque-looking fringes.
 pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> u32 {
-    unsafe { sys::flux_color_rgba(r, g, b, a) }
+    unsafe { sys::flux_color_rgba_premul(r, g, b, a) }
 }
 
 /// A CPU-side bump allocator (`flux_arena`). flux's per-frame value types —

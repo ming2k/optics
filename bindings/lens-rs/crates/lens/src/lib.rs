@@ -33,7 +33,10 @@ mod input;
 mod types;
 
 pub use input::{key, mods, Input, MouseButton};
-pub use types::{Align, Color, Icon, LayoutOpts, OverlayOpts, Rect, Response, Theme};
+pub use types::{
+    Align, Color, Icon, LayoutOpts, OverlayOpts, Rect, Response, TableColumn, TableOpts,
+    TableResult, Theme,
+};
 
 /// The retained UI context. Owns the persistent tree, layout, and draw list.
 /// Dropping a `Ui` calls `lens_destroy`.
@@ -454,6 +457,88 @@ impl Frame {
         r
     }
 
+    /// A virtualized, scrollable table. Only the visible rows are requested
+    /// through `cell`, so rendering cost stays bounded for large libraries.
+    /// Use [`Frame::size_next`] or [`Frame::flex`] immediately before this
+    /// call to define its viewport.
+    pub fn table<F>(
+        &mut self,
+        id: &str,
+        columns: &[TableColumn<'_>],
+        row_count: usize,
+        opts: TableOpts,
+        cell: F,
+    ) -> TableResult
+    where
+        F: FnMut(usize, usize) -> String,
+    {
+        struct CallbackState<F> {
+            cell: F,
+            scratch: CString,
+        }
+
+        unsafe extern "C" fn cell_trampoline<F>(
+            user: *mut std::ffi::c_void,
+            row: i32,
+            column: i32,
+        ) -> *const c_char
+        where
+            F: FnMut(usize, usize) -> String,
+        {
+            if user.is_null() || row < 0 || column < 0 {
+                return c"".as_ptr();
+            }
+            // SAFETY: `user` points to the stack-local CallbackState for the
+            // synchronous duration of lens_table. The C widget copies each
+            // returned string into its frame arena before invoking us again.
+            let state = unsafe { &mut *user.cast::<CallbackState<F>>() };
+            let value = (state.cell)(row as usize, column as usize).replace('\0', "�");
+            state.scratch = CString::new(value).unwrap_or_default();
+            state.scratch.as_ptr()
+        }
+
+        let id = cstr(id);
+        let titles = columns
+            .iter()
+            .map(|column| cstr(column.title))
+            .collect::<Vec<_>>();
+        let raw_columns = columns
+            .iter()
+            .zip(&titles)
+            .map(|(column, title)| sys::lens_table_column {
+                title: title.as_ptr(),
+                width: column.width.max(0.0),
+                align: column.align.raw(),
+            })
+            .collect::<Vec<_>>();
+        let mut state = CallbackState {
+            cell,
+            scratch: CString::default(),
+        };
+        let raw = unsafe {
+            sys::lens_table(
+                self.ui,
+                id.as_ptr(),
+                raw_columns.as_ptr(),
+                i32::try_from(raw_columns.len()).unwrap_or(i32::MAX),
+                i32::try_from(row_count).unwrap_or(i32::MAX),
+                Some(cell_trampoline::<F>),
+                (&mut state as *mut CallbackState<F>).cast(),
+                sys::lens_table_opts {
+                    row_height: opts.row_height.max(0.0),
+                    show_header: opts.show_header,
+                    selectable: opts.selectable,
+                    zebra: opts.zebra,
+                },
+            )
+        };
+        TableResult {
+            selected: usize::try_from(raw.selected).ok(),
+            selection_changed: raw.selection_changed,
+            clicked: raw.clicked,
+        }
+    }
+
     /// A tab strip keyed by `id`, tracking the selected index in `active`.
     /// Declare the tabs inside `strip` with [`Frame::tab`]; render the selected
     /// panel *after* this call, switching on `*active`.
@@ -643,9 +728,7 @@ impl Frame {
     pub fn label_wrapped_sized(&mut self, text: &str, size: f32, max_width: f32) {
         let c = cstr(text);
         // SAFETY: ui is live; c outlives the call.
-        unsafe {
-            sys::lens_label_wrapped_ex(self.ui, c.as_ptr(), size, max_width.max(0.0))
-        };
+        unsafe { sys::lens_label_wrapped_ex(self.ui, c.as_ptr(), size, max_width.max(0.0)) };
     }
 
     /// A text label without the theme padding. Use inside fixed-height chrome

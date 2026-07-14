@@ -248,19 +248,18 @@ static void ptr_axis(void *data, struct wl_pointer *p, uint32_t t, uint32_t axis
     (void)p;
     (void)t;
     wp_platform *pl = data;
-    /* Legacy wl_pointer.axis: ~10 units per notch, positive = content
-     * moves up (typical wheel-down). Normalise to ~±1 per notch. Modern
+    /* Legacy wl_pointer.axis: ~10 units per notch, positive is a physical
+     * wheel-down gesture. Lens uses the conventional UI delta contract in
+     * which wheel-down is negative (content offset increases), so invert at
+     * this platform boundary. Modern
      * compositors deliver via value120 instead — see ptr_axis_value120 —
      * but the legacy event still fires on older compositors, so we keep
-     * handling it. The sign is passed through unchanged: a positive
-     * Wayland axis value means the user pushed the wheel in the "scroll
-     * content up" direction (reveals later content), which is what hosts
-     * adding to their scroll offset want. */
+     * handling it. */
     double v = wl_fixed_to_double(value) / 10.0;
     if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-        pl->acc.scroll_y += v;
+        pl->acc.scroll_y -= v;
     else if (axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL)
-        pl->acc.scroll_x += v;
+        pl->acc.scroll_x -= v;
 }
 static void ptr_frame(void *d, struct wl_pointer *p) {
     (void)d;
@@ -285,7 +284,7 @@ static void ptr_axis_discrete(void *d, struct wl_pointer *p, uint32_t a, int32_t
 }
 /* Modern compositors (GNOME, KDE, wlroots ≥ 2022) deliver wheel events
  * here instead of the deprecated `axis` event. value120 is 120 per notch;
- * same sign convention as `axis` (positive = content moves up). Many
+ * same Wayland sign convention as `axis`; invert it for Lens. Many
  * compositors send BOTH this and `axis` for back-compat — accumulating
  * both would double the scroll, so we ONLY honour value120 when it fires
  * and zero the legacy accumulator contribution. The simplest way: handle
@@ -297,9 +296,9 @@ static void ptr_axis_value120(void *d, struct wl_pointer *p, uint32_t a, int32_t
     wp_platform *pl = d;
     double norm = (double)v / 120.0;
     if (a == WL_POINTER_AXIS_VERTICAL_SCROLL)
-        pl->acc.scroll_y += norm;
+        pl->acc.scroll_y -= norm;
     else if (a == WL_POINTER_AXIS_HORIZONTAL_SCROLL)
-        pl->acc.scroll_x += norm;
+        pl->acc.scroll_x -= norm;
 }
 static void ptr_axis_relative_direction(void *d, struct wl_pointer *p, uint32_t a, uint32_t dir) {
     (void)d;
@@ -1344,7 +1343,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     pl.toplevel = xdg_surface_get_toplevel(pl.xdg_surface);
     xdg_toplevel_add_listener(pl.toplevel, &toplevel_listener, &pl);
     xdg_toplevel_set_title(pl.toplevel, cfg->title ? cfg->title : "iris");
-    xdg_toplevel_set_app_id(pl.toplevel, "ai.opencode.iris");
+    xdg_toplevel_set_app_id(pl.toplevel,
+                            cfg->app_id ? cfg->app_id : "ai.opencode.iris");
 
     /* Ask the compositor for a server-side title bar when it can. */
     if (pl.deco_mgr) {

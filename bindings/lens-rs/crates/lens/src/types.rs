@@ -39,10 +39,11 @@ impl Color {
     /// Fully transparent (alpha 0). In overlay options this means "no fill".
     pub const TRANSPARENT: Color = Color(0);
 
-    /// A straight-alpha colour from 8-bit components.
+    /// A colour from straight-alpha 8-bit components, stored in flux's
+    /// premultiplied representation for correct SRC_OVER blending.
     pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color {
         // SAFETY: pure packing function, no state.
-        Color(unsafe { sys::flux_color_rgba(r, g, b, a) })
+        Color(unsafe { sys::flux_color_rgba_premul(r, g, b, a) })
     }
 
     /// Return the 8-bit RGBA components in linear-space byte form
@@ -60,7 +61,17 @@ impl Color {
     /// Return a new colour with the same RGB and the given alpha.
     /// The result is stored premultiplied, matching flux's internal format.
     pub fn with_alpha(self, a: u8) -> Color {
-        let (r, g, b, _) = self.components();
+        let (pr, pg, pb, old_a) = self.components();
+        if old_a == 0 || a == 0 {
+            return Color::TRANSPARENT;
+        }
+        let unpremultiply = |component: u8| {
+            let value = (u32::from(component) * 255 + u32::from(old_a) / 2) / u32::from(old_a);
+            u8::try_from(value.min(255)).unwrap_or(255)
+        };
+        let r = unpremultiply(pr);
+        let g = unpremultiply(pg);
+        let b = unpremultiply(pb);
         // SAFETY: pure packing function, no state.
         Color(unsafe { sys::flux_color_rgba_premul(r, g, b, a) })
     }
@@ -77,6 +88,43 @@ pub enum Align {
     Center,
     End,
     Stretch,
+}
+
+/// One column in a virtualized [`crate::Frame::table`]. A zero width shares
+/// the remaining table width with the other flexible columns.
+#[derive(Debug, Clone, Copy)]
+pub struct TableColumn<'a> {
+    pub title: &'a str,
+    pub width: f32,
+    pub align: Align,
+}
+
+/// Presentation and interaction options for a virtualized table.
+#[derive(Debug, Clone, Copy)]
+pub struct TableOpts {
+    pub row_height: f32,
+    pub show_header: bool,
+    pub selectable: bool,
+    pub zebra: bool,
+}
+
+impl Default for TableOpts {
+    fn default() -> Self {
+        Self {
+            row_height: 0.0,
+            show_header: true,
+            selectable: true,
+            zebra: false,
+        }
+    }
+}
+
+/// Interaction result returned by [`crate::Frame::table`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TableResult {
+    pub selected: Option<usize>,
+    pub selection_changed: bool,
+    pub clicked: bool,
 }
 
 impl Align {

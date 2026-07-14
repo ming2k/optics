@@ -14,6 +14,8 @@ typedef struct {
     float track_len;
     float scroll_range;
     bool dragging;
+    bool hovering;
+    bool initialized;
     float drag_start_offset, drag_start_y;
     int selected; /* -1 = none */
 } lens_table_state;
@@ -60,17 +62,25 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
     n->measured = (flux_point){vw > 0 ? vw : 200.0f, vh > 0 ? vh : 200.0f};
 
     lens_table_state *st = lens_node_state(n, sizeof *st);
-    /* On first allocation the store zeroes the state; selected must read
-     * as "none" (-1), not 0 (which is a valid row index). Detect a fresh
-     * state via a sentinel: offset_y==0 && selected==0 && dragging==0 is
-     * only the memset case before any interaction — seed selected to -1. */
-    if (st && st->selected == 0 && !st->dragging && st->thumb_h == 0.0f)
+    /* The store zeroes new state, but row zero is a valid selection. Keep an
+     * explicit initialization bit instead of inferring freshness from the
+     * scrollbar geometry (tables without overflow never have a thumb). */
+    if (st && !st->initialized) {
         st->selected = -1;
+        st->initialized = true;
+    }
 
-    /* Content height for scroll range. */
-    float content_h = header_h + (float)row_count * row_h;
+    /* The header is fixed chrome, not part of the scroll viewport. Rows,
+     * scrollbar geometry, and scroll range all use the body rectangle. */
+    float rows_h = (float)row_count * row_h;
+    float body_h = vh - header_h;
+    if (body_h < 0.0f)
+        body_h = 0.0f;
     float sb_w = t->scrollbar_width;
-    float view_w = vw - sb_w;
+    bool scrollable = body_h > 0.0f && rows_h > body_h;
+    float view_w = vw - (scrollable ? sb_w : 0.0f);
+    if (view_w < 0.0f)
+        view_w = 0.0f;
 
     /* Wheel routing: innermost scroll container under cursor. */
     if (n->has_prev && lensi_point_in(ui->input.cursor, n->prev_rect))
@@ -84,7 +94,7 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
     }
 
     /* Clamp offset to [0, scroll_range]. */
-    float scroll_range = content_h - vh;
+    float scroll_range = rows_h - body_h;
     if (scroll_range < 0)
         scroll_range = 0;
     if (st) {
@@ -98,25 +108,27 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
     n->scroll_y = off;
 
     /* Scrollbar thumb geometry + drag (mirrors scroll.c). */
-    if (st && n->has_prev && content_h > vh) {
-        float thumb_h = (vh / content_h) * vh;
+    if (st && n->has_prev && scrollable) {
+        float thumb_h = (body_h / rows_h) * body_h;
         if (thumb_h < t->scrollbar_min_thumb_h)
             thumb_h = t->scrollbar_min_thumb_h;
-        float track_len = vh - thumb_h;
-        float thumb_y = n->prev_rect.y + (scroll_range > 0 ? (off / scroll_range) * track_len : 0);
+        if (thumb_h > body_h)
+            thumb_h = body_h;
+        float track_len = body_h - thumb_h;
+        float track_y = n->prev_rect.y + header_h;
+        float thumb_y = track_y + (scroll_range > 0 ? (off / scroll_range) * track_len : 0);
         st->thumb_y = thumb_y;
         st->thumb_h = thumb_h;
         st->track_len = track_len;
 
         const int L = LENS_MOUSE_LEFT;
         flux_rect thumb_rect = {n->prev_rect.x + vw - sb_w, thumb_y, sb_w, thumb_h};
-        flux_rect track_rect = {n->prev_rect.x + vw - sb_w, n->prev_rect.y, sb_w, vh};
+        flux_rect track_rect = {n->prev_rect.x + vw - sb_w, track_y, sb_w, body_h};
         if (ui->active_id == n->id) {
             if (ui->input.mouse_down[L] && st->dragging) {
                 float dy = ui->input.cursor.y - st->drag_start_y;
                 st->offset_y =
                     st->drag_start_offset + (track_len > 0 ? dy * scroll_range / track_len : 0);
-                n->scroll_y = st->offset_y;
             }
             if (ui->input.mouse_released[L]) {
                 st->dragging = false;
@@ -128,15 +140,33 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
             st->drag_start_offset = st->offset_y;
             st->drag_start_y = ui->input.cursor.y;
             ui->input.mouse_pressed[L] = false;
+        } else if (lensi_point_in(ui->input.cursor, track_rect) && ui->input.mouse_pressed[L]) {
+            float page = body_h * 0.9f;
+            st->offset_y += ui->input.cursor.y < thumb_y ? -page : page;
+            ui->input.mouse_pressed[L] = false;
         }
-        st->dragging = st->dragging || (lensi_point_in(ui->input.cursor, track_rect));
+        if (st->offset_y < 0.0f)
+            st->offset_y = 0.0f;
+        if (st->offset_y > scroll_range)
+            st->offset_y = scroll_range;
+        st->hovering = st->dragging || lensi_point_in(ui->input.cursor, track_rect);
+        off = st->offset_y;
+        n->scroll_y = off;
+    } else if (st) {
+        st->thumb_y = 0.0f;
+        st->thumb_h = 0.0f;
+        st->track_len = 0.0f;
+        st->dragging = false;
+        st->hovering = false;
+        if (ui->active_id == n->id)
+            ui->active_id = 0;
     }
 
     /* ---- compute the visible row window ---- */
-    int first = (int)((off - header_h) / row_h);
+    int first = (int)(off / row_h);
     if (first < 0)
         first = 0;
-    int last = (int)((off + vh - header_h) / row_h) + 1;
+    int last = (int)((off + body_h) / row_h) + 1;
     if (last > row_count)
         last = row_count;
 
@@ -211,6 +241,13 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
         }
     }
 
+    /* Rows scroll below a fixed header. Give the body its own clip so rows
+     * moving out at the top cannot paint across the column titles. */
+    float body_y = header_h;
+    lensi_drawlist_push(ui, n,
+                        (lens_draw_cmd){.kind = LENS_DRAW_CLIP_PUSH,
+                                        .rel = {0, body_y, view_w, body_h}});
+
     /* Visible rows. */
     for (int r = first; r < last; r++) {
         float ry = header_h + (float)r * row_h - off;
@@ -233,16 +270,21 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
             if (!txt || !txt[0])
                 continue;
             lens_align al = cols[c].align;
+            float cw = cols[c].width > 0 ? cols[c].width : flex_w;
             float tx = col_x[c] + t->padding;
             if (al == LENS_END || al == LENS_STRETCH) {
-                float cw = cols[c].width > 0 ? cols[c].width : flex_w;
                 lens_text_metrics tm = lensi_text_measure_label(ui, txt, t->font_size, 0.0f);
                 tx = col_x[c] + cw - tm.width - t->padding;
             } else if (al == LENS_CENTER) {
-                float cw = cols[c].width > 0 ? cols[c].width : flex_w;
                 lens_text_metrics tm = lensi_text_measure_label(ui, txt, t->font_size, 0.0f);
                 tx = col_x[c] + (cw - tm.width) * 0.5f;
             }
+            /* Clip each cell independently. Without this, a long title can
+             * paint through artist/album/duration columns even though the
+             * table itself is clipped to the viewport. */
+            lensi_drawlist_push(ui, n,
+                                (lens_draw_cmd){.kind = LENS_DRAW_CLIP_PUSH,
+                                                .rel = {col_x[c], ry, cw, row_h}});
             lensi_drawlist_push(
                 ui, n,
                 (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
@@ -250,16 +292,28 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
                                 .color = sel ? t->color_accent : t->color_fg,
                                 .text = txt,
                                 .text_size = t->font_size});
+            lensi_drawlist_push(ui, n,
+                                (lens_draw_cmd){.kind = LENS_DRAW_CLIP_POP,
+                                                .rel = {col_x[c], ry, cw, row_h}});
         }
     }
+
+    lensi_drawlist_push(ui, n,
+                        (lens_draw_cmd){.kind = LENS_DRAW_CLIP_POP,
+                                        .rel = {0, body_y, view_w, body_h}});
 
     lensi_drawlist_push(ui, n, (lens_draw_cmd){.kind = LENS_DRAW_CLIP_POP, .rel = {0, 0, 0, 0}});
 
     /* Scrollbar thumb (drawn after the clip so it sits above content). */
-    if (st && n->has_prev && content_h > vh) {
-        bool hov =
-            st->dragging || lensi_point_in(ui->input.cursor, (flux_rect){n->prev_rect.x + vw - sb_w,
-                                                                         n->prev_rect.y, sb_w, vh});
+    if (st && n->has_prev && scrollable) {
+        if (t->color_scrollbar_track & 0xff000000u) {
+            lensi_drawlist_push(ui, n,
+                                (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                                .rel = {vw - sb_w, header_h, sb_w, body_h},
+                                                .color = t->color_scrollbar_track,
+                                                .radius = t->scrollbar_radius});
+        }
+        bool hov = st->hovering;
         flux_color tc = st->dragging ? t->color_scrollbar_thumb_active
                         : hov        ? t->color_scrollbar_thumb_hover
                                      : t->color_scrollbar_thumb;

@@ -1,10 +1,10 @@
 /*
  * iris/file_dialog.h — file picker via the host desktop.
  *
- * On Linux, files out to xdg-desktop-portal's FileChooser interface via
- * subprocess (gdbus call). This is the same path modern GTK/Qt take —
- * the user sees their own DE's native picker, and the calling app does
- * not need filesystem UI of its own.
+ * On Linux, talks directly to xdg-desktop-portal's FileChooser interface
+ * over the user D-Bus. This is the same path modern GTK/Qt take — the user
+ * sees their own DE's native picker, and the calling app does not need
+ * filesystem UI of its own.
  *
  * Blocking: the call runs the portal's modal loop and returns when the
  * user confirms or cancels. Returns 0 on success, non-zero otherwise.
@@ -29,6 +29,10 @@ typedef struct iris_file_dialog_opts {
  * Returns non-zero if the user cancels, the portal is unavailable, or
  * out_path is too small (out_cap must be >= the full URI length + 1). */
 IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap);
+
+/* Open a single-folder picker. The return convention and URI encoding match
+ * iris_pick_file. */
+IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap);
 
 #ifdef __cplusplus
 }

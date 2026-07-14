@@ -2,7 +2,9 @@
 //! bindings, the linker resolved liblens + libflux, and a real headless
 //! frame drives the widget set through the safe wrapper. No GPU required.
 
-use lens::{Align, Color, Input, LayoutOpts, MouseButton, TextBuf, Theme, Ui};
+use lens::{
+    Align, Color, Input, LayoutOpts, MouseButton, TableColumn, TableOpts, TextBuf, Theme, Ui,
+};
 
 #[test]
 fn version_links_and_runs() {
@@ -100,6 +102,98 @@ fn headless_frame_drives_containers() {
 }
 
 #[test]
+fn safe_table_virtualizes_rust_cells() {
+    let mut ui = Ui::headless().expect("create headless ui");
+    let input = Input::new((640.0, 480.0), 1.0 / 60.0);
+    let columns = [
+        TableColumn {
+            title: "Title",
+            width: 0.0,
+            align: Align::Start,
+        },
+        TableColumn {
+            title: "Time",
+            width: 64.0,
+            align: Align::End,
+        },
+    ];
+    let mut requested = 0_usize;
+    ui.frame(&input, |frame| {
+        frame.size_next(600.0, 300.0);
+        let result = frame.table(
+            "library",
+            &columns,
+            10_000,
+            TableOpts::default(),
+            |row, column| {
+                requested += 1;
+                format!("{row}:{column}")
+            },
+        );
+        assert_eq!(result.selected, None);
+    });
+    assert!(requested < 100, "table requested {requested} cells");
+}
+
+#[test]
+fn safe_table_wheel_down_advances_rows() {
+    let mut ui = Ui::headless().expect("create headless ui");
+    let columns = [TableColumn {
+        title: "Title",
+        width: 0.0,
+        align: Align::Start,
+    }];
+    let mut visible_rows = Vec::new();
+    for _ in 0..2 {
+        visible_rows.clear();
+        let input = Input::new((480.0, 320.0), 1.0 / 60.0);
+        ui.frame(&input, |frame| {
+            frame.size_next(440.0, 240.0);
+            frame.table(
+                "scroll-direction",
+                &columns,
+                1_000,
+                TableOpts {
+                    row_height: 28.0,
+                    ..TableOpts::default()
+                },
+                |row, _| {
+                    visible_rows.push(row);
+                    row.to_string()
+                },
+            );
+        });
+    }
+    visible_rows.clear();
+    let mut wheel_down = Input::new((480.0, 320.0), 1.0 / 60.0);
+    wheel_down.set_cursor(100.0, 100.0).set_scroll(0.0, -8.0);
+    ui.frame(&wheel_down, |frame| {
+        frame.size_next(440.0, 240.0);
+        frame.table(
+            "scroll-direction",
+            &columns,
+            1_000,
+            TableOpts {
+                row_height: 28.0,
+                ..TableOpts::default()
+            },
+            |row, _| {
+                visible_rows.push(row);
+                row.to_string()
+            },
+        );
+    });
+    assert!(
+        visible_rows
+            .iter()
+            .copied()
+            .min()
+            .is_some_and(|row| row > 0),
+        "wheel-down must reveal later rows, got {visible_rows:?}"
+    );
+}
+
+#[test]
 fn headless_frame_drives_descriptor_containers() {
     // The *_ex containers carry gap / pad / cross / bg. Drive them headless so
     // the retained tree reconciles layout with the full option set.
@@ -192,6 +286,30 @@ fn theme_colours_adapt_to_light_and_dark() {
             "light theme foreground should be darker than background"
         );
     });
+}
+
+#[test]
+fn rgba_and_with_alpha_preserve_premultiplied_colour_contract() {
+    let translucent = Color::rgba(240, 120, 60, 32);
+    let (r, g, b, a) = translucent.components();
+    assert_eq!(a, 32);
+    assert!(r <= a && g <= a && b <= a);
+
+    let retinted = translucent.with_alpha(128);
+    let (r, g, b, a) = retinted.components();
+    assert_eq!(a, 128);
+    assert!(
+        (118..=122).contains(&r),
+        "red should preserve its straight colour"
+    );
+    assert!(
+        (58..=62).contains(&g),
+        "green should preserve its straight colour"
+    );
+    assert!(
+        (28..=32).contains(&b),
+        "blue should preserve its straight colour"
+    );
 }
 
 #[test]

@@ -96,6 +96,7 @@ typedef void (*iris_paint_fn)(flux_canvas *canvas, flux_device *device, float sc
 
 typedef struct iris_app_config {
     const char *title;   /* window title (UTF-8, optional)       */
+    const char *app_id;  /* Wayland desktop app ID (optional)    */
     int32_t width;       /* initial logical width (0 = default)  */
     int32_t height;      /* initial logical height (0 = default) */
     bool dark;           /* force dark; false = follow system    */
