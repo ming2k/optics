@@ -85,19 +85,25 @@ static void arrange(lens_node *n, flux_rect rect) {
     float inner_main = (ax == LENS_ROW) ? inner.w : inner.h;
     float inner_cross = (ax == LENS_ROW) ? inner.h : inner.w;
 
-    /* base = sum of measured main extents; free = leftover for grow */
-    float base = 0, total_grow = 0;
+    /* base = sum of measured main extents; free = leftover for grow.
+     * Flexible children also form the shrink pool when their intrinsic sizes
+     * do not fit. Fixed siblings keep their requested size while the flexible
+     * content yields the deficit, matching the common sidebar | content |
+     * inspector layout. */
+    float base = 0, total_grow = 0, total_shrink_basis = 0;
     uint32_t cnt = 0;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         base += pt_main(c->measured, ax);
         total_grow += c->flex_grow;
+        if (c->flex_grow > 0)
+            total_shrink_basis += pt_main(c->measured, ax);
         cnt++;
     }
     if (cnt > 1)
         base += n->gap * (float)(cnt - 1);
     float free = inner_main - base;
-    if (free < 0)
-        free = 0;
+    float grow_space = free > 0 ? free : 0;
+    float shrink_space = free < 0 ? fminf(-free, total_shrink_basis) : 0;
 
     /* reserve scrollbar width so content doesn't render underneath it */
     if (n->is_scroll && ax == LENS_COLUMN && base > inner_main) {
@@ -111,7 +117,9 @@ static void arrange(lens_node *n, flux_rect rect) {
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         float main_sz = pt_main(c->measured, ax);
         if (total_grow > 0 && c->flex_grow > 0)
-            main_sz += free * (c->flex_grow / total_grow);
+            main_sz += grow_space * (c->flex_grow / total_grow);
+        if (shrink_space > 0 && c->flex_grow > 0 && total_shrink_basis > 0)
+            main_sz -= shrink_space * (main_sz / total_shrink_basis);
 
         /* A scroll container must stay within the parent's viewport so its
          * content can actually overflow and trigger scrolling. Without this

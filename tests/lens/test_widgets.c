@@ -359,6 +359,38 @@ static void test_title_and_heading_sizes(void) {
     lens_destroy(ui);
 }
 
+static void test_wrapped_label_respects_width_and_grows_height(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {200, 200}, .dt_seconds = 0.016f};
+    lens_theme theme = lens_get_theme(ui);
+    float single_line_h =
+        lens_text_measure(ui, theme.font, "Ag", theme.font_size).height + 2.0f * theme.padding;
+
+    lens_begin(ui, &in);
+    lens_column_ex(ui, (lens_layout_opts){.cross = LENS_START});
+    lens_label_wrapped(ui,
+                       "Paper account cash 100000 available 100000 equity 100000 and a "
+                       "very-long-token-without-a-natural-break",
+                       120.0f);
+    lens_label(ui, "After");
+    lens_close(ui);
+    lens_end(ui);
+
+    lens_node *column = lens_node_first_child(lens_root(ui));
+    lens_node *wrapped = lens_node_first_child(column);
+    lens_node *after = lens_node_next_sibling(wrapped);
+    flux_rect rw = lens_node_bounds(wrapped);
+    flux_rect ra = lens_node_bounds(after);
+
+    CHECK_NEAR(rw.w, 120.0f, 0.5f);
+    CHECK(rw.h > single_line_h * 2.0f);
+    CHECK(ra.y >= rw.y + rw.h);
+    CHECK(rw.x + rw.w <= 200.0f);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_button_click();
     test_checkbox_toggle();
@@ -368,5 +400,6 @@ int main(void) {
     test_scroll_offset();
     test_scroll_thumb_drag();
     test_title_and_heading_sizes();
+    test_wrapped_label_respects_width_and_grows_height();
     return TEST_REPORT();
 }

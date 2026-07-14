@@ -437,6 +437,10 @@ LENS_API bool lens_selectable(lens *ui, const char *label, bool selected);
 LENS_API bool lens_selectable_icon(lens *ui, lens_icon_id icon, const char *label, bool selected);
 LENS_API void lens_label(lens *ui, const char *text);
 LENS_API void lens_label_ex(lens *ui, const char *text, float size);
+/* A label constrained to max_width logical pixels. Text wraps at whitespace
+ * when possible and falls back to UTF-8 boundaries for long tokens. */
+LENS_API void lens_label_wrapped(lens *ui, const char *text, float max_width);
+LENS_API void lens_label_wrapped_ex(lens *ui, const char *text, float size, float max_width);
 LENS_API void lens_label_compact_ex(lens *ui, const char *text, float size);
 LENS_API void lens_title(lens *ui, const char *text);
 LENS_API void lens_heading(lens *ui, const char *text, int level);

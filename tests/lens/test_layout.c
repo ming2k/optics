@@ -85,6 +85,43 @@ static void test_flex_distributes_slack(void) {
     lens_destroy(ui);
 }
 
+static void test_flex_child_shrinks_between_fixed_siblings(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_row_ex(ui, (lens_layout_opts){.gap = 5, .pad = 0, .cross = LENS_STRETCH});
+    lens_size(ui, 40.0f, 0.0f);
+    (void)lens_button(ui, "sidebar");
+    lens_flex(ui, 1.0f);
+    lens_column(ui);
+    (void)lens_button(ui, "workspace content with a wide intrinsic size");
+    lens_close(ui);
+    lens_size(ui, 50.0f, 0.0f);
+    (void)lens_button(ui, "inspector");
+    lens_close(ui);
+    lens_end(ui);
+
+    lens_node *row = lens_node_first_child(lens_root(ui));
+    lens_node *sidebar = lens_node_first_child(row);
+    lens_node *workspace = lens_node_next_sibling(sidebar);
+    lens_node *inspector = lens_node_next_sibling(workspace);
+
+    flux_rect rs = lens_node_bounds(sidebar);
+    flux_rect rw = lens_node_bounds(workspace);
+    flux_rect ri = lens_node_bounds(inspector);
+
+    CHECK_NEAR(rs.w, 40.0f, 0.5f);
+    CHECK_NEAR(rw.x, 45.0f, 0.5f);
+    CHECK_NEAR(rw.w, 100.0f, 0.5f);
+    CHECK_NEAR(ri.x, 150.0f, 0.5f);
+    CHECK_NEAR(ri.w, 50.0f, 0.5f);
+    CHECK_NEAR(ri.x + ri.w, 200.0f, 0.5f);
+
+    lens_destroy(ui);
+}
+
 static void test_column_stacks_children(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
@@ -140,6 +177,7 @@ static void test_flex_applies_to_terse_container(void) {
 int main(void) {
     test_row_packs_children();
     test_flex_distributes_slack();
+    test_flex_child_shrinks_between_fixed_siblings();
     test_column_stacks_children();
     test_flex_applies_to_terse_container();
     return TEST_REPORT();

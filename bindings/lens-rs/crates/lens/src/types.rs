@@ -216,6 +216,54 @@ impl Theme {
         self
     }
 
+    /// Set the application body/background colour.
+    pub fn with_bg(mut self, color: Color) -> Theme {
+        self.0.color_bg = color.raw();
+        self
+    }
+
+    /// Set the primary foreground/text colour.
+    pub fn with_fg(mut self, color: Color) -> Theme {
+        self.0.color_fg = color.raw();
+        self
+    }
+
+    /// Set the accent colour used by focused and selected controls.
+    pub fn with_accent(mut self, color: Color) -> Theme {
+        self.0.color_accent = color.raw();
+        self
+    }
+
+    /// Set the border and divider colour.
+    pub fn with_border(mut self, color: Color) -> Theme {
+        self.0.color_border = color.raw();
+        self
+    }
+
+    /// Set the hover-surface colour.
+    pub fn with_hover(mut self, color: Color) -> Theme {
+        self.0.color_hover = color.raw();
+        self
+    }
+
+    /// Set the pressed/active-surface colour.
+    pub fn with_active(mut self, color: Color) -> Theme {
+        self.0.color_active = color.raw();
+        self
+    }
+
+    /// Set the disabled-control colour.
+    pub fn with_disabled(mut self, color: Color) -> Theme {
+        self.0.color_disabled = color.raw();
+        self
+    }
+
+    /// Set the validation/error colour.
+    pub fn with_error(mut self, color: Color) -> Theme {
+        self.0.color_error = color.raw();
+        self
+    }
+
     /// Background colour of the window/body.
     pub fn bg(self) -> Color {
         Color(self.0.color_bg)
@@ -280,6 +328,29 @@ impl Default for Theme {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Icon {
+    Activity,
+    BarChart,
+    Bell,
+    BookOpen,
+    Briefcase,
+    CheckCircle,
+    Clock,
+    Database,
+    DollarSign,
+    ExternalLink,
+    Globe,
+    Grid,
+    Home,
+    Link,
+    MessageCircle,
+    Radio,
+    RefreshCw,
+    Rss,
+    Shield,
+    Target,
+    TrendingUp,
+    Users,
+    Zap,
     Settings,
     Sidebar,
     Menu,
@@ -299,6 +370,29 @@ impl Icon {
     pub(crate) fn raw(self) -> sys::lens_icon_id {
         use sys::lens_icon_id::*;
         match self {
+            Icon::Activity => LENS_ICON_ACTIVITY,
+            Icon::BarChart => LENS_ICON_BAR_CHART_2,
+            Icon::Bell => LENS_ICON_BELL,
+            Icon::BookOpen => LENS_ICON_BOOK_OPEN,
+            Icon::Briefcase => LENS_ICON_BRIEFCASE,
+            Icon::CheckCircle => LENS_ICON_CHECK_CIRCLE,
+            Icon::Clock => LENS_ICON_CLOCK,
+            Icon::Database => LENS_ICON_DATABASE,
+            Icon::DollarSign => LENS_ICON_DOLLAR_SIGN,
+            Icon::ExternalLink => LENS_ICON_EXTERNAL_LINK,
+            Icon::Globe => LENS_ICON_GLOBE,
+            Icon::Grid => LENS_ICON_GRID,
+            Icon::Home => LENS_ICON_HOME,
+            Icon::Link => LENS_ICON_LINK,
+            Icon::MessageCircle => LENS_ICON_MESSAGE_CIRCLE,
+            Icon::Radio => LENS_ICON_RADIO,
+            Icon::RefreshCw => LENS_ICON_REFRESH_CW,
+            Icon::Rss => LENS_ICON_RSS,
+            Icon::Shield => LENS_ICON_SHIELD,
+            Icon::Target => LENS_ICON_TARGET,
+            Icon::TrendingUp => LENS_ICON_TRENDING_UP,
+            Icon::Users => LENS_ICON_USERS,
+            Icon::Zap => LENS_ICON_ZAP,
             Icon::Settings => LENS_ICON_SETTINGS,
             Icon::Sidebar => LENS_ICON_SIDEBAR,
             Icon::Menu => LENS_ICON_MENU,

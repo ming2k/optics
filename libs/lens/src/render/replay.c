@@ -140,16 +140,31 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
                 size_t vlen = end ? (size_t)(end - c->text) : strlen(c->text);
                 if (vlen) {
                     float x = r.x;
+                    float y = r.y;
+                    lens_text_metrics tm = {0};
+                    bool measured_text = false;
                     if (c->rel.w < 0.0f) {
                         /* Negative rel.w means "center in the resolved rect". */
-                        lens_text_metrics tm =
-                            lensi_text_measure_label(ui, c->text, c->text_size, c->text_weight);
+                        tm = lensi_text_measure_label(ui, c->text, c->text_size, c->text_weight);
+                        measured_text = true;
                         x = r.x + (r.w - tm.width) * 0.5f;
                         if (x < r.x)
                             x = r.x;
                     }
+                    if (c->rel.h < 0.0f) {
+                        /* Negative rel.h means "center in the final node
+                         * height". Unlike a build-time y offset, this remains
+                         * correct when the parent constrains the node below
+                         * its intrinsic padded height. */
+                        if (!measured_text)
+                            tm = lensi_text_measure_label(ui, c->text, c->text_size,
+                                                          c->text_weight);
+                        y = r.y + (r.h - tm.height) * 0.5f;
+                        if (y < r.y)
+                            y = r.y;
+                    }
 
-                    flux_text_draw(ui->text, canvas, &ui->arena, x, r.y, c->text, vlen,
+                    flux_text_draw(ui->text, canvas, &ui->arena, x, y, c->text, vlen,
                                    &(flux_text_style){.size_px = c->text_size,
                                                       .weight = c->text_weight,
                                                       .color = c->color});

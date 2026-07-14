@@ -632,6 +632,22 @@ impl Frame {
         unsafe { sys::lens_label_ex(self.ui, c.as_ptr(), size) };
     }
 
+    /// A text label that wraps within `max_width` logical pixels.
+    pub fn label_wrapped(&mut self, text: &str, max_width: f32) {
+        let c = cstr(text);
+        // SAFETY: ui is live; c outlives the call.
+        unsafe { sys::lens_label_wrapped(self.ui, c.as_ptr(), max_width.max(0.0)) };
+    }
+
+    /// A wrapped text label at a specific point size.
+    pub fn label_wrapped_sized(&mut self, text: &str, size: f32, max_width: f32) {
+        let c = cstr(text);
+        // SAFETY: ui is live; c outlives the call.
+        unsafe {
+            sys::lens_label_wrapped_ex(self.ui, c.as_ptr(), size, max_width.max(0.0))
+        };
+    }
+
     /// A text label without the theme padding. Use inside fixed-height chrome
     /// such as status bars where the regular label would overflow.
     pub fn label_compact_sized(&mut self, text: &str, size: f32) {
@@ -645,6 +661,13 @@ impl Frame {
         let c = cstr(text);
         // SAFETY: ui is live; c outlives the call.
         unsafe { sys::lens_title(self.ui, c.as_ptr()) };
+    }
+
+    /// A semantic heading with an explicit level from 1 (largest) to 6.
+    pub fn heading(&mut self, text: &str, level: i32) {
+        let c = cstr(text);
+        // SAFETY: ui is live for the frame; c outlives the call.
+        unsafe { sys::lens_heading(self.ui, c.as_ptr(), level.clamp(1, 6)) };
     }
 
     /// A checkbox bound to `value`. Returns `true` on the frame it toggles.
@@ -684,6 +707,22 @@ impl Frame {
         // SAFETY: ui is live; c and buf outlive the call; buf is NUL-terminated
         // with capacity buf.cap().
         unsafe { sys::lens_textfield(self.ui, c.as_ptr(), buf.as_mut_ptr(), buf.cap()) }
+    }
+
+    /// A multi-line text editor with a minimum visible height.
+    pub fn textarea(&mut self, label: &str, buf: &mut TextBuf, min_height: f32) -> bool {
+        let c = cstr(label);
+        // SAFETY: ui is live; c and buf outlive the call; buf is NUL-terminated
+        // with capacity buf.cap().
+        unsafe {
+            sys::lens_textarea(
+                self.ui,
+                c.as_ptr(),
+                buf.as_mut_ptr(),
+                buf.cap(),
+                min_height.max(0.0),
+            )
+        }
     }
 }
 
@@ -728,9 +767,7 @@ impl TextBuf {
         let n = text.len().min(cap - 1);
         // Wipe first so a shorter replacement can't leave stale tail bytes
         // before the new NUL terminator.
-        for b in &mut self.bytes {
-            *b = 0;
-        }
+        self.bytes.fill(0);
         self.bytes[..n].copy_from_slice(&text.as_bytes()[..n]);
         self.bytes[n] = 0;
     }

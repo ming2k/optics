@@ -39,7 +39,7 @@ void lens_title(lens *ui, const char *text) {
 
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding, t->padding, 0, 0},
+                                        .rel = {t->padding, 0, 0, -1.0f},
                                         .color = t->color_fg,
                                         .text = text,
                                         .text_size = size,
@@ -68,7 +68,7 @@ void lens_heading(lens *ui, const char *text, int level) {
 
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding, t->padding, 0, 0},
+                                        .rel = {t->padding, 0, 0, -1.0f},
                                         .color = t->color_fg,
                                         .text = text,
                                         .text_size = size,
