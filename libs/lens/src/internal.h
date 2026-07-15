@@ -43,7 +43,9 @@ typedef enum lens_draw_kind {
 
 typedef struct lens_draw_cmd {
     lens_draw_kind kind;
-    flux_rect rel; /* relative to the node's final_rect */
+    /* Relative to the node's final_rect. With an explicit positive width,
+     * a negative x anchors the rectangle to the trailing edge. */
+    flux_rect rel;
     flux_color color;
     float radius;
     float width;      /* border width */
@@ -86,6 +88,8 @@ struct lens_node {
     bool dismissable; /* overlay may be closed by Esc/click-outside; false = modal-pinned (ADR-0016)
                        */
     flux_rect overlay_anchor; /* set by lens_overlay_begin/lens_layer_begin */
+    flux_rect overlay_bounds; /* optional placement/render boundary inherited from an owner */
+    bool has_overlay_bounds;
     lens_axis axis;
     float gap, pad;
     lens_align cross;
@@ -301,6 +305,7 @@ const char *lensi_take_paste(lens *ui, uint32_t *out_len);
  * per-frame layer array; only overlays track open state and dismissal. */
 bool lensi_overlay_is_open_id(const lens *ui, lens_id id);
 void lensi_overlay_open_id_pub(lens *ui, lens_id id, bool dismissable); /* ADR-0017 menu internal */
+void lensi_overlay_constrain_current(lens *ui, flux_rect bounds);
 void lensi_overlay_layout(lens *ui);                                    /* post-arrange placement */
 void lensi_overlay_render(lens *ui, flux_canvas *canvas);
 void lensi_overlay_dismiss(lens *ui); /* click-outside + Esc (overlays only) */

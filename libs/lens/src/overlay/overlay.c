@@ -181,6 +181,17 @@ void lens_overlay_end(lens *ui) {
         lensi_open_container_pop(ui);
 }
 
+/* Constrain the overlay currently being built to its owner's visible region.
+ * Dropdowns use the nearest scroll viewport so a portal-style popup can still
+ * escape ordinary layout flow without crossing the inspector that owns it. */
+void lensi_overlay_constrain_current(lens *ui, flux_rect bounds) {
+    lens_node *n = ui ? lensi_open_container(ui) : NULL;
+    if (!n || !n->is_overlay || n->is_panel_layer || bounds.w <= 0.0f || bounds.h <= 0.0f)
+        return;
+    n->overlay_bounds = bounds;
+    n->has_overlay_bounds = true;
+}
+
 /* ---- panel begin / end -------------------------------------------- */
 /* The persistent-chrome sibling. Always renders; placed at the exact
  * rect (clamped on screen); never dismissed. See file header. */
@@ -228,6 +239,21 @@ void lensi_overlay_layout(lens *ui) {
         float w = n->measured.x;
         float h = n->measured.y;
 
+        float area_x = 0.0f;
+        float area_y = 0.0f;
+        float area_w = dw;
+        float area_h = dh;
+        if (n->has_overlay_bounds && !n->is_centered && !n->is_panel_layer) {
+            float right = n->overlay_bounds.x + n->overlay_bounds.w;
+            float bottom = n->overlay_bounds.y + n->overlay_bounds.h;
+            area_x = fmaxf(0.0f, n->overlay_bounds.x);
+            area_y = fmaxf(0.0f, n->overlay_bounds.y);
+            right = dw > 0.0f ? fminf(dw, right) : right;
+            bottom = dh > 0.0f ? fminf(dh, bottom) : bottom;
+            area_w = fmaxf(0.0f, right - area_x);
+            area_h = fmaxf(0.0f, bottom - area_y);
+        }
+
         float x, y;
         if (n->is_centered) {
             /* Modal content: center on the display (ADR-0016). */
@@ -238,26 +264,29 @@ void lensi_overlay_layout(lens *ui) {
             x = n->overlay_anchor.x;
             y = n->overlay_anchor.y;
         } else {
-            /* Popup overlay: drop below the anchor, flip above if it
-             * would overflow the bottom edge. */
+            /* Popup overlay: drop below the anchor, flip above if it would
+             * overflow the owner's visible boundary, then clamp within it. */
             x = n->overlay_anchor.x;
             y = n->overlay_anchor.y + n->overlay_anchor.h; /* below */
-            if (dh > 0 && y + h > dh) {
+            float area_bottom = area_y + area_h;
+            if (area_h > 0.0f && y + h > area_bottom) {
                 float up = n->overlay_anchor.y - h; /* flip above */
-                if (up >= 0)
+                if (up >= area_y)
                     y = up;
                 else
-                    y = (dh > h) ? dh - h : 0;
+                    y = (area_h > h) ? area_bottom - h : area_y;
             }
         }
-        if (dw > 0 && x + w > dw)
-            x = dw - w;
-        if (x < 0)
-            x = 0;
-        if (dh > 0 && y + h > dh)
-            y = dh - h;
-        if (y < 0)
-            y = 0;
+        float area_right = area_x + area_w;
+        float area_bottom = area_y + area_h;
+        if (area_w > 0.0f && x + w > area_right)
+            x = area_right - w;
+        if (x < area_x)
+            x = area_x;
+        if (area_h > 0.0f && y + h > area_bottom)
+            y = area_bottom - h;
+        if (y < area_y)
+            y = area_y;
 
         lensi_layout_subtree(n, (flux_rect){x, y, w, h});
     }
@@ -272,8 +301,11 @@ void lensi_overlay_render(lens *ui, flux_canvas *canvas) {
         return;
     flux_rect no_clip = {-1e6f, -1e6f, 2e6f, 2e6f};
     for (uint32_t i = 0; i < ui->overlay_layer_count; i++) {
-        if (ui->overlay_layers[i])
-            lensi_render_node(ui, canvas, ui->overlay_layers[i], no_clip);
+        if (ui->overlay_layers[i]) {
+            lens_node *n = ui->overlay_layers[i];
+            flux_rect clip = n->has_overlay_bounds ? n->overlay_bounds : no_clip;
+            lensi_render_node(ui, canvas, n, clip);
+        }
     }
 }
 
@@ -343,7 +375,12 @@ void lensi_overlay_dismiss(lens *ui) {
         if (!slot->dismissable)
             continue; /* modal-pinned (ADR-0016) */
         lens_node *ov = lensi_store_find(ui, slot->id);
-        bool hit = ov && ov->has_prev && lensi_point_in(cur, ov->prev_rect);
+        bool hit_layer = ov && ov->has_prev && lensi_point_in(cur, ov->prev_rect);
+        /* The anchor is part of the popup interaction. Without this, pressing
+         * an open dropdown trigger dismisses on press and the trigger reopens
+         * the same overlay on release. */
+        bool hit_anchor = ov && lensi_point_in(cur, ov->overlay_anchor);
+        bool hit = hit_layer || hit_anchor;
         if (!hit) {
             for (uint32_t j = (uint32_t)i; j + 1 < ui->open_overlay_count; j++)
                 ui->open_overlays[j] = ui->open_overlays[j + 1];

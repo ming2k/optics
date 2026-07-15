@@ -38,7 +38,7 @@ static lens_overlay_opts menu_panel_opts(lens *ui) {
     return (lens_overlay_opts){
         .pad = t->padding * 0.5f,
         .gap = 1.0f,
-        .bg = t->color_hover,
+        .bg = t->color_bg | 0xff000000u,
         .border = t->color_border,
         .border_width = t->border_width,
         .radius = t->corner_radius,
@@ -131,8 +131,7 @@ bool lens_menu_item_flags(lens *ui, const char *label, const char *shortcut, uin
     if (shortcut && sc_w > 0.0f) {
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                            .rel = {w - t->padding - sc_w + t->padding,
-                                                    (h - tm.height) * 0.5f, 0, 0},
+                                            .rel = {-t->padding, (h - tm.height) * 0.5f, sc_w, 0},
                                             .color = t->color_disabled,
                                             .text = shortcut,
                                             .text_size = t->font_size * 0.9f});
@@ -316,14 +315,15 @@ bool lens_submenu_begin(lens *ui, const char *label) {
                                         .color = t->color_fg,
                                         .text = label,
                                         .text_size = t->font_size});
-    /* trailing chevron ▸ */
+    /* Vector chevron anchored to the solved trailing edge. */
+    float icon_size = t->font_size;
     lensi_drawlist_push(
         ui, n,
-        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                        .rel = {w - t->padding - tm.height, (h - tm.height) * 0.5f, 0, 0},
+        (lens_draw_cmd){.kind = LENS_DRAW_ICON,
+                        .rel = {-t->padding, (h - icon_size) * 0.5f, icon_size, icon_size},
                         .color = t->color_disabled,
-                        .text = "▸",
-                        .text_size = t->font_size});
+                        .width = 1.8f * (icon_size / 24.0f),
+                        .icon_id = LENS_ICON_CHEVRON_RIGHT});
 
     ui->last_response = r;
     if (!open)

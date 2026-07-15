@@ -15,6 +15,8 @@ void lensi_node_reset_frame(lens_node *n) {
     n->is_scroll = false;
     n->is_overlay = false;
     n->overlay_anchor = (flux_rect){0, 0, 0, 0};
+    n->overlay_bounds = (flux_rect){0, 0, 0, 0};
+    n->has_overlay_bounds = false;
     n->axis = LENS_ROW;
     n->gap = n->pad = 0.0f;
     n->cross = LENS_STRETCH;

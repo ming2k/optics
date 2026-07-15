@@ -452,6 +452,10 @@ LENS_API bool lens_slider(lens *ui, const char *label, float *value, float min, 
 LENS_API bool lens_radio(lens *ui, const char *label, int *value, int option_value);
 LENS_API bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap);
 LENS_API bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float min_h);
+/* Select trigger with a trailing vector chevron and an opaque floating option
+ * surface. Re-clicking the trigger closes once; a popup inside a scroll area
+ * inherits that viewport and closes when scrolling starts. A positive height
+ * supplied through lens_size/lens_box is raised when needed for its content. */
 LENS_API bool lens_dropdown(lens *ui, const char *label, int *selected, const char **items,
                             int count);
 LENS_API bool lens_collapsing(lens *ui, const char *label);
@@ -465,6 +469,9 @@ LENS_API void lens_collapsing_set_open(lens *ui, const char *label, bool open);
 LENS_API void lens_scroll_begin(lens *ui, const char *id);
 LENS_API void lens_scroll_end(lens *ui);
 
+/* Horizontal selection strip. Tab padding lives inside each hit target; the
+ * strip itself adds no inset. Keyboard focus shares the active underline and
+ * an undersized host height is raised to the tallest tab content. */
 LENS_API bool lens_tabs_begin(lens *ui, const char *id, int *active_tab);
 LENS_API bool lens_tab(lens *ui, const char *label);
 LENS_API void lens_tabs_end(lens *ui);
@@ -603,9 +610,10 @@ LENS_API void lens_overlay_close(lens *ui, const char *id);
 LENS_API bool lens_overlay_is_open(const lens *ui, const char *id);
 
 /* Open a floating layer anchored to `anchor` (usually the owner widget's
- * `lens_get_response().rect`). Returns true when the overlay is currently
- * open and the body should build; returns false otherwise so the caller
- * can skip its contents. Pair with lens_overlay_end on true returns. */
+ * `lens_get_response().rect`). The anchor counts as part of the overlay for
+ * click-outside dismissal, allowing an owner trigger to implement a clean
+ * press/release toggle. Returns true when the overlay is currently open and
+ * the body should build. Pair with lens_overlay_end on true returns. */
 LENS_API bool lens_overlay_begin(lens *ui, const char *id, flux_rect anchor,
                                  lens_overlay_opts opts);
 LENS_API void lens_overlay_end(lens *ui);

@@ -15,7 +15,8 @@ static flux_rect offset_rel(flux_rect box, flux_rect rel) {
         w = 0;
     if (h < 0)
         h = 0;
-    return (flux_rect){box.x + rel.x, box.y + rel.y, w, h};
+    float x = (rel.x < 0.0f && rel.w > 0.0f) ? box.x + box.w + rel.x - w : box.x + rel.x;
+    return (flux_rect){x, box.y + rel.y, w, h};
 }
 
 /* Snap a logical rect to the device-pixel grid so sharp edges (1 px

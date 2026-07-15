@@ -563,6 +563,8 @@ impl Frame {
     }
 
     /// A tab strip keyed by `id`, tracking the selected index in `active`.
+    /// The strip enforces the themed label height and uses its underline for
+    /// both selection and keyboard focus instead of drawing a detached frame.
     /// Declare the tabs inside `strip` with [`Frame::tab`]; render the selected
     /// panel *after* this call, switching on `*active`.
     ///
@@ -602,7 +604,10 @@ impl Frame {
     }
 
     /// A dropdown selecting an index into `items`, stored in `selected`.
-    /// Returns `true` on the frame the selection changes.
+    /// Its vector chevron stays on the trailing edge and the floating option
+    /// list owns an opaque surface. In a scroll area the list inherits the
+    /// viewport and closes when scrolling starts. Returns `true` when
+    /// selection changes.
     pub fn dropdown(&mut self, label: &str, selected: &mut i32, items: &[&str]) -> bool {
         let label_c = cstr(label);
         // Keep the CStrings alive for the whole call; collect their pointers.

@@ -4,6 +4,18 @@
 #include <stdio.h>
 #include <string.h>
 
+static bool nearest_scroll_bounds(lens_node *n, flux_rect *out) {
+    for (lens_node *parent = n ? n->parent : NULL; parent; parent = parent->parent) {
+        if (parent->is_scroll && parent->has_prev && parent->prev_rect.w > 0.0f &&
+            parent->prev_rect.h > 0.0f) {
+            if (out)
+                *out = parent->prev_rect;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool lens_dropdown(lens *ui, const char *label, int *selected, const char **items, int count) {
     const lens_theme *t = &ui->theme;
     bool disabled = ui->next_disabled;
@@ -30,6 +42,13 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
     }
 
     bool open = lens_overlay_is_open(ui, ov_label);
+    /* A popup is anchored to content coordinates. Close it at the start of a
+     * scroll gesture so the list never lags behind or crosses the owner's
+     * viewport while the trigger is moving. */
+    if (open && (fabsf(ui->input.scroll_x) > 0.0001f || fabsf(ui->input.scroll_y) > 0.0001f)) {
+        lens_overlay_close(ui, ov_label);
+        open = false;
+    }
     lens_response r = lensi_interact(ui, n, true, disabled);
     if (r.clicked) {
         if (open) {
@@ -44,12 +63,18 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
     const char *preview =
         (selected && *selected >= 0 && *selected < count) ? items[*selected] : label;
 
-    char buf[256];
-    snprintf(buf, sizeof buf, "%s %s", preview, open ? "▲" : "▼");
-
-    lens_text_metrics tm = lensi_text_measure_label(ui, buf, t->font_size, 0.0f);
-    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * t->padding;
-    float h = (n->fixed_h > 0) ? n->fixed_h : t->font_size + 2.0f * t->padding;
+    lens_text_metrics tm = lensi_text_measure_label(ui, preview, t->font_size, 0.0f);
+    float icon_size = t->font_size;
+    float icon_gap = 8.0f;
+    float content_w = tm.width + icon_gap + icon_size;
+    float natural_h = fmaxf(tm.height, icon_size) + 2.0f * t->padding;
+    /* A select trigger must not accept a box hint that clips its label or
+     * disclosure icon. Width remains host-controlled; height has a semantic
+     * minimum derived from the current theme and text metrics. */
+    if (n->fixed_h > 0.0f && n->fixed_h < natural_h)
+        n->fixed_h = natural_h;
+    float w = (n->fixed_w > 0) ? n->fixed_w : content_w + 2.0f * t->padding;
+    float h = (n->fixed_h > 0) ? fmaxf(n->fixed_h, natural_h) : natural_h;
     n->measured = (flux_point){w, h};
 
     float dt = ui->input.dt_seconds;
@@ -58,8 +83,9 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
         n->active_t = lensi_approach(ui, n->active_t, (ui->active_id == id) ? 1.f : 0.f, dt, 18.f);
     }
 
-    flux_color bg =
-        disabled ? t->color_disabled : lensi_lerp_color(t->color_bg, t->color_hover, n->hover_t);
+    float emphasis = (open || r.focused) ? 0.72f : n->hover_t;
+    flux_color bg = disabled ? t->color_disabled
+                             : lensi_lerp_color(t->color_bg, t->color_hover, emphasis);
 
     lensi_drawlist_push(
         ui, n,
@@ -68,17 +94,31 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
 
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding, (h - tm.height) * 0.5f, -1.0f, 0},
+                                        .rel = {t->padding, (h - tm.height) * 0.5f, 0, 0},
                                         .color = t->color_fg,
-                                        .text = buf,
+                                        .text = preview,
                                         .text_size = t->font_size});
+
+    float icon_y = (h - icon_size) * 0.5f;
+    lensi_drawlist_push(
+        ui, n,
+        (lens_draw_cmd){.kind = LENS_DRAW_ICON,
+                        .rel = {-t->padding, icon_y, icon_size, icon_size},
+                        .color = (open || r.focused) ? t->color_accent : t->color_fg,
+                        .width = 1.8f * (icon_size / 24.0f),
+                        .icon_id = open ? LENS_ICON_CHEVRON_UP : LENS_ICON_CHEVRON_DOWN});
 
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
                                         .rel = {0, 0, 0, 0},
-                                        .color = r.focused ? t->color_accent : t->color_border,
+                                        .color = t->color_border,
                                         .radius = t->corner_radius,
                                         .width = t->border_width});
+
+    uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) |
+                         (disabled ? LENS_A11Y_DISABLED : 0) |
+                         (open ? LENS_A11Y_EXPANDED : 0);
+    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, preview, sem_flags);
 
     bool changed = false;
 
@@ -109,18 +149,22 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
          * dropdown to fill its row should get a full-width menu, not one
          * shrink-wrapped to "17 ▼". */
         float popup_w = anchor.w;
-        /* The popup surface is one step lighter than the page so the menu
-         * reads as a distinct floating panel, with a border to delineate it
-         * (the page itself is drawn in color_bg). */
+        flux_rect owner_bounds = {0, 0, 0, 0};
+        bool has_owner_bounds = nearest_scroll_bounds(n, &owner_bounds);
+        /* Use the opaque theme background instead of color_hover. Hover can
+         * legitimately be translucent, but a floating option surface must
+         * never reveal or visually merge with content behind it. */
         if (lens_overlay_begin(ui, ov_label, anchor,
                                (lens_overlay_opts){.pad = t->padding,
                                                    .gap = 2.0f,
-                                                   .bg = t->color_hover,
+                                                   .bg = t->color_bg | 0xff000000u,
                                                    .border = t->color_border,
                                                    .border_width = t->border_width,
                                                    .radius = t->corner_radius,
                                                    .min_width = popup_w,
                                                    .cross = LENS_STRETCH})) {
+            if (has_owner_bounds)
+                lensi_overlay_constrain_current(ui, owner_bounds);
             /* Flat selectable rows, not filled accent buttons: a column of
              * lens_button reads as a stack of bordered pills, whereas a menu
              * wants one flat list with the current value highlighted. */
