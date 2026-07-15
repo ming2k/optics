@@ -50,6 +50,17 @@ or report through `flux_get_last_error` as noted.
 | `flux_buffer_mapped` | Returns the persistent mapped pointer, or `NULL` for a `FLUX_BUFFER_GPU_LOCAL` buffer. |
 | `flux_buffer_size` | Returns the buffer's size in bytes. |
 
+### Render Target
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_target_create` | Creates a refcounted color or depth attachment with flux-owned image, memory, and view. |
+| `flux_target_retain` | Increments the refcount; returns the same handle. |
+| `flux_target_release` | Decrements the refcount; destroys at zero. Null-safe. |
+| `flux_target_width` | Returns the target width. |
+| `flux_target_height` | Returns the target height. |
+| `flux_frame_prepare_target` | Records the target's attachment layout transition and discards prior contents. Reused targets require one instance per frame-in-flight slot or equivalent external synchronization. |
+
 ### Surface
 
 | Symbol | Description |
@@ -235,8 +246,10 @@ for handle packing.
 
 | Symbol | Description |
 |--------|-------------|
-| `flux_frame_begin_pass` | Begins dynamic rendering with the given color attachments and optional depth and stencil attachments. A `VK_NULL_HANDLE` color view targets the frame's swapchain image. |
+| `flux_frame_begin_pass` | Begins dynamic rendering with the given color attachments and optional depth and stencil attachments. A `VK_NULL_HANDLE` color view targets the frame's swapchain image; non-zero `flux_pass_desc.width/height` select a custom render extent. |
 | `flux_frame_end_pass` | Ends the current dynamic-rendering pass. |
+| `flux_frame_set_viewport` | Sets dynamic viewport state without fetching a raw `VkCommandBuffer`. Ignored unless the frame is recording. |
+| `flux_frame_set_scissor` | Sets dynamic scissor state without fetching a raw `VkCommandBuffer`. Ignored unless the frame is recording. |
 
 ## `<flux/canvas.h>`
 
@@ -274,9 +287,15 @@ are `void`-returning; segments dropped on arena exhaustion are counted.
 | Symbol | Description |
 |--------|-------------|
 | `flux_image_create` | Creates a sampled GPU image (8-bit color formats), optionally uploading `initial_data`, and registers it in the bindless heap. |
+| `flux_image_create_render_target` | Creates a color-attachment image with undefined initial contents. Its first target pass performs the initial transition and makes it sampleable on finish. Its extent may differ from the surface for downsampled effects. |
 | `flux_image_retain` | Increments the refcount; returns the same handle. |
 | `flux_image_release` | Decrements the refcount; destroys at zero. Null-safe. |
+| `flux_image_width` | Returns the image width. |
+| `flux_image_height` | Returns the image height. |
+| `flux_image_format` | Returns the image's `flux_format`. |
 | `flux_image_update_region` | Synchronously uploads pixels into an in-bounds sub-region. The bindless handle and view stay valid across the update. |
+| `flux_frame_prepare_image_target` | Transitions a new or sampleable render-target image to color-attachment layout for a caller-recorded pass. |
+| `flux_frame_finish_image_target` | Restores a caller-recorded image target to sampleable layout after its pass. |
 
 ### Canvas
 
@@ -286,6 +305,8 @@ are `void`-returning; segments dropped on arena exhaustion are counted.
 | `flux_canvas_destroy` | Destroys the canvas and releases the surface reference. |
 | `flux_canvas_begin` | Binds the canvas to a frame; non-`NULL` `clear_color` clears the target, `NULL` loads it. |
 | `flux_canvas_end` | Ends the recording session; the canvas detaches from the frame. |
+| `flux_canvas_begin_target` | Begins an offscreen Canvas pass. The target chooses the render extent and may be smaller than the surface. |
+| `flux_canvas_end_target` | Ends an offscreen Canvas pass and makes its target sampleable. |
 | `flux_canvas_save` | Pushes the current state (transform + clip) onto the state stack. |
 | `flux_canvas_restore` | Pops the state stack. |
 | `flux_canvas_clip_rect` | Intersects the current clip with a rectangle (scissor). |
@@ -353,5 +374,9 @@ transient-output lifetime rules.
 | Symbol | Description |
 |--------|-------------|
 | `flux_effect_blur` | Records a separable two-pass Gaussian blur into `cmd`. Sigma is clamped to `[0, FLUX_EFFECT_BLUR_SIGMA_MAX]`; sigma 0 degenerates to a copy. The output image is effect-owned and transient. |
+| `flux_blur_filter_create` | Creates a reusable fixed-cost Dual-Kawase blur with pyramid/output images isolated per frame-in-flight slot. |
+| `flux_blur_filter_retain` | Increments the reusable blur refcount. |
+| `flux_blur_filter_release` | Decrements the reusable blur refcount and destroys it at zero. |
+| `flux_blur_filter_apply` | Records two downsample and two upsample passes using the current frame slot, suitable for animated compositors without sigma-dependent loops, pool growth, or device-wide waits. |
 | `flux_effect_promote` | Synchronously copies a transient effect output into a fresh caller-owned `flux_image` with the regular refcounted lifecycle. |
 | `flux_effect_reset` | Ends an effect lease epoch after every command buffer referencing its images has completed; old output pointers become invalid. |

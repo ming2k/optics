@@ -240,7 +240,7 @@ typedef struct lens_theme {
     flux_color color_accent;
     flux_color color_border;
     flux_color color_hover;
-    flux_color color_active;
+    flux_color color_active; /* pressed and selected surface fill */
     flux_color color_disabled;
     flux_color color_error;
 
@@ -262,11 +262,11 @@ typedef struct lens_theme {
     float font_weight;
     float font_weight_bold;
 
-    /* Active-indicator treatment for selectable ghost buttons
-     * (`lens_icon_button_active`). Width in logical pixels of the left accent
-     * bar drawn when active; when > 0 the glyph also takes `color_accent`.
-     * Set to 0 for a calmer tint-only active state (the background fill is
-     * drawn regardless). Defaults to 2.0 via theme normalisation. */
+    /* Optional active-indicator treatment for selectable rows and ghost icon
+     * buttons (`lens_icon_button_active`). Width in logical pixels of the
+     * left accent rail drawn when active; when > 0 the glyph/text also takes
+     * `color_accent`. Set to 0 for the plain tint-only active state (the
+     * background fill is drawn regardless). Defaults to 0. */
     float active_indicator_width;
 
     /* Scrollbar styling for scroll areas. The thumb is drawn flush against
@@ -428,11 +428,12 @@ LENS_API void lens_spacer(lens *ui, float size);     /* fixed empty main-axis ga
 /* ================================================================== */
 
 LENS_API bool lens_button(lens *ui, const char *label);
-/* A borderless, full-width list / nav item (VS Code-style). Transparent at
- * rest, subtle hover fill, and a steady rounded highlight when `selected`.
- * The selected accent bar follows theme.active_indicator_width. Returns true
- * on the frame it is clicked. Use it for sidebar lists where a stack of filled
- * lens_buttons would read as bordered pills. */
+/* A borderless, full-width list / nav item. Transparent at rest, with a subtle
+ * hover fill and a steady `color_active` surface when `selected`. Selection
+ * colour is independent from decoration: themes may separately opt into a
+ * left accent rail through active_indicator_width. Returns true on the frame
+ * it is clicked. Use it for sidebar lists where a stack of filled lens_buttons
+ * would read as bordered pills. */
 LENS_API bool lens_selectable(lens *ui, const char *label, bool selected);
 LENS_API bool lens_selectable_icon(lens *ui, lens_icon_id icon, const char *label, bool selected);
 LENS_API void lens_label(lens *ui, const char *text);
@@ -445,6 +446,8 @@ LENS_API void lens_label_compact_ex(lens *ui, const char *text, float size);
 LENS_API void lens_title(lens *ui, const char *text);
 LENS_API void lens_heading(lens *ui, const char *text, int level);
 LENS_API bool lens_checkbox(lens *ui, const char *label, bool *value);
+/* Horizontal value control. The resting track omits its knob; hover, keyboard
+ * focus, or dragging reveals it with the framework's seek-safe transition. */
 LENS_API bool lens_slider(lens *ui, const char *label, float *value, float min, float max);
 LENS_API bool lens_radio(lens *ui, const char *label, int *value, int option_value);
 LENS_API bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap);
@@ -484,12 +487,19 @@ LENS_API void lens_image(lens *ui, flux_image *image, float w, float h);
  * no texture is available. */
 LENS_API bool lens_image_button(lens *ui, flux_image *image);
 LENS_API bool lens_image_button_active(lens *ui, flux_image *image, bool active);
-/* Flat icon button (activity-bar / toolbar idiom): transparent at rest, subtle
- * hover fill, no accent pill. Returns true on the frame it is clicked. */
+/* Flat icon button for navigation strips and toolbars: transparent at rest,
+ * with a subtle hover fill. Returns true on the frame it is clicked. */
 LENS_API bool lens_icon_button(lens *ui, lens_icon_id id);
-/* As lens_icon_button, but `active` shows a steady highlight (fill, accent glyph,
- * left accent bar) — for the currently-selected view in a nav strip. */
+/* As lens_icon_button, but `active` shows a steady tint for the selected view.
+ * An accent rail and accent glyph are added only when the theme explicitly
+ * sets active_indicator_width above 0. */
 LENS_API bool lens_icon_button_active(lens *ui, lens_icon_id id, bool active);
+/* Rounded icon tile with an explicit logical glyph size and optional
+ * top-right text badge (for example "1" on repeat-one). The tile stays flat
+ * at rest, gains a rounded hover/active surface, and never uses an accent
+ * rail. Pass NULL or an empty string for no badge. */
+LENS_API bool lens_icon_button_badged(lens *ui, lens_icon_id id, const char *badge,
+                                     float glyph_size, bool active);
 
 /* ================================================================== */
 /*  Widgets — descriptor forms                                        */

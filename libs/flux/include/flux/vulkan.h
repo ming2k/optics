@@ -305,12 +305,24 @@ typedef struct flux_pass_desc {
      * stencilAttachmentFormat. The canvas uses this internally for
      * stencil-then-cover fills (ADR-0014). */
     const flux_pass_depth_attachment *stencil;
+    /* Optional render extent for caller-supplied attachments. Zero selects
+     * the frame surface extent. Attachment views must cover this area. */
+    uint32_t width;
+    uint32_t height;
 } flux_pass_desc;
 
 #define FLUX_PASS_DESC_INIT {.type = FLUX_TYPE_PASS_DESC}
 
 FLUX_API void flux_frame_begin_pass(flux_frame *f, const flux_pass_desc *desc);
 FLUX_API void flux_frame_end_pass(flux_frame *f);
+
+/* Backend-neutral wrappers for the dynamic viewport and scissor state used by
+ * graphics pipelines. The frame must be recording; calls outside that state
+ * are ignored. */
+FLUX_API void flux_frame_set_viewport(flux_frame *f, float x, float y, float width, float height,
+                                      float min_depth, float max_depth);
+FLUX_API void flux_frame_set_scissor(flux_frame *f, int32_t x, int32_t y, uint32_t width,
+                                     uint32_t height);
 
 #ifdef __cplusplus
 }

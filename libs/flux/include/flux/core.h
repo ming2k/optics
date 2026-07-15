@@ -410,6 +410,14 @@ FLUX_API void flux_target_release(flux_target *t);
 FLUX_API uint32_t flux_target_width(const flux_target *t);
 FLUX_API uint32_t flux_target_height(const flux_target *t);
 
+/* Record the layout transition that makes `target` usable as the attachment
+ * selected by its usage. The target's previous contents are discarded, so
+ * the following pass must clear or otherwise fully overwrite it. Call once
+ * per frame before flux_frame_begin_pass. A target reused across frames must
+ * be dedicated to that frame-in-flight slot (or otherwise externally
+ * synchronized). */
+FLUX_API void flux_frame_prepare_target(flux_frame *f, const flux_target *target);
+
 /* ================================================================== */
 /*  Surface                                                           */
 /* ================================================================== */

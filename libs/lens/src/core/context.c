@@ -98,7 +98,7 @@ static void lensi_theme_normalize(lens_theme *t) {
     if (t->font_weight_bold <= 0.0f)
         t->font_weight_bold = 700.0f;
     if (t->active_indicator_width < 0.0f)
-        t->active_indicator_width = 2.0f;
+        t->active_indicator_width = 0.0f;
     if (t->scrollbar_width <= 0.0f)
         t->scrollbar_width = 8.0f;
     if (t->scrollbar_radius < 0.0f)

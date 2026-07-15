@@ -27,6 +27,11 @@ the effect header in automatically.
 To take a long-lived copy, use [`flux_effect_promote`](#flux_effect_promote)
 below.
 
+For an effect that updates every frame, use
+[`flux_blur_filter_apply`](#reusable-frame-slot-blur) instead. It owns one
+two-level pyramid and output per frame-in-flight slot and does not use
+transient lease epochs.
+
 ## `flux_effect_blur`
 
 Separable two-pass Gaussian blur.
@@ -46,6 +51,9 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_blur(
 | `next`   | `const void *`   | no       | Reserved for future chained extensions.                            |
 | `input`  | `flux_image *`   | yes      | Must be RGBA8_UNORM or BGRA8_UNORM. Sampled bindless handle required. |
 | `sigma`  | `float`          | yes      | Gaussian sigma in pixels. Clamped silently to `[0, FLUX_EFFECT_BLUR_SIGMA_MAX]`. |
+
+The output keeps the input dimensions and uses `FLUX_FORMAT_RGBA8_UNORM`.
+BGRA input remains valid for sampling but is normalized before storage writes.
 
 ### Returns
 
@@ -75,6 +83,34 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_blur(
 
 - The effect emits a `COMPUTE_SHADER STORAGE_WRITE → COMPUTE_SHADER | FRAGMENT_SHADER SAMPLED_READ | STORAGE_READ` image barrier on the output before returning. Callers can sample the output in any subsequent shader stage without additional synchronisation.
 - The effect does **not** transition the input image. The input must already be in `SHADER_READ_ONLY_OPTIMAL` or `GENERAL` and its prior writes must be visible to compute reads.
+
+## Reusable frame-slot blur
+
+`flux_blur_filter` is the fixed-cost animated compositor path. It records a
+two-level Dual-Kawase pyramid instead of the exact Gaussian kernel. Create one
+filter for one surface/frame stream, retain it across frames, and apply it only
+at a frame pass boundary:
+
+```c
+flux_blur_filter *filter = NULL;
+flux_blur_filter_create(device, &filter);
+
+flux_effect_blur_desc blur = FLUX_EFFECT_BLUR_DESC_INIT;
+blur.input = captured_scene;
+blur.sigma = 5.0f;
+
+flux_image *output = NULL; /* borrowed; do not release */
+flux_blur_filter_apply(filter, frame, &blur, &output);
+```
+
+The filter selects storage by `flux_frame_index(frame)`. Since
+`flux_surface_begin_frame` has waited that slot's fence, it can overwrite the
+slot without waiting for unrelated frames or growing the transient pool. The
+output has the input dimensions and `FLUX_FORMAT_RGBA8_UNORM`. It remains valid until the same
+slot is applied again, the input extent/format changes, or the filter is
+released. Positive `sigma` values control bounded sample offsets; they never
+increase the four-dispatch sample count. Sigma 0 records a copy. Release the
+filter only after GPU work that references it has completed.
 
 ## `flux_effect_promote`
 

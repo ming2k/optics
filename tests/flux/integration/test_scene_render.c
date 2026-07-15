@@ -54,109 +54,19 @@ static flux_mesh *make_quad(flux_device *d, float half, float z) {
     return m;
 }
 
-/* Caller-owned depth image per ADR-0001, allocated raw. */
-typedef struct depth_image {
-    VkImage image;
-    VkDeviceMemory memory;
-    VkImageView view;
-} depth_image;
-
-static bool depth_create(depth_image *di, flux_device *d) {
-    VkDevice vk = flux_device_vk_device(d);
-    VkImageCreateInfo ici = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = DEPTH_FORMAT,
-        .extent = {W, H, 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-    if (vkCreateImage(vk, &ici, nullptr, &di->image) != VK_SUCCESS)
-        return false;
-
-    VkMemoryRequirements mr;
-    vkGetImageMemoryRequirements(vk, di->image, &mr);
-    uint32_t mt =
-        test_helpers_find_memory_type(d, mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (mt == UINT32_MAX)
-        return false;
-    VkMemoryAllocateInfo mai = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = mr.size,
-        .memoryTypeIndex = mt,
-    };
-    if (vkAllocateMemory(vk, &mai, nullptr, &di->memory) != VK_SUCCESS)
-        return false;
-    vkBindImageMemory(vk, di->image, di->memory, 0);
-
-    VkImageViewCreateInfo ivci = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = di->image,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = DEPTH_FORMAT,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    return vkCreateImageView(vk, &ivci, nullptr, &di->view) == VK_SUCCESS;
-}
-
-static void depth_destroy(depth_image *di, flux_device *d) {
-    VkDevice vk = flux_device_vk_device(d);
-    if (di->view)
-        vkDestroyImageView(vk, di->view, nullptr);
-    if (di->image)
-        vkDestroyImage(vk, di->image, nullptr);
-    if (di->memory)
-        vkFreeMemory(vk, di->memory, nullptr);
-    memset(di, 0, sizeof(*di));
-}
-
-/* Shared per-frame plumbing: begin frame, transition depth, begin a
- * pass with a dark clear + depth clear, set viewport/scissor, run
- * `draw`, end, submit, present. */
+/* Shared per-frame plumbing: begin frame, prepare a flux-owned depth target,
+ * begin a pass with a dark clear + depth clear, set viewport/scissor through
+ * the backend-neutral helpers, run `draw`, end, submit, present. */
 typedef void (*draw_fn)(flux_frame *f, const flux_camera *cam, void *user);
 
-static flux_result render_frame(flux_surface *s, depth_image *di, const flux_camera *cam,
+static flux_result render_frame(flux_surface *s, flux_target *depth, const flux_camera *cam,
                                 draw_fn draw, void *user) {
     flux_frame *frame = nullptr;
     flux_result r = flux_surface_begin_frame(s, nullptr, &frame);
     if (r != FLUX_OK)
         return r;
 
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
-
-    VkImageMemoryBarrier2 b = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        .srcAccessMask = 0,
-        .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                        VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-        .dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-        .image = di->image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    VkDependencyInfo dep = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &b,
-    };
-    vkCmdPipelineBarrier2(cmd, &dep);
+    flux_frame_prepare_target(frame, depth);
 
     flux_pass_attachment color = {
         .load_op = FLUX_LOAD_CLEAR,
@@ -164,7 +74,7 @@ static flux_result render_frame(flux_surface *s, depth_image *di, const flux_cam
         .clear_color = {0.0f, 0.0f, 0.0f, 1.0f},
     };
     flux_pass_depth_attachment depth_att = {
-        .view = di->view,
+        .view = flux_target_vk_view(depth),
         .format = DEPTH_FORMAT,
         .load_op = FLUX_LOAD_CLEAR,
         .store_op = FLUX_STORE_DONT_CARE,
@@ -178,10 +88,8 @@ static flux_result render_frame(flux_surface *s, depth_image *di, const flux_cam
     };
     flux_frame_begin_pass(frame, &pass);
 
-    VkViewport vp = {.width = (float)W, .height = (float)H, .maxDepth = 1.0f};
-    VkRect2D sc = {.extent = {W, H}};
-    vkCmdSetViewport(cmd, 0, 1, &vp);
-    vkCmdSetScissor(cmd, 0, 1, &sc);
+    flux_frame_set_viewport(frame, 0.0f, 0.0f, (float)W, (float)H, 0.0f, 1.0f);
+    flux_frame_set_scissor(frame, 0, 0, W, H);
 
     draw(frame, cam, user);
 
@@ -233,8 +141,15 @@ int main(void) {
         EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
     }
 
-    depth_image di = {0};
-    EXPECT(depth_create(&di, d));
+    flux_target_desc depth_desc = {
+        .type = FLUX_TYPE_TARGET_DESC,
+        .usage = FLUX_TARGET_DEPTH,
+        .format = FLUX_DEPTH_FORMAT,
+        .width = W,
+        .height = H,
+    };
+    flux_target *depth = nullptr;
+    EXPECT(flux_target_create(d, &depth_desc, &depth) == FLUX_OK);
 
     flux_camera cam;
     flux_camera_perspective(&cam, 1.0f, (float)W / (float)H, 0.1f, 100.0f);
@@ -261,7 +176,7 @@ int main(void) {
         md.base_color = (flux_vec4){0, 1, 0, 1};
         EXPECT(flux_material_create(d, &md, &c.green) == FLUX_OK);
 
-        EXPECT(render_frame(s, &di, &cam, draw_depth_case, &c) == FLUX_OK);
+        EXPECT(render_frame(s, depth, &cam, draw_depth_case, &c) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
@@ -310,7 +225,7 @@ int main(void) {
             .color = {1, 1, 1},
             .ambient = 0.1f,
         };
-        EXPECT(render_frame(s, &di, &cam, draw_phong_case, &c) == FLUX_OK);
+        EXPECT(render_frame(s, depth, &cam, draw_phong_case, &c) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         /* Copy out of px — the next readback overwrites it. */
@@ -321,7 +236,7 @@ int main(void) {
         /* Light travels +Z, away from the quad: ndotl = 0, ambient
          * only (0.1 → ~26). The shading must respond to direction. */
         c.light.direction = (flux_vec3){0, 0, 1};
-        EXPECT(render_frame(s, &di, &cam, draw_phong_case, &c) == FLUX_OK);
+        EXPECT(render_frame(s, depth, &cam, draw_phong_case, &c) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         const uint8_t *dark = px_at(px, W / 2, H / 2);
@@ -333,7 +248,7 @@ int main(void) {
     }
 
     flux_device_wait_idle(d);
-    depth_destroy(&di, d);
+    flux_target_release(depth);
     flux_surface_release(s);
     flux_device_release(d);
     TEST_SUMMARY();

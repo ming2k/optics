@@ -27,7 +27,7 @@ or pull a raw `VkCommandBuffer` back.
 
 | Pattern              | Applied to                                                                                  |
 |----------------------|---------------------------------------------------------------------------------------------|
-| Opaque pointer       | `flux_device`, `flux_surface`, `flux_frame`, `flux_buffer`, `flux_image`, `flux_canvas`, `flux_path`, `flux_mesh`, `flux_material`, `flux_sampler`, `flux_graphics_pipeline`, `flux_compute_pipeline`. Never dereferenced by the caller. |
+| Opaque pointer       | `flux_device`, `flux_surface`, `flux_frame`, `flux_buffer`, `flux_target`, `flux_image`, `flux_canvas`, `flux_path`, `flux_mesh`, `flux_material`, `flux_sampler`, `flux_graphics_pipeline`, `flux_compute_pipeline`. Never dereferenced by the caller. |
 | Atomic refcount      | Every heavy resource above. `_retain` is `[[nodiscard]]` and returns the same pointer; `_release` is null-safe.  |
 | Value type           | `flux_vec2/3/4`, `flux_mat3x2`, `flux_mat4`, `flux_quat`, `flux_color`, `flux_point`, `flux_rect`, `flux_camera`, `flux_vertex`, `flux_scene_light`. Pass by value; live on the stack or in a `flux_arena`. |
 | Arena-owned          | `flux_path`, `flux_paint`. Reset/destroy the arena to free; no per-element release.         |

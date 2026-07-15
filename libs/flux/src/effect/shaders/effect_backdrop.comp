@@ -1,0 +1,78 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+/*
+ * Fixed-cost Dual-Kawase filter for animated compositor backdrops.
+ *
+ * A downsample pass uses five bilinear samples. An upsample pass uses eight.
+ * The host records two passes in each direction over a 1/2 and 1/4 pyramid,
+ * so cost is independent of the requested blur width. Mode 2 is a single-
+ * sample copy used to preserve sigma == 0 semantics.
+ */
+
+layout(set = 0, binding = 0) uniform texture2D u_sampled[];
+layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+layout(set = 0, binding = 2) uniform sampler u_samplers[];
+
+layout(push_constant) uniform PC {
+    uint in_handle;
+    uint sampler_handle;
+    uint out_handle;
+    uint input_width;
+    uint input_height;
+    uint output_width;
+    uint output_height;
+    float offset;
+    uint mode; /* 0 = downsample, 1 = upsample, 2 = copy */
+} pc;
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+vec4 sample_input(uint image_handle, uint sampler_handle, vec2 uv)
+{
+    return texture(
+        sampler2D(
+            u_sampled[nonuniformEXT(image_handle)],
+            u_samplers[nonuniformEXT(sampler_handle)]
+        ),
+        uv
+    );
+}
+
+void main()
+{
+    uvec2 p = gl_GlobalInvocationID.xy;
+    if (p.x >= pc.output_width || p.y >= pc.output_height) return;
+
+    uint ih = pc.in_handle & 0x0FFFFFFFu;
+    uint sh = pc.sampler_handle & 0x0FFFFFFFu;
+    uint oh = pc.out_handle & 0x0FFFFFFFu;
+    vec2 uv = (vec2(p) + 0.5) / vec2(pc.output_width, pc.output_height);
+    if (pc.mode == 2u) {
+        imageStore(u_storage[nonuniformEXT(oh)], ivec2(p), sample_input(ih, sh, uv));
+        return;
+    }
+
+    vec2 half_pixel = (0.5 * pc.offset) / vec2(pc.input_width, pc.input_height);
+    vec4 colour;
+    if (pc.mode == 0u) {
+        colour = sample_input(ih, sh, uv) * 4.0;
+        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0, -1.0));
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0, -1.0));
+        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0,  1.0));
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0,  1.0));
+        colour *= 0.125;
+    } else {
+        colour  = sample_input(ih, sh, uv + half_pixel * vec2(-2.0,  0.0));
+        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0,  1.0)) * 2.0;
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 0.0,  2.0));
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0,  1.0)) * 2.0;
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 2.0,  0.0));
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0, -1.0)) * 2.0;
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 0.0, -2.0));
+        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0, -1.0)) * 2.0;
+        colour /= 12.0;
+    }
+
+    imageStore(u_storage[nonuniformEXT(oh)], ivec2(p), colour);
+}

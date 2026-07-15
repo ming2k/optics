@@ -58,8 +58,29 @@ static void test_slider_disabled(void) {
     lens_destroy(ui);
 }
 
+static void test_slider_hover_schedules_knob_animation(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    float value = 0.5f;
+
+    lens_begin(ui, &IN0);
+    lens_slider(ui, "Volume", &value, 0.0f, 1.0f);
+    lens_end(ui);
+    CHECK(!lens_anim_pending(ui));
+
+    lens_input hover = IN0;
+    hover.cursor = (flux_point){80, 16};
+    lens_begin(ui, &hover);
+    lens_slider(ui, "Volume", &value, 0.0f, 1.0f);
+    lens_end(ui);
+    CHECK(lens_anim_pending(ui));
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_slider_drag();
     test_slider_disabled();
+    test_slider_hover_schedules_knob_animation();
     return TEST_REPORT();
 }

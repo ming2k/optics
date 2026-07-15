@@ -1,9 +1,9 @@
 /*
- * mineradio_fx — an interactive particle stage inspired by Mineradio.
+ * ripple_field — an interactive point-cloud surface with cursor ripples.
  *
- * This example tests the engine's ability to render an interactive
- * audio-reactive-style particle stage, responding to mouse inputs and
- * rendering additive glowing particles efficiently.
+ * This example renders an animated field of additive glowing particles.
+ * Moving the cursor over the window emits a ripple at the corresponding
+ * point on the field.
  */
 #include <flux/flux.h>
 #include <flux/math.h>
@@ -22,10 +22,10 @@
 #include <string.h>
 
 alignas(uint32_t) static const unsigned char fx_vert_spv[] = {
-#embed "mineradio_fx.vert.spv"
+#embed "ripple_field.vert.spv"
 };
 alignas(uint32_t) static const unsigned char fx_frag_spv[] = {
-#embed "mineradio_fx.frag.spv"
+#embed "ripple_field.frag.spv"
 };
 
 #define DEPTH_FORMAT VK_FORMAT_D32_SFLOAT
@@ -34,13 +34,13 @@ alignas(uint32_t) static const unsigned char fx_frag_spv[] = {
 #define GRID 200
 #define POINT_COUNT (GRID * GRID)
 
-typedef struct mineradio_push {
+typedef struct ripple_field_push {
     float mvp[16];
     float time;
     float point_size;
-    float mouse_x;
-    float mouse_y;
-} mineradio_push;
+    float ripple_x;
+    float ripple_z;
+} ripple_field_push;
 
 static flux_target *depth_ensure(flux_target *t, flux_device *device, uint32_t w, uint32_t h) {
     if (t && flux_target_width(t) == w && flux_target_height(t) == h)
@@ -72,6 +72,50 @@ static void on_resize(GLFWwindow *win, int w, int h) {
         (void)flux_surface_resize(surface, (uint32_t)w, (uint32_t)h);
 }
 
+static bool cursor_ground_position(GLFWwindow *win, flux_mat4 inverse_view_proj, float *world_x,
+                                   float *world_z) {
+    if (!glfwGetWindowAttrib(win, GLFW_HOVERED))
+        return false;
+
+    int window_width = 0, window_height = 0;
+    glfwGetWindowSize(win, &window_width, &window_height);
+    if (window_width <= 0 || window_height <= 0)
+        return false;
+
+    double cursor_x = 0.0, cursor_y = 0.0;
+    glfwGetCursorPos(win, &cursor_x, &cursor_y);
+
+    float ndc_x = (float)(cursor_x / (double)window_width) * 2.0f - 1.0f;
+    float ndc_y = (float)(cursor_y / (double)window_height) * 2.0f - 1.0f;
+    flux_vec4 near_point =
+        flux_mat4_transform_vec4(inverse_view_proj, (flux_vec4){ndc_x, ndc_y, 0.0f, 1.0f});
+    flux_vec4 far_point =
+        flux_mat4_transform_vec4(inverse_view_proj, (flux_vec4){ndc_x, ndc_y, 1.0f, 1.0f});
+    if (fabsf(near_point.w) <= 1e-6f || fabsf(far_point.w) <= 1e-6f)
+        return false;
+
+    float near_inv_w = 1.0f / near_point.w;
+    float far_inv_w = 1.0f / far_point.w;
+    near_point.x *= near_inv_w;
+    near_point.y *= near_inv_w;
+    near_point.z *= near_inv_w;
+    far_point.x *= far_inv_w;
+    far_point.y *= far_inv_w;
+    far_point.z *= far_inv_w;
+
+    float ray_y = far_point.y - near_point.y;
+    if (fabsf(ray_y) <= 1e-6f)
+        return false;
+
+    float distance = -near_point.y / ray_y;
+    if (distance < 0.0f)
+        return false;
+
+    *world_x = near_point.x + (far_point.x - near_point.x) * distance;
+    *world_z = near_point.z + (far_point.z - near_point.z) * distance;
+    return true;
+}
+
 int main(void) {
     if (!glfwInit()) {
         return 1;
@@ -83,7 +127,7 @@ int main(void) {
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    GLFWwindow *win = glfwCreateWindow(960, 540, "flux Mineradio FX", nullptr, nullptr);
+    GLFWwindow *win = glfwCreateWindow(960, 540, "flux Ripple Field", nullptr, nullptr);
     if (!win) {
         glfwTerminate();
         return 1;
@@ -94,7 +138,7 @@ int main(void) {
     const char *device_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
     flux_pipeline_cache_file cache = FLUX_PIPELINE_CACHE_FILE_INIT;
-    flux_pipeline_cache_file_set_default_path(&cache, "mineradio_fx.bin");
+    flux_pipeline_cache_file_set_default_path(&cache, "ripple_field.bin");
 
     flux_device_desc ddesc = {
         .type = FLUX_TYPE_DEVICE_DESC,
@@ -158,7 +202,7 @@ int main(void) {
     pdesc.depth = FLUX_DEPTH_TEST_AND_WRITE;
     pdesc.color_format = flux_format_from_vk(flux_surface_vk_format(surface));
     pdesc.depth_format = FLUX_DEPTH_FORMAT;
-    pdesc.push_constant_bytes = sizeof(mineradio_push);
+    pdesc.push_constant_bytes = sizeof(ripple_field_push);
 
     flux_graphics_pipeline *pipe = nullptr;
     if (flux_graphics_pipeline_create(device, &pdesc, &pipe) != FLUX_OK) {
@@ -254,13 +298,6 @@ int main(void) {
 
         float t = (float)glfwGetTime();
 
-        double mx = -999.0, my = -999.0;
-        if (glfwGetWindowAttrib(win, GLFW_HOVERED)) {
-            glfwGetCursorPos(win, &mx, &my);
-            mx = (mx / info.width) * 2.0 - 1.0;
-            my = (my / info.height) * 2.0 - 1.0;
-        }
-
         flux_camera cam;
         flux_camera_perspective(&cam, 1.0f, (float)info.width / (float)info.height, 0.1f, 100.0f);
         flux_camera_look_at(&cam, (flux_vec3){0.0f, 10.0f, 10.0f}, (flux_vec3){0.0f, 0.0f, 0.0f},
@@ -269,13 +306,15 @@ int main(void) {
         flux_mat4 view_proj = flux_mat4_multiply(cam.projection, cam.view);
         flux_mat4 mvp = flux_mat4_multiply(view_proj, flux_mat4_identity());
 
-        mineradio_push pc;
+        float ripple_x = -999.0f, ripple_z = -999.0f;
+        (void)cursor_ground_position(win, flux_mat4_invert(view_proj), &ripple_x, &ripple_z);
+
+        ripple_field_push pc;
         memcpy(pc.mvp, mvp.m, sizeof(pc.mvp));
         pc.time = t;
         pc.point_size = 4.0f;
-        // Map screen mouse position roughly to our plane
-        pc.mouse_x = (float)mx;
-        pc.mouse_y = (float)my;
+        pc.ripple_x = ripple_x;
+        pc.ripple_z = ripple_z;
         flux_graphics_pipeline_bind(frame, pipe, &pc, sizeof(pc));
 
         vkCmdDraw(cmd, POINT_COUNT, 1, 0, 0);

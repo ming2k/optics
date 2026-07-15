@@ -200,12 +200,11 @@ impl Theme {
         self
     }
 
-    /// Set the active-indicator width used by ghost icon buttons
-    /// ([`crate::Frame::icon_button_active`]). When > 0 the active state
-    /// draws a left accent bar of this width and tints the glyph with the
-    /// accent colour. When 0 the indicator is suppressed and only the
-    /// background tint remains — useful for a calmer, tint-only active
-    /// style. The background tint is drawn regardless of this value.
+    /// Set the optional active-indicator width used by selectable rows and
+    /// ghost icon buttons ([`crate::Frame::icon_button_active`]). When > 0,
+    /// the active state draws a flush left accent rail of this width and tints
+    /// the glyph or text with the accent colour. The default is 0: no rail,
+    /// with the background tint as the plain active treatment.
     pub fn with_active_indicator_width(mut self, width: f32) -> Theme {
         self.0.active_indicator_width = width.max(0.0);
         self
@@ -294,7 +293,8 @@ impl Theme {
         self
     }
 
-    /// Set the pressed/active-surface colour.
+    /// Set the pressed and selected-surface colour. Selectable rows use this
+    /// colour whether or not an active-indicator rail is enabled.
     pub fn with_active(mut self, color: Color) -> Theme {
         self.0.color_active = color.raw();
         self
@@ -409,6 +409,15 @@ pub enum Icon {
     Trash,
     ChevronLeft,
     ChevronRight,
+    Repeat,
+    Shuffle,
+    SkipBack,
+    Play,
+    Pause,
+    SkipForward,
+    VolumeMuted,
+    VolumeLow,
+    VolumeHigh,
     Search,
     Star,
     X,
@@ -451,6 +460,15 @@ impl Icon {
             Icon::Trash => LENS_ICON_TRASH_2,
             Icon::ChevronLeft => LENS_ICON_CHEVRON_LEFT,
             Icon::ChevronRight => LENS_ICON_CHEVRON_RIGHT,
+            Icon::Repeat => LENS_ICON_REPEAT,
+            Icon::Shuffle => LENS_ICON_SHUFFLE,
+            Icon::SkipBack => LENS_ICON_SKIP_BACK,
+            Icon::Play => LENS_ICON_PLAY,
+            Icon::Pause => LENS_ICON_PAUSE,
+            Icon::SkipForward => LENS_ICON_SKIP_FORWARD,
+            Icon::VolumeMuted => LENS_ICON_VOLUME_X,
+            Icon::VolumeLow => LENS_ICON_VOLUME_1,
+            Icon::VolumeHigh => LENS_ICON_VOLUME_2,
             Icon::Search => LENS_ICON_SEARCH,
             Icon::Star => LENS_ICON_STAR,
             Icon::X => LENS_ICON_X,

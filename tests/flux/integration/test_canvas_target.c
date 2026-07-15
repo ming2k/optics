@@ -21,6 +21,8 @@
 #define W 64u
 #define H 64u
 #define BYTES (W * H * 4u)
+#define BACKDROP_W 640u
+#define BACKDROP_H 360u
 
 int main(void) {
     flux_device *d = test_helpers_make_headless_device();
@@ -47,6 +49,12 @@ int main(void) {
     flux_image *target = nullptr;
     EXPECT(flux_image_create_render_target(d, W, H, target_fmt, &target) == FLUX_OK);
     EXPECT(flux_image_bindless_handle(target) != FLUX_BINDLESS_INVALID);
+    EXPECT(flux_image_width(target) == W);
+    EXPECT(flux_image_height(target) == H);
+    EXPECT(flux_image_format(target) == target_fmt);
+
+    flux_blur_filter *blur_filter = nullptr;
+    EXPECT(flux_blur_filter_create(d, &blur_filter) == FLUX_OK);
 
     static uint8_t px[BYTES];
 
@@ -68,8 +76,7 @@ int main(void) {
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
         bd.sigma = 6.0f;
-        VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
-        EXPECT(flux_effect_blur(cmd, &bd, &blurred) == FLUX_OK);
+        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
         EXPECT(blurred != nullptr);
 
         /* Composite the blurred capture onto the frame. */
@@ -83,13 +90,6 @@ int main(void) {
 
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-
-        /* Safe point: flux_surface_read_pixels waited on this frame's
-         * fence, so the GPU has finished sampling `blurred`. Resetting
-         * before submit/present freed the transient (and its bindless
-         * slot) while the draw_image still referenced it — a
-         * use-after-free that hangs the present wait. */
-        flux_effect_reset(d);
 
         /* The sharp captured edge, after sigma=6 blur + composite, should
          * be softened at the midpoint. */
@@ -129,6 +129,34 @@ int main(void) {
         EXPECT(px[(H / 2 * W + (W - 4)) * 4] > 240);
     }
 
+    /* --- reusable blur cycles through and safely reuses frame slots --- */
+    for (uint32_t iteration = 0; iteration < 5; ++iteration) {
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+
+        uint8_t red = (uint8_t)(40u + iteration * 30u);
+        flux_color fill = flux_color_rgba(red, 20, 40, 255);
+        EXPECT(flux_canvas_begin_target(canvas, frame, target, &fill) == FLUX_OK);
+        flux_canvas_end_target(canvas);
+
+        flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+        bd.input = target;
+        bd.sigma = 2.0f;
+        flux_image *blurred = nullptr;
+        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        EXPECT(blurred != nullptr);
+
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        flux_canvas_end(canvas);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        memset(px, 0, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px[(H / 2 * W + W / 2) * 4] >= red - 2u);
+    }
+
     /* --- nesting rejected: begin_target inside an active frame pass --- */
     {
         flux_frame *frame = nullptr;
@@ -142,19 +170,99 @@ int main(void) {
         EXPECT(flux_frame_present(frame) == FLUX_OK);
     }
 
-    /* --- validation: extent mismatch rejected --- */
+    /* --- downsampled target: render small, then upscale on composite --- */
     {
-        flux_image *bad = nullptr;
-        EXPECT(flux_image_create_render_target(d, W / 2, H, target_fmt, &bad) == FLUX_OK);
+        flux_image *downsampled = nullptr;
+        EXPECT(flux_image_create_render_target(d, W / 2, H / 2, target_fmt, &downsampled) ==
+               FLUX_OK);
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        flux_color red = flux_color_rgba(255, 0, 0, 255);
+        EXPECT(flux_canvas_begin_target(canvas, frame, downsampled, &red) == FLUX_OK);
+        flux_canvas_end_target(canvas);
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_target(canvas, frame, bad, &black) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        flux_canvas_draw_image(canvas, downsampled, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        flux_canvas_end(canvas);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
-        flux_image_release(bad);
+        memset(px, 0, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px[(H / 2 * W + W / 2) * 4] > 240);
+        flux_image_release(downsampled);
     }
 
+    /* --- representative HiDPI backdrop capture stays bounded at max sigma --- */
+    {
+        flux_image *backdrop = nullptr;
+        EXPECT(flux_image_create_render_target(d, BACKDROP_W, BACKDROP_H, target_fmt, &backdrop) ==
+               FLUX_OK);
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        flux_color source = flux_color_rgba(35, 70, 105, 255);
+        EXPECT(flux_canvas_begin_target(canvas, frame, backdrop, &source) == FLUX_OK);
+        flux_canvas_end_target(canvas);
+
+        flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+        bd.input = backdrop;
+        bd.sigma = FLUX_EFFECT_BLUR_SIGMA_MAX;
+        flux_image *blurred = nullptr;
+        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        flux_canvas_end(canvas);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+
+        memset(px, 0, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        const uint8_t *centre = &px[(H / 2 * W + W / 2) * 4];
+        EXPECT(centre[0] >= 33 && centre[0] <= 37);
+        EXPECT(centre[1] >= 68 && centre[1] <= 72);
+        EXPECT(centre[2] >= 103 && centre[2] <= 107);
+        flux_image_release(backdrop);
+    }
+
+    /* --- cross-format capture: sampled BGRA/RGBA normalizes to RGBA storage --- */
+    {
+        flux_format cross_fmt = target_fmt == FLUX_FORMAT_RGBA8_UNORM ? FLUX_FORMAT_BGRA8_UNORM
+                                                                      : FLUX_FORMAT_RGBA8_UNORM;
+        flux_image *cross_target = nullptr;
+        EXPECT(flux_image_create_render_target(d, W / 2, H / 2, cross_fmt, &cross_target) ==
+               FLUX_OK);
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        flux_color source = flux_color_rgba(11, 22, 33, 255);
+        EXPECT(flux_canvas_begin_target(canvas, frame, cross_target, &source) == FLUX_OK);
+        flux_canvas_end_target(canvas);
+
+        flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+        bd.input = cross_target;
+        bd.sigma = 4.0f;
+        flux_image *blurred = nullptr;
+        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        EXPECT(flux_image_format(blurred) == FLUX_FORMAT_RGBA8_UNORM);
+
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        flux_canvas_end(canvas);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+
+        memset(px, 0, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        const uint8_t *centre = &px[(H / 2 * W + W / 2) * 4];
+        EXPECT(centre[0] >= 9 && centre[0] <= 13);
+        EXPECT(centre[1] >= 20 && centre[1] <= 24);
+        EXPECT(centre[2] >= 31 && centre[2] <= 35);
+        flux_image_release(cross_target);
+    }
+
+    flux_device_wait_idle(d);
+    flux_blur_filter_release(blur_filter);
     flux_image_release(target);
     flux_canvas_destroy(canvas);
     flux_surface_release(s);

@@ -31,18 +31,19 @@ LENS_API void lens_icon(lens *ui, lens_icon_id id, float size) {
                         });
 }
 
-/* Flat ("ghost") icon button — the activity-bar / toolbar idiom. Transparent
- * at rest, a subtle fill on hover. The active state is layered:
+/* Flat ("ghost") icon button for navigation strips and toolbars. Transparent
+ * at rest, with a subtle fill on hover. The active state is layered:
  *   - a steady background tint (always, the universal "this is selected"
  *     signal), PLUS
  *   - an optional accent-coloured indicator treatment controlled by
- *     `theme.active_indicator_width`: when > 0 a left accent bar of that
- *     width is drawn and the glyph takes the accent colour; when 0 the
- *     indicator is suppressed and the glyph stays foreground, leaving a
- *     calm tint-only active state.
- * No filled accent pill or rounded shape, so a column of these reads as a
- * flat icon strip (VS Code activity bar) rather than a stack of buttons. */
-static bool icon_button_impl(lens *ui, lens_icon_id id, bool active) {
+ *     `theme.active_indicator_width`: when > 0 a left accent rail of that
+ *     width is drawn and the glyph takes the accent colour. It is disabled by
+ *     default; with width 0, the glyph stays foreground and the active state
+ *     is tint-only.
+ * There is no filled accent pill or rounded shape, so a column reads as a
+ * single flat icon strip rather than a stack of buttons. */
+static bool icon_button_impl(lens *ui, lens_icon_id id, bool active, const char *badge,
+                             float requested_size, bool rounded) {
     if ((unsigned)id >= LENS_ICON_COUNT)
         return false;
     const lens_theme *t = &ui->theme;
@@ -50,8 +51,9 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active) {
     ui->next_disabled = false;
     ui->next_error = false;
 
-    char label[32];
-    snprintf(label, sizeof(label), "##icon%d", (int)id);
+    char label[64];
+    snprintf(label, sizeof(label), "##icon%d%s%s", (int)id, badge && badge[0] ? ":" : "",
+             badge && badge[0] ? badge : "");
     lens_id nid = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, nid);
     if (!n)
@@ -74,7 +76,7 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active) {
     if (max_s < 1.0f)
         max_s = 1.0f;
     /* Keep glyph size independent from a larger square hit target. */
-    float s = t->font_size * 1.55f;
+    float s = requested_size > 0.0f ? requested_size : t->font_size * 1.55f;
     if (s > max_s)
         s = max_s;
     if (s < 1.0f)
@@ -94,17 +96,21 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active) {
      * indicator treatment below. */
     float fill = active ? 1.0f : n->hover_t * 0.6f;
     if (fill > 0.001f) {
-        flux_color bg = lensi_lerp_color(t->color_bg, t->color_hover, fill);
+        flux_color bg = active && rounded ? t->color_active
+                                          : lensi_lerp_color(t->color_bg, t->color_hover, fill);
         lensi_drawlist_push(
             ui, n,
             (lens_draw_cmd){
-                .kind = LENS_DRAW_RECT, .rel = {0, 0, 0, 0}, .color = bg, .radius = 0.0f});
+                .kind = LENS_DRAW_RECT,
+                .rel = {0, 0, 0, 0},
+                .color = bg,
+                .radius = rounded ? t->corner_radius : 0.0f});
     }
 
     /* Optional accent indicator (left bar + accent glyph) for the active
      * item, theme-tunable via `active_indicator_width`. Width 0 suppresses
      * both, leaving only the background tint. */
-    float indicator_w = active ? t->active_indicator_width : 0.0f;
+    float indicator_w = active && !rounded ? t->active_indicator_width : 0.0f;
     if (indicator_w > 0.0f)
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_RECT,
@@ -117,9 +123,10 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active) {
 
     /* Glyph: dimmed when disabled, accent only when the indicator treatment
      * is active, plain foreground otherwise. */
-    flux_color glyph = disabled             ? t->color_disabled
-                       : indicator_w > 0.0f ? t->color_accent
-                                            : t->color_fg;
+    flux_color glyph = disabled                    ? t->color_disabled
+                       : rounded && active         ? t->color_accent
+                       : indicator_w > 0.0f        ? t->color_accent
+                                                   : t->color_fg;
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){
                             .kind = LENS_DRAW_ICON,
@@ -129,14 +136,39 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active) {
                             .icon_id = id,
                         });
 
+    if (badge && badge[0]) {
+        float badge_size = s * 0.42f;
+        if (badge_size < 8.0f)
+            badge_size = 8.0f;
+        lens_text_metrics bm = lensi_text_measure_label(ui, badge, badge_size, 650.0f);
+        float badge_x = icon_x + s - bm.width * 0.62f;
+        float badge_y = icon_y - bm.height * 0.30f;
+        if (badge_x + bm.width > w)
+            badge_x = w - bm.width;
+        if (badge_y < 0.0f)
+            badge_y = 0.0f;
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
+                                            .rel = {badge_x, badge_y, 0, 0},
+                                            .color = glyph,
+                                            .text = badge,
+                                            .text_size = badge_size,
+                                            .text_weight = 650.0f});
+    }
+
     ui->last_response = r;
     return r.clicked;
 }
 
 LENS_API bool lens_icon_button(lens *ui, lens_icon_id id) {
-    return icon_button_impl(ui, id, false);
+    return icon_button_impl(ui, id, false, NULL, 0.0f, false);
 }
 
 LENS_API bool lens_icon_button_active(lens *ui, lens_icon_id id, bool active) {
-    return icon_button_impl(ui, id, active);
+    return icon_button_impl(ui, id, active, NULL, 0.0f, false);
+}
+
+LENS_API bool lens_icon_button_badged(lens *ui, lens_icon_id id, const char *badge,
+                                     float glyph_size, bool active) {
+    return icon_button_impl(ui, id, active, badge, glyph_size, true);
 }

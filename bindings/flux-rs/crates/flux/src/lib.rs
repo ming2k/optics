@@ -256,6 +256,11 @@ impl Surface {
         (info.width, info.height)
     }
 
+    /// Backend-neutral color format selected for this surface.
+    pub fn format(&self) -> Format {
+        unsafe { sys::flux_format_from_vk(sys::flux_surface_vk_format(self.raw)) }
+    }
+
     /// Acquire the next frame. Returns the backend result so callers can handle
     /// `SURFACE_LOST` / out-of-date by resizing.
     pub fn begin_frame(&self) -> Result<Frame<'_>, Error> {
@@ -268,7 +273,7 @@ impl Surface {
         Error::check(unsafe { sys::flux_surface_begin_frame(self.raw, &desc, &mut out) })?;
         Ok(Frame {
             raw: out,
-            _surface: PhantomData,
+            surface: self,
         })
     }
 
@@ -294,7 +299,7 @@ impl Drop for Surface {
 #[must_use = "a frame must be submitted and then presented"]
 pub struct Frame<'surface> {
     raw: *mut sys::flux_frame,
-    _surface: PhantomData<&'surface Surface>,
+    surface: &'surface Surface,
 }
 
 impl<'surface> Frame<'surface> {
@@ -307,8 +312,334 @@ impl<'surface> Frame<'surface> {
         })
     }
 
+    /// Frame-in-flight slot index. Resources written by the GPU should keep
+    /// one instance per slot when the previous frame may still be executing.
+    pub fn index(&self) -> u32 {
+        unsafe { sys::flux_frame_index(self.raw) }
+    }
+
+    /// Current extent of the surface this frame records into.
+    pub fn surface_size(&self) -> (u32, u32) {
+        self.surface.size()
+    }
+
+    /// Begin a depth-tested scene pass targeting this frame's surface.
+    ///
+    /// `depth` must match the surface extent. The target's previous contents
+    /// are discarded and depth is cleared to 1.0. The returned guard ends the
+    /// pass on drop; scene drawing APIs accept the guard directly, preventing
+    /// them from escaping the pass bracket.
+    pub fn begin_scene_pass<'frame>(
+        &'frame mut self,
+        depth: &'frame Target,
+        color: SceneColorLoad,
+    ) -> Result<ScenePass<'frame, 'surface>, Error> {
+        let (width, height) = self.surface.size();
+        if depth.size() != (width, height) {
+            return Err(Error(sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT));
+        }
+
+        self.begin_scene_pass_raw(
+            std::ptr::null_mut(),
+            self.surface.format(),
+            (width, height),
+            depth,
+            color,
+        )
+    }
+
+    /// Begin a depth-tested scene pass targeting a sampleable offscreen image.
+    ///
+    /// The color image and depth target must have the same extent. The image
+    /// is transitioned from sampleable to color-attachment layout for the
+    /// pass and restored when the returned guard ends, so Canvas and image
+    /// effects can consume it immediately afterward.
+    pub fn begin_image_scene_pass<'frame>(
+        &'frame mut self,
+        target: &'frame Image,
+        depth: &'frame Target,
+        color: SceneColorLoad,
+    ) -> Result<ScenePass<'frame, 'surface>, Error> {
+        let size = target.size();
+        if depth.size() != size {
+            return Err(Error(sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT));
+        }
+        Error::check(unsafe { sys::flux_frame_prepare_image_target(self.raw, target.raw) })?;
+        self.begin_scene_pass_raw(target.raw, target.format(), size, depth, color)
+    }
+
+    fn begin_scene_pass_raw<'frame>(
+        &'frame mut self,
+        target: *mut sys::flux_image,
+        color_format: Format,
+        (width, height): (u32, u32),
+        depth: &'frame Target,
+        color: SceneColorLoad,
+    ) -> Result<ScenePass<'frame, 'surface>, Error> {
+        let (load_op, clear_color) = match color {
+            SceneColorLoad::Load => (sys::flux_load_op::FLUX_LOAD_LOAD, [0.0, 0.0, 0.0, 0.0]),
+            SceneColorLoad::Clear(rgba) => (sys::flux_load_op::FLUX_LOAD_CLEAR, rgba),
+        };
+        let color_attachment = sys::flux_pass_attachment {
+            view: if target.is_null() {
+                Default::default()
+            } else {
+                unsafe { sys::flux_image_vk_image_view(target) }
+            },
+            format: unsafe { sys::flux_format_to_vk(color_format) },
+            load_op,
+            store_op: sys::flux_store_op::FLUX_STORE_STORE,
+            clear_color: vec4(clear_color),
+            ..Default::default()
+        };
+        let depth_attachment = sys::flux_pass_depth_attachment {
+            view: unsafe { sys::flux_target_vk_view(depth.raw) },
+            format: unsafe { sys::flux_format_to_vk(depth.format) },
+            load_op: sys::flux_load_op::FLUX_LOAD_CLEAR,
+            store_op: sys::flux_store_op::FLUX_STORE_DONT_CARE,
+            clear_depth: 1.0,
+            ..Default::default()
+        };
+        let pass = sys::flux_pass_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_PASS_DESC,
+            color_attachment_count: 1,
+            color_attachments: &color_attachment,
+            depth: &depth_attachment,
+            width,
+            height,
+            ..Default::default()
+        };
+        unsafe {
+            sys::flux_frame_prepare_target(self.raw, depth.raw);
+            sys::flux_frame_begin_pass(self.raw, &pass);
+            sys::flux_frame_set_viewport(self.raw, 0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
+            sys::flux_frame_set_scissor(self.raw, 0, 0, width, height);
+        }
+        Ok(ScenePass {
+            frame: self,
+            active: true,
+            target,
+        })
+    }
+
     pub fn as_raw(&self) -> *mut sys::flux_frame {
         self.raw
+    }
+}
+
+/// How a scene pass treats the existing surface color.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SceneColorLoad {
+    /// Preserve color recorded by an earlier pass in the same frame.
+    Load,
+    /// Clear the surface to linear RGBA before drawing the scene.
+    Clear([f32; 4]),
+}
+
+/// Active depth-tested scene pass. Dropping the guard ends the pass.
+pub struct ScenePass<'frame, 'surface> {
+    frame: &'frame mut Frame<'surface>,
+    active: bool,
+    target: *mut sys::flux_image,
+}
+
+impl ScenePass<'_, '_> {
+    /// Raw frame pointer for sibling content libraries such as
+    /// `flux-scene-graph`. The pass remains owned by this guard.
+    pub fn as_raw(&self) -> *mut sys::flux_frame {
+        self.frame.raw
+    }
+
+    /// End the pass explicitly. Dropping the guard has the same effect.
+    pub fn end(mut self) {
+        self.finish();
+    }
+
+    fn finish(&mut self) {
+        if !self.active {
+            return;
+        }
+        unsafe {
+            sys::flux_frame_end_pass(self.frame.raw);
+            if !self.target.is_null() {
+                let _ = sys::flux_frame_finish_image_target(self.frame.raw, self.target);
+            }
+        }
+        self.active = false;
+    }
+}
+
+impl Drop for ScenePass<'_, '_> {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+/// Perspective camera used by flux scene renderers.
+pub struct Camera {
+    raw: sys::flux_camera,
+}
+
+impl Camera {
+    pub fn perspective(fov_y_rad: f32, aspect: f32, z_near: f32, z_far: f32) -> Camera {
+        let mut raw = sys::flux_camera::default();
+        unsafe { sys::flux_camera_perspective(&mut raw, fov_y_rad, aspect, z_near, z_far) };
+        Camera { raw }
+    }
+
+    pub fn look_at(&mut self, eye: [f32; 3], center: [f32; 3], up: [f32; 3]) {
+        unsafe { sys::flux_camera_look_at(&mut self.raw, vec3(eye), vec3(center), vec3(up)) };
+    }
+
+    pub fn as_raw(&self) -> *const sys::flux_camera {
+        &self.raw
+    }
+}
+
+/// One directional light in world space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneLight {
+    pub direction: [f32; 3],
+    pub color: [f32; 3],
+    pub ambient: f32,
+}
+
+impl Default for SceneLight {
+    fn default() -> Self {
+        Self {
+            direction: [-0.4, -0.8, -0.45],
+            color: [1.0, 1.0, 1.0],
+            ambient: 0.08,
+        }
+    }
+}
+
+impl SceneLight {
+    pub fn as_raw(&self) -> sys::flux_scene_light {
+        sys::flux_scene_light {
+            direction: vec3(self.direction),
+            color: vec3(self.color),
+            ambient: self.ambient,
+        }
+    }
+}
+
+/// Built-in material pipeline kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaterialKind {
+    Unlit,
+    Phong,
+}
+
+/// Parameters for a built-in scene material.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaterialDesc {
+    pub kind: MaterialKind,
+    pub base_color: [f32; 4],
+    pub color_format: Format,
+    pub depth_format: Format,
+    pub shininess: f32,
+    pub specular: f32,
+}
+
+/// Refcounted built-in scene material.
+pub struct Material {
+    raw: *mut sys::flux_material,
+}
+
+impl Material {
+    pub fn new(device: &Device, desc: MaterialDesc) -> Result<Material, Error> {
+        let kind = match desc.kind {
+            MaterialKind::Unlit => sys::flux_material_kind::FLUX_MATERIAL_UNLIT,
+            MaterialKind::Phong => sys::flux_material_kind::FLUX_MATERIAL_PHONG,
+        };
+        let raw_desc = sys::flux_material_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_MATERIAL_DESC,
+            kind,
+            base_color: vec4(desc.base_color),
+            color_format: desc.color_format,
+            depth_format: desc.depth_format,
+            shininess: desc.shininess,
+            specular: desc.specular,
+            ..Default::default()
+        };
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_material_create(device.raw, &raw_desc, &mut raw) })?;
+        Ok(Material { raw })
+    }
+
+    pub fn as_raw(&self) -> *mut sys::flux_material {
+        self.raw
+    }
+}
+
+impl Drop for Material {
+    fn drop(&mut self) {
+        unsafe { sys::flux_material_release(self.raw) };
+    }
+}
+
+/// Refcounted render target. Scene passes use a depth target matching the
+/// surface extent, with one target per frame-in-flight slot.
+pub struct Target {
+    raw: *mut sys::flux_target,
+    format: Format,
+}
+
+impl Target {
+    pub fn depth(
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: Format,
+    ) -> Result<Target, Error> {
+        let desc = sys::flux_target_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_TARGET_DESC,
+            usage: sys::flux_target_usage::FLUX_TARGET_DEPTH as u32,
+            format,
+            width,
+            height,
+            ..Default::default()
+        };
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_target_create(device.raw, &desc, &mut raw) })?;
+        Ok(Target { raw, format })
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        unsafe {
+            (
+                sys::flux_target_width(self.raw),
+                sys::flux_target_height(self.raw),
+            )
+        }
+    }
+
+    pub fn as_raw(&self) -> *mut sys::flux_target {
+        self.raw
+    }
+}
+
+impl Drop for Target {
+    fn drop(&mut self) {
+        unsafe { sys::flux_target_release(self.raw) };
+    }
+}
+
+fn vec3(v: [f32; 3]) -> sys::flux_vec3 {
+    sys::flux_vec3 {
+        x: v[0],
+        y: v[1],
+        z: v[2],
+    }
+}
+
+fn vec4(v: [f32; 4]) -> sys::flux_vec4 {
+    sys::flux_vec4 {
+        x: v[0],
+        y: v[1],
+        z: v[2],
+        w: v[3],
     }
 }
 
@@ -404,6 +735,28 @@ impl Canvas {
             .map(|c| c as *const u32)
             .unwrap_or(std::ptr::null());
         Error::check(unsafe { sys::flux_canvas_begin(self.raw, frame.raw, ptr) })
+    }
+
+    /// Begin a Canvas pass into a sampleable offscreen render-target image.
+    /// `Some(clear)` uses the Canvas MSAA resolve path; `None` loads the
+    /// image's existing contents for composition after a scene pass.
+    pub fn begin_target(
+        &self,
+        frame: &Frame<'_>,
+        target: &Image,
+        clear: Option<u32>,
+    ) -> Result<(), Error> {
+        let ptr = clear
+            .as_ref()
+            .map(|c| c as *const u32)
+            .unwrap_or(std::ptr::null());
+        Error::check(unsafe { sys::flux_canvas_begin_target(self.raw, frame.raw, target.raw, ptr) })
+    }
+
+    /// End an offscreen Canvas pass and restore the target to a sampleable
+    /// image layout.
+    pub fn end_target(&self) {
+        unsafe { sys::flux_canvas_end_target(self.raw) };
     }
 
     /// Unified, backend-agnostic pass bracket. Pass `Some(frame)` for a GPU
@@ -754,6 +1107,22 @@ pub struct Image {
 }
 
 impl Image {
+    /// Create a color image for an offscreen Canvas or scene attachment. Its
+    /// initial contents are undefined; finishing its first target pass makes
+    /// it sampleable.
+    pub fn render_target(
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: Format,
+    ) -> Result<Image, Error> {
+        let mut out = std::ptr::null_mut();
+        Error::check(unsafe {
+            sys::flux_image_create_render_target(device.raw, width, height, format, &mut out)
+        })?;
+        Ok(Image { raw: out })
+    }
+
     /// Create an image from tightly packed pixel data. `data` must be exactly
     /// `width * height * bytes_per_pixel(format)` bytes. The upload is
     /// synchronous; the data may be freed after this returns.
@@ -787,6 +1156,19 @@ impl Image {
     /// `flux_image` typedef is bindgen-generated independently.
     pub fn as_raw(&self) -> *mut sys::flux_image {
         self.raw
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        unsafe {
+            (
+                sys::flux_image_width(self.raw),
+                sys::flux_image_height(self.raw),
+            )
+        }
+    }
+
+    pub fn format(&self) -> Format {
+        unsafe { sys::flux_image_format(self.raw) }
     }
 }
 
@@ -851,6 +1233,71 @@ impl Image {
 impl Drop for Image {
     fn drop(&mut self) {
         unsafe { sys::flux_image_release(self.raw) };
+    }
+}
+
+/// Reusable fixed-cost blur with a two-level Dual-Kawase pyramid per
+/// frame-in-flight slot. This is the live-compositor path: blur width changes
+/// sample offsets rather than dynamic kernel length, repeated calls do not
+/// grow the transient effect pool, and no device-wide wait is required.
+pub struct BlurFilter {
+    raw: *mut sys::flux_blur_filter,
+}
+
+impl BlurFilter {
+    pub fn new(device: &Device) -> Result<BlurFilter, Error> {
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_blur_filter_create(device.raw, &mut raw) })?;
+        Ok(BlurFilter { raw })
+    }
+
+    /// Record a realtime blur for this frame's reusable slot. `sigma` controls
+    /// the visual blur width, but does not increase the number of texture
+    /// samples. The returned image borrows the filter, preventing that slot's
+    /// storage from being replaced while it is composed into the frame.
+    pub fn apply<'filter>(
+        &'filter mut self,
+        frame: &Frame<'_>,
+        input: &Image,
+        sigma: f32,
+    ) -> Result<BlurredImage<'filter>, Error> {
+        let desc = sys::flux_effect_blur_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_EFFECT_BLUR_DESC,
+            input: input.raw,
+            sigma,
+            ..Default::default()
+        };
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_blur_filter_apply(self.raw, frame.raw, &desc, &mut raw) })?;
+        Ok(BlurredImage {
+            raw,
+            _filter: PhantomData,
+        })
+    }
+}
+
+impl Drop for BlurFilter {
+    fn drop(&mut self) {
+        unsafe { sys::flux_blur_filter_release(self.raw) };
+    }
+}
+
+/// Borrowed output of a [`BlurFilter`] application.
+pub struct BlurredImage<'filter> {
+    raw: *mut sys::flux_image,
+    _filter: PhantomData<&'filter mut BlurFilter>,
+}
+
+impl BlurredImage<'_> {
+    /// Draw the blurred output through the Canvas image pipeline.
+    pub fn draw(&self, canvas: &Canvas, x: f32, y: f32, width: f32, height: f32) {
+        let destination = sys::flux_rect {
+            x,
+            y,
+            w: width,
+            h: height,
+        };
+        unsafe { sys::flux_canvas_draw_image(canvas.raw, self.raw, destination, std::ptr::null()) };
     }
 }
 

@@ -17,6 +17,10 @@ int main(void) {
     /* iris_app_run: NULL config is rejected before any backend work. */
     CHECK(iris_app_run(NULL) != 0);
 
+    /* Safe outside a running app; the dispatcher/backend seam treats this
+     * exactly like a request made after the window has closed. */
+    iris_request_animation_frame();
+
     /* Pickers reject NULL buffers / zero capacity before contacting the
      * portal. A valid buffer would open a live desktop picker. */
     CHECK(iris_pick_file(NULL, NULL, 0) != 0);

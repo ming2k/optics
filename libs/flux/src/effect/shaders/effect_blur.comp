@@ -35,8 +35,21 @@ layout(push_constant) uniform PC {
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
+/* Gaussian weights are identical for every pixel in a dispatch. Cache the
+ * positive half of the kernel once per workgroup instead of evaluating exp()
+ * for every tap of every pixel. EFFECT_BLUR_RADIUS_MAX is 64 on the host. */
+shared float kernel_weights[65];
+
 void main()
 {
+    uint local_index = gl_LocalInvocationIndex;
+    if (local_index <= uint(pc.radius)) {
+        float i = float(local_index);
+        float two_sigma_sq = 2.0 * pc.sigma * pc.sigma;
+        kernel_weights[local_index] = exp(-(i * i) / two_sigma_sq);
+    }
+    barrier();
+
     uvec2 p = gl_GlobalInvocationID.xy;
     if (p.x >= pc.width || p.y >= pc.height) return;
 
@@ -60,14 +73,13 @@ void main()
         return;
     }
 
-    float two_sigma_sq = 2.0 * pc.sigma * pc.sigma;
     float weight_sum   = 0.0;
     vec4  colour_sum   = vec4(0.0);
 
     for (int i = -pc.radius; i <= pc.radius; ++i) {
         vec2 off = (pc.axis == 0u) ? vec2(float(i), 0.0) : vec2(0.0, float(i));
         vec2 uv  = base_uv + off * inv_size;
-        float w  = exp(-float(i * i) / two_sigma_sq);
+        float w  = kernel_weights[abs(i)];
         vec4  c  = texture(
             sampler2D(
                 u_sampled[nonuniformEXT(ih)],

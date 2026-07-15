@@ -19,6 +19,8 @@ struct flux_target {
     VkImage image;
     VkImageView view;
     flux_vk_alloc alloc;
+    VkFormat format;
+    uint32_t usage;
     uint32_t width;
     uint32_t height;
 };
@@ -54,10 +56,12 @@ flux_result flux_target_create(flux_device *d, const flux_target_desc *desc, flu
     t->device = flux_device_retain(d);
     t->image = VK_NULL_HANDLE;
     t->view = VK_NULL_HANDLE;
+    t->format = flux_format_to_vk(desc->format);
+    t->usage = desc->usage;
     t->width = desc->width;
     t->height = desc->height;
 
-    VkFormat vfmt = flux_format_to_vk(desc->format);
+    VkFormat vfmt = t->format;
 
     VkImageCreateInfo ici = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -151,6 +155,50 @@ uint32_t flux_target_width(const flux_target *t) {
 }
 uint32_t flux_target_height(const flux_target *t) {
     return t ? t->height : 0;
+}
+
+void flux_frame_prepare_target(flux_frame *f, const flux_target *t) {
+    if (!f || !t || !t->image)
+        return;
+    VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
+    if (!cmd)
+        return;
+
+    bool depth = (t->usage & FLUX_TARGET_DEPTH) != 0;
+    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    VkImageLayout layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkAccessFlags2 access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    if (depth) {
+        aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (t->format == VK_FORMAT_D24_UNORM_S8_UINT ||
+            t->format == VK_FORMAT_D32_SFLOAT_S8_UINT)
+            aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        layout = (aspect & VK_IMAGE_ASPECT_STENCIL_BIT)
+                     ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                     : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    }
+
+    VkImageMemoryBarrier2 barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        .dstStageMask = stage,
+        .dstAccessMask = access,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = layout,
+        .image = t->image,
+        .subresourceRange = {.aspectMask = aspect, .levelCount = 1, .layerCount = 1},
+    };
+    VkDependencyInfo dep = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier,
+    };
+    vkCmdPipelineBarrier2(cmd, &dep);
 }
 
 VkImage flux_target_vk_image(const flux_target *t) {

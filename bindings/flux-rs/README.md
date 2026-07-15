@@ -1,7 +1,7 @@
 # flux-rs
 
 Rust bindings to [**flux**][flux] — the C23, Vulkan-first 2D/3D graphics
-library. Five crates wrap flux's C surface with the standard two-tier
+library. Seven crates wrap flux's C surface with the standard two-tier
 FFI split (`openssl` / `openssl-sys`, `rusqlite` / `libsqlite3-sys`
 convention):
 
@@ -12,6 +12,8 @@ convention):
 | [`flux-text-sys`]  | Raw bindgen FFI to `libflux-text` (HarfBuzz shaping sibling). |
 | [`flux-text`]      | Safe wrapper over `flux-text-sys`, Layer-0 shaping surface.  |
 | [`flux-text-layout`] | Pure-Rust Layer-1 line wrapping on top of `flux-text`.     |
+| [`flux-scene-graph-sys`] | Raw bindgen FFI to `libflux-scene-graph`.          |
+| [`flux-scene-graph`] | Safe glTF scene loading, bounds, and scene-pass drawing. |
 
 [flux]: https://github.com/ming2k/flux
 [`flux-sys`]: crates/flux-sys/
@@ -19,6 +21,8 @@ convention):
 [`flux-text-sys`]: crates/flux-text-sys/
 [`flux-text`]: crates/flux-text/
 [`flux-text-layout`]: crates/flux-text-layout/
+[`flux-scene-graph-sys`]: crates/flux-scene-graph-sys/
+[`flux-scene-graph`]: crates/flux-scene-graph/
 
 This repository is **separate** from the C library by design — it
 follows the industry convention (openssl, sqlite, curl, gtk all keep
@@ -78,6 +82,14 @@ let (w, h, stride, px) = c.read_pixels().expect("CPU pixels");
 
 Vector only: image and glyph (text) draws are ignored on a CPU canvas
 (they need a GPU-resident texture). See `tests/cpu_canvas.rs`.
+
+## Live offscreen effects
+
+The safe `flux` crate exposes sampleable `Image::render_target` images,
+`Frame::begin_image_scene_pass` for depth-tested 3D composition, and a
+frame-slot-safe `BlurFilter`. Together they support a live compositor path
+without transient-pool growth or device-wide waits: Canvas background → scene
+pass → Canvas foreground → fixed-cost Dual-Kawase blur → final composite.
 
 ## License
 

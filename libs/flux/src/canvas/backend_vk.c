@@ -26,24 +26,27 @@ typedef struct canvas_owned_image {
     flux_vk_alloc alloc;
     VkImageView view;
     VkExtent2D extent;
+    VkFormat format;
 } canvas_owned_image;
+
+typedef struct canvas_attachment_set {
+    canvas_owned_image stencil_single;
+    canvas_owned_image stencil_msaa;
+    canvas_owned_image msaa;
+} canvas_attachment_set;
 
 typedef struct flux_vk_canvas {
     VkPipelineLayout layout;   /* borrowed from the device canvas cache */
-    VkFormat color_format;     /* surface/target colour format (create time) */
+    VkFormat color_format;     /* active surface/target colour format */
     VkFormat stencil_format;   /* device stencil format, or UNDEFINED */
     VkPipeline bound_pipeline; /* last pipeline bound this pass */
     VkSampleCountFlagBits active_samples;
 
-    /* LOAD renders directly into the one-sample destination while CLEAR uses
-     * the four-sample resolve path. Keep a stencil image for each sample count:
-     * alternating frames must not destroy an attachment still in flight. */
-    canvas_owned_image stencil_single;
-    canvas_owned_image stencil_msaa;
-
-    /* Multisample colour target: rendering goes here at FLUX_CANVAS_SAMPLES and
-     * resolves to the surface/target image each pass. Surface-sized. */
-    canvas_owned_image msaa;
+    /* Attachments are isolated by frame slot and destination class. A target
+     * capture and the final surface pass can have different extents/formats in
+     * one command buffer; neither may destroy resources recorded by the other. */
+    canvas_attachment_set surface_attachments[FLUX_MAX_FRAMES_IN_FLIGHT];
+    canvas_attachment_set target_attachments[FLUX_MAX_FRAMES_IN_FLIGHT];
 } flux_vk_canvas;
 
 static inline flux_vk_canvas *vkc(flux_canvas *c) {
@@ -65,11 +68,11 @@ static void owned_image_destroy(flux_canvas *c, canvas_owned_image *owned) {
     *owned = (canvas_owned_image){0};
 }
 
-static bool stencil_ensure(flux_canvas *c, uint32_t w, uint32_t h, VkSampleCountFlagBits samples,
-                           canvas_owned_image **out) {
+static bool stencil_ensure(flux_canvas *c, canvas_attachment_set *attachments, uint32_t w,
+                           uint32_t h, VkSampleCountFlagBits samples, canvas_owned_image **out) {
     flux_vk_canvas *v = vkc(c);
-    canvas_owned_image *owned =
-        samples == VK_SAMPLE_COUNT_1_BIT ? &v->stencil_single : &v->stencil_msaa;
+    canvas_owned_image *owned = samples == VK_SAMPLE_COUNT_1_BIT ? &attachments->stencil_single
+                                                                 : &attachments->stencil_msaa;
     *out = nullptr;
     if (v->stencil_format == VK_FORMAT_UNDEFINED || w == 0 || h == 0)
         return false;
@@ -120,18 +123,23 @@ static bool stencil_ensure(flux_canvas *c, uint32_t w, uint32_t h, VkSampleCount
     return true;
 }
 
-static void msaa_destroy(flux_canvas *c) {
-    owned_image_destroy(c, &vkc(c)->msaa);
+static void attachments_destroy(flux_canvas *c, canvas_attachment_set *attachments) {
+    owned_image_destroy(c, &attachments->stencil_single);
+    owned_image_destroy(c, &attachments->stencil_msaa);
+    owned_image_destroy(c, &attachments->msaa);
 }
 
-static bool msaa_ensure(flux_canvas *c, uint32_t w, uint32_t h) {
+static bool msaa_ensure(flux_canvas *c, canvas_attachment_set *attachments, uint32_t w,
+                        uint32_t h) {
     flux_vk_canvas *v = vkc(c);
+    canvas_owned_image *owned = &attachments->msaa;
     if (v->color_format == VK_FORMAT_UNDEFINED || w == 0 || h == 0)
         return false;
-    if (v->msaa.view && v->msaa.extent.width == w && v->msaa.extent.height == h)
+    if (owned->view && owned->extent.width == w && owned->extent.height == h &&
+        owned->format == v->color_format)
         return true;
 
-    msaa_destroy(c);
+    owned_image_destroy(c, owned);
 
     flux_device *d = c->device;
     VkImageCreateInfo ici = {
@@ -149,13 +157,13 @@ static bool msaa_ensure(flux_canvas *c, uint32_t w, uint32_t h) {
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
-    if (flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &v->msaa.image,
-                            &v->msaa.alloc) != FLUX_OK) {
+    if (flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &owned->image,
+                            &owned->alloc) != FLUX_OK) {
         return false;
     }
     VkImageViewCreateInfo ivci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = v->msaa.image,
+        .image = owned->image,
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
         .format = v->color_format,
         .subresourceRange =
@@ -165,12 +173,13 @@ static bool msaa_ensure(flux_canvas *c, uint32_t w, uint32_t h) {
                 .layerCount = 1,
             },
     };
-    if (vkCreateImageView(d->device, &ivci, nullptr, &v->msaa.view) != VK_SUCCESS) {
-        msaa_destroy(c);
+    if (vkCreateImageView(d->device, &ivci, nullptr, &owned->view) != VK_SUCCESS) {
+        owned_image_destroy(c, owned);
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas msaa view failed");
         return false;
     }
-    v->msaa.extent = (VkExtent2D){w, h};
+    owned->extent = (VkExtent2D){w, h};
+    owned->format = v->color_format;
     return true;
 }
 
@@ -221,11 +230,10 @@ static void vk_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) {
     if (!v)
         return;
     /* Owned attachments may still be referenced by in-flight frames. */
-    if (v->stencil_single.image || v->stencil_msaa.image || v->msaa.image) {
-        flux_device_wait_idle(c->device);
-        owned_image_destroy(c, &v->stencil_single);
-        owned_image_destroy(c, &v->stencil_msaa);
-        msaa_destroy(c);
+    flux_device_wait_idle(c->device);
+    for (uint32_t i = 0; i < FLUX_MAX_FRAMES_IN_FLIGHT; ++i) {
+        attachments_destroy(c, &v->surface_attachments[i]);
+        attachments_destroy(c, &v->target_attachments[i]);
     }
     /* Pipeline + layout are owned by the device's canvas cache; we just drop
      * the borrowed references. */
@@ -258,20 +266,15 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     flux_surface_get_info(c->surface, &info);
     uint32_t w = target ? target->width : info.width;
     uint32_t h = target ? target->height : info.height;
-
-    if (target) {
-        /* v1: the target must match the canvas pipelines' baked-in colour
-         * format (cache keyed on colour only) and the surface extent (the
-         * pass render area and owned attachments are surface-sized). */
-        if (flux_format_to_vk(target->format) != v->color_format) {
-            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "target colour format != canvas colour format");
-            return FLUX_ERROR_INVALID_ARGUMENT;
-        }
-        if (target->width != info.width || target->height != info.height) {
-            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "target extent != surface extent (v1)");
-            return FLUX_ERROR_INVALID_ARGUMENT;
-        }
-    }
+    v->color_format =
+        target ? flux_format_to_vk(target->format) : flux_surface_vk_format(c->surface);
+    if (v->color_format == VK_FORMAT_UNDEFINED)
+        return FLUX_ERROR_UNSUPPORTED;
+    uint32_t slot = flux_frame_index(f);
+    if (slot >= FLUX_MAX_FRAMES_IN_FLIGHT)
+        return FLUX_ERROR_OUT_OF_RANGE;
+    canvas_attachment_set *attachments =
+        target ? &v->target_attachments[slot] : &v->surface_attachments[slot];
 
     flux_vec4 cc;
     unpack_clear(clear, &cc);
@@ -290,16 +293,25 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
         att.view = target->view;
 
     if (target) {
-        /* Transition target SHADER_READ_ONLY -> COLOR_ATTACHMENT (resolve dst). */
+        /* First use starts from UNDEFINED; later passes transition from the
+         * sampleable layout established by the preceding target pass. */
+        bool first_use = target->current_layout == VK_IMAGE_LAYOUT_UNDEFINED;
+        if (!first_use && target->current_layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+            FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                      "canvas target is neither new nor sampleable before begin");
+            return FLUX_ERROR_INVALID_STATE;
+        }
         VkCommandBuffer pre_cmd = flux_frame_vk_command_buffer(f);
         VkImageMemoryBarrier2 b = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            .srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+            .srcStageMask = first_use ? VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT
+                                      : (VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
+            .srcAccessMask = first_use ? 0 : VK_ACCESS_2_SHADER_READ_BIT,
             .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             .dstAccessMask =
                 VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .oldLayout = target->current_layout,
             .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .image = target->image,
             .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -316,7 +328,7 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     /* Render to the owned multisample colour target and resolve, so vector
      * fills are anti-aliased. LOAD deliberately bypasses this block. */
     if (use_msaa) {
-        if (!msaa_ensure(c, w, h)) {
+        if (!msaa_ensure(c, attachments, w, h)) {
             FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas MSAA attachment unavailable");
             return FLUX_ERROR_BACKEND_FAILURE;
         }
@@ -329,7 +341,7 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
             .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, /* contents cleared at load */
             .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .image = v->msaa.image,
+            .image = attachments->msaa.image,
             .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                                  .levelCount = 1,
                                  .layerCount = 1},
@@ -339,7 +351,7 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
                                .pImageMemoryBarriers = &b};
         vkCmdPipelineBarrier2(pre_cmd, &di);
 
-        att.view = v->msaa.view;
+        att.view = attachments->msaa.view;
         att.format = v->color_format;
         if (target)
             att.resolve_view = target->view;
@@ -352,7 +364,7 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
      * even if no fill needs the fallback this frame. */
     flux_pass_depth_attachment stencil_att;
     canvas_owned_image *stencil = nullptr;
-    bool has_stencil = stencil_ensure(c, w, h, samples, &stencil);
+    bool has_stencil = stencil_ensure(c, attachments, w, h, samples, &stencil);
     if (v->stencil_format != VK_FORMAT_UNDEFINED && !has_stencil) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas stencil attachment unavailable");
         return FLUX_ERROR_BACKEND_FAILURE;
@@ -393,6 +405,8 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
         .color_attachment_count = 1,
         .color_attachments = &att,
         .stencil = has_stencil ? &stencil_att : nullptr,
+        .width = w,
+        .height = h,
     };
 
     flux_frame_begin_pass(f, &pass);
@@ -445,7 +459,8 @@ static void vk_end_pass(const flux_canvas_backend *self, flux_canvas *c) {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstStageMask =
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

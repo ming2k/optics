@@ -38,6 +38,7 @@ struct flux_image {
     flux_bindless_handle
         bindless_storage; /* STORAGE_IMAGE slot, FLUX_BINDLESS_INVALID for sampled-only images */
     VkImageLayout current_layout; /* tracked so cross-module recorders can emit correct barriers */
+    bool render_target;           /* created with COLOR_ATTACHMENT usage */
 };
 
 /* Internal: create an image with STORAGE | SAMPLED | TRANSFER_SRC |

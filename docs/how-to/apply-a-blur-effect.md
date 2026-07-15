@@ -1,7 +1,12 @@
 # How to apply a blur effect
 
-Blur a `flux_image` with a separable Gaussian and either consume the
-result for one frame or promote it to a long-lived image.
+Blur a `flux_image` with an exact separable Gaussian and either consume
+the result for one frame or promote it to a long-lived image.
+
+For a live backdrop that changes every frame, prefer a reusable
+`flux_blur_filter`. It uses a fixed-cost two-level Dual-Kawase pyramid,
+isolates storage per frame-in-flight slot, and avoids transient-pool
+growth, device-wide waits, and sigma-dependent shader loops.
 
 ## Prerequisites
 
@@ -29,10 +34,33 @@ must have `-Deffect=true` (default).
     flux_canvas_draw_image(canvas, blurred,
         (flux_rect){ 0, 0, (float)w, (float)h }, nullptr);
 
-## Lifetime — pick one
+## Live compositor path
 
-`blurred` comes from the effect module's per-device transient pool.
-It is exclusively leased and valid until `flux_effect_reset(d)` is called.
+Create the filter once, then apply it with the recording `flux_frame`:
+
+    flux_blur_filter *filter = NULL;
+    flux_blur_filter_create(d, &filter);
+
+    /* Per frame, outside a render pass: */
+    flux_image *blurred = NULL; /* borrowed from filter */
+    flux_blur_filter_apply(filter, frame, &bd, &blurred);
+    flux_canvas_draw_image(canvas, blurred,
+        (flux_rect){ 0, 0, (float)w, (float)h }, NULL);
+
+Keep one filter per surface/frame stream. Release it after the last referencing
+frame has completed. The output keeps the input dimensions and uses
+`FLUX_FORMAT_RGBA8_UNORM`. For
+backdrop blur, render the scene into a quarter-resolution
+`flux_image_create_render_target` and scale `sigma` by the same factor.
+The filter always records two downsample and two upsample passes; `sigma`
+changes sample offsets without changing the sample count.
+
+## Exact Gaussian output lifetime
+
+The image returned by `flux_effect_blur` comes from the effect module's
+per-device transient pool. It is exclusively leased and valid until
+`flux_effect_reset(d)` is called. The live filter output instead follows the
+frame-slot lifetime described above.
 
 | Need                                                          | Do this                                                         |
 |---------------------------------------------------------------|-----------------------------------------------------------------|
@@ -48,7 +76,10 @@ and blocks until the copy completes:
         /* `owned` has its own bindless slot, refcount 1, regular flux_image lifecycle */
     }
 
-## Sigma → kernel radius
+## Exact Gaussian sigma → kernel radius
+
+This table applies to `flux_effect_blur`. The reusable live filter clamps the
+same input range but maps positive sigma values to bounded pyramid offsets.
 
 | `sigma`                      | Behaviour                                                  |
 |------------------------------|------------------------------------------------------------|

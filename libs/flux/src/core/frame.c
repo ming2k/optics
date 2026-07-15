@@ -299,9 +299,13 @@ void flux_frame_begin_pass(flux_frame *f, const flux_pass_desc *desc) {
         }
     }
 
+    VkExtent2D render_extent = s->extent;
+    if (desc && desc->width > 0 && desc->height > 0)
+        render_extent = (VkExtent2D){desc->width, desc->height};
+
     VkRenderingInfo ri = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = {.offset = {0, 0}, .extent = s->extent},
+        .renderArea = {.offset = {0, 0}, .extent = render_extent},
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &color,
@@ -355,6 +359,30 @@ void flux_frame_end_pass(flux_frame *f) {
     flux_per_frame *pf = &f->surface->frames[f->slot];
     vkCmdEndRendering(pf->cmd);
     f->pass_active = false;
+}
+
+void flux_frame_set_viewport(flux_frame *f, float x, float y, float width, float height,
+                             float min_depth, float max_depth) {
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
+        return;
+    flux_per_frame *pf = &f->surface->frames[f->slot];
+    VkViewport viewport = {
+        .x = x,
+        .y = y,
+        .width = width,
+        .height = height,
+        .minDepth = min_depth,
+        .maxDepth = max_depth,
+    };
+    vkCmdSetViewport(pf->cmd, 0, 1, &viewport);
+}
+
+void flux_frame_set_scissor(flux_frame *f, int32_t x, int32_t y, uint32_t width, uint32_t height) {
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
+        return;
+    flux_per_frame *pf = &f->surface->frames[f->slot];
+    VkRect2D scissor = {.offset = {x, y}, .extent = {width, height}};
+    vkCmdSetScissor(pf->cmd, 0, 1, &scissor);
 }
 
 /* ------------------------------------------------------------------ */

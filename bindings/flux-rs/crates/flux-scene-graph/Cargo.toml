@@ -1,0 +1,12 @@
+[package]
+name = "flux-scene-graph"
+description = "Safe Rust bindings to flux-scene-graph glTF loading and drawing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+flux = { path = "../flux", version = "0.1.0" }
+flux-scene-graph-sys = { path = "../flux-scene-graph-sys", version = "0.1.0" }

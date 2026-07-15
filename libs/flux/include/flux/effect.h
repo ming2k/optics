@@ -40,8 +40,10 @@ extern "C" {
 /*  Gaussian blur                                                     */
 /* ------------------------------------------------------------------ */
 
-/* Separable two-pass Gaussian blur. The output image has the same
- * format and dimensions as the input. Kernel radius is derived
+/* Separable two-pass Gaussian blur. The output image has RGBA8_UNORM format
+ * and the same dimensions as the input. Normalizing BGRA inputs before the
+ * storage write keeps the shader's declared rgba8 format valid on strict
+ * Vulkan drivers. Kernel radius is derived
  * from sigma; sigma is clamped to [0, FLUX_EFFECT_BLUR_SIGMA_MAX]
  * — values outside that range are clamped silently.
  *
@@ -70,6 +72,30 @@ typedef struct flux_effect_blur_desc {
 FLUX_NODISCARD FLUX_API flux_result flux_effect_blur(VkCommandBuffer cmd,
                                                      const flux_effect_blur_desc *desc,
                                                      flux_image **out);
+
+/* Reusable, frame-slot-safe realtime blur. Unlike flux_effect_blur's exact
+ * Gaussian kernel, this path uses a two-level Dual-Kawase pyramid: two
+ * downsample and two upsample passes with a fixed sample count. Requested
+ * sigma controls sample offsets instead of loop length, so an animated
+ * compositor cannot accidentally create an unbounded full-screen dispatch.
+ * A filter owns its pyramid/output images per frame-in-flight slot and needs
+ * no transient-pool growth or whole-device wait. Use one filter with one
+ * surface/frame stream; begin_frame has already waited for the selected slot
+ * before that slot is reused. Output is RGBA8_UNORM with the input dimensions.
+ *
+ * The image returned by apply is borrowed from the filter and remains valid
+ * until the same slot is applied again, the filter is released, or its input
+ * extent/format changes. Do not release the returned image. */
+typedef struct flux_blur_filter flux_blur_filter;
+
+FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_create(flux_device *device,
+                                                            flux_blur_filter **out);
+FLUX_NODISCARD FLUX_API flux_blur_filter *flux_blur_filter_retain(flux_blur_filter *filter);
+FLUX_API void flux_blur_filter_release(flux_blur_filter *filter);
+FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_apply(flux_blur_filter *filter,
+                                                           flux_frame *frame,
+                                                           const flux_effect_blur_desc *desc,
+                                                           flux_image **out);
 
 /* ------------------------------------------------------------------ */
 /*  Promote a transient output to a caller-owned image                */

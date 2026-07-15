@@ -165,6 +165,15 @@ VkImage flux_image_vk_image(const flux_image *im) {
 VkImageView flux_image_vk_image_view(const flux_image *im) {
     return im ? im->view : VK_NULL_HANDLE;
 }
+uint32_t flux_image_width(const flux_image *im) {
+    return im ? im->width : 0;
+}
+uint32_t flux_image_height(const flux_image *im) {
+    return im ? im->height : 0;
+}
+flux_format flux_image_format(const flux_image *im) {
+    return im ? im->format : FLUX_FORMAT_UNDEFINED;
+}
 flux_bindless_handle flux_image_bindless_handle(const flux_image *im) {
     return im ? im->bindless : FLUX_BINDLESS_INVALID;
 }
@@ -309,13 +318,104 @@ fail:
     return r;
 }
 
+flux_result flux_frame_prepare_image_target(flux_frame *f, flux_image *target) {
+    if (!f || !target)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (!target->render_target) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                  "image target was not created with flux_image_create_render_target");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (f->state != FLUX_FRAME_STATE_RECORDING || f->pass_active) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "image target prepare outside frame pass boundary");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    if (target->current_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        return FLUX_OK;
+    bool first_use = target->current_layout == VK_IMAGE_LAYOUT_UNDEFINED;
+    if (!first_use && target->current_layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "image target is neither new nor sampleable before prepare");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+
+    VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
+    VkImageMemoryBarrier2 barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = first_use ? VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT
+                                  : (VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
+        .srcAccessMask = first_use ? 0 : VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask =
+            VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = target->current_layout,
+        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .image = target->image,
+        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                             .levelCount = 1,
+                             .layerCount = 1},
+    };
+    VkDependencyInfo dependency = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier,
+    };
+    vkCmdPipelineBarrier2(cmd, &dependency);
+    target->current_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    return FLUX_OK;
+}
+
+flux_result flux_frame_finish_image_target(flux_frame *f, flux_image *target) {
+    if (!f || !target)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (!target->render_target) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                  "image target was not created with flux_image_create_render_target");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (f->state != FLUX_FRAME_STATE_RECORDING || f->pass_active) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "image target finish outside frame pass boundary");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    if (target->current_layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "image target was not prepared for colour output");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+
+    VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
+    VkImageMemoryBarrier2 barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstStageMask =
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .image = target->image,
+        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                             .levelCount = 1,
+                             .layerCount = 1},
+    };
+    VkDependencyInfo dependency = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier,
+    };
+    vkCmdPipelineBarrier2(cmd, &dependency);
+    target->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    return FLUX_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Render-target image (ADR-0017)                                    */
 /* ------------------------------------------------------------------ */
 
 /* Create an image suitable as a flux_canvas_begin_target destination:
- * COLOR_ATTACHMENT | SAMPLED | TRANSFER_DST, 1 sample, transitioned to
- * SHADER_READ_ONLY_OPTIMAL so it is immediately sampleable. Strong device
+ * COLOR_ATTACHMENT | SAMPLED | TRANSFER_DST, 1 sample. Contents and layout
+ * stay undefined until the first caller-recorded target pass; this avoids a
+ * synchronous one-shot queue submission during frame recording. Strong device
  * ref (caller-owned, like flux_image_create — not the effect-pool weak ref). */
 flux_result flux_image_create_render_target(flux_device *d, uint32_t width, uint32_t height,
                                             flux_format fmt, flux_image **out) {
@@ -344,6 +444,7 @@ flux_result flux_image_create_render_target(flux_device *d, uint32_t width, uint
     im->bindless = FLUX_BINDLESS_INVALID;
     im->bindless_storage = FLUX_BINDLESS_INVALID;
     im->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    im->render_target = true;
 
     VkImageCreateInfo ici = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -363,12 +464,6 @@ flux_result flux_image_create_render_target(flux_device *d, uint32_t width, uint
         flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &im->image, &im->alloc);
     if (r != FLUX_OK)
         goto fail;
-
-    r = flux_vk_transition_image_layout(d, im->image, VK_IMAGE_LAYOUT_UNDEFINED,
-                                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    if (r != FLUX_OK)
-        goto fail;
-    im->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkImageViewCreateInfo ivci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,

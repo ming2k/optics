@@ -77,6 +77,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "flux-scene-graph"
+version = "0.1.1"
+dependencies = [
+ "flux",
+ "flux-scene-graph-sys",
+]
+
+[[package]]
+name = "flux-scene-graph-sys"
+version = "0.1.1"
+dependencies = [
+ "bindgen",
+ "pkg-config",
+]
+
+[[package]]
 name = "flux-sys"
 version = "0.1.1"
 dependencies = [

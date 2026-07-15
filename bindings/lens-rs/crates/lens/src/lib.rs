@@ -400,9 +400,9 @@ impl Frame {
         unsafe { sys::lens_image(self.ui, image, w, h) };
     }
 
-    /// A flat icon-only button (activity-bar / toolbar idiom): transparent at
-    /// rest, a subtle fill on hover, no accent pill. Returns `true` on the
-    /// frame it is clicked.
+    /// A flat icon-only button for navigation strips and toolbars: transparent
+    /// at rest, with a subtle fill on hover. Returns `true` on the frame it is
+    /// clicked.
     pub fn icon_button(&mut self, id: Icon) -> bool {
         // SAFETY: ui is live for the frame.
         unsafe { sys::lens_icon_button(self.ui, id.raw()) }
@@ -410,14 +410,37 @@ impl Frame {
 
     /// As [`Frame::icon_button`], but `active` marks the currently-selected
     /// view in a navigation strip. The visual treatment is theme-driven:
-    /// always a background tint, plus an optional left accent bar and
+    /// always a background tint, plus an opt-in left accent rail and
     /// accent-tinted glyph when
     /// [`Theme::with_active_indicator_width`](crate::Theme::with_active_indicator_width)
-    /// is > 0 (the default). Set it to 0 for a calmer tint-only active
-    /// state. Returns `true` on the frame it is clicked.
+    /// is > 0. The default is the tint-only active state. Returns `true` on
+    /// the frame it is clicked.
     pub fn icon_button_active(&mut self, id: Icon, active: bool) -> bool {
         // SAFETY: ui is live for the frame.
         unsafe { sys::lens_icon_button_active(self.ui, id.raw(), active) }
+    }
+
+    /// A rounded icon tile with an explicit glyph size and optional top-right
+    /// badge. An empty `badge` draws only the icon.
+    pub fn icon_button_badged(
+        &mut self,
+        id: Icon,
+        badge: &str,
+        glyph_size: f32,
+        active: bool,
+    ) -> bool {
+        let badge = cstr(badge);
+        // SAFETY: ui is live; badge remains valid for the duration of the
+        // call, and Lens copies text draw commands into its frame arena.
+        unsafe {
+            sys::lens_icon_button_badged(
+                self.ui,
+                id.raw(),
+                badge.as_ptr(),
+                glyph_size.max(1.0),
+                active,
+            )
+        }
     }
 
     /// Texture-backed `icon_button`. Same hover/click behaviour, draws the
@@ -680,15 +703,17 @@ impl Frame {
         unsafe { sys::lens_button(self.ui, c.as_ptr()) }
     }
 
-    /// A borderless, full-width selectable row — a VS Code-style list / nav
-    /// item. Transparent at rest, a subtle fill on hover, and a steady
-    /// highlight (fill, accent text, left accent bar) when `selected`. Returns
-    /// `true` on the frame it is clicked.
+    /// A plain, borderless, full-width list or navigation row. It is
+    /// transparent at rest, uses a subtle fill on hover, and uses the theme's
+    /// active-surface colour when `selected`. Independently, themes can opt
+    /// into an accent rail and accent text through
+    /// [`Theme::with_active_indicator_width`](crate::Theme::with_active_indicator_width).
+    /// Returns `true` on the frame it is clicked.
     ///
-    /// Unlike [`Frame::button`] it paints no filled background and no rounded
-    /// shape, so a `column` of selectables reads as one flat navigation list
-    /// rather than a stack of bordered pills. In a stretched column the row
-    /// spans the full width, so the whole row is clickable.
+    /// Unlike [`Frame::button`], it has no persistent filled surface or border
+    /// at rest, so a `column` of selectables reads as one flat navigation list.
+    /// In a stretched column the row spans the full width, so the whole row is
+    /// clickable.
     pub fn selectable(&mut self, label: &str, selected: bool) -> bool {
         let c = cstr(label);
         // SAFETY: ui is live; c outlives the call.
@@ -760,8 +785,9 @@ impl Frame {
         unsafe { sys::lens_checkbox(self.ui, c.as_ptr(), value as *mut bool) }
     }
 
-    /// A slider bound to `value`, clamped to `[min, max]`. Returns `true` on
-    /// the frame the value changes.
+    /// A slider bound to `value`, clamped to `[min, max]`. Its knob stays
+    /// hidden at rest and animates in for hover, keyboard focus, or dragging.
+    /// Returns `true` on the frame the value changes.
     pub fn slider(&mut self, label: &str, value: &mut f32, min: f32, max: f32) -> bool {
         let c = cstr(label);
         // SAFETY: ui is live; c and value outlive the call.

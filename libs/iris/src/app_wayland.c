@@ -137,6 +137,7 @@ typedef struct wp_platform {
     int pending_w, pending_h; /* from the latest toplevel.configure    */
     bool running;
     bool resized; /* size or scale changed -> resize swap  */
+    bool animation_frame_requested; /* host asked for active-rate follow-up */
     lens *ui;     /* so output/scale callbacks can update  */
 
     /* Live colour-scheme watching + AT-SPI bridge: optional, fail-soft. */
@@ -316,6 +317,12 @@ static void ptr_axis_relative_direction(void *d, struct wl_pointer *p, uint32_t 
  * iris_app_run_wayland, cleared at exit. Documented as thread-affine:
  * callers must drive it from the same thread that runs iris_app_run. */
 static wp_platform *g_active_pl = NULL;
+
+void iris_request_animation_frame_wayland(void) {
+    wp_platform *pl = g_active_pl;
+    if (pl)
+        pl->animation_frame_requested = true;
+}
 
 /* Map the public cursor enum to the cursor-shape-v1 shape enum. The
  * compositor renders the cursor with its own configured theme, so we
@@ -1495,9 +1502,15 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             continue;
 
         /* Render this iteration. Schedule the next deadline relative to now
-         * (no catch-up bursts): fast while input is recent, slow when idle. */
+         * (no catch-up bursts): fast while input is recent, slow when idle.
+         * A host animation request made by the previous frame also keeps this
+         * iteration at the active cadence. */
         t = now_ns();
-        long long period = (t - last_input_ns < INPUT_GRACE_NS) ? ACTIVE_PERIOD_NS : IDLE_PERIOD_NS;
+        bool host_animating = pl.animation_frame_requested;
+        pl.animation_frame_requested = false;
+        long long period = (t - last_input_ns < INPUT_GRACE_NS || host_animating)
+                               ? ACTIVE_PERIOD_NS
+                               : IDLE_PERIOD_NS;
         next_deadline = t + period;
         last_render_ns = t;
 
@@ -1606,6 +1619,12 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                                       (uint32_t)(pl.height * pl.buffer_scale));
         else if (r != FLUX_OK)
             break;
+
+        /* build/paint may have requested a follow-up after the tentative idle
+         * deadline was selected above. Pull that deadline forward now so the
+         * next frame arrives at the active cadence. */
+        if (pl.animation_frame_requested)
+            next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
 
         if (++frame_no == 1)
             printf("first frame presented: %dx%d logical, %ux%u device (scale=%d)\n", pl.width,

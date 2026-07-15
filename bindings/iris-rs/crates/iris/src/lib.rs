@@ -179,6 +179,16 @@ impl Config {
 /// calling thread until the window is closed.
 pub struct Application;
 
+/// Request one more frame at Iris's active animation cadence.
+///
+/// Call this during a build or paint callback while host-owned, time-based
+/// content is moving. Repeating it every frame sustains the animation; once
+/// requests stop, Iris can return to its low-power idle cadence. Calls outside
+/// an active [`Application::run`] are harmless no-ops.
+pub fn request_animation_frame() {
+    unsafe { sys::iris_request_animation_frame() };
+}
+
 impl Application {
     pub fn run<B, P>(config: Config, build: B, paint: Option<P>) -> Result<(), RunError>
     where

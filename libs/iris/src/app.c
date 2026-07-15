@@ -13,7 +13,14 @@
 
 #ifndef IRIS_BUILD_NO_BACKEND
 int iris_app_run_wayland(const iris_app_config *cfg);
+void iris_request_animation_frame_wayland(void);
 #endif
+
+IRIS_API void iris_request_animation_frame(void) {
+#ifndef IRIS_BUILD_NO_BACKEND
+    iris_request_animation_frame_wayland();
+#endif
+}
 
 IRIS_API int iris_app_run(const iris_app_config *cfg) {
     /* Both callbacks are optional: a pure-lens app leaves paint NULL, a

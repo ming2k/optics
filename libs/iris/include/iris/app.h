@@ -106,6 +106,14 @@ typedef struct iris_app_config {
     void *user;          /* opaque pointer passed to both callbacks */
 } iris_app_config;
 
+/* Request one more frame at the backend's active animation cadence.
+ *
+ * Call this from a build or paint callback while time-based host content is
+ * still moving. Repeating the request every frame sustains the animation;
+ * stopping lets the backend return to its low-power idle cadence. The call is
+ * thread-affine to iris_app_run and is a no-op outside an active app. */
+IRIS_API void iris_request_animation_frame(void);
+
 /* Run the application until the window is closed. Returns 0 on success,
  * non-zero on platform failure (no display, GPU init failure, etc.).
  *

@@ -166,14 +166,28 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_create(flux_device *d, const flux
                                                       flux_image **out);
 
 /* Create a render-target image for flux_canvas_begin_target (ADR-0017):
- * COLOR_ATTACHMENT | SAMPLED usage, 1 sample, in SHADER_READ_ONLY_OPTIMAL
- * so it is immediately sampleable. Released with flux_image_release. */
+ * COLOR_ATTACHMENT | SAMPLED usage, 1 sample, with undefined initial contents.
+ * The first target pass performs its initial layout transition in the frame;
+ * after that pass finishes the image is sampleable. Released with
+ * flux_image_release. */
 FLUX_NODISCARD FLUX_API flux_result flux_image_create_render_target(flux_device *d, uint32_t width,
                                                                     uint32_t height,
                                                                     flux_format fmt,
                                                                     flux_image **out);
 FLUX_NODISCARD FLUX_API flux_image *flux_image_retain(flux_image *i);
 FLUX_API void flux_image_release(flux_image *i);
+FLUX_API uint32_t flux_image_width(const flux_image *i);
+FLUX_API uint32_t flux_image_height(const flux_image *i);
+FLUX_API flux_format flux_image_format(const flux_image *i);
+
+/* Transition a new or sampleable render-target image into colour-attachment
+ * state for a caller-recorded pass, then restore it to sampleable state. Prepare before
+ * flux_frame_begin_pass and finish immediately after flux_frame_end_pass.
+ * The image must come from flux_image_create_render_target. */
+FLUX_NODISCARD FLUX_API flux_result flux_frame_prepare_image_target(flux_frame *f,
+                                                                    flux_image *target);
+FLUX_NODISCARD FLUX_API flux_result flux_frame_finish_image_target(flux_frame *f,
+                                                                   flux_image *target);
 
 /* Upload `bytes` of `data` into a sub-region of an existing image.
  * The region must be in-bounds; `bytes` must be at least
@@ -200,12 +214,12 @@ typedef enum flux_canvas_backend_kind {
 typedef struct flux_canvas_desc {
     flux_struct_type type; /* FLUX_TYPE_CANVAS_DESC */
     const void *next;
-    flux_surface *surface; /* GPU: required (retained). CPU: ignored. */
-    float scale;           /* content scale (device-pixel ratio); 0 => 1.0.
-                              The canvas draws in logical units scaled onto
-                              the physical surface by this factor; flux_text
-                              reads it to rasterise glyphs crisply at HiDPI.
-                              Change later with flux_canvas_set_scale. */
+    flux_surface *surface;            /* GPU: required (retained). CPU: ignored. */
+    float scale;                      /* content scale (device-pixel ratio); 0 => 1.0.
+                                         The canvas draws in logical units scaled onto
+                                         the physical surface by this factor; flux_text
+                                         reads it to rasterise glyphs crisply at HiDPI.
+                                         Change later with flux_canvas_set_scale. */
     flux_canvas_backend_kind backend; /* default AUTO */
     uint32_t width, height;           /* CPU framebuffer size (physical px);
                                          ignored for the GPU backend. */
@@ -259,11 +273,13 @@ FLUX_API const uint8_t *flux_canvas_read_pixels(flux_canvas *c, uint32_t *width,
  * captured image is a regular sampleable flux_image, so it can feed
  * flux_effect_blur and be drawn back via flux_canvas_draw_image.
  *
- * `target` must match the canvas's colour format and (v1) the surface
- * extent. The canvas transitions target to COLOR_ATTACHMENT_OPTIMAL on
- * begin and back to SHADER_READ_ONLY_OPTIMAL on end, so the following
- * effect or draw needs no caller-side synchronisation. Requires an open
- * frame (flux_surface_begin_frame) but NOT an open canvas_begin session
+ * `target` must match the canvas's colour format. Its extent selects the
+ * offscreen pass extent and may be smaller than the surface for effects such
+ * as downsampled backdrop blur. The canvas transitions target to
+ * COLOR_ATTACHMENT_OPTIMAL on begin and back to SHADER_READ_ONLY_OPTIMAL on
+ * end, so the following effect or draw needs no caller-side synchronisation.
+ * Requires an open frame (flux_surface_begin_frame) but NOT an open
+ * canvas_begin session
  * — a capture typically runs before the frame pass. A target pass may
  * not be nested inside the frame's own canvas_begin/canvas_end. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_target(flux_canvas *c, flux_frame *f,
@@ -360,9 +376,9 @@ typedef struct flux_glyph_quad {
 typedef struct flux_glyph_run_desc {
     flux_struct_type type; /* FLUX_TYPE_GLYPH_RUN_DESC */
     const void *next;
-    flux_image *atlas;     /* caller-owned; R8 coverage (.r × tint).
-                             * NULL on a device-less CPU canvas — set
-                             * host_coverage instead. */
+    flux_image *atlas; /* caller-owned; R8 coverage (.r × tint).
+                        * NULL on a device-less CPU canvas — set
+                        * host_coverage instead. */
     /* Host-resident R8 coverage atlas, the CPU-backend alternative to
      * `atlas` (ADR-0019): when non-NULL the CPU rasteriser samples
      * coverage straight from this buffer with no GPU image, so a
