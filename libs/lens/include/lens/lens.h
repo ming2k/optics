@@ -285,6 +285,14 @@ typedef struct lens_theme {
     flux_color color_scrollbar_thumb;
     flux_color color_scrollbar_thumb_hover;
     flux_color color_scrollbar_thumb_active;
+
+    /* Slider styling. Zero-valued tokens inherit color_border / color_accent /
+     * color_fg during theme normalisation. Keeping the knob separate from the
+     * fill lets value controls use a high-contrast handle without losing the
+     * application's accent on the filled range. */
+    flux_color color_slider_track;
+    flux_color color_slider_fill;
+    flux_color color_slider_knob;
 } lens_theme;
 
 LENS_API lens_theme lens_theme_default(void);
@@ -394,6 +402,10 @@ typedef struct lens_box {
 typedef struct lens_layout_opts {
     lens_box box;     /* identity, flex, and fixed size of the container
                        itself (.disabled/.error/.tooltip unused here) */
+    float min_width;  /* minimum resolved width; 0 = no lower bound */
+    float max_width;  /* maximum resolved width; 0 = no upper bound */
+    float min_height; /* minimum resolved height; 0 = no lower bound */
+    float max_height; /* maximum resolved height; 0 = no upper bound */
     float gap;        /* between children, main axis */
     float pad;        /* inside the container, all sides */
     lens_align cross; /* cross-axis alignment; LENS_STRETCH fills */
@@ -428,6 +440,10 @@ LENS_API void lens_spacer(lens *ui, float size);     /* fixed empty main-axis ga
 /* ================================================================== */
 
 LENS_API bool lens_button(lens *ui, const char *label);
+/* Inline text action for breadcrumbs and secondary navigation. It has no
+ * surface at rest and indicates hover/focus with an accent underline without
+ * changing the text's size or weight. */
+LENS_API bool lens_link(lens *ui, const char *label);
 /* A borderless, full-width list / nav item. Transparent at rest, with a subtle
  * hover fill and a steady `color_active` surface when `selected`. Selection
  * colour is independent from decoration: themes may separately opt into a
@@ -449,6 +465,15 @@ LENS_API bool lens_checkbox(lens *ui, const char *label, bool *value);
 /* Horizontal value control. The resting track omits its knob; hover, keyboard
  * focus, or dragging reveals it with the framework's seek-safe transition. */
 LENS_API bool lens_slider(lens *ui, const char *label, float *value, float min, float max);
+/* Vertical value control. `min` is at the bottom and `max` is at the top.
+ * Hovered wheel input and Up/Down keys adjust by `step`; a non-positive step
+ * defaults to one twentieth of the range. */
+LENS_API bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, float max,
+                                   float step);
+/* Apply the current vertical wheel delta to `value` when the most recently
+ * built widget is hovered. Consumes that delta so an ancestor scroll area
+ * cannot also move. Useful for compact value triggers that expand elsewhere. */
+LENS_API bool lens_adjust_float_on_scroll(lens *ui, float *value, float min, float max, float step);
 LENS_API bool lens_radio(lens *ui, const char *label, int *value, int option_value);
 LENS_API bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap);
 LENS_API bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float min_h);
@@ -469,10 +494,37 @@ LENS_API void lens_collapsing_set_open(lens *ui, const char *label, bool open);
 LENS_API void lens_scroll_begin(lens *ui, const char *id);
 LENS_API void lens_scroll_end(lens *ui);
 
-/* Horizontal selection strip. Tab padding lives inside each hit target; the
- * strip itself adds no inset. Keyboard focus shares the active underline and
- * an undersized host height is raised to the tallest tab content. */
+typedef enum lens_tab_style {
+    /* The compact Lens default: independent tabs with an active underline. */
+    LENS_TAB_STYLE_STANDARD = 0,
+    /* A shared rail whose active surface joins its neighbours through curved
+     * shoulders. Uses the theme's active/accent tokens and adds no close
+     * affordance. Intended for views that should read as connected surfaces. */
+    LENS_TAB_STYLE_CONNECTED = 1,
+    /* A compact strip with a theme-coloured indicator. Its independently
+     * sprung edges stretch and settle when selection changes. */
+    LENS_TAB_STYLE_INDICATOR = 2,
+} lens_tab_style;
+
+typedef struct lens_tabs_opts {
+    lens_tab_style style;
+    flux_color rail_color;      /* 0 = style default */
+    flux_color active_color;    /* 0 = theme color_active */
+    flux_color hover_color;     /* 0 = theme color_hover */
+    flux_color indicator_color; /* 0 = theme color_accent */
+    float radius;               /* <= 0 = theme corner_radius */
+    float connector_size;       /* <= 0 = derived from radius */
+    float indicator_thickness;  /* <= 0 = 3 logical px */
+    float indicator_gap;        /* <= 0 = 2 logical px */
+    float indicator_padding;    /* <= 0 = derived from theme padding */
+    bool equal_width;            /* divide available width into equal hit targets */
+} lens_tabs_opts;
+
+/* Horizontal selection strip. The terse form preserves the standard Lens
+ * treatment; use lens_tabs_begin_ex to opt into a presentation variant. Both
+ * forms raise an undersized host height to contain the tallest tab content. */
 LENS_API bool lens_tabs_begin(lens *ui, const char *id, int *active_tab);
+LENS_API bool lens_tabs_begin_ex(lens *ui, const char *id, int *active_tab, lens_tabs_opts opts);
 LENS_API bool lens_tab(lens *ui, const char *label);
 LENS_API void lens_tabs_end(lens *ui);
 
@@ -506,7 +558,7 @@ LENS_API bool lens_icon_button_active(lens *ui, lens_icon_id id, bool active);
  * at rest, gains a rounded hover/active surface, and never uses an accent
  * rail. Pass NULL or an empty string for no badge. */
 LENS_API bool lens_icon_button_badged(lens *ui, lens_icon_id id, const char *badge,
-                                     float glyph_size, bool active);
+                                      float glyph_size, bool active);
 
 /* ================================================================== */
 /*  Widgets — descriptor forms                                        */
@@ -608,6 +660,9 @@ typedef struct lens_overlay_opts {
 LENS_API void lens_overlay_open(lens *ui, const char *id);
 LENS_API void lens_overlay_close(lens *ui, const char *id);
 LENS_API bool lens_overlay_is_open(const lens *ui, const char *id);
+/* Whether the last-frame bounds of an open overlay contain the cursor. This
+ * complements an owner widget's hovered response for hover-to-open popups. */
+LENS_API bool lens_overlay_hovered(const lens *ui, const char *id);
 
 /* Open a floating layer anchored to `anchor` (usually the owner widget's
  * `lens_get_response().rect`). The anchor counts as part of the overlay for

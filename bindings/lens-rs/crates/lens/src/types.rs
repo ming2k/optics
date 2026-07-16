@@ -31,6 +31,25 @@ impl Rect {
     }
 }
 
+/// Shaped text extent in logical pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextMetrics {
+    pub width: f32,
+    pub height: f32,
+    /// Baseline offset measured from the top of the text run.
+    pub baseline: f32,
+}
+
+impl TextMetrics {
+    pub(crate) fn from_raw(metrics: sys::lens_text_metrics) -> Self {
+        Self {
+            width: metrics.width,
+            height: metrics.height,
+            baseline: metrics.baseline,
+        }
+    }
+}
+
 /// A packed RGBA colour (`flux_color`). Construct with [`Color::rgba`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color(pub sys::flux_color);
@@ -106,6 +125,79 @@ pub struct TableOpts {
     pub show_header: bool,
     pub selectable: bool,
     pub zebra: bool,
+}
+
+/// Visual relationship between tabs in a [`crate::Frame::tabs_ex`] strip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TabStyle {
+    /// Compact independent tabs with the standard Lens active indicator.
+    #[default]
+    Standard,
+    /// Tabs share a rail; the active surface joins adjacent tabs with curved
+    /// connectors and follows the theme's active/accent colours.
+    Connected,
+    /// Compact tabs with a theme-coloured indicator whose independently
+    /// sprung edges stretch and settle when selection changes.
+    Indicator,
+}
+
+/// Presentation options for a tab strip. Zero/transparent values inherit the
+/// current theme, so selecting a style does not require duplicating tokens.
+#[derive(Debug, Clone, Copy)]
+pub struct TabsOpts {
+    pub style: TabStyle,
+    pub rail_color: Color,
+    pub active_color: Color,
+    pub hover_color: Color,
+    pub indicator_color: Color,
+    pub radius: f32,
+    pub connector_size: f32,
+    pub indicator_thickness: f32,
+    pub indicator_gap: f32,
+    pub indicator_padding: f32,
+    /// Give every tab the same share of the strip's available width.
+    /// This layout policy is independent of [`TabStyle`].
+    pub equal_width: bool,
+}
+
+impl Default for TabsOpts {
+    fn default() -> Self {
+        Self {
+            style: TabStyle::Standard,
+            rail_color: Color::TRANSPARENT,
+            active_color: Color::TRANSPARENT,
+            hover_color: Color::TRANSPARENT,
+            indicator_color: Color::TRANSPARENT,
+            radius: 0.0,
+            connector_size: 0.0,
+            indicator_thickness: 0.0,
+            indicator_gap: 0.0,
+            indicator_padding: 0.0,
+            equal_width: false,
+        }
+    }
+}
+
+impl TabsOpts {
+    pub(crate) fn to_raw(self) -> sys::lens_tabs_opts {
+        sys::lens_tabs_opts {
+            style: match self.style {
+                TabStyle::Standard => sys::lens_tab_style::LENS_TAB_STYLE_STANDARD,
+                TabStyle::Connected => sys::lens_tab_style::LENS_TAB_STYLE_CONNECTED,
+                TabStyle::Indicator => sys::lens_tab_style::LENS_TAB_STYLE_INDICATOR,
+            },
+            rail_color: self.rail_color.raw(),
+            active_color: self.active_color.raw(),
+            hover_color: self.hover_color.raw(),
+            indicator_color: self.indicator_color.raw(),
+            radius: self.radius.max(0.0),
+            connector_size: self.connector_size.max(0.0),
+            indicator_thickness: self.indicator_thickness.max(0.0),
+            indicator_gap: self.indicator_gap.max(0.0),
+            indicator_padding: self.indicator_padding.max(0.0),
+            equal_width: self.equal_width,
+        }
+    }
 }
 
 impl Default for TableOpts {
@@ -257,6 +349,24 @@ impl Theme {
         self
     }
 
+    /// Set the unfilled slider-track colour.
+    pub fn with_slider_track_color(mut self, color: Color) -> Theme {
+        self.0.color_slider_track = color.raw();
+        self
+    }
+
+    /// Set the filled-range colour for horizontal and vertical sliders.
+    pub fn with_slider_fill_color(mut self, color: Color) -> Theme {
+        self.0.color_slider_fill = color.raw();
+        self
+    }
+
+    /// Set the slider knob colour independently from its filled range.
+    pub fn with_slider_knob_color(mut self, color: Color) -> Theme {
+        self.0.color_slider_knob = color.raw();
+        self
+    }
+
     /// Set the base UI font size.
     pub fn with_font_size(mut self, size: f32) -> Theme {
         self.0.font_size = size.max(1.0);
@@ -350,6 +460,16 @@ impl Theme {
     /// Error/invalid state colour.
     pub fn error(self) -> Color {
         Color(self.0.color_error)
+    }
+
+    /// Base body-font size in logical pixels.
+    pub fn font_size(self) -> f32 {
+        self.0.font_size
+    }
+
+    /// Shared internal control padding in logical pixels.
+    pub fn padding(self) -> f32 {
+        self.0.padding
     }
 
     /// Best-effort dark-mode detection from the body background luminance.
@@ -523,6 +643,14 @@ pub struct LayoutOpts {
     pub width: f32,
     /// Fixed height in logical px (0 = intrinsic).
     pub height: f32,
+    /// Minimum resolved width in logical px (0 = no lower bound).
+    pub min_width: f32,
+    /// Maximum resolved width in logical px (0 = no upper bound).
+    pub max_width: f32,
+    /// Minimum resolved height in logical px (0 = no lower bound).
+    pub min_height: f32,
+    /// Maximum resolved height in logical px (0 = no upper bound).
+    pub max_height: f32,
     /// Gap between children along the main axis.
     pub gap: f32,
     /// Padding inside the container, applied to all four sides.
@@ -543,6 +671,10 @@ impl Default for LayoutOpts {
             flex: 0.0,
             width: 0.0,
             height: 0.0,
+            min_width: 0.0,
+            max_width: 0.0,
+            min_height: 0.0,
+            max_height: 0.0,
             gap: 0.0,
             pad: 0.0,
             cross: Align::Stretch,
@@ -564,6 +696,10 @@ impl LayoutOpts {
                 error: false,
                 tooltip: std::ptr::null(),
             },
+            min_width: self.min_width,
+            max_width: self.max_width,
+            min_height: self.min_height,
+            max_height: self.max_height,
             gap: self.gap,
             pad: self.pad,
             cross: self.cross.raw(),

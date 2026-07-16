@@ -5,6 +5,45 @@
 
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
 
+static void test_link_click_and_intrinsic_size(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    lens_begin(ui, &IN0);
+    lens_row(ui);
+    CHECK(!lens_link(ui, "Playlists"));
+    lens_close(ui);
+    lens_end(ui);
+    lens_node *row = lens_node_first_child(lens_root(ui));
+    CHECK(row != NULL);
+    lens_node *link = lens_node_first_child(row);
+    CHECK(link != NULL);
+    flux_rect bounds = lens_node_bounds(link);
+    CHECK(bounds.w > 0.0f && bounds.w < 100.0f);
+    CHECK(bounds.h > 0.0f && bounds.h < 40.0f);
+
+    lens_input in = IN0;
+    in.cursor = (flux_point){10.0f, 8.0f};
+    in.mouse_pressed[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &in);
+    lens_row(ui);
+    CHECK(!lens_link(ui, "Playlists"));
+    CHECK(lens_get_response(ui).hovered);
+    lens_close(ui);
+    lens_end(ui);
+
+    in = IN0;
+    in.cursor = (flux_point){10.0f, 8.0f};
+    in.mouse_released[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &in);
+    lens_row(ui);
+    CHECK(lens_link(ui, "Playlists"));
+    lens_close(ui);
+    lens_end(ui);
+
+    lens_destroy(ui);
+}
+
 static void test_button_click(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
@@ -81,6 +120,7 @@ static void test_badged_icon_button_respects_tile_size(void) {
 }
 
 int main(void) {
+    test_link_click_and_intrinsic_size();
     test_button_click();
     test_button_no_click_when_disabled();
     test_badged_icon_button_respects_tile_size();

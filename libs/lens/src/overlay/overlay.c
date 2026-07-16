@@ -99,6 +99,16 @@ bool lens_overlay_is_open(const lens *ui, const char *id) {
     return lensi_overlay_is_open_id(ui, lens_current_id(ui, id));
 }
 
+bool lens_overlay_hovered(const lens *ui, const char *id) {
+    if (!ui || !id)
+        return false;
+    lens_id overlay_id = lens_current_id(ui, id);
+    if (!lensi_overlay_is_open_id(ui, overlay_id))
+        return false;
+    lens_node *n = lensi_store_find((lens *)ui, overlay_id);
+    return n && n->has_prev && lensi_point_in(ui->input.cursor, n->prev_rect);
+}
+
 /* ---- shared sub-root registration --------------------------------- */
 /* Stages a floating layer node: container flags, anchor, fixed_w from
  * min_width, and registers it in this frame's overlay_layers[] so the

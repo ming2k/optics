@@ -174,11 +174,98 @@ static void test_flex_applies_to_terse_container(void) {
     lens_destroy(ui);
 }
 
+static void test_container_width_constraints_bound_intrinsic_size(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {500, 100}, .dt_seconds = 0.016f};
+    const float pad = 8.0f;
+    const float natural = btn_w(ui, "natural") + 2.0f * pad;
+
+    lens_begin(ui, &in);
+    lens_row_ex(ui, (lens_layout_opts){.gap = 5.0f, .cross = LENS_STRETCH});
+    lens_column_ex(ui, (lens_layout_opts){.min_width = 90.0f, .pad = pad});
+    (void)lens_button(ui, "A");
+    lens_close(ui);
+    lens_column_ex(ui,
+                   (lens_layout_opts){.min_width = 20.0f, .max_width = 240.0f, .pad = pad});
+    (void)lens_button(ui, "natural");
+    lens_close(ui);
+    lens_column_ex(ui, (lens_layout_opts){.max_width = 100.0f, .pad = pad});
+    (void)lens_button(ui, "content that is intentionally much wider than the cap");
+    lens_close(ui);
+    lens_close(ui);
+    lens_end(ui);
+
+    lens_node *row = lens_node_first_child(lens_root(ui));
+    lens_node *minimum = lens_node_first_child(row);
+    lens_node *intrinsic = lens_node_next_sibling(minimum);
+    lens_node *maximum = lens_node_next_sibling(intrinsic);
+    CHECK_NEAR(lens_node_bounds(minimum).w, 90.0f, 0.5f);
+    CHECK_NEAR(lens_node_bounds(intrinsic).w, natural, 0.5f);
+    CHECK_NEAR(lens_node_bounds(maximum).w, 100.0f, 0.5f);
+
+    lens_destroy(ui);
+}
+
+static void test_flex_redistributes_space_after_max_width(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {300, 100}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_row_ex(ui, (lens_layout_opts){.cross = LENS_STRETCH});
+    lens_column_ex(ui, (lens_layout_opts){.box = {.flex = 1.0f}, .max_width = 100.0f});
+    (void)lens_button(ui, "A");
+    lens_close(ui);
+    lens_column_ex(ui, (lens_layout_opts){.box = {.flex = 1.0f}});
+    (void)lens_button(ui, "B");
+    lens_close(ui);
+    lens_close(ui);
+    lens_end(ui);
+
+    lens_node *row = lens_node_first_child(lens_root(ui));
+    lens_node *capped = lens_node_first_child(row);
+    lens_node *remainder = lens_node_next_sibling(capped);
+    CHECK_NEAR(lens_node_bounds(capped).w, 100.0f, 0.5f);
+    CHECK_NEAR(lens_node_bounds(remainder).w, 200.0f, 0.5f);
+
+    lens_destroy(ui);
+}
+
+static void test_flex_respects_min_width_while_shrinking(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_row_ex(ui, (lens_layout_opts){.cross = LENS_STRETCH});
+    lens_column_ex(ui, (lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f},
+                                          .min_width = 80.0f});
+    (void)lens_button(ui, "A");
+    lens_close(ui);
+    lens_column_ex(ui, (lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f}});
+    (void)lens_button(ui, "B");
+    lens_close(ui);
+    lens_close(ui);
+    lens_end(ui);
+
+    lens_node *row = lens_node_first_child(lens_root(ui));
+    lens_node *floored = lens_node_first_child(row);
+    lens_node *remainder = lens_node_next_sibling(floored);
+    CHECK_NEAR(lens_node_bounds(floored).w, 80.0f, 0.5f);
+    CHECK_NEAR(lens_node_bounds(remainder).w, 20.0f, 0.5f);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_row_packs_children();
     test_flex_distributes_slack();
     test_flex_child_shrinks_between_fixed_siblings();
     test_column_stacks_children();
     test_flex_applies_to_terse_container();
+    test_container_width_constraints_bound_intrinsic_size();
+    test_flex_redistributes_space_after_max_width();
+    test_flex_respects_min_width_while_shrinking();
     return TEST_REPORT();
 }

@@ -79,6 +79,14 @@ static void open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
         n->fixed_w = opts.box.width;
     if (opts.box.height > 0)
         n->fixed_h = opts.box.height;
+    if (opts.min_width > 0)
+        n->min_w = opts.min_width;
+    if (opts.max_width > 0)
+        n->max_w = opts.max_width;
+    if (opts.min_height > 0)
+        n->min_h = opts.min_height;
+    if (opts.max_height > 0)
+        n->max_h = opts.max_height;
 
     /* Optional panel background — painted at replay against final_rect,
      * so it fills the container after layout has solved its size.

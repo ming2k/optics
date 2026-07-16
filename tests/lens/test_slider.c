@@ -78,9 +78,65 @@ static void test_slider_hover_schedules_knob_animation(void) {
     lens_destroy(ui);
 }
 
+static void test_vertical_slider_drag_and_wheel(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    float value = 0.25f;
+
+    lens_begin(ui, &IN0);
+    lens_size(ui, 44.0f, 160.0f);
+    lens_slider_vertical(ui, "Volume", &value, 0.0f, 1.0f, 0.05f);
+    lens_end(ui);
+
+    lens_input drag = IN0;
+    drag.cursor = (flux_point){22.0f, 22.0f};
+    drag.mouse_pressed[LENS_MOUSE_LEFT] = true;
+    drag.mouse_down[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &drag);
+    lens_size(ui, 44.0f, 160.0f);
+    CHECK(lens_slider_vertical(ui, "Volume", &value, 0.0f, 1.0f, 0.05f));
+    lens_end(ui);
+    CHECK(value > 0.8f);
+
+    value = 0.5f;
+    lens_input wheel = IN0;
+    wheel.cursor = (flux_point){22.0f, 80.0f};
+    wheel.scroll_y = 1.0f;
+    lens_begin(ui, &wheel);
+    lens_size(ui, 44.0f, 160.0f);
+    CHECK(lens_slider_vertical(ui, "Volume", &value, 0.0f, 1.0f, 0.05f));
+    lens_end(ui);
+    CHECK_NEAR(value, 0.55f, 0.001f);
+
+    lens_destroy(ui);
+}
+
+static void test_hovered_trigger_adjusts_on_wheel(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    float value = 0.5f;
+
+    lens_begin(ui, &IN0);
+    (void)lens_button(ui, "Volume trigger");
+    lens_end(ui);
+
+    lens_input wheel = IN0;
+    wheel.cursor = (flux_point){20.0f, 20.0f};
+    wheel.scroll_y = -1.0f;
+    lens_begin(ui, &wheel);
+    (void)lens_button(ui, "Volume trigger");
+    CHECK(lens_adjust_float_on_scroll(ui, &value, 0.0f, 1.0f, 0.05f));
+    lens_end(ui);
+    CHECK_NEAR(value, 0.45f, 0.001f);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_slider_drag();
     test_slider_disabled();
     test_slider_hover_schedules_knob_animation();
+    test_vertical_slider_drag_and_wheel();
+    test_hovered_trigger_adjusts_on_wheel();
     return TEST_REPORT();
 }

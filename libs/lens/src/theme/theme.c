@@ -41,6 +41,9 @@ lens_theme lens_theme_dark(void) {
     t.color_scrollbar_thumb = flux_color_rgba(0xff, 0xff, 0xff, 0x24);
     t.color_scrollbar_thumb_hover = flux_color_rgba(0xff, 0xff, 0xff, 0x40);
     t.color_scrollbar_thumb_active = flux_color_rgba(0xff, 0xff, 0xff, 0x66);
+    t.color_slider_track = t.color_border;
+    t.color_slider_fill = t.color_accent;
+    t.color_slider_knob = t.color_fg;
     return t;
 }
 
@@ -82,5 +85,8 @@ lens_theme lens_theme_default(void) {
     t.color_scrollbar_thumb = flux_color_rgba(0x00, 0x00, 0x00, 0x1c);
     t.color_scrollbar_thumb_hover = flux_color_rgba(0x00, 0x00, 0x00, 0x33);
     t.color_scrollbar_thumb_active = flux_color_rgba(0x00, 0x00, 0x00, 0x4a);
+    t.color_slider_track = t.color_border;
+    t.color_slider_fill = t.color_accent;
+    t.color_slider_knob = t.color_fg;
     return t;
 }

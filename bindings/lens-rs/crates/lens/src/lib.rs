@@ -34,8 +34,8 @@ mod types;
 
 pub use input::{key, mods, Input, MouseButton};
 pub use types::{
-    Align, Color, Icon, LayoutOpts, OverlayOpts, Rect, Response, TableColumn, TableOpts,
-    TableResult, Theme,
+    Align, Color, Icon, LayoutOpts, OverlayOpts, Rect, Response, TabStyle, TableColumn, TableOpts,
+    TableResult, TabsOpts, TextMetrics, Theme,
 };
 
 /// The retained UI context. Owns the persistent tree, layout, and draw list.
@@ -242,6 +242,19 @@ impl Frame {
     pub fn set_theme(&mut self, theme: Theme) {
         // SAFETY: ui is live inside a frame; theme is a value type.
         unsafe { sys::lens_set_theme(self.ui, theme.0) };
+    }
+
+    /// Shape `text` with the active theme font and return its logical extent.
+    /// This is the same measurement seam used by Lens widgets during their
+    /// intrinsic-size pass.
+    pub fn measure_text(&self, text: &str, size: f32) -> TextMetrics {
+        let text = cstr(text);
+        let theme = self.theme();
+        // SAFETY: ui and the theme font are live for this frame; text is a
+        // NUL-terminated string that outlives the call.
+        TextMetrics::from_raw(unsafe {
+            sys::lens_text_measure(self.ui, theme.0.font, text.as_ptr(), size.max(1.0))
+        })
     }
 
     // ---- containers -------------------------------------------------------
@@ -562,9 +575,9 @@ impl Frame {
         }
     }
 
-    /// A tab strip keyed by `id`, tracking the selected index in `active`.
-    /// The strip enforces the themed label height and uses its underline for
-    /// both selection and keyboard focus instead of drawing a detached frame.
+    /// A standard tab strip keyed by `id`, tracking the selected index in
+    /// `active`. Use [`Frame::tabs_ex`] to opt into another visual relationship
+    /// without changing the library-wide default.
     /// Declare the tabs inside `strip` with [`Frame::tab`]; render the selected
     /// panel *after* this call, switching on `*active`.
     ///
@@ -591,6 +604,29 @@ impl Frame {
             strip(self);
         }
         // lens_tabs_end is called unconditionally (matches the C contract).
+        // SAFETY: matched tabs begin/end.
+        unsafe { sys::lens_tabs_end(self.ui) };
+    }
+
+    /// A tab strip with an explicit presentation variant. `Connected` joins
+    /// the active surface to its neighbours; `Indicator` uses a compact,
+    /// elastic theme-coloured marker. The standard treatment remains the
+    /// default used by [`Frame::tabs`].
+    pub fn tabs_ex(
+        &mut self,
+        id: &str,
+        active: &mut i32,
+        opts: &TabsOpts,
+        strip: impl FnOnce(&mut Frame),
+    ) {
+        let c = cstr(id);
+        // SAFETY: ui is live; c and active outlive the call; opts is copied.
+        let build = unsafe {
+            sys::lens_tabs_begin_ex(self.ui, c.as_ptr(), active as *mut i32, opts.to_raw())
+        };
+        if build {
+            strip(self);
+        }
         // SAFETY: matched tabs begin/end.
         unsafe { sys::lens_tabs_end(self.ui) };
     }
@@ -657,6 +693,15 @@ impl Frame {
         unsafe { sys::lens_overlay_is_open(self.ui as *const sys::lens, c.as_ptr()) }
     }
 
+    /// Whether the cursor is inside the open overlay's last-frame bounds.
+    /// Combine this with the owner widget's hover response to implement a
+    /// hover-to-open popup that remains usable while the cursor crosses over.
+    pub fn overlay_hovered(&self, id: &str) -> bool {
+        let c = cstr(id);
+        // SAFETY: ui is live; c outlives the call; read-only.
+        unsafe { sys::lens_overlay_hovered(self.ui as *const sys::lens, c.as_ptr()) }
+    }
+
     /// A floating overlay layer anchored to `anchor` (usually the owning
     /// widget's `response().rect`). `body` runs only while the overlay is open;
     /// the closure is skipped otherwise.
@@ -706,6 +751,15 @@ impl Frame {
         let c = cstr(label);
         // SAFETY: ui is live; c outlives the call.
         unsafe { sys::lens_button(self.ui, c.as_ptr()) }
+    }
+
+    /// A lightweight inline text action for breadcrumbs and secondary
+    /// navigation. It remains plain text at rest and gains an accent
+    /// underline on hover/focus without changing size or weight.
+    pub fn link(&mut self, label: &str) -> bool {
+        let c = cstr(label);
+        // SAFETY: ui is live; c outlives the call.
+        unsafe { sys::lens_link(self.ui, c.as_ptr()) }
     }
 
     /// A plain, borderless, full-width list or navigation row. It is
@@ -797,6 +851,35 @@ impl Frame {
         let c = cstr(label);
         // SAFETY: ui is live; c and value outlive the call.
         unsafe { sys::lens_slider(self.ui, c.as_ptr(), value as *mut f32, min, max) }
+    }
+
+    /// A vertical slider with `min` at the bottom and `max` at the top.
+    /// Hovered wheel input and Up/Down keys adjust by `step`; pass `0.0` to
+    /// use one twentieth of the range.
+    pub fn slider_vertical(
+        &mut self,
+        label: &str,
+        value: &mut f32,
+        min: f32,
+        max: f32,
+        step: f32,
+    ) -> bool {
+        let c = cstr(label);
+        // SAFETY: ui is live; c and value outlive the call.
+        unsafe { sys::lens_slider_vertical(self.ui, c.as_ptr(), value as *mut f32, min, max, step) }
+    }
+
+    /// Adjust `value` from the current wheel delta when the most recently
+    /// built widget is hovered. The wheel event is consumed on use.
+    pub fn adjust_float_on_scroll(
+        &mut self,
+        value: &mut f32,
+        min: f32,
+        max: f32,
+        step: f32,
+    ) -> bool {
+        // SAFETY: ui is live and value outlives the call.
+        unsafe { sys::lens_adjust_float_on_scroll(self.ui, value, min, max, step) }
     }
 
     /// A radio button. Sets `*value = option` and returns `true` when picked.

@@ -43,7 +43,7 @@ pub use lens::key;
 pub use lens::mods;
 pub use lens::{
     Align, Color, Frame, Icon, Input, LayoutOpts, MouseButton, OverlayOpts, Rect, Response,
-    TableColumn, TableOpts, TableResult, TextBuf, Theme, Ui,
+    TabStyle, TableColumn, TableOpts, TableResult, TabsOpts, TextBuf, Theme, Ui,
 };
 
 /// A thin wrapper over the raw pointers iris hands to the paint

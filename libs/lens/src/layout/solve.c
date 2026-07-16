@@ -10,6 +10,32 @@ static float pt_cross(flux_point p, lens_axis a) {
     return a == LENS_ROW ? p.y : p.x;
 }
 
+static float constrain_extent(float value, float min_value, float max_value) {
+    if (max_value > 0.0f)
+        value = fminf(value, max_value);
+    /* A contradictory range resolves in favour of the minimum, matching the
+     * rule that content must not collapse below its usability floor. */
+    if (min_value > 0.0f)
+        value = fmaxf(value, min_value);
+    return value;
+}
+
+static float node_min_main(const lens_node *n, lens_axis a) {
+    return a == LENS_ROW ? n->min_w : n->min_h;
+}
+
+static float node_max_main(const lens_node *n, lens_axis a) {
+    return a == LENS_ROW ? n->max_w : n->max_h;
+}
+
+static float node_min_cross(const lens_node *n, lens_axis a) {
+    return a == LENS_ROW ? n->min_h : n->min_w;
+}
+
+static float node_max_cross(const lens_node *n, lens_axis a) {
+    return a == LENS_ROW ? n->max_h : n->max_w;
+}
+
 /* ---- pass 1: measure (bottom-up) ---- */
 
 static flux_point measure(lens_node *n) {
@@ -20,6 +46,8 @@ static flux_point measure(lens_node *n) {
             m.x = n->fixed_w;
         if (n->fixed_h > 0)
             m.y = n->fixed_h;
+        m.x = constrain_extent(m.x, n->min_w, n->max_w);
+        m.y = constrain_extent(m.y, n->min_h, n->max_h);
         n->measured = m;
         return m;
     }
@@ -44,6 +72,8 @@ static flux_point measure(lens_node *n) {
         m.x = n->fixed_w;
     if (n->fixed_h > 0)
         m.y = n->fixed_h;
+    m.x = constrain_extent(m.x, n->min_w, n->max_w);
+    m.y = constrain_extent(m.y, n->min_h, n->max_h);
     n->measured = m;
     return m;
 }
@@ -61,6 +91,79 @@ static float align_offset(lens_align a, float free) {
     default:
         return 0.0f;
     }
+}
+
+/* Return the water-filling level for a bounded flex adjustment. Grow uses
+ * flex_grow as its weight; shrink preserves the existing proportional-to-
+ * intrinsic-size behaviour. Children that hit a max/min constraint leave
+ * their unused share for the remaining flexible siblings. */
+static float flex_level(const lens_node *parent, lens_axis axis, float space, bool grow) {
+    if (space <= 0.0f)
+        return 0.0f;
+
+    float total_weight = 0.0f;
+    for (const lens_node *c = parent->first_child; c; c = c->next_sibling) {
+        if (c->flex_grow <= 0.0f)
+            continue;
+        float base = pt_main(c->measured, axis);
+        total_weight += grow ? c->flex_grow : base;
+    }
+    if (total_weight <= 0.0f)
+        return 0.0f;
+
+    float level = space / total_weight;
+    for (uint32_t iteration = 0; iteration <= parent->child_count; iteration++) {
+        float capped_space = 0.0f;
+        float active_weight = 0.0f;
+        for (const lens_node *c = parent->first_child; c; c = c->next_sibling) {
+            if (c->flex_grow <= 0.0f)
+                continue;
+            float base = pt_main(c->measured, axis);
+            float weight = grow ? c->flex_grow : base;
+            if (weight <= 0.0f)
+                continue;
+
+            float capacity;
+            if (grow) {
+                float maximum = node_max_main(c, axis);
+                capacity = maximum > 0.0f ? fmaxf(maximum - base, 0.0f) : INFINITY;
+            } else {
+                capacity = fmaxf(base - node_min_main(c, axis), 0.0f);
+            }
+
+            if (isfinite(capacity) && capacity / weight <= level) {
+                capped_space += capacity;
+            } else {
+                active_weight += weight;
+            }
+        }
+
+        if (active_weight <= 0.0f)
+            return INFINITY;
+        float next_level = fmaxf(space - capped_space, 0.0f) / active_weight;
+        if (fabsf(next_level - level) <= 0.0001f)
+            return next_level;
+        level = next_level;
+    }
+    return level;
+}
+
+static float flex_adjustment(const lens_node *n, lens_axis axis, float level, bool grow) {
+    if (n->flex_grow <= 0.0f || level <= 0.0f)
+        return 0.0f;
+    float base = pt_main(n->measured, axis);
+    float weight = grow ? n->flex_grow : base;
+    if (weight <= 0.0f)
+        return 0.0f;
+
+    float capacity;
+    if (grow) {
+        float maximum = node_max_main(n, axis);
+        capacity = maximum > 0.0f ? fmaxf(maximum - base, 0.0f) : INFINITY;
+    } else {
+        capacity = fmaxf(base - node_min_main(n, axis), 0.0f);
+    }
+    return fminf(capacity, weight * level);
 }
 
 static void arrange(lens_node *n, flux_rect rect) {
@@ -90,20 +193,19 @@ static void arrange(lens_node *n, flux_rect rect) {
      * do not fit. Fixed siblings keep their requested size while the flexible
      * content yields the deficit, matching the common sidebar | content |
      * inspector layout. */
-    float base = 0, total_grow = 0, total_shrink_basis = 0;
+    float base = 0;
     uint32_t cnt = 0;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         base += pt_main(c->measured, ax);
-        total_grow += c->flex_grow;
-        if (c->flex_grow > 0)
-            total_shrink_basis += pt_main(c->measured, ax);
         cnt++;
     }
     if (cnt > 1)
         base += n->gap * (float)(cnt - 1);
     float free = inner_main - base;
     float grow_space = free > 0 ? free : 0;
-    float shrink_space = free < 0 ? fminf(-free, total_shrink_basis) : 0;
+    float shrink_space = free < 0 ? -free : 0;
+    float grow_level = flex_level(n, ax, grow_space, true);
+    float shrink_level = flex_level(n, ax, shrink_space, false);
 
     /* reserve scrollbar width so content doesn't render underneath it */
     if (n->is_scroll && ax == LENS_COLUMN && base > inner_main) {
@@ -116,10 +218,8 @@ static void arrange(lens_node *n, flux_rect rect) {
     float cursor = (ax == LENS_ROW) ? inner.x : inner.y;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         float main_sz = pt_main(c->measured, ax);
-        if (total_grow > 0 && c->flex_grow > 0)
-            main_sz += grow_space * (c->flex_grow / total_grow);
-        if (shrink_space > 0 && c->flex_grow > 0 && total_shrink_basis > 0)
-            main_sz -= shrink_space * (main_sz / total_shrink_basis);
+        main_sz += flex_adjustment(c, ax, grow_level, true);
+        main_sz -= flex_adjustment(c, ax, shrink_level, false);
 
         /* A scroll container must stay within the parent's viewport so its
          * content can actually overflow and trigger scrolling. Without this
@@ -129,6 +229,7 @@ static void arrange(lens_node *n, flux_rect rect) {
             main_sz = inner_main;
 
         float cross_sz = (n->cross == LENS_STRETCH) ? inner_cross : pt_cross(c->measured, ax);
+        cross_sz = constrain_extent(cross_sz, node_min_cross(c, ax), node_max_cross(c, ax));
         if (cross_sz > inner_cross)
             cross_sz = inner_cross;
 

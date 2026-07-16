@@ -39,7 +39,14 @@ typedef enum lens_draw_kind {
     LENS_DRAW_CLIP_PUSH = 4,
     LENS_DRAW_CLIP_POP = 5,
     LENS_DRAW_ICON = 6,
+    LENS_DRAW_CONNECTED_TAB = 7,
+    LENS_DRAW_TAB_INDICATOR = 8,
 } lens_draw_kind;
+
+enum {
+    LENSI_TAB_CONNECT_LEFT = 1u << 0,
+    LENSI_TAB_CONNECT_RIGHT = 1u << 1,
+};
 
 typedef struct lens_draw_cmd {
     lens_draw_kind kind;
@@ -53,6 +60,7 @@ typedef struct lens_draw_cmd {
     float text_size;
     float text_weight; /* 0 = use theme default */
     int32_t icon_id;   /* LENS_DRAW_ICON: enum lens_icon_id */
+    uint32_t flags;    /* kind-specific flags */
     flux_image *image; /* LENS_DRAW_IMAGE: host-owned texture, borrowed
                           for the frame; must outlive lens_render */
 } lens_draw_cmd;
@@ -95,6 +103,8 @@ struct lens_node {
     lens_align cross;
     float flex_grow;
     float fixed_w, fixed_h; /* 0 = intrinsic */
+    float min_w, max_w;     /* 0 = unconstrained */
+    float min_h, max_h;     /* 0 = unconstrained */
     float scroll_x, scroll_y;
 
     /* layout outputs */

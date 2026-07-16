@@ -56,6 +56,35 @@ static void test_begin_gated_by_open_state(void) {
     lens_destroy(ui);
 }
 
+static void test_open_overlay_reports_hover_for_its_whole_surface(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    lens_begin(ui, &ZERO_IN);
+    lens_overlay_open(ui, "hover-card");
+    if (lens_overlay_begin(ui, "hover-card", (flux_rect){40, 40, 40, 20},
+                           (lens_overlay_opts){.pad = 12, .min_width = 100})) {
+        lens_label(ui, "value");
+        lens_overlay_end(ui);
+    }
+    lens_end(ui);
+
+    lens_input hover = ZERO_IN;
+    hover.cursor = (flux_point){50, 75};
+    lens_begin(ui, &hover);
+    CHECK(lens_overlay_hovered(ui, "hover-card"));
+    if (lens_overlay_begin(ui, "hover-card", (flux_rect){40, 40, 40, 20},
+                           (lens_overlay_opts){.pad = 12, .min_width = 100})) {
+        lens_label(ui, "value");
+        lens_overlay_end(ui);
+    }
+    lens_end(ui);
+
+    lens_overlay_close(ui, "hover-card");
+    CHECK(!lens_overlay_hovered(ui, "hover-card"));
+    lens_destroy(ui);
+}
+
 /* Anchored placement: by default, below the anchor; flips above when
  * there's no room. */
 static void test_anchor_placement_and_flip(void) {
@@ -215,6 +244,7 @@ static void test_escape_dismisses_top(void) {
 int main(void) {
     test_open_close_persist();
     test_begin_gated_by_open_state();
+    test_open_overlay_reports_hover_for_its_whole_surface();
     test_anchor_placement_and_flip();
     test_eclipse_blocks_base();
     test_click_outside_dismisses();

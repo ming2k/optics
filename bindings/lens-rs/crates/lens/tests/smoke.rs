@@ -3,7 +3,8 @@
 //! frame drives the widget set through the safe wrapper. No GPU required.
 
 use lens::{
-    Align, Color, Input, LayoutOpts, MouseButton, TableColumn, TableOpts, TextBuf, Theme, Ui,
+    Align, Color, Input, LayoutOpts, MouseButton, TabStyle, TableColumn, TableOpts, TabsOpts,
+    TextBuf, Theme, Ui,
 };
 
 #[test]
@@ -68,6 +69,33 @@ fn headless_frame_drives_containers() {
                 f.tab("Advanced");
                 f.tab("About");
             });
+            f.tabs_ex(
+                "connected-settings",
+                &mut active,
+                &TabsOpts {
+                    style: TabStyle::Connected,
+                    ..TabsOpts::default()
+                },
+                |f| {
+                    f.tab("Primary");
+                    f.tab("Secondary");
+                    f.tab("Tertiary");
+                },
+            );
+            f.tabs_ex(
+                "indicator-settings",
+                &mut active,
+                &TabsOpts {
+                    style: TabStyle::Indicator,
+                    equal_width: true,
+                    ..TabsOpts::default()
+                },
+                |f| {
+                    f.tab("Recent");
+                    f.tab("Pending");
+                    f.tab("Completed");
+                },
+            );
             match active {
                 0 => f.label("General"),
                 1 => f.label("Advanced"),
@@ -248,6 +276,30 @@ fn headless_frame_drives_descriptor_containers() {
             });
         });
     }
+}
+
+#[test]
+fn layout_constraints_and_text_metrics_are_available_safely() {
+    let mut ui = Ui::headless().expect("create headless ui");
+    let input = Input::new((400.0, 200.0), 1.0 / 60.0);
+
+    ui.frame(&input, |f| {
+        let metrics = f.measure_text("adaptive rail", f.theme().font_size());
+        assert!(metrics.width > 0.0);
+        assert!(metrics.height > 0.0);
+        assert!(f.theme().padding() >= 0.0);
+
+        f.column_ex(
+            &LayoutOpts {
+                min_width: 120.0,
+                max_width: 180.0,
+                min_height: 40.0,
+                max_height: 160.0,
+                ..LayoutOpts::default()
+            },
+            |f| f.label("content"),
+        );
+    });
 }
 
 #[test]

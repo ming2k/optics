@@ -64,6 +64,56 @@ bool lens_button(lens *ui, const char *label) {
     return r.clicked;
 }
 
+bool lens_link(lens *ui, const char *label) {
+    const lens_theme *t = &ui->theme;
+    bool disabled = ui->next_disabled;
+    ui->next_disabled = false;
+    ui->next_error = false;
+    lens_id id = lensi_gen_widget_id(ui, label);
+    lens_node *n = lensi_store_touch(ui, id);
+    if (!n)
+        return false;
+    lensi_link_child(ui, n);
+    n->is_container = false;
+
+    lens_text_metrics tm = lensi_text_measure_label(ui, label, t->font_size, 0.0f);
+    float w = n->fixed_w > 0.0f ? n->fixed_w : tm.width;
+    float h = n->fixed_h > 0.0f ? n->fixed_h : tm.height + 6.0f;
+    n->measured = (flux_point){w, h};
+
+    lens_response r = lensi_interact(ui, n, true, disabled);
+    uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0);
+    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, sem_flags);
+
+    if (!disabled)
+        n->hover_t = lensi_approach(ui, n->hover_t, (r.hovered || r.focused) ? 1.0f : 0.0f,
+                                    ui->input.dt_seconds, 18.0f);
+
+    float text_y = fmaxf((h - tm.height) * 0.5f - 1.0f, 0.0f);
+    flux_color fg = disabled ? t->color_disabled
+                             : lensi_lerp_color(t->color_fg, t->color_accent, n->hover_t * 0.35f);
+    lensi_drawlist_push(ui, n,
+                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
+                                        .rel = {0.0f, text_y, 0.0f, 0.0f},
+                                        .color = fg,
+                                        .text = label,
+                                        .text_size = t->font_size,
+                                        .text_weight = 0.0f});
+
+    if (n->hover_t > 0.001f) {
+        float underline_w = tm.width * n->hover_t;
+        float underline_y = fminf(text_y + tm.height + 2.0f, h - 1.5f);
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                            .rel = {0.0f, underline_y, underline_w, 1.5f},
+                                            .color = t->color_accent,
+                                            .radius = 0.75f});
+    }
+
+    ui->last_response = r;
+    return r.clicked;
+}
+
 lens_response lens_button_ex(lens *ui, lens_button_opts o) {
     lensi_apply_box(ui, o.box);
     bool scoped = o.box.id && o.box.id[0];

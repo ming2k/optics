@@ -123,6 +123,57 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
             }
             break;
 
+        case LENS_DRAW_CONNECTED_TAB: {
+            /* The connected tab surface extends into the rail's lower inset.
+             * Optional shoulders curve into adjacent tab space, so selection
+             * reads as one continuous shape instead of an isolated pill. */
+            float shoulder = fminf(c->width, fminf(r.w * 0.25f, r.h * 0.45f));
+            float depth = fmaxf(0.0f, c->text_size);
+            float bottom = r.y + r.h + depth;
+            float radius = fminf(c->radius, fminf(r.w * 0.5f, r.h * 0.5f));
+            bool connect_left = (c->flags & LENSI_TAB_CONNECT_LEFT) != 0;
+            bool connect_right = (c->flags & LENSI_TAB_CONNECT_RIGHT) != 0;
+
+            flux_path *p = NULL;
+            if (flux_path_create(&p, &ui->arena) != FLUX_OK)
+                break;
+
+            if (connect_left) {
+                flux_path_move_to(p, r.x - shoulder, bottom);
+                flux_path_cubic_to(p, r.x - shoulder * 0.42f, bottom, r.x,
+                                   bottom - shoulder * 0.42f, r.x, bottom - shoulder);
+            } else {
+                flux_path_move_to(p, r.x, bottom);
+            }
+            flux_path_line_to(p, r.x, r.y + radius);
+            flux_path_cubic_to(p, r.x, r.y + radius * 0.45f, r.x + radius * 0.45f, r.y,
+                               r.x + radius, r.y);
+            flux_path_line_to(p, r.x + r.w - radius, r.y);
+            flux_path_cubic_to(p, r.x + r.w - radius * 0.45f, r.y, r.x + r.w, r.y + radius * 0.45f,
+                               r.x + r.w, r.y + radius);
+            if (connect_right) {
+                flux_path_line_to(p, r.x + r.w, bottom - shoulder);
+                flux_path_cubic_to(p, r.x + r.w, bottom - shoulder * 0.42f,
+                                   r.x + r.w + shoulder * 0.42f, bottom, r.x + r.w + shoulder,
+                                   bottom);
+            } else {
+                flux_path_line_to(p, r.x + r.w, bottom);
+            }
+            flux_path_close(p);
+
+            flux_paint paint = flux_paint_solid(c->color);
+            flux_canvas_fill_path(canvas, p, &paint);
+            break;
+        }
+
+        case LENS_DRAW_TAB_INDICATOR: {
+            float thickness = c->width > 0.0f ? c->width : 3.0f;
+            flux_rect indicator = {r.x, box.y + box.h - thickness, r.w, thickness};
+            indicator = snap_rect(indicator, scale);
+            flux_canvas_fill_rrect(canvas, indicator, thickness * 0.5f, c->color);
+            break;
+        }
+
         case LENS_DRAW_BORDER: {
             float bw = c->width > 0 ? c->width : 1.0f;
             if (c->radius > 0.5f) {

@@ -86,7 +86,10 @@ static bool image_button_impl(lens *ui, flux_image *image, bool active) {
         n->hover_t = lensi_approach(ui, n->hover_t, r.hovered ? 1.f : 0.f, dt, 12.f);
 
     float fill = active ? 1.0f : n->hover_t * 0.6f;
-    if (fill > 0.001f) {
+    /* A blank image button still needs the standard surface. For a real
+     * image, draw interaction feedback after the texture instead; otherwise
+     * the opaque image hides the hover/active treatment completely. */
+    if (!image && fill > 0.001f) {
         flux_color bg = lensi_lerp_color(t->color_bg, t->color_hover, fill);
         lensi_drawlist_push(
             ui, n,
@@ -107,6 +110,28 @@ static bool image_button_impl(lens *ui, flux_image *image, bool active) {
         float iy = (h - s) * 0.5f;
         lensi_drawlist_push(
             ui, n, (lens_draw_cmd){.kind = LENS_DRAW_IMAGE, .rel = {ix, iy, s, s}, .image = image});
+
+        float feedback = active ? 0.65f + n->hover_t * 0.35f : n->hover_t;
+        if (feedback > 0.001f) {
+            /* A restrained dark veil remains visible over both light and
+             * dark photography. The accent outline carries selected/hover
+             * state without obscuring the artwork. */
+            float veil = active ? 18.0f + n->hover_t * 34.0f : n->hover_t * 52.0f;
+            uint8_t veil_alpha = (uint8_t)veil;
+            lensi_drawlist_push(ui, n,
+                                (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                                .rel = {ix, iy, s, s},
+                                                .color = flux_color_rgba(0, 0, 0, veil_alpha),
+                                                .radius = t->corner_radius});
+            lensi_drawlist_push(
+                ui, n,
+                (lens_draw_cmd){
+                    .kind = LENS_DRAW_BORDER,
+                    .rel = {ix, iy, s, s},
+                    .color = lensi_lerp_color(t->color_border, t->color_accent, feedback * 0.75f),
+                    .radius = t->corner_radius,
+                    .width = t->border_width > 1.5f ? t->border_width : 1.5f});
+        }
     }
 
     ui->last_response = r;

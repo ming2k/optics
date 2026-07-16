@@ -105,6 +105,12 @@ static void lensi_theme_normalize(lens_theme *t) {
         t->scrollbar_radius = t->scrollbar_width * 0.5f;
     if (t->scrollbar_min_thumb_h <= 0.0f)
         t->scrollbar_min_thumb_h = 28.0f;
+    if (!t->color_slider_track)
+        t->color_slider_track = t->color_border;
+    if (!t->color_slider_fill)
+        t->color_slider_fill = t->color_accent;
+    if (!t->color_slider_knob)
+        t->color_slider_knob = t->color_fg;
 }
 
 void lens_set_theme(lens *ui, lens_theme theme) {
