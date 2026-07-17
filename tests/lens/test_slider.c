@@ -1,5 +1,6 @@
 /* test_slider.c — slider value change detection. */
 
+#include "../../libs/lens/src/internal.h"
 #include "test_helpers.h"
 #include <lens/lens.h>
 #include <math.h>
@@ -78,6 +79,52 @@ static void test_slider_hover_schedules_knob_animation(void) {
     lens_destroy(ui);
 }
 
+static void test_slider_geometry_uses_theme_tokens(void) {
+    CHECK_NEAR(lens_theme_default().slider_track_thickness, 6.0f, 0.001f);
+    CHECK_NEAR(lens_theme_default().slider_knob_size, 14.0f, 0.001f);
+    CHECK_NEAR(lens_theme_dark().slider_track_thickness, 6.0f, 0.001f);
+    CHECK_NEAR(lens_theme_dark().slider_knob_size, 14.0f, 0.001f);
+
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_theme theme = lens_theme_dark();
+    theme.slider_track_thickness = 2.5f;
+    theme.slider_knob_size = 10.0f;
+    lens_set_theme(ui, theme);
+
+    float value = 0.5f;
+    lens_input hover = IN0;
+    hover.cursor = (flux_point){80.0f, 16.0f};
+    for (int frame = 0; frame < 90; frame++) {
+        lens_begin(ui, &hover);
+        lens_slider(ui, "Compact", &value, 0.0f, 1.0f);
+        lens_end(ui);
+    }
+
+    lens_node *slider = lens_node_first_child(lens_root(ui));
+    CHECK(slider != NULL);
+    CHECK(slider && slider->cmd_count == 3);
+    if (slider && slider->cmd_count == 3) {
+        const lens_draw_cmd *track = &slider->cmds[0];
+        const lens_draw_cmd *fill = &slider->cmds[1];
+        const lens_draw_cmd *knob = &slider->cmds[2];
+        CHECK_NEAR(track->rel.h, 2.5f, 0.001f);
+        CHECK_NEAR(fill->rel.h, 2.5f, 0.001f);
+        CHECK_NEAR(track->radius, 1.25f, 0.001f);
+        CHECK_NEAR(knob->rel.w, 10.0f, 0.01f);
+        CHECK_NEAR(knob->rel.h, 10.0f, 0.01f);
+    }
+
+    theme.slider_track_thickness = 0.0f;
+    theme.slider_knob_size = -1.0f;
+    lens_set_theme(ui, theme);
+    theme = lens_get_theme(ui);
+    CHECK_NEAR(theme.slider_track_thickness, 6.0f, 0.001f);
+    CHECK_NEAR(theme.slider_knob_size, 14.0f, 0.001f);
+
+    lens_destroy(ui);
+}
+
 static void test_vertical_slider_drag_and_wheel(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
@@ -136,6 +183,7 @@ int main(void) {
     test_slider_drag();
     test_slider_disabled();
     test_slider_hover_schedules_knob_animation();
+    test_slider_geometry_uses_theme_tokens();
     test_vertical_slider_drag_and_wheel();
     test_hovered_trigger_adjusts_on_wheel();
     return TEST_REPORT();

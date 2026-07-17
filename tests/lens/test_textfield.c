@@ -402,6 +402,25 @@ static void test_textfield_paste_replaces_selection(void) {
     lens_destroy(ui);
 }
 
+static void test_textfield_requests_text_cursor(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    char buf[16] = "hello";
+
+    lens_begin(ui, &IN0);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+
+    lens_input hover = IN0;
+    hover.cursor = (flux_point){20.0f, 20.0f};
+    lens_begin(ui, &hover);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    CHECK(lens_get_cursor_hint(ui) == LENS_CURSOR_TEXT);
+    lens_end(ui);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_textfield_paste();
     test_textfield_committed_text();
@@ -414,5 +433,6 @@ int main(void) {
     test_textfield_shift_select();
     test_textfield_copy_cut();
     test_textfield_paste_replaces_selection();
+    test_textfield_requests_text_cursor();
     return TEST_REPORT();
 }

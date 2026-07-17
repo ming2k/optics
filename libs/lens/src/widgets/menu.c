@@ -90,6 +90,8 @@ bool lens_menu_item_flags(lens *ui, const char *label, const char *shortcut, uin
     n->measured = (flux_point){w, h};
 
     lens_response r = lensi_interact(ui, n, false, disabled);
+    if (r.hovered)
+        ui->cursor_hint = LENS_CURSOR_POINTER;
     lens_menu_item_state *st = lens_node_state(n, sizeof *st);
 
     uint32_t sem_flags = (disabled ? LENS_A11Y_DISABLED : 0) | (checked ? LENS_A11Y_CHECKED : 0);
@@ -292,6 +294,8 @@ bool lens_submenu_begin(lens *ui, const char *label) {
     n->measured = (flux_point){w, h};
 
     lens_response r = lensi_interact(ui, n, false, false);
+    if (r.hovered)
+        ui->cursor_hint = LENS_CURSOR_POINTER;
     lens_menu_item_state *st = lens_node_state(n, sizeof *st);
 
     /* Dwell: accumulate hover time; open after ~0.25s. Reset on leave. */

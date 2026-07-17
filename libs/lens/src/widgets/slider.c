@@ -5,8 +5,6 @@
 
 #define LENS_SLIDER_DEFAULT_W 160.0f
 #define LENS_SLIDER_DEFAULT_H 160.0f
-#define LENS_SLIDER_KNOB 14.0f
-#define LENS_SLIDER_TRACK 6.0f
 
 static float slider_span(float min, float max) {
     return max > min ? max - min : 1.0f;
@@ -102,8 +100,11 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
 
     /* track geometry from last frame's width (one-frame latency, ADR-0006) */
     flux_rect rect = n->has_prev ? n->prev_rect : (flux_rect){0, 0, w, h};
-    float track_x0 = t->padding + LENS_SLIDER_KNOB * 0.5f;
-    float track_w = rect.w - 2.0f * t->padding - LENS_SLIDER_KNOB;
+    float track_thickness = t->slider_track_thickness;
+    float knob_extent = t->slider_knob_size;
+    float track_radius = track_thickness * 0.5f;
+    float track_x0 = t->padding + knob_extent * 0.5f;
+    float track_w = rect.w - 2.0f * t->padding - knob_extent;
     if (track_w < 1.0f)
         track_w = 1.0f;
 
@@ -133,23 +134,24 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
     flux_color fill_color =
         disabled ? t->color_disabled : (error ? t->color_error : t->color_slider_fill);
     /* track */
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                        .rel = {track_x0, h * 0.5f - LENS_SLIDER_TRACK * 0.5f,
-                                                track_w, LENS_SLIDER_TRACK},
-                                        .color = track_color,
-                                        .radius = 3.0f});
+    lensi_drawlist_push(
+        ui, n,
+        (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                        .rel = {track_x0, h * 0.5f - track_radius, track_w, track_thickness},
+                        .color = track_color,
+                        .radius = track_radius});
 
     /* Filled portion ends at the exact value. The knob is an interaction
      * affordance, not part of the value geometry, so hiding it must not move
      * or lengthen the fill. */
     float fill_w = frac * track_w;
     if (fill_w > 0.001f)
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {track_x0, h * 0.5f - 3.0f, fill_w, 6.0f},
-                                            .color = fill_color,
-                                            .radius = 3.0f});
+        lensi_drawlist_push(
+            ui, n,
+            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                            .rel = {track_x0, h * 0.5f - track_radius, fill_w, track_thickness},
+                            .color = fill_color,
+                            .radius = track_radius});
 
     /* Resting sliders are visually quiet. Hover, keyboard focus, and drag
      * reveal a knob with a short fade + scale transition. lensi_approach
@@ -157,7 +159,7 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
      * the transition settles. */
     float knob_t = n->hover_t * n->hover_t * (3.0f - 2.0f * n->hover_t);
     if (knob_t > 0.001f) {
-        float knob_size = LENS_SLIDER_KNOB * (0.72f + 0.28f * knob_t);
+        float knob_size = knob_extent * (0.72f + 0.28f * knob_t);
         float knob_x = track_x0 + frac * track_w - knob_size * 0.5f;
         float knob_y = h * 0.5f - knob_size * 0.5f;
         flux_color knob_color = lensi_lerp_color(flux_color_rgba(0, 0, 0, 0),
@@ -207,8 +209,10 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
         lensi_approach(ui, n->hover_t, disabled ? 0.0f : 1.0f, dt, disabled ? 14.0f : 18.0f);
 
     flux_rect rect = n->has_prev ? n->prev_rect : (flux_rect){0, 0, w, h};
-    float track_y0 = t->padding + LENS_SLIDER_KNOB * 0.5f;
-    float track_h = rect.h - 2.0f * t->padding - LENS_SLIDER_KNOB;
+    float track_thickness = t->slider_track_thickness;
+    float knob_extent = t->slider_knob_size;
+    float track_y0 = t->padding + knob_extent * 0.5f;
+    float track_h = rect.h - 2.0f * t->padding - knob_extent;
     if (track_h < 1.0f)
         track_h = 1.0f;
     float span = slider_span(min, max);
@@ -233,7 +237,7 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
 
     float frac = value ? (*value - min) / span : 0.0f;
     frac = frac < 0.0f ? 0.0f : (frac > 1.0f ? 1.0f : frac);
-    float track_x = w * 0.5f - LENS_SLIDER_TRACK * 0.5f;
+    float track_x = w * 0.5f - track_thickness * 0.5f;
     flux_color track_color =
         disabled ? t->color_disabled : (error ? t->color_error : t->color_slider_track);
     flux_color fill_color =
@@ -241,21 +245,21 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
 
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                        .rel = {track_x, track_y0, LENS_SLIDER_TRACK, track_h},
+                                        .rel = {track_x, track_y0, track_thickness, track_h},
                                         .color = track_color,
-                                        .radius = LENS_SLIDER_TRACK * 0.5f});
+                                        .radius = track_thickness * 0.5f});
     float fill_h = frac * track_h;
     if (fill_h > 0.001f)
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {track_x, track_y0 + track_h - fill_h,
-                                                    LENS_SLIDER_TRACK, fill_h},
-                                            .color = fill_color,
-                                            .radius = LENS_SLIDER_TRACK * 0.5f});
+        lensi_drawlist_push(
+            ui, n,
+            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                            .rel = {track_x, track_y0 + track_h - fill_h, track_thickness, fill_h},
+                            .color = fill_color,
+                            .radius = track_thickness * 0.5f});
 
     float knob_t = n->hover_t * n->hover_t * (3.0f - 2.0f * n->hover_t);
     if (knob_t > 0.001f) {
-        float knob_size = LENS_SLIDER_KNOB * (0.72f + 0.28f * knob_t);
+        float knob_size = knob_extent * (0.72f + 0.28f * knob_t);
         float knob_x = w * 0.5f - knob_size * 0.5f;
         float knob_y = track_y0 + (1.0f - frac) * track_h - knob_size * 0.5f;
         flux_color knob_color = lensi_lerp_color(

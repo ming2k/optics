@@ -497,6 +497,10 @@ flux_result flux_image_import_dmabuf(flux_device *d, const flux_dmabuf_image_des
         goto fail;
 
     *out = im;
+    /* The import bypasses the slab; count it so stats and the teardown
+     * leak warning see it. Uncounted at retire time via imported_size. */
+    flux_vk_allocator_note_external(d, mreq.memoryRequirements.size);
+    im->imported_size = mreq.memoryRequirements.size;
     close(plane->fd);
     if (desc->has_acquire_sync_fd)
         close(desc->acquire_sync_fd);

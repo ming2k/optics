@@ -171,6 +171,17 @@ typedef struct lens_response {
     bool focused;
 } lens_response;
 
+/* Semantic cursor requested by the hovered Lens widget. Lens only reports
+ * intent; the windowing host remains responsible for mapping it to the
+ * platform cursor API once per frame. */
+typedef enum lens_cursor_hint {
+    LENS_CURSOR_DEFAULT = 0,
+    LENS_CURSOR_POINTER,
+    LENS_CURSOR_TEXT,
+    LENS_CURSOR_RESIZE_EW,
+    LENS_CURSOR_RESIZE_NS,
+} lens_cursor_hint;
+
 /* ================================================================== */
 /*  Accessibility semantics (ADR-0012)                                */
 /* ================================================================== */
@@ -286,10 +297,14 @@ typedef struct lens_theme {
     flux_color color_scrollbar_thumb_hover;
     flux_color color_scrollbar_thumb_active;
 
-    /* Slider styling. Zero-valued tokens inherit color_border / color_accent /
-     * color_fg during theme normalisation. Keeping the knob separate from the
-     * fill lets value controls use a high-contrast handle without losing the
-     * application's accent on the filled range. */
+    /* Slider styling. Non-positive geometry tokens fall back to 6 logical px
+     * for the track and 14 logical px for the knob. Zero-valued colour tokens
+     * inherit color_border / color_accent / color_fg during theme
+     * normalisation. Keeping the knob separate from the fill lets value
+     * controls use a high-contrast handle without losing the application's
+     * accent on the filled range. */
+    float slider_track_thickness;
+    float slider_knob_size;
     flux_color color_slider_track;
     flux_color color_slider_fill;
     flux_color color_slider_knob;
@@ -362,6 +377,13 @@ LENS_API bool lens_overflowed(const lens *ui);
  * lens_begin. */
 LENS_API bool lens_anim_pending(const lens *ui);
 
+/* Accessibility reduced-motion switch. When enabled, every eased value in
+ * lens resolves to its target within one frame — no fades, slides, or other
+ * transitions — and lens_anim_pending stays false. The host owns the policy
+ * (user preference); lens executes it. Default false. */
+LENS_API void lens_set_reduced_motion(lens *ui, bool reduced);
+LENS_API bool lens_reduced_motion(const lens *ui);
+
 /* ================================================================== */
 /*  Identity (ADR-0003)                                               */
 /* ================================================================== */
@@ -418,6 +440,15 @@ LENS_API void lens_column(lens *ui);
 LENS_API void lens_row_ex(lens *ui, lens_layout_opts opts);
 LENS_API void lens_column_ex(lens *ui, lens_layout_opts opts);
 LENS_API void lens_close(lens *ui); /* close the current container */
+
+/* A composable row with one button-sized interaction target around all of
+ * its children. The returned response is resolved against the complete row,
+ * not individual labels/images inside it. The row remains open for child
+ * declarations until lens_pressable_end. `id` supplies stable identity while
+ * `label` is exposed to accessibility; either may be an empty string. */
+LENS_API lens_response lens_pressable_begin(lens *ui, const char *id, const char *label,
+                                            lens_layout_opts opts);
+LENS_API void lens_pressable_end(lens *ui);
 
 /* Positional layout hints applied to the *next* node (widget OR
  * container). Unlike state/styling, these are purely about placement and
@@ -517,7 +548,7 @@ typedef struct lens_tabs_opts {
     float indicator_thickness;  /* <= 0 = 3 logical px */
     float indicator_gap;        /* <= 0 = 2 logical px */
     float indicator_padding;    /* <= 0 = derived from theme padding */
-    bool equal_width;            /* divide available width into equal hit targets */
+    bool equal_width;           /* divide available width into equal hit targets */
 } lens_tabs_opts;
 
 /* Horizontal selection strip. The terse form preserves the standard Lens
@@ -559,6 +590,12 @@ LENS_API bool lens_icon_button_active(lens *ui, lens_icon_id id, bool active);
  * rail. Pass NULL or an empty string for no badge. */
 LENS_API bool lens_icon_button_badged(lens *ui, lens_icon_id id, const char *badge,
                                       float glyph_size, bool active);
+/* Checkable rounded icon button whose state is expressed by swapping glyphs,
+ * not by painting a persistent selected surface. The checked glyph uses the
+ * accent colour and accessibility exposes LENS_A11Y_CHECKED. Hover feedback
+ * remains the same as a regular rounded icon button. */
+LENS_API bool lens_icon_toggle_button(lens *ui, lens_icon_id unchecked_icon,
+                                      lens_icon_id checked_icon, float glyph_size, bool checked);
 
 /* ================================================================== */
 /*  Widgets — descriptor forms                                        */
@@ -844,6 +881,7 @@ LENS_API lens_table_result lens_table(lens *ui, const char *id, const lens_table
 /* ================================================================== */
 
 LENS_API lens_response lens_get_response(const lens *ui); /* last widget */
+LENS_API lens_cursor_hint lens_get_cursor_hint(const lens *ui);
 LENS_API bool lens_focused(const lens *ui, lens_id id);
 LENS_API void lens_set_focus(lens *ui, lens_id id);
 LENS_API lens_id lens_active(const lens *ui);

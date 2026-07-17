@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static uint32_t bytes_per_pixel(flux_format f) {
@@ -65,6 +66,12 @@ flux_result flux_image_create(flux_device *d, const flux_image_desc *desc, flux_
         flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &im->image, &im->alloc);
     if (r != FLUX_OK)
         goto fail;
+    {
+        char name[80];
+        snprintf(name, sizeof(name), "flux_image %ux%u fmt=%d", desc->width, desc->height,
+                 (int)desc->format);
+        flux_vk_set_name(d, VK_OBJECT_TYPE_IMAGE, (uint64_t)im->image, name);
+    }
     VkResult vr;
 
     if (desc->initial_data) {
@@ -184,18 +191,16 @@ void flux_image_release(flux_image *im) {
     if (atomic_fetch_sub_explicit(&im->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
     flux_device *d = im->device;
-    if (im->bindless != FLUX_BINDLESS_INVALID)
-        flux_bindless_release(d, im->bindless);
-    if (im->bindless_storage != FLUX_BINDLESS_INVALID)
-        flux_bindless_release(d, im->bindless_storage);
-    if (im->view)
-        vkDestroyImageView(d->device, im->view, nullptr);
-    if (im->image)
-        vkDestroyImage(d->device, im->image, nullptr);
-    if (im->alloc.memory)
-        flux_vk_deallocate(d, &im->alloc);
-    if (im->imported_memory)
-        vkFreeMemory(d->device, im->imported_memory, nullptr);
+    /* The image may still be sampled by batches in flight on the graphics
+     * queue (frames recorded before this release). Destroying the view /
+     * image or freeing the memory inline can fault the engine mid-batch —
+     * on i915 this was observed as a GPU hang and context reset, surfacing
+     * in hosts as a fence timeout, a frozen UI thread, then
+     * VK_ERROR_DEVICE_LOST. Park the pieces on the device retire queue;
+     * they are destroyed once the queue provably passed every batch that
+     * could reference them. */
+    flux_device_retire_image(d, im->view, im->image, &im->alloc, im->imported_memory,
+                             im->imported_size, im->bindless, im->bindless_storage);
     bool weak = im->device_weak;
     flux_internal_free(d, im);
     if (!weak)

@@ -464,7 +464,10 @@ void push_vertex(flux_canvas_vertex *v, flux_point p, flux_mat3x2 tx, flux_color
 
 /* Fill a flux_canvas_push from the active paint. For solid paints
  * the gradient fields are zeroed (the solid shader ignores them).
- * For gradients, copies endpoint + stops. */
+ * For gradients, copies endpoint + stops, converting the parameters
+ * into framebuffer pixel space with the current transform — the
+ * shaders evaluate gradients per fragment in pixel space, matching
+ * the SDF path's draw_sdf_rrect handling. */
 void build_push(flux_canvas *c, const flux_paint *paint, flux_canvas_push *out) {
     *out = (flux_canvas_push){
         .inv_window_size = {2.0f / (float)c->fb_width, 2.0f / (float)c->fb_height},
@@ -477,17 +480,19 @@ void build_push(flux_canvas *c, const flux_paint *paint, flux_canvas_push *out) 
     flux_point from = {0, 0};
     flux_point to = {0, 0};
     float radius = 0.0f;
+    const flux_mat3x2 tx = c->states[c->state_top].transform;
+    const float pixel_scale = flux_canvas_mat3x2_pixel_scale(tx);
     switch (paint->kind) {
     case FLUX_PAINT_SOLID:
         return;
     case FLUX_PAINT_LINEAR_GRADIENT:
-        from = paint->gradient.linear.from;
-        to = paint->gradient.linear.to;
+        from = flux_mat3x2_transform_point(tx, paint->gradient.linear.from);
+        to = flux_mat3x2_transform_point(tx, paint->gradient.linear.to);
         stops = &paint->gradient.linear.stops;
         break;
     case FLUX_PAINT_RADIAL_GRADIENT:
-        from = paint->gradient.radial.center;
-        radius = paint->gradient.radial.radius;
+        from = flux_mat3x2_transform_point(tx, paint->gradient.radial.center);
+        radius = paint->gradient.radial.radius * pixel_scale;
         stops = &paint->gradient.radial.stops;
         break;
     }

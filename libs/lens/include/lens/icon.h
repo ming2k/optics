@@ -291,6 +291,8 @@ typedef enum lens_icon_id {
     LENS_ICON_ZAP = 284,
     LENS_ICON_ZOOM_IN = 285,
     LENS_ICON_ZOOM_OUT = 286,
+    LENS_ICON_STAR_ROUNDED_FILLED = 287,
+    LENS_ICON_STAR_ROUNDED = 288,
     LENS_ICON_COUNT,
 } lens_icon_id;
 

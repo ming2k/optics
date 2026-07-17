@@ -32,6 +32,7 @@ typedef struct flux_surface_image_storage {
     VkImageView *views;
     VkImageLayout *layouts;
     bool *foreign_owned;
+    bool *sync_exported;
     VkSemaphore *render_finished;
     flux_vk_alloc *allocs;
 } flux_surface_image_storage;
@@ -43,6 +44,7 @@ static void image_storage_free(flux_device *d, flux_surface_image_storage *stora
     flux_internal_free(d, storage->views);
     flux_internal_free(d, storage->layouts);
     flux_internal_free(d, storage->foreign_owned);
+    flux_internal_free(d, storage->sync_exported);
     flux_internal_free(d, storage->render_finished);
     flux_internal_free(d, storage->allocs);
     *storage = (flux_surface_image_storage){0};
@@ -65,11 +67,12 @@ static bool image_storage_alloc(flux_device *d, uint32_t count,
     storage->views = image_storage_alloc_array(d, count, sizeof(*storage->views));
     storage->layouts = image_storage_alloc_array(d, count, sizeof(*storage->layouts));
     storage->foreign_owned = image_storage_alloc_array(d, count, sizeof(*storage->foreign_owned));
+    storage->sync_exported = image_storage_alloc_array(d, count, sizeof(*storage->sync_exported));
     storage->render_finished =
         image_storage_alloc_array(d, count, sizeof(*storage->render_finished));
     storage->allocs = image_storage_alloc_array(d, count, sizeof(*storage->allocs));
     if (!storage->images || !storage->views || !storage->layouts || !storage->foreign_owned ||
-        !storage->render_finished || !storage->allocs) {
+        !storage->sync_exported || !storage->render_finished || !storage->allocs) {
         image_storage_free(d, storage);
         return false;
     }
@@ -85,6 +88,7 @@ static void surface_take_image_storage(flux_surface *s, flux_surface_image_stora
     s->image_views = storage->views;
     s->image_layouts = storage->layouts;
     s->image_foreign_owned = storage->foreign_owned;
+    s->image_sync_exported = storage->sync_exported;
     s->render_finished = storage->render_finished;
     s->image_allocs = storage->allocs;
     *storage = (flux_surface_image_storage){0};
@@ -97,6 +101,7 @@ static void surface_free_image_storage(flux_surface *s) {
         .views = s->image_views,
         .layouts = s->image_layouts,
         .foreign_owned = s->image_foreign_owned,
+        .sync_exported = s->image_sync_exported,
         .render_finished = s->render_finished,
         .allocs = s->image_allocs,
     };
@@ -107,6 +112,7 @@ static void surface_free_image_storage(flux_surface *s) {
     s->image_views = nullptr;
     s->image_layouts = nullptr;
     s->image_foreign_owned = nullptr;
+    s->image_sync_exported = nullptr;
     s->render_finished = nullptr;
     s->image_allocs = nullptr;
 }
@@ -410,18 +416,36 @@ static void offscreen_destroy_images(flux_surface *s) {
             vkDestroyImage(s->device->device, s->images[i], nullptr);
         if (s->image_allocs[i].memory)
             flux_vk_deallocate(s->device, &s->image_allocs[i]);
+        if (s->render_finished[i])
+            vkDestroySemaphore(s->device->device, s->render_finished[i], nullptr);
         s->image_views[i] = VK_NULL_HANDLE;
         s->images[i] = VK_NULL_HANDLE;
         s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
         s->image_foreign_owned[i] = false;
+        s->image_sync_exported[i] = false;
+        s->render_finished[i] = VK_NULL_HANDLE;
         s->image_allocs[i] = (flux_vk_alloc){0};
     }
     surface_free_image_storage(s);
 }
 
+static bool modifier_allowed(uint64_t modifier, const uint64_t *allowed, uint32_t allowed_count) {
+    if (!allowed)
+        return true;
+    for (uint32_t i = 0; i < allowed_count; ++i) {
+        if (allowed[i] == modifier)
+            return true;
+    }
+    return false;
+}
+
 /* One color image per frame slot; image index == frame slot, so the
- * per-slot fence already serialises reuse. */
-static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t h) {
+ * per-slot fence already serialises reuse. `allowed_modifiers == NULL` keeps
+ * the general offscreen behaviour; a non-NULL list constrains zero-copy
+ * export to modifiers accepted by the external consumer. */
+static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t h,
+                                           const uint64_t *allowed_modifiers,
+                                           uint32_t allowed_modifier_count) {
     if (w == 0 || h == 0) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "offscreen surface needs non-zero width and height");
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -449,7 +473,7 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
      * Otherwise we fall back to the original OPTIMAL-tiling slab-allocated
      * image (read back via flux_surface_read_pixels). */
     flux_device *d = s->device;
-    bool want_export = flux_dmabuf_supported(d);
+    bool want_export = flux_dmabuf_supported(d) && !s->offscreen_require_readback;
     s->offscreen_exportable = false;
     s->offscreen_modifier = 0;
     s->offscreen_stride = 0;
@@ -483,6 +507,9 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
                     if ((mods[i].drmFormatModifierTilingFeatures & need) != need)
                         continue;
                     if (mods[i].drmFormatModifierPlaneCount != 1)
+                        continue;
+                    if (!modifier_allowed(mods[i].drmFormatModifier, allowed_modifiers,
+                                          allowed_modifier_count))
                         continue;
                     if (mods[i].drmFormatModifier == FLUX_DRM_FORMAT_MOD_LINEAR) {
                         found_linear = true;
@@ -535,6 +562,13 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
                                    VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
         if (!exportable)
             use_modifier = false;
+    }
+
+    if (allowed_modifiers && !use_modifier) {
+        offscreen_destroy_images(s);
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                  "no shared renderable/exportable dma-buf modifier");
+        return FLUX_ERROR_UNSUPPORTED;
     }
 
     s->offscreen_exportable = use_modifier;
@@ -631,12 +665,8 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
             s->image_allocs[i].size = mreq.memoryRequirements.size;
             s->image_allocs[i].mapped = NULL;
             s->image_allocs[i].block = NULL;
-            flux_vk_allocator *a = &d->mem_allocator;
-            pthread_mutex_lock(&a->lock);
-            a->bytes_in_use += mreq.memoryRequirements.size;
-            a->bytes_reserved += mreq.memoryRequirements.size;
-            a->live_allocations++;
-            pthread_mutex_unlock(&a->lock);
+            /* The export bypasses the slab; count it like an import. */
+            flux_vk_allocator_note_external(d, mreq.memoryRequirements.size);
 
             /* Record the stride from memory-plane 0. For DRM-modifier images
              * the aspect must be VK_IMAGE_ASPECT_MEMORY_PLANE_i_BIT_EXT, not
@@ -685,8 +715,27 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
             offscreen_destroy_images(s);
             return FLUX_ERROR_BACKEND_FAILURE;
         }
+        if (use_modifier && d->has_external_semaphore_fd) {
+            VkExportSemaphoreCreateInfo export_info = {
+                .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+                .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+            };
+            VkSemaphoreCreateInfo semaphore_info = {
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+                .pNext = &export_info,
+            };
+            vr = vkCreateSemaphore(d->device, &semaphore_info, nullptr,
+                                   &s->render_finished[i]);
+            if (vr != VK_SUCCESS) {
+                FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE,
+                             "offscreen export semaphore creation failed", vr);
+                offscreen_destroy_images(s);
+                return FLUX_ERROR_BACKEND_FAILURE;
+            }
+        }
         s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
         s->image_foreign_owned[i] = false;
+        s->image_sync_exported[i] = false;
     }
     return FLUX_OK;
 }
@@ -814,6 +863,7 @@ flux_result flux_surface_create(flux_device *device, const flux_surface_desc *de
     s->device = flux_device_retain(device);
     s->vk_surface = (VkSurfaceKHR)desc->vk_surface_khr;
     s->offscreen = (desc->vk_surface_khr == nullptr); /* ADR-0013 */
+    s->offscreen_require_readback = false;
     s->vsync = desc->vsync;
     s->hdr_preferred = desc->hdr_preferred;
     s->last_submitted_slot = UINT32_MAX;
@@ -823,7 +873,47 @@ flux_result flux_surface_create(flux_device *device, const flux_surface_desc *de
 
     flux_result r;
     if (s->offscreen) {
-        r = offscreen_create_images(s, desc->width, desc->height);
+        const struct {
+            flux_struct_type type;
+            const void *next;
+        } *extension = desc->next;
+        while (extension) {
+            if (extension->type == FLUX_TYPE_SURFACE_DMABUF_DESC) {
+                const flux_surface_dmabuf_desc *dmabuf = (const void *)extension;
+                if (!dmabuf->modifiers || dmabuf->modifier_count == 0) {
+                    FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                              "surface dma-buf extension needs modifiers");
+                    r = FLUX_ERROR_INVALID_ARGUMENT;
+                    goto fail;
+                }
+                size_t bytes;
+                if (__builtin_mul_overflow((size_t)dmabuf->modifier_count, sizeof(uint64_t),
+                                           &bytes)) {
+                    r = FLUX_ERROR_OUT_OF_RANGE;
+                    goto fail;
+                }
+                s->offscreen_allowed_modifiers = flux_internal_alloc(device, bytes);
+                if (!s->offscreen_allowed_modifiers) {
+                    r = FLUX_ERROR_OUT_OF_MEMORY;
+                    goto fail;
+                }
+                memcpy(s->offscreen_allowed_modifiers, dmabuf->modifiers, bytes);
+                s->offscreen_allowed_modifier_count = dmabuf->modifier_count;
+            } else if (extension->type == FLUX_TYPE_SURFACE_READBACK_DESC) {
+                const flux_surface_readback_desc *readback = (const void *)extension;
+                s->offscreen_require_readback = readback->require_readback;
+            }
+            extension = extension->next;
+        }
+        if (s->offscreen_require_readback && s->offscreen_allowed_modifier_count > 0) {
+            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                      "surface readback and dma-buf extensions conflict");
+            r = FLUX_ERROR_INVALID_ARGUMENT;
+            goto fail;
+        }
+        r = offscreen_create_images(s, desc->width, desc->height,
+                                    s->offscreen_allowed_modifiers,
+                                    s->offscreen_allowed_modifier_count);
         if (r != FLUX_OK)
             goto fail;
     } else {
@@ -865,6 +955,7 @@ fail:
         offscreen_destroy_images(s);
     else
         flux_surface_destroy_swapchain(s);
+    flux_internal_free(device, s->offscreen_allowed_modifiers);
     flux_device_release(s->device);
     flux_internal_free(device, s);
     return r;
@@ -876,13 +967,51 @@ flux_surface *flux_surface_retain(flux_surface *s) {
     return s;
 }
 
+/* Wait until the GPU is provably done with every batch that could
+ * still reference this surface, without stalling unrelated device work.
+ *
+ * Offscreen surfaces have no presentation engine: every batch that can
+ * touch the surface's images and transient ring was submitted on the
+ * graphics queue guarded by a per-slot in_flight fence, so waiting
+ * those fences is sufficient (one-shot uploads and readbacks are
+ * synchronous — complete before they return).
+ *
+ * Windowed surfaces must also cover the presentation engine, which can
+ * keep reading a presented image after the frame's fence signals; only
+ * a queue wait proves that. It is still narrower than the device-wide
+ * vkDeviceWaitIdle used previously: the transfer queue and unrelated
+ * devices keep running. */
+static void surface_wait_quiescent(flux_surface *s) {
+    flux_device *d = s->device;
+    if (!s->offscreen) {
+        /* Host access to the queue: serialised against concurrent
+         * submits, same rule as flux_vk_wait_idle. */
+        pthread_mutex_lock(&d->queue_lock);
+        vkQueueWaitIdle(d->graphics_queue);
+        pthread_mutex_unlock(&d->queue_lock);
+        flux_vk_note_graphics_completed(
+            d, atomic_load_explicit(&d->submit_serial, memory_order_acquire));
+        return;
+    }
+    uint64_t max_serial = 0;
+    for (uint32_t i = 0; i < s->frames_in_flight; ++i) {
+        flux_per_frame *pf = &s->frames[i];
+        if (pf->in_flight)
+            vkWaitForFences(d->device, 1, &pf->in_flight, VK_TRUE, UINT64_MAX);
+        if (pf->submitted_serial > max_serial)
+            max_serial = pf->submitted_serial;
+    }
+    if (max_serial)
+        flux_vk_note_graphics_completed(d, max_serial);
+}
+
 void flux_surface_release(flux_surface *s) {
     if (!s)
         return;
     if (atomic_fetch_sub_explicit(&s->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
 
-    vkDeviceWaitIdle(s->device->device);
+    surface_wait_quiescent(s);
     flux_transient_ring_destroy(&s->transient, s->device);
     for (uint32_t i = 0; i < s->frames_in_flight; ++i)
         destroy_per_frame(s, i);
@@ -891,6 +1020,7 @@ void flux_surface_release(flux_surface *s) {
     else
         flux_surface_destroy_swapchain(s);
     flux_device *dev = s->device;
+    flux_internal_free(dev, s->offscreen_allowed_modifiers);
     flux_internal_free(dev, s);
     flux_device_release(dev);
 }
@@ -899,14 +1029,15 @@ flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h) {
     if (!s)
         return FLUX_ERROR_INVALID_ARGUMENT;
 
-    vkDeviceWaitIdle(s->device->device);
+    surface_wait_quiescent(s);
     s->frame_active = false;
     s->frame_slot.state = FLUX_FRAME_STATE_INVALID;
     s->needs_recreate = false;
     if (s->offscreen) {
         s->current_frame = 0;
         s->last_submitted_slot = UINT32_MAX; /* old contents are gone */
-        return offscreen_create_images(s, w, h);
+        return offscreen_create_images(s, w, h, s->offscreen_allowed_modifiers,
+                                       s->offscreen_allowed_modifier_count);
     }
     /* Discard any acquire-signal carried by per-frame semaphores; an
      * acquire that returned OUT_OF_DATE may have left one signalled. */
@@ -971,16 +1102,12 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
-    VkBuffer staging = VK_NULL_HANDLE;
-    flux_vk_alloc staging_alloc = {0};
-    flux_result r = flux_vk_alloc_buffer(d, needed, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                         /*wants_device_address=*/false, &staging, &staging_alloc);
+    flux_staging_buf *staging = NULL;
+    flux_result r = flux_vk_staging_acquire(d, needed, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &staging);
     if (r != FLUX_OK)
         return r;
 
-    if (!staging_alloc.mapped) {
+    if (!staging->alloc.mapped) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE,
                   "readback staging allocation came back un-mapped (allocator invariant violated)");
         r = FLUX_ERROR_BACKEND_FAILURE;
@@ -1001,8 +1128,8 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
             .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
             .imageExtent = {s->extent.width, s->extent.height, 1},
         };
-        vkCmdCopyImageToBuffer(cmd, s->images[slot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging,
-                               1, &region);
+        vkCmdCopyImageToBuffer(cmd, s->images[slot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               staging->buffer, 1, &region);
 
         VkMemoryBarrier2 mb = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
@@ -1030,7 +1157,7 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
     }
 
     if (s->format == VK_FORMAT_B8G8R8A8_UNORM || s->format == VK_FORMAT_B8G8R8A8_SRGB) {
-        const uint8_t *src = (const uint8_t *)staging_alloc.mapped;
+        const uint8_t *src = (const uint8_t *)staging->alloc.mapped;
         uint8_t *out_px = (uint8_t *)dst;
         for (size_t i = 0; i < (size_t)s->extent.width * s->extent.height; ++i) {
             out_px[i * 4u + 0u] = src[i * 4u + 2u];
@@ -1039,15 +1166,12 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
             out_px[i * 4u + 3u] = src[i * 4u + 3u];
         }
     } else {
-        memcpy(dst, staging_alloc.mapped, needed);
+        memcpy(dst, staging->alloc.mapped, needed);
     }
     r = FLUX_OK;
 
 out:
-    if (staging)
-        vkDestroyBuffer(d->device, staging, nullptr);
-    if (staging_alloc.memory)
-        flux_vk_deallocate(d, &staging_alloc);
+    flux_vk_staging_release(d, staging);
     return r;
 }
 
@@ -1069,6 +1193,58 @@ uint64_t flux_surface_dmabuf_modifier(const flux_surface *s) {
 
 uint32_t flux_surface_dmabuf_stride(const flux_surface *s) {
     return s ? s->offscreen_stride : 0;
+}
+
+static flux_result export_surface_memory_fd(flux_surface *s, uint32_t slot, int *out_fd) {
+    flux_device *d = s->device;
+    PFN_vkGetMemoryFdKHR pGetMemoryFd =
+        (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(d->device, "vkGetMemoryFdKHR");
+    if (!pGetMemoryFd) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "vkGetMemoryFdKHR entry point missing");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    VkMemoryGetFdInfoKHR fd_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
+        .memory = s->image_allocs[slot].memory,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    VkResult vr = pGetMemoryFd(d->device, &fd_info, out_fd);
+    if (vr != VK_SUCCESS) {
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkGetMemoryFdKHR failed", vr);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+    return FLUX_OK;
+}
+
+static flux_result export_surface_sync_fd(flux_surface *s, uint32_t slot, int *out_fd) {
+    flux_device *d = s->device;
+    *out_fd = -1;
+    if (!d->has_external_semaphore_fd || s->render_finished[slot] == VK_NULL_HANDLE) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "explicit dma-buf sync is unavailable");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    if (s->image_sync_exported[slot]) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "frame sync fd was already exported");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    PFN_vkGetSemaphoreFdKHR pGetSemaphoreFd =
+        (PFN_vkGetSemaphoreFdKHR)vkGetDeviceProcAddr(d->device, "vkGetSemaphoreFdKHR");
+    if (!pGetSemaphoreFd) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "vkGetSemaphoreFdKHR entry point missing");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    VkSemaphoreGetFdInfoKHR info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
+        .semaphore = s->render_finished[slot],
+        .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+    };
+    VkResult vr = pGetSemaphoreFd(d->device, &info, out_fd);
+    if (vr != VK_SUCCESS) {
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkGetSemaphoreFdKHR failed", vr);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+    s->image_sync_exported[slot] = true;
+    return FLUX_OK;
 }
 
 /* Export the most recently submitted frame's image memory as a dma-buf fd.
@@ -1153,26 +1329,56 @@ flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
         s->image_foreign_owned[slot] = true;
     }
 
-    PFN_vkGetMemoryFdKHR pGetMemoryFd =
-        (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(d->device, "vkGetMemoryFdKHR");
-    if (!pGetMemoryFd) {
-        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "vkGetMemoryFdKHR entry point missing");
+    flux_result result = export_surface_memory_fd(s, slot, out_fd);
+    if (result != FLUX_OK)
+        return result;
+
+    /* A SYNC_FD export transfers the temporary semaphore payload. Legacy
+     * callers already waited the fence, so consume and close that payload to
+     * leave the binary semaphore reusable on this frame slot. */
+    if (d->has_external_semaphore_fd && s->render_finished[slot] != VK_NULL_HANDLE &&
+        !s->image_sync_exported[slot]) {
+        int sync_fd = -1;
+        result = export_surface_sync_fd(s, slot, &sync_fd);
+        if (result != FLUX_OK) {
+            close(*out_fd);
+            *out_fd = -1;
+            return result;
+        }
+        close(sync_fd);
+    }
+    return FLUX_OK;
+}
+
+flux_result flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, int *out_sync_fd) {
+    if (!s || !out_fd || !out_sync_fd)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_fd = -1;
+    *out_sync_fd = -1;
+    if (!s->offscreen || !s->offscreen_exportable) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                  "explicit dma-buf export needs an exportable offscreen surface");
         return FLUX_ERROR_UNSUPPORTED;
     }
-
-    VkMemoryGetFdInfoKHR fd_info = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
-        .memory = s->image_allocs[slot].memory,
-        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
-    };
-    int fd = -1;
-    vr = pGetMemoryFd(d->device, &fd_info, &fd);
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkGetMemoryFdKHR failed", vr);
-        return FLUX_ERROR_BACKEND_FAILURE;
+    if (s->last_submitted_slot == UINT32_MAX) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "no frame has been submitted to export");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    uint32_t slot = s->last_submitted_slot;
+    if (!s->image_foreign_owned[slot]) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "submitted image was not released to FOREIGN");
+        return FLUX_ERROR_INVALID_STATE;
     }
 
-    *out_fd = fd;
+    flux_result result = export_surface_sync_fd(s, slot, out_sync_fd);
+    if (result != FLUX_OK)
+        return result;
+    result = export_surface_memory_fd(s, slot, out_fd);
+    if (result != FLUX_OK) {
+        close(*out_sync_fd);
+        *out_sync_fd = -1;
+        return result;
+    }
     return FLUX_OK;
 }
 

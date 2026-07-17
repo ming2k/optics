@@ -56,6 +56,11 @@ void flux_set_last_error(flux_result code, const char *function, const char *fil
 
 #define FLUX_VK_BLOCK_SIZE (64ull * 1024 * 1024)          /* 64 MiB */
 #define FLUX_VK_DEDICATED_THRESH (FLUX_VK_BLOCK_SIZE / 4) /* 16 MiB */
+/* prefersDedicated is honoured only at or above this size: some drivers
+ * set the preference liberally, and dedicating every small allocation
+ * would burn the per-process vkAllocateMemory count the pool exists to
+ * protect. requiresDedicated is always honoured regardless of size. */
+#define FLUX_VK_PREFER_DEDICATED_MIN (1ull * 1024 * 1024) /* 1 MiB */
 
 typedef struct flux_vk_range {
     VkDeviceSize offset;
@@ -100,6 +105,7 @@ typedef struct flux_vk_allocator {
     uint64_t lost_ranges_bytes; /* bytes lost due to OOM on free-list node alloc */
     uint32_t live_allocations;
     uint32_t live_blocks;
+    uint32_t block_seq; /* monotonically increasing, for debug names */
     bool has_memory_budget;
 } flux_vk_allocator;
 
@@ -115,9 +121,30 @@ flux_result flux_vk_allocator_init(flux_device *d);
 void flux_vk_allocator_destroy(flux_device *d);
 uint32_t flux_vk_allocator_reclaim(flux_device *d);
 
+/* Account for a VkDeviceMemory living outside the slab (dma-buf import
+ * or export): note_external counts it up, unnote_external counts it
+ * back down. Keeps bytes_in_use / live_allocations honest so the
+ * teardown leak warning and flux_device_memory_stats see external
+ * memory too. Thread-safe. */
+void flux_vk_allocator_note_external(flux_device *d, VkDeviceSize bytes);
+void flux_vk_allocator_unnote_external(flux_device *d, VkDeviceSize bytes);
+
+/* Driver dedication hint for flux_vk_allocate, sourced from
+ * VkMemoryDedicatedRequirements chained on the resource's
+ * vkGet*MemoryRequirements2. When the driver requires or prefers a
+ * dedicated allocation for the resource, the request bypasses the slab
+ * and chains VkMemoryDedicatedAllocateInfo on the resource handle. */
+typedef struct flux_vk_dedication {
+    VkBuffer buffer; /* At most one of buffer/image set. */
+    VkImage image;
+    bool required;
+    bool preferred;
+} flux_vk_dedication;
+
 flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
                              VkMemoryPropertyFlags wanted_flags, bool is_image,
-                             bool wants_device_address, flux_vk_alloc *out);
+                             bool wants_device_address, const flux_vk_dedication *dedication,
+                             flux_vk_alloc *out);
 
 void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc);
 
@@ -162,6 +189,35 @@ typedef struct flux_bindless_heap {
     bool lock_initialized;
 } flux_bindless_heap;
 
+/* One released resource parked until the graphics queue has provably
+ * retired every batch that could still reference it. All fields are
+ * destroyed exactly as the owning release path used to destroy them
+ * inline; members the resource does not own stay zeroed. */
+typedef struct flux_retire_zombie {
+    VkImageView view;
+    VkImage image;
+    VkBuffer buffer;
+    flux_vk_alloc alloc;
+    VkDeviceMemory imported_memory;
+    VkDeviceSize imported_size; /* bytes to uncount from allocator stats
+                                 * when imported_memory is freed; 0 when
+                                 * imported_memory is VK_NULL_HANDLE */
+    uint32_t bindless;          /* FLUX_BINDLESS_INVALID when unset */
+    uint32_t bindless_storage;  /* FLUX_BINDLESS_INVALID when unset */
+    uint64_t retire_after;      /* destroy once completed_serial >= this */
+    struct flux_retire_zombie *next;
+} flux_retire_zombie;
+
+/* One idle staging buffer in the device cache (see flux_device).
+ * Buffer + allocation stay alive and mapped while cached. */
+typedef struct flux_staging_buf {
+    VkBuffer buffer;
+    flux_vk_alloc alloc;
+    VkDeviceSize capacity;
+    VkBufferUsageFlags usage;
+    struct flux_staging_buf *next;
+} flux_staging_buf;
+
 struct flux_device {
     atomic_uint ref_count;
 
@@ -185,6 +241,11 @@ struct flux_device {
     /* Vulkan handles */
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_messenger; /* VK_NULL_HANDLE if validation off */
+    /* VK_EXT_debug_utils is enabled whenever the instance advertises it
+     * (validation or not) so objects stay nameable under RenderDoc and
+     * validation captures alike; pfn_set_name is NULL when unavailable. */
+    bool has_debug_utils;
+    PFN_vkSetDebugUtilsObjectNameEXT pfn_set_name;
 
     VkPhysicalDevice physical_device;
     VkPhysicalDeviceProperties props;
@@ -215,9 +276,56 @@ struct flux_device {
      * one-shot upload helpers (image_create, mesh_create, anything
      * calling flux_vk_upload_to_*) can be called from worker threads
      * during asset loading. This mutex guards every vkQueueSubmit2
-     * issued by those helpers; the frame path acquires it too. */
+     * issued by those helpers; the frame path acquires it too.
+     * vkDeviceWaitIdle / vkQueueWaitIdle also count as host access to
+     * the queues (observed as an ANV double-free when a wait raced a
+     * concurrent submit), so they must go through flux_vk_wait_idle,
+     * which funnels them through this same lock. */
     pthread_mutex_t queue_lock;
     bool queue_lock_initialized;
+
+    /* Deferred resource destruction (retire queue). A released image or
+     * buffer may still be referenced by batches in flight on the
+     * graphics queue; destroying the Vulkan handle or freeing its memory
+     * at release time can fault the engine mid-batch (observed on i915
+     * as a GPU hang and context reset, surfaced to hosts as a fence
+     * timeout followed by VK_ERROR_DEVICE_LOST). Released resources are
+     * parked as zombies tagged with the graphics submission serial and
+     * destroyed only once a fence wait proves the queue passed every
+     * batch that could reference them. */
+    atomic_uint_fast64_t submit_serial;     /* graphics-queue batch counter */
+    atomic_uint_fast64_t completed_serial;  /* highest batch proven done    */
+    pthread_mutex_t retire_lock;
+    bool retire_lock_initialized;
+    flux_retire_zombie *retire_head; /* FIFO; tags are non-decreasing */
+    flux_retire_zombie **retire_tail;
+
+    /* Batched uploads (public flux_uploads_begin/flush). While a batch
+     * is open, the one-shot upload helpers record their copies into
+     * batch_cmd instead of submitting individually; flush submits once.
+     * Staging buffers are checked out of the staging cache per upload
+     * (memcpy stays parallel across threads) and returned after the
+     * flush's fence wait. upload_lock serialises batch state and all
+     * vkCmd* recording into batch_cmd. */
+    pthread_mutex_t upload_lock;
+    bool upload_lock_initialized;
+    bool upload_batch_open;
+    VkCommandPool upload_batch_pool;   /* VK_NULL_HANDLE when no batch ever opened */
+    VkCommandBuffer upload_batch_cmd;  /* recording while open */
+    flux_staging_buf *upload_batch_stagings; /* checked-out list, `next` chained */
+
+    /* Staging buffer cache. The one-shot upload / readback helpers are
+     * synchronous (submit + fence wait), so their host-visible staging
+     * buffer is idle again the moment the call returns; keeping a few
+     * around avoids a vkCreateBuffer + vkAllocateMemory pair per upload.
+     * Idle entries are matched by usage and smallest-fit capacity, and
+     * the cache is capped (see FLUX_VK_STAGING_CACHE_CAP in oneshot.c).
+     * Checked-out entries are owned by the caller; the idle list is
+     * drained at device teardown, after the device is known idle. */
+    pthread_mutex_t staging_lock;
+    bool staging_lock_initialized;
+    flux_staging_buf *staging_idle;
+    uint64_t staging_idle_bytes;
 
     /* Protects publication of lazily-created per-module state slots. The lock
      * is held only while reading or publishing pointers and hooks; allocation,
@@ -294,22 +402,29 @@ flux_result flux_vk_alloc_image(flux_device *d, const VkImageCreateInfo *ici,
                                 VkMemoryPropertyFlags props, VkImage *out_image,
                                 flux_vk_alloc *out_alloc);
 
-/* Dedicated-allocate an image whose VkImageCreateInfo pNext chain already
- * carries the external-memory / DRM-modifier structs. Unlike
- * flux_vk_alloc_image (slab sub-alloc), this always issues a dedicated
- * VkDeviceMemory so the bound memory can be exported as a dma-buf fd via
- * VK_KHR_external_memory_fd. `export_info` (may be NULL) is spliced into
- * the VkMemoryAllocateInfo pNext chain — pass a VkMemoryDedicatedAllocateInfo
- * or any external handle-type info the caller needs. */
-flux_result flux_vk_alloc_image_dedicated(flux_device *d, const VkImageCreateInfo *ici,
-                                          VkMemoryPropertyFlags props, const void *export_info,
-                                          VkImage *out_image, flux_vk_alloc *out_alloc);
+/* Staging cache (bodies in oneshot.c). acquire returns a mapped
+ * host-visible buffer of at least `size` bytes with `usage`, either
+ * recycled from the idle list or freshly created; release returns it to
+ * the cache (or destroys it once the cache cap is exceeded). Callers
+ * must only release a buffer after the GPU work consuming it has been
+ * awaited — the one-shot helpers' submit-and-wait provides that. */
+flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferUsageFlags usage,
+                                    flux_staging_buf **out);
+void flux_vk_staging_release(flux_device *d, flux_staging_buf *sb);
+/* Destroy every idle entry. Device must be idle (teardown only). */
+void flux_vk_staging_pool_destroy(flux_device *d);
+
+/* Upload batch internals (public entry points are flux_uploads_begin /
+ * flux_uploads_flush). Upload helpers record into the batch while
+ * d->upload_batch_open (guarded by upload_lock). */
+void flux_vk_upload_batch_attach_staging(flux_device *d, flux_staging_buf *sb);
 
 /* One-shot host -> device upload via a graphics-queue command buffer
  * (uses the graphics queue rather than transfer to avoid queue-family
- * ownership transfer plumbing in this simple path). Allocates a host-
- * visible staging buffer, copies in, records vkCmdCopyBuffer to dst,
- * submits with a fence, waits idle, and frees everything. */
+ * ownership transfer plumbing in this simple path). Copies through a
+ * cached host-visible staging buffer (flux_vk_staging_acquire), records
+ * vkCmdCopyBuffer to dst, submits with a fence, waits idle, and returns
+ * the staging buffer to the cache. */
 flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize offset,
                                      const void *data, VkDeviceSize size);
 
@@ -342,6 +457,43 @@ VkResult flux_vk_submit_and_wait(flux_device *d, VkQueue queue, VkCommandBuffer 
                                  VkSemaphore wait_sem, VkPipelineStageFlags2 wait_stage,
                                  VkSemaphore signal_sem, VkPipelineStageFlags2 signal_stage);
 VkResult flux_vk_submit_one_shot_and_wait(flux_device *d, VkCommandBuffer cmd);
+
+/* Graphics submission ordering for the retire queue (bodies in device.c).
+ * note_submission returns the serial assigned to a batch just submitted
+ * on the graphics queue; note_completed raises the completed watermark
+ * (all graphics batches complete in FIFO order) and sweeps zombies whose
+ * tag is covered. note_completed(0) is a harmless no-op for slots that
+ * have never submitted. */
+uint64_t flux_vk_note_graphics_submission(flux_device *d);
+void flux_vk_note_graphics_completed(flux_device *d, uint64_t serial);
+
+/* Park a released image's Vulkan pieces for deferred destruction. Takes
+ * ownership of view/image/alloc/imported_memory; the bindless slots are
+ * freed when the zombie is destroyed. imported_size is the byte count
+ * previously noted via flux_vk_allocator_note_external for
+ * imported_memory (0 when VK_NULL_HANDLE). Thread-safe. */
+void flux_device_retire_image(flux_device *d, VkImageView view, VkImage image,
+                              const flux_vk_alloc *alloc, VkDeviceMemory imported_memory,
+                              VkDeviceSize imported_size, uint32_t bindless,
+                              uint32_t bindless_storage);
+/* Park a released buffer's Vulkan pieces for deferred destruction. Takes
+ * ownership of buffer/alloc. Thread-safe. */
+void flux_device_retire_buffer(flux_device *d, VkBuffer buffer, const flux_vk_alloc *alloc);
+
+/* vkDeviceWaitIdle serialised against concurrent queue submissions via
+ * queue_lock. Every wait-idle in the library must go through this helper
+ * (see the queue_lock comment in flux_device). */
+void flux_vk_wait_idle(flux_device *d);
+
+/* Best-effort debug name for a Vulkan object (VK_EXT_debug_utils).
+ * No-op when the extension is unavailable. Names show up in RenderDoc
+ * captures and validation messages. */
+void flux_vk_set_name(flux_device *d, VkObjectType type, uint64_t handle, const char *name);
+/* Destroy every zombie whose tag is covered by completed_serial. */
+void flux_device_sweep_retire(flux_device *d);
+/* Unconditionally destroy all parked zombies (device teardown, after the
+ * device is known idle). */
+void flux_device_drain_retire(flux_device *d);
 
 /* Allocator helpers — routed through device->allocator if set, else
  * libc. flux_internal_alloc always returns zeroed memory regardless
@@ -381,6 +533,11 @@ typedef struct flux_per_frame {
     bool ts_was_submitted;
     flux_timestamp_result ts_results[FLUX_MAX_TIMESTAMPS_PER_FRAME];
     uint32_t ts_result_count;
+
+    /* Graphics-queue submission serial of the batch guarded by
+     * in_flight; a successful wait on in_flight retires everything up
+     * to this serial (see the device retire queue). */
+    uint64_t submitted_serial;
 } flux_per_frame;
 
 typedef struct flux_transient_ring {
@@ -430,6 +587,10 @@ struct flux_surface {
      * must not let a frame slot be reused until its external consumer has
      * released the dma-buf; begin_frame then records the matching acquire. */
     bool *image_foreign_owned;
+    /* Exportable offscreen images signal one SYNC_FD-capable semaphore per
+     * slot. This flag prevents exporting its temporary payload twice before
+     * the slot is reacquired and submitted again. */
+    bool *image_sync_exported;
     /* Present-wait semaphores are indexed by acquired swapchain image, not by
      * frame slot. Reacquiring an image proves its prior presentation has
      * finished consuming the corresponding semaphore. */
@@ -441,8 +602,16 @@ struct flux_surface {
      * build a matching zwp_linux_buffer_params. exportable == false for
      * windowed surfaces and when the device lacks the needed extensions. */
     bool offscreen_exportable;
+    /* Surface creation was pinned to CPU readback (flux_surface_readback_desc):
+     * never make its offscreen images dma-buf exportable, so read_pixels
+     * always works even on a dma-buf-capable device. */
+    bool offscreen_require_readback;
     uint64_t offscreen_modifier; /* DRM_FORMAT_MOD_* (0 = invalid) */
     uint32_t offscreen_stride;   /* bytes per row of plane 0 */
+    /* Optional consumer modifier constraint copied from the surface extension
+     * at creation and retained so resize preserves the same contract. */
+    uint64_t *offscreen_allowed_modifiers;
+    uint32_t offscreen_allowed_modifier_count;
     bool hdr_actual;
 
     /* Offscreen: slot of the most recently submitted frame, or

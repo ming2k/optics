@@ -20,6 +20,17 @@ test_buffer = executable('test_buffer',
 )
 test('buffer', test_buffer, suite : 'integration')
 
+# Buffer/target retire queue: churn create -> draw -> release every
+# frame so inline destruction of an in-flight vertex buffer or depth
+# target (the same i915 GPU-hang hazard as image_retire) fails loudly.
+test_buffer_retire = executable('test_buffer_retire',
+  'test_buffer_retire.c',
+  triangle_attr_vert_spv, triangle_frag_spv,
+  dependencies : [test_helpers_dep],
+  c_args       : ['--embed-dir=' + core_tests_build_dir],
+)
+test('buffer_retire', test_buffer_retire, suite : 'integration')
+
 test_bindless = executable('test_bindless',
   'test_bindless.c',
   dependencies : [test_helpers_dep],
@@ -64,6 +75,16 @@ test_scene_mesh = executable('test_scene_mesh',
 )
 test('scene_mesh', test_scene_mesh, suite : 'integration')
 
+# Mesh retire queue: churn create -> draw -> release every frame so
+# inline destruction of in-flight vertex/index buffers fails loudly.
+if opt_scene
+  test_mesh_retire = executable('test_mesh_retire',
+    'test_mesh_retire.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('mesh_retire', test_mesh_retire, suite : 'integration')
+endif
+
 # Scene GPU rendering with pixel assertions: offscreen surface
 # (ADR-0013) + caller-owned depth. Covers depth testing and the
 # Phong lit path end-to-end.
@@ -80,6 +101,32 @@ test_allocator = executable('test_allocator',
   dependencies : [test_helpers_dep],
 )
 test('allocator', test_allocator, suite : 'integration')
+
+# VK_EXT_memory_budget: enabled-when-advertised, per-heap usage/budget
+# must be sane on supporting drivers and zeroed cleanly elsewhere.
+test_memory_budget = executable('test_memory_budget',
+  'test_memory_budget.c',
+  dependencies : [test_helpers_dep],
+)
+test('memory_budget', test_memory_budget, suite : 'integration')
+
+# OOM fault injection: interposed vkAllocateMemory drives the pool,
+# dedicated, and reclaim-retry failure paths end to end.
+test_alloc_fault = executable('test_alloc_fault',
+  'test_alloc_fault.c',
+  dependencies : [test_helpers_dep, dl_dep],
+)
+test('alloc_fault', test_alloc_fault, suite : 'integration')
+
+# Batched uploads: one submission for a bulk load, auto-flush at frame
+# begin, steady-state allocator accounting afterwards.
+if opt_canvas
+  test_upload_batch = executable('test_upload_batch',
+    'test_upload_batch.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('upload_batch', test_upload_batch, suite : 'integration')
+endif
 
 # GPU integration: needs a compiled compute shader.
 test_compute_golden = executable('test_compute_golden',
@@ -122,6 +169,15 @@ if opt_canvas
     dependencies : [test_helpers_dep, flux_text_dep],
   )
   test('canvas_render', test_canvas_render, suite : 'integration')
+
+  # Image retire queue: churn create -> draw -> release every frame so
+  # inline destruction of in-flight images (GPU hang on i915) or a
+  # missing bindless-slot recycle fails loudly.
+  test_image_retire = executable('test_image_retire',
+    'test_image_retire.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('image_retire', test_image_retire, suite : 'integration')
 endif
 
 # Built only when the effect module is enabled.

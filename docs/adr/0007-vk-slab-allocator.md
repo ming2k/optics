@@ -1,6 +1,9 @@
 # ADR-0007: Hand-rolled Vulkan slab allocator (no VMA)
 
-- Status: Accepted
+- Status: Accepted — amended by [ADR-0020](0020-gpu-memory-production-hardening.md)
+  (budget feedback, reclaim-retry, dedication hints, and stats landed;
+  the slab design and the no-defragmentation position stand). The test
+  path referenced below moved to `tests/flux/integration/`.
 - Date: 2026-05-19
 
 ## Context

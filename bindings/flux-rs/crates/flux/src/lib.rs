@@ -18,6 +18,7 @@
 
 use std::fmt;
 use std::marker::PhantomData;
+use std::os::fd::{FromRawFd, OwnedFd};
 
 pub use flux_sys as sys;
 
@@ -176,8 +177,24 @@ impl Drop for Device {
     }
 }
 
-/// A presentable surface wrapping a caller-supplied `VkSurfaceKHR`. Refcounted
-/// in C; this handle owns one reference.
+/// One exported offscreen frame suitable for direct display through DRM/KMS
+/// or another dma-buf consumer. The file descriptor is closed on drop.
+#[derive(Debug)]
+pub struct SurfaceDmabuf {
+    pub fd: OwnedFd,
+    /// Optional Linux sync_file that becomes readable when rendering and the
+    /// Vulkan FOREIGN ownership release have completed.
+    pub acquire_fence: Option<OwnedFd>,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub modifier: u64,
+    /// Flux frame-in-flight slot that owns this image.
+    pub slot: u32,
+}
+
+/// A presentable or offscreen rendering surface. Refcounted in C; this handle
+/// owns one reference.
 pub struct Surface {
     raw: *mut sys::flux_surface,
 }
@@ -229,6 +246,72 @@ impl Surface {
         Ok(Surface { raw: out })
     }
 
+    /// Like [`Surface::offscreen`], but pinned to CPU readback: the images
+    /// are never made dma-buf exportable, so [`Surface::read_pixels`] works
+    /// even on a dma-buf-capable device (where plain offscreen surfaces
+    /// transition their submitted images to the foreign consumer). The right
+    /// constructor for screenshot/capture targets.
+    pub fn offscreen_readback(device: &Device, width: u32, height: u32) -> Result<Surface, Error> {
+        let readback = sys::flux_surface_readback_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_READBACK_DESC,
+            next: std::ptr::null(),
+            require_readback: true,
+        };
+        let desc = sys::flux_surface_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_DESC,
+            next: &readback as *const _ as *const std::os::raw::c_void,
+            vk_surface_khr: std::ptr::null_mut(),
+            width,
+            height,
+            ..unsafe { std::mem::zeroed() }
+        };
+        let mut out: *mut sys::flux_surface = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_surface_create(device.raw, &desc, &mut out) })?;
+        Ok(Surface { raw: out })
+    }
+
+    /// Create an exportable offscreen surface constrained to modifiers the
+    /// external consumer accepts. Flux intersects `modifiers` with the Vulkan
+    /// device's renderable, single-plane, dma-buf-exportable modifier set.
+    ///
+    /// This is the direct-display/zero-copy constructor: unlike [`offscreen`],
+    /// it fails instead of silently creating an ordinary non-exportable image
+    /// when no producer/consumer modifier is shared.
+    pub fn offscreen_dmabuf(
+        device: &Device,
+        width: u32,
+        height: u32,
+        modifiers: &[u64],
+    ) -> Result<Surface, Error> {
+        if modifiers.is_empty() {
+            return Err(Error(sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT));
+        }
+        let extension = sys::flux_surface_dmabuf_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_DMABUF_DESC,
+            next: std::ptr::null(),
+            modifiers: modifiers.as_ptr(),
+            modifier_count: modifiers
+                .len()
+                .try_into()
+                .map_err(|_| Error(sys::flux_result::FLUX_ERROR_OUT_OF_RANGE))?,
+        };
+        let desc = sys::flux_surface_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_DESC,
+            next: &extension as *const _ as *const std::os::raw::c_void,
+            vk_surface_khr: std::ptr::null_mut(),
+            width,
+            height,
+            ..unsafe { std::mem::zeroed() }
+        };
+        let mut out: *mut sys::flux_surface = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_surface_create(device.raw, &desc, &mut out) })?;
+        let surface = Surface { raw: out };
+        if !surface.is_exportable() {
+            return Err(Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED));
+        }
+        Ok(surface)
+    }
+
     /// Offscreen surfaces only: read back the most recently submitted frame as
     /// tightly packed RGBA8, row-major, top-left origin. `dst` must be at least
     /// `width * height * 4` bytes. Waits for the frame's GPU work to complete.
@@ -241,6 +324,74 @@ impl Surface {
                 dst.as_mut_ptr() as *mut std::os::raw::c_void,
                 dst.len(),
             )
+        })
+    }
+
+    /// Whether this offscreen surface can export its rendered images as
+    /// single-plane BGRA8 dma-bufs. Windowed surfaces are never exportable.
+    pub fn is_exportable(&self) -> bool {
+        unsafe { sys::flux_surface_exportable(self.raw) }
+    }
+
+    /// Export the most recently submitted offscreen frame without a pixel
+    /// copy. This waits for Flux's GPU work, transfers image ownership to a
+    /// foreign consumer, and returns an owned dma-buf descriptor plus the
+    /// metadata required to create a DRM framebuffer.
+    ///
+    /// The caller must not let Flux reuse `slot` until the external consumer
+    /// has released the buffer (for DRM/KMS, after a page flip has replaced
+    /// the framebuffer). Dropping the returned fd does not itself release
+    /// external image ownership.
+    pub fn export_dmabuf(&self) -> Result<SurfaceDmabuf, Error> {
+        let mut fd = -1;
+        Error::check(unsafe { sys::flux_surface_export_dmabuf(self.raw, &mut fd) })?;
+        if fd < 0 {
+            return Err(Error(sys::flux_result::FLUX_ERROR_BACKEND_FAILURE));
+        }
+        let (width, height) = self.size();
+        Ok(SurfaceDmabuf {
+            // SAFETY: Flux returned ownership of a fresh descriptor on success.
+            fd: unsafe { OwnedFd::from_raw_fd(fd) },
+            acquire_fence: None,
+            width,
+            height,
+            stride: unsafe { sys::flux_surface_dmabuf_stride(self.raw) },
+            modifier: unsafe { sys::flux_surface_dmabuf_modifier(self.raw) },
+            slot: unsafe { sys::flux_surface_last_slot(self.raw) },
+        })
+    }
+
+    /// Export the most recently submitted frame with an explicit acquire
+    /// fence, without waiting for the GPU on the calling CPU thread.
+    ///
+    /// The consumer must wait `acquire_fence` before reading the dma-buf. DRM
+    /// atomic clients pass it to the plane's `IN_FENCE_FD` property. This may
+    /// be called once per submitted frame slot.
+    pub fn export_dmabuf_explicit(&self) -> Result<SurfaceDmabuf, Error> {
+        let mut fd = -1;
+        let mut sync_fd = -1;
+        Error::check(unsafe {
+            sys::flux_surface_export_dmabuf_explicit(self.raw, &mut fd, &mut sync_fd)
+        })?;
+        if fd < 0 || sync_fd < 0 {
+            if fd >= 0 {
+                unsafe { drop(OwnedFd::from_raw_fd(fd)) };
+            }
+            if sync_fd >= 0 {
+                unsafe { drop(OwnedFd::from_raw_fd(sync_fd)) };
+            }
+            return Err(Error(sys::flux_result::FLUX_ERROR_BACKEND_FAILURE));
+        }
+        let (width, height) = self.size();
+        Ok(SurfaceDmabuf {
+            // SAFETY: Flux returned ownership of both fresh descriptors.
+            fd: unsafe { OwnedFd::from_raw_fd(fd) },
+            acquire_fence: Some(unsafe { OwnedFd::from_raw_fd(sync_fd) }),
+            width,
+            height,
+            stride: unsafe { sys::flux_surface_dmabuf_stride(self.raw) },
+            modifier: unsafe { sys::flux_surface_dmabuf_modifier(self.raw) },
+            slot: unsafe { sys::flux_surface_last_slot(self.raw) },
         })
     }
 
@@ -1193,6 +1344,55 @@ impl Image {
         offset: u32,
         stride: u32,
     ) -> Result<Image, Error> {
+        Self::import_dmabuf_impl(
+            device, width, height, format, modifier, fd, offset, stride, None,
+        )
+    }
+
+    /// Import a dma-buf and wait a Linux `sync_file` acquire fence before the
+    /// image becomes sampleable. On success Flux owns both file descriptors;
+    /// on error ownership remains with the caller.
+    ///
+    /// # Safety
+    /// The dma-buf metadata must describe `fd`, and `acquire_sync_fd` must be
+    /// a valid sync-file descriptor for the producer operation.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn import_dmabuf_with_acquire_fence(
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: Format,
+        modifier: u64,
+        fd: i32,
+        offset: u32,
+        stride: u32,
+        acquire_sync_fd: i32,
+    ) -> Result<Image, Error> {
+        Self::import_dmabuf_impl(
+            device,
+            width,
+            height,
+            format,
+            modifier,
+            fd,
+            offset,
+            stride,
+            Some(acquire_sync_fd),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn import_dmabuf_impl(
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: Format,
+        modifier: u64,
+        fd: i32,
+        offset: u32,
+        stride: u32,
+        acquire_sync_fd: Option<i32>,
+    ) -> Result<Image, Error> {
         let mut desc = sys::flux_dmabuf_image_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_DMABUF_IMAGE_DESC,
             width,
@@ -1203,6 +1403,10 @@ impl Image {
             ..std::mem::zeroed()
         };
         desc.planes[0] = sys::flux_dmabuf_plane { fd, offset, stride };
+        if let Some(acquire_sync_fd) = acquire_sync_fd {
+            desc.has_acquire_sync_fd = true;
+            desc.acquire_sync_fd = acquire_sync_fd;
+        }
         let mut out: *mut sys::flux_image = std::ptr::null_mut();
         Error::check(sys::flux_image_import_dmabuf(device.raw, &desc, &mut out))?;
         Ok(Image { raw: out })
@@ -1308,6 +1512,12 @@ pub fn dmabuf_supported(device: &Device) -> bool {
     unsafe { sys::flux_dmabuf_supported(device.raw) }
 }
 
+/// Whether this device can import/export Linux sync_file fences alongside
+/// dma-bufs through `VK_KHR_external_semaphore_fd`.
+pub fn dmabuf_sync_supported(device: &Device) -> bool {
+    unsafe { sys::flux_dmabuf_sync_supported(device.raw) }
+}
+
 /// The Vulkan device extensions dma-buf import requires. Pass to
 /// [`Device::new`].
 pub const DMABUF_DEVICE_EXTENSIONS: [&std::ffi::CStr; 5] = [
@@ -1317,6 +1527,10 @@ pub const DMABUF_DEVICE_EXTENSIONS: [&std::ffi::CStr; 5] = [
     c"VK_EXT_image_drm_format_modifier",
     c"VK_EXT_queue_family_foreign",
 ];
+
+/// Optional Vulkan device extension used to import/export Linux sync_file
+/// fences alongside dma-bufs.
+pub const DMABUF_SYNC_DEVICE_EXTENSIONS: [&std::ffi::CStr; 1] = [c"VK_KHR_external_semaphore_fd"];
 
 #[cfg(test)]
 mod tests {

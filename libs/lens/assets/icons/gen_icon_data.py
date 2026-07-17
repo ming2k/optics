@@ -9,8 +9,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 FEATHER_DIR = ROOT / "assets" / "icons" / "feather"
+MATERIAL_ROUNDED_DIR = ROOT / "assets" / "icons" / "material-rounded"
 ICON_H = ROOT / "include" / "lens" / "icon.h"
 ICON_DATA_C = ROOT / "src" / "icon_data.c"
+
+ICON_RENDER_STROKE = 0
+ICON_RENDER_FILL = 1
+
+ICON_SOURCES = (
+    (FEATHER_DIR, ICON_RENDER_STROKE),
+    # Appended after Feather so the existing public icon IDs stay stable.
+    (MATERIAL_ROUNDED_DIR, ICON_RENDER_FILL),
+)
 
 CMD_MOVE_TO = 0
 CMD_LINE_TO = 1
@@ -462,6 +472,15 @@ def parse_svg(filepath):
     return all_cmds
 
 
+def svg_render_mode(filepath, fallback):
+    root = ET.parse(filepath).getroot()
+    fill = (root.get("fill") or "").strip().lower()
+    stroke = (root.get("stroke") or "").strip().lower()
+    if fill == "none" and stroke and stroke != "none":
+        return ICON_RENDER_STROKE
+    return fallback
+
+
 def icon_enum_name(filename):
     stem = Path(filename).stem
     return stem.upper().replace("-", "_")
@@ -491,7 +510,7 @@ def generate_icon_h(icons):
     lines.append("#include <stdint.h>")
     lines.append("")
     lines.append("typedef enum lens_icon_id {")
-    for i, (name, _) in enumerate(icons):
+    for i, (name, _, _) in enumerate(icons):
         lines.append(f"\tLENS_ICON_{name} = {i},")
     lines.append("\tLENS_ICON_COUNT,")
     lines.append("} lens_icon_id;")
@@ -517,7 +536,7 @@ def generate_icon_data_c(icons):
     lines.append('#include "../include/lens/icon.h"')
     lines.append("")
 
-    for name, cmds in icons:
+    for name, cmds, _ in icons:
         aname = icon_array_name(name.lower().replace("_", "-"))
         lines.append(f"static const lens_icon_cmd lens_icon_{aname}_cmds[] = {{")
         for cmd in cmds:
@@ -529,28 +548,34 @@ def generate_icon_data_c(icons):
         lines.append("")
 
     lines.append("const lens_icon_desc lens_icon_table[LENS_ICON_COUNT] = {")
-    for i, (name, cmds) in enumerate(icons):
+    for name, cmds, _ in icons:
         aname = icon_array_name(name.lower().replace("_", "-"))
         count = len(cmds)
         lines.append(f"\t[LENS_ICON_{name}] = {{ lens_icon_{aname}_cmds, {count} }},")
     lines.append("};")
     lines.append("")
+
+    lines.append("const uint8_t lens_icon_render_modes[LENS_ICON_COUNT] = {")
+    for name, _, render_mode in icons:
+        if render_mode != ICON_RENDER_STROKE:
+            lines.append(f"\t[LENS_ICON_{name}] = {render_mode},")
+    lines.append("};")
     return "\n".join(lines) + "\n"
 
 
 def main():
     icons = []
-    svg_files = sorted(f for f in os.listdir(FEATHER_DIR) if f.endswith(".svg"))
-
-    for svg_file in svg_files:
-        name = icon_enum_name(svg_file)
-        filepath = os.path.join(FEATHER_DIR, svg_file)
-        try:
-            cmds = parse_svg(filepath)
-            icons.append((name, cmds))
-        except Exception as e:
-            print(f"Warning: failed to parse {svg_file}: {e}", file=sys.stderr)
-            icons.append((name, []))
+    for source_dir, render_mode in ICON_SOURCES:
+        svg_files = sorted(f for f in os.listdir(source_dir) if f.endswith(".svg"))
+        for svg_file in svg_files:
+            name = icon_enum_name(svg_file)
+            filepath = os.path.join(source_dir, svg_file)
+            try:
+                cmds = parse_svg(filepath)
+                icons.append((name, cmds, svg_render_mode(filepath, render_mode)))
+            except Exception as e:
+                print(f"Warning: failed to parse {svg_file}: {e}", file=sys.stderr)
+                icons.append((name, [], render_mode))
 
     ICON_H.write_text(generate_icon_h(icons))
     ICON_DATA_C.write_text(generate_icon_data_c(icons))

@@ -209,7 +209,8 @@ static void arrange(lens_node *n, flux_rect rect) {
 
     /* reserve scrollbar width so content doesn't render underneath it */
     if (n->is_scroll && ax == LENS_COLUMN && base > inner_main) {
-        inner.w -= n->ui->theme.scrollbar_width;
+        n->scroll_gutter = n->ui->theme.scrollbar_width;
+        inner.w -= n->scroll_gutter;
         if (inner.w < 0.0f)
             inner.w = 0.0f;
         inner_cross = inner.w;

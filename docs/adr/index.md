@@ -25,3 +25,5 @@ a decision, write a new ADR and update the old one's status to
 | 0017 | [Canvas render-target capture for real backdrop effects](0017-canvas-render-target-capture.md) | Accepted |
 | 0018 | [Obsolete iris meson subprojects](0018-obsolete-iris-meson-subprojects.md) | Accepted |
 | 0019 | [Canvas rendering backend seam + software (CPU) backend](0019-canvas-backend-seam-and-cpu-backend.md) | Accepted |
+| 0020 | [GPU memory production hardening (amends ADR-0007)](0020-gpu-memory-production-hardening.md) | Accepted |
+| 0021 | [Batched uploads, surface-scoped quiescent waits, prefers-dedicated floor](0021-batched-uploads-and-quiescent-waits.md) | Accepted |

@@ -173,6 +173,8 @@ typedef enum flux_struct_type {
     FLUX_TYPE_DMABUF_IMAGE_DESC = 14,
     FLUX_TYPE_GLYPH_RUN_DESC = 15,
     FLUX_TYPE_TARGET_DESC = 16,
+    FLUX_TYPE_SURFACE_DMABUF_DESC = 17,
+    FLUX_TYPE_SURFACE_READBACK_DESC = 18,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -321,6 +323,39 @@ typedef struct flux_memory_budget {
 
 FLUX_API void flux_device_memory_budget(const flux_device *d, flux_memory_budget *out);
 
+/* Point-in-time snapshot of the GPU memory allocator. bytes_in_use is
+ * what live resources (pooled sub-allocations, dedicated and external
+ * dma-buf memory) actually occupy; bytes_reserved is what the allocator
+ * holds from the driver in total, including empty pool blocks kept for
+ * reuse. All counters return to zero once every resource is released
+ * and the retire queue has drained (see flux_device_wait_idle). */
+typedef struct flux_memory_stats {
+    uint64_t bytes_in_use;
+    uint64_t bytes_reserved;
+    uint64_t lost_ranges_bytes; /* freed bytes unrecoverable until block reclaim */
+    uint32_t live_allocations;
+    uint32_t live_blocks;
+} flux_memory_stats;
+
+FLUX_API void flux_device_memory_stats(const flux_device *d, flux_memory_stats *out);
+
+/* Batched uploads. Between begin and flush, upload work from
+ * flux_image_create, flux_image_update_region, flux_mesh_create and
+ * flux_buffer_create (GPU_LOCAL with initial_data) accumulates into one
+ * queue submission instead of a submit-and-wait per resource — this is
+ * the fast path for bulk asset loading.
+ *
+ * A resource created inside a batch is usable once flush returns.
+ * flux_surface_begin_frame flushes any open batch before recording, so
+ * an unflushed batch can never be sampled by a frame. Non-frame
+ * consumers (compute dispatch, readback) must flush explicitly.
+ * begin/flush are device-global; the upload calls themselves may run on
+ * any thread. Nested begin returns FLUX_ERROR_INVALID_STATE; flushing
+ * with no batch open is a harmless no-op. Without a batch, uploads stay
+ * synchronous exactly as before. */
+FLUX_NODISCARD FLUX_API flux_result flux_uploads_begin(flux_device *d);
+FLUX_NODISCARD FLUX_API flux_result flux_uploads_flush(flux_device *d);
+
 /* ================================================================== */
 /*  Buffer                                                            */
 /* ================================================================== */
@@ -368,6 +403,10 @@ FLUX_NODISCARD FLUX_API flux_result flux_buffer_create(flux_device *d, const flu
                                                        flux_buffer **out);
 
 FLUX_NODISCARD FLUX_API flux_buffer *flux_buffer_retain(flux_buffer *b);
+/* Destruction is deferred: a released buffer may still be referenced by
+ * in-flight frames, so the VkBuffer and its memory are destroyed by the
+ * device retire queue only after the GPU provably passed every batch
+ * that could reference them. */
 FLUX_API void flux_buffer_release(flux_buffer *b);
 
 /* Persistent mapped pointer; NULL on a GPU_LOCAL buffer. */
@@ -405,6 +444,10 @@ FLUX_NODISCARD FLUX_API flux_result flux_target_create(flux_device *d, const flu
                                                        flux_target **out);
 
 FLUX_NODISCARD FLUX_API flux_target *flux_target_retain(flux_target *t);
+/* Destruction is deferred: a released target may still be an attachment
+ * of in-flight frames, so the image, view, and memory are destroyed by
+ * the device retire queue only after the GPU provably passed every batch
+ * that could reference them. */
 FLUX_API void flux_target_release(flux_target *t);
 
 FLUX_API uint32_t flux_target_width(const flux_target *t);
@@ -440,6 +483,37 @@ typedef struct flux_surface_desc {
 } flux_surface_desc;
 
 #define FLUX_SURFACE_DESC_INIT {.type = FLUX_TYPE_SURFACE_DESC}
+
+/* Optional flux_surface_desc extension for an exportable offscreen surface.
+ * `modifiers` is the consumer-supported DRM_FORMAT_MOD_* set. Flux intersects
+ * it with the Vulkan device's renderable/exportable single-plane modifiers;
+ * surface creation fails with FLUX_ERROR_UNSUPPORTED when the intersection is
+ * empty. The array is read only during flux_surface_create. */
+typedef struct flux_surface_dmabuf_desc {
+    flux_struct_type type; /* FLUX_TYPE_SURFACE_DMABUF_DESC */
+    const void *next;
+    const uint64_t *modifiers;
+    uint32_t modifier_count;
+} flux_surface_dmabuf_desc;
+
+#define FLUX_SURFACE_DMABUF_DESC_INIT {.type = FLUX_TYPE_SURFACE_DMABUF_DESC}
+
+/* Optional flux_surface_desc extension for a CPU-readable offscreen surface.
+ * On a dma-buf-capable device an offscreen surface is normally made
+ * exportable, which transfers each submitted image to the foreign consumer
+ * and makes flux_surface_read_pixels refuse it. Setting `require_readback`
+ * keeps the surface non-exportable (OPTIMAL-tiling, slab-allocated) so
+ * readback always works — the right pick for screenshot/capture targets
+ * that never leave the process. Mutually exclusive with
+ * flux_surface_dmabuf_desc (FLUX_ERROR_INVALID_ARGUMENT). Ignored on
+ * windowed surfaces. */
+typedef struct flux_surface_readback_desc {
+    flux_struct_type type; /* FLUX_TYPE_SURFACE_READBACK_DESC */
+    const void *next;
+    bool require_readback;
+} flux_surface_readback_desc;
+
+#define FLUX_SURFACE_READBACK_DESC_INIT {.type = FLUX_TYPE_SURFACE_READBACK_DESC}
 
 typedef struct flux_surface_info {
     uint32_t width;
@@ -501,6 +575,15 @@ FLUX_API bool flux_surface_exportable(const flux_surface *s);
 FLUX_API uint64_t flux_surface_dmabuf_modifier(const flux_surface *s);
 FLUX_API uint32_t flux_surface_dmabuf_stride(const flux_surface *s);
 FLUX_NODISCARD FLUX_API flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd);
+
+/* Explicit-sync export for a submitted exportable offscreen frame. Returns a
+ * dma-buf fd plus a Linux sync_file fd signalled by the same Vulkan submission
+ * that released image ownership to VK_QUEUE_FAMILY_FOREIGN_EXT. Unlike
+ * flux_surface_export_dmabuf, this does not wait for the GPU on the CPU.
+ * Both descriptors belong to the caller on success. Requires
+ * VK_KHR_external_semaphore_fd and may be called once per submitted slot. */
+FLUX_NODISCARD FLUX_API flux_result
+flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, int *out_sync_fd);
 
 /* Offscreen surfaces: the frame slot index of the most recently submitted
  * frame (0..frames_in_flight-1), or UINT32_MAX before the first submit.

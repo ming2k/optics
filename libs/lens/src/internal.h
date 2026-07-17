@@ -65,6 +65,14 @@ typedef struct lens_draw_cmd {
                           for the frame; must outlive lens_render */
 } lens_draw_cmd;
 
+enum {
+    LENSI_ICON_RENDER_STROKE = 0,
+    LENSI_ICON_RENDER_FILL = 1,
+};
+
+/* Generated beside lens_icon_table from the vendored SVG source style. */
+extern const uint8_t lens_icon_render_modes[LENS_ICON_COUNT];
+
 /* ------------------------------------------------------------------ */
 /*  Retained node slot (ADR-0004)                                     */
 /* ------------------------------------------------------------------ */
@@ -106,6 +114,7 @@ struct lens_node {
     float min_w, max_w;     /* 0 = unconstrained */
     float min_h, max_h;     /* 0 = unconstrained */
     float scroll_x, scroll_y;
+    float scroll_gutter; /* trailing viewport space reserved for scrollbar */
 
     /* layout outputs */
     flux_point measured;  /* measure pass */
@@ -188,6 +197,9 @@ struct lens {
                         * frame; the host should schedule another
                         * frame so the animation can settle even
                         * without further input (see lens_anim_pending) */
+    bool reduced_motion; /* accessibility: when set, every eased value
+                          * resolves to its target in one frame (see
+                          * lens_set_reduced_motion) */
 
     /* id stack (ADR-0003) */
     lens_id id_stack[LENSI_ID_STACK_MAX];
@@ -212,6 +224,7 @@ struct lens {
     lens_id active_id; /* captured (e.g. dragging) */
     lens_id focused_id;
     lens_id scroll_hot_id; /* deepest scroll container under cursor */
+    lens_cursor_hint cursor_hint; /* semantic cursor for the top hovered control */
     lens_response last_response;
     lens_node *last_node; /* most recently linked node (for lens_a11y) */
 
@@ -235,6 +248,15 @@ struct lens {
     lens_node **overlay_layers; /* per-frame, arena-backed */
     uint32_t overlay_layer_count;
     uint32_t overlay_layer_cap;
+    /* Floating layers as of the END of the previous frame, kept across
+     * the arena reset as plain ids so eclipse hit-testing covers base
+     * widgets built BEFORE the layer re-registers this frame (the common
+     * case: popups are declared after the content they cover). Without
+     * this the eclipse only applied to widgets declared after the layer
+     * in build order, and clicks fell through every popup to tables and
+     * scroll areas beneath. */
+    lens_id prev_overlay_layer_ids[LENSI_OVERLAY_MAX];
+    uint32_t prev_overlay_layer_count;
 
     /* modal focus trap (ADR-0016). When modal_active, Tab cycling is
      * clamped to [modal_tab_lo, modal_tab_hi) — the tab_order slice
@@ -323,6 +345,19 @@ void lensi_overlay_dismiss(lens *ui); /* click-outside + Esc (overlays only) */
  * using last-frame geometry. Used by lensi_interact to eclipse base
  * widgets under a popup or chrome panel. */
 bool lensi_point_in_floating_layer(lens *ui, flux_point p);
+/* True when a floating layer covers the cursor for a widget that does
+ * NOT belong to that layer. Widgets with their own hit-testing
+ * (table rows, scrollbars, wheel routing) must check this in addition
+ * to lensi_interact so popups eclipse them too. */
+bool lensi_widget_eclipsed(const lens *ui, const lens_node *n);
+/* True when point `p` falls outside the viewport of any scroll ancestor
+ * of `n`. Scroll containers clip their children's RENDERING to the
+ * viewport; hit-testing must apply the same clip, otherwise children
+ * scrolled out of view stay hoverable/clickable through whatever is
+ * painted over them (a queue item folded below the viewport edge
+ * reacting under the player bar). Every interactive hit-test must
+ * consult this in addition to the widget's own rect. */
+bool lensi_point_clipped_by_scroll(const lens_node *n, flux_point p);
 /* Walk an overlay/panel subtree for accessibility (called by the a11y walk). */
 lens_node **lensi_overlay_layers(lens *ui, uint32_t *out_count);
 
@@ -373,8 +408,11 @@ static inline bool lensi_point_in(flux_point p, flux_rect r) {
 /* Exponential ease toward `target`. Pass the `ui` so a value still in transit
  * marks the frame as animating (`ui->anim_pending`): an input-driven host can
  * then schedule the next frame and let the animation settle instead of
- * freezing mid-fade when input stops. `ui` may be NULL (e.g. tests). */
+ * freezing mid-fade when input stops. `ui` may be NULL (e.g. tests). Under
+ * reduced motion the value resolves to `target` immediately. */
 static inline float lensi_approach(lens *ui, float cur, float target, float dt, float rate) {
+    if (ui && ui->reduced_motion)
+        return target;
     float k = dt * rate;
     float next = (k >= 1.0f) ? target : cur + (target - cur) * k;
     if (ui && fabsf(next - target) > 0.0015f)

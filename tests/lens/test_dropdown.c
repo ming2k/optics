@@ -206,9 +206,21 @@ static void test_scrolled_dropdown_stays_in_owner_and_closes_on_wheel(void) {
     CHECK(scroll != NULL);
     CHECK(dropdown != NULL);
     flux_rect scroll_bounds = lens_node_bounds(scroll);
-    flux_rect trigger_bounds = lens_node_bounds(dropdown);
 
+    /* Scroll the trigger into the viewport first: an out-of-viewport
+     * widget is clipped from hit-testing like any other folded child. */
     lens_input in = IN0;
+    in.cursor = (flux_point){scroll_bounds.x + 20.0f, scroll_bounds.y + 20.0f};
+    in.scroll_y = -2.0f;
+    lens_begin(ui, &in);
+    build_scroll_dropdown(ui, &sel);
+    lens_end(ui);
+
+    flux_rect trigger_bounds = lens_node_bounds(dropdown);
+    CHECK(trigger_bounds.y >= scroll_bounds.y);
+    CHECK(trigger_bounds.y + trigger_bounds.h <= scroll_bounds.y + scroll_bounds.h);
+
+    in = IN0;
     in.cursor = (flux_point){trigger_bounds.x + 10.0f, trigger_bounds.y + trigger_bounds.h * 0.5f};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_down[LENS_MOUSE_LEFT] = true;

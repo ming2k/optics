@@ -25,6 +25,7 @@ void lensi_node_reset_frame(lens_node *n) {
     n->min_w = n->max_w = 0.0f;
     n->min_h = n->max_h = 0.0f;
     n->scroll_x = n->scroll_y = 0.0f;
+    n->scroll_gutter = 0.0f;
 
     n->measured = (flux_point){0, 0};
     n->final_rect = (flux_rect){0, 0, 0, 0};

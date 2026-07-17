@@ -261,6 +261,31 @@ impl Response {
     }
 }
 
+/// Semantic cursor requested by the hovered Lens widget. Windowing hosts map
+/// this hint to their platform cursor once after building each frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CursorHint {
+    #[default]
+    Default,
+    Pointer,
+    Text,
+    ResizeEw,
+    ResizeNs,
+}
+
+impl CursorHint {
+    pub(crate) fn from_raw(hint: sys::lens_cursor_hint) -> Self {
+        use sys::lens_cursor_hint::*;
+        match hint {
+            LENS_CURSOR_POINTER => Self::Pointer,
+            LENS_CURSOR_TEXT => Self::Text,
+            LENS_CURSOR_RESIZE_EW => Self::ResizeEw,
+            LENS_CURSOR_RESIZE_NS => Self::ResizeNs,
+            LENS_CURSOR_DEFAULT => Self::Default,
+        }
+    }
+}
+
 /// A token set (colours, sizes, radii) that drives lens's appearance.
 /// Construct a built-in set, adjust tokens with the `with_*` methods, and pass
 /// it to [`crate::Ui::set_theme`].
@@ -364,6 +389,18 @@ impl Theme {
     /// Set the slider knob colour independently from its filled range.
     pub fn with_slider_knob_color(mut self, color: Color) -> Theme {
         self.0.color_slider_knob = color.raw();
+        self
+    }
+
+    /// Set the slider track thickness in logical pixels.
+    pub fn with_slider_track_thickness(mut self, thickness: f32) -> Theme {
+        self.0.slider_track_thickness = thickness.max(0.0);
+        self
+    }
+
+    /// Set the slider knob diameter in logical pixels.
+    pub fn with_slider_knob_size(mut self, size: f32) -> Theme {
+        self.0.slider_knob_size = size.max(0.0);
         self
     }
 
@@ -490,7 +527,7 @@ impl Default for Theme {
     }
 }
 
-/// A built-in icon glyph (Feather set), for [`crate::Frame::icon`] and
+/// A built-in vector icon glyph, for [`crate::Frame::icon`] and
 /// [`crate::Frame::icon_button`]. Mirrors a subset of `lens_icon_id`; reach for
 /// `sys::lens_icon_id` directly for ids not listed here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -540,6 +577,8 @@ pub enum Icon {
     VolumeHigh,
     Search,
     Star,
+    StarRounded,
+    StarRoundedFilled,
     X,
 }
 
@@ -591,6 +630,8 @@ impl Icon {
             Icon::VolumeHigh => LENS_ICON_VOLUME_2,
             Icon::Search => LENS_ICON_SEARCH,
             Icon::Star => LENS_ICON_STAR,
+            Icon::StarRounded => LENS_ICON_STAR_ROUNDED,
+            Icon::StarRoundedFilled => LENS_ICON_STAR_ROUNDED_FILLED,
             Icon::X => LENS_ICON_X,
         }
     }

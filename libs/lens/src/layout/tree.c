@@ -54,7 +54,7 @@ void lensi_open_container_pop(lens *ui) {
 
 /* ---- public container API ---- */
 
-static void open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
+static lens_node *open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
     /* Explicit box.id gives the container a stable, label-independent
      * identity; otherwise fall back to the sibling-sequence id. */
     lens_id id = (opts.box.id && opts.box.id[0])
@@ -62,7 +62,7 @@ static void open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
                      : lensi_gen_container_id(ui, axis == LENS_ROW ? "row" : "col");
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return;
+        return NULL;
     lensi_link_child(ui, n); /* link into parent BEFORE pushing */
     n->is_container = true;
     n->axis = axis;
@@ -101,6 +101,7 @@ static void open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
     }
 
     lensi_open_container_push(ui, n);
+    return n;
 }
 
 void lens_row_ex(lens *ui, lens_layout_opts opts) {
@@ -119,6 +120,60 @@ void lens_column(lens *ui) {
 
 void lens_close(lens *ui) {
     lensi_open_container_pop(ui);
+}
+
+lens_response lens_pressable_begin(lens *ui, const char *id, const char *label,
+                                   lens_layout_opts opts) {
+    lens_response empty = {0};
+    if (!ui)
+        return empty;
+
+    opts.box.id = id;
+    lens_node *n = open_flex(ui, LENS_ROW, opts);
+    if (!n)
+        return empty;
+
+    bool disabled = opts.box.disabled;
+    lens_response r = lensi_interact(ui, n, true, disabled);
+    uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0);
+    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, sem_flags);
+
+    if (!disabled) {
+        float dt = ui->input.dt_seconds;
+        n->hover_t =
+            lensi_approach(ui, n->hover_t, (r.hovered || r.focused) ? 1.0f : 0.0f, dt, 14.0f);
+        n->active_t =
+            lensi_approach(ui, n->active_t, (ui->active_id == n->id) ? 1.0f : 0.0f, dt, 18.0f);
+    }
+
+    float emphasis = fmaxf(n->hover_t * 0.72f, n->active_t);
+    if (emphasis > 0.001f) {
+        flux_color transparent = flux_color_rgba(0, 0, 0, 0);
+        flux_color target =
+            n->active_t > n->hover_t * 0.72f ? ui->theme.color_active : ui->theme.color_hover;
+        lensi_drawlist_push(
+            ui, n,
+            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                            .rel = {0, 0, 0, 0},
+                            .color = lensi_lerp_color(transparent, target, emphasis),
+                            .radius = opts.radius});
+    }
+    if (r.focused) {
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
+                                            .rel = {0, 0, 0, 0},
+                                            .color = ui->theme.color_accent,
+                                            .radius = opts.radius,
+                                            .width = ui->theme.border_width});
+    }
+
+    ui->last_response = r;
+    return r;
+}
+
+void lens_pressable_end(lens *ui) {
+    if (ui)
+        lens_close(ui);
 }
 
 /* ---- descriptor plumbing (internal; drained by the next widget body) ----

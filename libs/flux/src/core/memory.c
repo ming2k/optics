@@ -9,6 +9,7 @@
  */
 #include "internal.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -45,11 +46,28 @@ flux_result flux_vk_alloc_buffer(flux_device *d, VkDeviceSize size, VkBufferUsag
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
-    VkMemoryRequirements mr;
-    vkGetBufferMemoryRequirements(d->device, *out_buffer, &mr);
+    /* Chain VkMemoryDedicatedRequirements so the allocator can honour a
+     * driver-mandated (or preferred) dedicated allocation. */
+    VkMemoryDedicatedRequirements ded_req = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS,
+    };
+    VkMemoryRequirements2 mreq = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,
+        .pNext = &ded_req,
+    };
+    VkBufferMemoryRequirementsInfo2 mri = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2,
+        .buffer = *out_buffer,
+    };
+    vkGetBufferMemoryRequirements2(d->device, &mri, &mreq);
 
-    flux_result r =
-        flux_vk_allocate(d, mr, props, /*is_image=*/false, wants_device_address, out_alloc);
+    flux_vk_dedication ded = {
+        .buffer = *out_buffer,
+        .required = ded_req.requiresDedicatedAllocation == VK_TRUE,
+        .preferred = ded_req.prefersDedicatedAllocation == VK_TRUE,
+    };
+    flux_result r = flux_vk_allocate(d, mreq.memoryRequirements, props, /*is_image=*/false,
+                                     wants_device_address, &ded, out_alloc);
     if (r != FLUX_OK) {
         vkDestroyBuffer(d->device, *out_buffer, nullptr);
         *out_buffer = VK_NULL_HANDLE;
@@ -78,11 +96,26 @@ flux_result flux_vk_alloc_image(flux_device *d, const VkImageCreateInfo *ici,
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
-    VkMemoryRequirements mr;
-    vkGetImageMemoryRequirements(d->device, *out_image, &mr);
+    VkMemoryDedicatedRequirements ded_req = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS,
+    };
+    VkMemoryRequirements2 mreq = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,
+        .pNext = &ded_req,
+    };
+    VkImageMemoryRequirementsInfo2 mri = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
+        .image = *out_image,
+    };
+    vkGetImageMemoryRequirements2(d->device, &mri, &mreq);
 
-    flux_result r = flux_vk_allocate(d, mr, props, /*is_image=*/true,
-                                     /*wants_device_address=*/false, out_alloc);
+    flux_vk_dedication ded = {
+        .image = *out_image,
+        .required = ded_req.requiresDedicatedAllocation == VK_TRUE,
+        .preferred = ded_req.prefersDedicatedAllocation == VK_TRUE,
+    };
+    flux_result r = flux_vk_allocate(d, mreq.memoryRequirements, props, /*is_image=*/true,
+                                     /*wants_device_address=*/false, &ded, out_alloc);
     if (r != FLUX_OK) {
         vkDestroyImage(d->device, *out_image, nullptr);
         *out_image = VK_NULL_HANDLE;
@@ -96,87 +129,6 @@ flux_result flux_vk_alloc_image(flux_device *d, const VkImageCreateInfo *ici,
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkBindImageMemory failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
-    return FLUX_OK;
-}
-
-/* Dedicated allocation for an exportable image. The caller's ici pNext
- * chain carries VkExternalMemoryImageCreateInfo (+ DRM-modifier struct);
- * `export_info` (VkMemoryDedicatedAllocateInfo etc.) is appended after our
- * flags-info so the memory is dedicated to this image and exportable. */
-flux_result flux_vk_alloc_image_dedicated(flux_device *d, const VkImageCreateInfo *ici,
-                                          VkMemoryPropertyFlags props, const void *export_info,
-                                          VkImage *out_image, flux_vk_alloc *out_alloc) {
-    *out_image = VK_NULL_HANDLE;
-    *out_alloc = (flux_vk_alloc){0};
-
-    VkResult vr = vkCreateImage(d->device, ici, nullptr, out_image);
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dedicated vkCreateImage failed", vr);
-        return FLUX_ERROR_BACKEND_FAILURE;
-    }
-
-    VkMemoryRequirements2 mreq = {.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
-    VkImageMemoryRequirementsInfo2 mri = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
-        .image = *out_image,
-    };
-    vkGetImageMemoryRequirements2(d->device, &mri, &mreq);
-
-    /* External/exportable images only support a dedicated allocation in
-     * practice; intersect the memory-type bits with the requested props. */
-    uint32_t mt = flux_vk_find_memory_type(d, mreq.memoryRequirements.memoryTypeBits, props);
-    if (mt == UINT32_MAX) {
-        /* DEVICE_LOCAL may be unsatisfiable for some external formats; try
-         * any type the image accepts. */
-        mt = flux_vk_find_memory_type(d, mreq.memoryRequirements.memoryTypeBits, 0);
-    }
-    if (mt == UINT32_MAX) {
-        vkDestroyImage(d->device, *out_image, nullptr);
-        *out_image = VK_NULL_HANDLE;
-        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "no memory type for exportable image");
-        return FLUX_ERROR_UNSUPPORTED;
-    }
-
-    /* pNext chain: export_info (dedicated alloc) -> MemoryAllocateInfo.
-     * We never need device-address or host-visible mapping for an exported
-     * offscreen colour attachment. */
-    VkMemoryAllocateInfo mai = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = export_info,
-        .allocationSize = mreq.memoryRequirements.size,
-        .memoryTypeIndex = mt,
-    };
-
-    VkDeviceMemory mem = VK_NULL_HANDLE;
-    vr = vkAllocateMemory(d->device, &mai, nullptr, &mem);
-    if (vr != VK_SUCCESS) {
-        vkDestroyImage(d->device, *out_image, nullptr);
-        *out_image = VK_NULL_HANDLE;
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dedicated vkAllocateMemory failed", vr);
-        return FLUX_ERROR_BACKEND_FAILURE;
-    }
-
-    vr = vkBindImageMemory(d->device, *out_image, mem, 0);
-    if (vr != VK_SUCCESS) {
-        vkFreeMemory(d->device, mem, nullptr);
-        vkDestroyImage(d->device, *out_image, nullptr);
-        *out_image = VK_NULL_HANDLE;
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dedicated vkBindImageMemory failed", vr);
-        return FLUX_ERROR_BACKEND_FAILURE;
-    }
-
-    flux_vk_allocator *a = &d->mem_allocator;
-    pthread_mutex_lock(&a->lock);
-    a->bytes_in_use += mreq.memoryRequirements.size;
-    a->bytes_reserved += mreq.memoryRequirements.size;
-    a->live_allocations++;
-    pthread_mutex_unlock(&a->lock);
-
-    out_alloc->memory = mem;
-    out_alloc->offset = 0;
-    out_alloc->size = mreq.memoryRequirements.size;
-    out_alloc->mapped = NULL;
-    out_alloc->block = NULL;
     return FLUX_OK;
 }
 
@@ -231,6 +183,7 @@ flux_result flux_transient_ring_init(flux_transient_ring *r, flux_device *d,
         .buffer = r->buffer,
     };
     r->device_address = vkGetBufferDeviceAddress(d->device, &bdai);
+    flux_vk_set_name(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)r->buffer, "flux transient ring");
     return FLUX_OK;
 }
 

@@ -34,6 +34,7 @@
 
 #![deny(rust_2018_idioms)]
 
+use std::cell::Cell;
 use std::ffi::CString;
 use std::os::raw::c_int;
 
@@ -42,9 +43,13 @@ pub use iris_sys as sys;
 pub use lens::key;
 pub use lens::mods;
 pub use lens::{
-    Align, Color, Frame, Icon, Input, LayoutOpts, MouseButton, OverlayOpts, Rect, Response,
-    TabStyle, TableColumn, TableOpts, TableResult, TabsOpts, TextBuf, Theme, Ui,
+    Align, Color, CursorHint, Frame, Icon, Input, LayoutOpts, MouseButton, OverlayOpts, Rect,
+    Response, TabStyle, TableColumn, TableOpts, TableResult, TabsOpts, TextBuf, Theme, Ui,
 };
+
+thread_local! {
+    static CURSOR_OVERRIDDEN_IN_BUILD: Cell<bool> = const { Cell::new(false) };
+}
 
 /// A thin wrapper over the raw pointers iris hands to the paint
 /// callback: the canvas (live inside an open `flux_canvas_begin/end`
@@ -227,7 +232,13 @@ impl Application {
                 let mut frame = unsafe { Frame::from_raw(lens_ui) };
                 let input_ptr = in_ as *const lens::sys::lens_input;
                 let input = unsafe { Input::from_raw_ref(input_ptr) };
+                CURSOR_OVERRIDDEN_IN_BUILD.with(|overridden| overridden.set(false));
                 (run.build)(&mut frame, input);
+                let overridden =
+                    CURSOR_OVERRIDDEN_IN_BUILD.with(|overridden| overridden.replace(false));
+                if !overridden {
+                    set_cursor_raw(Cursor::from(frame.cursor_hint()));
+                }
             }));
         }
 
@@ -405,10 +416,10 @@ pub fn stop_color_scheme_watcher() {
 
 /// Cursor appearance the host wants iris to show over its window.
 ///
-/// This is an L3 concern: iris owns the window and the cursor surface,
-/// so it owns cursor appearance too. Hosts call [`set_cursor`] when their
-/// hover state changes (e.g. an editor showing an I-beam over its text
-/// area).
+/// This is an L3 concern: iris owns the window and the cursor surface, so it
+/// owns cursor appearance too. [`Application::run`] automatically maps the
+/// hovered Lens widget's [`CursorHint`]; hosts use [`set_cursor`] for custom
+/// canvas regions and other application-specific overrides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(i32)]
 pub enum Cursor {
@@ -447,13 +458,32 @@ impl Cursor {
     }
 }
 
-/// Set the cursor the next pointer motion will show. Idempotent; passing
-/// the same value twice does no work.
+impl From<CursorHint> for Cursor {
+    fn from(hint: CursorHint) -> Self {
+        match hint {
+            CursorHint::Default => Self::Default,
+            CursorHint::Pointer => Self::Pointer,
+            CursorHint::Text => Self::Text,
+            CursorHint::ResizeEw => Self::ResizeEw,
+            CursorHint::ResizeNs => Self::ResizeNs,
+        }
+    }
+}
+
+/// Set the cursor the next pointer motion will show. Idempotent; passing the
+/// same value twice does no work. Inside an [`Application::run`] build
+/// closure this overrides Lens's automatic cursor hint for the current frame;
+/// call it each frame while the custom cursor should remain active.
 ///
 /// No-op when iris was built without `wayland-cursor` (the compositor's
 /// default arrow stays) or before [`Application::run`] starts. Thread-
 /// affine: call from the same thread that drives the run loop.
 pub fn set_cursor(cursor: Cursor) {
+    CURSOR_OVERRIDDEN_IN_BUILD.with(|overridden| overridden.set(true));
+    set_cursor_raw(cursor);
+}
+
+fn set_cursor_raw(cursor: Cursor) {
     unsafe { sys::iris_set_cursor(cursor.raw()) }
 }
 
@@ -604,6 +634,15 @@ mod tests {
     fn color_scheme_derives_eq() {
         assert_eq!(ColorScheme::PreferDark, ColorScheme::PreferDark);
         assert_ne!(ColorScheme::PreferDark, ColorScheme::PreferLight);
+    }
+
+    #[test]
+    fn lens_cursor_hints_map_to_platform_cursor_shapes() {
+        assert_eq!(Cursor::from(CursorHint::Default), Cursor::Default);
+        assert_eq!(Cursor::from(CursorHint::Pointer), Cursor::Pointer);
+        assert_eq!(Cursor::from(CursorHint::Text), Cursor::Text);
+        assert_eq!(Cursor::from(CursorHint::ResizeEw), Cursor::ResizeEw);
+        assert_eq!(Cursor::from(CursorHint::ResizeNs), Cursor::ResizeNs);
     }
 
     #[test]

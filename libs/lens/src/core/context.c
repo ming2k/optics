@@ -111,6 +111,10 @@ static void lensi_theme_normalize(lens_theme *t) {
         t->color_slider_fill = t->color_accent;
     if (!t->color_slider_knob)
         t->color_slider_knob = t->color_fg;
+    if (t->slider_track_thickness <= 0.0f)
+        t->slider_track_thickness = 6.0f;
+    if (t->slider_knob_size <= 0.0f)
+        t->slider_knob_size = 14.0f;
 }
 
 void lens_set_theme(lens *ui, lens_theme theme) {
@@ -146,11 +150,27 @@ bool lens_anim_pending(const lens *ui) {
     return ui && ui->anim_pending;
 }
 
+void lens_set_reduced_motion(lens *ui, bool reduced) {
+    if (ui)
+        ui->reduced_motion = reduced;
+}
+bool lens_reduced_motion(const lens *ui) {
+    return ui && ui->reduced_motion;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Frame lifecycle                                                   */
 /* ------------------------------------------------------------------ */
 
 void lens_begin(lens *ui, const lens_input *input) {
+    /* Carry last frame's floating-layer ids across the arena reset so
+     * this frame's eclipse checks use the layers that are actually on
+     * screen (their prev_rect geometry), independent of build order. */
+    ui->prev_overlay_layer_count = 0;
+    for (uint32_t i = 0; i < ui->overlay_layer_count && i < LENSI_OVERLAY_MAX; ++i) {
+        if (ui->overlay_layers[i])
+            ui->prev_overlay_layer_ids[ui->prev_overlay_layer_count++] = ui->overlay_layers[i]->id;
+    }
     flux_arena_reset(&ui->arena);
     ui->frame++;
     ui->overflow = false;
@@ -181,6 +201,7 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->click_hit_focusable = false;
     ui->hot_id = 0;
     ui->scroll_hot_id = 0;
+    ui->cursor_hint = LENS_CURSOR_DEFAULT;
     ui->tab_order = NULL;
     ui->tab_count = ui->tab_cap = 0;
     ui->last_response = (lens_response){0};
@@ -240,6 +261,9 @@ bool lens_focused(const lens *ui, lens_id id) {
 }
 lens_response lens_get_response(const lens *ui) {
     return ui ? ui->last_response : (lens_response){0};
+}
+lens_cursor_hint lens_get_cursor_hint(const lens *ui) {
+    return ui ? ui->cursor_hint : LENS_CURSOR_DEFAULT;
 }
 
 lens_node *lens_root(lens *ui) {

@@ -139,14 +139,14 @@ void flux_mesh_release(flux_mesh *m) {
         return;
 
     flux_device *d = m->device;
+    /* Same in-flight hazard as flux_buffer_release: the vertex/index
+     * buffers may still be bound to batches executing on the graphics
+     * queue. Each buffer is parked on the device retire queue on its
+     * own; the two zombies share no state, so teardown order is
+     * irrelevant and nothing is freed twice. */
+    flux_device_retire_buffer(d, m->vertex_buffer, &m->vertex_alloc);
     if (m->index_buffer)
-        vkDestroyBuffer(d->device, m->index_buffer, nullptr);
-    if (m->index_alloc.memory)
-        flux_vk_deallocate(d, &m->index_alloc);
-    if (m->vertex_buffer)
-        vkDestroyBuffer(d->device, m->vertex_buffer, nullptr);
-    if (m->vertex_alloc.memory)
-        flux_vk_deallocate(d, &m->vertex_alloc);
+        flux_device_retire_buffer(d, m->index_buffer, &m->index_alloc);
     flux_internal_free(d, m);
     flux_device_release(d);
 }

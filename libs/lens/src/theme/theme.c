@@ -44,6 +44,8 @@ lens_theme lens_theme_dark(void) {
     t.color_slider_track = t.color_border;
     t.color_slider_fill = t.color_accent;
     t.color_slider_knob = t.color_fg;
+    t.slider_track_thickness = 6.0f;
+    t.slider_knob_size = 14.0f;
     return t;
 }
 
@@ -88,5 +90,7 @@ lens_theme lens_theme_default(void) {
     t.color_slider_track = t.color_border;
     t.color_slider_fill = t.color_accent;
     t.color_slider_knob = t.color_fg;
+    t.slider_track_thickness = 6.0f;
+    t.slider_knob_size = 14.0f;
     return t;
 }

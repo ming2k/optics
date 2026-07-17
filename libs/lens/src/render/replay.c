@@ -313,10 +313,14 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
             }
 
             flux_paint paint = flux_paint_solid(c->color);
-            paint.stroke_width = c->width > 0 ? c->width : 2.0f * s;
-            paint.cap = FLUX_CAP_ROUND;
-            paint.join = FLUX_JOIN_ROUND;
-            flux_canvas_stroke_path(canvas, p, &paint);
+            if (lens_icon_render_modes[c->icon_id] == LENSI_ICON_RENDER_FILL) {
+                flux_canvas_fill_path(canvas, p, &paint);
+            } else {
+                paint.stroke_width = c->width > 0 ? c->width : 2.0f * s;
+                paint.cap = FLUX_CAP_ROUND;
+                paint.join = FLUX_JOIN_ROUND;
+                flux_canvas_stroke_path(canvas, p, &paint);
+            }
             break;
         }
         }
@@ -330,8 +334,15 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
 
     bool pushed_canvas_clip = false;
     if (n->is_scroll && n->first_child) {
-        flux_rect viewport = {box.x + n->pad, box.y + n->pad, box.w - 2.0f * n->pad,
-                              box.h - 2.0f * n->pad};
+        /* Layout reserves scroll_gutter from the children's cross axis when
+         * a vertical scrollbar is present. Apply the same reservation to
+         * the child clip: descendants such as long text can paint beyond
+         * their own arranged box, and otherwise cover the scrollbar because
+         * parent draw commands are replayed before child nodes. */
+        float viewport_w = box.w - 2.0f * n->pad - n->scroll_gutter;
+        if (viewport_w < 0.0f)
+            viewport_w = 0.0f;
+        flux_rect viewport = {box.x + n->pad, box.y + n->pad, viewport_w, box.h - 2.0f * n->pad};
         clip = rect_intersect(clip, viewport);
         if (clip.w <= 0.0f || clip.h <= 0.0f)
             return;

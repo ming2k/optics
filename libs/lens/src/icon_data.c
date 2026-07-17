@@ -3784,6 +3784,46 @@ static const lens_icon_cmd lens_icon_zoom_out_cmds[] = {
     {1, {14.0f, 11.0f, 0.0f, 0.0f, 0.0f, 0.0f}},
 };
 
+static const lens_icon_cmd lens_icon_star_rounded_filled_cmds[] = {
+    {0, {12.0f, 17.27f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {1, {16.15f, 19.78f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {2, {16.91f, 20.24f, 17.84f, 19.56f, 17.64f, 18.7f}},
+    {1, {16.54f, 13.98f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {1, {20.21f, 10.8f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {2, {20.88f, 10.22f, 20.52f, 9.12f, 19.64f, 9.05f}},
+    {1, {14.81f, 8.64f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {1, {12.92f, 4.18f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {2, {12.58f, 3.37f, 11.42f, 3.37f, 11.08f, 4.18f}},
+    {1, {9.19f, 8.63f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {1, {4.36f, 9.04f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {2, {3.48f, 9.11f, 3.12f, 10.21f, 3.79f, 10.79f}},
+    {1, {7.46f, 13.97f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {1, {6.36f, 18.69f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {2, {6.16f, 19.55f, 7.09f, 20.23f, 7.85f, 19.77f}},
+    {1, {12.0f, 17.27f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {4, {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}},
+};
+
+static const lens_icon_cmd lens_icon_star_rounded_cmds[] = {
+    {0, {12.0f, 17.27f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {1, {16.15f, 19.78f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {2, {16.91f, 20.24f, 17.84f, 19.56f, 17.64f, 18.7f}},
+    {1, {16.54f, 13.98f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {1, {20.21f, 10.8f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {2, {20.88f, 10.22f, 20.52f, 9.12f, 19.64f, 9.05f}},
+    {1, {14.81f, 8.64f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {1, {12.92f, 4.18f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {2, {12.58f, 3.37f, 11.42f, 3.37f, 11.08f, 4.18f}},
+    {1, {9.19f, 8.63f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {1, {4.36f, 9.04f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {2, {3.48f, 9.11f, 3.12f, 10.21f, 3.79f, 10.79f}},
+    {1, {7.46f, 13.97f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {1, {6.36f, 18.69f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {2, {6.16f, 19.55f, 7.09f, 20.23f, 7.85f, 19.77f}},
+    {1, {12.0f, 17.27f, 0.0f, 0.0f, 0.0f, 0.0f}},
+    {4, {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}},
+};
+
 const lens_icon_desc lens_icon_table[LENS_ICON_COUNT] = {
     [LENS_ICON_ACTIVITY] = {lens_icon_activity_cmds, 6},
     [LENS_ICON_AIRPLAY] = {lens_icon_airplay_cmds, 15},
@@ -4072,4 +4112,10 @@ const lens_icon_desc lens_icon_table[LENS_ICON_COUNT] = {
     [LENS_ICON_ZAP] = {lens_icon_zap_cmds, 8},
     [LENS_ICON_ZOOM_IN] = {lens_icon_zoom_in_cmds, 7},
     [LENS_ICON_ZOOM_OUT] = {lens_icon_zoom_out_cmds, 5},
+    [LENS_ICON_STAR_ROUNDED_FILLED] = {lens_icon_star_rounded_filled_cmds, 17},
+    [LENS_ICON_STAR_ROUNDED] = {lens_icon_star_rounded_cmds, 17},
+};
+
+const uint8_t lens_icon_render_modes[LENS_ICON_COUNT] = {
+    [LENS_ICON_STAR_ROUNDED_FILLED] = 1,
 };

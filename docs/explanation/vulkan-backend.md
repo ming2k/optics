@@ -94,6 +94,15 @@ Swapchain `OUT_OF_DATE` and `SUBOPTIMAL` are surfaced to the caller as
 framebuffer extent (typically pulled from
 `glfwGetFramebufferSize`) before the next frame.
 
+Teardown waits are surface-scoped (`surface_wait_quiescent`): offscreen
+release/resize waits only the surface's own per-slot `in_flight`
+fences, since nothing outside those batches can reference its images or
+transient ring; windowed teardown waits the graphics queue
+(`vkQueueWaitIdle` under `queue_lock`), which is the only wait that
+also covers the presentation engine still reading a presented image.
+Neither path stalls the whole device the way the old
+`vkDeviceWaitIdle` did.
+
 ## Transient memory ring
 
 Each surface owns one host-visible, host-coherent buffer. It is split
@@ -106,7 +115,7 @@ The buffer is created with combined usage (vertex | index | uniform |
 storage | transfer-src | buffer-device-address) so a module can use it
 for any binding without a second allocation. Default per-frame size:
 16 MiB. Out-of-space allocations record
-`FLUX_ERROR_OUT_OF_MEMORY` via `flux_get_last_error` — the module's
+`FLUX_ERROR_OUT_OF_RANGE` via `flux_get_last_error` — the module's
 policy decides whether that is fatal.
 
 ## Bindless descriptor heap
@@ -127,6 +136,44 @@ The heap is bound once per pipeline as set 0. Shaders reference
 resources by handle (a plain `uint32_t`) rather than by descriptor set
 and binding. Both `flux_canvas` and `flux_scene` use this path for
 textures and uniform data.
+
+## Deferred resource destruction (retire queue)
+
+A released `flux_image`, `flux_buffer`, `flux_mesh`, or `flux_target`
+may still be referenced by batches in flight on the graphics queue —
+frames recorded before the release. Destroying the view/image/buffer
+or freeing its memory at release time can fault the engine mid-batch
+(observed on i915 as a GPU hang and context reset, surfacing to hosts
+as a fence timeout followed by `VK_ERROR_DEVICE_LOST`).
+
+Release therefore never destroys Vulkan objects inline. It parks the
+pieces (view, image, buffer, allocation, imported memory, bindless
+slots) on a device-wide retire queue tagged with one past the current
+graphics submission serial. Every graphics-queue submission is
+assigned a monotonically increasing serial at `vkQueueSubmit2`; every
+fence wait that proves a batch complete (the per-slot wait in
+`flux_surface_begin_frame`, one-shot submit-and-wait,
+`flux_device_wait_idle`) raises a completed watermark. Because the
+queue is FIFO, a zombie is destroyed as soon as the watermark covers
+its tag. The tag is one past the current counter so a frame that is
+still recording when the release happens is covered too.
+
+Two resource families are exempt because slot fencing already covers
+them: transient-ring slices (a slot's fence is awaited before its
+cursor resets) and per-frame-slot canvas attachments (destroyed only
+when rebuilding for a slot whose frame already completed).
+
+Host consequence: releasing a resource is always safe, at any point in
+the frame. Destruction (and bindless slot recycling) trails the
+release by at most a couple of frame periods, and
+`flux_device_release` drains everything once the device is idle.
+
+A related threading rule: `vkDeviceWaitIdle` / `vkQueueWaitIdle` count
+as host access to the queues, so every wait-idle in the library goes
+through `flux_vk_wait_idle`, which holds the same `queue_lock` that
+serialises `vkQueueSubmit2`. An unsynchronised wait racing a
+concurrent submit was observed to double-free inside the Intel ANV
+driver.
 
 ## Pipeline cache
 
@@ -175,9 +222,68 @@ list of fixed-size blocks (default 64 MiB) with a per-block free
 list. Allocation walks the free list of the matching pool, splits
 on first-fit, and coalesces with adjacent ranges on free. Requests
 ≥ 16 MiB (the default dedicated threshold) skip pooling entirely and
-get a standalone `VkDeviceMemory`. The allocator is thread-safe
-behind one mutex; mappings are established once per host-visible
-block at creation time. See ADR-0007 for the trade-offs.
+get a standalone `VkDeviceMemory` — as does any resource the driver
+flags `requiresDedicatedAllocation` or `prefersDedicatedAllocation`
+(via `VkMemoryDedicatedRequirements`), with
+`VkMemoryDedicatedAllocateInfo` chained onto the resource. The
+allocator is thread-safe behind one mutex; mappings are established
+once per host-visible block at creation time. See ADR-0007 for the
+design trade-offs and ADR-0020 for the hardening pass.
+
+OOM behaviour: when a pool block allocation fails — or when the
+`VK_EXT_memory_budget` heap query (enabled automatically when
+advertised) says a new block would cross the heap budget — the
+allocator first reclaims every empty block back to the driver and
+retries once before reporting `FLUX_ERROR_OUT_OF_MEMORY`
+(`VK_ERROR_OUT_OF_DEVICE_MEMORY` and `VK_ERROR_OUT_OF_HOST_MEMORY`
+map to it uniformly). Empty blocks are also returned eagerly when a
+sibling block of the same pool key exists, and on demand via
+`flux_vk_allocator_reclaim`.
+
+Observability: `flux_device_memory_stats` returns a point-in-time
+snapshot (bytes in use, bytes reserved, live allocations/blocks,
+lost ranges); dma-buf imports and exports are counted too, so the
+teardown leak warning sees them. When `VK_EXT_debug_utils` is
+available (enabled whenever the instance advertises it), pool
+blocks, dedicated allocations, staging buffers, the transient ring,
+and public buffers/images carry debug names into RenderDoc and
+validation output.
+
+## Staging cache
+
+One-shot upload and readback helpers
+(`flux_vk_upload_to_buffer/image`, `flux_surface_read_pixels`) copy
+through host-visible staging buffers drawn from a per-device cache
+rather than a fresh `vkCreateBuffer` + `vkAllocateMemory` per call.
+The helpers are synchronous (submit + fence wait, with queue-idle
+fallback on timeout), so a staging buffer is provably idle when the
+call returns and goes straight back to the cache's idle list.
+Entries match by usage and smallest-fit capacity; the cache is
+capped at 64 MiB per device and drained at device teardown.
+
+## Batched uploads
+
+For bulk asset loading, `flux_uploads_begin` / `flux_uploads_flush`
+collapse any number of uploads into a single graphics-queue
+submission. While a batch is open, `flux_image_create`,
+`flux_image_update_region`, `flux_mesh_create`,
+`flux_buffer_create` with `initial_data`, and layout transitions
+record their barriers and copies into one device-global command
+buffer; flush submits it once, waits the fence, and returns every
+checked-out staging buffer to the cache. Recording is serialised by
+`upload_lock` while the staging memcpy runs outside it, so loader
+threads still overlap.
+
+A resource created inside a batch is usable once flush returns.
+`flux_surface_begin_frame` auto-flushes any open batch before
+recording, so a frame can never sample unsubmitted data; non-frame
+consumers (compute dispatch, readback) flush explicitly, and
+`flux_device_release` flushes a leaked-open batch at teardown.
+Batches always record on the graphics queue — same-queue implicit
+ordering against in-flight frames is what makes live-image updates
+safe, and it needs no QFOT plumbing. Without a batch, uploads stay
+synchronous (and keep the dedicated transfer queue when one exists).
+See ADR-0021.
 
 ## Async transfer queue
 
@@ -190,11 +296,15 @@ with a queue-family-ownership barrier so subsequent graphics-side
 use sees fully visible data. On adapters without a dedicated
 transfer family the helpers fall back to a single submit on the
 graphics queue. Both paths are synchronous from the caller's view —
-the helper waits on a fence before returning.
+the helper waits on a fence before returning. (Batched uploads are
+the exception: they always record on the graphics queue — see
+[Batched uploads](#batched-uploads).)
 
 ## See also
 
 - [ADR-0001 — project foundations](../adr/0001-project-foundations.md)
+- [ADR-0020 — GPU memory production hardening](../adr/0020-gpu-memory-production-hardening.md)
+- [ADR-0021 — batched uploads and quiescent waits](../adr/0021-batched-uploads-and-quiescent-waits.md)
 - [ADR-0002 — per-module device state](../adr/0002-per-module-device-state.md)
 - [ADR-0003 — bindless handle packing](../adr/0003-bindless-handle-packing.md)
 - [Application architecture](application-architecture.md) — where the

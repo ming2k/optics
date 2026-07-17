@@ -14,6 +14,7 @@
 #include <flux/vulkan.h>
 
 #include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 
 struct flux_buffer {
@@ -79,6 +80,13 @@ flux_result flux_buffer_create(flux_device *d, const flux_buffer_desc *desc, flu
     if (r != FLUX_OK)
         goto fail;
 
+    {
+        char name[80];
+        snprintf(name, sizeof(name), "flux_buffer %llu KiB",
+                 (unsigned long long)(desc->size >> 10));
+        flux_vk_set_name(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)b->buffer, name);
+    }
+
     if (desc->location == FLUX_BUFFER_HOST_VISIBLE) {
         b->mapped = b->alloc.mapped;
         if (!b->mapped) {
@@ -128,10 +136,14 @@ void flux_buffer_release(flux_buffer *b) {
     if (atomic_fetch_sub_explicit(&b->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
     flux_device *d = b->device;
-    if (b->buffer)
-        vkDestroyBuffer(d->device, b->buffer, nullptr);
-    if (b->alloc.memory)
-        flux_vk_deallocate(d, &b->alloc);
+    /* The buffer may still be bound to batches in flight on the graphics
+     * queue (vertex/index/uniform binds recorded before this release).
+     * Destroying the VkBuffer or freeing its memory inline can fault the
+     * engine mid-batch — the same i915 hazard that motivated the image
+     * retire queue. Park the pieces on the device retire queue; they are
+     * destroyed once the queue provably passed every batch that could
+     * reference them. */
+    flux_device_retire_buffer(d, b->buffer, &b->alloc);
     flux_internal_free(d, b);
     flux_device_release(d);
 }

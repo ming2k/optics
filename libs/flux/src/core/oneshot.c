@@ -13,6 +13,7 @@
  */
 #include "internal.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -62,14 +63,25 @@ VkResult flux_vk_submit_and_wait(flux_device *d, VkQueue queue, VkCommandBuffer 
     };
     pthread_mutex_lock(&d->queue_lock);
     VkResult vr = vkQueueSubmit2(queue, 1, &si, fence);
+    /* Graphics-queue batches retire every earlier batch in FIFO order;
+     * remember this one's serial so the fence wait below can raise the
+     * retire watermark. Transfer-queue submissions are unordered against
+     * graphics work and must not move that watermark. */
+    uint64_t graphics_serial = 0;
+    if (vr == VK_SUCCESS && queue == d->graphics_queue)
+        graphics_serial = flux_vk_note_graphics_submission(d);
     pthread_mutex_unlock(&d->queue_lock);
     if (vr == VK_SUCCESS) {
         vr = vkWaitForFences(d->device, 1, &fence, VK_TRUE, FLUX_DEFAULT_FRAME_TIMEOUT_NS);
+        if (vr == VK_SUCCESS && graphics_serial)
+            flux_vk_note_graphics_completed(d, graphics_serial);
         if (vr != VK_SUCCESS && vr != VK_ERROR_DEVICE_LOST) {
             VkResult wait_result = vr;
             pthread_mutex_lock(&d->queue_lock);
             VkResult idle = vkQueueWaitIdle(queue);
             pthread_mutex_unlock(&d->queue_lock);
+            if (idle == VK_SUCCESS && graphics_serial)
+                flux_vk_note_graphics_completed(d, graphics_serial);
             /* Preserve timeout/error semantics once completion is proven. If
              * idle itself fails, surface the stronger backend/device error. */
             vr = idle == VK_SUCCESS ? wait_result : idle;
@@ -143,6 +155,166 @@ VkResult flux_vk_new_transient_cmd(flux_device *d, uint32_t family, VkCommandPoo
 }
 
 /* ------------------------------------------------------------------ */
+/*  Staging buffer cache                                              */
+/* ------------------------------------------------------------------ */
+
+/* Total bytes the idle staging cache may hold before releases destroy
+ * instead of caching. 64 MiB bounds worst-case host memory pinned by
+ * idle staging while comfortably holding a few large texture uploads. */
+#define FLUX_VK_STAGING_CACHE_CAP (64ull * 1024 * 1024)
+
+static void staging_destroy(flux_device *d, flux_staging_buf *sb) {
+    if (!sb)
+        return;
+    if (sb->buffer)
+        vkDestroyBuffer(d->device, sb->buffer, nullptr);
+    if (sb->alloc.memory)
+        flux_vk_deallocate(d, &sb->alloc);
+    flux_internal_free(d, sb);
+}
+
+flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferUsageFlags usage,
+                                    flux_staging_buf **out) {
+    *out = NULL;
+
+    /* Smallest-fit idle entry with matching usage. */
+    pthread_mutex_lock(&d->staging_lock);
+    flux_staging_buf **best = NULL;
+    for (flux_staging_buf **pp = &d->staging_idle; *pp; pp = &(*pp)->next) {
+        if ((*pp)->usage != usage || (*pp)->capacity < size)
+            continue;
+        if (!best || (*pp)->capacity < (*best)->capacity)
+            best = pp;
+    }
+    if (best) {
+        flux_staging_buf *sb = *best;
+        *best = sb->next;
+        d->staging_idle_bytes -= sb->capacity;
+        pthread_mutex_unlock(&d->staging_lock);
+        sb->next = NULL;
+        *out = sb;
+        return FLUX_OK;
+    }
+    pthread_mutex_unlock(&d->staging_lock);
+
+    flux_staging_buf *sb = flux_internal_alloc(d, sizeof(*sb));
+    if (!sb)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    flux_result r = flux_vk_alloc_buffer(
+        d, size, usage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        /*wants_device_address=*/false, &sb->buffer, &sb->alloc);
+    if (r != FLUX_OK) {
+        flux_internal_free(d, sb);
+        return r;
+    }
+    sb->capacity = size;
+    sb->usage = usage;
+    sb->next = NULL;
+    char name[64];
+    snprintf(name, sizeof(name), "flux staging %llu KiB", (unsigned long long)(size >> 10));
+    flux_vk_set_name(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)sb->buffer, name);
+    *out = sb;
+    return FLUX_OK;
+}
+
+void flux_vk_staging_release(flux_device *d, flux_staging_buf *sb) {
+    if (!sb)
+        return;
+    pthread_mutex_lock(&d->staging_lock);
+    if (d->staging_idle_bytes + sb->capacity > FLUX_VK_STAGING_CACHE_CAP) {
+        pthread_mutex_unlock(&d->staging_lock);
+        staging_destroy(d, sb);
+        return;
+    }
+    sb->next = d->staging_idle;
+    d->staging_idle = sb;
+    d->staging_idle_bytes += sb->capacity;
+    pthread_mutex_unlock(&d->staging_lock);
+}
+
+void flux_vk_staging_pool_destroy(flux_device *d) {
+    flux_staging_buf *idle = d->staging_idle;
+    d->staging_idle = NULL;
+    d->staging_idle_bytes = 0;
+    while (idle) {
+        flux_staging_buf *next = idle->next;
+        staging_destroy(d, idle);
+        idle = next;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Upload batch (public flux_uploads_begin / flux_uploads_flush)     */
+/* ------------------------------------------------------------------ */
+
+void flux_vk_upload_batch_attach_staging(flux_device *d, flux_staging_buf *sb) {
+    sb->next = d->upload_batch_stagings;
+    d->upload_batch_stagings = sb;
+}
+
+flux_result flux_uploads_begin(flux_device *d) {
+    if (!d)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    pthread_mutex_lock(&d->upload_lock);
+    if (d->upload_batch_open) {
+        pthread_mutex_unlock(&d->upload_lock);
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "flux_uploads_begin: a batch is already open");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    /* Batches always record on the graphics queue: same-queue implicit
+     * ordering against in-flight frames is what makes live-image
+     * updates safe, and it needs no QFOT dance. */
+    VkResult vr = flux_vk_new_transient_cmd(d, d->graphics_family, &d->upload_batch_pool,
+                                            &d->upload_batch_cmd);
+    if (vr != VK_SUCCESS) {
+        pthread_mutex_unlock(&d->upload_lock);
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "upload batch cmd alloc failed", vr);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+    d->upload_batch_open = true;
+    pthread_mutex_unlock(&d->upload_lock);
+    return FLUX_OK;
+}
+
+flux_result flux_uploads_flush(flux_device *d) {
+    if (!d)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    pthread_mutex_lock(&d->upload_lock);
+    if (!d->upload_batch_open) {
+        pthread_mutex_unlock(&d->upload_lock);
+        return FLUX_OK;
+    }
+    VkCommandBuffer cmd = d->upload_batch_cmd;
+    VkResult vr = vkEndCommandBuffer(cmd);
+    if (vr == VK_SUCCESS)
+        vr = flux_vk_submit_one_shot_and_wait(d, cmd);
+
+    vkDestroyCommandPool(d->device, d->upload_batch_pool, nullptr);
+    d->upload_batch_pool = VK_NULL_HANDLE;
+    d->upload_batch_cmd = VK_NULL_HANDLE;
+    d->upload_batch_open = false;
+
+    /* The fence wait proved the GPU is done reading every staging
+     * buffer: hand them all back to the cache. */
+    flux_staging_buf *sb = d->upload_batch_stagings;
+    d->upload_batch_stagings = NULL;
+    pthread_mutex_unlock(&d->upload_lock);
+    while (sb) {
+        flux_staging_buf *next = sb->next;
+        sb->next = NULL;
+        flux_vk_staging_release(d, sb);
+        sb = next;
+    }
+
+    if (vr != VK_SUCCESS) {
+        flux_result r = submit_result(vr);
+        FLUX_FAIL_VK(r, "upload batch submit failed", vr);
+        return r;
+    }
+    return FLUX_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /*  One-shot buffer upload                                            */
 /* ------------------------------------------------------------------ */
 
@@ -151,31 +323,40 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
     if (size == 0)
         return FLUX_OK;
 
-    VkBuffer staging = VK_NULL_HANDLE;
-    flux_vk_alloc staging_alloc = {0};
+    flux_staging_buf *staging = NULL;
     VkCommandPool xfer_pool = VK_NULL_HANDLE;
     VkCommandBuffer xfer_cmd = VK_NULL_HANDLE;
     VkCommandPool gfx_pool = VK_NULL_HANDLE;
     VkCommandBuffer gfx_cmd = VK_NULL_HANDLE;
     VkSemaphore handoff = VK_NULL_HANDLE;
     VkResult vr = VK_SUCCESS;
-    flux_result r = flux_vk_alloc_buffer(d, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                         /*wants_device_address=*/false, &staging, &staging_alloc);
+    flux_result r = flux_vk_staging_acquire(d, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &staging);
     if (r != FLUX_OK)
         return r;
 
     /* HOST_VISIBLE staging buffers are always pre-mapped by the
      * allocator (one mapping per VkDeviceMemory, set at block-create
      * time). If this is NULL the allocator invariant is broken. */
-    if (!staging_alloc.mapped) {
+    if (!staging->alloc.mapped) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE,
                   "staging allocation came back un-mapped (allocator invariant violated)");
         vr = VK_ERROR_UNKNOWN;
         goto fail;
     }
-    memcpy(staging_alloc.mapped, data, size);
+    memcpy(staging->alloc.mapped, data, size);
+
+    /* Batch mode: record into the open batch and return. The staging
+     * buffer stays checked out (chained on the batch) until flush's
+     * fence wait proves the GPU is done reading it. */
+    pthread_mutex_lock(&d->upload_lock);
+    if (d->upload_batch_open) {
+        VkBufferCopy region = {.srcOffset = 0, .dstOffset = offset, .size = size};
+        vkCmdCopyBuffer(d->upload_batch_cmd, staging->buffer, dst, 1, &region);
+        flux_vk_upload_batch_attach_staging(d, staging);
+        pthread_mutex_unlock(&d->upload_lock);
+        return FLUX_OK;
+    }
+    pthread_mutex_unlock(&d->upload_lock);
 
     bool use_xfer = flux_vk_prefer_transfer_queue(d);
 
@@ -187,7 +368,7 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
     }
 
     VkBufferCopy region = {.srcOffset = 0, .dstOffset = offset, .size = size};
-    vkCmdCopyBuffer(xfer_cmd, staging, dst, 1, &region);
+    vkCmdCopyBuffer(xfer_cmd, staging->buffer, dst, 1, &region);
 
     if (use_xfer) {
         /* Release ownership transfer-family -> graphics-family. */
@@ -278,10 +459,9 @@ fail:
         vkDestroyCommandPool(d->device, gfx_pool, nullptr);
     if (xfer_pool)
         vkDestroyCommandPool(d->device, xfer_pool, nullptr);
-    if (staging)
-        vkDestroyBuffer(d->device, staging, nullptr);
-    if (staging_alloc.memory)
-        flux_vk_deallocate(d, &staging_alloc);
+    /* submit_and_wait proved the GPU is done with the staging buffer,
+     * so it goes straight back to the cache on success and failure. */
+    flux_vk_staging_release(d, staging);
     return submit_result(vr);
 }
 
@@ -289,34 +469,97 @@ fail:
 /*  One-shot image upload                                             */
 /* ------------------------------------------------------------------ */
 
+/* Record the complete single-queue upload for one image into `cmd`:
+ * old_layout -> TRANSFER_DST, buffer->image copy, TRANSFER_DST ->
+ * SHADER_READ_ONLY. srcAccess covers prior shader reads when updating
+ * an already-sampled image. Shared by the synchronous graphics-queue
+ * path and by upload batches (which always record graphics-side). */
+static void record_image_upload(VkCommandBuffer cmd, VkBuffer staging, VkImage dst, int32_t ox,
+                                int32_t oy, uint32_t w, uint32_t h, VkImageLayout old_layout) {
+    bool from_shader = old_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkImageMemoryBarrier2 pre = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = from_shader ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+                                    : VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        .srcAccessMask = from_shader ? VK_ACCESS_2_SHADER_SAMPLED_READ_BIT : 0,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .oldLayout = old_layout,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .image = dst,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                           .imageMemoryBarrierCount = 1,
+                           .pImageMemoryBarriers = &pre};
+    vkCmdPipelineBarrier2(cmd, &di);
+
+    VkBufferImageCopy region = {
+        .bufferOffset = 0,
+        .imageSubresource =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        .imageOffset = {ox, oy, 0},
+        .imageExtent = {w, h, 1},
+    };
+    vkCmdCopyBufferToImage(cmd, staging, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    VkImageMemoryBarrier2 post = pre;
+    post.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    post.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    post.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    post.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+    post.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    post.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    di.pImageMemoryBarriers = &post;
+    vkCmdPipelineBarrier2(cmd, &di);
+}
+
 flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_x, int32_t offset_y,
                                     uint32_t width, uint32_t height, VkImageLayout old_layout,
                                     const void *data, size_t bytes) {
     if (bytes == 0)
         return FLUX_OK;
 
-    VkBuffer staging = VK_NULL_HANDLE;
-    flux_vk_alloc staging_alloc = {0};
+    flux_staging_buf *staging = NULL;
     VkCommandPool xfer_pool = VK_NULL_HANDLE;
     VkCommandBuffer xfer_cmd = VK_NULL_HANDLE;
     VkCommandPool gfx_pool = VK_NULL_HANDLE;
     VkCommandBuffer gfx_cmd = VK_NULL_HANDLE;
     VkSemaphore handoff = VK_NULL_HANDLE;
     VkResult vr = VK_SUCCESS;
-    flux_result r = flux_vk_alloc_buffer(d, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                         /*wants_device_address=*/false, &staging, &staging_alloc);
+    flux_result r = flux_vk_staging_acquire(d, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &staging);
     if (r != FLUX_OK)
         return r;
 
-    if (!staging_alloc.mapped) {
+    if (!staging->alloc.mapped) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE,
                   "image staging allocation came back un-mapped (allocator invariant violated)");
         vr = VK_ERROR_UNKNOWN;
         goto fail;
     }
-    memcpy(staging_alloc.mapped, data, bytes);
+    memcpy(staging->alloc.mapped, data, bytes);
+
+    /* Batch mode: record the full single-queue sequence into the open
+     * batch; the staging buffer stays checked out until flush. */
+    pthread_mutex_lock(&d->upload_lock);
+    if (d->upload_batch_open) {
+        record_image_upload(d->upload_batch_cmd, staging->buffer, dst, offset_x, offset_y, width,
+                            height, old_layout);
+        flux_vk_upload_batch_attach_staging(d, staging);
+        pthread_mutex_unlock(&d->upload_lock);
+        return FLUX_OK;
+    }
+    pthread_mutex_unlock(&d->upload_lock);
 
     /* When the image is already SHADER_READ_ONLY_OPTIMAL we're updating
      * a resource that may still be sampled by an in-flight frame on the
@@ -341,18 +584,18 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
         goto fail;
     }
 
-    /* On the transfer/graphics command buffer: old_layout -> TRANSFER_DST,
-     * copy, then either TRANSFER_DST -> SHADER_READ_ONLY (single-queue)
-     * or TRANSFER_DST release-ownership barrier (dual-queue path). The
-     * srcAccessMask covers prior shader reads when updating an
-     * already-sampled image. */
-    {
-        bool from_shader = old_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkImageMemoryBarrier2 b = {
+    /* Record the copy sequence: dual-queue (transfer + QFOT) for initial
+     * uploads when a dedicated transfer queue exists, otherwise the
+     * single-queue sequence shared with the batch path. */
+    if (use_xfer) {
+        /* old_layout -> TRANSFER_DST, copy, then the release-ownership
+         * barrier; the matching acquire (+ final transition to
+         * SHADER_READ_ONLY) is recorded on the graphics queue. This
+         * path only runs for old_layout == UNDEFINED. */
+        VkImageMemoryBarrier2 pre = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = from_shader ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
-                                        : VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-            .srcAccessMask = from_shader ? VK_ACCESS_2_SHADER_SAMPLED_READ_BIT : 0,
+            .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+            .srcAccessMask = 0,
             .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
             .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .oldLayout = old_layout,
@@ -367,29 +610,24 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
         };
         VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
                                .imageMemoryBarrierCount = 1,
-                               .pImageMemoryBarriers = &b};
+                               .pImageMemoryBarriers = &pre};
         vkCmdPipelineBarrier2(xfer_cmd, &di);
-    }
 
-    VkBufferImageCopy region = {
-        .bufferOffset = 0,
-        .imageSubresource =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .mipLevel = 0,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-        .imageOffset = {offset_x, offset_y, 0},
-        .imageExtent = {width, height, 1},
-    };
-    vkCmdCopyBufferToImage(xfer_cmd, staging, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                           &region);
+        VkBufferImageCopy region = {
+            .bufferOffset = 0,
+            .imageSubresource =
+                {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .mipLevel = 0,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+            .imageOffset = {offset_x, offset_y, 0},
+            .imageExtent = {width, height, 1},
+        };
+        vkCmdCopyBufferToImage(xfer_cmd, staging->buffer, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               1, &region);
 
-    if (use_xfer) {
-        /* Release-ownership barrier on the transfer queue. The
-         * matching acquire (+ final layout transition to
-         * SHADER_READ_ONLY) is recorded on the graphics queue. */
         VkImageMemoryBarrier2 rel = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
@@ -408,32 +646,11 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
                     .layerCount = 1,
                 },
         };
-        VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                               .imageMemoryBarrierCount = 1,
-                               .pImageMemoryBarriers = &rel};
+        di.pImageMemoryBarriers = &rel;
         vkCmdPipelineBarrier2(xfer_cmd, &di);
     } else {
-        /* Single-queue path: also transition to SHADER_READ_ONLY here. */
-        VkImageMemoryBarrier2 b = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
-            .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .image = dst,
-            .subresourceRange =
-                {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .levelCount = 1,
-                    .layerCount = 1,
-                },
-        };
-        VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                               .imageMemoryBarrierCount = 1,
-                               .pImageMemoryBarriers = &b};
-        vkCmdPipelineBarrier2(xfer_cmd, &di);
+        record_image_upload(xfer_cmd, staging->buffer, dst, offset_x, offset_y, width, height,
+                            old_layout);
     }
 
     vr = vkEndCommandBuffer(xfer_cmd);
@@ -510,10 +727,7 @@ fail:
         vkDestroyCommandPool(d->device, gfx_pool, nullptr);
     if (xfer_pool)
         vkDestroyCommandPool(d->device, xfer_pool, nullptr);
-    if (staging)
-        vkDestroyBuffer(d->device, staging, nullptr);
-    if (staging_alloc.memory)
-        flux_vk_deallocate(d, &staging_alloc);
+    flux_vk_staging_release(d, staging);
     return submit_result(vr);
 }
 
@@ -521,11 +735,48 @@ fail:
 /*  One-shot layout transition                                        */
 /* ------------------------------------------------------------------ */
 
+/* Record one layout-transition barrier into `cmd`. Shared by the
+ * one-shot path and by upload batches. */
+static void record_layout_transition(VkCommandBuffer cmd, VkImage img, VkImageLayout old_layout,
+                                     VkImageLayout new_layout) {
+    VkImageMemoryBarrier2 b = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        .srcAccessMask = 0,
+        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        .oldLayout = old_layout,
+        .newLayout = new_layout,
+        .image = img,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    VkDependencyInfo di = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &b,
+    };
+    vkCmdPipelineBarrier2(cmd, &di);
+}
+
 flux_result flux_vk_transition_image_layout(flux_device *d, VkImage img, VkImageLayout old_layout,
                                             VkImageLayout new_layout) {
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkResult vr;
+
+    /* Batch mode: record the barrier and return; flush submits it. */
+    pthread_mutex_lock(&d->upload_lock);
+    if (d->upload_batch_open) {
+        record_layout_transition(d->upload_batch_cmd, img, old_layout, new_layout);
+        pthread_mutex_unlock(&d->upload_lock);
+        return FLUX_OK;
+    }
+    pthread_mutex_unlock(&d->upload_lock);
 
     VkCommandPoolCreateInfo pci = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -558,28 +809,7 @@ flux_result flux_vk_transition_image_layout(flux_device *d, VkImage img, VkImage
         goto fail;
     }
 
-    VkImageMemoryBarrier2 b = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        .srcAccessMask = 0,
-        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-        .oldLayout = old_layout,
-        .newLayout = new_layout,
-        .image = img,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    VkDependencyInfo di = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &b,
-    };
-    vkCmdPipelineBarrier2(cmd, &di);
+    record_layout_transition(cmd, img, old_layout, new_layout);
 
     vr = vkEndCommandBuffer(cmd);
     if (vr != VK_SUCCESS) {

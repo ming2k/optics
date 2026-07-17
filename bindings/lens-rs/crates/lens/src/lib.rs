@@ -34,8 +34,8 @@ mod types;
 
 pub use input::{key, mods, Input, MouseButton};
 pub use types::{
-    Align, Color, Icon, LayoutOpts, OverlayOpts, Rect, Response, TabStyle, TableColumn, TableOpts,
-    TableResult, TabsOpts, TextMetrics, Theme,
+    Align, Color, CursorHint, Icon, LayoutOpts, OverlayOpts, Rect, Response, TabStyle, TableColumn,
+    TableOpts, TableResult, TabsOpts, TextMetrics, Theme,
 };
 
 /// The retained UI context. Owns the persistent tree, layout, and draw list.
@@ -171,6 +171,21 @@ impl Ui {
         unsafe { sys::lens_anim_pending(self.raw as *const sys::lens) }
     }
 
+    /// Accessibility reduced-motion switch. While enabled, every eased value
+    /// resolves to its target within one frame — no fades or slides — and
+    /// [`Ui::anim_pending`] stays false. The host owns the policy (user
+    /// preference); lens executes it. Default false.
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        // SAFETY: raw is a live context.
+        unsafe { sys::lens_set_reduced_motion(self.raw, reduced) };
+    }
+
+    /// Whether reduced motion is currently enabled.
+    pub fn reduced_motion(&self) -> bool {
+        // SAFETY: raw is a live context; the call only reads state.
+        unsafe { sys::lens_reduced_motion(self.raw as *const sys::lens) }
+    }
+
     // ---- clipboard & IME (host side, ADR-0013) ----------------------------
 
     /// Caret rect of the focused text widget, in UI-space; zero-sized when no
@@ -302,6 +317,28 @@ impl Frame {
         // SAFETY: matched lens_column_ex / lens_close.
         unsafe { sys::lens_close(self.ui) };
         r
+    }
+
+    /// A composable row whose complete bounds form one button interaction
+    /// target. Children are presentation only; hover, focus, press, and click
+    /// are reported by the returned [`Response`] for the row as a whole.
+    pub fn pressable_row<R>(
+        &mut self,
+        id: &str,
+        label: &str,
+        opts: &LayoutOpts,
+        body: impl FnOnce(&mut Frame, Response) -> R,
+    ) -> (Response, R) {
+        let id = cstr(id);
+        let label = cstr(label);
+        // SAFETY: ui is live and both strings outlive this call.
+        let response = Response::from_raw(unsafe {
+            sys::lens_pressable_begin(self.ui, id.as_ptr(), label.as_ptr(), opts.to_raw())
+        });
+        let result = body(self, response);
+        // SAFETY: matched lens_pressable_begin.
+        unsafe { sys::lens_pressable_end(self.ui) };
+        (response, result)
     }
 
     /// A collapsing header. Returns `true` while expanded; put the body inside
@@ -452,6 +489,28 @@ impl Frame {
                 badge.as_ptr(),
                 glyph_size.max(1.0),
                 active,
+            )
+        }
+    }
+
+    /// A checkable rounded icon button that swaps its glyph instead of
+    /// painting a persistent selected background. The checked glyph uses the
+    /// theme accent; hover feedback remains visible.
+    pub fn icon_toggle_button(
+        &mut self,
+        unchecked_icon: Icon,
+        checked_icon: Icon,
+        glyph_size: f32,
+        checked: bool,
+    ) -> bool {
+        // SAFETY: ui is live and both icon IDs are generated Lens values.
+        unsafe {
+            sys::lens_icon_toggle_button(
+                self.ui,
+                unchecked_icon.raw(),
+                checked_icon.raw(),
+                glyph_size.max(1.0),
+                checked,
             )
         }
     }
@@ -670,6 +729,13 @@ impl Frame {
     pub fn response(&self) -> Response {
         // SAFETY: ui is live; the call only reads state.
         Response::from_raw(unsafe { sys::lens_get_response(self.ui as *const sys::lens) })
+    }
+
+    /// Cursor intent accumulated from hovered widgets built so far. Read this
+    /// once after building the frame and pass it to the windowing host.
+    pub fn cursor_hint(&self) -> CursorHint {
+        // SAFETY: ui is live; the call only reads state.
+        CursorHint::from_raw(unsafe { sys::lens_get_cursor_hint(self.ui as *const sys::lens) })
     }
 
     /// Open the overlay keyed by `id` (retained until closed).

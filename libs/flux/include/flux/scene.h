@@ -55,6 +55,10 @@ typedef struct flux_mesh_desc {
 FLUX_NODISCARD FLUX_API flux_result flux_mesh_create(flux_device *d, const flux_mesh_desc *desc,
                                                      flux_mesh **out);
 FLUX_NODISCARD FLUX_API flux_mesh *flux_mesh_retain(flux_mesh *m);
+/* Destruction is deferred: a released mesh's vertex/index buffers may
+ * still be bound by in-flight frames, so they are destroyed by the
+ * device retire queue only after the GPU provably passed every batch
+ * that could reference them. */
 FLUX_API void flux_mesh_release(flux_mesh *m);
 
 /* ------------------------------------------------------------------ */

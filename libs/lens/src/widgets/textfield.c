@@ -135,6 +135,8 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
 
     /* ---- Interaction ----------------------------------------------- */
     lens_response r = lensi_interact(ui, n, true, disabled);
+    if (r.hovered)
+        ui->cursor_hint = LENS_CURSOR_TEXT;
     bool changed = false;
 
     if (!disabled && r.focused && buf && buf_cap > 1) {

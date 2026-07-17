@@ -149,11 +149,24 @@ static bool block_try_alloc(flux_vk_block *b, VkDeviceSize size, VkDeviceSize al
 /*  Block lifecycle                                                   */
 /* ------------------------------------------------------------------ */
 
+/* Map a vkAllocateMemory / vkMapMemory failure to a flux_result. GPU
+ * and host OOM both surface as FLUX_ERROR_OUT_OF_MEMORY so callers can
+ * react (reclaim, retry, evict) instead of seeing a generic backend
+ * fault; anything else stays BACKEND_FAILURE. */
+static flux_result result_from_vk_memory_failure(VkResult vr) {
+    if (vr == VK_ERROR_OUT_OF_DEVICE_MEMORY || vr == VK_ERROR_OUT_OF_HOST_MEMORY)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    return FLUX_ERROR_BACKEND_FAILURE;
+}
+
 static flux_vk_block *block_create(flux_device *d, uint32_t memory_type, VkDeviceSize size,
-                                   bool is_image_pool, bool has_dev_addr, bool host_visible) {
+                                   bool is_image_pool, bool has_dev_addr, bool host_visible,
+                                   flux_result *err) {
     flux_vk_block *b = calloc(1, sizeof(*b));
-    if (!b)
+    if (!b) {
+        *err = FLUX_ERROR_OUT_OF_MEMORY;
         return NULL;
+    }
     b->size = size;
     b->memory_type = memory_type;
     b->is_image_pool = is_image_pool;
@@ -171,7 +184,8 @@ static flux_vk_block *block_create(flux_device *d, uint32_t memory_type, VkDevic
     };
     VkResult vr = vkAllocateMemory(d->device, &mai, NULL, &b->memory);
     if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkAllocateMemory (pool block) failed", vr);
+        *err = result_from_vk_memory_failure(vr);
+        FLUX_FAIL_VK(*err, "vkAllocateMemory (pool block) failed", vr);
         free(b);
         return NULL;
     }
@@ -179,7 +193,8 @@ static flux_vk_block *block_create(flux_device *d, uint32_t memory_type, VkDevic
     if (host_visible) {
         vr = vkMapMemory(d->device, b->memory, 0, VK_WHOLE_SIZE, 0, &b->mapped);
         if (vr != VK_SUCCESS) {
-            FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkMapMemory (pool block) failed", vr);
+            *err = result_from_vk_memory_failure(vr);
+            FLUX_FAIL_VK(*err, "vkMapMemory (pool block) failed", vr);
             vkFreeMemory(d->device, b->memory, NULL);
             free(b);
             return NULL;
@@ -189,12 +204,18 @@ static flux_vk_block *block_create(flux_device *d, uint32_t memory_type, VkDevic
     /* One free range covering the whole block. */
     b->free_list = range_new(0, size);
     if (!b->free_list) {
+        *err = FLUX_ERROR_OUT_OF_MEMORY;
         if (b->mapped)
             vkUnmapMemory(d->device, b->memory);
         vkFreeMemory(d->device, b->memory, NULL);
         free(b);
         return NULL;
     }
+    char name[80];
+    snprintf(name, sizeof(name), "flux pool block #%u (%s mt=%u %llu MiB)",
+             d->mem_allocator.block_seq++, is_image_pool ? "image" : "buffer", memory_type,
+             (unsigned long long)(size >> 20));
+    flux_vk_set_name(d, VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)b->memory, name);
     return b;
 }
 
@@ -307,30 +328,48 @@ static uint32_t pick_memory_type(flux_device *d, uint32_t type_filter,
 }
 
 static flux_result do_dedicated(flux_device *d, VkDeviceSize size, uint32_t memory_type,
-                                bool wants_device_address, bool host_visible, flux_vk_alloc *out) {
+                                bool wants_device_address, bool host_visible,
+                                const flux_vk_dedication *ded, flux_vk_alloc *out) {
+    /* Chain order: [VkMemoryDedicatedAllocateInfo] -> [FlagsInfo] ->
+     * MemoryAllocateInfo. The dedicated-info struct is only chained when
+     * it names a real resource — both handles null is a VUID violation. */
+    VkMemoryDedicatedAllocateInfo dai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
+        .buffer = ded ? ded->buffer : VK_NULL_HANDLE,
+        .image = ded ? ded->image : VK_NULL_HANDLE,
+    };
     VkMemoryAllocateFlagsInfo afi = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
         .flags = wants_device_address ? VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT : 0,
     };
+    const void *chain = NULL;
+    if (dai.buffer != VK_NULL_HANDLE || dai.image != VK_NULL_HANDLE)
+        chain = &dai;
+    if (wants_device_address) {
+        afi.pNext = chain;
+        chain = &afi;
+    }
     VkMemoryAllocateInfo mai = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = wants_device_address ? &afi : NULL,
+        .pNext = chain,
         .allocationSize = size,
         .memoryTypeIndex = memory_type,
     };
     VkDeviceMemory mem = VK_NULL_HANDLE;
     VkResult vr = vkAllocateMemory(d->device, &mai, NULL, &mem);
     if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkAllocateMemory (dedicated) failed", vr);
-        return FLUX_ERROR_BACKEND_FAILURE;
+        flux_result err = result_from_vk_memory_failure(vr);
+        FLUX_FAIL_VK(err, "vkAllocateMemory (dedicated) failed", vr);
+        return err;
     }
     void *mapped = NULL;
     if (host_visible) {
         vr = vkMapMemory(d->device, mem, 0, VK_WHOLE_SIZE, 0, &mapped);
         if (vr != VK_SUCCESS) {
-            FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkMapMemory (dedicated) failed", vr);
+            flux_result err = result_from_vk_memory_failure(vr);
+            FLUX_FAIL_VK(err, "vkMapMemory (dedicated) failed", vr);
             vkFreeMemory(d->device, mem, NULL);
-            return FLUX_ERROR_BACKEND_FAILURE;
+            return err;
         }
     }
     out->memory = mem;
@@ -338,12 +377,41 @@ static flux_result do_dedicated(flux_device *d, VkDeviceSize size, uint32_t memo
     out->size = size;
     out->mapped = mapped;
     out->block = NULL;
+    char name[80];
+    snprintf(name, sizeof(name), "flux dedicated %llu KiB (mt=%u)",
+             (unsigned long long)(size >> 10), memory_type);
+    flux_vk_set_name(d, VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)mem, name);
     return FLUX_OK;
 }
 
+/* Best-effort heap usage/budget query for `heap_index`, via
+ * VK_EXT_memory_budget. Returns false when the extension is absent so
+ * callers can skip budget-aware behaviour entirely. */
+static bool query_heap_budget(const flux_device *d, uint32_t heap_index, VkDeviceSize *usage,
+                              VkDeviceSize *budget) {
+    if (!d->mem_allocator.has_memory_budget || heap_index >= VK_MAX_MEMORY_HEAPS)
+        return false;
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT bp = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT,
+    };
+    VkPhysicalDeviceMemoryProperties2 mp2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
+        .pNext = &bp,
+    };
+    vkGetPhysicalDeviceMemoryProperties2(d->physical_device, &mp2);
+    *usage = bp.heapUsage[heap_index];
+    *budget = bp.heapBudget[heap_index];
+    return true;
+}
+
+/* Destroy every empty block, returning its memory to the driver.
+ * a->lock must be held. Defined after block_is_reclaimable below. */
+static uint32_t reclaim_locked(flux_device *d);
+
 flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
                              VkMemoryPropertyFlags wanted_flags, bool is_image,
-                             bool wants_device_address, flux_vk_alloc *out) {
+                             bool wants_device_address, const flux_vk_dedication *dedication,
+                             flux_vk_alloc *out) {
     if (!d || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = (flux_vk_alloc){0};
@@ -364,9 +432,23 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
     flux_vk_allocator *a = &d->mem_allocator;
     pthread_mutex_lock(&a->lock);
 
-    /* Dedicated path for oversize. */
-    if (size >= FLUX_VK_DEDICATED_THRESH) {
-        flux_result r = do_dedicated(d, size, mt, wants_device_address, host_visible, out);
+    /* Dedicated path: oversize requests; any resource the driver marks
+     * requiresDedicated (mandatory — pooling would be a spec violation);
+     * or prefersDedicated above the small-size floor (driver knows best
+     * for big resources, but small ones stay pooled to protect the
+     * vkAllocateMemory count). */
+    bool force_dedicated =
+        dedication && (dedication->required ||
+                       (dedication->preferred && size >= FLUX_VK_PREFER_DEDICATED_MIN));
+    if (force_dedicated || size >= FLUX_VK_DEDICATED_THRESH) {
+        flux_result r =
+            do_dedicated(d, size, mt, wants_device_address, host_visible, dedication, out);
+        if (r == FLUX_ERROR_OUT_OF_MEMORY && reclaim_locked(d) > 0) {
+            /* Empty pool blocks may be sitting on the memory this
+             * request needs: hand them back to the driver and retry
+             * once before declaring OOM. */
+            r = do_dedicated(d, size, mt, wants_device_address, host_visible, dedication, out);
+        }
         if (r == FLUX_OK) {
             a->bytes_in_use += size;
             a->bytes_reserved += size;
@@ -406,11 +488,31 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
          * unmapped block. */
         bool block_is_host_visible =
             (d->mem_props.memoryTypes[mt].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
-        target =
-            block_create(d, mt, block_size, is_image, wants_device_address, block_is_host_visible);
+        /* Budget gate: when a fresh block would push the heap past its
+         * driver-advertised budget, hand empty blocks back to the
+         * driver before asking for more. The definitive failure still
+         * comes from vkAllocateMemory if the driver cannot satisfy the
+         * request — the budget is a hint, not a hard limit. */
+        bool reclaimed = false;
+        VkDeviceSize usage = 0, budget = 0;
+        uint32_t heap = d->mem_props.memoryTypes[mt].heapIndex;
+        if (query_heap_budget(d, heap, &usage, &budget) &&
+            (usage >= budget || block_size > budget - usage)) {
+            reclaim_locked(d);
+            reclaimed = true;
+        }
+        flux_result err = FLUX_ERROR_OUT_OF_MEMORY;
+        target = block_create(d, mt, block_size, is_image, wants_device_address,
+                              block_is_host_visible, &err);
+        if (!target && !reclaimed && reclaim_locked(d) > 0) {
+            /* The failure may be nothing more than empty blocks of a
+             * different key holding memory: reclaim and retry once. */
+            target = block_create(d, mt, block_size, is_image, wants_device_address,
+                                  block_is_host_visible, &err);
+        }
         if (!target) {
             pthread_mutex_unlock(&a->lock);
-            return FLUX_ERROR_OUT_OF_MEMORY;
+            return err;
         }
         target->next = a->blocks;
         a->blocks = target;
@@ -553,12 +655,8 @@ void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc) {
     pthread_mutex_unlock(&a->lock);
 }
 
-uint32_t flux_vk_allocator_reclaim(flux_device *d) {
-    if (!d)
-        return 0;
+static uint32_t reclaim_locked(flux_device *d) {
     flux_vk_allocator *a = &d->mem_allocator;
-    pthread_mutex_lock(&a->lock);
-
     uint32_t reclaimed = 0;
     flux_vk_block **pp = &a->blocks;
     while (*pp) {
@@ -574,6 +672,57 @@ uint32_t flux_vk_allocator_reclaim(flux_device *d) {
             pp = &b->next;
         }
     }
+    return reclaimed;
+}
+
+uint32_t flux_vk_allocator_reclaim(flux_device *d) {
+    if (!d)
+        return 0;
+    flux_vk_allocator *a = &d->mem_allocator;
+    pthread_mutex_lock(&a->lock);
+    uint32_t reclaimed = reclaim_locked(d);
     pthread_mutex_unlock(&a->lock);
     return reclaimed;
+}
+
+void flux_vk_allocator_note_external(flux_device *d, VkDeviceSize bytes) {
+    flux_vk_allocator *a = &d->mem_allocator;
+    pthread_mutex_lock(&a->lock);
+    a->bytes_in_use += bytes;
+    a->bytes_reserved += bytes;
+    a->live_allocations++;
+    pthread_mutex_unlock(&a->lock);
+}
+
+void flux_vk_allocator_unnote_external(flux_device *d, VkDeviceSize bytes) {
+    flux_vk_allocator *a = &d->mem_allocator;
+    pthread_mutex_lock(&a->lock);
+    if (a->live_allocations == 0 || bytes > a->bytes_in_use) {
+        if (d->log) {
+            d->log(FLUX_LOG_ERROR, "flux", 0, "%s",
+                   "flux_vk_allocator_unnote_external: rejected (would underflow)", d->log_user);
+        }
+        pthread_mutex_unlock(&a->lock);
+        return;
+    }
+    a->bytes_in_use -= bytes;
+    a->bytes_reserved -= bytes;
+    a->live_allocations--;
+    pthread_mutex_unlock(&a->lock);
+}
+
+void flux_device_memory_stats(const flux_device *d, flux_memory_stats *out) {
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
+    if (!d)
+        return;
+    flux_vk_allocator *a = (flux_vk_allocator *)&d->mem_allocator;
+    pthread_mutex_lock(&a->lock);
+    out->bytes_in_use = a->bytes_in_use;
+    out->bytes_reserved = a->bytes_reserved;
+    out->lost_ranges_bytes = a->lost_ranges_bytes;
+    out->live_allocations = a->live_allocations;
+    out->live_blocks = a->live_blocks;
+    pthread_mutex_unlock(&a->lock);
 }

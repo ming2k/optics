@@ -173,6 +173,8 @@ void lens_split_end(lens *ui) {
 
     /* Draw the handle strip, positioned at the divider (prev_rect space). */
     bool hov = over_handle || st->dragging;
+    if (hov)
+        ui->cursor_hint = vertical ? LENS_CURSOR_RESIZE_EW : LENS_CURSOR_RESIZE_NS;
     flux_color hc = hov ? t->color_active : t->color_border;
     if (split->has_prev) {
         if (vertical) {
@@ -197,7 +199,7 @@ void lens_split_end(lens *ui) {
     snprintf(val, sizeof val, "%.2f", st->ratio);
     lensi_node_semantics(ui, split, LENS_ROLE_SLIDER, "split", val, 0);
 
-    /* Record a response so the host can set a resize cursor. */
+    /* Record the interaction response for callers that need the handle state. */
     ui->last_response = (lens_response){
         .id = split->id, .rect = split->prev_rect, .hovered = hov, .pressed = st->dragging};
 

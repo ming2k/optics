@@ -39,6 +39,10 @@ or report through `flux_get_last_error` as noted.
 | `flux_device_alloc` | Allocates `bytes` through the device's caller-supplied allocator. Use in peer code instead of `malloc`. |
 | `flux_device_free` | Frees a pointer obtained from `flux_device_alloc`. |
 | `flux_device_memory_budget` | Fills a `flux_memory_budget` snapshot per heap. `has_budget_extension` reports whether `VK_EXT_memory_budget` data is live or totals are estimates. |
+| `flux_device_memory_stats` | Fills a `flux_memory_stats` snapshot of the GPU allocator: bytes in use vs reserved, live allocation/block counts, lost ranges. dma-buf imports/exports are included. Counters return to zero once all resources are released and the retire queue has drained. |
+| `flux_device_log` | Forwards a message to the device's `flux_log_fn`; `category` is a short filter tag. Sibling libraries (flux-text, …) use this instead of dereferencing the desc logger. |
+| `flux_uploads_begin` | Opens a batched-upload window: subsequent uploads from `flux_image_create`, `flux_image_update_region`, `flux_mesh_create`, `flux_buffer_create` (with `initial_data`) and layout transitions accumulate into one submission. Nested begin returns `FLUX_ERROR_INVALID_STATE`. |
+| `flux_uploads_flush` | Submits the open batch once and waits for completion; resources created in the batch are usable on return. No-op when no batch is open. `flux_surface_begin_frame` flushes automatically. |
 
 ### Buffer
 
@@ -71,6 +75,12 @@ or report through `flux_get_last_error` as noted.
 | `flux_surface_resize` | Stalls the device and rebuilds the swapchain (or offscreen images) at the new extent. In-flight `flux_frame` handles from this surface become invalid; an offscreen surface's prior contents are dropped. Returns `FLUX_ERROR_INVALID_ARGUMENT` when either dimension is 0. |
 | `flux_surface_get_info` | Fills a `flux_surface_info` (current extent, image count, whether the surface is actually HDR). |
 | `flux_surface_read_pixels` | Offscreen surfaces only: waits for the most recently submitted frame and copies it into `dst` as tightly packed RGBA8 (`width * height * 4` bytes minimum). Returns `FLUX_ERROR_UNSUPPORTED` on a windowed surface and `FLUX_ERROR_INVALID_STATE` before the first submitted frame. |
+| `flux_surface_exportable` | Reports whether an offscreen surface was created dma-buf-exportable (device had the external-memory extensions and a suitable DRM modifier was found). |
+| `flux_surface_export_dmabuf` | Offscreen exportable surfaces: exports the most recently submitted frame's image as a caller-owned dma-buf fd (zero-copy; waits for the frame's GPU work first). `FLUX_ERROR_UNSUPPORTED` on windowed/non-exportable surfaces, `FLUX_ERROR_INVALID_STATE` before the first submit. |
+| `flux_surface_export_dmabuf_explicit` | Like `flux_surface_export_dmabuf` but also exports a sync fd for explicit acquire synchronisation (no CPU-side GPU wait). Requires `VK_KHR_external_semaphore_fd`; once per submitted slot. |
+| `flux_surface_dmabuf_modifier` | Returns the DRM format modifier of an exportable surface's images. |
+| `flux_surface_dmabuf_stride` | Returns the row stride in bytes of an exportable surface's images. |
+| `flux_surface_last_slot` | Offscreen surfaces: frame slot of the most recently submitted frame (`0..frames_in_flight-1`), `UINT32_MAX` before the first submit; aligns a per-slot dma-buf pool with the next export. |
 
 ### Frame
 
@@ -186,6 +196,8 @@ rules.
 | `flux_device_vk_transfer_queue` | `VkQueue` (dedicated transfer, or the graphics queue when none exists) |
 | `flux_device_vk_transfer_family` | Transfer queue family index |
 | `flux_device_vk_pipeline_cache` | `VkPipelineCache` (in-memory; cross-session persistence via consumer hooks) |
+| `flux_device_vk_pipeline_cache_lock` | Locks the pipeline cache for external use; Vulkan requires external synchronisation per cache access. Always paired with the unlock on the same thread. |
+| `flux_device_vk_pipeline_cache_unlock` | Releases the pipeline-cache lock. |
 | `flux_buffer_vk_buffer` | `VkBuffer` |
 | `flux_buffer_device_address` | 64-bit buffer device address, or 0 when the buffer was created without `device_address` |
 | `flux_surface_vk_handle` | The `VkSurfaceKHR` the surface wraps |
@@ -197,6 +209,8 @@ rules.
 | `flux_frame_vk_transient_buffer` | The `VkBuffer` backing `flux_frame_alloc_transient` |
 | `flux_image_vk_image` | `VkImage` |
 | `flux_image_vk_image_view` | `VkImageView` |
+| `flux_target_vk_image` | Render-target `VkImage` |
+| `flux_target_vk_view` | Render-target `VkImageView` (for `flux_pass_attachment.view` / `flux_pass_depth_attachment.view`) |
 
 ### Format conversion
 
@@ -305,6 +319,10 @@ are `void`-returning; segments dropped on arena exhaustion are counted.
 | `flux_canvas_destroy` | Destroys the canvas and releases the surface reference. |
 | `flux_canvas_begin` | Binds the canvas to a frame; non-`NULL` `clear_color` clears the target, `NULL` loads it. |
 | `flux_canvas_end` | Ends the recording session; the canvas detaches from the frame. |
+| `flux_canvas_begin_frame` | Backend-agnostic pass bracket: binds the canvas to a GPU frame (from `flux_surface_begin_frame`) or, with `NULL`, starts a CPU-canvas pass. Same drawing code runs on either backend between begin/end. |
+| `flux_canvas_end_frame` | Ends a pass opened by `flux_canvas_begin_frame`. |
+| `flux_canvas_set_scale` | Sets the base content (device-pixel) scale of the canvas transform. |
+| `flux_canvas_get_scale` | Returns the effective scale of the active transform (base scale composed with any `flux_canvas_scale` on the stack). |
 | `flux_canvas_begin_target` | Begins an offscreen Canvas pass. The target chooses the render extent and may be smaller than the surface. |
 | `flux_canvas_end_target` | Ends an offscreen Canvas pass and makes its target sampleable. |
 | `flux_canvas_save` | Pushes the current state (transform + clip) onto the state stack. |
@@ -316,14 +334,31 @@ are `void`-returning; segments dropped on arena exhaustion are counted.
 | `flux_canvas_transform` | Appends an arbitrary `flux_mat3x2` to the current transform. |
 | `flux_canvas_fill_rect` | Fills a rectangle with a paint. |
 | `flux_canvas_fill_rect_color` | Fills a rectangle with a solid color, no paint struct needed. |
+| `flux_canvas_fill_rrect` | Fills a rounded rectangle (radius clamped to half the shorter side) with a solid premultiplied color. Axis-aligned under translation + uniform scale; prefer over `fill_path` for UI shapes. |
+| `flux_canvas_stroke_rrect` | Strokes a rounded-rectangle outline with a solid premultiplied color. |
 | `flux_canvas_fill_path` | Fills a path. Concave and multi-contour (holes) tessellate on the CPU; self-intersecting input falls back to GPU stencil-then-cover under the nonzero winding rule (ADR-0014). |
 | `flux_canvas_stroke_path` | Strokes a path using the paint's width, cap, join, and miter limit. |
 | `flux_canvas_draw_image` | Draws an image into `dst` with the default linear sampler; `optional_paint.color` modulates its premultiplied colour/opacity. Canvas affine transforms apply to the image quad. |
+| `flux_canvas_draw_image_sub` | Draws a source sub-rectangle of an image into `dst` (compositor `wp_viewport`-style source crop), no tint or coverage handling. |
 | `flux_canvas_draw_image_sampled` | Draws an image sampled through a caller-supplied `flux_sampler` (borrowed for the call). |
 | `flux_canvas_draw_image_coverage` | Draws an R8 image as alpha coverage multiplied by a premultiplied `tint` (glyph rendering). |
 | `flux_canvas_draw_image_coverage_sub` | Coverage draw from a normalized sub-rectangle of a glyph atlas. |
 | `flux_canvas_draw_glyph_run` | Draws a pre-shaped glyph run as one batched draw (ADR-0010): each `flux_glyph_quad` is a screen-space rect sampled from a texel sub-rect of the caller-owned R8 atlas, the `.r` channel multiplied by the quad's premultiplied tint. `sampler` is optional (`NULL` = canvas default; pass NEAREST for crisp blits). |
 | `flux_canvas_dropped_draws` | Cumulative draws dropped due to transient-ring exhaustion since canvas creation. Non-zero means the ring is too small for the workload. |
+| `flux_canvas_read_pixels` | Backend-polymorphic pixel access: CPU backend returns its framebuffer (with optional width/height/stride out-params); returns `NULL` on the GPU backend (use `flux_canvas_begin_target` + image readback instead). Buffer is canvas-owned. |
+
+## `<flux/canvas_cpu.h>`
+
+Software (CPU) backend for the canvas (ADR-0019); available iff the
+library was built with `-Dcanvas=true`. Same drawing API as the GPU
+canvas — image draws are silently ignored (no GPU-resident textures).
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_canvas_create_cpu` | Creates a headless CPU canvas with a `width`×`height` (physical pixels) framebuffer; `scale` is the content/device-pixel ratio. Destroy with `flux_canvas_destroy`. |
+| `flux_canvas_cpu_begin` | Begins a recording pass, clearing to `clear` (premultiplied; `NULL` = fully transparent). CPU analogue of `flux_canvas_begin` — no frame needed. |
+| `flux_canvas_cpu_end` | Ends the recording pass; pixels are resolved in the framebuffer. |
+| `flux_canvas_cpu_pixels` | Returns the premultiplied-RGBA8 framebuffer (tightly packed, canvas-owned, refreshed per call). `NULL` if the canvas is not a CPU canvas. |
 
 ## `<flux/dmabuf.h>`
 

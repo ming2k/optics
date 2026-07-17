@@ -234,6 +234,35 @@ int main(void) {
         EXPECT(total == N_THREADS * N_PER);
     }
 
+    /* --- leak gate + staging-cache steady state: two identical
+     *     create/settle rounds. Each upload advances the graphics serial
+     *     past every parked retire zombie (tags are serial+1) and its
+     *     fence wait sweeps them. Round 1 warms the staging cache; round
+     *     2 must reuse the cached staging buffer and sweep round 1's
+     *     zombie, landing on the exact same allocator counts. Any leak
+     *     in the churn above shows up as growth between the rounds. --- */
+    {
+        flux_image_desc desc = {
+            .type = FLUX_TYPE_IMAGE_DESC,
+            .width = 64,
+            .height = 64,
+            .format = FLUX_FORMAT_RGBA8_UNORM,
+        };
+        flux_image *img1 = NULL;
+        EXPECT(flux_image_create(d, &desc, &img1) == FLUX_OK);
+        flux_memory_stats s1;
+        flux_device_memory_stats(d, &s1);
+        flux_image_release(img1);
+
+        flux_image *img2 = NULL;
+        EXPECT(flux_image_create(d, &desc, &img2) == FLUX_OK);
+        flux_memory_stats s2;
+        flux_device_memory_stats(d, &s2);
+        EXPECT(s2.live_allocations == s1.live_allocations);
+        EXPECT(s2.bytes_in_use == s1.bytes_in_use);
+        flux_image_release(img2);
+    }
+
     flux_device_release(d);
     TEST_SUMMARY();
 }

@@ -78,3 +78,72 @@ fn safe_radial_gradient_reaches_canvas_backend() {
     assert!(pixels[center] > 200, "gradient center should be red");
     assert!(pixels[corner] < 20, "gradient corner should fade to black");
 }
+
+#[test]
+fn radial_gradient_follows_canvas_transform() {
+    // Under a 2x canvas transform the gradient geometry must be evaluated in
+    // framebuffer pixel space: centre (32,32) radius 16 becomes centre (64,64)
+    // radius 32. Regression test for build_push copying gradient parameters
+    // without applying the canvas transform.
+    let c = Canvas::new_cpu(128, 128, 1.0).unwrap();
+    c.begin_cpu(Some(rgba(0, 0, 0, 255))).unwrap();
+    c.save();
+    c.scale(2.0, 2.0);
+    c.fill_rect_radial_gradient(
+        (0.0, 0.0, 64.0, 64.0),
+        (32.0, 32.0),
+        16.0,
+        &[
+            GradientStop::new(0.0, rgba(255, 64, 32, 255)),
+            GradientStop::new(1.0, rgba(255, 64, 32, 0)),
+        ],
+    );
+    c.restore();
+    c.end();
+    let (_, _, stride, pixels) = c.read_pixels().expect("CPU readback");
+    let scaled_center = 64 * stride as usize + 64 * 4;
+    let unscaled_center = 32 * stride as usize + 32 * 4;
+    assert!(
+        pixels[scaled_center] > 200,
+        "gradient should centre at (64,64) after scaling, R = {}",
+        pixels[scaled_center]
+    );
+    assert!(
+        pixels[unscaled_center] < 20,
+        "unscaled position (32,32) should fade out, R = {}",
+        pixels[unscaled_center]
+    );
+}
+
+#[test]
+fn linear_gradient_follows_canvas_transform() {
+    // from (0,0) to (64,0) under a 2x transform spans device x 0..=128.
+    let c = Canvas::new_cpu(128, 128, 1.0).unwrap();
+    c.begin_cpu(Some(rgba(0, 0, 0, 255))).unwrap();
+    c.save();
+    c.scale(2.0, 2.0);
+    c.fill_rect_linear_gradient(
+        (0.0, 0.0, 64.0, 64.0),
+        (0.0, 0.0),
+        (64.0, 0.0),
+        &[
+            GradientStop::new(0.0, rgba(255, 0, 0, 255)),
+            GradientStop::new(1.0, rgba(255, 0, 0, 0)),
+        ],
+    );
+    c.restore();
+    c.end();
+    let (_, _, stride, pixels) = c.read_pixels().expect("CPU readback");
+    let near_start = 64 * stride as usize + 8 * 4;
+    let mid = 64 * stride as usize + 64 * 4;
+    assert!(
+        pixels[near_start] > 200,
+        "device x=8 should still be near full red, R = {}",
+        pixels[near_start]
+    );
+    assert!(
+        (90..=170).contains(&pixels[mid]),
+        "device x=64 should sit mid-gradient, R = {}",
+        pixels[mid]
+    );
+}

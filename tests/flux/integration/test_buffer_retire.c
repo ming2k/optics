@@ -1,0 +1,157 @@
+/*
+ * flux_buffer / flux_target retire queue: a buffer or target released
+ * right after a frame that referenced it must survive until the GPU
+ * provably passes that batch. The pre-fix behaviour destroyed the
+ * handle and freed the memory inline — the same hazard that motivated
+ * the image retire queue (i915: GPU hang -> context reset ->
+ * VK_ERROR_DEVICE_LOST). This test churns create -> draw -> release
+ * every frame so any inline destruction trips an error on real
+ * hardware. Skips if no Vulkan device.
+ */
+#include "test_helpers.h"
+#include <flux/flux.h>
+#include <flux/vulkan.h>
+
+#include <stdalign.h>
+
+alignas(uint32_t) static const unsigned char vert_spv[] = {
+#embed "triangle_attr.vert.spv"
+};
+alignas(uint32_t) static const unsigned char frag_spv[] = {
+#embed "triangle.frag.spv"
+};
+
+#define SURF_W 64u
+#define SURF_H 64u
+#define CHURN_FRAMES 400u
+
+static flux_buffer *make_triangle_vb(flux_device *d) {
+    const float positions[3][2] = {{0.0f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f}};
+    flux_buffer_desc desc = FLUX_BUFFER_DESC_INIT;
+    desc.size = sizeof(positions);
+    desc.usage = FLUX_BUFFER_USAGE_VERTEX;
+    desc.location = FLUX_BUFFER_GPU_LOCAL;
+    desc.initial_data = positions;
+    flux_buffer *out = nullptr;
+    return flux_buffer_create(d, &desc, &out) == FLUX_OK ? out : nullptr;
+}
+
+static flux_target *make_depth(flux_device *d) {
+    flux_target_desc desc = {
+        .type = FLUX_TYPE_TARGET_DESC,
+        .usage = FLUX_TARGET_DEPTH,
+        .format = FLUX_FORMAT_D32_SFLOAT,
+        .width = SURF_W,
+        .height = SURF_H,
+    };
+    flux_target *out = nullptr;
+    return flux_target_create(d, &desc, &out) == FLUX_OK ? out : nullptr;
+}
+
+int main(void) {
+    flux_device *d = test_helpers_make_headless_device();
+    if (!d) {
+        fprintf(stderr, "test_buffer_retire: no Vulkan device; skipping\n");
+        TEST_SUMMARY();
+    }
+
+    flux_surface *surface = nullptr;
+    {
+        flux_surface_desc desc = FLUX_SURFACE_DESC_INIT;
+        desc.width = SURF_W;
+        desc.height = SURF_H;
+        EXPECT(flux_surface_create(d, &desc, &surface) == FLUX_OK);
+    }
+
+    flux_graphics_pipeline *pipeline = nullptr;
+    {
+        flux_vertex_attribute attr = {
+            .location = 0,
+            .format = FLUX_FORMAT_RG32_SFLOAT,
+            .offset = 0,
+        };
+        flux_vertex_binding binding = {
+            .stride = 2 * sizeof(float),
+            .attribute_count = 1,
+            .attributes = &attr,
+        };
+        flux_graphics_pipeline_desc desc = FLUX_GRAPHICS_PIPELINE_DESC_INIT;
+        desc.vertex_spirv = (const uint32_t *)vert_spv;
+        desc.vertex_spirv_word_count = sizeof(vert_spv) / sizeof(uint32_t);
+        desc.fragment_spirv = (const uint32_t *)frag_spv;
+        desc.fragment_spirv_word_count = sizeof(frag_spv) / sizeof(uint32_t);
+        desc.vertex_binding = &binding;
+        desc.topology = FLUX_TOPOLOGY_TRIANGLE_LIST;
+        desc.cull = FLUX_CULL_NONE;
+        desc.blend = FLUX_BLEND_PRESET_NONE;
+        desc.depth = FLUX_DEPTH_TEST_AND_WRITE;
+        desc.color_format = flux_format_from_vk(flux_surface_vk_format(surface));
+        desc.depth_format = FLUX_FORMAT_D32_SFLOAT;
+        EXPECT(flux_graphics_pipeline_create(d, &desc, &pipeline) == FLUX_OK);
+    }
+
+    /* Churn: each frame draws from a fresh vertex buffer into a pass
+     * with a fresh depth target, then releases both immediately after
+     * present — while the batch referencing them may still be in
+     * flight. Deferred destruction must keep those references valid. */
+    for (uint32_t i = 0; i < CHURN_FRAMES; ++i) {
+        flux_buffer *vb = make_triangle_vb(d);
+        EXPECT(vb != nullptr);
+        flux_target *depth = make_depth(d);
+        EXPECT(depth != nullptr);
+
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+        flux_frame_prepare_target(frame, depth);
+        flux_pass_attachment color = {
+            .load_op = FLUX_LOAD_CLEAR,
+            .store_op = FLUX_STORE_STORE,
+            .clear_color = {0.0f, 0.0f, 0.0f, 1.0f},
+        };
+        flux_pass_depth_attachment depth_att = {
+            .view = flux_target_vk_view(depth),
+            .format = VK_FORMAT_D32_SFLOAT,
+            .load_op = FLUX_LOAD_CLEAR,
+            .store_op = FLUX_STORE_DONT_CARE,
+            .clear_depth = 1.0f,
+        };
+        flux_pass_desc pass = {
+            .type = FLUX_TYPE_PASS_DESC,
+            .color_attachment_count = 1,
+            .color_attachments = &color,
+            .depth = &depth_att,
+        };
+        flux_frame_begin_pass(frame, &pass);
+        flux_frame_set_viewport(frame, 0.0f, 0.0f, (float)SURF_W, (float)SURF_H, 0.0f, 1.0f);
+        flux_frame_set_scissor(frame, 0, 0, SURF_W, SURF_H);
+
+        VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          flux_graphics_pipeline_vk_pipeline(pipeline));
+        VkBuffer vkb = flux_buffer_vk_buffer(vb);
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vkb, &offset);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+
+        flux_frame_end_pass(frame);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+
+        flux_buffer_release(vb);
+        flux_target_release(depth);
+    }
+
+    /* Release-without-frame: zombies parked after the last submission
+     * must be destroyed by device teardown (drain path). */
+    flux_buffer *stray_buf = make_triangle_vb(d);
+    EXPECT(stray_buf != nullptr);
+    flux_buffer_release(stray_buf);
+    flux_target *stray_depth = make_depth(d);
+    EXPECT(stray_depth != nullptr);
+    flux_target_release(stray_depth);
+
+    flux_graphics_pipeline_release(pipeline);
+    flux_surface_release(surface);
+    flux_device_release(d);
+    TEST_SUMMARY();
+}

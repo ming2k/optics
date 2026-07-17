@@ -89,13 +89,14 @@ flux_device *test_helpers_make_dmabuf_device(void) {
         VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
         VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
         VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
+        VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
     };
     flux_device_desc d = FLUX_DEVICE_DESC_INIT;
     d.headless = true;
     d.frames_in_flight = 1;
     d.validation = FLUX_VALIDATION_OFF;
     d.required_device_extensions = exts;
-    d.required_device_extension_count = 4;
+    d.required_device_extension_count = 5;
     flux_device *out = nullptr;
     if (flux_device_create(&d, &out) != FLUX_OK)
         return nullptr;

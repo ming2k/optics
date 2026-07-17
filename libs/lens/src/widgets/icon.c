@@ -42,8 +42,19 @@ LENS_API void lens_icon(lens *ui, lens_icon_id id, float size) {
  *     is tint-only.
  * There is no filled accent pill or rounded shape, so a column reads as a
  * single flat icon strip rather than a stack of buttons. */
-static bool icon_button_impl(lens *ui, lens_icon_id id, bool active, const char *badge,
-                             float requested_size, bool rounded) {
+typedef struct icon_button_spec {
+    lens_icon_id icon;
+    const char *identity;
+    const char *badge;
+    float requested_size;
+    bool rounded;
+    bool active_surface;
+    bool checked;
+    bool accent_checked;
+} icon_button_spec;
+
+static bool icon_button_impl(lens *ui, icon_button_spec spec) {
+    lens_icon_id id = spec.icon;
     if ((unsigned)id >= LENS_ICON_COUNT)
         return false;
     const lens_theme *t = &ui->theme;
@@ -51,10 +62,7 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active, const char 
     ui->next_disabled = false;
     ui->next_error = false;
 
-    char label[64];
-    snprintf(label, sizeof(label), "##icon%d%s%s", (int)id, badge && badge[0] ? ":" : "",
-             badge && badge[0] ? badge : "");
-    lens_id nid = lensi_gen_widget_id(ui, label);
+    lens_id nid = lensi_gen_widget_id(ui, spec.identity);
     lens_node *n = lensi_store_touch(ui, nid);
     if (!n)
         return false;
@@ -76,7 +84,7 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active, const char 
     if (max_s < 1.0f)
         max_s = 1.0f;
     /* Keep glyph size independent from a larger square hit target. */
-    float s = requested_size > 0.0f ? requested_size : t->font_size * 1.55f;
+    float s = spec.requested_size > 0.0f ? spec.requested_size : t->font_size * 1.55f;
     if (s > max_s)
         s = max_s;
     if (s < 1.0f)
@@ -84,8 +92,8 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active, const char 
 
     lens_response r = lensi_interact(ui, n, true, disabled);
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0) |
-                         (active ? LENS_A11Y_CHECKED : 0);
-    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, sem_flags);
+                         (spec.checked ? LENS_A11Y_CHECKED : 0);
+    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, spec.identity, NULL, sem_flags);
 
     if (!disabled)
         n->hover_t = r.hovered ? 1.f : 0.f;
@@ -94,23 +102,22 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active, const char 
      * steady slightly-stronger tint when active. This is always drawn the
      * same way — it's the baseline active signal independent of the
      * indicator treatment below. */
-    float fill = active ? 1.0f : n->hover_t * 0.6f;
+    float fill = spec.active_surface ? 1.0f : n->hover_t * 0.6f;
     if (fill > 0.001f) {
-        flux_color bg = active && rounded ? t->color_active
-                                          : lensi_lerp_color(t->color_bg, t->color_hover, fill);
-        lensi_drawlist_push(
-            ui, n,
-            (lens_draw_cmd){
-                .kind = LENS_DRAW_RECT,
-                .rel = {0, 0, 0, 0},
-                .color = bg,
-                .radius = rounded ? t->corner_radius : 0.0f});
+        flux_color bg = spec.active_surface && spec.rounded
+                            ? t->color_active
+                            : lensi_lerp_color(t->color_bg, t->color_hover, fill);
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                            .rel = {0, 0, 0, 0},
+                                            .color = bg,
+                                            .radius = spec.rounded ? t->corner_radius : 0.0f});
     }
 
     /* Optional accent indicator (left bar + accent glyph) for the active
      * item, theme-tunable via `active_indicator_width`. Width 0 suppresses
      * both, leaving only the background tint. */
-    float indicator_w = active && !rounded ? t->active_indicator_width : 0.0f;
+    float indicator_w = spec.active_surface && !spec.rounded ? t->active_indicator_width : 0.0f;
     if (indicator_w > 0.0f)
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_RECT,
@@ -123,10 +130,11 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active, const char 
 
     /* Glyph: dimmed when disabled, accent only when the indicator treatment
      * is active, plain foreground otherwise. */
-    flux_color glyph = disabled                    ? t->color_disabled
-                       : rounded && active         ? t->color_accent
-                       : indicator_w > 0.0f        ? t->color_accent
-                                                   : t->color_fg;
+    flux_color glyph = disabled ? t->color_disabled
+                       : spec.rounded && (spec.active_surface || spec.accent_checked)
+                           ? t->color_accent
+                       : indicator_w > 0.0f ? t->color_accent
+                                            : t->color_fg;
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){
                             .kind = LENS_DRAW_ICON,
@@ -136,11 +144,11 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active, const char 
                             .icon_id = id,
                         });
 
-    if (badge && badge[0]) {
+    if (spec.badge && spec.badge[0]) {
         float badge_size = s * 0.42f;
         if (badge_size < 8.0f)
             badge_size = 8.0f;
-        lens_text_metrics bm = lensi_text_measure_label(ui, badge, badge_size, 650.0f);
+        lens_text_metrics bm = lensi_text_measure_label(ui, spec.badge, badge_size, 650.0f);
         float badge_x = icon_x + s - bm.width * 0.62f;
         float badge_y = icon_y - bm.height * 0.30f;
         if (badge_x + bm.width > w)
@@ -151,7 +159,7 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active, const char 
                             (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
                                             .rel = {badge_x, badge_y, 0, 0},
                                             .color = glyph,
-                                            .text = badge,
+                                            .text = spec.badge,
                                             .text_size = badge_size,
                                             .text_weight = 650.0f});
     }
@@ -161,14 +169,44 @@ static bool icon_button_impl(lens *ui, lens_icon_id id, bool active, const char 
 }
 
 LENS_API bool lens_icon_button(lens *ui, lens_icon_id id) {
-    return icon_button_impl(ui, id, false, NULL, 0.0f, false);
+    char identity[32];
+    snprintf(identity, sizeof(identity), "##icon%d", (int)id);
+    return icon_button_impl(ui,
+                            (icon_button_spec){.icon = id, .identity = identity, .checked = false});
 }
 
 LENS_API bool lens_icon_button_active(lens *ui, lens_icon_id id, bool active) {
-    return icon_button_impl(ui, id, active, NULL, 0.0f, false);
+    char identity[32];
+    snprintf(identity, sizeof(identity), "##icon%d", (int)id);
+    return icon_button_impl(
+        ui, (icon_button_spec){
+                .icon = id, .identity = identity, .active_surface = active, .checked = active});
 }
 
 LENS_API bool lens_icon_button_badged(lens *ui, lens_icon_id id, const char *badge,
-                                     float glyph_size, bool active) {
-    return icon_button_impl(ui, id, active, badge, glyph_size, true);
+                                      float glyph_size, bool active) {
+    char identity[64];
+    snprintf(identity, sizeof(identity), "##icon%d%s%s", (int)id, badge && badge[0] ? ":" : "",
+             badge && badge[0] ? badge : "");
+    return icon_button_impl(ui, (icon_button_spec){.icon = id,
+                                                   .identity = identity,
+                                                   .badge = badge,
+                                                   .requested_size = glyph_size,
+                                                   .rounded = true,
+                                                   .active_surface = active,
+                                                   .checked = active});
+}
+
+LENS_API bool lens_icon_toggle_button(lens *ui, lens_icon_id unchecked_icon,
+                                      lens_icon_id checked_icon, float glyph_size, bool checked) {
+    if ((unsigned)unchecked_icon >= LENS_ICON_COUNT || (unsigned)checked_icon >= LENS_ICON_COUNT)
+        return false;
+    char identity[48];
+    snprintf(identity, sizeof(identity), "##toggle%d:%d", (int)unchecked_icon, (int)checked_icon);
+    return icon_button_impl(ui, (icon_button_spec){.icon = checked ? checked_icon : unchecked_icon,
+                                                   .identity = identity,
+                                                   .requested_size = glyph_size,
+                                                   .rounded = true,
+                                                   .checked = checked,
+                                                   .accent_checked = checked});
 }

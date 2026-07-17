@@ -578,14 +578,11 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
     xkb_keycode_t code = key + 8; /* evdev -> xkb */
     xkb_keysym_t sym = xkb_state_key_get_one_sym(pl->xkb_state, code);
 
-    if (sym == XKB_KEY_Escape && pressed) {
-        pl->running = false;
-        return;
-    }
-
     if (pressed && pl->acc.key_count < LENS_INPUT_MAX_KEYS) {
         int fk = 0;
-        if (sym == XKB_KEY_Tab)
+        if (sym == XKB_KEY_Escape)
+            fk = LENS_KEY_ESCAPE;
+        else if (sym == XKB_KEY_Tab)
             fk = LENS_KEY_TAB;
         else if (sym == XKB_KEY_Return)
             fk = LENS_KEY_RETURN;

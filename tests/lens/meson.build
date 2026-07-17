@@ -6,7 +6,9 @@ tests = ['test_id', 'test_store', 'test_layout', 'test_input',
          'test_tooltip', 'test_dropdown', 'test_radio', 'test_tabs',
          'test_textarea', 'test_button', 'test_checkbox', 'test_slider',
          'test_progress', 'test_scroll', 'test_selectable', 'test_modal',
-         'test_menu', 'test_split', 'test_table']
+         'test_menu', 'test_split', 'test_table', 'test_pressable',
+         'test_overlay_eclipse', 'test_scroll_hit_clip',
+         'test_reduced_motion']
 
 foreach t : tests
   exe = executable(t, t + '.c',

@@ -82,8 +82,10 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
     if (view_w < 0.0f)
         view_w = 0.0f;
 
-    /* Wheel routing: innermost scroll container under cursor. */
-    if (n->has_prev && lensi_point_in(ui->input.cursor, n->prev_rect))
+    /* Wheel routing: innermost scroll container under cursor. A floating
+     * layer above the table eclipses it (same rule as lensi_interact). */
+    bool eclipsed = n->has_prev && lensi_widget_eclipsed(ui, n);
+    if (n->has_prev && !eclipsed && lensi_point_in(ui->input.cursor, n->prev_rect))
         ui->scroll_hot_id = n->id;
 
     /* Apply wheel scroll if this is the hot scroll target. */
@@ -134,13 +136,15 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
                 st->dragging = false;
                 ui->active_id = 0;
             }
-        } else if (lensi_point_in(ui->input.cursor, thumb_rect) && ui->input.mouse_pressed[L]) {
+        } else if (!eclipsed && lensi_point_in(ui->input.cursor, thumb_rect) &&
+                   ui->input.mouse_pressed[L]) {
             ui->active_id = n->id;
             st->dragging = true;
             st->drag_start_offset = st->offset_y;
             st->drag_start_y = ui->input.cursor.y;
             ui->input.mouse_pressed[L] = false;
-        } else if (lensi_point_in(ui->input.cursor, track_rect) && ui->input.mouse_pressed[L]) {
+        } else if (!eclipsed && lensi_point_in(ui->input.cursor, track_rect) &&
+                   ui->input.mouse_pressed[L]) {
             float page = body_h * 0.9f;
             st->offset_y += ui->input.cursor.y < thumb_y ? -page : page;
             ui->input.mouse_pressed[L] = false;
@@ -149,7 +153,8 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
             st->offset_y = 0.0f;
         if (st->offset_y > scroll_range)
             st->offset_y = scroll_range;
-        st->hovering = st->dragging || lensi_point_in(ui->input.cursor, track_rect);
+        st->hovering = st->dragging ||
+                       (!eclipsed && lensi_point_in(ui->input.cursor, track_rect));
         off = st->offset_y;
         n->scroll_y = off;
     } else if (st) {
@@ -170,12 +175,25 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
     if (last > row_count)
         last = row_count;
 
-    /* ---- row interaction (click selects) ---- */
+    /* ---- row interaction (click selects) ----
+     * Rows below the visible body are scrolled out of view: the table's
+     * render clips them to the body, and hit-testing must clip the same
+     * way — plus any scroll ancestor's viewport — or folded rows keep
+     * reacting through the widgets painted over them. */
+    bool clipped_out = lensi_point_clipped_by_scroll(n, ui->input.cursor);
     bool clicked_row = false;
-    if (opts.selectable && st && n->has_prev && ui->input.mouse_pressed[LENS_MOUSE_LEFT] &&
+    float hovered_row_y = ui->input.cursor.y - n->prev_rect.y + off - header_h;
+    bool hovering_row = opts.selectable && n->has_prev && !eclipsed && !clipped_out &&
+                        lensi_point_in(ui->input.cursor, n->prev_rect) &&
+                        ui->input.cursor.x < n->prev_rect.x + view_w &&
+                        hovered_row_y >= 0.0f && hovered_row_y < body_h;
+    if (hovering_row)
+        ui->cursor_hint = LENS_CURSOR_POINTER;
+    if (opts.selectable && st && n->has_prev && !eclipsed && !clipped_out &&
+        ui->input.mouse_pressed[LENS_MOUSE_LEFT] &&
         lensi_point_in(ui->input.cursor, n->prev_rect)) {
         float ly = ui->input.cursor.y - n->prev_rect.y + off - header_h;
-        if (ly >= 0) {
+        if (ly >= 0.0f && ly < body_h) {
             int r = (int)(ly / row_h);
             if (r >= 0 && r < row_count) {
                 st->selected = r;

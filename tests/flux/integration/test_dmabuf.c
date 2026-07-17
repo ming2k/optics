@@ -100,6 +100,13 @@ int main(void) {
         sd.width = 16;
         sd.height = 16;
         flux_surface *surface = nullptr;
+
+        flux_surface_dmabuf_desc invalid_export = FLUX_SURFACE_DMABUF_DESC_INIT;
+        sd.next = &invalid_export;
+        EXPECT(flux_surface_create(dd, &sd, &surface) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(surface == nullptr);
+        sd.next = nullptr;
+
         flux_result sr = flux_surface_create(dd, &sd, &surface);
         if (sr == FLUX_OK) {
             if (flux_surface_exportable(surface)) {
@@ -108,16 +115,51 @@ int main(void) {
                 EXPECT(flux_frame_submit(frame) == FLUX_OK);
                 EXPECT(flux_frame_present(frame) == FLUX_OK);
                 int exported = -1;
-                EXPECT(flux_surface_export_dmabuf(surface, &exported) == FLUX_OK);
+                int sync_fd = -1;
+                if (flux_dmabuf_sync_supported(dd)) {
+                    EXPECT(flux_surface_export_dmabuf_explicit(surface, &exported, &sync_fd) ==
+                           FLUX_OK);
+                    EXPECT(fd_is_open(sync_fd));
+                    if (sync_fd >= 0)
+                        close(sync_fd);
+                } else {
+                    EXPECT(flux_surface_export_dmabuf(surface, &exported) == FLUX_OK);
+                }
                 EXPECT(fd_is_open(exported));
                 if (exported >= 0)
                     close(exported);
+
+                uint64_t produced_modifier = flux_surface_dmabuf_modifier(surface);
+                flux_surface_dmabuf_desc constrained = FLUX_SURFACE_DMABUF_DESC_INIT;
+                constrained.modifiers = &produced_modifier;
+                constrained.modifier_count = 1;
+                sd.next = &constrained;
+                flux_surface *shared = nullptr;
+                EXPECT(flux_surface_create(dd, &sd, &shared) == FLUX_OK);
+                EXPECT(shared != nullptr && flux_surface_exportable(shared));
+                if (shared)
+                    flux_surface_release(shared);
             }
             flux_surface_release(surface);
         }
 
         int dmabuf_fd = try_dma_heap_alloc(64u * 64u * 4u);
         if (dmabuf_fd >= 0) {
+            /* Settle any zombies parked by the surface phase and take a
+             * baseline: the probe's upload advances the graphics serial
+             * past them, and keeping it alive pins exactly one known
+             * allocation for the accounting assertions below. */
+            flux_image_desc probe_desc = {
+                .type = FLUX_TYPE_IMAGE_DESC,
+                .width = 64,
+                .height = 64,
+                .format = FLUX_FORMAT_RGBA8_UNORM,
+            };
+            flux_image *probe = nullptr;
+            EXPECT(flux_image_create(dd, &probe_desc, &probe) == FLUX_OK);
+            flux_memory_stats before;
+            flux_device_memory_stats(dd, &before);
+
             flux_dmabuf_image_desc real = FLUX_DMABUF_IMAGE_DESC_INIT;
             real.width = 64;
             real.height = 64;
@@ -132,12 +174,32 @@ int main(void) {
             if (rr == FLUX_OK) {
                 EXPECT(imported != nullptr);
                 EXPECT(!fd_is_open(dmabuf_fd));
+
+                /* Imported memory bypasses the slab but must still be
+                 * counted (ADR: stats and the teardown leak warning see
+                 * external memory). */
+                flux_memory_stats after_import;
+                flux_device_memory_stats(dd, &after_import);
+                EXPECT(after_import.live_allocations == before.live_allocations + 1);
+                EXPECT(after_import.bytes_in_use > before.bytes_in_use);
+
                 flux_image_release(imported);
+
+                /* A fresh upload sweeps the import's retire zombie; the
+                 * import's bytes must be uncounted again. */
+                flux_image *tmp = nullptr;
+                EXPECT(flux_image_create(dd, &probe_desc, &tmp) == FLUX_OK);
+                flux_memory_stats settled;
+                flux_device_memory_stats(dd, &settled);
+                EXPECT(settled.live_allocations == before.live_allocations + 1);
+                EXPECT(settled.bytes_in_use < after_import.bytes_in_use);
+                flux_image_release(tmp);
             } else {
                 EXPECT(imported == nullptr);
                 EXPECT(fd_is_open(dmabuf_fd));
                 close(dmabuf_fd);
             }
+            flux_image_release(probe);
         } else {
             fprintf(stderr,
                     "test_dmabuf: /dev/dma_heap/system unavailable; skipping real import\n");

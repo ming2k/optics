@@ -69,19 +69,23 @@ static void barrier_to_color_attachment(VkCommandBuffer cmd, VkImage img, VkImag
 /* End-of-frame transition. Windowed surfaces go to PRESENT_SRC for the
  * presentation engine; offscreen surfaces (ADR-0013) go to TRANSFER_SRC
  * for flux_surface_read_pixels. */
-static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen) {
+static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen, bool exportable,
+                             uint32_t graphics_family) {
+    VkImageLayout final_layout = exportable   ? VK_IMAGE_LAYOUT_GENERAL
+                                 : offscreen  ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                                              : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     VkImageMemoryBarrier2 b = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask =
-            offscreen ? VK_PIPELINE_STAGE_2_COPY_BIT : VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-        .dstAccessMask = offscreen ? VK_ACCESS_2_TRANSFER_READ_BIT : 0,
+        .dstStageMask = exportable   ? VK_PIPELINE_STAGE_2_NONE
+                        : offscreen  ? VK_PIPELINE_STAGE_2_COPY_BIT
+                                     : VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+        .dstAccessMask = exportable ? 0 : (offscreen ? VK_ACCESS_2_TRANSFER_READ_BIT : 0),
         .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout =
-            offscreen ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .newLayout = final_layout,
+        .srcQueueFamilyIndex = exportable ? graphics_family : VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = exportable ? VK_QUEUE_FAMILY_FOREIGN_EXT : VK_QUEUE_FAMILY_IGNORED,
         .image = img,
         .subresourceRange =
             {
@@ -120,6 +124,14 @@ flux_result flux_surface_begin_frame(flux_surface *s, const flux_frame_begin_des
         return FLUX_ERROR_INVALID_STATE;
     }
 
+    /* A frame must never sample resources whose upload is still
+     * unsubmitted: flush any open upload batch first. */
+    {
+        flux_result fr = flux_uploads_flush(s->device);
+        if (fr != FLUX_OK)
+            return fr;
+    }
+
     uint64_t timeout =
         (desc && desc->timeout_ns) ? desc->timeout_ns : FLUX_DEFAULT_FRAME_TIMEOUT_NS;
 
@@ -135,6 +147,10 @@ flux_result flux_surface_begin_frame(flux_surface *s, const flux_frame_begin_des
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkWaitForFences failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
+    /* The slot's previous batch just retired; because the graphics queue
+     * is FIFO, every batch up to its serial is done. Raise the retire
+     * watermark so zombies parked before it are destroyed now. */
+    flux_vk_note_graphics_completed(s->device, pf->submitted_serial);
 
     /* Acquire. Offscreen surfaces have no swapchain (ADR-0013): the
      * image index is the frame slot and the fence wait above already
@@ -427,7 +443,8 @@ flux_result flux_frame_submit(flux_frame *f) {
         flux_frame_end_pass(f);
     }
 
-    barrier_to_final(pf->cmd, s->images[s->current_image], s->offscreen);
+    barrier_to_final(pf->cmd, s->images[s->current_image], s->offscreen,
+                     s->offscreen_exportable, s->device->graphics_family);
 
     pf->ts_was_submitted = (pf->ts_scope_count > 0);
 
@@ -458,19 +475,32 @@ flux_result flux_frame_submit(flux_frame *f) {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
             .commandBuffer = pf->cmd,
         };
+        VkSemaphoreSubmitInfo signal = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .semaphore = s->render_finished[s->current_image],
+            .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        };
+        bool signal_sync = signal.semaphore != VK_NULL_HANDLE;
         VkSubmitInfo2 osi = {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
             .commandBufferInfoCount = 1,
             .pCommandBufferInfos = &ocb,
+            .signalSemaphoreInfoCount = signal_sync ? 1u : 0u,
+            .pSignalSemaphoreInfos = signal_sync ? &signal : nullptr,
         };
         pthread_mutex_lock(&s->device->queue_lock);
         vr = vkQueueSubmit2(s->device->graphics_queue, 1, &osi, pf->in_flight);
+        if (vr == VK_SUCCESS)
+            pf->submitted_serial = flux_vk_note_graphics_submission(s->device);
         pthread_mutex_unlock(&s->device->queue_lock);
         if (vr != VK_SUCCESS)
             return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
         s->last_submitted_slot = f->slot;
-        s->image_layouts[s->current_image] = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        s->image_foreign_owned[s->current_image] = false;
+        s->image_layouts[s->current_image] = s->offscreen_exportable
+                                                  ? VK_IMAGE_LAYOUT_GENERAL
+                                                  : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        s->image_foreign_owned[s->current_image] = s->offscreen_exportable;
+        s->image_sync_exported[s->current_image] = false;
         f->state = FLUX_FRAME_STATE_SUBMITTED;
         return FLUX_OK;
     }
@@ -503,6 +533,8 @@ flux_result flux_frame_submit(flux_frame *f) {
     };
     pthread_mutex_lock(&s->device->queue_lock);
     vr = vkQueueSubmit2(s->device->graphics_queue, 1, &si, pf->in_flight);
+    if (vr == VK_SUCCESS)
+        pf->submitted_serial = flux_vk_note_graphics_submission(s->device);
     pthread_mutex_unlock(&s->device->queue_lock);
     if (vr != VK_SUCCESS)
         return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");

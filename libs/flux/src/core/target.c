@@ -140,12 +140,12 @@ void flux_target_release(flux_target *t) {
     if (atomic_fetch_sub_explicit(&t->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
     flux_device *d = t->device;
-    if (t->view)
-        vkDestroyImageView(d->device, t->view, nullptr);
-    if (t->image)
-        vkDestroyImage(d->device, t->image, nullptr);
-    if (t->alloc.memory)
-        flux_vk_deallocate(d, &t->alloc);
+    /* Same in-flight hazard as flux_image_release: the target may still
+     * be an attachment of batches executing on the graphics queue. Park
+     * the pieces on the device retire queue — a target owns no bindless
+     * slots and no imported memory. */
+    flux_device_retire_image(d, t->view, t->image, &t->alloc, VK_NULL_HANDLE, 0,
+                             FLUX_BINDLESS_INVALID, FLUX_BINDLESS_INVALID);
     flux_internal_free(d, t);
     flux_device_release(d);
 }

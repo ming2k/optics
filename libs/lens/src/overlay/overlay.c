@@ -327,14 +327,11 @@ void lensi_overlay_render(lens *ui, flux_canvas *canvas) {
 bool lensi_point_in_floating_layer(lens *ui, flux_point p) {
     if (!ui)
         return false;
-    for (uint32_t i = 0; i < ui->overlay_layer_count; i++) {
-        lens_node *layer = ui->overlay_layers[i];
-        if (!layer)
-            continue;
-        /* Resolve the same id in the persistent store: overlay_layers
-         * holds per-frame pointers, but we want the prev_rect-bearing
-         * node the store retains across frames. */
-        lens_node *n = lensi_store_find(ui, layer->id);
+    /* Iterate LAST frame's floating layers (carried across the arena
+     * reset as ids): a popup eclipses base widgets no matter where in
+     * this frame's build order the layer re-registers. */
+    for (uint32_t i = 0; i < ui->prev_overlay_layer_count; i++) {
+        lens_node *n = lensi_store_find(ui, ui->prev_overlay_layer_ids[i]);
         if (n && n->has_prev && lensi_point_in(p, n->prev_rect))
             return true;
     }

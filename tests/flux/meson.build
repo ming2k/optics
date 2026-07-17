@@ -32,6 +32,10 @@ test_helpers_dep = declare_dependency(
 core_tests_build_dir = meson.current_build_dir()
 glslang = find_program('glslangValidator', required : true)
 
+# libdl for the fault-injection test's dlsym(RTLD_NEXT); on glibc >= 2.34
+# this resolves to libc, which is fine.
+dl_dep = cc.find_library('dl', required : false)
+
 triangle_vert_spv = custom_target('test_triangle.vert.spv',
   input   : 'shaders/triangle.vert',
   output  : 'triangle.vert.spv',
@@ -40,6 +44,11 @@ triangle_vert_spv = custom_target('test_triangle.vert.spv',
 triangle_frag_spv = custom_target('test_triangle.frag.spv',
   input   : 'shaders/triangle.frag',
   output  : 'triangle.frag.spv',
+  command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+)
+triangle_attr_vert_spv = custom_target('test_triangle_attr.vert.spv',
+  input   : 'shaders/triangle_attr.vert',
+  output  : 'triangle_attr.vert.spv',
   command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
 )
 fill_pattern_spv = custom_target('test_fill_pattern.comp.spv',

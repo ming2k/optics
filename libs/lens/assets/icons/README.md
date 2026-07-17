@@ -30,7 +30,19 @@ flux core's path API (`flux_path_*` + `flux_canvas_stroke_path`):
 3. The façade verbs wrap the draw command: `lens_icon(ui, id, size)`,
    `lens_icon_button(ui, id)`, `lens_icon_button_active(ui, id, active)`.
 
+## material-rounded/
+
+[Material Icons](https://github.com/google/material-design-icons) by Google —
+**Apache-2.0** (see `material-rounded/LICENSE`). This directory contains the
+rounded empty/filled star pair used by checkable icon buttons. The SVG wrappers
+are normalized for the Lens generator; the upstream path data is unchanged.
+
+Unlike Feather's stroked paths, these assets are replayed with
+`flux_canvas_fill_path`. The generator appends non-Feather sources after the
+stable Feather ID range and emits a render-mode table alongside the path data.
+
 ## Licensing
 
-Feather is MIT, which is compatible with lens's MIT license.
-Keep `feather/LICENSE` alongside the assets when redistributing.
+Feather is MIT and Material Icons is Apache-2.0; both are compatible with
+lens's MIT license. Keep each source directory's `LICENSE` file alongside the
+assets when redistributing.

@@ -206,6 +206,55 @@ int main(void) {
 
     flux_canvas_destroy(canvas);
     flux_surface_release(s);
+
+    /* --- readback desc: pinned non-exportable, readback always works --- */
+    {
+        flux_surface_readback_desc rb = FLUX_SURFACE_READBACK_DESC_INIT;
+        rb.require_readback = true;
+        flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+        sd.next = &rb;
+        sd.width = W;
+        sd.height = H;
+        flux_surface *rs = nullptr;
+        EXPECT(flux_surface_create(d, &sd, &rs) == FLUX_OK);
+        EXPECT(rs != nullptr);
+        EXPECT(!flux_surface_exportable(rs));
+
+        flux_canvas *rc = nullptr;
+        flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
+        cd.surface = rs;
+        EXPECT(flux_canvas_create(&cd, &rc) == FLUX_OK);
+        EXPECT(render_frame(rs, rc) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(rs, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
+        /* export still refused: the surface is deliberately not exportable */
+        int fd = -1;
+        EXPECT(flux_surface_export_dmabuf(rs, &fd) != FLUX_OK);
+
+        flux_canvas_destroy(rc);
+        flux_surface_release(rs);
+    }
+
+    /* --- readback + dma-buf extensions conflict --- */
+    {
+        uint64_t linear_modifier = 0; /* DRM_FORMAT_MOD_LINEAR */
+        flux_surface_dmabuf_desc dm = FLUX_SURFACE_DMABUF_DESC_INIT;
+        dm.modifiers = &linear_modifier;
+        dm.modifier_count = 1;
+        flux_surface_readback_desc rb = FLUX_SURFACE_READBACK_DESC_INIT;
+        rb.require_readback = true;
+        rb.next = &dm;
+        flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+        sd.next = &rb;
+        sd.width = W;
+        sd.height = H;
+        flux_surface *cs = nullptr;
+        EXPECT(flux_surface_create(d, &sd, &cs) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(cs == nullptr);
+    }
+
     flux_device_release(d);
     TEST_SUMMARY();
 }

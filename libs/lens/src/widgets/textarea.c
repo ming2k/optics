@@ -260,6 +260,8 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
     n->measured = (flux_point){w, h};
 
     lens_response r = lensi_interact(ui, n, true, disabled);
+    if (r.hovered)
+        ui->cursor_hint = LENS_CURSOR_TEXT;
     bool changed = false;
 
     /* IME manages its own cursor during preedit; clear our selection. */
