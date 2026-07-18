@@ -30,7 +30,7 @@
 | `flux_paint`             | Plain POD value. Pass it by `const flux_paint *`. No lifecycle. |
 | `flux_mesh_*`            | Refcount is atomic. `_create` performs a deferred one-shot upload; same queue lock as `flux_image`. Safe to call concurrently from worker threads. |
 | `flux_material_*`        | Refcount is atomic. Immutable after creation. |
-| `flux_scene_draw`        | Single-threaded only. The draw records into the active frame's command buffer; mix only with the thread that began the frame. |
+| `flux_scene_draw_mesh*`  | Single-threaded only. The draw records into the active frame's command buffer; mix only with the thread that began the frame. |
 | `flux_buffer_*`          | Refcount is atomic. Creation is safe to call concurrently from worker threads (uses the device queue lock for any staging upload). Once created, GPU-side reads/writes follow Vulkan's external-synchronisation rules. |
 | `flux_sampler_*`         | Refcount is atomic. Creation and release are safe to call concurrently. |
 | `flux_graphics_pipeline_*`| Refcount is atomic. Creation is safe to call concurrently (relies on the device's `VkPipelineCache` and bindless layout, both immutable post-init). Binding is single-threaded per frame. |

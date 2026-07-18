@@ -171,5 +171,5 @@ different devices are independent.
 ## See also
 
 - [ADR-0008 — Image-effect pipeline](../adr/0008-image-effect-pipeline.md) — design rationale.
-- [`<flux/compute.h>` reference](api.md#compute) — the primitive effects build on.
-- [`<flux/canvas.h>` reference](api.md#canvas) — `flux_image` lifecycle.
+- [`<flux/compute.h>` reference](api.md#headers) — the primitive effects build on.
+- [`<flux/canvas.h>` reference](api.md#headers) — `flux_image` lifecycle.

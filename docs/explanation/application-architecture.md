@@ -1,131 +1,131 @@
 # Application Architecture
 
-What goes where, and why? This document explains how an application,
-the flux modules, and Vulkan fit together.
+What goes where, and why? This document explains how an application, the
+Optics libraries, and Vulkan fit together.
 
-## The four-layer stack
+## The Stack
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  Your application                                                │
-│  Owns: VkInstance, VkSurfaceKHR (via GLFW/SDL/Wayland/X11)       │
-│         the main loop, input, scene state                        │
-└──────────────────────────────────┬───────────────────────────────┘
-                                   │
-                  uses canvas, scene, compute, plus flux-core directly
-                                   │
-┌──────────────────────────────────┴───────────────────────────────┐
-│  Modules — canvas, scene, compute                                │
-│  Own: drawing pipelines, shaders, attachment policy (depth       │
-│        image for scene), tessellation, scene primitives          │
-└──────────────────────────────────┬───────────────────────────────┘
-                                   │
-                  uses flux_device + flux_frame from flux-core
-                                   │
-┌──────────────────────────────────┴───────────────────────────────┐
-│  flux-core                                                       │
-│  Owns: device lifecycle, swapchain, per-frame sync,              │
-│        transient memory, bindless heap, pipeline cache           │
-└──────────────────────────────────┬───────────────────────────────┘
-                                   │
-                                Vulkan 1.3
+```text
+application
+  ├── iris ── window, event loop, desktop integration
+  │     └── lens ── UI state, layout, input, draw lists
+  │           ├── flux-text ── shaping and glyph runs
+  │           └── flux canvas
+  └── direct rendering
+        ├── flux-scene-graph ── glTF content
+        └── flux canvas / scene / compute / effect
+                    └── flux-core ── device, frame, memory, sync
+                                      └── Vulkan 1.3
 ```
 
-`flux_compute` is a first-class peer: it does not need a surface or a
-swapchain, and it records dispatch commands into its own command
-buffers or into a frame's command buffer when mixing graphics and
-compute in the same submission.
+Applications can stop at the `iris` surface for a complete UI host or use any
+lower layer directly. `lens` remains useful without a window. The content
+siblings are producers of `flux` primitives, not alternate rendering
+backends.
 
-## Three rules
+`flux_compute` is a first-class peer: it does not need a surface or swapchain,
+and it records dispatch commands into its own command buffers or a frame's
+command buffer when graphics and compute share a submission.
 
-**1. Your application owns the window and the VkInstance.**
+## Boundary Rules
 
-flux does not link against GLFW, SDL, or any windowing toolkit. You
-create the instance (typically with `glfwGetRequiredInstanceExtensions`),
-pass the required extensions to `flux_device_create`, create your
-`VkSurfaceKHR` from the window, and lend it to `flux_surface_create`.
-flux borrows; you destroy.
+### The Host Owns the Window
 
-**2. flux-core owns the frame; modules own the attachments.**
+In an `iris` application, `iris` owns the Wayland window, event loop, and OS
+integration. In a direct `flux` application, the application creates the
+`VkInstance` and `VkSurfaceKHR` through GLFW, SDL, Wayland, or another host.
+`flux` borrows the surface handle; the host destroys it.
 
-Per frame, *flux-core* acquires the swapchain image, manages
-synchronisation, and provides the command buffer. *Modules* (or your
-application directly) supply a `flux_pass_desc` describing the colour
-attachments and any depth-stencil view they want bound. See
-[ADR-0001](../adr/0001-project-foundations.md).
+### Lens Is Headless
 
-This means `flux_scene` carries its own depth image, `flux_canvas` does not
-need one, and a future post-processing pipeline could supply N colour
-attachments without touching `flux-core`.
+Input reaches `lens` as data. Windowing, portal calls, system theme watching,
+and the accessibility bus remain in `iris`, which keeps `lens` deterministic
+and embeddable.
 
-**3. Modules do not see each other.**
+### Flux-core Owns the Frame
 
-`flux_canvas`, `flux_scene`, and `flux_compute` all depend on
-`flux-core` but not on each other. They can be used together in a single
-frame (3D scene first, 2D HUD overlay second) because both record into
-the same `VkCommandBuffer` returned by `flux_frame_vk_command_buffer`.
-The application is the integration point.
+Per frame, `flux-core` acquires the swapchain image, manages synchronisation,
+and provides the command buffer. Modules or the application supply a
+`flux_pass_desc` describing the colour attachments and any depth-stencil view
+they want bound. See [ADR-0001](../adr/0001-project-foundations.md).
 
-## Worked example: 3D scene with a 2D HUD
+A scene consumer supplies a depth attachment, `flux_canvas` does not need one,
+and a post-processing pipeline can supply its own colour attachments without
+changing `flux-core`.
+
+### Flux Modules Do Not See Each Other
+
+`flux_canvas`, `flux_scene`, and `flux_compute` all depend on `flux-core` but
+not on each other. They can be used together in a single frame because each
+records into the same `VkCommandBuffer` returned by
+`flux_frame_vk_command_buffer`. The application is the integration point.
+
+### Content Libraries Feed Draw Primitives
+
+`flux-text` shapes text and feeds `flux_canvas_draw_glyph_run`;
+`flux-scene-graph` loads glTF content and feeds scene mesh draws. They link
+through public `flux` APIs and remain separately consumable libraries.
+
+## Worked Example: 3D Scene with a 2D HUD
 
 ```c
 flux_frame *frame;
 flux_surface_begin_frame(surface, nullptr, &frame);
 
-  /* 3D scene with depth */
-  flux_pass_attachment att = {
-      .view        = VK_NULL_HANDLE,
-      .load_op     = FLUX_LOAD_CLEAR,
-      .store_op    = FLUX_STORE_STORE,
-      .clear_color = { 0.04f, 0.04f, 0.06f, 1.0f },
-  };
-  flux_pass_depth_attachment depth = {
-      .view        = my_depth_view,
-      .format      = VK_FORMAT_D32_SFLOAT,
-      .load_op     = FLUX_LOAD_CLEAR,
-      .store_op    = FLUX_STORE_DONT_CARE,
-      .clear_depth = 1.0f,
-  };
-  flux_pass_desc pass = {
-      .type                   = FLUX_TYPE_PASS_DESC,
-      .color_attachment_count = 1,
-      .color_attachments      = &att,
-      .depth                  = &depth,
-  };
-  flux_frame_begin_pass(frame, &pass);
+/* 3D scene with depth */
+flux_pass_attachment att = {
+    .view        = VK_NULL_HANDLE,
+    .load_op     = FLUX_LOAD_CLEAR,
+    .store_op    = FLUX_STORE_STORE,
+    .clear_color = { 0.04f, 0.04f, 0.06f, 1.0f },
+};
+flux_pass_depth_attachment depth = {
+    .view        = my_depth_view,
+    .format      = VK_FORMAT_D32_SFLOAT,
+    .load_op     = FLUX_LOAD_CLEAR,
+    .store_op    = FLUX_STORE_DONT_CARE,
+    .clear_depth = 1.0f,
+};
+flux_pass_desc pass = {
+    .type                   = FLUX_TYPE_PASS_DESC,
+    .color_attachment_count = 1,
+    .color_attachments      = &att,
+    .depth                  = &depth,
+};
+flux_frame_begin_pass(frame, &pass);
 
-  flux_scene_draw(frame, &camera, world_matrix, mesh, material);
+flux_scene_draw_mesh(frame, &camera, world_matrix, mesh, material);
 
-  flux_frame_end_pass(frame);
+flux_frame_end_pass(frame);
 
-  /* 2D HUD on top of the rendered scene — LOAD, not CLEAR */
-  flux_canvas_begin(canvas, frame, nullptr);   /* nullptr = load existing */
-  flux_canvas_fill_rect_color(canvas, hud_rect, panel_color);
-  flux_canvas_end(canvas);
+/* 2D HUD on top of the rendered scene: load instead of clear. */
+flux_canvas_begin(canvas, frame, nullptr);
+flux_canvas_fill_rect_color(canvas, hud_rect, panel_color);
+flux_canvas_end(canvas);
 
 flux_frame_submit(frame);
 flux_frame_present(frame);
 ```
 
-`flux_canvas_begin` with a non-NULL `clear_color` clears; with `nullptr`
-it loads the existing framebuffer content, making the overlay pattern above
-work naturally.
+`flux_canvas_begin` with a non-null `clear_color` clears; with `nullptr` it
+loads the existing framebuffer content, making the overlay pattern work
+naturally.
 
-## Where the boundaries fail (deliberately)
+## The Deliberate Vulkan Seam
 
-There is intentionally **no abstraction over Vulkan** at the public
-boundary. `flux_frame_vk_command_buffer` returns a raw `VkCommandBuffer`.
-`flux_device_vk_device` returns a raw `VkDevice`. A module or
-application can record any Vulkan command it likes between
-`flux_frame_begin_pass` and `flux_frame_end_pass`.
+There is intentionally no abstraction over Vulkan at the public boundary.
+`flux_frame_vk_command_buffer` returns a raw `VkCommandBuffer`, and
+`flux_device_vk_device` returns a raw `VkDevice`. A module or application can
+record Vulkan commands between `flux_frame_begin_pass` and
+`flux_frame_end_pass`.
 
-This is on purpose. The modules themselves demonstrate the pattern:
-they are not privileged consumers; they use the same public API any
-application can use to build a custom renderer on top of `flux-core`.
-See [ADR-0001](../adr/0001-project-foundations.md).
+The modules are not privileged consumers; they use the same public API that an
+application can use to build a custom renderer on top of `flux-core`. See
+[ADR-0001](../adr/0001-project-foundations.md).
 
-## See also
+## See Also
 
 - [Vulkan backend](vulkan-backend.md) — the per-frame lifecycle in detail.
 - [ADR-0001 — project foundations](../adr/0001-project-foundations.md)
 - [ADR-0002 — per-module device state](../adr/0002-per-module-device-state.md)
+- [ADR-0023 — unified monorepo build](../adr/0023-unified-monorepo-build.md)

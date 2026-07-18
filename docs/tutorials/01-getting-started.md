@@ -1,84 +1,94 @@
-# Getting started
+# Getting Started
 
-You will build flux from source, run the simplest example, and confirm
-your environment supports it. Total time: about five minutes.
+You will build the Optics monorepo, run its correctness tests, and launch the
+smallest `flux` example. Allow about five minutes after the dependencies are
+installed.
 
-## What you need before you start
+## Step 1 — Prepare the Environment
 
-- A Linux box with a Vulkan 1.3 driver. macOS and Windows are possible
-  but not covered here.
-- Root or sudo for one `apt`/`pacman`/`dnf` command.
-- About 100 MB of disk space for the build directory.
+You need a C23 compiler with `#embed` support, Meson, Ninja,
+`glslangValidator`, and the development libraries used by the default feature
+set. On Debian or Ubuntu, install them with:
 
-## Step 1 — install the dependencies
+```bash
+sudo apt-get install -y --no-install-recommends \
+  build-essential meson ninja-build pkg-config glslang-tools vulkan-tools \
+  libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
+  libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
+  libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev
+```
 
-On Debian/Ubuntu:
+If the distribution compiler is older than GCC 15 or Clang 19, install a
+newer compiler and select it with `CC` when configuring Meson.
 
-    sudo apt install meson ninja-build gcc-15 libvulkan-dev \
-                     vulkan-validationlayers glslang-tools libglfw3-dev
+Confirm that a Vulkan 1.3 implementation is visible:
 
-On Arch:
+```bash
+vulkaninfo --summary
+```
 
-    sudo pacman -S meson ninja gcc vulkan-headers vulkan-validation-layers \
-                   glslang glfw
+At least one device should report `apiVersion` 1.3 or newer. A physical GPU is
+not required; Lavapipe is sufficient for headless development.
 
-> **Compiler note:** flux is a C23 library. It uses `#embed` to inline
-> SPIR-V shaders at compile time. You need **GCC ≥ 15** or **Clang ≥ 19**.
-> Older compilers will fail on the `#embed` directives in the examples.
+## Step 2 — Get and Build Optics
 
-Confirm Vulkan 1.3 is available:
+```bash
+git clone <optics-repository-url> optics
+cd optics
+meson setup build -Dexamples=true -Dtests=true
+meson compile -C build
+```
 
-    vulkaninfo --summary
+The one root build compiles `flux`, `lens`, `iris`, the enabled sibling
+libraries, and their examples and tests. No intermediate install is needed.
 
-You should see at least one `GPU` with `apiVersion >= 1.3.*`.
+## Step 3 — Run the Tests
 
-## Step 2 — get and build flux
+```bash
+meson test -C build --no-suite bench
+```
 
-    git clone <flux repo> flux
-    cd flux
-    meson setup build -Dexamples=true -Dtests=true
-    meson compile -C build
+The CPU suites run everywhere. GPU integration cases use the available Vulkan
+device and skip cleanly when a required capability is absent. Full failure
+output is stored in `build/meson-logs/testlog.txt`; pass `-v` to
+`meson test` for live verbose output.
 
-You will see one library built and four example binaries linked.
+## Step 4 — Run the Smallest Windowed Example
 
-## Step 3 — run the tests
+```bash
+./build/examples/flux/hello_triangle
+```
 
-    meson test -C build
+A window opens with a coloured triangle. This program uses `flux-core`
+directly: it creates a device and surface, records a dynamic-rendering pass,
+submits the frame, and presents it. Close the window to exit.
 
-You should see all tests `OK`. If any fail, the full per-test stderr
-goes to `build/meson-logs/testlog.txt`. The most common cause is a
-missing or pre-1.3 Vulkan driver — see
-[dev/testing.md](../dev/testing.md) for the headless lavapipe setup
-CI uses.
+If the binary was not built, install the GLFW development package and
+reconfigure the build. If no display is available, run the headless compute
+example instead:
 
-## Step 4 — run the simplest example
+```bash
+./build/examples/flux/compute_fill
+```
 
-    ./build/examples/hello_triangle
+## Step 5 — Explore 2D, 3D, and UI
 
-A window opens and draws a coloured triangle. Close it.
+```bash
+./build/examples/flux/canvas_hello
+./build/examples/flux/scene_cube
+./build/examples/lens/headless_demo
+./build/examples/iris/widgets
+```
 
-You just consumed `flux-core` directly without any higher-level module:
-that program calls `flux_surface_begin_frame`, `flux_frame_begin_pass`
-(clear + draw), `flux_frame_end_pass`, `flux_frame_submit`,
-`flux_frame_present`. No 2D shapes or 3D scene. This is the smallest possible
-flux application.
+The `flux` examples show direct rendering, the `lens` example exercises the
+headless UI engine, and the `iris` example supplies the Wayland window and
+event loop for a complete UI application.
 
-## Step 5 — run the 2D, 3D, and compute examples
+## What's Next
 
-    ./build/examples/canvas_hello
-    ./build/examples/scene_cube
-    ./build/examples/compute_fill
-
-The first shows tiled rectangles, gradients, paths, stroked lines, and
-rotated shapes. The second shows a tumbling cube with depth testing. The
-third runs headless, dispatches a compute shader, and prints the first and
-last values of the filled buffer.
-
-## What's next
-
-| Want to...                              | Read                                               |
-|-----------------------------------------|----------------------------------------------------|
-| Build your own 2D app                   | [02 — Your first 2D canvas application](02-first-2d-app.md) |
-| Build your own 3D app                   | [03 — Your first 3D scene application](03-first-3d-app.md)  |
-| Understand the architecture             | [Application architecture](../explanation/application-architecture.md) |
-| Look up types and contracts             | [API reference](../reference/api.md), [Thread safety](../reference/thread-safety.md), [Glossary](../reference/glossary.md). The headers themselves (`include/flux/*.h`) are the canonical reference until a generated doc page lands. |
+| Goal | Read |
+|------|------|
+| Build a 2D app | [Your first 2D canvas application](02-first-2d-app.md) |
+| Build a 3D app | [Your first 3D scene application](03-first-3d-app.md) |
+| Understand the stack | [Application architecture](../explanation/application-architecture.md) |
+| Look up contracts | [API reference](../reference/api.md), [thread safety](../reference/thread-safety.md), and [glossary](../reference/glossary.md) |

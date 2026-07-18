@@ -1,8 +1,8 @@
 # API Reference
 
-Version-agnostic description of how the `flux` public API is shaped.
-For what's promised across version bumps, see [`CHANGELOG.md`](../../CHANGELOG.md);
-for what's planned next, see [`dev/roadmap.md`](../dev/roadmap.md).
+Version-agnostic description of how the current `flux` public API is shaped.
+The installed headers and [symbol reference](symbols.md) are the canonical
+lookup surfaces for this checkout.
 
 ## Headers
 
@@ -144,7 +144,7 @@ differently:
 | Version transition           | Source compat              | Binary compat              |
 |------------------------------|----------------------------|----------------------------|
 | Patch (`0.N.x → 0.N.y`)      | Yes                        | Yes                        |
-| Minor pre-1.0 (`0.N → 0.N+1`)| May break; called out in CHANGELOG | May break; **rebuild required** |
+| Minor pre-1.0 (`0.N → 0.N+1`)| May break; called out in release notes | May break; **rebuild required** |
 | Minor post-1.0 (`1.N → 1.N+1`)| Yes                        | Yes — new fields only via `next`-chained extension structs; base layouts are frozen at 1.0 |
 | Major (`N.0 → N+1.0`)        | May break                  | May break                  |
 
@@ -154,20 +154,11 @@ guaranteed safe**: the library may read past the end of the
 caller's smaller struct. Recompile against the matching headers when
 you upgrade across a minor bump.
 
-Post-1.0, base desc layouts are frozen. Library-side feature
-additions ride a chained extension struct accessed through `next`:
-
-```c
-flux_device_desc_v2_ext ext = FLUX_DEVICE_DESC_V2_EXT_INIT;
-ext.some_new_knob = 42;
-
-flux_device_desc d = FLUX_DEVICE_DESC_INIT;
-d.next = &ext;
-```
-
-The library walks the `next` chain looking for `sType` discriminators
-it knows; unknown extensions are ignored. This is the same pattern
-Vulkan uses for ABI-stable feature growth.
+Post-1.0, base desc layouts are frozen. Library-side additions ride a chained
+extension struct accessed through `next`. The library walks that chain looking
+for `flux_struct_type` discriminators it knows; unknown extensions are ignored.
+This is the same pattern Vulkan uses for ABI-stable feature growth. No public
+extension structs are defined in the current pre-1.0 API.
 
 ## dma-buf Import
 
@@ -270,14 +261,14 @@ major version bump:
 When a public symbol is on the way out, the preferred path is:
 
 1. Mark deprecated at minor `0.N`. The header carries a
-   `[[deprecated("use X")]]` attribute and the changelog notes the
+   `[[deprecated("use X")]]` attribute and the release notes name the
    replacement.
 2. Remove at minor `0.N+1` or later.
 
 A one-cycle deprecation is the floor, not the ceiling. Symbols with
 no plausible replacement (e.g. a misnamed accessor with no remaining
 callers) may be renamed immediately at a minor bump, with the rename
-called out in the changelog.
+called out in the release notes.
 
 ## Vulkan handle stability
 

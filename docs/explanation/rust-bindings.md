@@ -1,37 +1,64 @@
 # Rust Bindings
 
-Rust bindings to flux live in the separate **[flux-rs][flux-rs]** repository:
+The Rust bindings live under `bindings/` in the Optics monorepo. They remain
+separate Cargo workspaces so each library can keep a focused dependency graph
+and package surface, while C and Rust changes can land atomically.
 
-<https://github.com/ming2k/flux-rs>
+The root Meson build does not invoke Cargo. C-only consumers therefore do not
+need a Rust toolchain.
 
-The split follows the industry convention for Rust bindings to C libraries
-(`openssl-sys`, `libsqlite3-sys`, `rust-curl`, `gtk-rs` all live outside
-the C source tree). Keeping them out of tree lets the C library and the
-bindings follow independent release cadences and stability policies, and
-it removes any Rust toolchain requirement from the C build.
+## Workspaces and Crates
 
-## What moved
+| Workspace | Crates | Role |
+|-----------|--------|------|
+| `bindings/flux-rs/` | `flux-sys`, `flux` | Raw FFI and safe rendering API. |
+| | `flux-text-sys`, `flux-text`, `flux-text-layout` | Text FFI, shaping, and line layout. |
+| | `flux-scene-graph-sys`, `flux-scene-graph` | glTF scene-graph FFI and safe wrapper. |
+| `bindings/lens-rs/` | `lens-sys`, `lens` | Raw FFI and safe UI wrapper. |
+| `bindings/iris-rs/` | `iris-sys`, `iris` | Raw FFI and safe application-host wrapper. |
 
-flux-rs ships the same five crates that previously lived under this
-repo's `crates/` directory:
+The `*-sys` crates own native linking and bindgen output. Safe crates expose
+RAII handles and Rust error types without duplicating the C implementation.
 
-| Crate              | Role                                                          |
-|--------------------|---------------------------------------------------------------|
-| `flux-sys`         | Raw bindgen FFI to `libflux`. Owns `links = "flux"`.          |
-| `flux`             | Safe wrapper: RAII handles, `Result<T, Error>`.              |
-| `flux-text-sys`    | Raw bindgen FFI to `libflux-text` (HarfBuzz shaping sibling). |
-| `flux-text`        | Safe wrapper over `flux-text-sys`, Layer-0 shaping surface.  |
-| `flux-text-layout` | Pure-Rust Layer-1 line wrapping on top of `flux-text`.       |
+## Development Linking
 
-See the flux-rs README for build integration (`FLUX_SOURCE_DIR`,
-`FLUX_BUILD_DIR`, and `FLUX_USE_INSTALLED` semantics).
+Build the C stack first:
 
-## Historical reference
+```bash
+meson setup build -Dtests=true
+meson compile -C build
+```
 
-The original design rationale for the two-crate split (`flux-sys` raw
-FFI + `flux` safe wrapper) is preserved in the flux-rs git history at
-the extraction commit. The link-ownership, lint-isolation,
-`unsafe`-boundary, and direct-FFI-consumer arguments documented there
-still apply within flux-rs.
+Then point the binding build scripts at this checkout and its one Meson build
+tree:
 
-[flux-rs]: https://github.com/ming2k/flux-rs
+```bash
+export FLUX_SOURCE_DIR="$PWD/libs/flux"
+export LENS_SOURCE_DIR="$PWD"
+export IRIS_SOURCE_DIR="$PWD"
+export FLUX_BUILD_DIR="$PWD/build"
+export LENS_BUILD_DIR="$PWD/build"
+export IRIS_BUILD_DIR="$PWD/build"
+
+cargo test --manifest-path bindings/flux-rs/Cargo.toml --workspace
+cargo test --manifest-path bindings/lens-rs/Cargo.toml --workspace
+cargo test --manifest-path bindings/iris-rs/Cargo.toml --workspace
+```
+
+The build scripts prepend `build/meson-uninstalled/` to `PKG_CONFIG_PATH` and
+read public headers from `libs/`. This keeps bindgen and native linking on the
+same checkout without running `meson install`.
+
+For an installed stack, leave the source/build variables unset and make the
+installed `.pc` files visible through the normal pkg-config search path.
+
+## Change Workflow
+
+When a public C API changes:
+
+1. Update the owning header, implementation, and C test.
+2. Update the matching `*-sys` declarations or bindgen allowlist.
+3. Update the safe wrapper and add a Rust test.
+4. Run the C suite and every affected Cargo workspace before committing.
+
+The workspace READMEs contain crate-specific examples and feature notes.

@@ -5,11 +5,12 @@ client area with a coloured rectangle. By the end you will understand
 the three objects every flux-canvas app needs (device, surface,
 canvas) and the per-frame call sequence.
 
-## Step 1 — start from a known-good skeleton
+## Step 1 — Start from a Known-good Skeleton
 
-Copy `examples/canvas_hello.c` to `hello_canvas.c`. We will trim it down,
-not write from a blank page. The full version draws gradients, paths,
-strokes, and images; you will strip those out, then add them back.
+Open `examples/flux/canvas_hello.c` on a disposable branch. We will trim the
+known-good example instead of starting from a blank file. The full version
+draws gradients, paths, strokes, and images; you will strip those out, then
+add them back.
 
 ## Step 2 — minimum viable frame
 
@@ -22,7 +23,7 @@ except this:
 
 Build:
 
-    meson compile -C build && ./build/examples/canvas_hello
+    meson compile -C build && ./build/examples/flux/canvas_hello
 
 A blue rectangle appears on a dark background. That is the whole shape
 of a flux-canvas frame.
@@ -42,14 +43,14 @@ Inside the loop, between `flux_canvas_begin` and `flux_canvas_end`:
     flux_arena_reset(&path_arena);
 
     flux_path *circle = nullptr;
-    if (flux_path_init(&circle, &path_arena) != FLUX_OK) continue;
+    if (flux_path_create(&circle, &path_arena) != FLUX_OK) continue;
     flux_path_add_circle(circle, 400, 300, 80);
 
     flux_paint paint = flux_paint_default();
     paint.color = flux_color_rgba_premul(255, 200, 80, 255);
     flux_canvas_fill_path(canvas, circle, &paint);
 
-`flux_path_init` is `[[nodiscard]]` — it returns `FLUX_OK` on success,
+`flux_path_create` is `[[nodiscard]]` — it returns `FLUX_OK` on success,
 `FLUX_ERROR_OUT_OF_MEMORY` if the arena is exhausted, or
 `FLUX_ERROR_INVALID_ARGUMENT` for a NULL `out` or arena. Check or
 explicitly cast to `void` if you genuinely want to ignore the failure.
@@ -79,7 +80,7 @@ The circle now spins around its own centre.
 
 ## Step 5 — handle surface loss on resize
 
-The frame loop in `examples/canvas_hello.c` already shows the pattern:
+The frame loop in `examples/flux/canvas_hello.c` already shows the pattern:
 
     flux_frame *frame = nullptr;
     flux_result r = flux_surface_begin_frame(surface, nullptr, &frame);
@@ -91,8 +92,8 @@ The frame loop in `examples/canvas_hello.c` already shows the pattern:
         continue;
     }
 
-`FLUX_ERROR_SURFACE_LOST` means the swapchain was recreated; skip this
-frame and try again next iteration.
+`FLUX_ERROR_SURFACE_LOST` means the swapchain is out of date; resize it, skip
+this frame, and try again on the next iteration.
 
 ## Step 6 — clean up
 
@@ -120,4 +121,4 @@ frame and try again next iteration.
 |-----------------------------------------|----------------------------------------------------|
 | Build a 3D app                          | [03 — Your first 3D scene application](03-first-3d-app.md) |
 | Understand the frame lifecycle          | [How to record and present a frame](../how-to/record-and-present-a-frame.md) |
-| See every canvas method                 | `include/flux/canvas.h` (the canonical reference) |
+| See every canvas method                 | [`libs/flux/include/flux/canvas.h`](../../libs/flux/include/flux/canvas.h) |

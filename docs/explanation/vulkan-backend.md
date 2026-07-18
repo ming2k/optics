@@ -24,7 +24,7 @@ Devices reporting only Vulkan 1.2 are rejected at `flux_device_create`.
 
 ## The object graph
 
-```
+```text
                           flux_device
                     (allocator + logger + Vulkan device)
                                 │
@@ -54,7 +54,7 @@ Devices reporting only Vulkan 1.2 are rejected at `flux_device_create`.
 
 ## Per-frame lifecycle
 
-```
+```text
             flux_surface_begin_frame
             ├─ wait on slot's in_flight fence
             ├─ acquire next swapchain image
@@ -208,7 +208,8 @@ ddesc.pipeline_cache_userdata = &cache;
 
 Leave all three NULL and the cache lives only for the device lifetime
 — the default. The file-backed helper above ships in
-`examples/pipeline_cache.h` for copy-paste; the env-var cascade
+[`examples/flux/pipeline_cache.h`](../../examples/flux/pipeline_cache.h) for
+copy-paste; the env-var cascade
 (`$FLUX_PIPELINE_CACHE`, `$XDG_CACHE_HOME`, `$HOME`) lives in that
 example helper, not in the library. This restores the contract
 ADR-0001 set out: *"the consumer persists; flux provides the in/out

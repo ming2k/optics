@@ -3,7 +3,7 @@
 You will draw a cube. By the end you will understand `flux_camera`,
 `flux_mesh`, `flux_material`, and the depth-tested pass.
 
-## Step 1 — start from `examples/scene_cube.c`
+## Step 1 — Start from `examples/flux/scene_cube.c`
 
 The example is the smallest 3D program possible. Copy it; we will
 narrate what each part does instead of writing from scratch.
@@ -36,7 +36,7 @@ underlying `flux_mat4_*` functions directly if you want a custom matrix.
 
     float t = (float)glfwGetTime();
     flux_quat q = flux_quat_axis_angle(
-        flux_vec3_normalise((flux_vec3){ 0.3f, 1.0f, 0.2f }),
+        flux_vec3_normalize((flux_vec3){ 0.3f, 1.0f, 0.2f }),
         t * 0.8f);
     flux_mat4 world = flux_mat4_rotation_quat(q);
 
@@ -61,11 +61,11 @@ underlying `flux_mat4_*` functions directly if you want a custom matrix.
     };
     flux_frame_begin_pass(frame, &pass);
 
-    flux_scene_draw(frame, &cam, world, cube, mat);
+    flux_scene_draw_mesh(frame, &cam, world, cube, mat);
 
     flux_frame_end_pass(frame);
 
-`flux_scene_draw` records the mesh draw into the current pass. It
+`flux_scene_draw_mesh` records the mesh draw into the current pass. It
 internally builds the MVP matrix from `camera.view` × `camera.projection`
 and pushes it as a push constant. The material pipeline is bound
 automatically.
@@ -92,8 +92,8 @@ Order matters: `flux_mat4_multiply(a, b)` means apply `b` first, then `a`.
         .type         = FLUX_TYPE_MATERIAL_DESC,
         .kind         = FLUX_MATERIAL_UNLIT,
         .base_color   = { 1.0f, 0.4f, 0.25f, 1.0f },
-        .color_format = flux_surface_vk_format(surface),
-        .depth_format = DEPTH_FORMAT,
+        .color_format = flux_format_from_vk(flux_surface_vk_format(surface)),
+        .depth_format = FLUX_FORMAT_D32_SFLOAT,
     };
     flux_material *mat = nullptr;
     if (flux_material_create(device, &mdesc, &mat) != FLUX_OK) {
@@ -101,7 +101,7 @@ Order matters: `flux_mat4_multiply(a, b)` means apply `b` first, then `a`.
         return 1;
     }
 
-Pass `mat` to `flux_scene_draw`. The material is refcounted; release
+Pass `mat` to `flux_scene_draw_mesh`. The material is refcounted; release
 it on shutdown.
 
 ## What you now know
@@ -116,5 +116,5 @@ it on shutdown.
 | Want to...                              | Read                                               |
 |-----------------------------------------|----------------------------------------------------|
 | Combine 2D and 3D in one frame          | [Application architecture](../explanation/application-architecture.md) |
-| Understand the math types               | `include/flux/math.h` (the canonical reference)    |
-| See lighting (when shipped)             | Not yet; the material enum will gain Phong / PBR values when those pipelines ship. |
+| Understand the math types               | [`libs/flux/include/flux/math.h`](../../libs/flux/include/flux/math.h) |
+| Add directional lighting                | [How to light a mesh](../how-to/light-a-mesh.md) |

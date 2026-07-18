@@ -349,9 +349,10 @@ are `void`-returning; segments dropped on arena exhaustion are counted.
 
 ## `<flux/canvas_cpu.h>`
 
-Software (CPU) backend for the canvas (ADR-0019); available iff the
-library was built with `-Dcanvas=true`. Same drawing API as the GPU
-canvas — image draws are silently ignored (no GPU-resident textures).
+Software (CPU) backend for the canvas (ADR-0019); available iff the library was
+built with `-Dcanvas=true`. It supports vector draws and glyph runs backed by
+`flux_glyph_run_desc.host_coverage`; textured image draws are ignored because
+there is no GPU-resident texture.
 
 | Symbol | Description |
 |--------|-------------|

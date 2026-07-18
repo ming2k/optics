@@ -66,10 +66,16 @@ impl Device {
     /// Create a device. `instance_extensions` / `device_extensions` are extra
     /// Vulkan extensions to require at bootstrap (e.g. surface + platform
     /// surface extensions for a nested backend, or dmabuf import extensions).
+    ///
+    /// `frames_in_flight` sets how many frame slots (and, for offscreen
+    /// surfaces, how many ring images) the device runs concurrently; pass 0
+    /// for the flux default (2). Values above `FLUX_MAX_FRAMES_IN_FLIGHT` (3)
+    /// are clamped by the C core.
     pub fn new(
         headless: bool,
         instance_extensions: &[&std::ffi::CStr],
         device_extensions: &[&std::ffi::CStr],
+        frames_in_flight: u32,
     ) -> Result<Device, Error> {
         let inst: Vec<*const std::os::raw::c_char> =
             instance_extensions.iter().map(|s| s.as_ptr()).collect();
@@ -91,6 +97,7 @@ impl Device {
             },
             required_device_extension_count: dev.len() as u32,
             headless,
+            frames_in_flight,
             ..unsafe { std::mem::zeroed() }
         };
 

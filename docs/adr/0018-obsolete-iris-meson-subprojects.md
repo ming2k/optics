@@ -1,6 +1,6 @@
-# ADR-0001: Meson subprojects for the flux + lens + iris stack
+# ADR-0018: Meson subprojects for the flux + lens + iris stack
 
-- Status: Accepted
+- Status: Superseded by [ADR-0023](0023-unified-monorepo-build.md)
 - Date: 2026-06-23
 
 ## Context
@@ -17,7 +17,7 @@ Three forces make this friction acute enough to revisit.
 
 ### 1. Cross-cutting changes have a breakage window
 
-The flux [ADR-0016](https://github.com/ming2k/flux/blob/main/docs/adr/0016-pure-rhi-and-draw-primitives.md)
+The flux [ADR-0016](0016-pure-rhi-and-draw-primitives.md)
 text extraction moved `flux_text_*` out of `libflux` into a `flux-text`
 sibling. That change required coordinated edits across **two** repos: flux
 (remove text, add the sibling) and lens (`#include <flux-text/text.h>`,
@@ -67,7 +67,7 @@ reach into one another's internals.
 Adopt **meson subprojects** to compose the stack at build time, without
 merging the repositories.
 
-```
+```text
 iris/subprojects/lens.wrap   →  lens source  (local-path or git wrap)
 lens/subprojects/flux.wrap    →  flux source
 ```
@@ -152,11 +152,10 @@ Negative:
 
 ## See also
 
-- flux
-  [ADR-0016](https://github.com/ming2k/flux/blob/main/docs/adr/0016-pure-rhi-and-draw-primitives.md)
+- flux [ADR-0016](0016-pure-rhi-and-draw-primitives.md)
   — the text / scene-graph sibling split that motivated this ADR.
-- [iris ADR-0001](../../libs/iris/docs/adr/0001-why-iris-exists.md) —
-  why iris is a separate repo from lens.
-- [Development setup](../dev/setup.md) — the current `flux → lens → iris`
-  install sequence this ADR proposes to replace.
+- The former iris repository's ADR-0001 recorded why iris is a distinct layer
+  above lens; that file was not carried into the monorepo history.
+- [Development setup](../dev/setup.md) — the current monorepo workflow that
+  replaced this decision.
 - [Release](../dev/release.md) — the stack build order at release time.

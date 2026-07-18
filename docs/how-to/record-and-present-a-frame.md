@@ -7,7 +7,7 @@ in the tree (and every module) makes sense.
 ## Prerequisites
 
 You have a `flux_device *d` and a `flux_surface *s`. The fastest path
-to a working pair is to copy `examples/hello_triangle.c` and trim it;
+to a working pair is to copy `examples/flux/hello_triangle.c` and trim it;
 [tutorial 01](../tutorials/01-getting-started.md) walks through the
 build and run.
 
@@ -68,14 +68,14 @@ Provide a caller-owned image view in the pass desc:
         .depth                  = &depth,
     };
 
-`examples/scene_cube.c` does exactly this; it owns its own depth image
+`examples/flux/scene_cube.c` does exactly this; it owns its own depth image
 and recreates it on surface resize. Copy that pattern when you write a
 3D renderer.
 
 ## Recording with a module
 
 For 2D content, do not call `flux_frame_begin_pass` yourself —
-`flux_canvas_begin` does it internally. Likewise, `flux_scene_draw`
+`flux_canvas_begin` does it internally. Likewise, `flux_scene_draw_mesh`
 expects to be called inside an active pass that you began manually
 (or inside a pass that another module opened).
 
@@ -96,5 +96,5 @@ pass; both write to the same command buffer returned by
 
 - [Vulkan backend explanation](../explanation/vulkan-backend.md) — the
   same lifecycle in prose, with diagrams.
-- [examples/hello_triangle.c](../../examples/hello_triangle.c) — minimal
+- [examples/flux/hello_triangle.c](../../examples/flux/hello_triangle.c) — minimal
   working frame loop.

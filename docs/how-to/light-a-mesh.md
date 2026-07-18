@@ -57,7 +57,7 @@ Run the cube example with lighting enabled and confirm the faces shade
 with the light direction instead of rendering flat:
 
 ```bash
-./build/examples/scene_cube --phong
+./build/examples/flux/scene_cube --phong
 ```
 
 ## Pitfalls

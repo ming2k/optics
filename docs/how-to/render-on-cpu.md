@@ -40,9 +40,10 @@ Bracket the drawing with `flux_canvas_cpu_begin` / `flux_canvas_cpu_end`
     flux_canvas_cpu_end(c);
 
 Supported: solid fills, path fills/strokes, rounded rects, linear/radial
-gradients, clipping, transforms — anti-aliased (4x supersampled),
-premultiplied SRC_OVER. **Not** supported on CPU: image and glyph (text)
-draws (they sample a GPU texture) and offscreen `begin_target`.
+gradients, clipping, transforms, and glyph runs with host R8 coverage —
+anti-aliased (4x supersampled), premultiplied SRC_OVER. `flux-text` supplies
+that host coverage when it draws into a CPU canvas. Textured image draws and
+offscreen `begin_target` remain unsupported because they require GPU images.
 
 ## Read the pixels
 
