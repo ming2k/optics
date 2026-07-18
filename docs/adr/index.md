@@ -27,3 +27,4 @@ a decision, write a new ADR and update the old one's status to
 | 0019 | [Canvas rendering backend seam + software (CPU) backend](0019-canvas-backend-seam-and-cpu-backend.md) | Accepted |
 | 0020 | [GPU memory production hardening (amends ADR-0007)](0020-gpu-memory-production-hardening.md) | Accepted |
 | 0021 | [Batched uploads, surface-scoped quiescent waits, prefers-dedicated floor](0021-batched-uploads-and-quiescent-waits.md) | Accepted |
+| 0022 | [Deferred upload submission (amends ADR-0021 item 1)](0022-deferred-upload-submission.md) | Accepted |

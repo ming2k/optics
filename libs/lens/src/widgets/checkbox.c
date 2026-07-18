@@ -45,10 +45,16 @@ bool lens_checkbox(lens *ui, const char *label, bool *value) {
 
     float box_y = (n->measured.y - box) * 0.5f;
 
+    /* color_border is tuned for layout hairlines (separators, card outlines)
+     * and nearly vanishes on dark cards at this size, so lift the idle box
+     * border toward fg. Hover emphasizes with accent (same idiom as the
+     * focused border in textfield/textarea); the previous border->hover lerp
+     * went darker on the dark theme, making a hovered box less visible. */
+    flux_color idle_border = lensi_lerp_color(t->color_border, t->color_fg, 0.35f);
     flux_color box_border =
         disabled ? t->color_disabled
                  : (on ? t->color_accent
-                       : lensi_lerp_color(t->color_border, t->color_hover, n->hover_t));
+                       : lensi_lerp_color(idle_border, t->color_accent, n->hover_t));
 
     /* box background — always fill so the border has something to contrast
      * against, especially on dark cards in light mode. */

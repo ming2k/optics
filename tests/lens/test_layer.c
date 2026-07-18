@@ -79,6 +79,45 @@ static void test_place_at_rect(void) {
     lens_destroy(ui);
 }
 
+/* The supplied rect is a minimum extent, not only a position anchor. This is
+ * essential for paint-only layers with no children (scrims, selection boxes)
+ * and must update immediately when callers move/resize the same stable id. */
+static void test_rect_extent_tracks_updates(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    lens_begin(ui, &ZERO_IN);
+    lens_id id = lens_current_id(ui, "selection");
+    CHECK(lens_layer_begin(ui, "selection", (flux_rect){20, 30, 40, 50},
+                           (lens_overlay_opts){.pad = 0}));
+    lens_layer_end(ui);
+    lens_end(ui);
+
+    lens_node *layer = lens_find(ui, id);
+    CHECK(layer != NULL);
+    flux_rect bounds = lens_node_bounds(layer);
+    CHECK_NEAR(bounds.x, 20.0f, 0.001f);
+    CHECK_NEAR(bounds.y, 30.0f, 0.001f);
+    CHECK_NEAR(bounds.w, 40.0f, 0.001f);
+    CHECK_NEAR(bounds.h, 50.0f, 0.001f);
+
+    lens_begin(ui, &ZERO_IN);
+    CHECK(lens_layer_begin(ui, "selection", (flux_rect){80, 60, 120, 90},
+                           (lens_overlay_opts){.pad = 0}));
+    lens_layer_end(ui);
+    lens_end(ui);
+
+    layer = lens_find(ui, id);
+    CHECK(layer != NULL);
+    bounds = lens_node_bounds(layer);
+    CHECK_NEAR(bounds.x, 80.0f, 0.001f);
+    CHECK_NEAR(bounds.y, 60.0f, 0.001f);
+    CHECK_NEAR(bounds.w, 120.0f, 0.001f);
+    CHECK_NEAR(bounds.h, 90.0f, 0.001f);
+
+    lens_destroy(ui);
+}
+
 /* Escape and click-outside must not close a persistent layer — it has
  * no open state to lose. */
 static void test_not_dismissible(void) {
@@ -164,6 +203,7 @@ static void test_eclipse_blocks_base(void) {
 int main(void) {
     test_always_rendered();
     test_place_at_rect();
+    test_rect_extent_tracks_updates();
     test_not_dismissible();
     test_eclipse_blocks_base();
     return TEST_REPORT();

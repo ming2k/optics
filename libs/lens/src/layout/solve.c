@@ -257,10 +257,15 @@ static void shift_subtree(lens_node *n, float dx, float dy) {
 
 static void scroll_clamp_node(lens_node *n) {
     if (n->is_scroll && n->first_child) {
-        float min_x = n->final_rect.x + n->pad;
-        float min_y = n->final_rect.y + n->pad;
-        float max_x = min_x;
-        float max_y = min_y;
+        /* Content extent is the union of the CHILD rects, seeded from the
+         * first child — not from the viewport corner. Seeding from the
+         * viewport inflates the union whenever a large single-frame delta
+         * flings every child past the viewport edge (an 800px wheel flick
+         * reads as 800px of content) and the clamp then allows overshoot. */
+        float min_x = n->first_child->final_rect.x;
+        float min_y = n->first_child->final_rect.y;
+        float max_x = min_x + n->first_child->final_rect.w;
+        float max_y = min_y + n->first_child->final_rect.h;
         for (lens_node *c = n->first_child; c; c = c->next_sibling) {
             flux_rect r = c->final_rect;
             if (r.x < min_x)
@@ -361,10 +366,19 @@ void lensi_scroll_clamp(lens *ui) {
         scroll_clamp_node(ui->root);
 }
 
+/* Overlay and panel sub-roots are laid out through lensi_layout_subtree and
+ * never see lensi_layout_solve; their scrolls (a dropdown's option list)
+ * clamp here, right after the final placement pass. */
+void lensi_scroll_clamp_subtree(lens_node *n) {
+    if (n)
+        scroll_clamp_node(n);
+}
+
 /* Used by the overlay layer (ADR-0014) to lay out a sub-root: a measure
  * pass followed by arrange against the supplied rect. Identical to the
  * root pass but does not touch ui->root and does not run scroll clamping
- * (overlays do not scroll in v0). */
+ * — the overlay layout pass clamps scrolls itself once the final
+ * placement is known (lensi_scroll_clamp_subtree). */
 void lensi_layout_subtree(lens_node *n, flux_rect rect) {
     if (!n)
         return;

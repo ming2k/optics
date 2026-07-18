@@ -84,6 +84,16 @@ impl Input {
         self
     }
 
+    /// Precise touchpad/continuous scroll distance in logical pixels.
+    ///
+    /// Unlike [`Input::set_scroll`], widgets consume these values directly
+    /// instead of multiplying them by the configured wheel-step distance.
+    pub fn set_scroll_pixels(&mut self, x: f32, y: f32) -> &mut Self {
+        self.0.scroll_pixels_x = x;
+        self.0.scroll_pixels_y = y;
+        self
+    }
+
     /// Active modifier mask (see [`mods`]).
     pub fn set_mods(&mut self, mask: u32) -> &mut Self {
         self.0.mods = mask;

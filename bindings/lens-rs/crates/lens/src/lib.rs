@@ -700,8 +700,11 @@ impl Frame {
 
     /// A dropdown selecting an index into `items`, stored in `selected`.
     /// Its vector chevron stays on the trailing edge and the floating option
-    /// list owns an opaque surface. In a scroll area the list inherits the
-    /// viewport and closes when scrolling starts. Returns `true` when
+    /// list owns an opaque surface. The list opens below the trigger when it
+    /// fits there, flips above otherwise, and is height-capped (at most ~7
+    /// rows) with its own scrolling: a wheel over the list scrolls it, a
+    /// wheel anywhere else closes the popup. In a scroll area the list
+    /// inherits the viewport as its placement boundary. Returns `true` when
     /// selection changes.
     pub fn dropdown(&mut self, label: &str, selected: &mut i32, items: &[&str]) -> bool {
         let label_c = cstr(label);
@@ -723,12 +726,48 @@ impl Frame {
 
     // ---- queries & overlays -----------------------------------------------
 
+    /// Bounds of a widget or layer from a previous frame, resolved from its
+    /// id within the current id-stack context (typically the root at the top
+    /// of the build callback). Returns `None` when no such node exists yet
+    /// (e.g. on the first frame). Useful for hosts that layer custom pointer
+    /// handling under the chrome: read the chrome's bounds here and exclude
+    /// hits inside them.
+    pub fn node_bounds(&self, id: &str) -> Option<Rect> {
+        let c = cstr(id);
+        // SAFETY: ui is live; c outlives the calls.
+        let raw_id = unsafe { sys::lens_current_id(self.ui, c.as_ptr()) };
+        if raw_id == 0 {
+            return None;
+        }
+        let node = unsafe { sys::lens_find(self.ui, raw_id) };
+        if node.is_null() {
+            return None;
+        }
+        Some(Rect::from_raw(unsafe { sys::lens_node_bounds(node) }))
+    }
+
+    /// Move keyboard focus to no widget. Hosts with their own canvas
+    /// interaction call this when a pointer press starts a canvas gesture so
+    /// stray key presses (Space, Enter) do not re-trigger a focused button.
+    pub fn clear_focus(&mut self) {
+        // SAFETY: ui is live; id 0 is the documented "none".
+        unsafe { sys::lens_set_focus(self.ui, 0) };
+    }
+
     /// The interaction result of the most recently built widget — useful for an
     /// overlay anchor (`f.response().rect`) or reading hover/click after the
     /// fact.
     pub fn response(&self) -> Response {
         // SAFETY: ui is live; the call only reads state.
         Response::from_raw(unsafe { sys::lens_get_response(self.ui as *const sys::lens) })
+    }
+
+    /// Whether any widget currently holds the active (pressed) role. Hosts
+    /// mixing custom canvas pointer handling with lens chrome should skip
+    /// canvas gestures while this is true.
+    pub fn active_widget(&self) -> bool {
+        // SAFETY: ui is live; the call only reads state.
+        unsafe { sys::lens_active(self.ui as *const sys::lens) != 0 }
     }
 
     /// Cursor intent accumulated from hovered widgets built so far. Read this
@@ -908,6 +947,45 @@ impl Frame {
         let c = cstr(label);
         // SAFETY: ui is live; c and value outlive the call.
         unsafe { sys::lens_checkbox(self.ui, c.as_ptr(), value as *mut bool) }
+    }
+
+    /// A compact boolean switch bound to `value`.
+    pub fn switch(&mut self, label: &str, value: &mut bool) -> bool {
+        let c = cstr(label);
+        // SAFETY: ui is live; c and value outlive the call.
+        unsafe { sys::lens_switch(self.ui, c.as_ptr(), value as *mut bool) }
+    }
+
+    /// A full-width settings row with title, supporting description, and a
+    /// trailing switch. `id` keeps identity stable when text is translated.
+    pub fn setting_switch(
+        &mut self,
+        id: &str,
+        label: &str,
+        description: &str,
+        value: &mut bool,
+        disabled: bool,
+    ) -> Response {
+        let id = cstr(id);
+        let label = cstr(label);
+        let description = cstr(description);
+        let opts = sys::lens_switch_opts {
+            box_: sys::lens_box {
+                id: id.as_ptr(),
+                flex: 0.0,
+                width: 0.0,
+                height: 0.0,
+                disabled,
+                error: false,
+                tooltip: ptr::null(),
+            },
+            label: label.as_ptr(),
+            description: description.as_ptr(),
+            value: value as *mut bool,
+        };
+        // SAFETY: ui is live and every pointer in opts remains valid for the
+        // synchronous call; Lens copies visible text into its frame arena.
+        Response::from_raw(unsafe { sys::lens_switch_ex(self.ui, opts) })
     }
 
     /// A slider bound to `value`, clamped to `[min, max]`. Its knob stays

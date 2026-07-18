@@ -31,6 +31,15 @@ fn headless_frame_drives_widgets() {
             f.label("A label");
             f.separator();
             f.checkbox("Wrap", &mut wrap);
+            f.switch("Compact mode", &mut wrap);
+            let response = f.setting_switch(
+                "tap",
+                "Tap to click",
+                "Tap with one finger",
+                &mut wrap,
+                false,
+            );
+            assert!(!response.changed);
             f.slider("Zoom", &mut zoom, 0.5, 4.0);
             f.radio("Option A", &mut choice, 0);
             f.radio("Option B", &mut choice, 1);
@@ -386,12 +395,15 @@ fn input_builder_sets_fields() {
         .set_cursor(10.0, 20.0)
         .set_mouse_pressed(MouseButton::Left, true)
         .set_scroll(0.0, -3.0)
+        .set_scroll_pixels(1.5, -2.5)
         .set_text("hi")
         .push_key(lens::key::RETURN, true, false);
 
     let raw = input.as_raw();
     assert_eq!(raw.cursor.x, 10.0);
     assert_eq!(raw.key_count, 1);
+    assert_eq!(raw.scroll_pixels_x, 1.5);
+    assert_eq!(raw.scroll_pixels_y, -2.5);
 
     // Feed it through a real frame; must not crash.
     let mut ui = Ui::headless().unwrap();

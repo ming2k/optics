@@ -769,6 +769,13 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
         goto fail;
     }
     d->upload_lock_initialized = true;
+    if (pthread_mutex_init(&d->upload_pending_lock, nullptr) != 0) {
+        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "upload pending lock init failed");
+        r = FLUX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->upload_pending_lock_initialized = true;
+    d->upload_pending_head = nullptr;
     atomic_init(&d->submit_serial, 0u);
     atomic_init(&d->completed_serial, 0u);
     d->retire_head = nullptr;
@@ -797,6 +804,10 @@ fail:
     /* Tear down partial state. */
     flux_bindless_heap_destroy(d);
     flux_vk_allocator_destroy(d);
+    if (d->upload_pending_lock_initialized) {
+        pthread_mutex_destroy(&d->upload_pending_lock);
+        d->upload_pending_lock_initialized = false;
+    }
     if (d->upload_lock_initialized) {
         pthread_mutex_destroy(&d->upload_lock);
         d->upload_lock_initialized = false;
@@ -858,6 +869,15 @@ void flux_device_release(flux_device *d) {
     if (d->device)
         flux_vk_wait_idle(d);
 
+    /* The device is idle: every deferred upload fence has signaled, so
+     * draining returns the parked staging buffers to the cache and
+     * destroys the remaining fences/pools/semaphores. Must run before
+     * the staging pool and allocator teardown below. */
+    flux_vk_upload_pending_drain(d);
+    if (d->upload_pending_lock_initialized) {
+        pthread_mutex_destroy(&d->upload_pending_lock);
+        d->upload_pending_lock_initialized = false;
+    }
     /* Per-module teardown before we destroy the VkDevice. The effect
      * module is torn down first because its transient images may
      * have been registered into the bindless heap and must be

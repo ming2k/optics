@@ -63,6 +63,27 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas) {
     return flux_frame_present(frame);
 }
 
+static flux_result render_solid_frame(flux_surface *s, flux_canvas *canvas, flux_color color,
+                                      bool capture) {
+    flux_frame *frame = nullptr;
+    flux_result r = flux_surface_begin_frame(s, nullptr, &frame);
+    if (r != FLUX_OK)
+        return r;
+    r = flux_canvas_begin(canvas, frame, &color);
+    if (r != FLUX_OK)
+        return r;
+    flux_canvas_end(canvas);
+    if (capture) {
+        r = flux_frame_request_readback(frame);
+        if (r != FLUX_OK)
+            return r;
+    }
+    r = flux_frame_submit(frame);
+    if (r != FLUX_OK)
+        return r;
+    return flux_frame_present(frame);
+}
+
 int main(void) {
     flux_device *d = test_helpers_make_headless_device();
     if (!d) {
@@ -98,8 +119,10 @@ int main(void) {
 
     /* --- readback validation --- */
     {
+        bool ready = false;
         EXPECT(flux_surface_read_pixels(nullptr, px, BYTES) == FLUX_ERROR_INVALID_ARGUMENT);
         EXPECT(flux_surface_read_pixels(s, nullptr, BYTES) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_surface_read_pixels_ready(s, &ready) == FLUX_ERROR_UNSUPPORTED);
         /* nothing submitted yet */
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_ERROR_INVALID_STATE);
     }
@@ -207,6 +230,50 @@ int main(void) {
     flux_canvas_destroy(canvas);
     flux_surface_release(s);
 
+    /* --- on-demand snapshot is the requested frame, not later frames --- */
+    {
+        flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+        sd.width = W;
+        sd.height = H;
+        flux_surface *snapshot_surface = nullptr;
+        EXPECT(flux_surface_create(d, &sd, &snapshot_surface) == FLUX_OK);
+        flux_canvas *snapshot_canvas = nullptr;
+        flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
+        cd.surface = snapshot_surface;
+        EXPECT(flux_canvas_create(&cd, &snapshot_canvas) == FLUX_OK);
+
+        bool ready = false;
+        EXPECT(flux_surface_prepare_readback(nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_surface_prepare_readback(snapshot_surface) == FLUX_OK);
+        EXPECT(flux_surface_prepare_readback(snapshot_surface) == FLUX_OK);
+        EXPECT(flux_frame_request_readback(nullptr) == FLUX_ERROR_INVALID_STATE);
+        EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) ==
+               FLUX_ERROR_INVALID_STATE);
+        EXPECT(render_solid_frame(snapshot_surface, snapshot_canvas,
+                                  flux_color_rgba(220, 10, 20, 255), true) == FLUX_OK);
+        /* This newer green frame must not mutate the requested red snapshot. */
+        EXPECT(render_solid_frame(snapshot_surface, snapshot_canvas,
+                                  flux_color_rgba(10, 210, 20, 255), false) == FLUX_OK);
+        flux_device_wait_idle(d);
+        EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) == FLUX_OK);
+        EXPECT(ready);
+        flux_readback *snapshot = nullptr;
+        EXPECT(flux_surface_take_readback(snapshot_surface, &snapshot) == FLUX_OK);
+        EXPECT(snapshot != nullptr);
+        EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) ==
+               FLUX_ERROR_UNSUPPORTED);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_readback_read_pixels(snapshot, px, BYTES) == FLUX_OK);
+        EXPECT(near8(px_at(px, 1, 1)[0], 220));
+        EXPECT(near8(px_at(px, 1, 1)[1], 10));
+        EXPECT(near8(px_at(px, 1, 1)[2], 20));
+        EXPECT(px_at(px, 1, 1)[3] == 255);
+        flux_readback_release(snapshot);
+
+        flux_canvas_destroy(snapshot_canvas);
+        flux_surface_release(snapshot_surface);
+    }
+
     /* --- readback desc: pinned non-exportable, readback always works --- */
     {
         flux_surface_readback_desc rb = FLUX_SURFACE_READBACK_DESC_INIT;
@@ -219,15 +286,39 @@ int main(void) {
         EXPECT(flux_surface_create(d, &sd, &rs) == FLUX_OK);
         EXPECT(rs != nullptr);
         EXPECT(!flux_surface_exportable(rs));
+        bool ready = false;
+        EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_ERROR_INVALID_STATE);
 
         flux_canvas *rc = nullptr;
         flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
         cd.surface = rs;
         EXPECT(flux_canvas_create(&cd, &rc) == FLUX_OK);
         EXPECT(render_frame(rs, rc) == FLUX_OK);
+        EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_OK);
+        if (!ready) {
+            flux_device_wait_idle(d);
+            EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_OK);
+        }
+        EXPECT(ready);
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(rs, px, BYTES) == FLUX_OK);
         EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
+        /* Several queued frames safely share the persistent staging buffer;
+         * the latest frame fence covers the last FIFO copy. */
+        for (int i = 0; i < 5; ++i)
+            EXPECT(render_frame(rs, rc) == FLUX_OK);
+        flux_device_wait_idle(d);
+        ready = false;
+        EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_OK);
+        EXPECT(ready);
+        EXPECT(flux_surface_read_pixels(rs, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        /* Resize retires and recreates persistent staging with the images. */
+        EXPECT(flux_surface_resize(rs, W, H) == FLUX_OK);
+        EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_ERROR_INVALID_STATE);
+        EXPECT(render_frame(rs, rc) == FLUX_OK);
+        EXPECT(flux_surface_read_pixels(rs, px, BYTES) == FLUX_OK);
         EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
         /* export still refused: the surface is deliberately not exportable */
         int fd = -1;

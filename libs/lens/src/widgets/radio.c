@@ -73,11 +73,14 @@ bool lens_radio(lens *ui, const char *label, int *value, int option_value) {
                             .radius = (circle - 2.0f * dot_pad) * 0.5f});
     }
 
-    /* circle border */
+    /* circle border — same treatment as the checkbox: color_border alone is
+     * too subtle at this size on dark cards; hover emphasizes with accent
+     * instead of going darker toward color_hover. */
+    flux_color idle_border = lensi_lerp_color(t->color_border, t->color_fg, 0.35f);
     flux_color circle_border =
         disabled ? t->color_disabled
                  : (on ? t->color_accent
-                       : lensi_lerp_color(t->color_border, t->color_hover, n->hover_t));
+                       : lensi_lerp_color(idle_border, t->color_accent, n->hover_t));
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
                                         .rel = {t->padding, circle_y, circle, circle},

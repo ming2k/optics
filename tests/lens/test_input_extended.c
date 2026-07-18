@@ -177,8 +177,12 @@ static void test_wheel_scrolls_content(void) {
     lens_begin(ui, &IN0);
     lens_size(ui, 0, 80);
     lens_scroll_begin(ui, "sc");
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 10; i++) {
+        /* Unique id per row: same-label siblings share one node otherwise. */
+        lens_push_id_int(ui, i);
         lens_label(ui, "line");
+        lens_pop_id(ui);
+    }
     lens_scroll_end(ui);
     lens_end(ui);
 
@@ -191,8 +195,11 @@ static void test_wheel_scrolls_content(void) {
     lens_begin(ui, &in);
     lens_size(ui, 0, 80);
     lens_scroll_begin(ui, "sc");
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 10; i++) {
+        lens_push_id_int(ui, i);
         lens_label(ui, "line");
+        lens_pop_id(ui);
+    }
     lens_scroll_end(ui);
     lens_end(ui);
 

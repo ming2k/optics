@@ -151,12 +151,13 @@ pieces (view, image, buffer, allocation, imported memory, bindless
 slots) on a device-wide retire queue tagged with one past the current
 graphics submission serial. Every graphics-queue submission is
 assigned a monotonically increasing serial at `vkQueueSubmit2`; every
-fence wait that proves a batch complete (the per-slot wait in
-`flux_surface_begin_frame`, one-shot submit-and-wait,
-`flux_device_wait_idle`) raises a completed watermark. Because the
-queue is FIFO, a zombie is destroyed as soon as the watermark covers
-its tag. The tag is one past the current counter so a frame that is
-still recording when the release happens is covered too.
+event that proves a batch complete (the per-slot fence wait in
+`flux_surface_begin_frame`, a deferred upload's fence observed by the
+pending-upload sweep, `flux_device_wait_idle`) raises a completed
+watermark. Because the queue is FIFO, a zombie is destroyed as soon
+as the watermark covers its tag. The tag is one past the current
+counter so a frame that is still recording when the release happens
+is covered too.
 
 Two resource families are exempt because slot fencing already covers
 them: transient-ring slices (a slot's fence is awaited before its
@@ -255,11 +256,11 @@ One-shot upload and readback helpers
 (`flux_vk_upload_to_buffer/image`, `flux_surface_read_pixels`) copy
 through host-visible staging buffers drawn from a per-device cache
 rather than a fresh `vkCreateBuffer` + `vkAllocateMemory` per call.
-The helpers are synchronous (submit + fence wait, with queue-idle
-fallback on timeout), so a staging buffer is provably idle when the
-call returns and goes straight back to the cache's idle list.
-Entries match by usage and smallest-fit capacity; the cache is
-capped at 64 MiB per device and drained at device teardown.
+Upload submissions are deferred (see ADR-0022): a staging buffer stays
+checked out on the pending list until the copy's fence signals, then
+the non-blocking sweep returns it to the cache's idle list. Entries
+match by usage and smallest-fit capacity; the cache is capped at
+64 MiB per device and drained at device teardown.
 
 ## Batched uploads
 
@@ -269,21 +270,22 @@ submission. While a batch is open, `flux_image_create`,
 `flux_image_update_region`, `flux_mesh_create`,
 `flux_buffer_create` with `initial_data`, and layout transitions
 record their barriers and copies into one device-global command
-buffer; flush submits it once, waits the fence, and returns every
-checked-out staging buffer to the cache. Recording is serialised by
-`upload_lock` while the staging memcpy runs outside it, so loader
-threads still overlap.
+buffer; flush submits it once — without waiting — and the checked-out
+staging buffers recycle once the batch's fence signals. Recording is
+serialised by `upload_lock` while the staging memcpy runs outside it,
+so loader threads still overlap.
 
-A resource created inside a batch is usable once flush returns.
+A resource created inside a batch is ordered before any later
+same-queue work once flush returns.
 `flux_surface_begin_frame` auto-flushes any open batch before
 recording, so a frame can never sample unsubmitted data; non-frame
 consumers (compute dispatch, readback) flush explicitly, and
 `flux_device_release` flushes a leaked-open batch at teardown.
 Batches always record on the graphics queue — same-queue implicit
 ordering against in-flight frames is what makes live-image updates
-safe, and it needs no QFOT plumbing. Without a batch, uploads stay
-synchronous (and keep the dedicated transfer queue when one exists).
-See ADR-0021.
+safe, and it needs no QFOT plumbing. Uploads outside a batch are
+deferred exactly the same way (and keep the dedicated transfer queue
+when one exists). See ADR-0021 and ADR-0022.
 
 ## Async transfer queue
 
@@ -295,16 +297,16 @@ queue. The destination resource is acquired on the graphics queue
 with a queue-family-ownership barrier so subsequent graphics-side
 use sees fully visible data. On adapters without a dedicated
 transfer family the helpers fall back to a single submit on the
-graphics queue. Both paths are synchronous from the caller's view —
-the helper waits on a fence before returning. (Batched uploads are
-the exception: they always record on the graphics queue — see
-[Batched uploads](#batched-uploads).)
+graphics queue. Both paths are deferred from the caller's view —
+the helper returns once the batches are submitted, and their
+resources recycle when the parked graphics fence signals.
 
 ## See also
 
 - [ADR-0001 — project foundations](../adr/0001-project-foundations.md)
 - [ADR-0020 — GPU memory production hardening](../adr/0020-gpu-memory-production-hardening.md)
 - [ADR-0021 — batched uploads and quiescent waits](../adr/0021-batched-uploads-and-quiescent-waits.md)
+- [ADR-0022 — deferred upload submission](../adr/0022-deferred-upload-submission.md)
 - [ADR-0002 — per-module device state](../adr/0002-per-module-device-state.md)
 - [ADR-0003 — bindless handle packing](../adr/0003-bindless-handle-packing.md)
 - [Application architecture](application-architecture.md) — where the

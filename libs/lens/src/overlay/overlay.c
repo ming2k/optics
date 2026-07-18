@@ -215,6 +215,15 @@ bool lens_layer_begin(lens *ui, const char *id_str, flux_rect rect, lens_overlay
     if (!n)
         return false;
     n->is_panel_layer = true;
+    /* A persistent layer's rectangle is both its placement anchor and its
+     * minimum extent. Content may grow beyond it, but an empty paint-only
+     * layer (scrims, selection borders, highlights) must still cover the
+     * caller-supplied rectangle. Keep popup overlays content-sized: their
+     * anchor describes the owner widget rather than the popup itself. */
+    if (rect.w > n->fixed_w)
+        n->fixed_w = rect.w;
+    if (rect.h > n->fixed_h)
+        n->fixed_h = rect.h;
 
     lensi_open_container_push(ui, n);
     layer_paint_bg(ui, n, opts);
@@ -299,6 +308,10 @@ void lensi_overlay_layout(lens *ui) {
             y = area_y;
 
         lensi_layout_subtree(n, (flux_rect){x, y, w, h});
+        /* Sub-roots skip lensi_layout_solve, so clamp their scrolls (a
+         * dropdown's option list) explicitly now that placement is final —
+         * otherwise wheel/thumb offsets drift past the content bounds. */
+        lensi_scroll_clamp_subtree(n);
     }
 }
 

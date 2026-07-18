@@ -185,6 +185,13 @@ static flux_result import_sync_fd_semaphore(flux_device *d, int acquire_sync_fd,
     return FLUX_OK;
 }
 
+/* The FOREIGN -> graphics-family acquire transition is submitted
+ * deferred: the batch waits on acquire_sem GPU-side, so the calling
+ * thread never blocks on the producer's fence, and later same-queue
+ * work (the frame that samples this image) is ordered after the
+ * transition by queue submission order alone. On success the parked
+ * pending entry owns both the command pool and acquire_sem, recycled
+ * once the batch's fence signals. */
 static flux_result dmabuf_transition_image_layout(flux_device *d, VkImage img,
                                                   VkSemaphore acquire_sem) {
     VkCommandPool pool = VK_NULL_HANDLE;
@@ -226,14 +233,23 @@ static flux_result dmabuf_transition_image_layout(flux_device *d, VkImage img,
         goto fail;
     }
 
-    vr = flux_vk_submit_and_wait(d, d->graphics_queue, cmd, acquire_sem,
-                                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0);
+    {
+        VkFence fence = VK_NULL_HANDLE;
+        uint64_t serial = 0;
+        vr = flux_vk_submit_upload(d, d->graphics_queue, cmd, acquire_sem,
+                                   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, &fence,
+                                   &serial);
+        if (vr == VK_SUCCESS) {
+            /* Ownership of the command pool and acquire_sem moves to the
+             * pending entry; both are recycled when the batch retires. */
+            flux_vk_upload_pending_park(d, fence, pool, VK_NULL_HANDLE, acquire_sem, NULL, serial);
+            return FLUX_OK;
+        }
+    }
 
 fail:
     if (pool)
         vkDestroyCommandPool(d->device, pool, nullptr);
-    if (vr == VK_SUCCESS)
-        return FLUX_OK;
     flux_result r = vr == VK_TIMEOUT             ? FLUX_ERROR_TIMEOUT
                     : vr == VK_ERROR_DEVICE_LOST ? FLUX_ERROR_DEVICE_LOST
                                                  : FLUX_ERROR_BACKEND_FAILURE;
@@ -470,6 +486,9 @@ flux_result flux_image_import_dmabuf(flux_device *d, const flux_dmabuf_image_des
     r = dmabuf_transition_image_layout(d, im->image, acquire_sem);
     if (r != FLUX_OK)
         goto fail;
+    /* The deferred transition's pending entry now owns the semaphore;
+     * clear it so the success/fail paths below do not destroy it. */
+    acquire_sem = VK_NULL_HANDLE;
     im->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkImageViewCreateInfo ivci = {

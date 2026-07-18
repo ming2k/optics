@@ -90,8 +90,9 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
 
     /* Apply wheel scroll if this is the hot scroll target. */
     if (st && ui->scroll_hot_id == n->id) {
-        st->offset_y -= ui->input.scroll_y * 40.0f;
+        st->offset_y -= ui->input.scroll_y * 40.0f + ui->input.scroll_pixels_y;
         ui->input.scroll_y = 0.0f;
+        ui->input.scroll_pixels_y = 0.0f;
         ui->scroll_hot_id = 0;
     }
 

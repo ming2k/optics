@@ -24,11 +24,11 @@
 | `flux_device_*`          | Free-threaded. Refcount is atomic. The bindless heap, GPU memory allocator, queue submission path, and lazy default sampler are all internally locked. Vulkan handle accessors are lock-free reads of immutable post-init fields. |
 | `flux_surface_*`         | Refcount is atomic. **Surface operations are not thread-safe**: `begin_frame`, `resize`, etc. must be serialised by the caller. |
 | `flux_frame_*`           | Single-threaded only. A `flux_frame` returned by `begin_frame` must be consumed (submit + present) on the same thread that began it. |
-| `flux_image_*`           | Refcount is atomic. `_create` performs a synchronous one-shot upload; the queue submit is internally locked, so concurrent creates from worker threads are safe. |
+| `flux_image_*`           | Refcount is atomic. `_create` performs a deferred one-shot upload (returns after submission; ordered before later same-queue work); the queue submit is internally locked, so concurrent creates from worker threads are safe. |
 | `flux_canvas_*`          | Single-threaded only. Tied to one surface and one frame at a time. Per-canvas geometry scratch is isolated, so two canvases on two threads is supported as long as each thread drives its own canvas + its own frame. There is no API for parallel command-buffer recording into a single frame. |
 | `flux_path_*`            | Value type owned by a `flux_arena`. Not refcounted, not thread-safe — the owning arena is single-threaded. |
 | `flux_paint`             | Plain POD value. Pass it by `const flux_paint *`. No lifecycle. |
-| `flux_mesh_*`            | Refcount is atomic. `_create` performs a synchronous one-shot upload; same queue lock as `flux_image`. Safe to call concurrently from worker threads. |
+| `flux_mesh_*`            | Refcount is atomic. `_create` performs a deferred one-shot upload; same queue lock as `flux_image`. Safe to call concurrently from worker threads. |
 | `flux_material_*`        | Refcount is atomic. Immutable after creation. |
 | `flux_scene_draw`        | Single-threaded only. The draw records into the active frame's command buffer; mix only with the thread that began the frame. |
 | `flux_buffer_*`          | Refcount is atomic. Creation is safe to call concurrently from worker threads (uses the device queue lock for any staging upload). Once created, GPU-side reads/writes follow Vulkan's external-synchronisation rules. |

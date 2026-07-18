@@ -22,6 +22,7 @@ lens_sources = files(
   'src/widgets/label.c',
   'src/widgets/title.c',
   'src/widgets/checkbox.c',
+  'src/widgets/switch.c',
   'src/widgets/slider.c',
   'src/widgets/textfield.c',
   'src/widgets/collapsing.c',
@@ -71,5 +72,4 @@ pkg.generate(
   version     : meson.project_version(),
   requires    : ['flux >= 0.1.0', 'flux-text >= 0.1.0'],
 )
-
 

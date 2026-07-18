@@ -57,10 +57,11 @@ static bool adjust_from_keys(lens *ui, const lens_response *r, float *value, flo
 
 static bool adjust_from_scroll(lens *ui, bool hovered, float *value, float min, float max,
                                float step) {
-    if (!hovered || !value || fabsf(ui->input.scroll_y) <= 0.0001f)
+    float delta = ui->input.scroll_y + ui->input.scroll_pixels_y / 40.0f;
+    if (!hovered || !value || fabsf(delta) <= 0.0001f)
         return false;
-    float delta = ui->input.scroll_y;
     ui->input.scroll_y = 0.0f;
+    ui->input.scroll_pixels_y = 0.0f;
     return set_slider_value(value, *value + delta * slider_step(min, max, step), min, max);
 }
 

@@ -127,7 +127,7 @@ typedef struct lens_input {
     bool mouse_down[LENS_MOUSE_COUNT];
     bool mouse_pressed[LENS_MOUSE_COUNT];
     bool mouse_released[LENS_MOUSE_COUNT];
-    float scroll_x, scroll_y;
+    float scroll_x, scroll_y; /* wheel-step deltas */
 
     uint32_t mods;      /* modifier bitmask */
     char text_utf8[32]; /* committed text this frame */
@@ -144,6 +144,12 @@ typedef struct lens_input {
     uint32_t preedit_cursor; /* caret byte-offset in preedit */
     uint32_t preedit_sel_lo; /* active clause, byte range    */
     uint32_t preedit_sel_hi;
+
+    /* Precise surface-local pixel deltas from touchpads or other continuous
+     * sources. Kept separate from wheel steps so widgets do not multiply
+     * finger motion by their line-scroll factor. Appended for size-guarded
+     * ABI compatibility with callers built against older headers. */
+    float scroll_pixels_x, scroll_pixels_y;
 } lens_input;
 
 /* Host clipboard interface (ADR-0013). Supplied in lens_desc; optional.
@@ -493,6 +499,9 @@ LENS_API void lens_label_compact_ex(lens *ui, const char *text, float size);
 LENS_API void lens_title(lens *ui, const char *text);
 LENS_API void lens_heading(lens *ui, const char *text, int level);
 LENS_API bool lens_checkbox(lens *ui, const char *label, bool *value);
+/* Full-width settings row with a trailing platform-style switch. The optional
+ * description is available on the descriptor form below. */
+LENS_API bool lens_switch(lens *ui, const char *label, bool *value);
 /* Horizontal value control. The resting track omits its knob; hover, keyboard
  * focus, or dragging reveals it with the framework's seek-safe transition. */
 LENS_API bool lens_slider(lens *ui, const char *label, float *value, float min, float max);
@@ -510,8 +519,12 @@ LENS_API bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_
 LENS_API bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float min_h);
 /* Select trigger with a trailing vector chevron and an opaque floating option
  * surface. Re-clicking the trigger closes once; a popup inside a scroll area
- * inherits that viewport and closes when scrolling starts. A positive height
- * supplied through lens_size/lens_box is raised when needed for its content. */
+ * inherits that viewport as its placement boundary. The list opens below the
+ * trigger when it fits there, flips above otherwise, and is height-capped to
+ * the roomier side (at most ~7 rows) with its own scrolling — a wheel over
+ * the list scrolls it, a wheel anywhere else closes the popup. A positive
+ * height supplied through lens_size/lens_box is raised when needed for its
+ * content. */
 LENS_API bool lens_dropdown(lens *ui, const char *label, int *selected, const char **items,
                             int count);
 LENS_API bool lens_collapsing(lens *ui, const char *label);
@@ -623,6 +636,12 @@ typedef struct lens_checkbox_opts {
     const char *label;
     bool *value;
 } lens_checkbox_opts;
+typedef struct lens_switch_opts {
+    lens_box box;
+    const char *label;
+    const char *description;
+    bool *value;
+} lens_switch_opts;
 typedef struct lens_radio_opts {
     lens_box box;
     const char *label;
@@ -665,6 +684,7 @@ typedef struct lens_dropdown_opts {
 LENS_API lens_response lens_button_ex(lens *ui, lens_button_opts opts);
 LENS_API lens_response lens_selectable_ex(lens *ui, lens_selectable_opts opts);
 LENS_API lens_response lens_checkbox_ex(lens *ui, lens_checkbox_opts opts);
+LENS_API lens_response lens_switch_ex(lens *ui, lens_switch_opts opts);
 LENS_API lens_response lens_radio_ex(lens *ui, lens_radio_opts opts);
 LENS_API lens_response lens_slider_ex(lens *ui, lens_slider_opts opts);
 LENS_API lens_response lens_collapsing_ex(lens *ui, lens_collapsing_opts opts);

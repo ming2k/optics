@@ -3,6 +3,7 @@
 #include "test_helpers.h"
 #include <flux/canvas_cpu.h>
 #include <lens/lens.h>
+#include <math.h>
 
 static const lens_input IN0 = {.display_size = {400, 400}, .dt_seconds = 0.016f};
 
@@ -35,6 +36,52 @@ static void test_scroll_offset(void) {
 
     /* Just verify no crash; scroll consumption is internal. */
     CHECK(1);
+
+    lens_destroy(ui);
+}
+
+static void test_precise_scroll_uses_pixel_distance(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    /* Two stable frames establish previous-frame hit-test geometry. */
+    for (int frame = 0; frame < 2; frame++) {
+        lens_begin(ui, &IN0);
+        lens_size(ui, 0, 200);
+        lens_scroll_begin(ui, "precise-scroll");
+        for (int i = 0; i < 20; i++) {
+            lens_push_id_int(ui, i);
+            lens_label(ui, "Item");
+            lens_pop_id(ui);
+        }
+        lens_scroll_end(ui);
+        lens_end(ui);
+    }
+
+    lens_node *scroll = lens_node_first_child(lens_root(ui));
+    lens_node *first = lens_node_first_child(scroll);
+    CHECK(scroll != NULL && first != NULL);
+    float before = lens_node_bounds(first).y;
+
+    lens_input in = IN0;
+    in.cursor = (flux_point){50, 50};
+    in.scroll_pixels_y = -12.0f;
+    lens_begin(ui, &in);
+    lens_size(ui, 0, 200);
+    lens_scroll_begin(ui, "precise-scroll");
+    for (int i = 0; i < 20; i++) {
+        lens_push_id_int(ui, i);
+        lens_label(ui, "Item");
+        lens_pop_id(ui);
+    }
+    lens_scroll_end(ui);
+    lens_end(ui);
+
+    scroll = lens_node_first_child(lens_root(ui));
+    first = lens_node_first_child(scroll);
+    CHECK(scroll != NULL && first != NULL);
+    float after = lens_node_bounds(first).y;
+    CHECK(fabsf((after - before) + 12.0f) < 0.01f);
 
     lens_destroy(ui);
 }
@@ -97,6 +144,7 @@ static void test_scrollbar_gutter_clips_overflowing_descendants(void) {
 
 int main(void) {
     test_scroll_offset();
+    test_precise_scroll_uses_pixel_distance();
     test_scrollbar_gutter_clips_overflowing_descendants();
     return TEST_REPORT();
 }

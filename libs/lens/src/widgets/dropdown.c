@@ -42,14 +42,24 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
     }
 
     bool open = lens_overlay_is_open(ui, ov_label);
-    /* A popup is anchored to content coordinates. Close it at the start of a
-     * scroll gesture so the list never lags behind or crosses the owner's
-     * viewport while the trigger is moving. */
-    if (open && (fabsf(ui->input.scroll_x) > 0.0001f || fabsf(ui->input.scroll_y) > 0.0001f)) {
-        lens_overlay_close(ui, ov_label);
-        open = false;
+    /* A popup is anchored to content coordinates. A wheel gesture away from
+     * the popup scrolls the owner, so close the popup before its anchor can
+     * leave the viewport; a wheel over the popup itself drives the popup's
+     * own list and must not close it. */
+    if (open &&
+        (fabsf(ui->input.scroll_x) > 0.0001f || fabsf(ui->input.scroll_y) > 0.0001f ||
+         fabsf(ui->input.scroll_pixels_x) > 0.0001f ||
+         fabsf(ui->input.scroll_pixels_y) > 0.0001f)) {
+        lens_node *ov = lensi_store_find(ui, lens_current_id(ui, ov_label));
+        bool over_popup =
+            ov && ov->has_prev && lensi_point_in(ui->input.cursor, ov->prev_rect);
+        if (!over_popup) {
+            lens_overlay_close(ui, ov_label);
+            open = false;
+        }
     }
     lens_response r = lensi_interact(ui, n, true, disabled);
+    bool just_opened = false;
     if (r.clicked) {
         if (open) {
             lens_overlay_close(ui, ov_label);
@@ -57,6 +67,7 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
         } else {
             lens_overlay_open(ui, ov_label);
             open = true;
+            just_opened = true;
         }
     }
 
@@ -124,6 +135,7 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
 
     if (open) {
         /* Keyboard navigation inside the open dropdown */
+        bool kbd_nav = false;
         for (uint32_t i = 0; i < ui->input.key_count; i++) {
             const lens_key_event *k = &ui->input.keys[i];
             if (!k->pressed)
@@ -132,11 +144,13 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
                 if (selected && *selected + 1 < count) {
                     *selected = *selected + 1;
                     changed = true;
+                    kbd_nav = true;
                 }
             } else if (k->key == LENS_KEY_UP) {
                 if (selected && *selected > 0) {
                     *selected = *selected - 1;
                     changed = true;
+                    kbd_nav = true;
                 }
             } else if (k->key == LENS_KEY_ESCAPE) {
                 lens_overlay_close(ui, ov_label);
@@ -151,12 +165,47 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
         float popup_w = anchor.w;
         flux_rect owner_bounds = {0, 0, 0, 0};
         bool has_owner_bounds = nearest_scroll_bounds(n, &owner_bounds);
+
+        /* The placement area lensi_overlay_layout will use: the owner's
+         * scroll viewport clamped to the display, else the whole display. */
+        float dw = ui->input.display_size.x;
+        float dh = ui->input.display_size.y;
+        flux_rect area = {0.0f, 0.0f, dw, dh};
+        if (has_owner_bounds) {
+            float right = dw > 0.0f ? fminf(dw, owner_bounds.x + owner_bounds.w)
+                                    : owner_bounds.x + owner_bounds.w;
+            float bottom = dh > 0.0f ? fminf(dh, owner_bounds.y + owner_bounds.h)
+                                     : owner_bounds.y + owner_bounds.h;
+            area.x = fmaxf(0.0f, owner_bounds.x);
+            area.y = fmaxf(0.0f, owner_bounds.y);
+            area.w = fmaxf(0.0f, right - area.x);
+            area.h = fmaxf(0.0f, bottom - area.y);
+        }
+
+        /* Height budget: never taller than the roomier side of the trigger
+         * (so the capped popup always opens clear of it — below when it
+         * fits, flipped above otherwise), and never taller than a peek of
+         * ~7 rows so a long list scrolls instead of blanketing the owner.
+         * Row height mirrors lens_selectable. */
+        const float edge_margin = 4.0f;
+        float room_below = area.y + area.h - (anchor.y + anchor.h) - edge_margin;
+        float room_above = anchor.y - area.y - edge_margin;
+        float row_h = t->font_size + 2.0f * t->padding;
+        float list_gap = 2.0f;
+        float peek = 7.0f * row_h + 6.0f * list_gap + 0.5f * row_h;
+        float budget = fmaxf(room_below, room_above);
+        if (budget > peek)
+            budget = peek;
+        float list_max_h = budget - 2.0f * t->padding; /* overlay pad */
+        if (list_max_h < row_h)
+            list_max_h = row_h; /* always show at least one row */
+
         /* Use the opaque theme background instead of color_hover. Hover can
          * legitimately be translucent, but a floating option surface must
          * never reveal or visually merge with content behind it. */
         if (lens_overlay_begin(ui, ov_label, anchor,
                                (lens_overlay_opts){.pad = t->padding,
-                                                   .gap = 2.0f,
+                                                   .gap = list_gap,
                                                    .bg = t->color_bg | 0xff000000u,
                                                    .border = t->color_border,
                                                    .border_width = t->border_width,
@@ -167,10 +216,23 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
                 lensi_overlay_constrain_current(ui, owner_bounds);
             /* Flat selectable rows, not filled accent buttons: a column of
              * lens_button reads as a stack of bordered pills, whereas a menu
-             * wants one flat list with the current value highlighted. */
+             * wants one flat list with the current value highlighted. The
+             * list scrolls once it outgrows the height budget. */
+            lens_scroll_begin(ui, "##list");
+            lens_node *list = lensi_open_container(ui);
+            if (list) {
+                list->max_h = list_max_h;
+                list->gap = list_gap; /* scroll defaults to theme gap */
+            }
             for (int i = 0; i < count; i++) {
                 bool is_sel = selected && i == *selected;
-                if (lens_selectable(ui, items[i], is_sel)) {
+                /* Items with duplicate labels must still get distinct nodes;
+                 * scope each row by its index (same-label siblings would
+                 * otherwise collapse into one). */
+                lens_push_id_int(ui, i);
+                bool clicked = lens_selectable(ui, items[i], is_sel);
+                lens_pop_id(ui);
+                if (clicked) {
                     if (selected) {
                         *selected = i;
                         changed = true;
@@ -178,6 +240,26 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
                     lens_overlay_close(ui, ov_label);
                 }
             }
+            /* Keep the selected row in view: on open, and after keyboard
+             * navigation. Manual wheel scrolling is left untouched. */
+            if (list && selected && *selected >= 0 && *selected < count &&
+                (just_opened || kbd_nav)) {
+                lens_scroll_state *ss =
+                    (lens_scroll_state *)lens_node_state(list, sizeof(lens_scroll_state));
+                if (ss) {
+                    float viewport_h = fminf(
+                        (float)count * row_h + (float)(count - 1) * list_gap, list_max_h);
+                    float row_top = (float)*selected * (row_h + list_gap);
+                    if (just_opened)
+                        ss->offset_y = 0.0f;
+                    if (row_top < ss->offset_y)
+                        ss->offset_y = row_top;
+                    else if (row_top + row_h > ss->offset_y + viewport_h)
+                        ss->offset_y = row_top + row_h - viewport_h;
+                    list->scroll_y = ss->offset_y;
+                }
+            }
+            lens_scroll_end(ui);
             lens_overlay_end(ui);
         }
     }

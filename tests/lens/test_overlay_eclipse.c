@@ -155,8 +155,11 @@ static void test_floating_card_eclipses_scroll_wheel(void) {
         lens_begin(ui, &in);
         lens_size(ui, 200.0f, 60.0f);
         lens_scroll_begin(ui, "list");
-        for (int i = 0; i < 20; ++i)
+        for (int i = 0; i < 20; ++i) {
+            lens_push_id_int(ui, i);
             lens_label(ui, "row");
+            lens_pop_id(ui);
+        }
         lens_scroll_end(ui);
         lens_layer_begin(ui, "hover-card", (flux_rect){10.0f, 10.0f, 260.0f, 0.0f}, CARD_OPTS);
         lens_label(ui, "details");
@@ -178,8 +181,11 @@ static void test_floating_card_eclipses_scroll_wheel(void) {
     lens_begin(ui, &IN0);
     lens_size(ui, 200.0f, 60.0f);
     lens_scroll_begin(ui, "list");
-    for (int i = 0; i < 20; ++i)
+    for (int i = 0; i < 20; ++i) {
+        lens_push_id_int(ui, i);
         lens_label(ui, "row");
+        lens_pop_id(ui);
+    }
     lens_scroll_end(ui);
     lens_end(ui);
 
@@ -190,8 +196,11 @@ static void test_floating_card_eclipses_scroll_wheel(void) {
     lens_begin(ui, &in);
     lens_size(ui, 200.0f, 60.0f);
     lens_scroll_begin(ui, "list");
-    for (int i = 0; i < 20; ++i)
+    for (int i = 0; i < 20; ++i) {
+        lens_push_id_int(ui, i);
         lens_label(ui, "row");
+        lens_pop_id(ui);
+    }
     lens_scroll_end(ui);
     lens_end(ui);
     lens_node *scroll = lens_node_first_child(lens_root(ui));

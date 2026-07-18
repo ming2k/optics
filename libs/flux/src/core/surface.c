@@ -37,6 +37,14 @@ typedef struct flux_surface_image_storage {
     flux_vk_alloc *allocs;
 } flux_surface_image_storage;
 
+struct flux_readback {
+    flux_device *device;
+    flux_staging_buf *staging;
+    VkFormat format;
+    uint32_t width;
+    uint32_t height;
+};
+
 static void image_storage_free(flux_device *d, flux_surface_image_storage *storage) {
     if (!storage)
         return;
@@ -287,6 +295,8 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
         image_count++;
     if (caps.maxImageCount > 0 && image_count > caps.maxImageCount)
         image_count = caps.maxImageCount;
+    bool readback_supported =
+        (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
 
     VkSwapchainCreateInfoKHR sci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -296,7 +306,8 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
         .imageColorSpace = fmt.colorSpace,
         .imageExtent = extent,
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                      (readback_supported ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0),
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = caps.currentTransform,
         .compositeAlpha = pick_composite_alpha(caps.supportedCompositeAlpha),
@@ -384,6 +395,7 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
     s->color_space = fmt.colorSpace;
     s->extent = extent;
     s->hdr_actual = (fmt.colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+    s->readback_supported = readback_supported;
     surface_take_image_storage(s, &storage, new_count);
     for (uint32_t i = 0; i < new_count; ++i) {
         s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -409,6 +421,11 @@ new_swapchain_fail:
 /* ------------------------------------------------------------------ */
 
 static void offscreen_destroy_images(flux_surface *s) {
+    if (s->readback_staging) {
+        flux_vk_staging_release(s->device, s->readback_staging);
+        s->readback_staging = NULL;
+    }
+    s->last_readback_slot = UINT32_MAX;
     for (uint32_t i = 0; i < s->image_count; ++i) {
         if (s->image_views[i])
             vkDestroyImageView(s->device->device, s->image_views[i], nullptr);
@@ -737,12 +754,31 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
         s->image_foreign_owned[i] = false;
         s->image_sync_exported[i] = false;
     }
+    if (s->offscreen_require_readback) {
+        size_t needed;
+        if (__builtin_mul_overflow((size_t)w, (size_t)h, &needed) ||
+            __builtin_mul_overflow(needed, 4u, &needed)) {
+            offscreen_destroy_images(s);
+            return FLUX_ERROR_OUT_OF_RANGE;
+        }
+        flux_result r = flux_vk_staging_acquire(d, needed, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                &s->readback_staging);
+        if (r != FLUX_OK) {
+            offscreen_destroy_images(s);
+            return r;
+        }
+    }
     return FLUX_OK;
 }
 
 void flux_surface_destroy_swapchain(flux_surface *s) {
     if (!s || !s->device || !s->device->device)
         return;
+    if (s->readback_staging) {
+        flux_vk_staging_release(s->device, s->readback_staging);
+        s->readback_staging = NULL;
+    }
+    s->last_readback_slot = UINT32_MAX;
     for (uint32_t i = 0; i < s->image_count; ++i) {
         if (s->image_views[i])
             vkDestroyImageView(s->device->device, s->image_views[i], nullptr);
@@ -863,10 +899,12 @@ flux_result flux_surface_create(flux_device *device, const flux_surface_desc *de
     s->device = flux_device_retain(device);
     s->vk_surface = (VkSurfaceKHR)desc->vk_surface_khr;
     s->offscreen = (desc->vk_surface_khr == nullptr); /* ADR-0013 */
+    s->readback_supported = s->offscreen;
     s->offscreen_require_readback = false;
     s->vsync = desc->vsync;
     s->hdr_preferred = desc->hdr_preferred;
     s->last_submitted_slot = UINT32_MAX;
+    s->last_readback_slot = UINT32_MAX;
     s->frames_in_flight = device->frames_in_flight;
     if (s->frames_in_flight > FLUX_MAX_FRAMES_IN_FLIGHT)
         s->frames_in_flight = FLUX_MAX_FRAMES_IN_FLIGHT;
@@ -973,8 +1011,8 @@ flux_surface *flux_surface_retain(flux_surface *s) {
  * Offscreen surfaces have no presentation engine: every batch that can
  * touch the surface's images and transient ring was submitted on the
  * graphics queue guarded by a per-slot in_flight fence, so waiting
- * those fences is sufficient (one-shot uploads and readbacks are
- * synchronous — complete before they return).
+ * those fences is sufficient (persistent readback copies share the frame
+ * fence; legacy one-shot readbacks complete before they return).
  *
  * Windowed surfaces must also cover the presentation engine, which can
  * keep reading a presented image after the frame's fence signals; only
@@ -1036,6 +1074,7 @@ flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h) {
     if (s->offscreen) {
         s->current_frame = 0;
         s->last_submitted_slot = UINT32_MAX; /* old contents are gone */
+        s->last_readback_slot = UINT32_MAX;
         return offscreen_create_images(s, w, h, s->offscreen_allowed_modifiers,
                                        s->offscreen_allowed_modifier_count);
     }
@@ -1062,19 +1101,147 @@ void flux_surface_get_info(const flux_surface *s, flux_surface_info *out) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Offscreen readback (ADR-0013)                                     */
+/*  Frame readback                                                    */
 /* ------------------------------------------------------------------ */
+
+flux_result flux_surface_prepare_readback(flux_surface *s) {
+    if (!s)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (!s->readback_supported) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                  "surface images do not support transfer-source readback");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    if (s->readback_staging)
+        return FLUX_OK;
+    size_t needed;
+    if (__builtin_mul_overflow((size_t)s->extent.width, (size_t)s->extent.height, &needed) ||
+        __builtin_mul_overflow(needed, 4u, &needed))
+        return FLUX_ERROR_OUT_OF_RANGE;
+    return flux_vk_staging_acquire(s->device, needed, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                   &s->readback_staging);
+}
+
+flux_result flux_surface_read_pixels_ready(flux_surface *s, bool *out_ready) {
+    if (!s || !out_ready)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_ready = false;
+    if (!s->readback_staging) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "surface has no persistent readback staging");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    if (s->last_readback_slot == UINT32_MAX) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "no frame has been captured for readback");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    VkResult vr = vkGetFenceStatus(s->device->device, s->frames[s->last_readback_slot].in_flight);
+    if (vr == VK_SUCCESS) {
+        *out_ready = true;
+        return FLUX_OK;
+    }
+    if (vr == VK_NOT_READY)
+        return FLUX_OK;
+    flux_result r =
+        vr == VK_ERROR_DEVICE_LOST ? FLUX_ERROR_DEVICE_LOST : FLUX_ERROR_BACKEND_FAILURE;
+    FLUX_FAIL_VK(r, "read_pixels_ready fence query failed", vr);
+    return r;
+}
+
+flux_result flux_surface_take_readback(flux_surface *s, flux_readback **out) {
+    if (!s || !out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = NULL;
+    if (s->offscreen_require_readback) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                  "require_readback staging remains owned by its surface");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    if (!s->readback_staging || s->last_readback_slot == UINT32_MAX) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "no captured frame is available to detach");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    VkResult vr =
+        vkGetFenceStatus(s->device->device, s->frames[s->last_readback_slot].in_flight);
+    if (vr == VK_NOT_READY) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "captured frame is not ready");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    if (vr != VK_SUCCESS) {
+        flux_result r =
+            vr == VK_ERROR_DEVICE_LOST ? FLUX_ERROR_DEVICE_LOST : FLUX_ERROR_BACKEND_FAILURE;
+        FLUX_FAIL_VK(r, "captured frame fence query failed", vr);
+        return r;
+    }
+
+    flux_readback *readback = flux_internal_alloc(s->device, sizeof(*readback));
+    if (!readback)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    *readback = (flux_readback){
+        .device = flux_device_retain(s->device),
+        .staging = s->readback_staging,
+        .format = s->format,
+        .width = s->extent.width,
+        .height = s->extent.height,
+    };
+    s->readback_staging = NULL;
+    s->last_readback_slot = UINT32_MAX;
+    *out = readback;
+    return FLUX_OK;
+}
+
+flux_result flux_readback_read_pixels(const flux_readback *readback, void *dst, size_t bytes) {
+    if (!readback || !dst)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    size_t needed;
+    if (__builtin_mul_overflow((size_t)readback->width, (size_t)readback->height, &needed) ||
+        __builtin_mul_overflow(needed, 4u, &needed))
+        return FLUX_ERROR_OUT_OF_RANGE;
+    if (bytes < needed) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "dst too small for readback pixels");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    const uint8_t *src = readback->staging->alloc.mapped;
+    if (!src) {
+        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "readback staging is not mapped");
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+    if (readback->format == VK_FORMAT_B8G8R8A8_UNORM ||
+        readback->format == VK_FORMAT_B8G8R8A8_SRGB) {
+        uint8_t *out_px = dst;
+        for (size_t i = 0; i < (size_t)readback->width * readback->height; ++i) {
+            out_px[i * 4u + 0u] = src[i * 4u + 2u];
+            out_px[i * 4u + 1u] = src[i * 4u + 1u];
+            out_px[i * 4u + 2u] = src[i * 4u + 0u];
+            out_px[i * 4u + 3u] = src[i * 4u + 3u];
+        }
+    } else {
+        memcpy(dst, src, needed);
+    }
+    return FLUX_OK;
+}
+
+void flux_readback_release(flux_readback *readback) {
+    if (!readback)
+        return;
+    flux_device *device = readback->device;
+    flux_vk_staging_release(device, readback->staging);
+    flux_internal_free(device, readback);
+    flux_device_release(device);
+}
 
 flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
     if (!s || !dst)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    if (!s->offscreen) {
-        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "flux_surface_read_pixels needs an offscreen surface");
-        return FLUX_ERROR_UNSUPPORTED;
-    }
-    if (s->last_submitted_slot == UINT32_MAX) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "no frame has been submitted to read back");
+    bool persistent_staging = s->readback_staging != NULL;
+    uint32_t slot = persistent_staging ? s->last_readback_slot : s->last_submitted_slot;
+    if (slot == UINT32_MAX) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "no frame is available for readback");
         return FLUX_ERROR_INVALID_STATE;
+    }
+    if (!persistent_staging && !s->offscreen) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                  "windowed readback requires flux_frame_request_readback");
+        return FLUX_ERROR_UNSUPPORTED;
     }
     size_t needed = (size_t)s->extent.width * s->extent.height * 4u;
     if (bytes < needed) {
@@ -1083,9 +1250,8 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
     }
 
     flux_device *d = s->device;
-    uint32_t slot = s->last_submitted_slot;
     flux_per_frame *pf = &s->frames[slot];
-    if (s->image_foreign_owned[slot]) {
+    if (!persistent_staging && s->image_foreign_owned[slot]) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
                   "offscreen image is still owned by an external dma-buf consumer");
         return FLUX_ERROR_INVALID_STATE;
@@ -1102,10 +1268,13 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
-    flux_staging_buf *staging = NULL;
-    flux_result r = flux_vk_staging_acquire(d, needed, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &staging);
-    if (r != FLUX_OK)
-        return r;
+    flux_staging_buf *staging = s->readback_staging;
+    flux_result r = FLUX_OK;
+    if (!persistent_staging) {
+        r = flux_vk_staging_acquire(d, needed, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &staging);
+        if (r != FLUX_OK)
+            return r;
+    }
 
     if (!staging->alloc.mapped) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE,
@@ -1114,7 +1283,7 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
         goto out;
     }
 
-    {
+    if (!persistent_staging) {
         VkCommandPool pool = VK_NULL_HANDLE;
         VkCommandBuffer cmd = VK_NULL_HANDLE;
         vr = flux_vk_new_transient_cmd(d, d->graphics_family, &pool, &cmd);
@@ -1171,7 +1340,8 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
     r = FLUX_OK;
 
 out:
-    flux_vk_staging_release(d, staging);
+    if (!persistent_staging)
+        flux_vk_staging_release(d, staging);
     return r;
 }
 

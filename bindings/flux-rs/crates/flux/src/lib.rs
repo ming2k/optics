@@ -199,6 +199,37 @@ pub struct Surface {
     raw: *mut sys::flux_surface,
 }
 
+/// An immutable completed frame snapshot detached from a [`Surface`].
+///
+/// The staging allocation is independently owned, so this handle can be sent
+/// to a worker while the surface continues presenting or is resized.
+pub struct Readback {
+    raw: *mut sys::flux_readback,
+}
+
+// The C handle exclusively owns immutable mapped staging and uses the
+// device's locked staging cache when released.
+unsafe impl Send for Readback {}
+
+impl Readback {
+    /// Copy and normalize the snapshot to tightly packed RGBA8.
+    pub fn read_pixels(&self, dst: &mut [u8]) -> Result<(), Error> {
+        Error::check(unsafe {
+            sys::flux_readback_read_pixels(
+                self.raw,
+                dst.as_mut_ptr() as *mut std::os::raw::c_void,
+                dst.len(),
+            )
+        })
+    }
+}
+
+impl Drop for Readback {
+    fn drop(&mut self) {
+        unsafe { sys::flux_readback_release(self.raw) };
+    }
+}
+
 impl Surface {
     /// Wrap a `VkSurfaceKHR` (created by the caller, e.g. via `ash`) as a flux
     /// surface with its swapchain.
@@ -312,11 +343,10 @@ impl Surface {
         Ok(surface)
     }
 
-    /// Offscreen surfaces only: read back the most recently submitted frame as
-    /// tightly packed RGBA8, row-major, top-left origin. `dst` must be at least
-    /// `width * height * 4` bytes. Waits for the frame's GPU work to complete.
-    /// Returns [`Error`] wrapping `FLUX_ERROR_UNSUPPORTED` on a windowed surface
-    /// or `FLUX_ERROR_INVALID_STATE` before the first submitted frame.
+    /// Read back an immutable frame snapshot as tightly packed RGBA8,
+    /// row-major, top-left origin. `dst` must be at least
+    /// `width * height * 4` bytes. Windowed and exportable surfaces must first
+    /// request the snapshot through [`Frame::request_readback`].
     pub fn read_pixels(&self, dst: &mut [u8]) -> Result<(), Error> {
         Error::check(unsafe {
             sys::flux_surface_read_pixels(
@@ -325,6 +355,31 @@ impl Surface {
                 dst.len(),
             )
         })
+    }
+
+    /// Allocate readback staging before a latency-sensitive capture. Calling
+    /// this is optional; [`Frame::request_readback`] otherwise allocates on
+    /// first use. Re-run it after resizing the surface.
+    pub fn prepare_readback(&self) -> Result<(), Error> {
+        Error::check(unsafe { sys::flux_surface_prepare_readback(self.raw) })
+    }
+
+    /// Whether the most recently captured frame is available for
+    /// [`read_pixels`](Self::read_pixels), without waiting. Once this returns
+    /// `true`, `read_pixels` only copies already-mapped CPU memory.
+    pub fn read_pixels_ready(&self) -> Result<bool, Error> {
+        let mut ready = false;
+        Error::check(unsafe { sys::flux_surface_read_pixels_ready(self.raw, &mut ready) })?;
+        Ok(ready)
+    }
+
+    /// Detach the completed on-demand snapshot without copying its pixels.
+    /// The returned handle can be moved to a post-processing worker while
+    /// this surface continues presenting.
+    pub fn take_readback(&self) -> Result<Readback, Error> {
+        let mut out = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_surface_take_readback(self.raw, &mut out) })?;
+        Ok(Readback { raw: out })
     }
 
     /// Whether this offscreen surface can export its rendered images as
@@ -454,6 +509,12 @@ pub struct Frame<'surface> {
 }
 
 impl<'surface> Frame<'surface> {
+    /// Copy this exact frame into immutable readback staging during submit.
+    /// Later frames do not change the snapshot.
+    pub fn request_readback(&mut self) -> Result<(), Error> {
+        Error::check(unsafe { sys::flux_frame_request_readback(self.raw) })
+    }
+
     /// Submit recorded work to the GPU and advance to the submitted state.
     pub fn submit(self) -> Result<SubmittedFrame<'surface>, Error> {
         Error::check(unsafe { sys::flux_frame_submit(self.raw) })?;
@@ -1023,6 +1084,16 @@ impl Canvas {
         unsafe { sys::flux_canvas_stroke_rrect(self.raw, rect, radius, color, width) };
     }
 
+    /// Fill `path` with `paint` (the paint's fill rule applies).
+    pub fn fill_path(&self, path: &Path, paint: &Paint) {
+        unsafe { sys::flux_canvas_fill_path(self.raw, path.raw, &paint.raw) };
+    }
+
+    /// Stroke `path` with `paint` (width, cap, and join apply).
+    pub fn stroke_path(&self, path: &Path, paint: &Paint) {
+        unsafe { sys::flux_canvas_stroke_path(self.raw, path.raw, &paint.raw) };
+    }
+
     /// Fill a rectangle with a linear gradient in canvas pixel space.
     ///
     /// Flux supports at most eight stops; additional stops are ignored.
@@ -1236,6 +1307,179 @@ impl Drop for Arena {
     }
 }
 
+// =====================================================================
+//  Paint + Path
+// =====================================================================
+
+/// How the open ends of a stroked subpath are rendered
+/// (mirrors `flux_line_cap`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineCap {
+    /// Flat edge at the endpoint.
+    #[default]
+    Butt,
+    /// Semicircular cap extending past the endpoint.
+    Round,
+    /// Square cap extending past the endpoint.
+    Square,
+}
+
+impl LineCap {
+    fn raw(self) -> sys::flux_line_cap {
+        match self {
+            LineCap::Butt => sys::flux_line_cap::FLUX_CAP_BUTT,
+            LineCap::Round => sys::flux_line_cap::FLUX_CAP_ROUND,
+            LineCap::Square => sys::flux_line_cap::FLUX_CAP_SQUARE,
+        }
+    }
+}
+
+/// How the corners of a stroked path are rendered
+/// (mirrors `flux_line_join`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineJoin {
+    /// Sharp corner, clipped at the miter limit.
+    #[default]
+    Miter,
+    /// Rounded corner.
+    Round,
+    /// Bevelled corner.
+    Bevel,
+}
+
+impl LineJoin {
+    fn raw(self) -> sys::flux_line_join {
+        match self {
+            LineJoin::Miter => sys::flux_line_join::FLUX_JOIN_MITER,
+            LineJoin::Round => sys::flux_line_join::FLUX_JOIN_ROUND,
+            LineJoin::Bevel => sys::flux_line_join::FLUX_JOIN_BEVEL,
+        }
+    }
+}
+
+/// How a surface is coloured when filling or stroking (mirrors
+/// `flux_paint`). Construct via [`Paint::solid`]; stroke parameters are
+/// set with the `with_*` builders. The C defaults are a 1px butt/miter
+/// stroke with src-over blending.
+#[derive(Clone, Copy)]
+pub struct Paint {
+    raw: sys::flux_paint,
+}
+
+impl std::fmt::Debug for Paint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Paint")
+            .field("color", &self.raw.color)
+            .field("stroke_width", &self.raw.stroke_width)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Paint {
+    /// A flat premultiplied colour.
+    pub fn solid(color: u32) -> Paint {
+        Paint {
+            raw: unsafe { sys::flux_paint_solid(color) },
+        }
+    }
+
+    /// Stroke width in canvas units (default 1.0).
+    pub fn with_stroke(mut self, width: f32) -> Self {
+        self.raw.stroke_width = width;
+        self
+    }
+
+    /// Stroke end cap (default [`LineCap::Butt`]).
+    pub fn with_cap(mut self, cap: LineCap) -> Self {
+        self.raw.cap = cap.raw();
+        self
+    }
+
+    /// Stroke corner join (default [`LineJoin::Miter`]).
+    pub fn with_join(mut self, join: LineJoin) -> Self {
+        self.raw.join = join.raw();
+        self
+    }
+
+    /// Borrow the raw C paint.
+    pub fn as_raw(&self) -> &sys::flux_paint {
+        &self.raw
+    }
+}
+
+/// A vector path allocated from an [`Arena`] (mirrors `flux_path`).
+///
+/// The path borrows its arena: it is freed wholesale by [`Arena::reset`]
+/// or drop, so a `Path` must not outlive the frame's arena cycle. Mutators
+/// take `&self` because the path is a C-side growable buffer; overflow is
+/// reported by [`Path::dropped_count`].
+pub struct Path {
+    raw: *mut sys::flux_path,
+}
+
+impl Path {
+    /// Create an empty path in `arena`.
+    pub fn new(arena: &Arena) -> Result<Path, Error> {
+        let mut out = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_path_create(&mut out, arena.as_raw()) })?;
+        Ok(Path { raw: out })
+    }
+
+    /// Begin a new subpath at `(x, y)`.
+    pub fn move_to(&self, x: f32, y: f32) -> &Self {
+        unsafe { sys::flux_path_move_to(self.raw, x, y) };
+        self
+    }
+
+    /// Append a straight segment to `(x, y)`.
+    pub fn line_to(&self, x: f32, y: f32) -> &Self {
+        unsafe { sys::flux_path_line_to(self.raw, x, y) };
+        self
+    }
+
+    /// Append a quadratic Bézier with control point `(cx, cy)`.
+    pub fn quad_to(&self, cx: f32, cy: f32, x: f32, y: f32) -> &Self {
+        unsafe { sys::flux_path_quad_to(self.raw, cx, cy, x, y) };
+        self
+    }
+
+    /// Append a cubic Bézier with control points `(c1x, c1y)`, `(c2x, c2y)`.
+    pub fn cubic_to(&self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) -> &Self {
+        unsafe { sys::flux_path_cubic_to(self.raw, c1x, c1y, c2x, c2y, x, y) };
+        self
+    }
+
+    /// Close the current subpath with a straight segment to its start.
+    pub fn close(&self) -> &Self {
+        unsafe { sys::flux_path_close(self.raw) };
+        self
+    }
+
+    /// Append an axis-aligned rectangle subpath.
+    pub fn add_rect(&self, x: f32, y: f32, w: f32, h: f32) -> &Self {
+        unsafe { sys::flux_path_add_rect(self.raw, sys::flux_rect { x, y, w, h }) };
+        self
+    }
+
+    /// Append a rounded-rectangle subpath.
+    pub fn add_round_rect(&self, x: f32, y: f32, w: f32, h: f32, radius: f32) -> &Self {
+        unsafe { sys::flux_path_add_round_rect(self.raw, sys::flux_rect { x, y, w, h }, radius) };
+        self
+    }
+
+    /// Append a circle subpath.
+    pub fn add_circle(&self, cx: f32, cy: f32, radius: f32) -> &Self {
+        unsafe { sys::flux_path_add_circle(self.raw, cx, cy, radius) };
+        self
+    }
+
+    /// Segments rejected due to arena exhaustion; non-zero means draws
+    /// with this path silently dropped data (grow the arena).
+    pub fn dropped_count(&self) -> u32 {
+        unsafe { sys::flux_path_dropped_count(self.raw) }
+    }
+}
+
 fn image_data_len(width: u32, height: u32, format: Format) -> Result<usize, Error> {
     let bytes_per_pixel = match format {
         Format::FLUX_FORMAT_R8_UNORM => 1usize,
@@ -1275,8 +1519,10 @@ impl Image {
     }
 
     /// Create an image from tightly packed pixel data. `data` must be exactly
-    /// `width * height * bytes_per_pixel(format)` bytes. The upload is
-    /// synchronous; the data may be freed after this returns.
+    /// `width * height * bytes_per_pixel(format)` bytes; the pixel bytes are
+    /// copied before this returns and may be freed immediately. The upload
+    /// itself is deferred: it is ordered before any later work on the same
+    /// queue, so the image is safe to draw with right away.
     pub fn from_bytes(
         device: &Device,
         width: u32,

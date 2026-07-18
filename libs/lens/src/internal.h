@@ -320,6 +320,7 @@ void lensi_tooltip(lens *ui, const char *text); /* anchored to last widget */
 void lensi_layout_solve(lens *ui);
 void lensi_layout_subtree(lens_node *n, flux_rect rect); /* used by overlay */
 void lensi_scroll_clamp(lens *ui);
+void lensi_scroll_clamp_subtree(lens_node *n); /* overlay sub-roots, post-placement */
 
 /* input / interaction (input.c, focus.c) */
 lens_response lensi_interact(lens *ui, lens_node *n, bool focusable, bool disabled);

@@ -208,6 +208,7 @@ FLUX_API void flux_console_logger(flux_log_level level, const char *file, int li
 typedef struct flux_device flux_device;
 typedef struct flux_surface flux_surface;
 typedef struct flux_frame flux_frame;
+typedef struct flux_readback flux_readback;
 typedef struct flux_buffer flux_buffer;
 typedef struct flux_target flux_target;
 /* flux_image lives in <flux/canvas.h> — it's a canvas/2D concept. */
@@ -337,22 +338,29 @@ typedef struct flux_memory_stats {
     uint32_t live_blocks;
 } flux_memory_stats;
 
-FLUX_API void flux_device_memory_stats(const flux_device *d, flux_memory_stats *out);
+/* Sample live allocator counters. Deferred upload work (staging buffers
+ * still in flight) is settled before sampling so the numbers do not
+ * depend on GPU timing; this makes the call wait on outstanding upload
+ * fences, so keep it off hot paths. */
+FLUX_API void flux_device_memory_stats(flux_device *d, flux_memory_stats *out);
 
 /* Batched uploads. Between begin and flush, upload work from
  * flux_image_create, flux_image_update_region, flux_mesh_create and
  * flux_buffer_create (GPU_LOCAL with initial_data) accumulates into one
- * queue submission instead of a submit-and-wait per resource — this is
+ * queue submission instead of one submission per resource — this is
  * the fast path for bulk asset loading.
  *
- * A resource created inside a batch is usable once flush returns.
- * flux_surface_begin_frame flushes any open batch before recording, so
- * an unflushed batch can never be sampled by a frame. Non-frame
- * consumers (compute dispatch, readback) must flush explicitly.
- * begin/flush are device-global; the upload calls themselves may run on
- * any thread. Nested begin returns FLUX_ERROR_INVALID_STATE; flushing
- * with no batch open is a harmless no-op. Without a batch, uploads stay
- * synchronous exactly as before. */
+ * Upload submissions are deferred: flush (and the one-shot helpers
+ * outside a batch) submit the copy work and return without waiting for
+ * the GPU. A resource is safe to sample as soon as its creating call
+ * returns, because every later batch on the same queue is ordered after
+ * the copies; flux_surface_begin_frame flushes any open batch before
+ * recording, so an unflushed batch can never be sampled by a frame.
+ * Non-frame consumers (compute dispatch, readback) must flush
+ * explicitly. begin/flush are device-global; the upload calls
+ * themselves may run on any thread. Nested begin returns
+ * FLUX_ERROR_INVALID_STATE; flushing with no batch open is a harmless
+ * no-op. */
 FLUX_NODISCARD FLUX_API flux_result flux_uploads_begin(flux_device *d);
 FLUX_NODISCARD FLUX_API flux_result flux_uploads_flush(flux_device *d);
 
@@ -538,14 +546,41 @@ FLUX_API void flux_surface_release(flux_surface *s);
 FLUX_API flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h);
 FLUX_API void flux_surface_get_info(const flux_surface *s, flux_surface_info *out);
 
-/* Offscreen surfaces only: synchronously read back the most recently
- * submitted frame as tightly packed RGBA8, row-major, top-left origin
- * (`width * height * 4` bytes; `bytes` must be at least that). Waits
- * for the frame's GPU work to complete first. Returns
- * FLUX_ERROR_UNSUPPORTED on a windowed surface and
- * FLUX_ERROR_INVALID_STATE before the first submitted frame. */
+/* Read back a captured frame as tightly packed RGBA8, row-major, top-left
+ * origin (`width * height * 4` bytes; `bytes` must be at least that).
+ * Windowed and exportable surfaces require flux_frame_request_readback on the
+ * submitted frame. Plain offscreen surfaces retain their legacy behaviour of
+ * reading the most recently submitted image. Waits for the relevant GPU work
+ * to complete first. Returns FLUX_ERROR_INVALID_STATE when no readable frame
+ * is available. */
 FLUX_NODISCARD FLUX_API flux_result flux_surface_read_pixels(flux_surface *s, void *dst,
                                                              size_t bytes);
+
+/* Allocate persistent readback staging ahead of the first capture. This is
+ * optional (flux_frame_request_readback allocates it lazily) but lets
+ * latency-sensitive callers keep allocation out of the trigger frame. Resize
+ * retires this staging, so callers may prepare again afterward. */
+FLUX_NODISCARD FLUX_API flux_result flux_surface_prepare_readback(flux_surface *s);
+
+/* Non-blocking readiness query for a frame copied to persistent readback
+ * staging. `out_ready` becomes true once that frame's image-to-buffer copy has
+ * completed. Returns FLUX_ERROR_INVALID_STATE before the first captured frame
+ * and FLUX_ERROR_UNSUPPORTED when the surface has no persistent readback
+ * staging (a plain offscreen surface before any on-demand request). */
+FLUX_NODISCARD FLUX_API flux_result flux_surface_read_pixels_ready(flux_surface *s,
+                                                                   bool *out_ready);
+
+/* Detach a completed on-demand snapshot from its surface without copying its
+ * pixels. The returned immutable handle owns the mapped staging allocation,
+ * can outlive or move to a different thread from the surface, and is consumed
+ * with flux_readback_read_pixels before flux_readback_release. This is
+ * unsupported for require_readback surfaces, whose staging is continuously
+ * surface-owned. The caller should first observe `out_ready == true`. */
+FLUX_NODISCARD FLUX_API flux_result flux_surface_take_readback(flux_surface *s,
+                                                               flux_readback **out_readback);
+FLUX_NODISCARD FLUX_API flux_result flux_readback_read_pixels(const flux_readback *readback,
+                                                              void *dst, size_t bytes);
+FLUX_API void flux_readback_release(flux_readback *readback);
 
 /* Offscreen surfaces only (and only when the device had the dma-buf
  * extensions enabled at creation): export the most recently submitted
@@ -612,6 +647,14 @@ typedef struct flux_frame_begin_desc {
 FLUX_NODISCARD FLUX_API flux_result flux_surface_begin_frame(flux_surface *s,
                                                              const flux_frame_begin_desc *desc,
                                                              flux_frame **out_frame);
+
+/* Capture the exact color attachment produced by this recording frame.
+ * flux_frame_submit inserts an image-to-buffer copy before the final present
+ * or dma-buf ownership transition. The copied pixels remain unchanged by
+ * later frames and can be polled with flux_surface_read_pixels_ready, then
+ * retrieved with flux_surface_read_pixels. A later request replaces the
+ * surface's previous snapshot. */
+FLUX_NODISCARD FLUX_API flux_result flux_frame_request_readback(flux_frame *f);
 
 /* Frames follow a strict single-use state machine:
  * begin_frame -> submit -> present. Calling either transition out of order or

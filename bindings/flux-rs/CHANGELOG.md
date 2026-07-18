@@ -7,6 +7,12 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `Frame::request_readback` captures the exact frame being submitted on
+  windowed and offscreen surfaces. `Surface::prepare_readback` can preallocate
+  staging outside the trigger frame, while `Surface::read_pixels_ready`
+  exposes non-blocking completion polling. `Surface::take_readback` detaches
+  the mapped staging allocation so pixel copying and normalization can move to
+  a worker without blocking presentation.
 - **Software (CPU) canvas backend.** `Canvas::new_cpu(w, h, scale)` creates a
   headless canvas that renders on the CPU — no GPU, device, or window — mapped
   onto the C `flux_canvas_create_cpu` / `<flux/canvas_cpu.h>` (flux ≥ 0.2.4).

@@ -711,12 +711,18 @@ void flux_vk_allocator_unnote_external(flux_device *d, VkDeviceSize bytes) {
     pthread_mutex_unlock(&a->lock);
 }
 
-void flux_device_memory_stats(const flux_device *d, flux_memory_stats *out) {
+void flux_device_memory_stats(flux_device *d, flux_memory_stats *out) {
     if (!out)
         return;
     memset(out, 0, sizeof(*out));
     if (!d)
         return;
+    /* Settle deferred uploads before sampling: their staging buffers
+     * stay checked out (and counted) until the copy's fence signals and
+     * the pending entry is recycled, so without a drain the numbers
+     * depend on GPU timing rather than on what the caller did. This is
+     * a diagnostics path; the wait is off every hot loop. */
+    flux_vk_upload_pending_drain(d);
     flux_vk_allocator *a = (flux_vk_allocator *)&d->mem_allocator;
     pthread_mutex_lock(&a->lock);
     out->bytes_in_use = a->bytes_in_use;

@@ -97,13 +97,15 @@ void lens_scroll_end(lens *ui) {
     if (n && n->is_scroll && ui->scroll_hot_id == n->id) {
         lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
         if (ss) {
-            ss->offset_y -= ui->input.scroll_y * LENS_SCROLL_SPEED;
-            ss->offset_x -= ui->input.scroll_x * LENS_SCROLL_SPEED;
+            ss->offset_y -= ui->input.scroll_y * LENS_SCROLL_SPEED + ui->input.scroll_pixels_y;
+            ss->offset_x -= ui->input.scroll_x * LENS_SCROLL_SPEED + ui->input.scroll_pixels_x;
             n->scroll_y = ss->offset_y;
             n->scroll_x = ss->offset_x;
         }
         ui->input.scroll_y = 0.0f;
         ui->input.scroll_x = 0.0f;
+        ui->input.scroll_pixels_y = 0.0f;
+        ui->input.scroll_pixels_x = 0.0f;
         ui->scroll_hot_id = 0;
     }
     lensi_open_container_pop(ui);

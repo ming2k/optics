@@ -7,6 +7,7 @@
 | Bézier curve        | Parametric curve defined by control points; flux supports quadratic (1 control point) and cubic (2 control points). |
 | Canvas              | flux_canvas's immediate-mode recorder: one per surface, has a save/restore stack.     |
 | Command buffer      | Vulkan structure recording GPU commands; flux owns one per frame slot.                |
+| Deferred upload     | Texture/buffer copy submitted with a fence without a host wait; resources recycle once the fence signals ([ADR-0022](../adr/0022-deferred-upload-submission.md)). |
 | Descriptor set      | Vulkan binding for textures/samplers/buffers; flux uses one device-wide bindless set at slot 0 instead of per-frame descriptor pools. |
 | Device              | Combined context + device object (`flux_device`). Created once per application.       |
 | Diátaxis            | The documentation framework this project follows (tutorials / how-to / reference / explanation). |

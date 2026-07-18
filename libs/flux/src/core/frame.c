@@ -66,23 +66,55 @@ static void barrier_to_color_attachment(VkCommandBuffer cmd, VkImage img, VkImag
     vkCmdPipelineBarrier2(cmd, &di);
 }
 
-/* End-of-frame transition. Windowed surfaces go to PRESENT_SRC for the
- * presentation engine; offscreen surfaces (ADR-0013) go to TRANSFER_SRC
- * for flux_surface_read_pixels. */
-static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen, bool exportable,
-                             uint32_t graphics_family) {
-    VkImageLayout final_layout = exportable   ? VK_IMAGE_LAYOUT_GENERAL
-                                 : offscreen  ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-                                              : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+static void barrier_to_readback(VkCommandBuffer cmd, VkImage img) {
     VkImageMemoryBarrier2 b = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = img,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    VkDependencyInfo di = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &b,
+    };
+    vkCmdPipelineBarrier2(cmd, &di);
+}
+
+/* End-of-frame transition. Windowed surfaces go to PRESENT_SRC for the
+ * presentation engine; exportable offscreen surfaces return to GENERAL and
+ * foreign ownership; plain offscreen surfaces remain TRANSFER_SRC. */
+static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen, bool exportable,
+                             uint32_t graphics_family, VkImageLayout old_layout) {
+    VkImageLayout final_layout = exportable   ? VK_IMAGE_LAYOUT_GENERAL
+                                 : offscreen  ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                                              : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    if (old_layout == final_layout && !exportable)
+        return;
+    bool after_readback = old_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    VkImageMemoryBarrier2 b = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = after_readback ? VK_PIPELINE_STAGE_2_COPY_BIT
+                                       : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = after_readback ? VK_ACCESS_2_TRANSFER_READ_BIT
+                                        : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
         .dstStageMask = exportable   ? VK_PIPELINE_STAGE_2_NONE
                         : offscreen  ? VK_PIPELINE_STAGE_2_COPY_BIT
                                      : VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
         .dstAccessMask = exportable ? 0 : (offscreen ? VK_ACCESS_2_TRANSFER_READ_BIT : 0),
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .oldLayout = old_layout,
         .newLayout = final_layout,
         .srcQueueFamilyIndex = exportable ? graphics_family : VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = exportable ? VK_QUEUE_FAMILY_FOREIGN_EXT : VK_QUEUE_FAMILY_IGNORED,
@@ -257,6 +289,17 @@ acquired:
     };
     s->frame_active = true;
     *out = &s->frame_slot;
+    return FLUX_OK;
+}
+
+flux_result flux_frame_request_readback(flux_frame *f) {
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
+        return FLUX_ERROR_INVALID_STATE;
+    flux_surface *s = f->surface;
+    flux_result r = flux_surface_prepare_readback(s);
+    if (r != FLUX_OK)
+        return r;
+    f->readback_requested = true;
     return FLUX_OK;
 }
 
@@ -443,8 +486,35 @@ flux_result flux_frame_submit(flux_frame *f) {
         flux_frame_end_pass(f);
     }
 
+    bool copy_readback = s->offscreen_require_readback || f->readback_requested;
+    if (copy_readback) {
+        barrier_to_readback(pf->cmd, s->images[s->current_image]);
+        VkBufferImageCopy region = {
+            .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
+            .imageExtent = {s->extent.width, s->extent.height, 1},
+        };
+        vkCmdCopyImageToBuffer(pf->cmd, s->images[s->current_image],
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s->readback_staging->buffer, 1,
+                               &region);
+
+        VkMemoryBarrier2 readback_barrier = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+            .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+            .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
+        };
+        VkDependencyInfo readback_dependency = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .memoryBarrierCount = 1,
+            .pMemoryBarriers = &readback_barrier,
+        };
+        vkCmdPipelineBarrier2(pf->cmd, &readback_dependency);
+    }
     barrier_to_final(pf->cmd, s->images[s->current_image], s->offscreen,
-                     s->offscreen_exportable, s->device->graphics_family);
+                     s->offscreen_exportable, s->device->graphics_family,
+                     copy_readback ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                                   : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
     pf->ts_was_submitted = (pf->ts_scope_count > 0);
 
@@ -496,6 +566,8 @@ flux_result flux_frame_submit(flux_frame *f) {
         if (vr != VK_SUCCESS)
             return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
         s->last_submitted_slot = f->slot;
+        if (copy_readback)
+            s->last_readback_slot = f->slot;
         s->image_layouts[s->current_image] = s->offscreen_exportable
                                                   ? VK_IMAGE_LAYOUT_GENERAL
                                                   : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -538,6 +610,8 @@ flux_result flux_frame_submit(flux_frame *f) {
     pthread_mutex_unlock(&s->device->queue_lock);
     if (vr != VK_SUCCESS)
         return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
+    if (copy_readback)
+        s->last_readback_slot = f->slot;
     s->image_layouts[s->current_image] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     f->state = FLUX_FRAME_STATE_SUBMITTED;
     return FLUX_OK;

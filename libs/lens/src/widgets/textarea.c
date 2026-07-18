@@ -540,7 +540,7 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
 
     /* Wheel scroll */
     if (r.hovered && !disabled) {
-        ts->scroll_y -= ui->input.scroll_y * LENS_TEXTAREA_SCROLL_SPEED;
+        ts->scroll_y -= ui->input.scroll_y * LENS_TEXTAREA_SCROLL_SPEED + ui->input.scroll_pixels_y;
         if (ts->scroll_y < 0)
             ts->scroll_y = 0;
         if (ts->scroll_y > max_scroll)

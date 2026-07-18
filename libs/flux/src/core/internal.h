@@ -218,6 +218,25 @@ typedef struct flux_staging_buf {
     struct flux_staging_buf *next;
 } flux_staging_buf;
 
+/* One submitted-but-not-yet-retired upload batch. Upload submissions are
+ * deferred: the one-shot helpers and flux_uploads_flush hand the graphics
+ * (or transfer) queue their copy commands and return without a fence wait,
+ * parking everything the batch references here. The fence signals when the
+ * GPU has retired the batch; entries are then recycled lazily by the
+ * non-blocking sweep at the next upload call, or forcibly by
+ * flux_vk_upload_pending_drain (diagnostics + device teardown). Recycling
+ * any earlier is a use-after-submit: the staging buffers are still being
+ * read and the command pools still executing. */
+typedef struct flux_upload_pending {
+    VkFence fence;              /* signals when the copy batch retired */
+    VkCommandPool pool;         /* destroyed on recycle; VK_NULL_HANDLE allowed */
+    VkCommandPool pool2;        /* QFOT graphics-side pool; usually NULL */
+    VkSemaphore sem;            /* QFOT handoff semaphore; usually NULL */
+    flux_staging_buf *stagings; /* returned to the staging cache on recycle */
+    uint64_t serial;            /* graphics submission serial; 0 for non-graphics batches */
+    struct flux_upload_pending *next;
+} flux_upload_pending;
+
 struct flux_device {
     atomic_uint ref_count;
 
@@ -304,9 +323,10 @@ struct flux_device {
      * is open, the one-shot upload helpers record their copies into
      * batch_cmd instead of submitting individually; flush submits once.
      * Staging buffers are checked out of the staging cache per upload
-     * (memcpy stays parallel across threads) and returned after the
-     * flush's fence wait. upload_lock serialises batch state and all
-     * vkCmd* recording into batch_cmd. */
+     * (memcpy stays parallel across threads) and returned once the
+     * flush's parked fence proves the GPU retired the batch.
+     * upload_lock serialises batch state and all vkCmd* recording into
+     * batch_cmd. */
     pthread_mutex_t upload_lock;
     bool upload_lock_initialized;
     bool upload_batch_open;
@@ -314,10 +334,21 @@ struct flux_device {
     VkCommandBuffer upload_batch_cmd;  /* recording while open */
     flux_staging_buf *upload_batch_stagings; /* checked-out list, `next` chained */
 
-    /* Staging buffer cache. The one-shot upload / readback helpers are
-     * synchronous (submit + fence wait), so their host-visible staging
-     * buffer is idle again the moment the call returns; keeping a few
-     * around avoids a vkCreateBuffer + vkAllocateMemory pair per upload.
+    /* Deferred upload retirement. Every one-shot upload submission parks
+     * a flux_upload_pending here instead of blocking the caller on a
+     * fence. Guarded by its own lock; recycled by sweep (non-blocking,
+     * called from the upload entry points) or drain (waits, called from
+     * flux_device_memory_stats and device teardown). */
+    pthread_mutex_t upload_pending_lock;
+    bool upload_pending_lock_initialized;
+    flux_upload_pending *upload_pending_head;
+
+    /* Staging buffer cache. The one-shot upload / readback helpers reuse
+     * a host-visible staging buffer per copy; buffers are checked out
+     * while an upload is in flight and returned by the pending-upload
+     * sweep once the copy's fence signals (see above), so the cache
+     * avoids a vkCreateBuffer + vkAllocateMemory pair per upload without
+     * ever handing a buffer back while the GPU still reads it.
      * Idle entries are matched by usage and smallest-fit capacity, and
      * the cache is capped (see FLUX_VK_STAGING_CACHE_CAP in oneshot.c).
      * Checked-out entries are owned by the caller; the idle list is
@@ -406,13 +437,37 @@ flux_result flux_vk_alloc_image(flux_device *d, const VkImageCreateInfo *ici,
  * host-visible buffer of at least `size` bytes with `usage`, either
  * recycled from the idle list or freshly created; release returns it to
  * the cache (or destroys it once the cache cap is exceeded). Callers
- * must only release a buffer after the GPU work consuming it has been
- * awaited — the one-shot helpers' submit-and-wait provides that. */
+ * must only release a buffer once the GPU work consuming it has provably
+ * retired — the deferred upload submissions provide that by parking the
+ * buffer on the pending list until its fence signals. */
 flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferUsageFlags usage,
                                     flux_staging_buf **out);
 void flux_vk_staging_release(flux_device *d, flux_staging_buf *sb);
 /* Destroy every idle entry. Device must be idle (teardown only). */
 void flux_vk_staging_pool_destroy(flux_device *d);
+
+/* Deferred upload retirement (bodies in oneshot.c). drain waits on every
+ * parked upload fence and recycles all entries — used by
+ * flux_device_memory_stats (deterministic numbers) and by device
+ * teardown once the device is idle. The upload entry points run the
+ * non-blocking sweep internally. */
+void flux_vk_upload_pending_drain(flux_device *d);
+
+/* Fence + queue submission shared by the deferred upload paths (bodies
+ * in oneshot.c). submit_upload submits `cmd` on `queue` with optional
+ * wait/signal semaphores; on success *out_fence (when non-NULL) receives
+ * the fence that signals when the batch retires, on failure nothing is
+ * pending. upload_pending_park takes ownership of the batch's resources
+ * (fence, command pools, handoff semaphore, staging list) and recycles
+ * them once the fence signals. Used cross-module by the dma-buf import
+ * path, whose acquire-fence transition must not block the caller. */
+VkResult flux_vk_submit_upload(flux_device *d, VkQueue queue, VkCommandBuffer cmd,
+                               VkSemaphore wait_sem, VkPipelineStageFlags2 wait_stage,
+                               VkSemaphore signal_sem, VkPipelineStageFlags2 signal_stage,
+                               VkFence *out_fence, uint64_t *out_serial);
+void flux_vk_upload_pending_park(flux_device *d, VkFence fence, VkCommandPool pool,
+                                 VkCommandPool pool2, VkSemaphore sem,
+                                 flux_staging_buf *stagings, uint64_t serial);
 
 /* Upload batch internals (public entry points are flux_uploads_begin /
  * flux_uploads_flush). Upload helpers record into the batch while
@@ -423,8 +478,9 @@ void flux_vk_upload_batch_attach_staging(flux_device *d, flux_staging_buf *sb);
  * (uses the graphics queue rather than transfer to avoid queue-family
  * ownership transfer plumbing in this simple path). Copies through a
  * cached host-visible staging buffer (flux_vk_staging_acquire), records
- * vkCmdCopyBuffer to dst, submits with a fence, waits idle, and returns
- * the staging buffer to the cache. */
+ * vkCmdCopyBuffer to dst, and submits deferred — the caller returns
+ * immediately and the staging buffer is recycled once the copy's parked
+ * fence signals. */
 flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize offset,
                                      const void *data, VkDeviceSize size);
 
@@ -563,6 +619,7 @@ struct flux_frame {
     uint32_t slot;         /* 0..frames_in_flight-1; matches per_frame[] */
     flux_frame_state state;
     bool pass_active; /* true between begin_pass and end_pass */
+    bool readback_requested;
 };
 
 struct flux_surface {
@@ -573,6 +630,7 @@ struct flux_surface {
     bool vsync;
     bool hdr_preferred;
     bool offscreen; /* ADR-0013: no swapchain, surface-owned images */
+    bool readback_supported;
 
     VkSwapchainKHR swapchain;
     VkFormat format;
@@ -606,6 +664,12 @@ struct flux_surface {
      * never make its offscreen images dma-buf exportable, so read_pixels
      * always works even on a dma-buf-capable device. */
     bool offscreen_require_readback;
+    /* Persistent host-visible readback destination. require_readback surfaces
+     * fill it every frame; other surfaces allocate and fill it only when the
+     * recording frame requests a snapshot. The copy is part of the original
+     * graphics command buffer, so readiness is the frame fence and CPU
+     * readback needs no second queue submission. */
+    flux_staging_buf *readback_staging;
     uint64_t offscreen_modifier; /* DRM_FORMAT_MOD_* (0 = invalid) */
     uint32_t offscreen_stride;   /* bytes per row of plane 0 */
     /* Optional consumer modifier constraint copied from the surface extension
@@ -618,6 +682,9 @@ struct flux_surface {
      * UINT32_MAX before the first submit. flux_surface_read_pixels
      * waits on this slot's fence. */
     uint32_t last_submitted_slot;
+    /* Slot whose submission most recently copied into readback_staging, or
+     * UINT32_MAX when no immutable snapshot is available. */
+    uint32_t last_readback_slot;
 
     uint32_t frames_in_flight;
     flux_per_frame frames[FLUX_MAX_FRAMES_IN_FLIGHT];
