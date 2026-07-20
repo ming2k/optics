@@ -537,6 +537,11 @@ LENS_API bool lens_collapsing(lens *ui, const char *label);
 LENS_API void lens_collapsing_set_open(lens *ui, const char *label, bool open);
 LENS_API void lens_scroll_begin(lens *ui, const char *id);
 LENS_API void lens_scroll_end(lens *ui);
+/* Programmatically position a scroll area identified in the current id scope.
+ * Call after its begin/end body in the same frame (or on a later frame). The
+ * layout pass clamps both offsets to the resolved content bounds. Unknown ids
+ * are ignored, so callers may issue the request while content is appearing. */
+LENS_API void lens_scroll_to(lens *ui, const char *id, float x, float y);
 
 typedef enum lens_tab_style {
     /* The compact Lens default: independent tabs with an active underline. */

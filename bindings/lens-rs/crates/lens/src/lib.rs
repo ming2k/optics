@@ -552,6 +552,17 @@ impl Frame {
         r
     }
 
+    /// Set the retained offset of a scroll area in the current id scope.
+    ///
+    /// Call this after building the matching [`Frame::scroll`] body. Lens
+    /// clamps the request to the resolved content bounds during layout;
+    /// requesting an id that has not appeared yet is a harmless no-op.
+    pub fn scroll_to(&mut self, id: &str, x: f32, y: f32) {
+        let id = cstr(id);
+        // SAFETY: ui is live and id outlives the call.
+        unsafe { sys::lens_scroll_to(self.ui, id.as_ptr(), x.max(0.0), y.max(0.0)) };
+    }
+
     /// A virtualized, scrollable table. Only the visible rows are requested
     /// through `cell`, so rendering cost stays bounded for large libraries.
     /// Use [`Frame::size_next`] or [`Frame::flex`] immediately before this

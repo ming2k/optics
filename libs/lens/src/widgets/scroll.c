@@ -110,3 +110,18 @@ void lens_scroll_end(lens *ui) {
     }
     lensi_open_container_pop(ui);
 }
+
+void lens_scroll_to(lens *ui, const char *id, float x, float y) {
+    if (!ui || !id)
+        return;
+    lens_node *n = lensi_store_find(ui, lens_current_id(ui, id));
+    if (!n || !n->is_scroll)
+        return;
+    lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
+    if (!ss)
+        return;
+    ss->offset_x = fmaxf(0.0f, x);
+    ss->offset_y = fmaxf(0.0f, y);
+    n->scroll_x = ss->offset_x;
+    n->scroll_y = ss->offset_y;
+}

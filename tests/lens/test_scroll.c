@@ -86,6 +86,32 @@ static void test_precise_scroll_uses_pixel_distance(void) {
     lens_destroy(ui);
 }
 
+static void test_programmatic_scroll_is_applied_and_clamped(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    lens_input input = {.display_size = {200, 160}, .dt_seconds = 0.016f};
+    lens_begin(ui, &input);
+    lens_size(ui, 200, 80);
+    lens_scroll_begin(ui, "jump-scroll");
+    for (int i = 0; i < 10; i++) {
+        lens_push_id_int(ui, i);
+        lens_size(ui, 0, 20);
+        lens_label(ui, "Item");
+        lens_pop_id(ui);
+    }
+    lens_scroll_end(ui);
+    lens_scroll_to(ui, "jump-scroll", 0, 60);
+    lens_end(ui);
+
+    lens_node *scroll = lens_node_first_child(lens_root(ui));
+    lens_node *first = lens_node_first_child(scroll);
+    CHECK(scroll != NULL && first != NULL);
+    CHECK(fabsf(lens_node_bounds(first).y + 60.0f) < 0.01f);
+
+    lens_destroy(ui);
+}
+
 static void test_scrollbar_gutter_clips_overflowing_descendants(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
@@ -145,6 +171,7 @@ static void test_scrollbar_gutter_clips_overflowing_descendants(void) {
 int main(void) {
     test_scroll_offset();
     test_precise_scroll_uses_pixel_distance();
+    test_programmatic_scroll_is_applied_and_clamped();
     test_scrollbar_gutter_clips_overflowing_descendants();
     return TEST_REPORT();
 }
