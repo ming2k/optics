@@ -1,4 +1,4 @@
-/* overlay.c — floating layers with z-order and dismissal (ADR-0014).
+/* overlay.c — floating layers with z-order and dismissal (ADR-0037).
  *
  * Two sibling primitives share the positioning + rendering machinery in
  * this file:
@@ -42,7 +42,7 @@ bool lensi_overlay_is_open_id(const lens *ui, lens_id id) {
 }
 
 /* Open an overlay by a pre-computed lens_id, without the id-generation
- * side effect of lens_overlay_open. Used by menu.c (ADR-0017), which has
+ * side effect of lens_overlay_open. Used by menu.c (ADR-0040), which has
  * already derived the trigger id and must not perturb the sibling seq. */
 void lensi_overlay_open_id_pub(lens *ui, lens_id id, bool dismissable) {
     if (!ui)
@@ -105,7 +105,7 @@ bool lens_overlay_hovered(const lens *ui, const char *id) {
     lens_id overlay_id = lens_current_id(ui, id);
     if (!lensi_overlay_is_open_id(ui, overlay_id))
         return false;
-    lens_node *n = lensi_store_find((lens *)ui, overlay_id);
+    lens_node *n = lensi_store_find(ui, overlay_id);
     return n && n->has_prev && lensi_point_in(ui->input.cursor, n->prev_rect);
 }
 
@@ -179,7 +179,7 @@ bool lens_overlay_begin(lens *ui, const char *id_str, flux_rect anchor, lens_ove
     n->is_panel_layer = false;
 
     /* Push as a sub-root. Do not link as a child of the current container
-     * — the layer escapes the normal layout flow (ADR-0014). */
+     * — the layer escapes the normal layout flow (ADR-0037). */
     lensi_open_container_push(ui, n);
     layer_paint_bg(ui, n, opts);
     ui->last_node = n; /* lens_a11y target */
@@ -275,7 +275,7 @@ void lensi_overlay_layout(lens *ui) {
 
         float x, y;
         if (n->is_centered) {
-            /* Modal content: center on the display (ADR-0016). */
+            /* Modal content: center on the display (ADR-0039). */
             x = (dw > w) ? (dw - w) * 0.5f : 0;
             y = (dh > h) ? (dh - h) * 0.5f : 0;
         } else if (n->is_panel_layer) {
@@ -337,7 +337,7 @@ void lensi_overlay_render(lens *ui, flux_canvas *canvas) {
  * dock or a popup eclipses the base widget under it. Uses prev_rect
  * (last frame's geometry) for hit-testing. */
 
-bool lensi_point_in_floating_layer(lens *ui, flux_point p) {
+bool lensi_point_in_floating_layer(const lens *ui, flux_point p) {
     if (!ui)
         return false;
     /* Iterate LAST frame's floating layers (carried across the arena
@@ -368,7 +368,7 @@ void lensi_overlay_dismiss(lens *ui) {
         }
     }
     if (esc) {
-        /* Close the top *dismissable* overlay (ADR-0016: a modal pinned
+        /* Close the top *dismissable* overlay (ADR-0039: a modal pinned
          * with dismissable=false stops Escape here). */
         for (int i = (int)ui->open_overlay_count - 1; i >= 0; i--) {
             if (ui->open_overlays[i].dismissable) {
@@ -393,7 +393,7 @@ void lensi_overlay_dismiss(lens *ui) {
         if (slot->opened_frame >= ui->frame)
             continue; /* same-frame grace */
         if (!slot->dismissable)
-            continue; /* modal-pinned (ADR-0016) */
+            continue; /* modal-pinned (ADR-0039) */
         lens_node *ov = lensi_store_find(ui, slot->id);
         bool hit_layer = ov && ov->has_prev && lensi_point_in(cur, ov->prev_rect);
         /* The anchor is part of the popup interaction. Without this, pressing
@@ -411,8 +411,8 @@ void lensi_overlay_dismiss(lens *ui) {
 
 /* ---- accessor for the a11y walk ----------------------------------- */
 
-lens_node **lensi_overlay_layers(lens *ui, uint32_t *out_count) {
+lens_node **lensi_overlay_layers(const lens *ui, uint32_t *out_count) {
     if (out_count)
         *out_count = ui ? ui->overlay_layer_count : 0;
-    return ui ? ui->overlay_layers : NULL;
+    return ui ? (lens_node **)ui->overlay_layers : NULL;
 }

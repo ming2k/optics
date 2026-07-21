@@ -1,4 +1,4 @@
-/* scroll.c — scrollable container (ADR-0008). */
+/* scroll.c — scrollable container (ADR-0031). */
 
 #include "../internal.h"
 

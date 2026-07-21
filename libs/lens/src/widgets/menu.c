@@ -1,6 +1,6 @@
-/* menu.c — menu bar, context menu, submenu, and menu items (ADR-0017).
+/* menu.c — menu bar, context menu, submenu, and menu items (ADR-0040).
  *
- * Built on the ADR-0014 overlay layer. A menu is an overlay laid out as a
+ * Built on the ADR-0037 overlay layer. A menu is an overlay laid out as a
  * vertical list of items; a menu bar is a horizontal row of triggers with
  * click-then-drag switch behaviour; a context menu anchors at the cursor;
  * a submenu is a nested overlay anchored to its parent item.
@@ -14,16 +14,8 @@
 
 /* Per-node retained state sizes. */
 typedef struct {
-    bool open;
-    float hover_t;     /* smoothed hover (for submenu items) */
-    float dwell;       /* accumulated hover dwell toward opening a submenu */
-    bool submenu_open; /* cached open state for the submenu overlay */
+    float dwell; /* accumulated hover dwell toward opening a submenu */
 } lens_menu_item_state;
-
-typedef struct {
-    bool any_open;   /* a menu of this bar is open (enables switch-on-hover) */
-    char active[64]; /* label of the currently-open bar menu, "" = none */
-} lens_menubar_state;
 
 typedef struct {
     flux_point at; /* cursor position captured at open time */
@@ -92,7 +84,7 @@ bool lens_menu_item_flags(lens *ui, const char *label, const char *shortcut, uin
     lens_response r = lensi_interact(ui, n, false, disabled);
     if (r.hovered)
         ui->cursor_hint = LENS_CURSOR_POINTER;
-    lens_menu_item_state *st = lens_node_state(n, sizeof *st);
+    (void)lens_node_state(n, sizeof(lens_menu_item_state)); /* reserve for future state */
 
     uint32_t sem_flags = (disabled ? LENS_A11Y_DISABLED : 0) | (checked ? LENS_A11Y_CHECKED : 0);
     lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, shortcut, sem_flags);
@@ -226,7 +218,7 @@ bool lens_menu_begin(lens *ui, const char *label) {
     lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, 0);
 
     /* The open state lives on the *overlay* id, not the trigger id, so the
-     * two nodes stay distinct (ADR-0017; see dropdown.c "##ov"). */
+     * two nodes stay distinct (ADR-0040; see dropdown.c "##ov"). */
     char ov_label[80];
     lens_id ov_id = menu_overlay_id(ui, label, ov_label, sizeof ov_label);
     bool open = lensi_overlay_is_open_id(ui, ov_id);

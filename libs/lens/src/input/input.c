@@ -1,4 +1,4 @@
-/* input.c — interaction resolved against last frame's geometry (ADR-0006). */
+/* input.c — interaction resolved against last frame's geometry (ADR-0029). */
 
 #include "../internal.h"
 
@@ -19,7 +19,7 @@ static void tab_push(lens *ui, lens_id id) {
     ui->tab_order[ui->tab_count++] = id;
 }
 
-/* True if `n` is itself, or sits beneath, an overlay layer (ADR-0014).
+/* True if `n` is itself, or sits beneath, an overlay layer (ADR-0037).
  * Used to skip the popup eclipse for the overlay's own contents. */
 static bool node_inside_overlay(const lens_node *n) {
     for (const lens_node *p = n; p; p = p->parent)
@@ -31,8 +31,7 @@ static bool node_inside_overlay(const lens_node *n) {
 bool lensi_widget_eclipsed(const lens *ui, const lens_node *n) {
     if (!ui || !n)
         return false;
-    return !node_inside_overlay(n) &&
-           lensi_point_in_floating_layer((lens *)ui, ui->input.cursor);
+    return !node_inside_overlay(n) && lensi_point_in_floating_layer(ui, ui->input.cursor);
 }
 
 bool lensi_point_clipped_by_scroll(const lens_node *n, flux_point p) {
@@ -69,7 +68,7 @@ lens_response lensi_interact(lens *ui, lens_node *n, bool focusable, bool disabl
                   !lensi_point_clipped_by_scroll(n, ui->input.cursor);
     /* Eclipse: a floating layer (overlay or persistent panel) above
      * (last-frame geometry) swallows hover/press for any base widget
-     * under it (ADR-0014). The layer's own contents are exempt. */
+     * under it (ADR-0037). The layer's own contents are exempt. */
     if (inside && lensi_widget_eclipsed(ui, n))
         inside = false;
     if (inside) {

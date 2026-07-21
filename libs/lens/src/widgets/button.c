@@ -1,4 +1,4 @@
-/* button.c — filled button (ADR-0008). */
+/* button.c — filled button (ADR-0031). */
 
 #include "../internal.h"
 

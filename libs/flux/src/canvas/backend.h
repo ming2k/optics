@@ -11,13 +11,15 @@
  * (allocated in canvas_init, freed in canvas_destroy); the front end never
  * looks inside it. struct flux_canvas therefore holds no Vulkan types.
  *
- * Two implementations are envisaged (Skia-style CPU/GPU parity):
+ * Two implementations exist (Skia-style CPU/GPU parity):
  *   - Vulkan (flux_canvas_backend_vk): records into the frame's command
  *     buffer via cached pipelines, resolving 4x MSAA to the surface/target.
  *     This is the default.
- *   - CPU raster (future): rasterizes the same batches on the host, selecting
- *     a scanline routine per canvas_pipe_id and interpreting the same push
- *     block; canvas_init/begin_pass allocate a host framebuffer instead.
+ *   - CPU raster (flux_canvas_backend_cpu): rasterizes the same batches on
+ *     the host, selecting a scanline routine per canvas_pipe_id and
+ *     interpreting the same push block; canvas_init/begin_pass allocate a
+ *     host framebuffer instead. Used for headless rendering, golden-image
+ *     tests, and GPU-free environments (ADR-0019).
  *
  * Scope is the canvas 2D layer only. scene/compute/effect and the
  * <flux/vulkan.h> escape hatch remain Vulkan-only by design.

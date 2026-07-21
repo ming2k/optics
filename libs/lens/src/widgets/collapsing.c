@@ -1,4 +1,4 @@
-/* collapsing.c — lightweight expandable section header (ADR-0008). */
+/* collapsing.c — lightweight expandable section header (ADR-0031). */
 
 #include "../internal.h"
 

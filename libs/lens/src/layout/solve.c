@@ -1,4 +1,4 @@
-/* solve.c — two-pass flexbox measure/arrange over the tree (ADR-0005). */
+/* solve.c — two-pass flexbox measure/arrange over the tree (ADR-0028). */
 
 #include "../internal.h"
 
@@ -374,7 +374,7 @@ void lensi_scroll_clamp_subtree(lens_node *n) {
         scroll_clamp_node(n);
 }
 
-/* Used by the overlay layer (ADR-0014) to lay out a sub-root: a measure
+/* Used by the overlay layer (ADR-0037) to lay out a sub-root: a measure
  * pass followed by arrange against the supplied rect. Identical to the
  * root pass but does not touch ui->root and does not run scroll clamping
  * — the overlay layout pass clamps scrolls itself once the final

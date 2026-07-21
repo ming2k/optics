@@ -1,4 +1,4 @@
-/* label.c — static text (ADR-0008). Non-interactive. */
+/* label.c — static text (ADR-0031). Non-interactive. */
 
 #include "../internal.h"
 

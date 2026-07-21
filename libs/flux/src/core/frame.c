@@ -13,8 +13,6 @@
  *   submit         COLOR_ATTACHMENT_OPTIMAL -> PRESENT_SRC, then
  *                  end recording and vkQueueSubmit2 with sync.
  *   present        vkQueuePresentKHR waiting on render_finished.
- *
- * Transient-ring, bindless heap, timestamp queries: Stage 2b.2 / 2b.3.
  */
 #include "internal.h"
 #include <flux/vulkan.h>

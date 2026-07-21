@@ -211,9 +211,12 @@ static flux_result vk_canvas_init(const flux_canvas_backend *self, flux_canvas *
     };
     for (uint32_t sample = 0; sample < sizeof(sample_counts) / sizeof(sample_counts[0]); ++sample) {
         for (int id = 0; id < CANVAS_PIPE_COUNT; id++) {
+            /* Warm the default SRC_OVER pipeline for each id; non-default
+             * blend variants are built lazily on first use. */
             VkPipeline warm;
             flux_result r = get_canvas_pipeline_id(d, v->color_format, sample_counts[sample],
-                                                   (canvas_pipe_id)id, &v->layout, &warm);
+                                                   (canvas_pipe_id)id, FLUX_BLEND_SRC_OVER,
+                                                   &v->layout, &warm);
             if (r != FLUX_OK) {
                 flux_internal_free(d, v);
                 c->backend_data = nullptr;
@@ -494,8 +497,8 @@ static bool vk_bind_program(const flux_canvas_backend *self, flux_canvas *c, can
     flux_vk_canvas *v = vkc(c);
     VkPipelineLayout layout;
     VkPipeline pipeline;
-    if (get_canvas_pipeline_id(c->device, v->color_format, v->active_samples, id, &layout,
-                               &pipeline) != FLUX_OK)
+    if (get_canvas_pipeline_id(c->device, v->color_format, v->active_samples, id,
+                               c->pending_blend, &layout, &pipeline) != FLUX_OK)
         return false;
     if (v->bound_pipeline != pipeline) {
         VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);

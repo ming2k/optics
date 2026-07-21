@@ -548,6 +548,21 @@ static int m_get_locale(sd_bus_message *m, void *u, sd_bus_error *e) {
     return sd_bus_reply_method_return(m, "s", loc);
 }
 
+/* org.a11y.atspi.Application: Id property — AT clients use this to identify
+ * the application. We return the toolkit name; the bus unique name is also
+ * commonly used. The data pointer is unused (the value is constant). */
+static int p_get_app_id(sd_bus *bus, const char *path, const char *interface,
+                        const char *property, sd_bus_message *reply, void *u,
+                        sd_bus_error *e) {
+    (void)bus;
+    (void)path;
+    (void)interface;
+    (void)property;
+    (void)u;
+    (void)e;
+    return sd_bus_message_append(reply, "s", "iris");
+}
+
 /* ------------------------------------------------------------------ */
 /*  Vtables                                                            */
 /* ------------------------------------------------------------------ */
@@ -908,10 +923,7 @@ static const sd_bus_vtable g_application_vtable[] = {
                   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetVersion", NULL, "s", HANDLER(m_get_version), SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetLocale", "i", "s", HANDLER(m_get_locale), SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_PROPERTY("Id", "s", NULL,
-                    offsetof(
-                        struct { char dummy; }, dummy),
-                    SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+    SD_BUS_PROPERTY("Id", "s", p_get_app_id, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
     SD_BUS_VTABLE_END,
 };
 
@@ -987,20 +999,17 @@ IRIS_API int iris_a11y_init(void) {
     /* 4. Register the root accessible + Application interface. */
     rc = sd_bus_add_object_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible/root",
                                   "org.a11y.atspi.Application", g_application_vtable, NULL);
-    if (rc < 0) {
-    }
+    (void)rc;
     rc = sd_bus_add_object_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible/root",
                                   "org.a11y.atspi.Accessible", g_accessible_vtable, NULL);
-    if (rc < 0) {
-    }
+    (void)rc;
 
     /* 5. Fallback vtable for /org/a11y/atspi/accessible/<lens_id> paths.
      *    This catches every widget without us registering each one. */
     sd_bus_slot *slot = NULL;
     rc = sd_bus_add_fallback_vtable(g_a11y_bus, &slot, "/org/a11y/atspi/accessible",
                                     "org.a11y.atspi.Accessible", g_accessible_vtable, NULL, NULL);
-    if (rc < 0) {
-    }
+    (void)rc;
 
     /* 6. Action / Text / Value interfaces — same fallback path prefix, one
      *    vtable each. Each method handler no-ops for roles that do not

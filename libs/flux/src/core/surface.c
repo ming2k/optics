@@ -1346,7 +1346,7 @@ out:
 }
 
 /* ------------------------------------------------------------------ */
-/*  Offscreen dma-buf export (ADR-0040 follow-on)                     */
+/*  Offscreen dma-buf export (see ADR-0013 offscreen surface)            */
 /* ------------------------------------------------------------------ */
 
 bool flux_surface_exportable(const flux_surface *s) {

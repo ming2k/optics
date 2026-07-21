@@ -1,4 +1,4 @@
-/* selectable.c — borderless, full-width selectable row (ADR-0008).
+/* selectable.c — borderless, full-width selectable row (ADR-0031).
  *
  * A plain list / nav item: transparent at rest, with a subtle fill on hover
  * and a steady highlight when `selected`. By default the selected row is a

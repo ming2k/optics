@@ -1,4 +1,4 @@
-/* context.c — lens lifecycle and the per-frame envelope (ADR-0001/0009). */
+/* context.c — lens lifecycle and the per-frame envelope (ADR-0024/0009). */
 
 #include "../internal.h"
 
@@ -176,7 +176,7 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->overflow = false;
     ui->anim_pending = false; /* set true by any eased value still in transit */
 
-    /* Size-aware copy (ADR-0013): zero = legacy/trust full struct; >0
+    /* Size-aware copy (ADR-0036): zero = legacy/trust full struct; >0
      * clamps to min(caller, lib) so apps compiled against older or newer
      * headers degrade cleanly without ABI break. */
     ui->input = (lens_input){0};
@@ -210,7 +210,7 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->overlay_layer_count = ui->overlay_layer_cap = 0;
     ui->tooltip.active = false;
 
-    /* implicit root: a column container covering the display (ADR-0005) */
+    /* implicit root: a column container covering the display (ADR-0028) */
     lens_id root_id = lensi_hash("##root", 6, 0);
     ui->id_stack[ui->id_top++] = root_id;
 
@@ -231,9 +231,9 @@ void lens_end(lens *ui) {
     while (ui->cont_top > 1)
         lensi_open_container_pop(ui);
 
-    lensi_store_reap(ui);      /* phase transitions + GC (ADR-0004) */
-    lensi_layout_solve(ui);    /* two-pass measure/arrange (ADR-0005) */
-    lensi_overlay_layout(ui);  /* place open floating layers (ADR-0014) */
+    lensi_store_reap(ui);      /* phase transitions + GC (ADR-0027) */
+    lensi_layout_solve(ui);    /* two-pass measure/arrange (ADR-0028) */
+    lensi_overlay_layout(ui);  /* place open floating layers (ADR-0037) */
     lensi_overlay_dismiss(ui); /* click-outside + Escape, post-build   */
     lensi_focus_tab(ui);       /* Tab / Shift+Tab focus traversal     */
 
@@ -244,7 +244,7 @@ void lens_end(lens *ui) {
     lensi_mark_dirty(ui); /* compute subtree_changed for culling */
 
     /* Modal focus trap is per-frame; reset so a frame with no open modal
-     * falls back to whole-range Tab cycling (ADR-0016). */
+     * falls back to whole-range Tab cycling (ADR-0039). */
     ui->modal_active = false;
     ui->modal_tab_lo = ui->modal_tab_hi = 0;
 }

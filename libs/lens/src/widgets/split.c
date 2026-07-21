@@ -1,9 +1,9 @@
-/* split.c — resizable two-pane container with a draggable handle (ADR-0018).
+/* split.c — resizable two-pane container with a draggable handle (ADR-0041).
  *
  * A split is a container whose two panes are sized by a persisted ratio,
  * separated by a grabbable divider. Dragging the divider mutates the
  * ratio; the layout pass redistributes the space. The drag state machine
- * mirrors the scroll thumb (ADR-0006): active_id capture + a dragging flag
+ * mirrors the scroll thumb (ADR-0029): active_id capture + a dragging flag
  * + a delta from the press anchor. */
 
 #include "../internal.h"
@@ -213,7 +213,7 @@ float lens_split_ratio(const lens *ui, const char *id) {
     /* gen_widget_id mutates the seq counter; re-derive without the side
      * effect via lens_current_id. */
     lens_id lid = lens_current_id(ui, id);
-    const lens_node *n = lensi_store_find((lens *)ui, lid);
+    const lens_node *n = lensi_store_find(ui, lid);
     if (!n)
         return 0.5f;
     const lens_split_state *st = n->state;

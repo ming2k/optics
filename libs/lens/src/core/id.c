@@ -1,4 +1,4 @@
-/* id.c — widget identity: FNV-1a hashing over an id stack (ADR-0003). */
+/* id.c — widget identity: FNV-1a hashing over an id stack (ADR-0026). */
 
 #include "../internal.h"
 
@@ -28,7 +28,7 @@ size_t lensi_label_visible_len(const char *label) {
 }
 
 /* Widget id: pure (scope, label) so identity is stable across frames
- * and independent of sibling order (ADR-0003). The full label string —
+ * and independent of sibling order (ADR-0026). The full label string —
  * including any "##key" suffix — seeds the hash.
  *
  * An empty label would hash to the raw scope, which is exactly the id of

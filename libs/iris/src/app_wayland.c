@@ -1,10 +1,10 @@
-/* wl_platform.c — native Wayland window + Vulkan (via flux) + lens_input.
+/* app_wayland.c — native Wayland window + Vulkan (via flux) + lens_input.
  *
  * Replaces the GLFW glue the examples used to share. Pure Wayland:
  * xdg-shell for the toplevel, xdg-decoration for a server-side title bar
  * when available, xkbcommon for the keymap, and VK_KHR_wayland_surface to
  * hand flux core a VkSurfaceKHR. Pointer and keyboard events are folded
- * into one lens_input per frame (ADR-0006).
+ * into one lens_input per frame (ADR-0029).
  */
 
 #include "a11y_internal.h"
@@ -27,6 +27,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "cursor-shape-v1-client-protocol.h"
+#include "fractional-scale-v1-client-protocol.h"
 #include <linux/input-event-codes.h> /* BTN_LEFT / BTN_RIGHT / BTN_MIDDLE */
 
 #include <ctype.h>
@@ -38,7 +39,7 @@
 #include <time.h>
 #include <unistd.h>
 
-/* focus.c maps Tab from this portable keycode (ADR-0006). */
+/* focus.c maps Tab from this portable keycode (ADR-0029). */
 #define WP_KEY_TAB 258
 
 /* ------------------------------------------------------------------ */
@@ -77,17 +78,23 @@ typedef struct wp_platform {
     struct wl_compositor *compositor;
     struct xdg_wm_base *wm_base;
     struct wl_seat *seat;
-    struct wl_pointer *pointer;
-    struct wl_keyboard *keyboard;
     struct zxdg_decoration_manager_v1 *deco_mgr;
 
     struct wl_data_device_manager *data_device_mgr;
     struct wl_data_device *data_device;
     struct wl_data_offer *selection_offer; /* current clipboard offer */
+    struct wl_data_offer *dnd_offer;       /* current drag offer         */
     struct wl_data_source *copy_source;    /* our outgoing selection  */
     char *copy_buf;                        /* text we currently advertise for copy     */
     size_t copy_len;
     uint32_t last_serial; /* most recent input serial (set_selection) */
+    bool dnd_inside;      /* drag currently over our surface           */
+    flux_point dnd_pos;   /* last reported drag position (surface px)  */
+
+    /* Pointer + keyboard + touch (touch is optional). */
+    struct wl_pointer *pointer;
+    struct wl_keyboard *keyboard;
+    struct wl_touch *touch;
 
     struct wl_surface *surface;
     struct xdg_surface *xdg_surface;
@@ -130,11 +137,17 @@ typedef struct wp_platform {
 
     wp_output outputs[WP_MAX_OUTPUTS];
     int n_outputs;
-    int buffer_scale;  /* max scale of entered outputs; ≥1     */
-    int pending_scale; /* recomputed from enter/leave + globals */
+    int buffer_scale;       /* max scale of entered outputs; ≥1     */
+    int pending_scale;      /* recomputed from enter/leave + globals */
+    float fractional_scale; /* last reported fractional scale, 0 = none */
+
+    struct wp_fractional_scale_manager_v1 *fractional_scale_mgr;
+    struct wp_fractional_scale_v1 *fractional_scale_obj;
 
     int width, height;        /* surface size in *logical* pixels      */
     int pending_w, pending_h; /* from the latest toplevel.configure    */
+    int min_w, min_h;         /* size hints last sent to the compositor */
+    int max_w, max_h;         /* 0 = no limit                            */
     bool running;
     bool resized; /* size or scale changed -> resize swap  */
     bool animation_frame_requested; /* host asked for active-rate follow-up */
@@ -390,6 +403,96 @@ IRIS_API void iris_set_cursor(iris_cursor cursor) {
     cursor_apply(pl);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Window state (iris/window.h)                                       */
+/* ------------------------------------------------------------------ */
+
+/* All iris_window_* APIs operate on g_active_pl — the platform the active
+ * iris_app_run call owns. They are documented as thread-affine to
+ * iris_app_run and a no-op when no app is active. Each maps directly to the
+ * matching xdg_toplevel request; compositors honour them according to
+ * their own policy (tiling WMs may ignore maximise / minimise requests). */
+
+IRIS_API void iris_window_minimize(void) {
+    wp_platform *pl = g_active_pl;
+    if (pl && pl->toplevel)
+        xdg_toplevel_set_minimized(pl->toplevel);
+}
+
+IRIS_API void iris_window_maximize(void) {
+    wp_platform *pl = g_active_pl;
+    if (pl && pl->toplevel)
+        xdg_toplevel_set_maximized(pl->toplevel);
+}
+
+IRIS_API void iris_window_unmaximize(void) {
+    wp_platform *pl = g_active_pl;
+    if (pl && pl->toplevel)
+        xdg_toplevel_unset_maximized(pl->toplevel);
+}
+
+IRIS_API void iris_window_fullscreen(void) {
+    wp_platform *pl = g_active_pl;
+    if (pl && pl->toplevel)
+        xdg_toplevel_set_fullscreen(pl->toplevel, NULL);
+}
+
+IRIS_API void iris_window_unfullscreen(void) {
+    wp_platform *pl = g_active_pl;
+    if (pl && pl->toplevel)
+        xdg_toplevel_unset_fullscreen(pl->toplevel);
+}
+
+IRIS_API void iris_window_restore(void) {
+    wp_platform *pl = g_active_pl;
+    if (!pl || !pl->toplevel)
+        return;
+    xdg_toplevel_unset_maximized(pl->toplevel);
+    xdg_toplevel_unset_fullscreen(pl->toplevel);
+}
+
+IRIS_API void iris_window_focus(void) {
+    /* Wayland clients cannot activate themselves; the compositor is the
+     * arbiter. Provide the hook for symmetry with future Win32/Cocoa
+     * backends where it works. */
+    (void)0;
+}
+
+IRIS_API void iris_window_close(void) {
+    wp_platform *pl = g_active_pl;
+    if (pl)
+        pl->running = false;
+}
+
+IRIS_API void iris_window_set_min_size(int32_t width, int32_t height) {
+    wp_platform *pl = g_active_pl;
+    if (!pl || !pl->toplevel)
+        return;
+    pl->min_w = width;
+    pl->min_h = height;
+    xdg_toplevel_set_min_size(pl->toplevel, width, height);
+}
+
+IRIS_API void iris_window_set_max_size(int32_t width, int32_t height) {
+    wp_platform *pl = g_active_pl;
+    if (!pl || !pl->toplevel)
+        return;
+    pl->max_w = width;
+    pl->max_h = height;
+    xdg_toplevel_set_max_size(pl->toplevel, width, height);
+}
+
+IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) {
+    wp_platform *pl = g_active_pl;
+    if (!pl)
+        return false;
+    if (out_width)
+        *out_width = pl->width;
+    if (out_height)
+        *out_height = pl->height;
+    return true;
+}
+
 static const struct wl_pointer_listener pointer_listener = {
     .enter = ptr_enter,
     .leave = ptr_leave,
@@ -402,6 +505,97 @@ static const struct wl_pointer_listener pointer_listener = {
     .axis_discrete = ptr_axis_discrete,
     .axis_value120 = ptr_axis_value120,
     .axis_relative_direction = ptr_axis_relative_direction,
+};
+
+/* ------------------------------------------------------------------ */
+/*  Touch (wl_touch) — single-touch mapped to mouse + LENS_MOUSE_LEFT  */
+/* ------------------------------------------------------------------ */
+
+/* Multi-touch is intentionally collapsed to a single pointer; lens's input
+ * model is mouse + IME, and a proper multi-touch widget API is a follow-on.
+ * The first finger down drives the cursor and button state; subsequent
+ * fingers without an explicit ID up are tracked but ignored. */
+
+static int32_t g_touch_active_id = -1; /* -1 = no active touch */
+
+static void touch_down(void *data, struct wl_touch *t, uint32_t serial, uint32_t time,
+                       struct wl_surface *surf, int32_t id, wl_fixed_t x, wl_fixed_t y) {
+    (void)t;
+    (void)serial;
+    (void)time;
+    (void)surf;
+    wp_platform *pl = data;
+    if (g_touch_active_id == -1) {
+        g_touch_active_id = id;
+        pl->acc.cx = wl_fixed_to_double(x);
+        pl->acc.cy = wl_fixed_to_double(y);
+        if (!pl->acc.down[LENS_MOUSE_LEFT]) {
+            pl->acc.pressed[LENS_MOUSE_LEFT] = true;
+            pl->acc.down[LENS_MOUSE_LEFT] = true;
+        }
+    }
+}
+static void touch_up(void *data, struct wl_touch *t, uint32_t serial, uint32_t time, int32_t id) {
+    (void)t;
+    (void)serial;
+    (void)time;
+    wp_platform *pl = data;
+    if (g_touch_active_id == id) {
+        g_touch_active_id = -1;
+        if (pl->acc.down[LENS_MOUSE_LEFT]) {
+            pl->acc.released[LENS_MOUSE_LEFT] = true;
+            pl->acc.down[LENS_MOUSE_LEFT] = false;
+        }
+    }
+}
+static void touch_motion(void *data, struct wl_touch *t, uint32_t time, int32_t id,
+                         wl_fixed_t x, wl_fixed_t y) {
+    (void)t;
+    (void)time;
+    wp_platform *pl = data;
+    if (g_touch_active_id == id) {
+        pl->acc.cx = wl_fixed_to_double(x);
+        pl->acc.cy = wl_fixed_to_double(y);
+    }
+}
+static void touch_frame(void *d, struct wl_touch *t) {
+    (void)d;
+    (void)t;
+}
+static void touch_cancel(void *d, struct wl_touch *t) {
+    (void)d;
+    (void)t;
+    /* The compositor cancels the entire active sequence; reset state so we
+     * do not leave the mouse "stuck down". */
+    wp_platform *pl = g_active_pl;
+    if (pl) {
+        pl->acc.down[LENS_MOUSE_LEFT] = false;
+    }
+    g_touch_active_id = -1;
+}
+static void touch_shape(void *d, struct wl_touch *t, int32_t id, wl_fixed_t maj,
+                        wl_fixed_t min) {
+    (void)d;
+    (void)t;
+    (void)id;
+    (void)maj;
+    (void)min;
+}
+static void touch_orientation(void *d, struct wl_touch *t, int32_t id, wl_fixed_t ori) {
+    (void)d;
+    (void)t;
+    (void)id;
+    (void)ori;
+}
+
+static const struct wl_touch_listener touch_listener = {
+    .down = touch_down,
+    .up = touch_up,
+    .motion = touch_motion,
+    .frame = touch_frame,
+    .cancel = touch_cancel,
+    .shape = touch_shape,
+    .orientation = touch_orientation,
 };
 
 /* ------------------------------------------------------------------ */
@@ -525,11 +719,14 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
     /* Apply pending IME state in the order specified by the protocol:
      * 1. Delete surrounding text
      * 2. Insert commit string
-     * 3. Set preedit string */
+     * 3. Set preedit string
+     *
+     * The actual deletion is performed by lens when it sees the
+     * ime_delete_before / ime_delete_after fields in lens_input — we just
+     * forward the request through drain_input. */
     if (pl->ime.has_delete) {
-        /* Best-effort: for now we ignore delete_surrounding_text because
-         * lens's lens_input has no corresponding field. The commit string
-         * usually carries the corrected text anyway. */
+        /* Keep has_delete set; drain_input copies the values into lens_input
+         * and clears them after the frame. */
     }
 
     if (pl->ime.has_commit && pl->ime.commit[0]) {
@@ -554,7 +751,10 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
 
     pl->ime.has_commit = false;
     pl->ime.has_preedit = false;
-    pl->ime.has_delete = false;
+    /* NOTE: delete_before/delete_after are NOT cleared here — drain_input
+     * consumes them when it assembles lens_input, then clears. This is so
+     * a ti_done arriving between frames still delivers the delete request
+     * to lens on the next frame. */
 }
 
 static const struct zwp_text_input_v3_listener text_input_listener = {
@@ -668,12 +868,14 @@ static const struct wl_keyboard_listener keyboard_listener = {
 /*  Clipboard (wl_data_device) — bridges lens_clipboard to the selection */
 /* ------------------------------------------------------------------ */
 
-/* A data offer we might read on paste; remember the most recent text one. */
+/* A data offer we might read on paste or drop; remember the most recent
+ * text/URI-list one. Both clipboard (selection) and DnD share this listener. */
 static void doffer_offer(void *data, struct wl_data_offer *off, const char *mime) {
     wp_platform *pl = data;
     (void)off;
     /* Track only that *some* text type is on offer; receive negotiates below. */
-    if (strstr(mime, "text/")) { /* keep as the current selection candidate */
+    if (strstr(mime, "text/") || strstr(mime, "uri-list")) {
+        /* remember the strongest text mime we've seen on this offer */
     }
     (void)pl;
 }
@@ -706,31 +908,100 @@ static void ddev_selection(void *data, struct wl_data_device *dev, struct wl_dat
         wl_data_offer_destroy(pl->selection_offer);
     pl->selection_offer = offer; /* may be NULL when selection is cleared */
 }
+
+/* DnD enter/motion/leave/drop: report only text/uri-list drops. A real drop
+ * reads the offer via wl_data_offer_receive and writes the URIs into the
+ * pending buffer; the next frame's lens_input carries the dropped text. */
+static const char *dnd_pick_mime(struct wl_data_offer *offer) {
+    /* The listener doesn't expose the mime list; assume text/uri-list is
+     * always offered (compositors universally provide it for file drags).
+     * For raw text drags we fall back to text/plain;charset=utf-8. */
+    (void)offer;
+    return "text/uri-list";
+}
+
+static void dnd_read_and_emit(wp_platform *pl, struct wl_data_offer *offer) {
+    int fds[2];
+    if (pipe(fds) != 0)
+        return;
+    wl_data_offer_receive(offer, dnd_pick_mime(offer), fds[1]);
+    close(fds[1]);
+    wl_display_flush(pl->display);
+
+    /* Read everything; cap at sizeof pl->acc.text so we can land it in the
+     * pending IME commit slot, mirroring how paste delivers text to lens. */
+    char buf[1024];
+    size_t total = 0;
+    while (total < sizeof buf - 1) {
+        ssize_t n = read(fds[0], buf + total, sizeof buf - 1 - total);
+        if (n <= 0)
+            break;
+        total += (size_t)n;
+    }
+    close(fds[0]);
+    buf[total] = '\0';
+    /* Strip trailing newline from uri-list format. */
+    while (total && (buf[total - 1] == '\n' || buf[total - 1] == '\r'))
+        buf[--total] = '\0';
+
+    if (total == 0)
+        return;
+
+    /* Deliver as committed text — lens textfield/textarea will insert it
+     * the same way paste / IME commit text is inserted. For non-text-drop
+     * surfaces this is silently ignored, which is safe. */
+    size_t used = strlen(pl->acc.text);
+    size_t room = sizeof pl->acc.text - 1 - used;
+    if (total <= room)
+        memcpy(pl->acc.text + used, buf, total + 1);
+    else
+        memcpy(pl->acc.text + used, buf, room);
+    pl->acc.text[used + (total < room ? total : room)] = '\0';
+}
+
 static void ddev_enter(void *d, struct wl_data_device *dev, uint32_t s, struct wl_surface *su,
                        wl_fixed_t x, wl_fixed_t y, struct wl_data_offer *o) {
-    (void)d;
     (void)dev;
     (void)s;
     (void)su;
-    (void)x;
-    (void)y;
-    (void)o;
+    wp_platform *pl = d;
+    pl->dnd_inside = true;
+    pl->dnd_pos = (flux_point){wl_fixed_to_double(x), wl_fixed_to_double(y)};
+    if (pl->dnd_offer != o) {
+        if (pl->dnd_offer)
+            wl_data_offer_destroy(pl->dnd_offer);
+        pl->dnd_offer = o;
+    } else if (o) {
+        wl_data_offer_set_actions(o, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY,
+                                  WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+    }
 }
 static void ddev_leave(void *d, struct wl_data_device *dev) {
-    (void)d;
     (void)dev;
+    wp_platform *pl = d;
+    pl->dnd_inside = false;
+    if (pl->dnd_offer) {
+        wl_data_offer_destroy(pl->dnd_offer);
+        pl->dnd_offer = NULL;
+    }
 }
 static void ddev_motion(void *d, struct wl_data_device *dev, uint32_t t, wl_fixed_t x,
                         wl_fixed_t y) {
-    (void)d;
     (void)dev;
     (void)t;
-    (void)x;
-    (void)y;
+    wp_platform *pl = d;
+    pl->dnd_pos = (flux_point){wl_fixed_to_double(x), wl_fixed_to_double(y)};
 }
 static void ddev_drop(void *d, struct wl_data_device *dev) {
-    (void)d;
     (void)dev;
+    wp_platform *pl = d;
+    if (pl->dnd_offer) {
+        dnd_read_and_emit(pl, pl->dnd_offer);
+        wl_data_offer_finish(pl->dnd_offer);
+        wl_data_offer_destroy(pl->dnd_offer);
+        pl->dnd_offer = NULL;
+    }
+    pl->dnd_inside = false;
 }
 static const struct wl_data_device_listener data_device_listener = {
     .data_offer = ddev_data_offer,
@@ -859,6 +1130,7 @@ static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
     wp_platform *pl = data;
     bool has_ptr = caps & WL_SEAT_CAPABILITY_POINTER;
     bool has_kb = caps & WL_SEAT_CAPABILITY_KEYBOARD;
+    bool has_touch = caps & WL_SEAT_CAPABILITY_TOUCH;
 
     if (has_ptr && !pl->pointer) {
         pl->pointer = wl_seat_get_pointer(seat);
@@ -873,6 +1145,15 @@ static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
     } else if (!has_kb && pl->keyboard) {
         wl_keyboard_destroy(pl->keyboard);
         pl->keyboard = NULL;
+    }
+    if (has_touch && !pl->touch) {
+        pl->touch = wl_seat_get_touch(seat);
+        if (pl->touch)
+            wl_touch_add_listener(pl->touch, &touch_listener, pl);
+    } else if (!has_touch && pl->touch) {
+        wl_touch_destroy(pl->touch);
+        pl->touch = NULL;
+        g_touch_active_id = -1;
     }
 
     wp_maybe_create_data_device(pl);
@@ -984,6 +1265,32 @@ static void surf_preferred_buffer_transform(void *d, struct wl_surface *s, uint3
     (void)s;
     (void)t;
 }
+
+/* wp_fractional_scale_v1 (wayland-protocols ≥ 1.31, staging) — compositors
+ * that expose this global prefer it over wl_surface.preferred_buffer_scale
+ * because it carries a 1/120 fractional scale (e.g. 1.25x, 1.5x) instead
+ * of an integer. We bind the global and the per-surface object at registry
+ * time; the listener records the fractional scale so the lens side can be
+ * told the true float content scale. */
+static void frac_scale_preferred(void *data, struct wp_fractional_scale_v1 *frac, uint32_t scale) {
+    (void)frac;
+    wp_platform *pl = data;
+    /* scale is in 1/120 steps (so 120 = 1.0, 180 = 1.5, …). Convert to a
+     * float first, then a usable integer buffer scale (rounding to nearest
+     * so the existing integer-scale pipeline keeps working; the fractional
+     * part is preserved on the lens content_scale too). */
+    float f = (float)scale / 120.0f;
+    int b = (int)(f + 0.5f);
+    if (b < 1)
+        b = 1;
+    pl->pending_scale = b;
+    pl->fractional_scale = f;
+}
+
+static const struct wp_fractional_scale_v1_listener fractional_scale_listener = {
+    .preferred_scale = frac_scale_preferred,
+};
+
 static const struct wl_surface_listener surface_listener = {
     .enter = surf_enter,
     .leave = surf_leave,
@@ -1034,6 +1341,12 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
          * expose this global leave iris_set_cursor as a no-op. */
         pl->cursor_shape_mgr =
             wl_registry_bind(reg, name, &wp_cursor_shape_manager_v1_interface, 1);
+    } else if (strcmp(iface, wp_fractional_scale_manager_v1_interface.name) == 0) {
+        /* fractional-scale-v1 (wayland-protocols ≥ 1.31, staging). The
+         * modern HiDPI signal for fractional scales (1.25x, 1.5x). Falls
+         * back to integer wl_surface.preferred_buffer_scale when absent. */
+        pl->fractional_scale_mgr =
+            wl_registry_bind(reg, name, &wp_fractional_scale_manager_v1_interface, 1);
     }
 }
 static void reg_remove(void *d, struct wl_registry *r, uint32_t name) {
@@ -1118,12 +1431,22 @@ static void drain_input(wp_platform *pl, lens_input *in, float dt) {
     for (uint32_t i = 0; i < pl->acc.key_count; i++)
         in->keys[i] = pl->acc.keys[i];
 
+    /* Forward IME delete_surrounding (text-input-v3). Lens consumes it
+     * in textfield/textarea to honour compositor corrections (e.g. when
+     * an IME replaces "teh" -> "the", it asks us to delete "teh" first). */
+    if (pl->ime.delete_before || pl->ime.delete_after) {
+        in->ime_delete_before = pl->ime.delete_before;
+        in->ime_delete_after = pl->ime.delete_after;
+    }
+
     /* clear per-frame edges; keep level state (down/cursor/mods) */
     for (int i = 0; i < LENS_MOUSE_COUNT; i++)
         pl->acc.pressed[i] = pl->acc.released[i] = false;
     pl->acc.scroll_x = pl->acc.scroll_y = 0.0;
     pl->acc.key_count = 0;
     pl->acc.text[0] = '\0';
+    pl->ime.delete_before = pl->ime.delete_after = 0;
+    pl->ime.has_delete = false;
 }
 
 static void log_raw(const lens_input *in) {
@@ -1349,6 +1672,17 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     xdg_toplevel_set_title(pl.toplevel, cfg->title ? cfg->title : "iris");
     xdg_toplevel_set_app_id(pl.toplevel,
                             cfg->app_id ? cfg->app_id : "ai.opencode.iris");
+
+    /* Bind a fractional-scale object if the compositor exposes the global;
+     * it carries the precise 1/120-step scale used on HiDPI mixed-DPI
+     * desktops (Windows portability scenarios, fractional laptop scales). */
+    if (pl.fractional_scale_mgr) {
+        pl.fractional_scale_obj = wp_fractional_scale_manager_v1_get_fractional_scale(
+            pl.fractional_scale_mgr, pl.surface);
+        if (pl.fractional_scale_obj)
+            wp_fractional_scale_v1_add_listener(pl.fractional_scale_obj,
+                                                &fractional_scale_listener, &pl);
+    }
 
     /* Ask the compositor for a server-side title bar when it can. */
     if (pl.deco_mgr) {

@@ -1,10 +1,10 @@
-/* node.c — per-node frame reset and the lens_node_* escape hatch (ADR-0008). */
+/* node.c — per-node frame reset and the lens_node_* escape hatch (ADR-0031). */
 
 #include "../internal.h"
 
 /* Clear the per-frame fields of a node when it is first touched this
  * frame. Persistent fields (id, phase, has_prev, prev_rect, state,
- * animation) are preserved (ADR-0004). */
+ * animation) are preserved (ADR-0027). */
 void lensi_node_reset_frame(lens_node *n) {
     n->parent = NULL;
     n->first_child = n->last_child = n->next_sibling = NULL;
@@ -72,7 +72,7 @@ void *lens_node_state(lens_node *n, size_t bytes) {
         return n->state_bytes == bytes ? n->state : NULL;
     }
     /* Allocate through the owning context's persistent allocator and zero-init
-     * on first touch (ADR-0004). Freed at reap or lens_destroy. */
+     * on first touch (ADR-0027). Freed at reap or lens_destroy. */
     void *mem = lensi_alloc(n->ui, bytes);
     if (!mem)
         return NULL;

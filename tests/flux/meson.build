@@ -60,5 +60,8 @@ fill_pattern_spv = custom_target('test_fill_pattern.comp.spv',
 # --- sub-suites ---
 subdir('unit')
 subdir('integration')
+if get_option('fuzz')
+  subdir('fuzz')
+endif
 
 subdir('bench')

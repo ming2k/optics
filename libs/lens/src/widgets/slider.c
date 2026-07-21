@@ -1,4 +1,4 @@
-/* slider.c — horizontal and vertical float sliders (ADR-0008). */
+/* slider.c — horizontal and vertical float sliders (ADR-0031). */
 
 #include "../internal.h"
 #include <stdio.h>
@@ -99,7 +99,7 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
     n->hover_t =
         lensi_approach(ui, n->hover_t, reveal_knob ? 1.f : 0.f, dt, reveal_knob ? 18.f : 14.f);
 
-    /* track geometry from last frame's width (one-frame latency, ADR-0006) */
+    /* track geometry from last frame's width (one-frame latency, ADR-0029) */
     flux_rect rect = n->has_prev ? n->prev_rect : (flux_rect){0, 0, w, h};
     float track_thickness = t->slider_track_thickness;
     float knob_extent = t->slider_knob_size;

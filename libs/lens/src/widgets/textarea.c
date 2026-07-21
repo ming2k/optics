@@ -469,6 +469,26 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
             }
         }
 
+        /* IME delete_surrounding_text: applied BEFORE the commit string per
+         * the text-input-v3 protocol. */
+        if (ui->input.ime_delete_before || ui->input.ime_delete_after) {
+            uint32_t lo = ts->cursor >= ui->input.ime_delete_before
+                              ? ts->cursor - ui->input.ime_delete_before
+                              : 0;
+            uint32_t hi = ts->cursor + ui->input.ime_delete_after;
+            if (hi > len)
+                hi = (uint32_t)len;
+            if (hi > lo) {
+                delete_range(buf, &len, lo, hi);
+                ts->cursor = lo;
+                if (ts->sel_anchor > hi)
+                    ts->sel_anchor -= (hi - lo);
+                else if (ts->sel_anchor > lo)
+                    ts->sel_anchor = lo;
+                changed = true;
+            }
+        }
+
         /* Committed text */
         if (ui->input.text_utf8[0]) {
             if (sel_active(ts)) {

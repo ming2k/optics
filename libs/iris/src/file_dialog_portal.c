@@ -6,6 +6,9 @@
  * later Response signal. Keep both operations on one sd-bus connection so the
  * request remains alive, and pump that connection until the user accepts or
  * cancels. No command shell is involved, so arbitrary UTF-8 titles are safe.
+ *
+ * Supports open / open-multiple / open-folder / save modes, plus filters
+ * (name + glob), an initial URI, and a default save name (SaveFile mode).
  */
 
 #include <iris/file_dialog.h>
@@ -18,8 +21,10 @@
 #include <systemd/sd-bus.h>
 
 typedef struct iris_picker_response {
-    char *out;
+    char *out;       /* single-URI buffer or NUL-separated multi-URI buffer */
     size_t cap;
+    size_t used;     /* bytes written (excluding the final NUL terminator)   */
+    int count;       /* URIs received                                       */
     int done;
     int result;
 } iris_picker_response;
@@ -56,6 +61,63 @@ static int append_bool_option(sd_bus_message *message, const char *key, int valu
     return rc;
 }
 
+/* Append the "filters" option as a(sa(us)) — see the FileChooser portal spec. */
+static int append_filters_option(sd_bus_message *message, const iris_file_filter *filters) {
+    if (!filters)
+        return 0;
+    int rc = sd_bus_message_open_container(message, SD_BUS_TYPE_DICT_ENTRY, "sv");
+    if (rc < 0)
+        return rc;
+    rc = sd_bus_message_append(message, "s", "filters");
+    if (rc >= 0)
+        rc = sd_bus_message_open_container(message, SD_BUS_TYPE_VARIANT, "a(sa(us))");
+    if (rc >= 0)
+        rc = sd_bus_message_open_container(message, SD_BUS_TYPE_ARRAY, "(sa(us))");
+    while (rc >= 0 && filters->name) {
+        rc = sd_bus_message_open_container(message, SD_BUS_TYPE_STRUCT, "sa(us)");
+        if (rc < 0)
+            break;
+        rc = sd_bus_message_append(message, "s", filters->name ? filters->name : "");
+        if (rc >= 0)
+            rc = sd_bus_message_open_container(message, SD_BUS_TYPE_ARRAY, "(us)");
+        /* Parse the semicolon-separated glob list into individual (us) pairs. */
+        if (rc >= 0 && filters->pattern) {
+            const char *p = filters->pattern;
+            while (rc >= 0 && *p) {
+                const char *semi = strchr(p, ';');
+                size_t len = semi ? (size_t)(semi - p) : strlen(p);
+                if (len > 0) {
+                    char tmp[256];
+                    if (len >= sizeof tmp)
+                        len = sizeof tmp - 1;
+                    memcpy(tmp, p, len);
+                    tmp[len] = '\0';
+                    rc = sd_bus_message_open_container(message, SD_BUS_TYPE_STRUCT, "us");
+                    if (rc >= 0)
+                        rc = sd_bus_message_append(message, "us", 0u, tmp);
+                    if (rc >= 0)
+                        rc = sd_bus_message_close_container(message);
+                }
+                if (!semi)
+                    break;
+                p = semi + 1;
+            }
+        }
+        if (rc >= 0)
+            rc = sd_bus_message_close_container(message); /* (us) array */
+        if (rc >= 0)
+            rc = sd_bus_message_close_container(message); /* struct     */
+        ++filters;
+    }
+    if (rc >= 0)
+        rc = sd_bus_message_close_container(message); /* array       */
+    if (rc >= 0)
+        rc = sd_bus_message_close_container(message); /* variant     */
+    if (rc >= 0)
+        rc = sd_bus_message_close_container(message); /* dict entry  */
+    return rc;
+}
+
 static int on_picker_response(sd_bus_message *message, void *userdata, sd_bus_error *error) {
     (void)error;
     iris_picker_response *response = userdata;
@@ -82,20 +144,26 @@ static int on_picker_response(sd_bus_message *message, void *userdata, sd_bus_er
         if (sd_bus_message_read(message, "s", &key) < 0)
             break;
         if (key && strcmp(key, "uris") == 0) {
-            const char *uri = NULL;
             if (sd_bus_message_enter_container(message, SD_BUS_TYPE_VARIANT, "as") >= 0 &&
-                sd_bus_message_enter_container(message, SD_BUS_TYPE_ARRAY, "s") >= 0 &&
-                sd_bus_message_read(message, "s", &uri) > 0 && uri) {
-                size_t length = strlen(uri);
-                if (length + 1 <= response->cap) {
-                    memcpy(response->out, uri, length + 1);
-                    response->result = 0;
-                } else {
-                    response->result = 8;
+                sd_bus_message_enter_container(message, SD_BUS_TYPE_ARRAY, "s") >= 0) {
+                const char *uri = NULL;
+                while (sd_bus_message_read(message, "s", &uri) > 0 && uri) {
+                    size_t len = strlen(uri);
+                    /* +1 for the NUL terminator (single) or separator (multi). */
+                    if (response->used + len + 1 > response->cap) {
+                        response->result = 8;
+                        break;
+                    }
+                    memcpy(response->out + response->used, uri, len + 1);
+                    response->used += len + 1;
+                    response->count++;
+                    if (response->result != 0 && response->result != 8)
+                        response->result = 0;
+                    /* Continue for multi-select; single-select stops at one. */
                 }
+                (void)sd_bus_message_exit_container(message);
+                (void)sd_bus_message_exit_container(message);
             }
-            (void)sd_bus_message_exit_container(message);
-            (void)sd_bus_message_exit_container(message);
         } else {
             (void)sd_bus_message_skip(message, "v");
         }
@@ -106,14 +174,42 @@ static int on_picker_response(sd_bus_message *message, void *userdata, sd_bus_er
     return 0;
 }
 
-static int pick_uri(const iris_file_dialog_opts *opts, int directory, char *out_path,
-                    size_t out_cap) {
+/* mode: 0 = OpenFile (single), 1 = OpenFile (multiple), 2 = OpenFile (folder), 3 = SaveFile */
+typedef enum {
+    PICK_OPEN,
+    PICK_OPEN_MULTI,
+    PICK_FOLDER,
+    PICK_SAVE,
+} pick_mode;
+
+static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const char *default_name,
+                    char *out_path, size_t out_cap, size_t *out_used, int *out_count) {
     if (!out_path || out_cap == 0)
         return 1;
     out_path[0] = '\0';
 
-    const char *title = (opts && opts->title) ? opts->title :
-                                                   (directory ? "Open Folder" : "Open File");
+    const char *title;
+    const char *method;
+    switch (mode) {
+    case PICK_OPEN_MULTI:
+        title = (opts && opts->title) ? opts->title : "Open Files";
+        method = "OpenFile";
+        break;
+    case PICK_FOLDER:
+        title = (opts && opts->title) ? opts->title : "Open Folder";
+        method = "OpenFile";
+        break;
+    case PICK_SAVE:
+        title = (opts && opts->title) ? opts->title : "Save As";
+        method = "SaveFile";
+        break;
+    case PICK_OPEN:
+    default:
+        title = (opts && opts->title) ? opts->title : "Open File";
+        method = "OpenFile";
+        break;
+    }
+
     sd_bus *bus = NULL;
     sd_bus_message *call = NULL;
     sd_bus_message *reply = NULL;
@@ -126,7 +222,7 @@ static int pick_uri(const iris_file_dialog_opts *opts, int directory, char *out_
         goto cleanup;
     rc = sd_bus_message_new_method_call(bus, &call, "org.freedesktop.portal.Desktop",
                                         "/org/freedesktop/portal/desktop",
-                                        "org.freedesktop.portal.FileChooser", "OpenFile");
+                                        "org.freedesktop.portal.FileChooser", method);
     if (rc < 0)
         goto cleanup;
     rc = sd_bus_message_append(call, "ss", "", title);
@@ -141,8 +237,20 @@ static int pick_uri(const iris_file_dialog_opts *opts, int directory, char *out_
     char token[64];
     (void)snprintf(token, sizeof token, "iris_%ld_%ld", (long)now.tv_sec, now.tv_nsec);
     rc = append_string_option(call, "handle_token", token);
-    if (rc >= 0 && directory)
+    if (rc >= 0 && mode == PICK_FOLDER)
         rc = append_bool_option(call, "directory", 1);
+    if (rc >= 0 && mode == PICK_OPEN_MULTI)
+        rc = append_bool_option(call, "multiple", 1);
+    if (rc >= 0 && opts && opts->directory_only)
+        rc = append_bool_option(call, "directory", 1);
+    if (rc >= 0 && opts && opts->multiple_selection && mode == PICK_OPEN)
+        rc = append_bool_option(call, "multiple", 1);
+    if (rc >= 0 && opts && opts->filters)
+        rc = append_filters_option(call, opts->filters);
+    if (rc >= 0 && opts && opts->initial_uri)
+        rc = append_string_option(call, "current_folder", opts->initial_uri);
+    if (rc >= 0 && mode == PICK_SAVE && default_name)
+        rc = append_string_option(call, "current_name", default_name);
     if (rc >= 0)
         rc = sd_bus_message_close_container(call);
     if (rc < 0)
@@ -151,10 +259,12 @@ static int pick_uri(const iris_file_dialog_opts *opts, int directory, char *out_
     iris_picker_response response = {
         .out = out_path,
         .cap = out_cap,
+        .used = 0,
+        .count = 0,
         .done = 0,
         .result = 5,
     };
-    /* Register before sending OpenFile. A fast portal implementation is
+    /* Register before sending the request. A fast portal implementation is
      * allowed to emit Response immediately, before the method reply reaches
      * us. This dedicated bus connection has only this one picker request, so
      * matching any Request.Response path is both safe and race-free. */
@@ -182,6 +292,10 @@ static int pick_uri(const iris_file_dialog_opts *opts, int directory, char *out_
             goto cleanup;
     }
     result = response.result;
+    if (out_used)
+        *out_used = response.used;
+    if (out_count)
+        *out_count = response.count;
 
 cleanup:
     sd_bus_error_free(&error);
@@ -194,10 +308,13 @@ cleanup:
 
 #else
 
-static int pick_uri(const iris_file_dialog_opts *opts, int directory, char *out_path,
-                    size_t out_cap) {
+static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const char *default_name,
+                    char *out_path, size_t out_cap, size_t *out_used, int *out_count) {
     (void)opts;
-    (void)directory;
+    (void)mode;
+    (void)default_name;
+    (void)out_used;
+    (void)out_count;
     if (out_path && out_cap > 0)
         out_path[0] = '\0';
     return 6;
@@ -206,9 +323,23 @@ static int pick_uri(const iris_file_dialog_opts *opts, int directory, char *out_
 #endif
 
 IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
-    return pick_uri(opts, 0, out_path, out_cap);
+    return pick_uri(opts, PICK_OPEN, NULL, out_path, out_cap, NULL, NULL);
 }
 
 IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
-    return pick_uri(opts, 1, out_path, out_cap);
+    return pick_uri(opts, PICK_FOLDER, NULL, out_path, out_cap, NULL, NULL);
+}
+
+IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *default_name,
+                                 char *out_path, size_t out_cap) {
+    return pick_uri(opts, PICK_SAVE, default_name, out_path, out_cap, NULL, NULL);
+}
+
+IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths, size_t out_cap,
+                             size_t *out_bytes_used) {
+    int count = 0;
+    int rc = pick_uri(opts, PICK_OPEN_MULTI, NULL, out_paths, out_cap, out_bytes_used, &count);
+    if (rc != 0)
+        return 0;
+    return count;
 }

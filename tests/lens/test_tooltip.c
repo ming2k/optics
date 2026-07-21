@@ -37,8 +37,35 @@ static void test_tooltip_hover_does_not_crash(void) {
     lens_destroy(ui);
 }
 
+/* Regression: the tooltip text-draw branch used to be wrapped in an
+ * undefined #ifdef LENSI_HAVE_TEXT_FTHB, so the label was never rendered
+ * even when a flux_text handle was attached. We cannot fake a flux_text*
+ * without a device, but we can verify lens_render reaches the tooltip
+ * branch on the headless path (no text) without crashing or marking the
+ * frame overflowed. */
+static void test_tooltip_render_path(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    /* Two frames so prev_rect exists for hover hit-testing. */
+    lens_begin(ui, &IN0);
+    lens_button_ex(ui, (lens_button_opts){.label = "btn", .box = {.tooltip = "regression"}});
+    lens_end(ui);
+
+    lens_input in = IN0;
+    in.cursor = (flux_point){20, 15};
+    lens_begin(ui, &in);
+    lens_button_ex(ui, (lens_button_opts){.label = "btn", .box = {.tooltip = "regression"}});
+    lens_render(ui, NULL); /* headless: NULL canvas is a documented no-op */
+    lens_end(ui);
+
+    CHECK(lens_overflowed(ui) == false);
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_tooltip_no_hover_no_crash();
     test_tooltip_hover_does_not_crash();
+    test_tooltip_render_path();
     return TEST_REPORT();
 }

@@ -8,3 +8,4 @@ option('scene-graph', type : 'boolean', value : true, description : 'Build the f
 
 option('examples', type : 'boolean', value : false, description : 'Build all C examples across all modules')
 option('tests',    type : 'boolean', value : false, description : 'Build all C tests across all modules')
+option('fuzz',     type : 'boolean', value : false, description : 'Build fuzz harnesses (links libFuzzer when -Db_lundef=false + LIBFUZZER=1 env var)')

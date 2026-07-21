@@ -21,14 +21,14 @@
 
 #define LENSI_DEFAULT_ARENA_BYTES (1u << 20) /* 1 MiB per-frame arena */
 #define LENSI_DEFAULT_STORE_CAP 256u         /* initial hash slots    */
-#define LENSI_LEAVE_GRACE_FRAMES 8u          /* reap delay (ADR-0004) */
+#define LENSI_LEAVE_GRACE_FRAMES 8u          /* reap delay (ADR-0027) */
 #define LENSI_ID_STACK_MAX 64u
 #define LENSI_CONTAINER_STACK_MAX 64u
-#define LENSI_PASTE_MAX 1024u /* clipboard staging (ADR-0013) */
-#define LENSI_OVERLAY_MAX 8u  /* max simultaneously-open overlays (ADR-0014) */
+#define LENSI_PASTE_MAX 1024u /* clipboard staging (ADR-0036) */
+#define LENSI_OVERLAY_MAX 8u  /* max simultaneously-open overlays (ADR-0037) */
 
 /* ------------------------------------------------------------------ */
-/*  Draw command (ADR-0007) — coordinates relative to the node box    */
+/*  Draw command (ADR-0030) — coordinates relative to the node box    */
 /* ------------------------------------------------------------------ */
 
 typedef enum lens_draw_kind {
@@ -74,7 +74,7 @@ enum {
 extern const uint8_t lens_icon_render_modes[LENS_ICON_COUNT];
 
 /* ------------------------------------------------------------------ */
-/*  Retained node slot (ADR-0004)                                     */
+/*  Retained node slot (ADR-0027)                                     */
 /* ------------------------------------------------------------------ */
 
 struct lens_node {
@@ -98,10 +98,10 @@ struct lens_node {
     /* layout inputs (per frame) */
     bool is_container;
     bool is_scroll;
-    bool is_overlay;     /* a floating layer (ADR-0014)       */
+    bool is_overlay;     /* a floating layer (ADR-0037)       */
     bool is_panel_layer; /* persistent panel (no flip/dismiss) */
-    bool is_centered;    /* center on display instead of anchor (modal, ADR-0016) */
-    bool dismissable; /* overlay may be closed by Esc/click-outside; false = modal-pinned (ADR-0016)
+    bool is_centered;    /* center on display instead of anchor (modal, ADR-0039) */
+    bool dismissable; /* overlay may be closed by Esc/click-outside; false = modal-pinned (ADR-0039)
                        */
     flux_rect overlay_anchor; /* set by lens_overlay_begin/lens_layer_begin */
     flux_rect overlay_bounds; /* optional placement/render boundary inherited from an owner */
@@ -127,7 +127,7 @@ struct lens_node {
     uint32_t cmd_hash;      /* rolling hash of this frame's cmds */
     uint32_t last_cmd_hash; /* previous frame's cmd_hash */
 
-    /* accessibility semantics (per frame; ADR-0012) */
+    /* accessibility semantics (per frame; ADR-0035) */
     lens_semantics semantics;
 
     /* animation (persistent) */
@@ -161,7 +161,7 @@ typedef struct lens_scroll_state {
 } lens_scroll_state;
 
 /* ------------------------------------------------------------------ */
-/*  Open-addressing store: lens_id -> lens_node* (ADR-0004)               */
+/*  Open-addressing store: lens_id -> lens_node* (ADR-0027)               */
 /* ------------------------------------------------------------------ */
 
 typedef struct lens_store_slot {
@@ -176,7 +176,7 @@ typedef struct lens_store {
 } lens_store;
 
 /* ------------------------------------------------------------------ */
-/*  Context (ADR-0001, ADR-0009)                                      */
+/*  Context (ADR-0024, ADR-0032)                                      */
 /* ------------------------------------------------------------------ */
 
 struct lens {
@@ -201,7 +201,7 @@ struct lens {
                           * resolves to its target in one frame (see
                           * lens_set_reduced_motion) */
 
-    /* id stack (ADR-0003) */
+    /* id stack (ADR-0026) */
     lens_id id_stack[LENSI_ID_STACK_MAX];
     uint32_t id_top; /* count; top = id_stack[id_top-1] */
 
@@ -219,7 +219,7 @@ struct lens {
 
     bool click_hit_focusable; /* mouse pressed inside a focusable widget */
 
-    /* interaction state (ADR-0006) */
+    /* interaction state (ADR-0029) */
     lens_id hot_id;    /* hovered this frame */
     lens_id active_id; /* captured (e.g. dragging) */
     lens_id focused_id;
@@ -232,17 +232,17 @@ struct lens {
     lens_id *tab_order;
     uint32_t tab_count, tab_cap;
 
-    /* clipboard + IME (ADR-0013) */
+    /* clipboard + IME (ADR-0036) */
     lens_clipboard clipboard;
     flux_rect caret_rect; /* set by the focused text widget */
     char paste_buf[LENSI_PASTE_MAX];
     uint32_t paste_len; /* 0 = nothing pending */
 
-    /* overlay layer (ADR-0014) */
+    /* overlay layer (ADR-0037) */
     struct lens_overlay_slot {
         lens_id id;
         uint64_t opened_frame; /* dismiss grace: same-frame open ignored */
-        bool dismissable;      /* false = Escape/click-outside leave it (modal, ADR-0016) */
+        bool dismissable;      /* false = Escape/click-outside leave it (modal, ADR-0039) */
     } open_overlays[LENSI_OVERLAY_MAX];
     uint32_t open_overlay_count;
     lens_node **overlay_layers; /* per-frame, arena-backed */
@@ -258,7 +258,7 @@ struct lens {
     lens_id prev_overlay_layer_ids[LENSI_OVERLAY_MAX];
     uint32_t prev_overlay_layer_count;
 
-    /* modal focus trap (ADR-0016). When modal_active, Tab cycling is
+    /* modal focus trap (ADR-0039). When modal_active, Tab cycling is
      * clamped to [modal_tab_lo, modal_tab_hi) — the tab_order slice
      * recorded during the modal body build. */
     bool modal_active;
@@ -292,7 +292,7 @@ size_t lensi_label_visible_len(const char *label);
 /* store (store.c) */
 flux_result lensi_store_init(lens *ui, uint32_t cap);
 void lensi_store_destroy(lens *ui);
-lens_node *lensi_store_find(lens *ui, lens_id id);
+lens_node *lensi_store_find(const lens *ui, lens_id id);
 lens_node *lensi_store_touch(lens *ui, lens_id id); /* find-or-create, frame-reset */
 void lensi_store_reap(lens *ui);                    /* phase + GC at frame end */
 
@@ -326,18 +326,18 @@ void lensi_scroll_clamp_subtree(lens_node *n); /* overlay sub-roots, post-placem
 lens_response lensi_interact(lens *ui, lens_node *n, bool focusable, bool disabled);
 void lensi_focus_tab(lens *ui);
 
-/* clipboard + IME (clipboard.c, ADR-0013) — internal helpers for text
+/* clipboard + IME (clipboard.c, ADR-0036) — internal helpers for text
  * widgets (the consumer that will land with lens_text_input). */
 void lensi_set_caret_rect(lens *ui, flux_rect r);
 /* Borrow + clear any pending paste. Returns NULL when none. The buffer
  * is valid for the rest of the frame. */
 const char *lensi_take_paste(lens *ui, uint32_t *out_len);
 
-/* overlay layer (overlay.c, ADR-0014) — shared with persistent panels
+/* overlay layer (overlay.c, ADR-0037) — shared with persistent panels
  * (lens_layer_begin). Both register positional sub-roots in the same
  * per-frame layer array; only overlays track open state and dismissal. */
 bool lensi_overlay_is_open_id(const lens *ui, lens_id id);
-void lensi_overlay_open_id_pub(lens *ui, lens_id id, bool dismissable); /* ADR-0017 menu internal */
+void lensi_overlay_open_id_pub(lens *ui, lens_id id, bool dismissable); /* ADR-0040 menu internal */
 void lensi_overlay_constrain_current(lens *ui, flux_rect bounds);
 void lensi_overlay_layout(lens *ui);                                    /* post-arrange placement */
 void lensi_overlay_render(lens *ui, flux_canvas *canvas);
@@ -345,7 +345,7 @@ void lensi_overlay_dismiss(lens *ui); /* click-outside + Esc (overlays only) */
 /* Cursor sits inside any rendered floating layer (overlay or panel),
  * using last-frame geometry. Used by lensi_interact to eclipse base
  * widgets under a popup or chrome panel. */
-bool lensi_point_in_floating_layer(lens *ui, flux_point p);
+bool lensi_point_in_floating_layer(const lens *ui, flux_point p);
 /* True when a floating layer covers the cursor for a widget that does
  * NOT belong to that layer. Widgets with their own hit-testing
  * (table rows, scrollbars, wheel routing) must check this in addition
@@ -360,7 +360,7 @@ bool lensi_widget_eclipsed(const lens *ui, const lens_node *n);
  * consult this in addition to the widget's own rect. */
 bool lensi_point_clipped_by_scroll(const lens_node *n, flux_point p);
 /* Walk an overlay/panel subtree for accessibility (called by the a11y walk). */
-lens_node **lensi_overlay_layers(lens *ui, uint32_t *out_count);
+lens_node **lensi_overlay_layers(const lens *ui, uint32_t *out_count);
 
 /* render (drawlist.c, replay.c) */
 void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd);

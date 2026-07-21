@@ -1,4 +1,4 @@
-/* modal.c — centered modal dialog: backdrop + focus trap (ADR-0016).
+/* modal.c — centered modal dialog: backdrop + focus trap (ADR-0039).
  *
  * Two cooperating floating layers per open modal:
  *   - a full-display backdrop panel (non-dismissible, dims + eclipses the

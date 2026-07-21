@@ -13,15 +13,27 @@
 #define IRIS_FILE_DIALOG_H
 
 #include <iris/app.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/* A name + glob pair such as {"Text", "*.txt"}. `pattern` may be a single
+ * glob ("*.txt") or a semicolon-separated list ("*.txt;*.md"). A NULL or
+ * empty pattern means "any file". */
+typedef struct iris_file_filter {
+    const char *name;    /* human label, UTF-8 (optional)            */
+    const char *pattern; /* glob expression, UTF-8 (optional)        */
+} iris_file_filter;
+
 typedef struct iris_file_dialog_opts {
-    const char *title; /* dialog title (UTF-8, optional)        */
-    /* Future: filters, initial_path, save vs open mode, multiple selection. */
+    const char *title;       /* dialog title (UTF-8, optional)        */
+    const char *initial_uri; /* file:// URI to start at (optional)    */
+    const iris_file_filter *filters; /* NULL-terminated array (opt)   */
+    bool multiple_selection; /* allow more than one (open mode only)  */
+    bool directory_only;     /* restrict to directories               */
 } iris_file_dialog_opts;
 
 /* Open a single-file picker. On success, writes a NUL-terminated UTF-8
@@ -33,6 +45,20 @@ IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, s
 /* Open a single-folder picker. The return convention and URI encoding match
  * iris_pick_file. */
 IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap);
+
+/* Save dialog: asks the user for a destination path. `default_name` is the
+ * suggested filename (UTF-8, optional); on success a file:// URI is written
+ * to out_path. The file is not created — opening it for write is the host's
+ * responsibility. */
+IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *default_name,
+                                 char *out_path, size_t out_cap);
+
+/* Multi-selection picker. On success, writes NUL-separated UTF-8 file URIs
+ * into out_paths and returns the number of URIs (>= 1); 0 on cancel or
+ * failure. *out_bytes_used (optional) receives the total bytes written
+ * (excluding the trailing NUL terminator). */
+IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths, size_t out_cap,
+                             size_t *out_bytes_used);
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,4 @@
-/* dropdown.c — select widget with overlay item list (ADR-0014). */
+/* dropdown.c — select widget with overlay item list (ADR-0037). */
 
 #include "../internal.h"
 #include <stdio.h>

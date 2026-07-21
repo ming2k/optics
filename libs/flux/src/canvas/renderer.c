@@ -60,6 +60,7 @@ static VkShaderModule make_module(VkDevice d, const void *bytes, size_t len) {
 
 #define CANVAS_PIPELINE_CACHE_CAP 8
 #define CANVAS_SAMPLE_VARIANT_COUNT 2
+#define CANVAS_BLEND_VARIANT_COUNT 4 /* SRC_OVER, SRC, PLUS, MULTIPLY */
 
 enum canvas_sample_variant {
     CANVAS_SAMPLE_SINGLE = 0,
@@ -74,10 +75,16 @@ static int canvas_sample_variant(VkSampleCountFlagBits samples) {
     return -1;
 }
 
+static int canvas_blend_variant(flux_blend_mode b) {
+    if ((unsigned)b < CANVAS_BLEND_VARIANT_COUNT)
+        return (int)b;
+    return 0; /* unknown blends fall back to SRC_OVER */
+}
+
 typedef struct canvas_cache_entry {
     VkFormat color_format; /* VK_FORMAT_UNDEFINED = unused slot */
     VkPipelineLayout layout;
-    VkPipeline pipelines[CANVAS_SAMPLE_VARIANT_COUNT][CANVAS_PIPE_COUNT];
+    VkPipeline pipelines[CANVAS_SAMPLE_VARIANT_COUNT][CANVAS_PIPE_COUNT][CANVAS_BLEND_VARIANT_COUNT];
 } canvas_cache_entry;
 
 typedef struct canvas_module_state {
@@ -95,8 +102,9 @@ static void canvas_state_destroy(flux_device *d) {
         canvas_cache_entry *e = &st->entries[i];
         for (uint32_t sample = 0; sample < CANVAS_SAMPLE_VARIANT_COUNT; ++sample)
             for (uint32_t k = 0; k < CANVAS_PIPE_COUNT; ++k)
-                if (e->pipelines[sample][k])
-                    vkDestroyPipeline(d->device, e->pipelines[sample][k], nullptr);
+                for (uint32_t b = 0; b < CANVAS_BLEND_VARIANT_COUNT; ++b)
+                    if (e->pipelines[sample][k][b])
+                        vkDestroyPipeline(d->device, e->pipelines[sample][k][b], nullptr);
         if (e->layout)
             vkDestroyPipelineLayout(d->device, e->layout, nullptr);
     }
@@ -176,8 +184,8 @@ VkFormat flux_canvas_stencil_format(flux_device *d) {
 
 static flux_result build_canvas_pipeline(flux_device *device, VkFormat color_format,
                                          VkFormat stencil_format, VkSampleCountFlagBits samples,
-                                         canvas_pipe_id id, VkPipelineLayout layout,
-                                         VkPipeline *out_pipeline);
+                                         canvas_pipe_id id, flux_blend_mode blend,
+                                         VkPipelineLayout layout, VkPipeline *out_pipeline);
 
 static flux_result build_canvas_layout(flux_device *device, VkPipelineLayout *out_layout) {
     /* Pipeline layout shared by every canvas pipeline. Push constants
@@ -204,12 +212,14 @@ static flux_result build_canvas_layout(flux_device *device, VkPipelineLayout *ou
 }
 
 /* Returns the cached layout for this format (always set) plus the
- * pipeline for the requested internal id (built lazily). Pipelines
- * are owned by the device. */
+ * pipeline for the requested internal id + blend mode (built lazily).
+ * Pipelines are owned by the device. */
 flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
                                    VkSampleCountFlagBits samples, canvas_pipe_id id,
-                                   VkPipelineLayout *out_layout, VkPipeline *out_pipeline) {
+                                   flux_blend_mode blend, VkPipelineLayout *out_layout,
+                                   VkPipeline *out_pipeline) {
     int sample_variant = canvas_sample_variant(samples);
+    int blend_variant = canvas_blend_variant(blend);
     if (sample_variant < 0 || id < 0 || id >= CANVAS_PIPE_COUNT) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid canvas pipeline sample count or id");
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -252,16 +262,16 @@ flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
     }
     *out_layout = slot->layout;
 
-    if (!slot->pipelines[sample_variant][id]) {
-        flux_result r =
-            build_canvas_pipeline(device, color_format, stencil_format_locked(device, st), samples,
-                                  id, slot->layout, &slot->pipelines[sample_variant][id]);
+    if (!slot->pipelines[sample_variant][id][blend_variant]) {
+        flux_result r = build_canvas_pipeline(device, color_format, stencil_format_locked(device, st),
+                                              samples, id, blend, slot->layout,
+                                              &slot->pipelines[sample_variant][id][blend_variant]);
         if (r != FLUX_OK) {
             pthread_mutex_unlock(&st->lock);
             return r;
         }
     }
-    *out_pipeline = slot->pipelines[sample_variant][id];
+    *out_pipeline = slot->pipelines[sample_variant][id][blend_variant];
     pthread_mutex_unlock(&st->lock);
     return FLUX_OK;
 }
@@ -271,19 +281,21 @@ flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
  * flux_canvas_draw_image, not paint.kind). */
 flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format,
                                 VkSampleCountFlagBits samples, flux_paint_kind kind,
-                                VkPipelineLayout *out_layout, VkPipeline *out_pipeline) {
+                                flux_blend_mode blend, VkPipelineLayout *out_layout,
+                                VkPipeline *out_pipeline) {
     canvas_pipe_id id = CANVAS_PIPE_SOLID;
     if ((uint32_t)kind == 0xffu)
         id = CANVAS_PIPE_IMAGE;
     else if (kind == FLUX_PAINT_LINEAR_GRADIENT || kind == FLUX_PAINT_RADIAL_GRADIENT)
         id = CANVAS_PIPE_GRADIENT;
-    return get_canvas_pipeline_id(device, color_format, samples, id, out_layout, out_pipeline);
+    return get_canvas_pipeline_id(device, color_format, samples, id, blend, out_layout,
+                                  out_pipeline);
 }
 
 static flux_result build_canvas_pipeline(flux_device *device, VkFormat color_format,
                                          VkFormat stencil_format, VkSampleCountFlagBits samples,
-                                         canvas_pipe_id id, VkPipelineLayout layout,
-                                         VkPipeline *out_pipeline) {
+                                         canvas_pipe_id id, flux_blend_mode blend,
+                                         VkPipelineLayout layout, VkPipeline *out_pipeline) {
     VkDevice d = device->device;
 
     const unsigned char *frag_spv = canvas_solid_frag_spv;
@@ -354,21 +366,47 @@ static flux_result build_canvas_pipeline(flux_device *device, VkFormat color_for
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .rasterizationSamples = samples,
     };
-    /* Premultiplied SRC_OVER. The stencil-write pass masks all color
-     * channels off — it only touches the stencil attachment. */
+    /* Blend state. SRC_OVER is the default premultiplied-over composite;
+     * the other modes are the standard canvas / PDF separable blend modes
+     * expressed via fixed-function blend (per ADR-0008 / canvas blend).
+     * STENCIL_WRITE masks all colour channels off — it only touches the
+     * stencil attachment — so the blend mode is irrelevant there. */
     VkPipelineColorBlendAttachmentState ba = {
         .blendEnable = VK_TRUE,
-        .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
         .colorBlendOp = VK_BLEND_OP_ADD,
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
         .alphaBlendOp = VK_BLEND_OP_ADD,
-        .colorWriteMask = (id == CANVAS_PIPE_STENCIL_WRITE)
+        .colorWriteMask = (id == CANVAS_PIPE_STENCIL_WRITE || id == CANVAS_PIPE_STENCIL_WRITE_EO)
                               ? 0
                               : VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                     VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
     };
+    switch (blend) {
+    default:
+    case FLUX_BLEND_SRC_OVER:
+        ba.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        ba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        ba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        ba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        break;
+    case FLUX_BLEND_SRC:
+        ba.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        ba.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+        ba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        ba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        break;
+    case FLUX_BLEND_PLUS:
+        ba.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        ba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        ba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        ba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        break;
+    case FLUX_BLEND_MULTIPLY:
+        ba.srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
+        ba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        ba.srcAlphaBlendFactor = VK_BLEND_FACTOR_DST_ALPHA;
+        ba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        break;
+    }
     VkPipelineColorBlendStateCreateInfo cb = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
         .attachmentCount = 1,
@@ -385,7 +423,13 @@ static flux_result build_canvas_pipeline(flux_device *device, VkFormat color_for
      * winding: front-facing fan triangles increment, back-facing
      * decrement, both wrapping. The cover pass draws where the count
      * is non-zero and resets it to zero either way, leaving the
-     * attachment clean for the next fill in the same pass. */
+     * attachment clean for the next fill in the same pass.
+     *
+     * The even-odd write variant (CANVAS_PIPE_STENCIL_WRITE_EO) flips
+     * the stencil on every covered triangle (INVERT on both faces);
+     * after all contours, the stencil is 1 inside odd-overlap regions
+     * and 0 inside even-overlap regions, which the SAME cover pass
+     * picks up correctly via NOT_EQUAL 0. */
     VkPipelineDepthStencilStateCreateInfo ds = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     };
@@ -401,6 +445,17 @@ static flux_result build_canvas_pipeline(flux_device *device, VkFormat color_for
         };
         ds.back = ds.front;
         ds.back.passOp = VK_STENCIL_OP_DECREMENT_AND_WRAP;
+    } else if (id == CANVAS_PIPE_STENCIL_WRITE_EO) {
+        ds.stencilTestEnable = VK_TRUE;
+        ds.front = (VkStencilOpState){
+            .failOp = VK_STENCIL_OP_KEEP,
+            .passOp = VK_STENCIL_OP_INVERT,
+            .depthFailOp = VK_STENCIL_OP_KEEP,
+            .compareOp = VK_COMPARE_OP_ALWAYS,
+            .compareMask = 0xffu,
+            .writeMask = 0xffu,
+        };
+        ds.back = ds.front;
     } else if (id == CANVAS_PIPE_COVER_SOLID || id == CANVAS_PIPE_COVER_GRADIENT) {
         ds.stencilTestEnable = VK_TRUE;
         ds.front = (VkStencilOpState){
@@ -515,7 +570,9 @@ void build_push(flux_canvas *c, const flux_paint *paint, flux_canvas_push *out) 
 
 /* Bind the pipeline for the internal id lazily; skip the call if
  * it's already bound from a previous draw in the same pass. Delegates
- * to the active backend (the seam where Vulkan binding lives). */
+ * to the active backend (the seam where Vulkan binding lives). The
+ * blend mode comes from c->pending_blend (set by submit_triangles*
+ * from paint). */
 bool ensure_pipeline_bound_id(flux_canvas *c, canvas_pipe_id id) {
     return c->backend->bind_program(c->backend, c, id);
 }
@@ -531,11 +588,16 @@ bool ensure_pipeline_bound(flux_canvas *c, flux_paint_kind kind) {
 
 /* Front end for a triangle batch: assemble the backend-neutral push block
  * from the paint and hand the batch to the active backend, which owns vertex
- * transport and the draw itself. */
+ * transport and the draw itself. The paint's blend mode is forwarded to
+ * c->pending_blend so the GPU backend can key into the per-blend pipeline
+ * cache; paint == nullptr keeps the current blend (used by the stencil write
+ * pass, which ignores blend entirely). */
 void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id id,
                          const flux_canvas_vertex *verts, uint32_t vertex_count) {
     if (!c->recording || vertex_count == 0)
         return;
+    if (paint)
+        c->pending_blend = paint->blend;
     flux_canvas_push pc;
     build_push(c, paint, &pc);
     c->backend->submit(c->backend, c, id, &pc, verts, vertex_count);

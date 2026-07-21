@@ -1,0 +1,128 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build & test (ubuntu-24.04, ${{ matrix.config }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [release, asan-ubsan]
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential meson ninja-build pkg-config glslang-tools \
+            libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
+            libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
+            libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
+            libsystemd-dev
+
+      - name: Configure (release)
+        if: matrix.config == 'release'
+        run: |
+          meson setup build -Dexamples=true -Dtests=true --buildtype=release
+
+      - name: Configure (asan+ubsan)
+        if: matrix.config == 'asan-ubsan'
+        run: |
+          meson setup build -Dexamples=true -Dtests=true \
+            --buildtype=debugoptimized \
+            -Db_sanitize=address,undefined
+
+      - name: Compile
+        run: meson compile -C build
+
+      - name: Test (Lavapipe via VK_ICD_FILENAMES)
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          # LeakSanitizer reports fontconfig / FreeType / FriBidi global-cache
+          # allocations that survive process exit; those are system-library
+          # behaviour and not bugs in this codebase. Keep the ASAN crash
+          # detection but disable leak reporting until those libraries
+          # provide leak-free shutdown hooks.
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:halt_on_error=0
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: meson test -C build --no-suite bench --print-errorlogs --timeout-multiplier 4
+
+  clang-build:
+    name: build (clang, ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang lld meson ninja-build pkg-config glslang-tools \
+            libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
+            libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
+            libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
+            libsystemd-dev
+
+      - name: Configure
+        run: meson setup build -Dexamples=true -Dtests=true
+
+      - name: Compile
+        run: meson compile -C build
+
+      - name: Test
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: meson test -C build --no-suite bench --print-errorlogs
+
+  bindings:
+    name: rust bindings (${{ matrix.workspace }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [flux-rs, lens-rs, iris-rs]
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential meson ninja-build pkg-config glslang-tools rustc cargo \
+            libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
+            libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
+            libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
+            libsystemd-dev
+
+      - name: Build and install C libraries
+        run: |
+          meson setup build -Dexamples=false -Dtests=false --buildtype=release
+          sudo meson install -C build
+
+      - name: cargo fmt + clippy + test
+        working-directory: bindings/${{ matrix.workspace }}
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --workspace
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json

@@ -1,4 +1,4 @@
-/* tabs.c — horizontal tab bar (ADR-0008). */
+/* tabs.c — horizontal tab bar (ADR-0031). */
 
 #include "../internal.h"
 

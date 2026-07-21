@@ -5,7 +5,7 @@
  * is available at build time; contract-only stub otherwise.
  *
  * The lens side exposes a semantic tree via lens_accessibility_walk
- * (ADR-0012 in libs/lens/docs/adr/). iris_a11y_init connects to the
+ * (ADR-0035 in docs/adr/). iris_a11y_init connects to the
  * AT-SPI bus and registers the application; iris_a11y_update, called
  * once per frame after lens_end, walks the semantic tree and reconciles
  * the AT-SPI object tree with the live widgets — emitting ChildrenChanged

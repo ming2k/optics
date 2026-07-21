@@ -1,16 +1,20 @@
 # libiris: the cross-platform L3 toolkit surface.
 #
-# Today's surface is intentionally small: iris_app_run drives a windowed
-# Wayland event loop and dispatches per-frame build callbacks into lens.
-# Theme query reads GNOME / freedesktop colour scheme at startup. File
-# dialogs use xdg-desktop-portal over sd-bus. The a11y seam is a no-op stub
-# whose contract documents future AT-SPI work.
+# Today's surface: iris_app_run drives a windowed Wayland event loop and
+# dispatches per-frame build callbacks into lens. Theme query reads GNOME /
+# freedesktop colour scheme at startup (and follows it live when libsystemd
+# is available). File dialogs use xdg-desktop-portal over sd-bus. The a11y
+# seam is a real AT-SPI bridge when libsystemd is available, a no-op stub
+# otherwise.
+#
+# lens_dep (which transitively pulls flux_dep) is declared by libs/lens/
+# meson.build when it is subdir()'d earlier from the root meson.build
+# (ADR-0023 monorepo layout).
 #
 # Wayland-specific code lives in src/app_wayland.c; when a Win32 or Cocoa
 # backend is added it will land as src/app_win32.c / src/app_cocoa.m and
 # be selected at meson configure time.
 
-# Discover lens (Requires: flux, both via pkg-config).
 iris_inc = include_directories('include')
 
 # Cross-platform sources (compiled on every platform).
@@ -72,6 +76,7 @@ if is_linux
       wl.find_protocol('xdg-shell'),
       wl.find_protocol('xdg-decoration', state : 'unstable', version : 1),
       wl.find_protocol('text-input', state : 'unstable', version : 3),
+      wl.find_protocol('fractional-scale', state : 'staging', version : 1),
       'protocol/cursor-shape-v1.xml',
     )
     iris_sources += iris_proto_src
@@ -99,6 +104,7 @@ install_headers(
   'include/iris/theme.h',
   'include/iris/file_dialog.h',
   'include/iris/a11y.h',
+  'include/iris/window.h',
   subdir : 'iris',
 )
 
@@ -116,11 +122,3 @@ pkg.generate(
   version     : meson.project_version(),
   requires    : ['lens >= 0.1.0'],
 )
-
-if get_option('examples')
-  
-endif
-
-if get_option('tests')
-  
-endif

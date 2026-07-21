@@ -7,10 +7,10 @@
  *
  * Design contract (see docs/adr):
  *   - Public symbols are `lens_*`; library internals use a `lensi_*`
- *     prefix and are not exported (ADR-0008).
+ *     prefix and are not exported (ADR-0031).
  *   - Every widget call computes a stable lens_id from an id stack; the
- *     id keys the retained store (ADR-0003, ADR-0004).
- *   - lens draws only through <flux/canvas.h> (ADR-0002).
+ *     id keys the retained store (ADR-0026, ADR-0027).
+ *   - lens draws only through <flux/canvas.h> (ADR-0025).
  *   - Per frame:
  *       lens_begin(ui, &input) ->
  *       build (lens_row / lens_button / ...) ->
@@ -84,7 +84,7 @@ typedef enum lens_node_phase {
 } lens_node_phase;
 
 /* ================================================================== */
-/*  Input snapshot (ADR-0006)                                         */
+/*  Input snapshot (ADR-0029)                                         */
 /* ================================================================== */
 
 #define LENS_INPUT_MAX_KEYS 16
@@ -121,7 +121,7 @@ typedef struct lens_key_event {
 typedef struct lens_input {
     uint32_t size; /* sizeof(lens_input); 0 = trust
                       full struct (forward-compat
-                      guard, ADR-0013) */
+                      guard, ADR-0036) */
 
     flux_point cursor; /* UI-space pixels */
     bool mouse_down[LENS_MOUSE_COUNT];
@@ -138,7 +138,7 @@ typedef struct lens_input {
     flux_point display_size; /* layout root extent */
     float dt_seconds;        /* frame delta, drives animation */
 
-    /* IME composition in progress this frame; empty when none (ADR-0013).
+    /* IME composition in progress this frame; empty when none (ADR-0036).
      * The committed result still arrives through `text_utf8`. */
     char preedit_utf8[LENS_PREEDIT_MAX];
     uint32_t preedit_cursor; /* caret byte-offset in preedit */
@@ -150,9 +150,18 @@ typedef struct lens_input {
      * finger motion by their line-scroll factor. Appended for size-guarded
      * ABI compatibility with callers built against older headers. */
     float scroll_pixels_x, scroll_pixels_y;
+
+    /* IME `delete_surrounding_text` request (ADR: text-input-v3 full).
+     * Set by the host when the IME asks the application to remove bytes
+     * immediately before/after the current caret; textfield/textarea
+     * consume it during their IME update. Both are byte counts in the
+     * UTF-8 buffer the host most recently reported via text_utf8 /
+     * preedit_utf8; zero means no deletion requested this frame. */
+    uint32_t ime_delete_before;
+    uint32_t ime_delete_after;
 } lens_input;
 
-/* Host clipboard interface (ADR-0013). Supplied in lens_desc; optional.
+/* Host clipboard interface (ADR-0036). Supplied in lens_desc; optional.
  * Paste is asynchronous (matches Wayland wl_data_device): a request is
  * answered later by the host calling lens_paste. */
 typedef struct lens_clipboard {
@@ -162,7 +171,7 @@ typedef struct lens_clipboard {
 } lens_clipboard;
 
 /* ================================================================== */
-/*  Interaction result (ADR-0006)                                     */
+/*  Interaction result (ADR-0029)                                     */
 /* ================================================================== */
 
 typedef struct lens_response {
@@ -189,7 +198,7 @@ typedef enum lens_cursor_hint {
 } lens_cursor_hint;
 
 /* ================================================================== */
-/*  Accessibility semantics (ADR-0012)                                */
+/*  Accessibility semantics (ADR-0035)                                */
 /* ================================================================== */
 
 typedef enum lens_role {
@@ -203,9 +212,9 @@ typedef enum lens_role {
     LENS_ROLE_SCROLLAREA,
     LENS_ROLE_TEXTFIELD, /* reserved: text input                      */
     LENS_ROLE_TEXTAREA,  /* multi-line text input                   */
-    LENS_ROLE_MENU,      /* reserved: overlay layer (ADR-0014)        */
+    LENS_ROLE_MENU,      /* reserved: overlay layer (ADR-0037)        */
     LENS_ROLE_RADIO,
-    LENS_ROLE_DIALOG, /* modal dialog window (ADR-0016)            */
+    LENS_ROLE_DIALOG, /* modal dialog window (ADR-0039)            */
 } lens_role;
 
 /* State bits for lens_semantics.flags. */
@@ -240,7 +249,7 @@ LENS_API void lens_a11y(lens *ui, const lens_a11y_desc *desc);
  * next lens_begin. Visits every node carrying non-decorative semantics
  * in pre-order with its solved bounds and its nearest semantic ancestor.
  * The platform AT-SPI bridge (or a test) consumes it; lens calls no
- * assistive API itself (same host separation as input, ADR-0006). */
+ * assistive API itself (same host separation as input, ADR-0029). */
 typedef void (*lens_a11y_visit_fn)(const lens_semantics *s, flux_rect bounds, lens_id id,
                                    lens_id parent, void *user);
 LENS_API void lens_accessibility_walk(const lens *ui, lens_a11y_visit_fn visit, void *user);
@@ -269,7 +278,7 @@ typedef struct lens_theme {
     lens_font *font;
     float font_size;
 
-    /* Semantic text sizes (ADR-0011 extension). 0 = fall back to font_size. */
+    /* Semantic text sizes (ADR-0034 extension). 0 = fall back to font_size. */
     float font_size_title;
     float font_size_h1;
     float font_size_h2;
@@ -320,7 +329,7 @@ LENS_API lens_theme lens_theme_default(void);
 LENS_API lens_theme lens_theme_dark(void);
 
 /* ================================================================== */
-/*  Text seam (ADR-0010)                                              */
+/*  Text seam (ADR-0033)                                              */
 /* ================================================================== */
 
 typedef struct lens_text_metrics {
@@ -329,7 +338,7 @@ typedef struct lens_text_metrics {
     float baseline; /* from top */
 } lens_text_metrics;
 
-/* The only text entry point layout (ADR-0005 pass 1) may call. Backed
+/* The only text entry point layout (ADR-0028 pass 1) may call. Backed
  * by a monospace metrics stub until flux core ships canvas text. */
 LENS_API lens_text_metrics lens_text_measure(lens *ui, lens_font *font, const char *utf8,
                                              float size_px);
@@ -337,7 +346,7 @@ LENS_API lens_text_metrics lens_text_measure_ex(lens *ui, lens_font *font, const
                                                 float size_px, float weight);
 
 /* ================================================================== */
-/*  Context lifecycle (ADR-0009)                                      */
+/*  Context lifecycle (ADR-0032)                                      */
 /* ================================================================== */
 
 typedef struct lens_desc {
@@ -348,7 +357,7 @@ typedef struct lens_desc {
     size_t arena_bytes;       /* per-frame arena capacity; 0 = default */
     uint32_t store_capacity;  /* initial node-store slots; 0 = default */
     float scale;              /* device-pixel scale; 0 = 1.0          */
-    lens_clipboard clipboard; /* optional host clipboard (ADR-0013)   */
+    lens_clipboard clipboard; /* optional host clipboard (ADR-0036)   */
 } lens_desc;
 
 FLUX_NODISCARD LENS_API flux_result lens_create(const lens_desc *desc, lens **out);
@@ -366,7 +375,7 @@ LENS_API void lens_set_scale(lens *ui, float scale);
 LENS_API float lens_scale(const lens *ui);
 
 /* ================================================================== */
-/*  Frame lifecycle (ADR-0001, frame-lifecycle.md)                    */
+/*  Frame lifecycle (ADR-0024, frame-lifecycle.md)                    */
 /* ================================================================== */
 
 LENS_API void lens_begin(lens *ui, const lens_input *input);
@@ -391,7 +400,7 @@ LENS_API void lens_set_reduced_motion(lens *ui, bool reduced);
 LENS_API bool lens_reduced_motion(const lens *ui);
 
 /* ================================================================== */
-/*  Identity (ADR-0003)                                               */
+/*  Identity (ADR-0026)                                               */
 /* ================================================================== */
 
 LENS_API void lens_push_id(lens *ui, const char *seed);
@@ -424,7 +433,7 @@ typedef struct lens_box {
 } lens_box;
 
 /* ================================================================== */
-/*  Containers / layout (ADR-0005)                                    */
+/*  Containers / layout (ADR-0028)                                    */
 /* ================================================================== */
 
 typedef struct lens_layout_opts {
@@ -466,7 +475,7 @@ LENS_API void lens_size(lens *ui, float w, float h); /* next node's fixed size (
 LENS_API void lens_spacer(lens *ui, float size);     /* fixed empty main-axis gap */
 
 /* ================================================================== */
-/*  Widgets — terse forms (ADR-0008)                                  */
+/*  Widgets — terse forms (ADR-0031)                                  */
 /*                                                                    */
 /*  The common case: label doubles as the stable id, no styling. The  */
 /*  bool return means: button -> clicked; checkbox/slider/radio/text  */
@@ -535,6 +544,42 @@ LENS_API bool lens_collapsing(lens *ui, const char *label);
  * Has no effect if called after the user has already toggled the section
  * (lens_collapsing reads + toggles the state; this just pre-seeds it). */
 LENS_API void lens_collapsing_set_open(lens *ui, const char *label, bool open);
+
+/* ------------------------------------------------------------------ */
+/*  Tree (ADR: lens tree widget)                                       */
+/* ------------------------------------------------------------------ */
+
+/* A tree is a stack of nested disclosure rows. lens_tree_node returns true
+ * when the row is open; the host then opens child rows inside the same
+ * lens_column / lens_close block. The default open state is closed; pre-seed
+ * with lens_tree_node_set_open for "expand on first appearance" UX.
+ *
+ * Indentation is applied automatically — each nested lens_tree_node call
+ * shifts its header right by t->padding. A leaf (no children) renders a
+ * dot instead of a chevron; pass leaf=true to force leaf appearance.
+ *
+ * Example:
+ *   if (lens_tree_node(ui, "root", false)) {
+ *       if (lens_tree_node(ui, "child1", false)) { ... }
+ *       if (lens_tree_node(ui, "child2", false)) { ... }
+ *   }
+ *
+ * The returned value stays consistent across the begin/end pair; do not
+ * call lens_close in response to it. lens_tree_node is a self-closing
+ * widget (no separate end); nest begin/end pairs by re-entering with a
+ * child label while the parent is still in its "open" body scope. */
+LENS_API bool lens_tree_node(lens *ui, const char *label, bool leaf);
+
+/* Pre-seed / force the open state of the tree node identified by `label`
+ * in the current id scope. Symmetrical with lens_collapsing_set_open. */
+LENS_API void lens_tree_node_set_open(lens *ui, const char *label, bool open);
+
+/* Close the current tree node body. Each lens_tree_node that returned true
+ * must be balanced with one lens_tree_node_end before its parent's body
+ * closes. (Implementation note: this is a thin alias to lens_close so the
+ * host reads symmetrically.) */
+LENS_API void lens_tree_node_end(lens *ui);
+
 LENS_API void lens_scroll_begin(lens *ui, const char *id);
 LENS_API void lens_scroll_end(lens *ui);
 /* Programmatically position a scroll area identified in the current id scope.
@@ -698,7 +743,7 @@ LENS_API lens_response lens_textarea_ex(lens *ui, lens_textarea_opts opts);
 LENS_API lens_response lens_dropdown_ex(lens *ui, lens_dropdown_opts opts);
 
 /* ================================================================== */
-/*  Overlay layer (ADR-0014)                                          */
+/*  Overlay layer (ADR-0037)                                          */
 /*                                                                    */
 /*  Floating content that escapes the parent's clip and lays out above*/
 /*  the base tree: dropdown, menu, context menu, tooltip, modal.      */
@@ -736,7 +781,7 @@ LENS_API bool lens_overlay_begin(lens *ui, const char *id, flux_rect anchor,
 LENS_API void lens_overlay_end(lens *ui);
 
 /* ================================================================== */
-/*  Floating layers — persistent chrome (companion to ADR-0014)       */
+/*  Floating layers — persistent chrome (companion to ADR-0037)       */
 /*                                                                    */
 /*  A floating layer is the non-dismissible sibling of an overlay: a  */
 /*  positional sub-root that escapes the parent's layout flow and     */
@@ -764,7 +809,7 @@ LENS_API bool lens_layer_begin(lens *ui, const char *id, flux_rect rect, lens_ov
 LENS_API void lens_layer_end(lens *ui);
 
 /* ================================================================== */
-/*  Modal dialog (ADR-0016)                                           */
+/*  Modal dialog (ADR-0039)                                           */
 /*                                                                    */
 /*  A centered overlay with a dim backdrop that eclipses the base    */
 /*  tree, plus a Tab focus trap so keyboard cycling stays inside the */
@@ -792,7 +837,7 @@ LENS_API bool lens_modal_begin(lens *ui, const char *id, lens_modal_opts opts);
 LENS_API void lens_modal_end(lens *ui);
 
 /* ================================================================== */
-/*  Menus — menu bar, context menu, submenu (ADR-0017)                */
+/*  Menus — menu bar, context menu, submenu (ADR-0040)                */
 /*                                                                    */
 /*  Built on the overlay layer. A menu bar is a horizontal row of     */
 /*  triggers with click-then-drag switching; a context menu opens at  */
@@ -841,7 +886,7 @@ LENS_API void lens_context_menu_end(lens *ui);
 LENS_API void lens_menubar_close_all_open(lens *ui);
 
 /* ================================================================== */
-/*  Resizable split panel (ADR-0018)                                  */
+/*  Resizable split panel (ADR-0041)                                  */
 /*                                                                    */
 /*  A two-pane container whose divider the user drags to redistribute */
 /*  space. The ratio is retained per id; nest splits for 3/4-pane     */
@@ -869,7 +914,7 @@ LENS_API void lens_split_end(lens *ui);
 LENS_API float lens_split_ratio(const lens *ui, const char *id);
 
 /* ================================================================== */
-/*  Virtualized table / data grid (ADR-0019)                          */
+/*  Virtualized table / data grid (ADR-0042)                          */
 /*                                                                    */
 /*  A scroll-area-backed grid that builds only the visible window of  */
 /*  rows. The full row_count drives the scrollbar; cells come from a  */
@@ -902,7 +947,7 @@ LENS_API lens_table_result lens_table(lens *ui, const char *id, const lens_table
                                       void *user, lens_table_opts opts);
 
 /* ================================================================== */
-/*  Interaction queries (ADR-0006)                                    */
+/*  Interaction queries (ADR-0029)                                    */
 /* ================================================================== */
 
 LENS_API lens_response lens_get_response(const lens *ui); /* last widget */
@@ -912,7 +957,7 @@ LENS_API void lens_set_focus(lens *ui, lens_id id);
 LENS_API lens_id lens_active(const lens *ui);
 
 /* ================================================================== */
-/*  Clipboard and IME (ADR-0013)                                      */
+/*  Clipboard and IME (ADR-0036)                                      */
 /* ================================================================== */
 
 /* Caret rect of the focused text widget in UI-space, zero when none.
@@ -933,7 +978,7 @@ LENS_API void lens_request_paste(lens *ui);
 LENS_API void lens_paste(lens *ui, const char *utf8, size_t len);
 
 /* ================================================================== */
-/*  Escape hatch — retained nodes (ADR-0008)                          */
+/*  Escape hatch — retained nodes (ADR-0031)                          */
 /*                                                                    */
 /*  Handles are borrows valid only within the current frame. Re-resolve*/
 /*  by lens_id each frame; never cache a node pointer past lens_begin.  */

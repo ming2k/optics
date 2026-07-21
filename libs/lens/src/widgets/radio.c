@@ -1,4 +1,4 @@
-/* radio.c — mutually-exclusive toggle (ADR-0008). */
+/* radio.c — mutually-exclusive toggle (ADR-0031). */
 
 #include "../internal.h"
 #include <math.h>

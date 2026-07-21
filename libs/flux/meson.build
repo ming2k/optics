@@ -248,10 +248,3 @@ endif
 if get_option('scene-graph')
   subdir('scene_graph')
 endif
-
-if get_option('examples')
-  
-endif
-if get_option('tests')
-  
-endif

@@ -1,4 +1,4 @@
-/* store.c — open-addressing id->node map and node lifecycle (ADR-0004). */
+/* store.c — open-addressing id->node map and node lifecycle (ADR-0027). */
 
 #include "../internal.h"
 
@@ -62,8 +62,8 @@ void lensi_store_destroy(lens *ui) {
     s->cap = s->count = 0;
 }
 
-lens_node *lensi_store_find(lens *ui, lens_id id) {
-    lens_store *s = &ui->store;
+lens_node *lensi_store_find(const lens *ui, lens_id id) {
+    const lens_store *s = &ui->store;
     if (!s->cap || !id)
         return NULL;
     uint32_t i = slot_index(id, s->cap);

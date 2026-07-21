@@ -1,10 +1,10 @@
-/* semantics.c — per-node accessibility record + tree export (ADR-0012).
+/* semantics.c — per-node accessibility record + tree export (ADR-0035).
  *
  * Widgets call lensi_node_semantics during the build phase; the host
  * (an AT-SPI bridge, or a test) reads the result through
  * lens_accessibility_walk after lens_end. lens itself links no
  * assistive-technology library — same host separation as input
- * (ADR-0006) and the text backend (ADR-0010). */
+ * (ADR-0029) and the text backend (ADR-0033). */
 
 #include "../internal.h"
 
@@ -62,10 +62,10 @@ void lens_accessibility_walk(const lens *ui, lens_a11y_visit_fn visit, void *use
         return;
     if (ui->root)
         walk_node(ui->root, 0, visit, user);
-    /* Overlay sub-roots (ADR-0014) are not children of ui->root, so the
+    /* Overlay sub-roots (ADR-0037) are not children of ui->root, so the
      * walk visits each explicitly. Each layer reports under id 0 (root). */
     uint32_t n = 0;
-    lens_node **layers = lensi_overlay_layers((lens *)ui, &n);
+    lens_node **layers = lensi_overlay_layers(ui, &n);
     for (uint32_t i = 0; i < n; i++)
         if (layers[i])
             walk_node(layers[i], 0, visit, user);

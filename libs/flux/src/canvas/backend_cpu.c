@@ -133,10 +133,13 @@ static inline bool edge_is_top_left(float ax, float ay, float bx, float by) {
 
 /* Rasterize one triangle into the sample buffer, one blended sample per
  * hi-res texel. Vertex positions are in canvas (output) space; they are scaled
- * by SS here. Fragment shaders evaluate at the equivalent canvas coordinate. */
+ * by SS here. Fragment shaders evaluate at the equivalent canvas coordinate.
+ * `blend` selects the compositing mode (ADR: canvas blend modes); the GPU
+ * backend implements the same set via fixed-function VkBlendFactor. */
 static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
-                       const flux_canvas_push *pc, const flux_canvas_vertex *a,
-                       const flux_canvas_vertex *b, const flux_canvas_vertex *c) {
+                       const flux_canvas_push *pc, flux_blend_mode blend,
+                       const flux_canvas_vertex *a, const flux_canvas_vertex *b,
+                       const flux_canvas_vertex *c) {
     const float ss = (float)FLUX_CPU_SS;
     const flux_canvas_vertex *va = a;
     const flux_canvas_vertex *vb = b;
@@ -221,7 +224,8 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
                 break;
             }
             case CANVAS_PIPE_STENCIL_WRITE:
-                continue; /* colour-write masked off */
+            case CANVAS_PIPE_STENCIL_WRITE_EO:
+                continue; /* colour-write masked off; CPU has no stencil buffer */
             case CANVAS_PIPE_IMAGE:
                 return; /* textured image: unsupported on CPU */
             default:    /* SOLID / COVER_SOLID */
@@ -232,11 +236,42 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
             }
 
             float *dst = &v->fb[((size_t)sy * v->sw + sx) * 4];
-            float inv = 1.0f - frag.a; /* premultiplied SRC_OVER, one sample */
-            dst[0] = frag.r + dst[0] * inv;
-            dst[1] = frag.g + dst[1] * inv;
-            dst[2] = frag.b + dst[2] * inv;
-            dst[3] = frag.a + dst[3] * inv;
+            /* Premultiplied compositing. SRC_OVER is the default; the other
+             * three modes mirror the VkBlendFactor choices in renderer.c so
+             * CPU and GPU output stay pixel-equivalent for the canvas test
+             * suite. STENCIL_WRITE is colour-write-masked off above. */
+            switch (blend) {
+            case FLUX_BLEND_SRC:
+                dst[0] = frag.r;
+                dst[1] = frag.g;
+                dst[2] = frag.b;
+                dst[3] = frag.a;
+                break;
+            case FLUX_BLEND_PLUS:
+                dst[0] = frag.r + dst[0];
+                dst[1] = frag.g + dst[1];
+                dst[2] = frag.b + dst[2];
+                dst[3] = frag.a + dst[3];
+                break;
+            case FLUX_BLEND_MULTIPLY: {
+                /* dst' = src*dst + (1-src.a)*dst (premultiplied). */
+                float inva = 1.0f - frag.a;
+                dst[0] = frag.r * dst[0] + dst[0] * inva;
+                dst[1] = frag.g * dst[1] + dst[1] * inva;
+                dst[2] = frag.b * dst[2] + dst[2] * inva;
+                dst[3] = frag.a * dst[3] + dst[3] * inva;
+                break;
+            }
+            default: /* SRC_OVER */
+            {
+                float inv = 1.0f - frag.a;
+                dst[0] = frag.r + dst[0] * inv;
+                dst[1] = frag.g + dst[1] * inv;
+                dst[2] = frag.b + dst[2] * inv;
+                dst[3] = frag.a + dst[3] * inv;
+                break;
+            }
+            }
         }
     }
 }
@@ -520,7 +555,8 @@ static void cpu_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_p
         return; /* textured image draws unsupported on CPU */
 
     for (uint32_t i = 0; i + 3 <= vertex_count; i += 3)
-        raster_tri(v, clip, id, push, &verts[i], &verts[i + 1], &verts[i + 2]);
+        raster_tri(v, clip, id, push, c->pending_blend, &verts[i], &verts[i + 1],
+                   &verts[i + 2]);
 }
 
 static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canvas *c,

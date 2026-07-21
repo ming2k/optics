@@ -1,7 +1,8 @@
 /*
  * Vulkan instance + physical device + logical device + queues +
- * pipeline cache. Stage 2a: no swapchain, no memory allocator
- * (Stage 2b adds VMA-or-equivalent), no bindless heap (Stage 2b).
+ * pipeline cache. Memory allocation is provided by the slab allocator
+ * in vk_allocator.c (ADR-0007); the device-wide bindless descriptor
+ * heap is described by ADR-0003.
  */
 #include "internal.h"
 #include <flux/vulkan.h>

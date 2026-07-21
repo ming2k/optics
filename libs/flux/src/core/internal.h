@@ -654,7 +654,7 @@ struct flux_surface {
      * finished consuming the corresponding semaphore. */
     VkSemaphore *render_finished;
     flux_vk_alloc *image_allocs; /* offscreen only */
-    /* Offscreen dmabuf-export metadata (ADR-0040 follow-on). When
+    /* Offscreen dmabuf-export metadata (see ADR-0013 offscreen surface). When
      * offscreen images are created exportable (external-memory + DRM
      * modifier), these record the negotiated modifier so the host can
      * build a matching zwp_linux_buffer_params. exportable == false for

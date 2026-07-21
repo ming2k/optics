@@ -1,4 +1,4 @@
-/* focus.c — Tab / Shift+Tab keyboard focus traversal (ADR-0006). */
+/* focus.c — Tab / Shift+Tab keyboard focus traversal (ADR-0029). */
 
 #include "../internal.h"
 
@@ -21,7 +21,7 @@ void lensi_focus_tab(lens *ui) {
 
     bool back = (ui->input.mods & LENS_MOD_SHIFT) != 0;
 
-    /* The range Tab may cycle over. A modal (ADR-0016) clamps this to the
+    /* The range Tab may cycle over. A modal (ADR-0039) clamps this to the
      * slice recorded while its body was built, trapping focus inside. */
     uint32_t lo = ui->modal_active ? ui->modal_tab_lo : 0;
     uint32_t hi = ui->modal_active ? ui->modal_tab_hi : ui->tab_count;

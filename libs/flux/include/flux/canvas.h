@@ -1,10 +1,6 @@
 /*
  * flux/canvas.h — 2D immediate-mode canvas.
  *
- * Skeletal in Stage 1: opaque types, lifecycle, a small representative
- * surface. The full draw / paint / path / image API fleshes out in
- * Stage 4 once the core Vulkan plumbing is real.
- *
  * Design contract:
  *   - One canvas per surface.
  *   - flux_path, flux_paint are value types owned by a flux_arena.

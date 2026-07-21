@@ -1,4 +1,4 @@
-/* table.c — virtualized data grid (ADR-0019).
+/* table.c — virtualized data grid (ADR-0042).
  *
  * A scroll-area-backed table that builds only the visible window of rows.
  * The full row_count drives the scrollbar; only rows intersecting the
@@ -220,17 +220,8 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
             flex_cols++;
     }
     float flex_w = flex_cols > 0 ? (view_w - used) / flex_cols : 0;
+    /* col_x[c] = start x offset of column c. */
     float cx = 0;
-    for (int c = 0; c < col_count && c < 32; c++) {
-        if (col_x[c] <= 0)
-            col_x[c] = flex_w;
-        col_x[c] = cx; /* now holds the x offset */
-        cx += (c + 1 < col_count && cols[c].width <= 0)
-                  ? flex_w
-                  : (cols[c].width > 0 ? cols[c].width : flex_w);
-    }
-    /* recompute properly: col_x[c] = start x of column c */
-    cx = 0;
     for (int c = 0; c < col_count && c < 32; c++) {
         col_x[c] = cx;
         cx += (cols[c].width > 0 ? cols[c].width : flex_w);

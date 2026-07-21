@@ -1,4 +1,4 @@
-/* textfield.c — single-line text input widget with selection (ADR-0008). */
+/* textfield.c — single-line text input widget with selection (ADR-0031). */
 
 #include "../internal.h"
 #include <math.h>
@@ -286,6 +286,27 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
             ui->active_id = 0;
             if (ts->cursor == ts->sel_anchor)
                 sel_clear(ts);
+        }
+
+        /* IME delete_surrounding_text: applied BEFORE the commit string per
+         * the text-input-v3 protocol, so the freshly committed text lands in
+         * the right place relative to the IME's expected context window. */
+        if (ui->input.ime_delete_before || ui->input.ime_delete_after) {
+            uint32_t lo = ts->cursor >= ui->input.ime_delete_before
+                              ? ts->cursor - ui->input.ime_delete_before
+                              : 0;
+            uint32_t hi = ts->cursor + ui->input.ime_delete_after;
+            if (hi > len)
+                hi = (uint32_t)len;
+            if (hi > lo) {
+                delete_range(buf, &len, lo, hi);
+                ts->cursor = lo;
+                if (ts->sel_anchor > hi)
+                    ts->sel_anchor -= (hi - lo);
+                else if (ts->sel_anchor > lo)
+                    ts->sel_anchor = lo;
+                changed = true;
+            }
         }
 
         /* Committed text */

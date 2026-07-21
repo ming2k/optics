@@ -1,4 +1,4 @@
-/* hello_ui.c — a "Preferences" dialog mock on native Wayland.
+/* hello_app.c — a "Preferences" dialog mock on native Wayland.
  *
  * The window is laid out as a real app shell — toolbar, sidebar, content
  * card, status bar — with text rendered via the FreeType/HarfBuzz backend:

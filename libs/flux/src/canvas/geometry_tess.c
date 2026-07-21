@@ -267,10 +267,14 @@ bool ear_clip_contour(flux_canvas_vertex *verts, uint32_t *v_count, uint32_t ver
  * INCREMENT_AND_WRAP on front faces / DECREMENT_AND_WRAP on back
  * faces — after it, a pixel's stencil value is its nonzero winding
  * count. Pass 2 covers the fill's bounding quad with the paint where
- * stencil != 0, zeroing it for the next fill in the same pass. */
+ * stencil != 0, zeroing it for the next fill in the same pass.
+ *
+ * When `even_odd` is set, pass 1 uses CANVAS_PIPE_STENCIL_WRITE_EO
+ * (INVERT on both faces) so the stencil is 1 in odd-overlap regions
+ * and 0 in even-overlap regions; pass 2 is unchanged (NOT_EQUAL 0). */
 static void fill_path_stencil_cover(flux_canvas *c, const flux_paint *paint, flux_mat3x2 tx,
                                     const flux_point *pts, const struct contour_info *infos,
-                                    uint32_t contour_count) {
+                                    uint32_t contour_count, bool even_odd) {
     flux_canvas_vertex *verts = c->scratch_verts;
     const uint32_t verts_cap = FLUX_CANVAS_PATH_SCRATCH_CAP * 3;
     uint32_t v_count = 0;
@@ -303,7 +307,9 @@ static void fill_path_stencil_cover(flux_canvas *c, const flux_paint *paint, flu
     if (first || v_count == 0)
         return;
 
-    submit_triangles_id(c, nullptr, CANVAS_PIPE_STENCIL_WRITE, verts, v_count);
+    submit_triangles_id(c, nullptr,
+                        even_odd ? CANVAS_PIPE_STENCIL_WRITE_EO : CANVAS_PIPE_STENCIL_WRITE, verts,
+                        v_count);
 
     /* Cover quad over the (transformed) bounding box. Affine maps it
      * to a parallelogram that still bounds the transformed fill. */
@@ -326,6 +332,34 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
         return;
     if (p->count == 0)
         return;
+
+    /* EVEN_ODD needs the stencil path even for simple inputs: the
+     * ear-clip + hole-bridging pipeline computes nonzero winding, not
+     * parity. If the backend has no stencil (CPU), fall back to the
+     * nonzero ear-clip path; the rendered output will then differ
+     * from GPU EVEN_ODD but stays well-defined. */
+    bool even_odd = (paint->fill_rule == FLUX_FILL_EVEN_ODD);
+    if (even_odd && c->stencil_available) {
+        flux_point *pts0 = c->scratch_pts;
+        flux_canvas_contour *cons0 = c->scratch_contours;
+        flux_mat3x2 tx0 = c->states[c->state_top].transform;
+        float pixel_scale0 = flux_canvas_mat3x2_pixel_scale(tx0);
+        flatten_multi fm0 =
+            flatten_path_to_contours(p, pixel_scale0, pts0, FLUX_CANVAS_PATH_SCRATCH_CAP, cons0,
+                                     FLUX_CANVAS_MAX_CONTOURS);
+        if (fm0.contour_count == 0 || fm0.point_count < 3)
+            return;
+        struct contour_info infos_eo[FLUX_CANVAS_MAX_CONTOURS];
+        for (uint32_t ci = 0; ci < fm0.contour_count; ++ci) {
+            flux_canvas_contour *co = &cons0[ci];
+            infos_eo[ci] = (struct contour_info){
+                .start = co->start,
+                .count = co->count,
+            };
+        }
+        fill_path_stencil_cover(c, paint, tx0, pts0, infos_eo, fm0.contour_count, true);
+        return;
+    }
 
     flux_point *pts = c->scratch_pts;
     flux_canvas_contour *cons = c->scratch_contours;
@@ -405,7 +439,7 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
             }
         }
         if (stalled && c->stencil_available) {
-            fill_path_stencil_cover(c, paint, tx, pts, infos, fm.contour_count);
+            fill_path_stencil_cover(c, paint, tx, pts, infos, fm.contour_count, false);
             return;
         }
         submit_triangles(c, paint, verts, v_count);
@@ -549,7 +583,7 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
         /* Drop the partial triangulation and redo the whole fill via
          * stencil winding — it handles holes natively, so the merged
          * pieces that DID triangulate are simply superseded. */
-        fill_path_stencil_cover(c, paint, tx, pts, infos_orig, fm.contour_count);
+        fill_path_stencil_cover(c, paint, tx, pts, infos_orig, fm.contour_count, false);
         return;
     }
 

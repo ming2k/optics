@@ -1,5 +1,5 @@
 /* replay.c — resolve the draw list against final_rect and emit canvas
- * calls (ADR-0007). Walks front-to-back (parent before children). */
+ * calls (ADR-0030). Walks front-to-back (parent before children). */
 
 #include "../internal.h"
 #include <math.h>
@@ -49,7 +49,7 @@ static inline flux_rect rect_intersect(flux_rect a, flux_rect b) {
 }
 
 /* Walk a node and replay its draw list. Exposed (non-static) so the
- * overlay layer (ADR-0014) can reuse the same emission for its sub-roots
+ * overlay layer (ADR-0037) can reuse the same emission for its sub-roots
  * — otherwise overlays would have to duplicate this logic. */
 void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect clip) {
     flux_rect box = n->final_rect;
@@ -63,7 +63,7 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
      * Root is always rendered (it may have no cmds but its children
      * are gated by their own subtree_changed).
      *
-     * NOTE: disabled until subtree offscreen cache (ADR-0007) lands.
+     * NOTE: disabled until subtree offscreen cache (ADR-0030) lands.
      * Today the host clears the whole framebuffer each frame, so
      * skipping a subtree leaves a blank hole. Re-enable once we
      * blit cached subtrees instead of replaying draw commands. */
@@ -350,7 +350,7 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
         /* flux_canvas_clip_rect sets the scissor directly; it does not
          * apply the current canvas transform.  Convert logical clip to
          * device pixels to match the scale transform set in
-         * lensi_render_tree (ADR-0007). */
+         * lensi_render_tree (ADR-0030). */
         if (scale != 1.0f) {
             flux_rect device_clip = {clip.x * scale, clip.y * scale, clip.w * scale,
                                      clip.h * scale};
@@ -467,12 +467,11 @@ flux_result lens_render(lens *ui, flux_canvas *canvas) {
             flux_canvas_stroke_path(canvas, p, &paint);
         }
 
-#ifdef LENSI_HAVE_TEXT_FTHB
         if (ui->text) {
-            lensi_text_draw(ui->text, canvas, &ui->arena, x + pad, y + pad, t->color_fg,
-                            ui->tooltip.text, size, 0.0f, scale);
+            flux_text_draw(ui->text, canvas, &ui->arena, x + pad, y + pad,
+                           ui->tooltip.text, strlen(ui->tooltip.text),
+                           &(flux_text_style){.size_px = size, .color = t->color_fg});
         }
-#endif
         if (scaled)
             flux_canvas_restore(canvas);
     }

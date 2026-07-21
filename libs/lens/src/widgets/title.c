@@ -1,4 +1,4 @@
-/* title.c — semantic heading widgets (ADR-0008 extension).
+/* title.c — semantic heading widgets (ADR-0031 extension).
  *
  * lens_title   : single top-level title, theme font_size_title + bold.
  * lens_heading : section heading, level 1-3 maps to h1/h2/h3 sizes.

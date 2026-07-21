@@ -8,7 +8,7 @@ tests = ['test_id', 'test_store', 'test_layout', 'test_input',
          'test_progress', 'test_scroll', 'test_selectable', 'test_modal',
          'test_menu', 'test_split', 'test_table', 'test_pressable',
          'test_overlay_eclipse', 'test_scroll_hit_clip',
-         'test_reduced_motion']
+         'test_reduced_motion', 'test_tree']
 
 foreach t : tests
   exe = executable(t, t + '.c',
@@ -17,3 +17,7 @@ foreach t : tests
   )
   test(t, exe)
 endforeach
+
+if get_option('fuzz')
+  subdir('fuzz')
+endif

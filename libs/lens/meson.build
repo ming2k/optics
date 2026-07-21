@@ -1,7 +1,7 @@
-# liblens depends on libflux (rendering) and libflux-text (shaping, ADR-0016
-# in flux) exclusively via pkg-config. This is the polyrepo contract: build
-# and install flux and flux-text first, then build lens.
-
+# liblens depends on libflux (rendering) and libflux-text (shaping) — both
+# are siblings in this monorepo (ADR-0023). The flux_dep / flux_text_dep
+# variables are declared by libs/flux/meson.build when it is subdir()'d
+# earlier from the root meson.build.
 
 lens_inc = include_directories('include')
 
@@ -39,6 +39,7 @@ lens_sources = files(
   'src/widgets/menu.c',
   'src/widgets/split.c',
   'src/widgets/table.c',
+  'src/widgets/tree.c',
   'src/icon_data.c',
   'src/a11y/semantics.c',
   'src/overlay/overlay.c',

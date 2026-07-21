@@ -14,11 +14,11 @@
  * tree to assistive technology.
  *
  * Architecture and binding decisions:
- *   - iris is the L3 layer of the flux/lens stack (ADR-0001).
+ *   - iris is the L3 layer of the flux/lens stack (ADR-0043).
  *   - lens owns the widget tree and semantic model; iris owns windows,
  *     event loop, system integration, and the a11y transport.
  *   - Backend selection is compile-time, behind one public signature
- *     (ADR-0005).
+ *     (ADR-0044).
  *   - See libs/iris/docs/ for the explanation, ADR, and reference docs.
  */
 #ifndef IRIS_H
@@ -29,5 +29,6 @@
 #include <iris/cursor.h>
 #include <iris/file_dialog.h>
 #include <iris/theme.h>
+#include <iris/window.h>
 
 #endif /* IRIS_H */

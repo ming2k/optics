@@ -1,4 +1,4 @@
-/* checkbox.c — boolean toggle with a label (ADR-0008). */
+/* checkbox.c — boolean toggle with a label (ADR-0031). */
 
 #include "../internal.h"
 

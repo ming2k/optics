@@ -1,8 +1,8 @@
-/* drawlist.c — record resolution-deferred draw commands (ADR-0007).
+/* drawlist.c — record resolution-deferred draw commands (ADR-0030).
  *
  * Commands address geometry relative to the node box; absolute pixels
  * are resolved at replay, after layout. Commands live in the per-frame
- * arena (ADR-0009). */
+ * arena (ADR-0032). */
 
 #include "../internal.h"
 

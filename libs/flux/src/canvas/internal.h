@@ -106,6 +106,13 @@ struct flux_canvas {
     const uint8_t *pending_host_atlas;
     uint32_t pending_host_atlas_w;
     uint32_t pending_host_atlas_h;
+
+    /* Active blend mode for the next submit, set by submit_triangles*
+     * from the paint (ADR: canvas blend modes). The GPU backend uses
+     * it to key into the per-blend pipeline cache; the CPU backend
+     * uses it to pick the compositing routine. STENCIL_WRITE ignores
+     * it (color writes are off). Defaults to SRC_OVER. */
+    flux_blend_mode pending_blend;
 };
 
 /* Vertex layout matches std430 buffer_reference in
@@ -202,6 +209,7 @@ typedef enum canvas_pipe_id {
     CANVAS_PIPE_GRADIENT,
     CANVAS_PIPE_IMAGE,
     CANVAS_PIPE_STENCIL_WRITE,
+    CANVAS_PIPE_STENCIL_WRITE_EO, /* even-odd variant: INVERT both faces */
     CANVAS_PIPE_COVER_SOLID,
     CANVAS_PIPE_COVER_GRADIENT,
     CANVAS_PIPE_GLYPH, /* batched glyph run (ADR-0010) */
@@ -211,10 +219,12 @@ typedef enum canvas_pipe_id {
 
 flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format,
                                 VkSampleCountFlagBits samples, flux_paint_kind kind,
-                                VkPipelineLayout *out_layout, VkPipeline *out_pipeline);
+                                flux_blend_mode blend, VkPipelineLayout *out_layout,
+                                VkPipeline *out_pipeline);
 flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
                                    VkSampleCountFlagBits samples, canvas_pipe_id id,
-                                   VkPipelineLayout *out_layout, VkPipeline *out_pipeline);
+                                   flux_blend_mode blend, VkPipelineLayout *out_layout,
+                                   VkPipeline *out_pipeline);
 
 /* Stencil format every canvas pipeline (and the canvas's stencil
  * attachment) uses on this device. Probed once: S8_UINT preferred,

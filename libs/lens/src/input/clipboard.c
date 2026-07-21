@@ -2,11 +2,11 @@
  *
  * The host (the application's platform layer) supplies lens_clipboard at
  * lens_create. lens never links a clipboard or IME library itself —
- * same separation as windowing (ADR-0006) and text (ADR-0010/0011).
+ * same separation as windowing (ADR-0029) and text (ADR-0033/0011).
  *
  * Paste is asynchronous: a widget (or app) calls lens_request_paste,
  * the host fulfils it later by calling lens_paste, and the next frame's
- * focused text widget drains it via lensi_take_paste. (ADR-0013) */
+ * focused text widget drains it via lensi_take_paste. (ADR-0036) */
 
 #include "../internal.h"
 
