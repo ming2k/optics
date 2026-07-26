@@ -312,7 +312,9 @@ int main(void) {
         ripple_field_push pc;
         memcpy(pc.mvp, mvp.m, sizeof(pc.mvp));
         pc.time = t;
-        pc.point_size = 4.0f;
+        /* A zero base is a shader-side sentinel for the mandatory 1px
+         * fallback when Vulkan's optional largePoints feature is absent. */
+        pc.point_size = flux_device_supports_large_points(device) ? 4.0f : 0.0f;
         pc.ripple_x = ripple_x;
         pc.ripple_z = ripple_z;
         flux_graphics_pipeline_bind(frame, pipe, &pc, sizeof(pc));

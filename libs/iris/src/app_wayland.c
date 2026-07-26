@@ -1467,7 +1467,7 @@ static void log_raw(const lens_input *in) {
 /*  Pump Wayland events without blocking the render loop               */
 /* ------------------------------------------------------------------ */
 
-static void pump_events(wp_platform *pl, int timeout_ms) {
+static bool pump_events(wp_platform *pl, int timeout_ms) {
     struct wl_display *d = pl->display;
     while (wl_display_prepare_read(d) != 0)
         wl_display_dispatch_pending(d);
@@ -1480,7 +1480,9 @@ static void pump_events(wp_platform *pl, int timeout_ms) {
      * frame's worth of time. poll() returns the instant input (or a theme /
      * a11y event) arrives — keeping latency low — and otherwise wakes on the
      * deadline so time-based UI (caret blink, lens animations) keeps ticking
-     * even with no input. Passing 0 keeps the old non-blocking behaviour. */
+     * even with no input. Passing 0 keeps the old non-blocking behaviour.
+     * Returns true when any fd was signalled (as opposed to a timeout), so
+     * the frame loop can tell an event wake from a deadline expiry. */
     struct pollfd pfds[3];
     int n = 1;
     int theme_idx = -1, a11y_idx = -1;
@@ -1524,6 +1526,7 @@ static void pump_events(wp_platform *pl, int timeout_ms) {
     }
 
     wl_display_dispatch_pending(d);
+    return pr > 0;
 }
 
 /* Monotonic nanoseconds, for frame pacing. */
@@ -1594,6 +1597,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     flux_surface *surface = NULL;
     flux_canvas *canvas = NULL;
     lens *ui = NULL;
+    bool host_started = false;
     int rc = 1; /* pessimistic; set to 0 only on success */
 
     wp_platform pl = {
@@ -1751,6 +1755,12 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         goto fail;
     }
 
+    if (cfg->start && !cfg->start(ui, device, cfg->user)) {
+        fprintf(stderr, "iris host start callback failed\n");
+        goto fail;
+    }
+    host_started = true;
+
     /* --- Frame loop --------------------------------------------------
      * The surface presents without vsync (non-blocking, see flux_surface_desc
      * above): a FIFO/vsync present blocks the main thread in
@@ -1761,10 +1771,17 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
      * poll() until the next frame is due (or until real input wakes us early).
      *
      * The rate is adaptive. Right after user input we run at ~60 Hz so hover /
-     * scroll / drag stay smooth; once input goes quiet we drop to a low idle
-     * rate — just enough to keep the blinking caret and any settling animation
-     * alive — so an idle window costs almost no CPU instead of re-laying-out
-     * the whole document 60 times a second. */
+     * scroll / drag stay smooth. When nothing is happening we go further than
+     * a low idle rate: lens_frame_needs_repaint() tells us whether the frame
+     * just built would change a single pixel, and if not we skip the whole
+     * acquire/paint/present cycle; and when nothing time-driven is pending
+     * (no animation, no focused caret) we stop scheduling frames entirely and
+     * sleep in poll() until the next input / theme / a11y event. A focused
+     * text field keeps a low-frequency deadline alive for the caret blink.
+     *
+     * Hosts with a paint callback (cfg->paint) opt out of all of this: their
+     * content is opaque to lens, so they keep the old always-render pacing
+     * (~60 Hz after input, ~4 Hz idle). */
     const long long ACTIVE_PERIOD_NS = 16666667LL; /* ~60 Hz when active    */
     const long long IDLE_PERIOD_NS = 250000000LL;  /* ~4 Hz when idle: just  */
                                                    /* enough for the caret   */
@@ -1776,6 +1793,12 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     int frame_no = 0;
 
     long long next_deadline = now_ns();
+    bool frame_scheduled = true; /* the first frame must always paint */
+    /* Sticky until a frame containing the latest lens build is actually
+     * presented. Layout/draw hashes compare consecutive builds; without this
+     * host-side latch an acquire timeout could let the next identical build
+     * look clean and permanently skip content that never reached screen. */
+    bool surface_needs_paint = true;
     long long last_input_ns = next_deadline;
     long long last_render_ns = next_deadline - ACTIVE_PERIOD_NS;
     double prev_cx = pl.acc.cx, prev_cy = pl.acc.cy;
@@ -1805,16 +1828,22 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * Wayland / theme / a11y event. Gating the render on a deadline is what
          * lets poll() actually block: presenting every iteration would make the
          * compositor flood us with frame-callback events so poll() never sleeps
-         * and the loop spins at 100% CPU. */
+         * and the loop spins at 100% CPU. With no frame scheduled (fully idle:
+         * no animation, no focused caret) there is no deadline at all — poll
+         * blocks until an event; the 200ms cap only keeps the sd-bus fds'
+         * poll masks fresh. */
         long long t = now_ns();
-        long long budget_ns = next_deadline - t;
-        if (budget_ns > 0) {
+        long long budget_ns = frame_scheduled ? next_deadline - t : 0;
+        bool woke_on_event;
+        if (!frame_scheduled) {
+            woke_on_event = pump_events(&pl, 200);
+        } else if (budget_ns > 0) {
             int budget_ms = (int)(budget_ns / 1000000LL);
             if (budget_ms > 200)
                 budget_ms = 200;
-            pump_events(&pl, budget_ms);
+            woke_on_event = pump_events(&pl, budget_ms);
         } else {
-            pump_events(&pl, 0);
+            woke_on_event = pump_events(&pl, 0);
         }
 
         /* Real user input wakes us out of the idle rate: pull the next render
@@ -1824,17 +1853,26 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         if (acc_has_user_input(&pl, &prev_cx, &prev_cy)) {
             last_input_ns = now_ns();
             long long earliest = last_render_ns + ACTIVE_PERIOD_NS;
-            if (next_deadline > earliest)
+            if (!frame_scheduled || next_deadline > earliest)
                 next_deadline = earliest;
+            frame_scheduled = true;
+        } else if (woke_on_event && !frame_scheduled) {
+            /* A non-input event (theme change, a11y, configure/scale) while
+             * fully idle: run one frame so lens sees the new state; whether
+             * it paints is decided by the repaint query below. */
+            next_deadline = now_ns();
+            frame_scheduled = true;
         }
 
         /* Not time to draw yet — keep draining events and sleeping. */
-        if (now_ns() < next_deadline)
+        if (!frame_scheduled || now_ns() < next_deadline)
             continue;
 
-        /* Render this iteration. Schedule the next deadline relative to now
-         * (no catch-up bursts): fast while input is recent, slow when idle.
-         * A host animation request made by the previous frame also keeps this
+        /* Render this iteration. A tentative deadline is scheduled up front
+         * (no catch-up bursts) so the error `continue`s in the present path
+         * still retry; it is refined — or dropped entirely — after lens_end,
+         * once the repaint query and animation state are known. A host
+         * animation request made by the previous frame also keeps this
          * iteration at the active cadence. */
         t = now_ns();
         bool host_animating = pl.animation_frame_requested;
@@ -1843,11 +1881,15 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                                ? ACTIVE_PERIOD_NS
                                : IDLE_PERIOD_NS;
         next_deadline = t + period;
+        frame_scheduled = true;
         last_render_ns = t;
 
         /* Scale change (e.g. surface dragged to a HiDPI output): apply
          * the new buffer scale, resize the swapchain in device pixels,
-         * and tell lens so its replay transform matches. */
+         * and tell lens so its replay transform matches. The first frame
+         * after a resize/scale must always paint (the swapchain contents
+         * were discarded), so remember it for the skip decision below. */
+        bool resized_this_frame = false;
         if (pl.pending_scale > 0 && pl.pending_scale != pl.buffer_scale) {
             pl.buffer_scale = pl.pending_scale;
             wl_surface_set_buffer_scale(pl.surface, pl.buffer_scale);
@@ -1859,22 +1901,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
                                       (uint32_t)(pl.height * pl.buffer_scale));
             pl.resized = false;
+            resized_this_frame = true;
         }
-
-        flux_frame *frame = NULL;
-        flux_result r = flux_surface_begin_frame(surface, NULL, &frame);
-        if (r == FLUX_ERROR_SURFACE_LOST) {
-            (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
-                                      (uint32_t)(pl.height * pl.buffer_scale));
-            continue;
-        }
-        if (r == FLUX_ERROR_INVALID_STATE)
-            continue;
-        if (r != FLUX_OK)
-            break;
-
-        flux_surface_info info;
-        flux_surface_get_info(surface, &info);
 
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
@@ -1927,45 +1955,103 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             }
         }
 
-        /* Clear to the current theme's body background so empty areas
-         * (e.g. short content in a tall window) don't show a hard-coded
-         * dark color in light mode. The paint callback (if any) draws
-         * *under* lens's chrome: iris calls it before lens_render so the
-         * host's document surface lands first and lens's widget layer
-         * composites on top. */
-        lens_theme th = lens_get_theme(ui);
-        flux_color clear = th.color_bg;
-        if (flux_canvas_begin(canvas, frame, &clear) == FLUX_OK) {
-            if (cfg->paint)
-                cfg->paint(canvas, device, (float)pl.buffer_scale, cfg->user);
-            (void)lens_render(ui, canvas);
-            flux_canvas_end(canvas);
+        /* Static-frame skip: when lens reports no damage, the host has no
+         * paint callback, no host animation is in flight, and no resize /
+         * scale just happened, the frame just built is pixel-identical to
+         * what is on screen — skip the whole begin_frame → canvas → present
+         * cycle (no swapchain image acquired, nothing committed). */
+        bool must_paint = lens_frame_needs_repaint(ui) || cfg->paint != NULL || host_animating ||
+                          resized_this_frame || surface_needs_paint;
+        if (must_paint) {
+            surface_needs_paint = true;
+            flux_frame *frame = NULL;
+            flux_result r = flux_surface_begin_frame(surface, NULL, &frame);
+            if (r == FLUX_ERROR_SURFACE_LOST) {
+                (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
+                                          (uint32_t)(pl.height * pl.buffer_scale));
+                continue;
+            }
+            if (r == FLUX_ERROR_INVALID_STATE)
+                continue;
+            /* Acquire timeout (display asleep or surface occluded): not an
+             * error — no swapchain image was consumed, so skip this frame and
+             * retry on the next deadline instead of exiting the loop. */
+            if (r == FLUX_ERROR_TIMEOUT)
+                continue;
+            if (r != FLUX_OK)
+                break;
+
+            flux_surface_info info;
+            flux_surface_get_info(surface, &info);
+
+            /* Clear to the current theme's body background so empty areas
+             * (e.g. short content in a tall window) don't show a hard-coded
+             * dark color in light mode. The paint callback (if any) draws
+             * *under* lens's chrome: iris calls it before lens_render so the
+             * host's document surface lands first and lens's widget layer
+             * composites on top. */
+            lens_theme th = lens_get_theme(ui);
+            flux_color clear = th.color_bg;
+            bool drew = false;
+            if (flux_canvas_begin(canvas, frame, &clear) == FLUX_OK) {
+                if (cfg->paint)
+                    cfg->paint(canvas, device, (float)pl.buffer_scale, cfg->user);
+                drew = lens_render(ui, canvas) == FLUX_OK;
+                flux_canvas_end(canvas);
+            }
+
+            if (flux_frame_submit(frame) != FLUX_OK)
+                break;
+            r = flux_frame_present(frame);
+            if (r == FLUX_ERROR_SURFACE_LOST)
+                (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
+                                          (uint32_t)(pl.height * pl.buffer_scale));
+            else if (r != FLUX_OK)
+                break;
+            else if (drew)
+                surface_needs_paint = false;
+
+            if (++frame_no == 1)
+                printf("first frame presented: %dx%d logical, %ux%u device (scale=%d)\n", pl.width,
+                       pl.height, info.width, info.height, pl.buffer_scale);
         }
 
-        if (flux_frame_submit(frame) != FLUX_OK)
-            break;
-        r = flux_frame_present(frame);
-        if (r == FLUX_ERROR_SURFACE_LOST)
-            (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
-                                      (uint32_t)(pl.height * pl.buffer_scale));
-        else if (r != FLUX_OK)
-            break;
-
-        /* build/paint may have requested a follow-up after the tentative idle
-         * deadline was selected above. Pull that deadline forward now so the
-         * next frame arrives at the active cadence. */
-        if (pl.animation_frame_requested)
-            next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
-
-        if (++frame_no == 1)
-            printf("first frame presented: %dx%d logical, %ux%u device (scale=%d)\n", pl.width,
-                   pl.height, info.width, info.height, pl.buffer_scale);
+        /* Refine the tentative deadline now that the repaint query and the
+         * post-build animation state are known. Stay at the active rate
+         * while input is warm or an eased value / host animation is still
+         * in flight; keep a low cadence for the caret blink while a text
+         * field is focused; otherwise stop scheduling frames entirely —
+         * the loop sleeps in poll() until the next event. Hosts with a
+         * paint callback never unschedule: their content is opaque to lens,
+         * so they keep the always-render pacing (a mid-frame animation
+         * request pulls their tentative idle deadline forward). */
+        if (cfg->paint) {
+            if (pl.animation_frame_requested)
+                next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
+            frame_scheduled = true;
+        } else if (t - last_input_ns < INPUT_GRACE_NS || pl.animation_frame_requested ||
+                   lens_anim_pending(ui)) {
+            next_deadline = t + ACTIVE_PERIOD_NS;
+            frame_scheduled = true;
+        } else if (lens_caret_rect(ui).w > 0.0f) {
+            next_deadline = t + IDLE_PERIOD_NS;
+            frame_scheduled = true;
+        } else {
+            frame_scheduled = false;
+        }
     }
 
     rc = 0; /* success — fall through to the unified cleanup below */
 
     /* --- Cleanup (shared by the success path and every `goto fail`) --- */
 fail:
+    /* Let the host release every resource created from iris's borrowed
+     * device before that device, the lens context, or the canvas disappears.
+     * Keep the active platform published during the callback so thread-affine
+     * iris helpers remain valid through the host's teardown. */
+    if (host_started && cfg->stop)
+        cfg->stop(ui, device, cfg->user);
+
     /* Stop publishing this wp_platform to iris_set_cursor() — any host
      * call after this returns is a no-op rather than a use-after-free. */
     g_active_pl = NULL;
@@ -2004,6 +2090,8 @@ fail:
         wl_data_source_destroy(pl.copy_source);
     if (pl.selection_offer)
         wl_data_offer_destroy(pl.selection_offer);
+    if (pl.dnd_offer && pl.dnd_offer != pl.selection_offer)
+        wl_data_offer_destroy(pl.dnd_offer);
 
     if (pl.deco)
         zxdg_toplevel_decoration_v1_destroy(pl.deco);
@@ -2011,6 +2099,8 @@ fail:
         xdg_toplevel_destroy(pl.toplevel);
     if (pl.xdg_surface)
         xdg_surface_destroy(pl.xdg_surface);
+    if (pl.fractional_scale_obj)
+        wp_fractional_scale_v1_destroy(pl.fractional_scale_obj);
     if (pl.surface)
         wl_surface_destroy(pl.surface);
     for (int i = 0; i < pl.n_outputs; i++)
@@ -2026,10 +2116,28 @@ fail:
         wl_pointer_destroy(pl.pointer);
     if (pl.keyboard)
         wl_keyboard_destroy(pl.keyboard);
+    if (pl.touch)
+        wl_touch_destroy(pl.touch);
     if (pl.text_input)
         zwp_text_input_v3_destroy(pl.text_input);
     if (pl.data_device)
         wl_data_device_release(pl.data_device);
+    if (pl.text_input_mgr)
+        zwp_text_input_manager_v3_destroy(pl.text_input_mgr);
+    if (pl.fractional_scale_mgr)
+        wp_fractional_scale_manager_v1_destroy(pl.fractional_scale_mgr);
+    if (pl.deco_mgr)
+        zxdg_decoration_manager_v1_destroy(pl.deco_mgr);
+    if (pl.data_device_mgr)
+        wl_data_device_manager_destroy(pl.data_device_mgr);
+    if (pl.seat)
+        wl_seat_destroy(pl.seat);
+    if (pl.wm_base)
+        xdg_wm_base_destroy(pl.wm_base);
+    if (pl.compositor)
+        wl_compositor_destroy(pl.compositor);
+    if (pl.registry)
+        wl_registry_destroy(pl.registry);
     if (pl.display) {
         wl_display_roundtrip(pl.display); /* let the compositor process destroys */
         wl_display_disconnect(pl.display);

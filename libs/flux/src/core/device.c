@@ -543,6 +543,12 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
         return FLUX_ERROR_UNSUPPORTED;
     }
 
+    /* Optional core feature used by POINT_LIST consumers. Enabling every
+     * supported device lets procedural-particle pipelines use gl_PointSize
+     * above 1 without making large points a baseline requirement for Flux. */
+    feat2.features.largePoints = have2.features.largePoints;
+    d->large_points_enabled = have2.features.largePoints;
+
     /* Queue create infos: graphics; transfer iff dedicated. */
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qcis[2] = {
@@ -1193,6 +1199,9 @@ VkQueue flux_device_vk_transfer_queue(const flux_device *d) {
 }
 uint32_t flux_device_vk_transfer_family(const flux_device *d) {
     return d ? d->transfer_family : 0;
+}
+bool flux_device_supports_large_points(const flux_device *d) {
+    return d && d->large_points_enabled;
 }
 VkPipelineCache flux_device_vk_pipeline_cache(const flux_device *d) {
     return d ? d->pipeline_cache : VK_NULL_HANDLE;

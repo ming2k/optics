@@ -43,6 +43,15 @@ test_canvas_cpu_text = executable('test_canvas_cpu_text',
 )
 test('canvas_cpu_text', test_canvas_cpu_text, suite : 'unit')
 
+# Headless CPU-canvas display-list test: record/replay segments render
+# pixel-identically to live emission and refuse stale anchors (clip,
+# transform, released handle).
+test_canvas_record = executable('test_canvas_record',
+  'test_canvas_record.c',
+  dependencies : [test_helpers_dep],
+)
+test('canvas_record', test_canvas_record, suite : 'unit')
+
 test_canvas_path = executable('test_canvas_path',
   'test_canvas_path.c',
   dependencies : [test_helpers_dep],
@@ -59,6 +68,15 @@ test_canvas_tess = executable('test_canvas_tess',
   dependencies : [test_helpers_dep],
 )
 test('canvas_tess', test_canvas_tess, suite : 'unit')
+
+# Tessellation result cache: CPU-canvas pixel comparisons plus the
+# hit/miss/store counters read from struct flux_canvas via the
+# internal header. Links libflux normally (no source compiled in).
+test_canvas_tess_cache = executable('test_canvas_tess_cache',
+  'test_canvas_tess_cache.c',
+  dependencies : [test_helpers_dep],
+)
+test('canvas_tess_cache', test_canvas_tess_cache, suite : 'unit')
 
 # Same reasoning as test_canvas_tess: geometry_flatten.c is hidden
 # in libflux.so, so we compile it into the test binary directly.

@@ -13,7 +13,29 @@
 #include "test_helpers.h"
 #include <iris/iris.h>
 
+static bool host_start(lens *ui, flux_device *device, void *user) {
+    return ui != NULL && device != NULL && user != NULL;
+}
+
+static void host_stop(lens *ui, flux_device *device, void *user) {
+    (void)ui;
+    (void)device;
+    (void)user;
+}
+
 int main(void) {
+    /* Lifecycle callbacks are part of the public, designated-init API.
+     * Do not run this config headlessly; assigning it catches declaration
+     * and function-signature regressions at compile time. */
+    int user = 1;
+    iris_app_config lifecycle_config = {
+        .start = host_start,
+        .stop = host_stop,
+        .user = &user,
+    };
+    CHECK(lifecycle_config.start != NULL);
+    CHECK(lifecycle_config.stop != NULL);
+
     /* iris_app_run: NULL config is rejected before any backend work. */
     CHECK(iris_app_run(NULL) != 0);
 

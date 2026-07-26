@@ -7,7 +7,7 @@
  * exits non-zero. That forces the query through GTK_THEME / the default.
  */
 
-#define _GNU_SOURCE
+/* _GNU_SOURCE is provided by the build system. */
 #include <iris/theme.h>
 #include <stdio.h>
 #include <stdlib.h>

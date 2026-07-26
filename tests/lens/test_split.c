@@ -13,6 +13,7 @@ static void test_split_builds(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
+    lens_id split_id = lens_current_id(ui, "s");
     lens_split_begin(ui, "s", LENS_SPLIT_VERTICAL, &(lens_split_opts){.ratio = 0.5f});
     {
         lens_split_pane(ui);
@@ -24,6 +25,14 @@ static void test_split_builds(void) {
     lens_end(ui);
 
     CHECK(lens_split_ratio(ui, "s") == 0.5f);
+    lens_node *split = lens_find(ui, split_id);
+    lens_node *pane1 = lens_node_first_child(split);
+    lens_node *pane2 = lens_node_next_sibling(pane1);
+    CHECK(split != NULL);
+    CHECK(pane1 != NULL);
+    CHECK(pane2 != NULL);
+    CHECK(lens_node_parent(pane1) == split);
+    CHECK(lens_node_parent(pane2) == split);
 
     lens_destroy(ui);
 }

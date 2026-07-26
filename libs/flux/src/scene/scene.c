@@ -443,8 +443,9 @@ void flux_material_release(flux_material *m) {
 /* Fill the per-draw phong parameter block. The normal matrix is the
  * transpose of the inverse of world's upper-left 3×3 (handles
  * non-uniform scale); the eye position is the translation column of
- * the inverted view matrix. */
-static void fill_phong_params(scene_phong_params *p, const flux_camera *cam, flux_mat4 world,
+ * the inverted view matrix, provided by the caller (cached per frame —
+ * see scene_cached_view_inv). */
+static void fill_phong_params(scene_phong_params *p, const flux_mat4 *view_inv, flux_mat4 world,
                               const flux_material *material, const flux_scene_light *light) {
     static const flux_scene_light default_light = FLUX_SCENE_LIGHT_DEFAULT;
     if (!light)
@@ -453,7 +454,9 @@ static void fill_phong_params(scene_phong_params *p, const flux_camera *cam, flu
     memcpy(p->world, world.m, sizeof(p->world));
 
     /* Column i of transpose(inverse(world)) is row i of inverse(world);
-     * flux_mat4 is column-major, so row i reads m[i], m[4+i], m[8+i]. */
+     * flux_mat4 is column-major, so row i reads m[i], m[4+i], m[8+i].
+     * The inverse is per-draw on purpose: world differs per mesh, so a
+     * cache would not hit. */
     flux_mat4 inv = flux_mat4_invert(world);
     for (int i = 0; i < 3; ++i) {
         float *col = i == 0 ? p->nrm0 : i == 1 ? p->nrm1 : p->nrm2;
@@ -481,11 +484,25 @@ static void fill_phong_params(scene_phong_params *p, const flux_camera *cam, flu
     p->light_color_ambient[2] = light->color.z;
     p->light_color_ambient[3] = light->ambient;
 
-    flux_mat4 view_inv = flux_mat4_invert(cam->view);
-    p->eye_specular[0] = view_inv.m[12];
-    p->eye_specular[1] = view_inv.m[13];
-    p->eye_specular[2] = view_inv.m[14];
+    p->eye_specular[0] = view_inv->m[12];
+    p->eye_specular[1] = view_inv->m[13];
+    p->eye_specular[2] = view_inv->m[14];
     p->eye_specular[3] = material->specular;
+}
+
+/* Inverse of the camera's view matrix, cached on the frame: one memcmp
+ * per draw instead of a full 4x4 inverse for the common case of one
+ * camera held static across a pass's draws. Bit-identical input yields
+ * bit-identical output, so rendering is unchanged. The cache resets
+ * with the frame slot every begin_frame. */
+static const flux_mat4 *scene_cached_view_inv(flux_frame *f, const flux_camera *cam) {
+    if (!f->scene_view_inv_valid ||
+        memcmp(f->scene_view_src.m, cam->view.m, sizeof(cam->view.m)) != 0) {
+        f->scene_view_src = cam->view;
+        f->scene_view_inv = flux_mat4_invert(cam->view);
+        f->scene_view_inv_valid = true;
+    }
+    return &f->scene_view_inv;
 }
 
 static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, flux_mesh *mesh,
@@ -502,14 +519,28 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
     flux_mat4 view_proj = flux_mat4_multiply(cam->projection, cam->view);
     flux_mat4 mvp = flux_mat4_multiply(view_proj, world);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->pipeline);
+    /* Skip redundant rebinds: the frame mirrors the bindings scene
+     * last made on this command buffer (reset every begin_frame).
+     * Bindings persist across the passes of one command buffer, so the
+     * mirror holds for consecutive scene draws — the same dedup the
+     * canvas backend applies per pass. Draws recorded by other modules
+     * are not mirrored; interleaving another module's graphics pass
+     * between scene passes of one frame is outside scene's contract
+     * (each scene pass is expected to own its draws). */
+    if (f->scene_bound_pipeline != material->pipeline) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->pipeline);
+        f->scene_bound_pipeline = material->pipeline;
+    }
 
     /* Bind the device bindless set at slot 0 to match the pipeline
      * layout. Cheap; consistent with canvas and compute. */
     VkDescriptorSet bindless = flux_device_bindless_set(material->device);
-    if (bindless != VK_NULL_HANDLE) {
+    if (bindless != VK_NULL_HANDLE &&
+        (f->scene_bound_set != bindless || f->scene_bound_layout != material->layout)) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->layout, 0, 1,
                                 &bindless, 0, nullptr);
+        f->scene_bound_set = bindless;
+        f->scene_bound_layout = material->layout;
     }
 
     if (material->kind == FLUX_MATERIAL_PHONG) {
@@ -517,7 +548,7 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
         if (flux_frame_alloc_transient(f, sizeof(scene_phong_params), 16, &slice) != FLUX_OK) {
             return; /* draw dropped; alloc_transient set the error */
         }
-        fill_phong_params(slice.cpu, cam, world, material, light);
+        fill_phong_params(slice.cpu, scene_cached_view_inv(f, cam), world, material, light);
 
         scene_phong_push pc;
         memcpy(pc.mvp, mvp.m, sizeof(pc.mvp));

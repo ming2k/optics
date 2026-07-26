@@ -327,6 +327,120 @@ static void fill_path_stencil_cover(flux_canvas *c, const flux_paint *paint, flu
     submit_triangles_id(c, paint, cover, verts, v_count);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Tessellation result cache (layout and rationale in internal.h)    */
+/* ------------------------------------------------------------------ */
+
+static uint64_t tess_fnv1a(const void *data, size_t n, uint64_t h) {
+    const uint8_t *b = data;
+    for (size_t i = 0; i < n; ++i) {
+        h ^= b[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+/* 64-bit FNV-1a over the raw verb stream (segments are zero-padded by
+ * push_segment, so the bytes are deterministic) plus every parameter
+ * the tessellation output depends on. Irrelevant stroke/fill fields
+ * are zeroed so a paint that differs only in them still hits. */
+static uint64_t tess_cache_hash(const flux_path *p, const flux_paint *paint, bool is_stroke,
+                                float pixel_scale, float stroke_width, float miter_limit) {
+    uint64_t h = 14695981039346656037ULL;
+    h = tess_fnv1a(p->segments, p->count * sizeof(*p->segments), h);
+    h = tess_fnv1a(&pixel_scale, sizeof(pixel_scale), h);
+    h = tess_fnv1a(&stroke_width, sizeof(stroke_width), h);
+    h = tess_fnv1a(&miter_limit, sizeof(miter_limit), h);
+    const uint32_t words[4] = {
+        is_stroke ? 1u : 0u,
+        is_stroke ? (uint32_t)paint->cap : 0u,
+        is_stroke ? (uint32_t)paint->join : 0u,
+        is_stroke ? 0u : (uint32_t)paint->fill_rule,
+    };
+    return tess_fnv1a(words, sizeof(words), h);
+}
+
+static bool tess_entry_matches(const flux_tess_cache_entry *e, const flux_path *p,
+                               const flux_paint *paint, bool is_stroke, float pixel_scale,
+                               float stroke_width, float miter_limit, uint64_t hash) {
+    if (e->last_used == 0 || e->hash != hash || e->seg_count != p->count ||
+        e->is_stroke != (is_stroke ? 1u : 0u) || e->pixel_scale != pixel_scale ||
+        e->stroke_width != stroke_width || e->miter_limit != miter_limit ||
+        e->cap != (is_stroke ? (uint32_t)paint->cap : 0u) ||
+        e->join != (is_stroke ? (uint32_t)paint->join : 0u) ||
+        e->fill_rule != (is_stroke ? 0u : (uint32_t)paint->fill_rule))
+        return false;
+    /* Full verb-stream compare: the hash alone must never be trusted. */
+    return memcmp(e->segs, p->segments, p->count * sizeof(*p->segments)) == 0;
+}
+
+bool tess_cache_lookup_submit(flux_canvas *c, const flux_path *p, const flux_paint *paint,
+                              bool is_stroke, float pixel_scale, float stroke_width,
+                              float miter_limit, flux_mat3x2 tx) {
+    if (p->count > FLUX_TESS_CACHE_MAX_SEGS)
+        return false; /* can never be cached; don't count a miss */
+    uint64_t hash = tess_cache_hash(p, paint, is_stroke, pixel_scale, stroke_width, miter_limit);
+    for (uint32_t i = 0; i < FLUX_TESS_CACHE_CAP; ++i) {
+        flux_tess_cache_entry *e = &c->tess_cache[i];
+        if (!tess_entry_matches(e, p, paint, is_stroke, pixel_scale, stroke_width, miter_limit,
+                                hash))
+            continue;
+        e->last_used = ++c->tess_cache_tick;
+        c->tess_cache_hits++;
+        flux_canvas_vertex *verts = c->scratch_verts;
+        for (uint32_t v = 0; v < e->vert_count; ++v)
+            push_vertex(&verts[v], e->verts[v], tx, paint->color);
+        submit_triangles(c, paint, verts, e->vert_count);
+        return true;
+    }
+    c->tess_cache_misses++;
+    return false;
+}
+
+void tess_cache_store_and_transform(flux_canvas *c, const flux_path *p, const flux_paint *paint,
+                                    bool is_stroke, float pixel_scale, float stroke_width,
+                                    float miter_limit, bool stalled, flux_canvas_vertex *verts,
+                                    uint32_t v_count, flux_mat3x2 tx) {
+    if (!stalled && v_count > 0 && v_count <= FLUX_TESS_CACHE_MAX_VERTS &&
+        p->count <= FLUX_TESS_CACHE_MAX_SEGS) {
+        /* LRU slot: the first invalid entry, else the least used. */
+        flux_tess_cache_entry *slot = &c->tess_cache[0];
+        for (uint32_t i = 0; i < FLUX_TESS_CACHE_CAP; ++i) {
+            flux_tess_cache_entry *e = &c->tess_cache[i];
+            if (e->last_used == 0) {
+                slot = e;
+                break;
+            }
+            if (e->last_used < slot->last_used)
+                slot = e;
+        }
+        slot->hash = tess_cache_hash(p, paint, is_stroke, pixel_scale, stroke_width, miter_limit);
+        slot->seg_count = p->count;
+        slot->vert_count = v_count;
+        slot->pixel_scale = pixel_scale;
+        slot->stroke_width = stroke_width;
+        slot->miter_limit = miter_limit;
+        slot->is_stroke = is_stroke ? 1u : 0u;
+        slot->cap = is_stroke ? (uint32_t)paint->cap : 0u;
+        slot->join = is_stroke ? (uint32_t)paint->join : 0u;
+        slot->fill_rule = is_stroke ? 0u : (uint32_t)paint->fill_rule;
+        memcpy(slot->segs, p->segments, p->count * sizeof(*p->segments));
+        for (uint32_t v = 0; v < v_count; ++v)
+            slot->verts[v] = (flux_point){verts[v].pos[0], verts[v].pos[1]};
+        slot->last_used = ++c->tess_cache_tick;
+        c->tess_cache_stores++;
+    }
+    /* In-place transform: the identical flux_mat3x2_transform_point
+     * call push_vertex makes during emit, so a cached replay is
+     * bit-identical to a transform-during-emit run. */
+    for (uint32_t v = 0; v < v_count; ++v) {
+        flux_point t =
+            flux_mat3x2_transform_point(tx, (flux_point){verts[v].pos[0], verts[v].pos[1]});
+        verts[v].pos[0] = t.x;
+        verts[v].pos[1] = t.y;
+    }
+}
+
 void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint *paint) {
     if (!c || !c->recording || !p || !paint)
         return;
@@ -366,6 +480,21 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
 
     flux_mat3x2 tx = c->states[c->state_top].transform;
     float pixel_scale = flux_canvas_mat3x2_pixel_scale(tx);
+
+    /* Cache lookup before flattening — a hit skips flatten + classify
+     * + ear-clip entirely. EVEN_ODD bypasses: its semantics depend on
+     * stencil availability (stencil cover vs nonzero fallback), which
+     * the key cannot capture. On a miss, tessellate in path space
+     * (identity transform) so the result is cacheable; the store step
+     * re-applies `tx` before submit. */
+    bool cacheable = !even_odd;
+    flux_mat3x2 emit_tx = tx;
+    if (cacheable) {
+        if (tess_cache_lookup_submit(c, p, paint, false, pixel_scale, 0.0f, 0.0f, tx))
+            return;
+        emit_tx = flux_mat3x2_identity();
+    }
+
     flatten_multi fm = flatten_path_to_contours(p, pixel_scale, pts, FLUX_CANVAS_PATH_SCRATCH_CAP,
                                                 cons, FLUX_CANVAS_MAX_CONTOURS);
     if (fm.contour_count == 0 || fm.point_count < 3)
@@ -433,8 +562,8 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
                 lnk_prev[i] = (i == 0) ? n - 1 : i - 1;
                 lnk_next[i] = (i + 1 == n) ? 0 : i + 1;
             }
-            if (!ear_clip_contour(verts, &v_count, verts_cap, tx, color, cpts, lnk_prev, lnk_next,
-                                  n)) {
+            if (!ear_clip_contour(verts, &v_count, verts_cap, emit_tx, color, cpts, lnk_prev,
+                                  lnk_next, n)) {
                 stalled = true;
             }
         }
@@ -442,6 +571,9 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
             fill_path_stencil_cover(c, paint, tx, pts, infos, fm.contour_count, false);
             return;
         }
+        if (cacheable)
+            tess_cache_store_and_transform(c, p, paint, false, pixel_scale, 0.0f, 0.0f, stalled,
+                                           verts, v_count, tx);
         submit_triangles(c, paint, verts, v_count);
         return;
     }
@@ -545,7 +677,7 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
             m_prev[i] = (i == 0) ? merged_n - 1 : i - 1;
             m_next[i] = (i + 1 == merged_n) ? 0 : i + 1;
         }
-        if (!ear_clip_contour(verts, &v_count, verts_cap, tx, color, merged, m_prev, m_next,
+        if (!ear_clip_contour(verts, &v_count, verts_cap, emit_tx, color, merged, m_prev, m_next,
                               merged_n)) {
             stalled = true;
         }
@@ -574,7 +706,8 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
             lnk_prev[i] = (i == 0) ? n - 1 : i - 1;
             lnk_next[i] = (i + 1 == n) ? 0 : i + 1;
         }
-        if (!ear_clip_contour(verts, &v_count, verts_cap, tx, color, cpts, lnk_prev, lnk_next, n)) {
+        if (!ear_clip_contour(verts, &v_count, verts_cap, emit_tx, color, cpts, lnk_prev, lnk_next,
+                              n)) {
             stalled = true;
         }
     }
@@ -587,5 +720,8 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
         return;
     }
 
+    if (cacheable)
+        tess_cache_store_and_transform(c, p, paint, false, pixel_scale, 0.0f, 0.0f, stalled, verts,
+                                       v_count, tx);
     submit_triangles(c, paint, verts, v_count);
 }

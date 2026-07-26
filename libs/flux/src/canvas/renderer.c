@@ -600,7 +600,7 @@ void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id
         c->pending_blend = paint->blend;
     flux_canvas_push pc;
     build_push(c, paint, &pc);
-    c->backend->submit(c->backend, c, id, &pc, verts, vertex_count);
+    canvas_emit(c, id, &pc, verts, vertex_count);
 }
 
 void submit_triangles(flux_canvas *c, const flux_paint *paint, const flux_canvas_vertex *verts,

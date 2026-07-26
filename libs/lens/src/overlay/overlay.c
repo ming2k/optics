@@ -317,6 +317,18 @@ void lensi_overlay_layout(lens *ui) {
 
 /* ---- render: emit each layer after the base tree ------------------ */
 
+/* Floating layers are independent sub-roots, so replay.c's lensi_mark_dirty
+ * (which walks only ui->root) never computes their damage. Run the same
+ * bottom-up pass on each layer so lens_frame_needs_repaint can treat a
+ * changed popup/panel as a repaint trigger. */
+void lensi_overlay_mark_dirty(lens *ui) {
+    if (!ui)
+        return;
+    for (uint32_t i = 0; i < ui->overlay_layer_count; i++)
+        if (ui->overlay_layers[i])
+            lensi_mark_subtree_changed(ui->overlay_layers[i]);
+}
+
 /* Reuses lensi_render_node from replay.c so the draw-list emission has
  * a single source of truth; overlays just walk additional sub-roots. */
 void lensi_overlay_render(lens *ui, flux_canvas *canvas) {

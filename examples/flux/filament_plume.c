@@ -1,0 +1,267 @@
+/*
+ * filament_plume — a flowing, feather-like form made from 10,000 GPU points.
+ *
+ * The reference effect is a 140-byte generative sketch:
+ *
+ *   a=(y,d=mag(k=(4+cos(i/9-t*2))*cos(i/35),e=y/7-13)+sin(e/9+t/2)-4)=>
+ *     point((q=2*sin(k*3)-y/35*k*(9+k*sin(cos(e)*9-d*2+t)))+
+ *           40*cos(c=d-t)+200,q*sin(c)+d*35)
+ *
+ * Its loop evaluates that function 10,000 times per frame.  Here the same
+ * math runs in the vertex shader, with gl_VertexIndex standing in for `i`.
+ * One POINT_LIST draw produces the entire animated form without a vertex
+ * buffer or per-point CPU work.
+ *
+ * Teaches:
+ *   - a procedural POINT_LIST pipeline driven by gl_VertexIndex
+ *   - premultiplied source-over blending for translucent point accumulation
+ *   - push constants for time, framebuffer size, and point size
+ * Key flux APIs: flux_graphics_pipeline_create/_bind,
+ *                flux_surface_begin_frame, flux_frame_begin_pass
+ * Plumbing (raw Vulkan, not flux): GLFW window + VkSurfaceKHR creation,
+ *   viewport/scissor, and vkCmdDraw.
+ */
+#include <flux/flux.h>
+#include <flux/vulkan.h>
+
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+
+#include "pipeline_cache.h"
+
+#include <math.h>
+#include <stdalign.h>
+#include <stdio.h>
+
+alignas(uint32_t) static const unsigned char filament_plume_vert_spv[] = {
+#embed "filament_plume.vert.spv"
+};
+alignas(uint32_t) static const unsigned char filament_plume_frag_spv[] = {
+#embed "filament_plume.frag.spv"
+};
+
+#define POINT_COUNT 10000
+#define REFERENCE_SIZE 400.0f
+#define PI 3.14159265358979323846f
+
+typedef struct filament_plume_push {
+    float extent[2];
+    float time;
+    float point_size;
+} filament_plume_push;
+
+static void on_resize(GLFWwindow *window, int width, int height) {
+    flux_surface *surface = glfwGetWindowUserPointer(window);
+    if (surface && width > 0 && height > 0)
+        (void)flux_surface_resize(surface, (uint32_t)width, (uint32_t)height);
+}
+
+static void print_last_error(const char *operation, flux_result result) {
+    flux_error_info error;
+    flux_get_last_error(&error);
+    fprintf(stderr, "%s -> %s\n  %s\n", operation, flux_result_string(result),
+            error.message ? error.message : "(no detail)");
+}
+
+int main(void) {
+    if (!glfwInit() || !glfwVulkanSupported()) {
+        fprintf(stderr, "GLFW Vulkan initialization failed\n");
+        return 1;
+    }
+
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    GLFWwindow *window =
+        glfwCreateWindow(800, 800, "flux filament plume — 10,000 points", nullptr, nullptr);
+    if (!window) {
+        glfwTerminate();
+        return 1;
+    }
+
+    uint32_t extension_count = 0;
+    const char **instance_extensions = glfwGetRequiredInstanceExtensions(&extension_count);
+    const char *device_extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+
+    flux_pipeline_cache_file cache = FLUX_PIPELINE_CACHE_FILE_INIT;
+    flux_pipeline_cache_file_set_default_path(&cache, "filament_plume.bin");
+
+    flux_device_desc device_desc = {
+        .type = FLUX_TYPE_DEVICE_DESC,
+        .log = flux_console_logger,
+        .validation = FLUX_VALIDATION_AUTO,
+        .required_instance_extensions = instance_extensions,
+        .required_instance_extension_count = extension_count,
+        .required_device_extensions = device_extensions,
+        .required_device_extension_count =
+            sizeof(device_extensions) / sizeof(*device_extensions),
+        .frames_in_flight = 2,
+        .pipeline_cache_load = flux_pipeline_cache_file_load,
+        .pipeline_cache_save = flux_pipeline_cache_file_save,
+        .pipeline_cache_userdata = &cache,
+    };
+    flux_device *device = nullptr;
+    flux_result result = flux_device_create(&device_desc, &device);
+    if (result != FLUX_OK) {
+        print_last_error("flux_device_create", result);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return (int)result;
+    }
+
+    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
+    if (glfwCreateWindowSurface(flux_device_vk_instance(device), window, nullptr, &vk_surface) !=
+        VK_SUCCESS) {
+        fprintf(stderr, "glfwCreateWindowSurface failed\n");
+        flux_device_release(device);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
+
+    int framebuffer_width = 0, framebuffer_height = 0;
+    glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
+    flux_surface_desc surface_desc = {
+        .type = FLUX_TYPE_SURFACE_DESC,
+        .vk_surface_khr = vk_surface,
+        .width = (uint32_t)framebuffer_width,
+        .height = (uint32_t)framebuffer_height,
+        .vsync = true,
+    };
+    flux_surface *surface = nullptr;
+    result = flux_surface_create(device, &surface_desc, &surface);
+    if (result != FLUX_OK) {
+        print_last_error("flux_surface_create", result);
+        vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
+        flux_device_release(device);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return (int)result;
+    }
+    glfwSetWindowUserPointer(window, surface);
+    glfwSetFramebufferSizeCallback(window, on_resize);
+
+    flux_graphics_pipeline_desc pipeline_desc = FLUX_GRAPHICS_PIPELINE_DESC_INIT;
+    pipeline_desc.vertex_spirv = (const uint32_t *)filament_plume_vert_spv;
+    pipeline_desc.vertex_spirv_word_count = sizeof(filament_plume_vert_spv) / sizeof(uint32_t);
+    pipeline_desc.fragment_spirv = (const uint32_t *)filament_plume_frag_spv;
+    pipeline_desc.fragment_spirv_word_count = sizeof(filament_plume_frag_spv) / sizeof(uint32_t);
+    pipeline_desc.topology = FLUX_TOPOLOGY_POINT_LIST;
+    pipeline_desc.cull = FLUX_CULL_NONE;
+    pipeline_desc.blend = FLUX_BLEND_PRESET_PREMUL;
+    pipeline_desc.depth = FLUX_DEPTH_NONE;
+    pipeline_desc.color_format = flux_format_from_vk(flux_surface_vk_format(surface));
+    pipeline_desc.depth_format = FLUX_FORMAT_UNDEFINED;
+    pipeline_desc.push_constant_bytes = sizeof(filament_plume_push);
+
+    flux_graphics_pipeline *pipeline = nullptr;
+    result = flux_graphics_pipeline_create(device, &pipeline_desc, &pipeline);
+    if (result != FLUX_OK) {
+        print_last_error("flux_graphics_pipeline_create", result);
+        flux_surface_release(surface);
+        vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
+        flux_device_release(device);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return (int)result;
+    }
+
+    bool large_points = flux_device_supports_large_points(device);
+    printf("filament plume ready: %d procedural points, one draw per frame (%s points)\n",
+           POINT_COUNT, large_points ? "DPI-sized" : "1px");
+    double start_time = glfwGetTime();
+    int frame_number = 0;
+
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+
+        flux_frame *frame = nullptr;
+        result = flux_surface_begin_frame(surface, nullptr, &frame);
+        if (result == FLUX_ERROR_SURFACE_LOST) {
+            glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
+            if (framebuffer_width > 0 && framebuffer_height > 0)
+                (void)flux_surface_resize(surface, (uint32_t)framebuffer_width,
+                                          (uint32_t)framebuffer_height);
+            continue;
+        }
+        if (result == FLUX_ERROR_INVALID_STATE)
+            continue;
+        if (result != FLUX_OK) {
+            print_last_error("flux_surface_begin_frame", result);
+            break;
+        }
+
+        flux_pass_attachment color = {
+            .view = VK_NULL_HANDLE,
+            .load_op = FLUX_LOAD_CLEAR,
+            .store_op = FLUX_STORE_STORE,
+            .clear_color = {9.0f / 255.0f, 9.0f / 255.0f, 9.0f / 255.0f, 1.0f},
+        };
+        flux_pass_desc pass = {
+            .type = FLUX_TYPE_PASS_DESC,
+            .color_attachment_count = 1,
+            .color_attachments = &color,
+        };
+        flux_frame_timestamp_begin(frame, "filament plume");
+        flux_frame_begin_pass(frame, &pass);
+
+        flux_surface_info info;
+        flux_surface_get_info(surface, &info);
+        VkCommandBuffer command = flux_frame_vk_command_buffer(frame);
+        VkViewport viewport = {
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = (float)info.width,
+            .height = (float)info.height,
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        VkRect2D scissor = {.offset = {0, 0}, .extent = {info.width, info.height}};
+        vkCmdSetViewport(command, 0, 1, &viewport);
+        vkCmdSetScissor(command, 0, 1, &scissor);
+
+        float elapsed = (float)(glfwGetTime() - start_time);
+        float scale = fminf((float)info.width, (float)info.height) / REFERENCE_SIZE;
+        filament_plume_push push = {
+            .extent = {(float)info.width, (float)info.height},
+            /* The compact sketch advances PI/80 per frame.  Assume its
+             * intended 60 Hz playback while making motion refresh-independent. */
+            .time = PI / 80.0f + elapsed * (60.0f * PI / 80.0f),
+            .point_size = large_points ? fmaxf(1.0f, scale) : 1.0f,
+        };
+        flux_graphics_pipeline_bind(frame, pipeline, &push, sizeof(push));
+        vkCmdDraw(command, POINT_COUNT, 1, 0, 0);
+
+        flux_frame_end_pass(frame);
+        flux_frame_timestamp_end(frame);
+
+        result = flux_frame_submit(frame);
+        if (result != FLUX_OK) {
+            print_last_error("flux_frame_submit", result);
+            break;
+        }
+        result = flux_frame_present(frame);
+        if (result == FLUX_ERROR_SURFACE_LOST) {
+            glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
+            if (framebuffer_width > 0 && framebuffer_height > 0)
+                (void)flux_surface_resize(surface, (uint32_t)framebuffer_width,
+                                          (uint32_t)framebuffer_height);
+        } else if (result != FLUX_OK) {
+            print_last_error("flux_frame_present", result);
+            break;
+        }
+
+        if (++frame_number == 1)
+            printf("first frame presented at %ux%u\n", info.width, info.height);
+    }
+
+    flux_device_wait_idle(device);
+    flux_graphics_pipeline_release(pipeline);
+    flux_surface_release(surface);
+    vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
+    flux_device_release(device);
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return result == FLUX_OK ? 0 : (int)result;
+}

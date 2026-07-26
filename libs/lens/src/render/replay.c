@@ -38,6 +38,54 @@ static inline bool rect_overlaps(flux_rect a, flux_rect b) {
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
+static inline bool rect_equal(flux_rect a, flux_rect b) {
+    return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Display-list records (ADR-0030 status note, 2026-07)              */
+/*                                                                    */
+/*  An unchanged subtree (subtree_changed == false) with a valid      */
+/*  recorded segment re-submits the recording instead of re-emitting  */
+/*  every command — glyph quad rebuilds, path tessellation and        */
+/*  measure calls are skipped; the pixels are still redrawn every     */
+/*  frame (the host clears the framebuffer), they just come from the  */
+/*  recording. Validity layers:                                       */
+/*    - subtree_changed: content + node rect (hash covers hover etc.) */
+/*    - record_clip: the lens clip argument (culling decisions were   */
+/*      baked against it; catches overlay bounds / viewport changes   */
+/*      that never reach the canvas scissor)                          */
+/*    - record_text_gen: flux-text atlas clear count (a clear re-     */
+/*      packs glyph texels; recorded UVs would freeze stale)          */
+/*    - canvas anchor (flux_canvas_replay): framebuffer extent,       */
+/*      absolute transform (scale/scroll-origin), incoming scissor.   */
+/* ------------------------------------------------------------------ */
+
+/* Drop a node's record handle WITHOUT releasing the segment: store
+ * teardown runs outside render, where the owning canvas may already be
+ * destroyed — dereferencing the handle to release it would be a
+ * use-after-free. A live canvas reclaims the orphaned slot through its
+ * LRU budget. (Render-time replacement in lensi_render_node has the live
+ * canvas at hand and releases properly.) */
+void lensi_node_drop_record(lens *ui, lens_node *n) {
+    (void)ui;
+    n->record = (flux_canvas_record)FLUX_CANVAS_RECORD_INIT;
+}
+
+/* Drop every record handle without releasing — used when the render
+ * canvas changes, because the old canvas (and its slot pool) may already
+ * be destroyed, so dereferencing the handles to release them would be a
+ * use-after-free. Live canvases reclaim the orphaned slots through their
+ * LRU budget. */
+static void drop_all_records(lens *ui) {
+    const lens_store *s = &ui->store;
+    for (uint32_t i = 0; i < s->cap; i++) {
+        if (!s->slots[i].id)
+            continue;
+        lensi_node_drop_record(ui, s->slots[i].node);
+    }
+}
+
 static inline flux_rect rect_intersect(flux_rect a, flux_rect b) {
     float x1 = a.x > b.x ? a.x : b.x;
     float y1 = a.y > b.y ? a.y : b.y;
@@ -54,20 +102,31 @@ static inline flux_rect rect_intersect(flux_rect a, flux_rect b) {
 void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect clip) {
     flux_rect box = n->final_rect;
     float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
+    /* The clip as seen by this node's own commands; `clip` is narrowed
+     * below for scroll children, but the record validates against the
+     * entry value. */
+    const flux_rect entry_clip = clip;
 
     /* Cull nodes that are completely outside the clip region. */
     if (!rect_overlaps(box, clip))
         return;
 
-    /* Damage tracking: skip entire unchanged subtrees.
-     * Root is always rendered (it may have no cmds but its children
-     * are gated by their own subtree_changed).
-     *
-     * NOTE: disabled until subtree offscreen cache (ADR-0030) lands.
-     * Today the host clears the whole framebuffer each frame, so
-     * skipping a subtree leaves a blank hole. Re-enable once we
-     * blit cached subtrees instead of replaying draw commands. */
-    (void)n->subtree_changed; /* hash still computed for future use */
+    /* Replay path: skip re-emitting an unchanged subtree. The canvas
+     * does its own anchor validation inside flux_canvas_replay; a false
+     * return means the segment went stale (move/scale/clip/extent), so
+     * fall through, re-emit and re-record below. */
+    if (!n->subtree_changed && n->record.slot && rect_equal(n->record_clip, clip) &&
+        n->record_text_gen == ui->record_text_gen && flux_canvas_replay(canvas, n->record))
+        return;
+
+    /* Re-emit + re-record. The segment belongs to the live render
+     * canvas (a canvas switch drops every handle up front), so it is
+     * safe to release here. */
+    if (n->record.slot) {
+        flux_canvas_record_release(canvas, n->record);
+        n->record = (flux_canvas_record)FLUX_CANVAS_RECORD_INIT;
+    }
+    bool recording = flux_canvas_begin_record(canvas);
 
     /* Draw commands can nest logical clips (table viewport -> body -> cell).
      * Flux's clip_rect sets an absolute scissor rather than intersecting it,
@@ -344,8 +403,16 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
             viewport_w = 0.0f;
         flux_rect viewport = {box.x + n->pad, box.y + n->pad, viewport_w, box.h - 2.0f * n->pad};
         clip = rect_intersect(clip, viewport);
-        if (clip.w <= 0.0f || clip.h <= 0.0f)
+        if (clip.w <= 0.0f || clip.h <= 0.0f) {
+            /* Children are fully clipped away; close the recording with
+             * just this node's own commands in it. */
+            if (recording) {
+                n->record = flux_canvas_end_record(canvas);
+                n->record_clip = entry_clip;
+                n->record_text_gen = ui->record_text_gen;
+            }
             return;
+        }
         flux_canvas_save(canvas);
         /* flux_canvas_clip_rect sets the scissor directly; it does not
          * apply the current canvas transform.  Convert logical clip to
@@ -368,22 +435,31 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
     if (pushed_canvas_clip) {
         flux_canvas_restore(canvas);
     }
+
+    if (recording) {
+        n->record = flux_canvas_end_record(canvas);
+        n->record_clip = entry_clip;
+        n->record_text_gen = ui->record_text_gen;
+    }
 }
 
 /* ------------------------------------------------------------------ */
 /*  Damage tracking — mark nodes whose geometry or appearance changed  */
 /* ------------------------------------------------------------------ */
 
-static bool mark_subtree_changed(lens_node *n) {
+/* Non-static (lensi_ prefix) so the overlay layer can run the same
+ * bottom-up pass on its sub-roots — overlays live outside ui->root, so
+ * lensi_mark_dirty alone never reaches them. */
+bool lensi_mark_subtree_changed(lens_node *n) {
     bool changed = false;
     if (n->phase != LENS_NODE_STABLE)
         changed = true;
-    if (n->has_prev) {
-        if (n->final_rect.x != n->prev_rect.x || n->final_rect.y != n->prev_rect.y ||
-            n->final_rect.w != n->prev_rect.w || n->final_rect.h != n->prev_rect.h)
+    if (n->has_render_rect) {
+        if (n->final_rect.x != n->render_rect.x || n->final_rect.y != n->render_rect.y ||
+            n->final_rect.w != n->render_rect.w || n->final_rect.h != n->render_rect.h)
             changed = true;
     } else {
-        /* First frame with geometry: must paint. */
+        /* First rendered frame with geometry: must paint. */
         if (n->final_rect.w > 0.0f || n->final_rect.h > 0.0f)
             changed = true;
     }
@@ -395,16 +471,30 @@ static bool mark_subtree_changed(lens_node *n) {
     n->last_active_t = n->active_t;
 
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
-        if (mark_subtree_changed(c))
+        if (lensi_mark_subtree_changed(c))
             changed = true;
     }
     n->subtree_changed = changed;
     return changed;
 }
 
+/* Commit the geometry baseline only after the tree was actually emitted.
+ * This deliberately includes clipped descendants: if they later become
+ * visible, an ancestor geometry/clip change invalidates the enclosing
+ * record, while keeping an off-screen stable child from forcing perpetual
+ * repaint. */
+static void commit_render_rects(lens_node *n) {
+    if (!n)
+        return;
+    n->render_rect = n->final_rect;
+    n->has_render_rect = true;
+    for (lens_node *c = n->first_child; c; c = c->next_sibling)
+        commit_render_rects(c);
+}
+
 void lensi_mark_dirty(lens *ui) {
     if (ui->root)
-        mark_subtree_changed(ui->root);
+        lensi_mark_subtree_changed(ui->root);
 }
 
 flux_result lensi_render_tree(lens *ui, flux_canvas *canvas) {
@@ -412,6 +502,22 @@ flux_result lensi_render_tree(lens *ui, flux_canvas *canvas) {
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (!ui->root)
         return FLUX_OK;
+
+    /* Display-list records: the canvas owns the segments. A canvas switch
+     * means every handle may dangle (the old canvas may be destroyed), so
+     * drop them all without releasing; a live old canvas reclaims the
+     * orphaned slots via its LRU budget. */
+    if (ui->record_canvas != canvas) {
+        drop_all_records(ui);
+        ui->record_canvas = canvas;
+    }
+    /* Glyph UVs freeze into records; a flux-text atlas clear re-packs the
+     * texels, so records stamped with an older clear count must re-record. */
+    if (ui->text) {
+        flux_text_stats ts;
+        flux_text_get_stats(ui->text, &ts);
+        ui->record_text_gen = ts.atlas_clears;
+    }
 
     /* HiDPI: layout and draw commands stay in logical pixels; here we
      * scale the canvas transform so 1 logical px -> ui->scale device px.
@@ -426,6 +532,9 @@ flux_result lensi_render_tree(lens *ui, flux_canvas *canvas) {
     lensi_overlay_render(ui, canvas); /* floating layers above the base */
     if (scaled)
         flux_canvas_restore(canvas);
+    commit_render_rects(ui->root);
+    for (uint32_t i = 0; i < ui->overlay_layer_count; ++i)
+        commit_render_rects(ui->overlay_layers[i]);
     return FLUX_OK;
 }
 

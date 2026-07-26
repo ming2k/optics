@@ -6,7 +6,7 @@
 
 #![deny(rust_2018_idioms)]
 
-use iris::{Cursor, ColorScheme};
+use iris::{ColorScheme, Cursor};
 
 #[test]
 fn version_string_is_nonempty() {

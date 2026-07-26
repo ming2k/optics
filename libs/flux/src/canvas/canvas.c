@@ -122,6 +122,9 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
 void flux_canvas_destroy(flux_canvas *c) {
     if (!c)
         return;
+    /* Recorded segments retain images; release them before the backend
+     * (and its image teardown) goes away. */
+    canvas_record_pool_destroy(c);
     /* Backend owns all GPU resources (and any in-flight-frame wait). */
     c->backend->canvas_destroy(c->backend, c);
 
@@ -321,12 +324,57 @@ void flux_canvas_transform(flux_canvas *c, flux_mat3x2 m) {
 void flux_canvas_clip_rect(flux_canvas *c, flux_rect r) {
     if (!c)
         return;
-    int32_t x = (int32_t)r.x;
-    int32_t y = (int32_t)r.y;
-    uint32_t w = (uint32_t)(r.w > 0.0f ? r.w : 0.0f);
-    uint32_t h = (uint32_t)(r.h > 0.0f ? r.h : 0.0f);
-    flux_recti sc = {x, y, w, h};
-    c->states[c->state_top].scissor = sc;
+
+    flux_canvas_state *state = &c->states[c->state_top];
+    flux_rect transformed =
+        flux_mat3x2_transform_rect(state->transform, r);
+    flux_recti current = state->scissor;
+    int64_t current_left = current.x;
+    int64_t current_top = current.y;
+    int64_t current_right = current_left + (int64_t)current.w;
+    int64_t current_bottom = current_top + (int64_t)current.h;
+    flux_recti sc = {current.x, current.y, 0, 0};
+
+    if (isfinite(transformed.x) && isfinite(transformed.y)
+        && isfinite(transformed.w) && isfinite(transformed.h)
+        && transformed.w > 0.0f && transformed.h > 0.0f) {
+        double left_d = floor((double)transformed.x);
+        double top_d = floor((double)transformed.y);
+        double right_d =
+            ceil((double)transformed.x + (double)transformed.w);
+        double bottom_d =
+            ceil((double)transformed.y + (double)transformed.h);
+        int64_t left = current_left;
+        int64_t top = current_top;
+        int64_t right = current_right;
+        int64_t bottom = current_bottom;
+
+        if (left_d > (double)left)
+            left = left_d < (double)current_right
+                       ? (int64_t)left_d
+                       : current_right;
+        if (top_d > (double)top)
+            top = top_d < (double)current_bottom
+                      ? (int64_t)top_d
+                      : current_bottom;
+        if (right_d < (double)right)
+            right = right_d > (double)current_left
+                        ? (int64_t)right_d
+                        : current_left;
+        if (bottom_d < (double)bottom)
+            bottom = bottom_d > (double)current_top
+                         ? (int64_t)bottom_d
+                         : current_top;
+
+        if (right > left && bottom > top) {
+            sc.x = (int32_t)left;
+            sc.y = (int32_t)top;
+            sc.w = (uint32_t)(right - left);
+            sc.h = (uint32_t)(bottom - top);
+        }
+    }
+
+    state->scissor = sc;
     c->backend->set_scissor(c->backend, c, sc);
 }
 
@@ -369,9 +417,9 @@ static uint32_t pack_uv(float u, float v) {
     return pu | (pv << 16);
 }
 
-static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux_bindless_handle sh,
-                                           flux_rect dst, flux_rect src, flux_color tint,
-                                           uint32_t kind) {
+static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux_sampler *sampler,
+                                           flux_bindless_handle sh, flux_rect dst, flux_rect src,
+                                           flux_color tint, uint32_t kind) {
     /* Image draws need a GPU-resident texture (img->bindless): unsupported on
      * a headless CPU canvas. */
     if (!c->device || sh == FLUX_BINDLESS_INVALID)
@@ -411,7 +459,9 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
     pc.image_src[2] = src.w;
     pc.image_src[3] = src.h;
 
-    c->backend->submit(c->backend, c, CANVAS_PIPE_IMAGE, &pc, v, 6);
+    canvas_record_retain_image(c, img);
+    canvas_record_retain_sampler(c, sampler);
+    canvas_emit(c, CANVAS_PIPE_IMAGE, &pc, v, 6);
 }
 
 /* ------------------------------------------------------------------ */
@@ -472,7 +522,7 @@ static void draw_sdf_rrect(flux_canvas *c, flux_rect r, float radius, flux_color
     pc.image_src[2] = 0.0f;
     pc.image_src[3] = 0.0f;
 
-    c->backend->submit(c->backend, c, CANVAS_PIPE_SDF, &pc, v, 6);
+    canvas_emit(c, CANVAS_PIPE_SDF, &pc, v, 6);
 }
 
 void flux_canvas_fill_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color) {
@@ -495,15 +545,15 @@ void flux_canvas_draw_image(flux_canvas *c, flux_image *img, flux_rect dst,
         return;
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
     flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
-    draw_image_with_sampler_handle(c, img, sh, dst, FLUX_SRC_WHOLE, tint, 3u);
+    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, 3u);
 }
 
 void flux_canvas_draw_image_sub(flux_canvas *c, flux_image *img, flux_rect dst, flux_rect src) {
     if (!c || !c->recording || !img)
         return;
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, sh, dst, src, flux_color_rgba_premul(255, 255, 255, 255),
-                                   3u);
+    draw_image_with_sampler_handle(c, img, NULL, sh, dst, src,
+                                   flux_color_rgba_premul(255, 255, 255, 255), 3u);
 }
 
 void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *img, flux_sampler *sampler,
@@ -512,7 +562,7 @@ void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *img, flux_sample
         return;
     flux_bindless_handle sh = flux_sampler_bindless_handle(sampler);
     flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
-    draw_image_with_sampler_handle(c, img, sh, dst, FLUX_SRC_WHOLE, tint, 3u);
+    draw_image_with_sampler_handle(c, img, sampler, sh, dst, FLUX_SRC_WHOLE, tint, 3u);
 }
 
 void flux_canvas_draw_image_coverage(flux_canvas *c, flux_image *img, flux_rect dst,
@@ -520,7 +570,7 @@ void flux_canvas_draw_image_coverage(flux_canvas *c, flux_image *img, flux_rect 
     if (!c || !c->recording || !img)
         return;
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, sh, dst, FLUX_SRC_WHOLE, tint, 4u);
+    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, 4u);
 }
 
 void flux_canvas_draw_image_coverage_sub(flux_canvas *c, flux_image *img, flux_rect dst,
@@ -528,7 +578,7 @@ void flux_canvas_draw_image_coverage_sub(flux_canvas *c, flux_image *img, flux_r
     if (!c || !c->recording || !img)
         return;
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, sh, dst, src, tint, 4u);
+    draw_image_with_sampler_handle(c, img, NULL, sh, dst, src, tint, 4u);
 }
 
 /* ------------------------------------------------------------------ */
@@ -627,7 +677,12 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
             v_count += 6;
         }
 
-        c->backend->submit(c->backend, c, CANVAS_PIPE_GLYPH, &pc, verts, v_count);
+        canvas_emit(c, CANVAS_PIPE_GLYPH, &pc, verts, v_count);
+    }
+
+    if (!host) {
+        canvas_record_retain_image(c, desc->atlas);
+        canvas_record_retain_sampler(c, desc->sampler);
     }
 
     if (host) {
@@ -641,4 +696,12 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
 
 uint64_t flux_canvas_dropped_draws(const flux_canvas *c) {
     return c ? c->dropped_draws : 0;
+}
+
+uint64_t flux_canvas_submit_calls(const flux_canvas *c) {
+    return c ? c->submit_calls : 0;
+}
+
+uint64_t flux_canvas_recorded_draws(const flux_canvas *c) {
+    return c ? c->recorded_draws : 0;
 }

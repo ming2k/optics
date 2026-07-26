@@ -21,6 +21,7 @@ unconditionally.
 |---------|--------|---------|
 | [`compute_fill`](#compute_fill) | always | a compute pipeline: dispatch, SSBO readback |
 | [`hello_triangle`](#hello_triangle) | GLFW | the smallest render loop; public graphics pipeline |
+| [`filament_plume`](#filament_plume) | GLFW | a flowing filament plume from 10,000 procedural points |
 | [`canvas_hello`](#canvas_hello) | GLFW | the 2D canvas: paths, paint, text |
 | [`scene_cube`](#scene_cube) | GLFW | 3D mesh + material, camera, a depth attachment |
 | [`particles_terrain`](#particles_terrain) | GLFW | animated heightfield as a point cloud |
@@ -55,6 +56,16 @@ pipeline-state boilerplate in user code.
 
 This is the canonical entry point to flux: device, surface, one pipeline,
 present loop, swapchain resize, and per-frame GPU timestamps.
+
+## filament_plume
+
+A flowing, feather-like plume drawn from 10,000 translucent white points,
+implemented as a direct shader translation of a compact p5.js formula.
+`gl_VertexIndex` replaces the JavaScript loop variable, so the animation has
+no vertex buffer and performs no per-point CPU work: one `vkCmdDraw` generates
+the whole frame. The public pipeline uses `FLUX_TOPOLOGY_POINT_LIST` and
+`FLUX_BLEND_PRESET_PREMUL`; a small push-constant block supplies time,
+framebuffer extent, and DPI-aware point size.
 
 ## canvas_hello
 

@@ -290,6 +290,8 @@ impl Application {
             height: config.height,
             dark: config.dark,
             log_raw: config.log_raw,
+            start: None,
+            stop: None,
             build: build_fn,
             paint: paint_fn,
             user: user_ptr,
@@ -507,6 +509,7 @@ fn pick_path(title: Option<&str>, folder: bool) -> Option<String> {
             .as_ref()
             .map(|c| c.as_ptr())
             .unwrap_or(std::ptr::null()),
+        ..Default::default()
     };
     let mut buf = vec![0u8; 4096];
     let rc = unsafe {

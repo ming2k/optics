@@ -5,6 +5,7 @@
 #define FLUX_CORE_INTERNAL_H
 
 #include <flux/core.h>
+#include <flux/math.h>   /* flux_mat4 (flux_frame scene caches) */
 #include <flux/vulkan.h> /* flux_bindless_handle */
 #include <pthread.h>
 #include <stdatomic.h>
@@ -218,6 +219,15 @@ typedef struct flux_staging_buf {
     struct flux_staging_buf *next;
 } flux_staging_buf;
 
+/* One idle transient command pool in the device cache (see
+ * flux_device). The pool is parked already reset, ready for
+ * flux_vk_new_transient_cmd to hand out again. */
+typedef struct flux_transient_pool {
+    VkCommandPool pool;
+    uint32_t family; /* queue family the pool was created for */
+    struct flux_transient_pool *next;
+} flux_transient_pool;
+
 /* One submitted-but-not-yet-retired upload batch. Upload submissions are
  * deferred: the one-shot helpers and flux_uploads_flush hand the graphics
  * (or transfer) queue their copy commands and return without a fence wait,
@@ -229,8 +239,12 @@ typedef struct flux_staging_buf {
  * read and the command pools still executing. */
 typedef struct flux_upload_pending {
     VkFence fence;              /* signals when the copy batch retired */
-    VkCommandPool pool;         /* destroyed on recycle; VK_NULL_HANDLE allowed */
+    VkCommandPool pool;         /* returned to the transient pool cache on
+                                 * recycle; VK_NULL_HANDLE allowed */
     VkCommandPool pool2;        /* QFOT graphics-side pool; usually NULL */
+    uint32_t pool_family;       /* queue family of pool; UINT32_MAX when
+                                 * unknown (destroy instead of caching) */
+    uint32_t pool2_family;      /* same for pool2 */
     VkSemaphore sem;            /* QFOT handoff semaphore; usually NULL */
     flux_staging_buf *stagings; /* returned to the staging cache on recycle */
     uint64_t serial;            /* graphics submission serial; 0 for non-graphics batches */
@@ -255,6 +269,7 @@ struct flux_device {
     bool is_amd;
     bool is_intel;
     bool is_apple;
+    bool large_points_enabled;
     VkDeviceSize buffer_image_granularity;
 
     /* Vulkan handles */
@@ -358,6 +373,18 @@ struct flux_device {
     flux_staging_buf *staging_idle;
     uint64_t staging_idle_bytes;
 
+    /* Transient command pool cache (oneshot.c). One-shot submissions
+     * (uploads, layout transitions, readback) used to create + destroy
+     * a VkCommandPool each time; the text atlas flush hits that path
+     * every frame a new glyph appears. Pools are parked here — reset,
+     * not destroyed — once the GPU provably retired every batch
+     * recorded from them (the pending-upload fence), and handed out by
+     * queue family. Shares staging_lock (a leaf lock, same recycle
+     * paths); drained at device teardown by flux_vk_staging_pool_destroy
+     * once the device is idle. */
+    flux_transient_pool *transient_pool_idle;
+    uint32_t transient_pool_idle_count;
+
     /* Protects publication of lazily-created per-module state slots. The lock
      * is held only while reading or publishing pointers and hooks; allocation,
      * Vulkan calls, and module locks must remain outside it. */
@@ -443,7 +470,8 @@ flux_result flux_vk_alloc_image(flux_device *d, const VkImageCreateInfo *ici,
 flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferUsageFlags usage,
                                     flux_staging_buf **out);
 void flux_vk_staging_release(flux_device *d, flux_staging_buf *sb);
-/* Destroy every idle entry. Device must be idle (teardown only). */
+/* Destroy every idle staging entry and every parked transient command
+ * pool. Device must be idle (teardown only). */
 void flux_vk_staging_pool_destroy(flux_device *d);
 
 /* Deferred upload retirement (bodies in oneshot.c). drain waits on every
@@ -468,6 +496,13 @@ VkResult flux_vk_submit_upload(flux_device *d, VkQueue queue, VkCommandBuffer cm
 void flux_vk_upload_pending_park(flux_device *d, VkFence fence, VkCommandPool pool,
                                  VkCommandPool pool2, VkSemaphore sem,
                                  flux_staging_buf *stagings, uint64_t serial);
+/* Same as flux_vk_upload_pending_park but tags each pool with its queue
+ * family so the recycle path can return it to the transient pool cache
+ * instead of destroying it. Pass UINT32_MAX for an unknown family. */
+void flux_vk_upload_pending_park_families(flux_device *d, VkFence fence, VkCommandPool pool,
+                                          uint32_t pool_family, VkCommandPool pool2,
+                                          uint32_t pool2_family, VkSemaphore sem,
+                                          flux_staging_buf *stagings, uint64_t serial);
 
 /* Upload batch internals (public entry points are flux_uploads_begin /
  * flux_uploads_flush). Upload helpers record into the batch while
@@ -620,6 +655,27 @@ struct flux_frame {
     flux_frame_state state;
     bool pass_active; /* true between begin_pass and end_pass */
     bool readback_requested;
+
+    /* Scene-draw caches (scene.c). begin_frame re-initialises this
+     * whole struct, so they are per-frame by construction.
+     *
+     * scene_bound_* mirror the command buffer's current pipeline /
+     * descriptor bindings so scene_draw can skip redundant rebinds
+     * (the canvas backend does the same per pass). Pipeline and
+     * descriptor bindings persist across the passes of one command
+     * buffer, so the mirror stays valid when a frame holds several
+     * scene passes; it does *not* observe other modules' passes, so a
+     * scene pass interleaved with e.g. a canvas pass in one frame must
+     * rebind (see scene.c).
+     *
+     * scene_view_* cache inverse(camera.view): one memcmp per draw
+     * instead of a 4x4 inverse for the common static-camera pass. */
+    VkPipeline scene_bound_pipeline;
+    VkDescriptorSet scene_bound_set;
+    VkPipelineLayout scene_bound_layout;
+    flux_mat4 scene_view_src;
+    flux_mat4 scene_view_inv;
+    bool scene_view_inv_valid;
 };
 
 struct flux_surface {

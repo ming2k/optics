@@ -503,10 +503,7 @@ void txt_engine_shutdown(flux_text *t) {
     txt_atlas_destroy(t);
     glyph_cache_destroy(t->cache);
     t->cache = NULL;
-    for (int i = 0; i < 32; i++) {
-        free(t->layout_cache[i].utf8);
-        free(t->layout_cache[i].layout_buf);
-    }
+    txt_layout_cache_reset(t);
     free(t->layout_buf);
     free(t->runs_buf);
     free(t->run_levels_buf);

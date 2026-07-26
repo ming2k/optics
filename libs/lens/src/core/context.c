@@ -150,6 +150,53 @@ bool lens_anim_pending(const lens *ui) {
     return ui && ui->anim_pending;
 }
 
+/* Read-only repaint query for damage-driven hosts (valid between lens_end
+ * and the next lens_begin). True when anything the last lens_render would
+ * have produced differs from what is already on screen. */
+bool lens_frame_needs_repaint(const lens *ui) {
+    if (!ui)
+        return false;
+
+    /* Base tree damage: lifecycle, geometry, hover/active eases and
+     * draw-list hash changes, rolled up bottom-up by lensi_mark_dirty. */
+    if (ui->root && ui->root->subtree_changed)
+        return true;
+
+    /* Floating layers (popups, menus, panels) are independent sub-roots:
+     * their damage is not part of the base tree, and an open/close or a
+     * z-order change alters the layer set itself. prev_overlay_layer_ids
+     * holds last frame's set (carried across the arena reset). */
+    if (ui->overlay_layer_count != ui->prev_overlay_layer_count)
+        return true;
+    for (uint32_t i = 0; i < ui->overlay_layer_count; i++) {
+        lens_node *n = ui->overlay_layers[i];
+        if (!n || n->subtree_changed)
+            return true;
+        if (n->id != ui->prev_overlay_layer_ids[i])
+            return true;
+    }
+
+    /* The tooltip is painted straight from lens_render (no draw list, no
+     * node), so only its presence is observable here: active, or active
+     * last frame and now gone (its pixels must be erased). */
+    if (ui->tooltip.active || ui->prev_tooltip_active)
+        return true;
+
+    /* Time-driven state: an eased value (hover/active fade, slide) still
+     * in transit — the next frame differs from this one even with no
+     * input. */
+    if (ui->anim_pending)
+        return true;
+
+    /* A focused text widget keeps the caret clock alive: the host paces
+     * low-frequency frames for the blink, and each of those frames must
+     * actually paint. */
+    if (ui->caret_rect.w > 0.0f)
+        return true;
+
+    return false;
+}
+
 void lens_set_reduced_motion(lens *ui, bool reduced) {
     if (ui)
         ui->reduced_motion = reduced;
@@ -208,6 +255,7 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->last_node = NULL;
     ui->overlay_layers = NULL; /* arena-backed; resets with the arena */
     ui->overlay_layer_count = ui->overlay_layer_cap = 0;
+    ui->prev_tooltip_active = ui->tooltip.active;
     ui->tooltip.active = false;
 
     /* implicit root: a column container covering the display (ADR-0028) */
@@ -241,7 +289,8 @@ void lens_end(lens *ui) {
     if (ui->input.mouse_pressed[LENS_MOUSE_LEFT] && !ui->click_hit_focusable)
         ui->focused_id = 0;
 
-    lensi_mark_dirty(ui); /* compute subtree_changed for culling */
+    lensi_mark_dirty(ui);         /* compute subtree_changed for culling */
+    lensi_overlay_mark_dirty(ui); /* same for floating-layer sub-roots   */
 
     /* Modal focus trap is per-frame; reset so a frame with no open modal
      * falls back to whole-range Tab cycling (ADR-0039). */

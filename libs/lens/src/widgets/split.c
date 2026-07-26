@@ -61,14 +61,29 @@ bool lens_split_begin(lens *ui, const char *id, lens_split_direction dir,
  * second auto-closes pane 1 and opens pane 2. The caller fills each pane
  * between calls. lens_split_end closes pane 2 and the split. */
 bool lens_split_pane(lens *ui) {
-    lens_node *split = lensi_open_container(ui);
+    lens_node *current = lensi_open_container(ui);
+    lens_node *split = current;
+    lens_split_state *sst =
+        current && current->state_bytes == sizeof *sst ? current->state : NULL;
 
-    /* If the open container is a pane (not the split itself), this is the
-     * second pane: close the first so the new pane is a sibling. */
-    lens_split_state *sst = split ? lens_node_state(split, sizeof *sst) : NULL;
-    if (sst && sst->pane_open) {
+    /* The second call arrives with pane 1 as the open container. Resolve its
+     * parent split without allocating split-shaped state on the pane itself:
+     * that old allocation made pane 2 a child of pane 1 on the first frame
+     * and only happened to self-correct on later frames. */
+    if (!sst && current && current->parent
+        && current->parent->state_bytes == sizeof *sst) {
+        lens_split_state *parent_state = current->parent->state;
+        if (parent_state && parent_state->pane_open) {
+            split = current->parent;
+            sst = parent_state;
+        }
+    }
+
+    if (current != split) {
         lensi_open_container_pop(ui); /* close pane 1 → back to the split */
-        split = lensi_open_container(ui);
+    }
+    if (!split || !sst) {
+        return false;
     }
 
     lens_id cid = lensi_gen_container_id(ui, "pane");

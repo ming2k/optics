@@ -56,7 +56,7 @@ static void test_tooltip_render_path(void) {
     in.cursor = (flux_point){20, 15};
     lens_begin(ui, &in);
     lens_button_ex(ui, (lens_button_opts){.label = "btn", .box = {.tooltip = "regression"}});
-    lens_render(ui, NULL); /* headless: NULL canvas is a documented no-op */
+    (void)lens_render(ui, NULL); /* headless: NULL canvas is a documented no-op */
     lens_end(ui);
 
     CHECK(lens_overflowed(ui) == false);

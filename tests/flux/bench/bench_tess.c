@@ -61,6 +61,15 @@ void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id
     (void)vertex_count;
 }
 
+/* Referenced by the tess cache (compiled in with geometry_tess.c) but
+ * never reached here: the bench drives ear_clip_contour directly. */
+void push_vertex(flux_canvas_vertex *v, flux_point p, flux_mat3x2 tx, flux_color c) {
+    (void)v;
+    (void)p;
+    (void)tx;
+    (void)c;
+}
+
 float flux_canvas_mat3x2_pixel_scale(flux_mat3x2 m) {
     (void)m;
     return 1.0f;

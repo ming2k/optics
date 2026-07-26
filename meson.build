@@ -1,7 +1,7 @@
 project('optics', ['c'],
   version : '0.2.3',
   license : 'MIT',
-  meson_version : '>=1.0',
+  meson_version : '>=1.8.0',
   default_options : [
     'c_std=c2x',
     'warning_level=3',

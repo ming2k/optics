@@ -59,12 +59,16 @@ static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t st
 
     const char *segment = text + start;
     size_t segment_len = segment_end - start;
-    size_t cut = flux_text_byte_for_x(
-        ui->text, segment, segment_len, max_width,
-        &(flux_text_style){.size_px = size, .weight = 0.0f});
+    const flux_text_style style = {.size_px = size, .weight = 0.0f};
+    size_t cut = flux_text_byte_for_x(ui->text, segment, segment_len, max_width, &style);
     if (cut > segment_len)
         cut = segment_len;
-    while (cut > 0 && measure_slice(ui, segment, cut, size).width > max_width)
+    /* byte_for_x returns the *nearest* boundary, which can overshoot the
+     * budget by up to half a glyph; back off one codepoint at a time until
+     * the caret x of `cut` fits. Querying the caret within the full segment
+     * keeps every step on the same layout-cache entry — measuring each
+     * shrinking prefix instead would shape a fresh string per step. */
+    while (cut > 0 && flux_text_x_for_byte(ui->text, segment, segment_len, cut, &style) > max_width)
         cut = utf8_prev_boundary(segment, cut);
     if (cut == 0)
         cut = utf8_next_boundary(segment, segment_len, 0);

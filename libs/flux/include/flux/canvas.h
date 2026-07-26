@@ -288,6 +288,9 @@ FLUX_API void flux_canvas_end_target(flux_canvas *c);
  * window are silent no-ops (consult flux_get_last_error). */
 FLUX_API void flux_canvas_save(flux_canvas *c);
 FLUX_API void flux_canvas_restore(flux_canvas *c);
+/* Intersect the current clip with `r`. The rectangle is expressed in the
+ * current logical coordinate system and transformed to the physical-pixel
+ * scissor, including content scale and affine transforms. */
 FLUX_API void flux_canvas_clip_rect(flux_canvas *c, flux_rect r);
 FLUX_API void flux_canvas_translate(flux_canvas *c, float x, float y);
 FLUX_API void flux_canvas_scale(flux_canvas *c, float sx, float sy);
@@ -411,6 +414,69 @@ FLUX_API void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_de
  * small for the workload; check flux_frame_alloc_transient or increase the
  * ring size. */
 FLUX_API uint64_t flux_canvas_dropped_draws(const flux_canvas *c);
+
+/* Vulkan batching diagnostics, cumulative since canvas creation.
+ * `submit_calls` counts front-end batches handed to the backend;
+ * `recorded_draws` counts vkCmdDraw commands after consecutive compatible
+ * submits are merged. Both are zero for the CPU backend. */
+FLUX_API uint64_t flux_canvas_submit_calls(const flux_canvas *c);
+FLUX_API uint64_t flux_canvas_recorded_draws(const flux_canvas *c);
+
+/* ------------------------------------------------------------------ */
+/*  Display-list segments (record / replay)                           */
+/* ------------------------------------------------------------------ */
+
+/* Opaque handle to a recorded draw segment. The segment is owned by the
+ * canvas (fixed slot pool); the handle is a {slot, generation} pair so a
+ * stale handle — released, LRU-evicted, or from another canvas — fails
+ * validation instead of replaying the wrong draws. Zero-initialise for
+ * the null record. */
+typedef struct flux_canvas_record {
+    void *slot;
+    uint64_t generation;
+} flux_canvas_record;
+
+#define FLUX_CANVAS_RECORD_INIT {.slot = NULL, .generation = 0}
+
+/* Start capturing every draw submitted between here and the matching
+ * flux_canvas_end_record into a new segment. Recording is passive: draws
+ * are still submitted live, so a recorded frame renders exactly as an
+ * unrecorded one. Recordings nest (e.g. a re-recording parent subtree
+ * around a recording child); every active recording captures every draw.
+ * Returns false (and records nothing) when called outside
+ * begin_frame/end_frame or when the nesting-depth cap is hit — the caller
+ * then simply draws without recording and must not call end_record. */
+FLUX_API bool flux_canvas_begin_record(flux_canvas *c);
+
+/* Close the innermost recording and return its handle (null on budget
+ * overflow or allocation failure — the live draws still happened, only
+ * the recording is lost). The segment stays valid until
+ * flux_canvas_record_release, LRU eviction under the canvas-wide byte
+ * budget, or canvas destruction. */
+FLUX_API flux_canvas_record flux_canvas_end_record(flux_canvas *c);
+
+/* Re-submit a recorded segment. Replays only when the canvas state still
+ * matches the recording exactly — same framebuffer extent, same absolute
+ * transform, same incoming scissor — because vertex positions and push
+ * constants are baked in physical pixels at record time. On any mismatch
+ * (moved/scaled content, changed clip, resized target) nothing is drawn
+ * and false is returned; the caller should re-emit and re-record. A
+ * replay inside an active recording is itself captured, so a
+ * re-recording ancestor stays complete when an unchanged child replays.
+ * Images and custom samplers referenced by the segment are retained by
+ * the canvas for the segment's lifetime. */
+FLUX_API bool flux_canvas_replay(flux_canvas *c, flux_canvas_record rec);
+
+/* Release a segment early (e.g. its subtree changed or died). Safe on a
+ * null or stale handle. Unreleased segments are reclaimed by the canvas's
+ * LRU byte budget and at canvas destruction. */
+FLUX_API void flux_canvas_record_release(flux_canvas *c, flux_canvas_record rec);
+
+/* Diagnostics: cumulative successful end_record / replay counts since
+ * canvas creation. Tests diff these across a frame to assert that a
+ * static frame replays and a changed frame re-records. */
+FLUX_API uint64_t flux_canvas_records_created(const flux_canvas *c);
+FLUX_API uint64_t flux_canvas_records_replayed(const flux_canvas *c);
 
 #ifdef __cplusplus
 }

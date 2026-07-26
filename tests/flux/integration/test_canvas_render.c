@@ -78,11 +78,27 @@ static void draw_glyph_run(flux_canvas *canvas, void *user) {
     flux_canvas_draw_glyph_run(canvas, user);
 }
 
+static void draw_batchable_rects(flux_canvas *canvas, void *user) {
+    (void)user;
+    for (uint32_t i = 0; i < 64; ++i) {
+        uint32_t x = (i % 8u) * 8u;
+        uint32_t y = (i / 8u) * 8u;
+        flux_color color = (i & 1u) ? flux_color_rgba(220, 40, 80, 255)
+                                    : flux_color_rgba(40, 160, 220, 255);
+        flux_canvas_fill_rect_color(canvas, (flux_rect){x, y, 8, 8}, color);
+    }
+}
+
 typedef struct image_transform_case {
     flux_image *image;
     flux_sampler *sampler;
     flux_paint paint;
 } image_transform_case;
+
+typedef struct image_record_case {
+    image_transform_case image;
+    flux_canvas_record record;
+} image_record_case;
 
 static void draw_rotated_image(flux_canvas *canvas, void *user) {
     image_transform_case *tc = user;
@@ -92,6 +108,18 @@ static void draw_rotated_image(flux_canvas *canvas, void *user) {
     flux_canvas_draw_image_sampled(canvas, tc->image, tc->sampler,
                                    (flux_rect){-32.0f, -16.0f, 64.0f, 32.0f}, &tc->paint);
     flux_canvas_restore(canvas);
+}
+
+static void record_rotated_image(flux_canvas *canvas, void *user) {
+    image_record_case *tc = user;
+    EXPECT(flux_canvas_begin_record(canvas));
+    draw_rotated_image(canvas, &tc->image);
+    tc->record = flux_canvas_end_record(canvas);
+    EXPECT(tc->record.slot != nullptr);
+}
+
+static void replay_record(flux_canvas *canvas, void *user) {
+    EXPECT(flux_canvas_replay(canvas, *(flux_canvas_record *)user));
 }
 
 #if defined(FLUX_TEXT_HAVE_FTHB)
@@ -151,6 +179,23 @@ int main(void) {
     EXPECT(flux_arena_init(&arena, 64 * 1024, nullptr) == FLUX_OK);
 
     static uint8_t px[BYTES];
+
+    /* --- state-identical submit batching.
+     * Solid colours live in vertices, so 64 adjacent rect submissions share
+     * all draw-visible Vulkan state and must collapse to one vkCmdDraw while
+     * preserving every submitted primitive. --- */
+    {
+        uint64_t submits = flux_canvas_submit_calls(canvas);
+        uint64_t draws = flux_canvas_recorded_draws(canvas);
+        EXPECT(render_frame(s, canvas, draw_batchable_rects, nullptr) == FLUX_OK);
+        EXPECT(flux_canvas_submit_calls(canvas) - submits == 64);
+        EXPECT(flux_canvas_recorded_draws(canvas) - draws == 1);
+
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, 4, 4)[2] > 180);   /* first blue tile */
+        EXPECT(px_at(px, 60, 60)[0] > 180); /* last red tile */
+    }
 
     /* --- linear gradient: red → blue across x --- */
     {
@@ -317,12 +362,16 @@ int main(void) {
         flux_sampler *nearest = nullptr;
         EXPECT(flux_sampler_create(d, &sdesc, &nearest) == FLUX_OK);
 
-        image_transform_case tc = {
-            .image = image,
-            .sampler = nearest,
-            .paint = flux_paint_solid(flux_color_rgba_premul(255, 255, 255, 128)),
+        image_record_case tc = {
+            .image =
+                {
+                    .image = image,
+                    .sampler = nearest,
+                    .paint = flux_paint_solid(flux_color_rgba_premul(255, 255, 255, 128)),
+                },
+            .record = FLUX_CANVAS_RECORD_INIT,
         };
-        EXPECT(render_frame(s, canvas, draw_rotated_image, &tc) == FLUX_OK);
+        EXPECT(render_frame(s, canvas, record_rotated_image, &tc) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
@@ -340,8 +389,18 @@ int main(void) {
                top_left[1] < 144 && top_left[2] > 112 && top_left[2] < 144);
         EXPECT(px_at(px, 40, 64)[0] < 8); /* outside the rotated 32×64 quad */
 
+        /* A display-list segment owns both referenced bindless resources.
+         * Drop the caller's image and custom-sampler references, then replay:
+         * recycled handles would corrupt these pixels or trip validation. */
+        uint8_t live[BYTES];
+        memcpy(live, px, sizeof live);
         flux_sampler_release(nearest);
         flux_image_release(image);
+        EXPECT(render_frame(s, canvas, replay_record, &tc.record) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(memcmp(live, px, sizeof live) == 0);
+        flux_canvas_record_release(canvas, tc.record);
     }
 
     /* --- batched glyph run (ADR-0010): two quads, one atlas, one

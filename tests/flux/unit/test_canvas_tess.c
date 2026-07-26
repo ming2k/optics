@@ -136,6 +136,18 @@ void emit_tri(flux_canvas_vertex *verts, uint32_t *count, uint32_t cap, flux_mat
     *count += 3;
 }
 
+/* The tess cache replays hits through push_vertex (hidden in
+ * libflux.so); the fake canvas runs at identity transform, so the
+ * raw-coordinate copy matches the emit_tri stub above. */
+void push_vertex(flux_canvas_vertex *v, flux_point p, flux_mat3x2 tx, flux_color c) {
+    (void)tx;
+    (void)c;
+    v->pos[0] = p.x;
+    v->pos[1] = p.y;
+    v->color = 0;
+    v->_pad = 0;
+}
+
 /* --------------------------------------------------------------- */
 /*  Stack-resident fake canvas                                     */
 /* --------------------------------------------------------------- */
@@ -163,6 +175,10 @@ static flux_canvas make_fake_canvas(void) {
     return c;
 }
 
+/* The tess cache keys on the raw verb stream, so the scripted fills
+ * need a path whose `segments` pointer is readable for `count` verbs. */
+static flux_path_segment g_dummy_seg = {0};
+
 static void run_fill(flux_point *poly, uint32_t n) {
     g_script_contour_n = 0;
     g_polygon_n = n;
@@ -173,6 +189,7 @@ static void run_fill(flux_point *poly, uint32_t n) {
     flux_canvas c = make_fake_canvas();
     flux_path dummy = {0}; /* opaque to our scripted flatten */
     dummy.count = 1;       /* defeat the empty-path early-return */
+    dummy.segments = &g_dummy_seg;
     flux_paint paint = flux_paint_default();
     flux_canvas_fill_path(&c, &dummy, &paint);
 }
@@ -182,6 +199,7 @@ static void run_fill_scripted(void) {
     flux_canvas c = make_fake_canvas();
     flux_path dummy = {0};
     dummy.count = 1;
+    dummy.segments = &g_dummy_seg;
     flux_paint paint = flux_paint_default();
     flux_canvas_fill_path(&c, &dummy, &paint);
 }

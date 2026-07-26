@@ -941,12 +941,25 @@ IRIS_API int iris_a11y_init(void) {
     if (rc < 0)
         return -1;
 
-    char *addr = NULL;
+    char addr_buf[1024] = {0};
+    char *addr_owned = NULL;
     sd_bus_error err = SD_BUS_ERROR_NULL;
-    rc = sd_bus_get_property_trivial(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
-                                     "BusAddress", &err, 's', &addr);
-    if (rc < 0 || !addr || !*addr) {
+    rc = sd_bus_get_property_string(
+        session,
+        "org.a11y.Bus",
+        "/org/a11y/bus",
+        "org.a11y.Bus",
+        "BusAddress",
+        &err,
+        &addr_owned
+    );
+    if (rc >= 0 && addr_owned && addr_owned[0] != '\0'
+        && strlen(addr_owned) < sizeof addr_buf) {
+        memcpy(addr_buf, addr_owned, strlen(addr_owned) + 1);
+    } else {
         /* Some setups expose it via GetAddress method instead. */
+        free(addr_owned);
+        addr_owned = NULL;
         sd_bus_error_free(&err);
         sd_bus_message *reply = NULL;
         rc = sd_bus_call_method(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
@@ -956,18 +969,21 @@ IRIS_API int iris_a11y_init(void) {
             sd_bus_unref(session);
             return -1;
         }
-        rc = sd_bus_message_read(reply, "s", &addr);
+        const char *reply_addr = NULL;
+        rc = sd_bus_message_read(reply, "s", &reply_addr);
+        bool valid =
+            rc >= 0 && reply_addr && reply_addr[0] != '\0'
+            && strlen(reply_addr) < sizeof addr_buf;
+        if (valid)
+            memcpy(addr_buf, reply_addr, strlen(reply_addr) + 1);
         sd_bus_message_unref(reply);
-        if (rc < 0 || !addr || !*addr) {
+        if (!valid) {
             sd_bus_error_free(&err);
             sd_bus_unref(session);
             return -1;
         }
     }
-    /* Save the address — we'll need it after closing the session bus. */
-    char addr_buf[1024];
-    strncpy(addr_buf, addr, sizeof addr_buf - 1);
-    addr_buf[sizeof addr_buf - 1] = '\0';
+    free(addr_owned);
     sd_bus_error_free(&err);
     sd_bus_unref(session);
 
@@ -1006,8 +1022,7 @@ IRIS_API int iris_a11y_init(void) {
 
     /* 5. Fallback vtable for /org/a11y/atspi/accessible/<lens_id> paths.
      *    This catches every widget without us registering each one. */
-    sd_bus_slot *slot = NULL;
-    rc = sd_bus_add_fallback_vtable(g_a11y_bus, &slot, "/org/a11y/atspi/accessible",
+    rc = sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
                                     "org.a11y.atspi.Accessible", g_accessible_vtable, NULL, NULL);
     (void)rc;
 
@@ -1015,12 +1030,11 @@ IRIS_API int iris_a11y_init(void) {
      *    vtable each. Each method handler no-ops for roles that do not
      *    support the interface, so orca querying e.g. Text on a button gets
      *    a benign empty answer rather than an unknown-method error. */
-    sd_bus_slot *slot_act = NULL, *slot_txt = NULL, *slot_val = NULL;
-    (void)sd_bus_add_fallback_vtable(g_a11y_bus, &slot_act, "/org/a11y/atspi/accessible",
+    (void)sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
                                      "org.a11y.atspi.Action", g_action_vtable, NULL, NULL);
-    (void)sd_bus_add_fallback_vtable(g_a11y_bus, &slot_txt, "/org/a11y/atspi/accessible",
+    (void)sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
                                      "org.a11y.atspi.Text", g_text_vtable, NULL, NULL);
-    (void)sd_bus_add_fallback_vtable(g_a11y_bus, &slot_val, "/org/a11y/atspi/accessible",
+    (void)sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
                                      "org.a11y.atspi.Value", g_value_vtable, NULL, NULL);
 
     /* 6. Register with the AT-SPI registry (links our root into the

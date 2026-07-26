@@ -23,7 +23,7 @@
 
 #ifdef IRIS_HAVE_PORTAL_WATCH
 
-#define _GNU_SOURCE
+/* _GNU_SOURCE is provided by the build system (add_project_arguments). */
 #include <iris/theme.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -123,10 +123,16 @@ IRIS_API void iris_pump_color_scheme_watcher(void) {
     if (!g_bus)
         return;
     /* Process pending messages; 0 = nothing to do, >0 = handled,
-     * <0 = error (ignore — the next pump will retry). */
+     * <0 = error (clean up on connection failure). */
     for (;;) {
         int rc = sd_bus_process(g_bus, NULL);
-        if (rc <= 0)
+        if (rc < 0) {
+            if (rc == -ENOTCONN || rc == -ECONNRESET || rc == -EPIPE || rc == -EBADF) {
+                iris_stop_color_scheme_watcher();
+            }
+            break;
+        }
+        if (rc == 0)
             break;
     }
 }

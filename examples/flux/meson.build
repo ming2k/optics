@@ -37,6 +37,24 @@ executable('hello_triangle',
   c_args       : ['--embed-dir=' + meson.current_build_dir()],
 )
 
+filament_plume_vert_spv = custom_target('filament_plume.vert.spv',
+  input   : 'shaders/filament_plume.vert',
+  output  : 'filament_plume.vert.spv',
+  command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
+)
+filament_plume_frag_spv = custom_target('filament_plume.frag.spv',
+  input   : 'shaders/filament_plume.frag',
+  output  : 'filament_plume.frag.spv',
+  command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
+)
+executable('filament_plume',
+  'filament_plume.c',
+  filament_plume_vert_spv,
+  filament_plume_frag_spv,
+  dependencies : [flux_dep, glfw_dep, m_dep],
+  c_args       : ['--embed-dir=' + meson.current_build_dir()],
+)
+
 executable('canvas_hello',
   'canvas_hello.c',
   dependencies : [flux_dep, glfw_dep, m_dep],

@@ -2,15 +2,18 @@
  * iris/app.h — cross-platform application entry point.
  *
  * iris_app_run() opens a window, creates a flux device + canvas + lens
- * context, runs the platform event loop, and drives two host callbacks per
- * frame:
+ * context, runs the platform event loop, and drives an optional host
+ * lifecycle around two per-frame callbacks:
  *
- *   1. build(ui, in) — runs inside an open lens_begin/end pair. The host
+ *   1. start(ui, device) — creates host resources from Iris-owned contexts.
+ *   2. build(ui, in) — runs inside an open lens_begin/end pair. The host
  *      builds its chrome (immediate-mode lens widgets) and reads `in`, the
  *      same lens_input snapshot lens is consuming this frame.
- *   2. paint(canvas) — runs inside an open flux_canvas_begin/end pair,
+ *   3. paint(canvas) — runs inside an open flux_canvas_begin/end pair,
  *      *before* lens_render(). Anything the host draws here lands *under*
  *      lens's chrome. Returning without drawing is fine.
+ *   4. stop(ui, device) — releases host resources before Iris tears down
+ *      Lens, Flux, and the device.
  *
  * Today only the Linux/Wayland backend is built; it lives inside libiris
  * (src/app_wayland.c) and is dispatched from iris_app_run in src/app.c.
@@ -21,7 +24,7 @@
  * platform-less CI / bindgen builds.
  *
  * Concurrency: iris_app_run blocks the calling thread until the window
- * is closed. Both callbacks run on the same thread.
+ * is closed. All callbacks run on the same thread.
  */
 #ifndef IRIS_APP_H
 #define IRIS_APP_H
@@ -94,6 +97,16 @@ typedef void (*iris_build_fn)(lens *ui, const lens_input *in, void *user);
  * captures it in the same closure context. */
 typedef void (*iris_paint_fn)(flux_canvas *canvas, flux_device *device, float scale, void *user);
 
+/* Application-resource lifecycle.
+ *
+ * `start` runs after iris has created its flux device, canvas, and lens
+ * context, but before the first frame. Returning false aborts the run.
+ * `stop` runs after the frame loop and before iris destroys any of those
+ * objects, allowing hosts to release device-backed resources in dependency
+ * order. `stop` is called only when `start` was absent or returned true. */
+typedef bool (*iris_start_fn)(lens *ui, flux_device *device, void *user);
+typedef void (*iris_stop_fn)(lens *ui, flux_device *device, void *user);
+
 typedef struct iris_app_config {
     const char *title;   /* window title (UTF-8, optional)       */
     const char *app_id;  /* Wayland desktop app ID (optional)    */
@@ -101,6 +114,8 @@ typedef struct iris_app_config {
     int32_t height;      /* initial logical height (0 = default) */
     bool dark;           /* force dark; false = follow system    */
     bool log_raw;        /* debug raw input events to stderr     */
+    iris_start_fn start; /* resource setup before first frame (optional) */
+    iris_stop_fn stop;   /* resource teardown before iris GPU teardown (optional) */
     iris_build_fn build; /* per-frame build callback (may be NULL) */
     iris_paint_fn paint; /* per-frame canvas paint (may be NULL)   */
     void *user;          /* opaque pointer passed to both callbacks */

@@ -45,6 +45,99 @@ typedef struct stroke_frame stroke_frame;
  * the (intentionally private) vertex layout from canvas.c. */
 typedef struct flux_canvas_vertex flux_canvas_vertex;
 
+/* Path verb stream. Kept above struct flux_canvas so the tessellation
+ * cache can embed a copy of the stream in its entries. The full
+ * struct flux_path stays in the Path section below. */
+typedef enum flux_path_op {
+    FLUX_PATH_MOVE = 0,
+    FLUX_PATH_LINE = 1,
+    FLUX_PATH_QUAD = 2,
+    FLUX_PATH_CUBIC = 3,
+    FLUX_PATH_CLOSE = 4,
+} flux_path_op;
+
+typedef struct flux_path_segment {
+    uint32_t op;  /* flux_path_op */
+    float pts[6]; /* up to a cubic's 3 control points */
+} flux_path_segment;
+
+/* ------------------------------------------------------------------ */
+/*  Display-list segments (record / replay)                           */
+/*                                                                    */
+/*  A segment captures every backend submit (pipeline id, push        */
+/*  constants, scissor, blend, vertex bytes) emitted between          */
+/*  flux_canvas_begin_record / flux_canvas_end_record so an unchanged */
+/*  subtree can be re-submitted later without re-running the emitter  */
+/*  (text shaping, tessellation, measure). Recording is passive: the  */
+/*  draws are submitted live as usual while being captured.           */
+/*                                                                    */
+/*  Ownership: slots live in a fixed pool owned by the canvas, freed  */
+/*  at flux_canvas_destroy. The public handle is a {slot, generation} */
+/*  pair; release or LRU eviction bumps the generation so stale       */
+/*  handles fail validation instead of replaying a reused slot. Total */
+/*  recorded bytes are capped (LRU eviction), as is each segment.     */
+/* ------------------------------------------------------------------ */
+
+#define FLUX_CANVAS_RECORD_DEPTH_CAP 16u              /* nested recordings  */
+#define FLUX_CANVAS_RECORD_SLOT_CAP 1024u             /* pool size          */
+#define FLUX_CANVAS_RECORD_TOTAL_BUDGET (16u << 20)   /* bytes, all segs    */
+#define FLUX_CANVAS_RECORD_SEG_BUDGET (2u << 20)      /* bytes, one segment */
+#define FLUX_CANVAS_RECORD_IMG_CAP 32u                /* retained images    */
+#define FLUX_CANVAS_RECORD_SAMPLER_CAP 16u            /* retained samplers  */
+
+enum flux_record_slot_state {
+    FLUX_RECORD_SLOT_FREE = 0,
+    FLUX_RECORD_SLOT_RECORDING,
+    FLUX_RECORD_SLOT_VALID,
+    FLUX_RECORD_SLOT_POISONED, /* recording aborted (budget/alloc); end_record discards */
+};
+
+/* Full definitions sit below flux_canvas_push (flux_record_op embeds it).
+ * struct flux_canvas only holds pointers to these. */
+typedef struct flux_record_op flux_record_op;
+typedef struct flux_canvas_record_slot flux_canvas_record_slot;
+
+/* ------------------------------------------------------------------ */
+/*  Tessellation result cache                                         */
+/*                                                                    */
+/*  fill_path / stroke_path re-flatten (recursive cubic subdivision), */
+/*  classify, and ear-clip the same paths every frame — for icons on  */
+/*  a static UI this is pure waste. The cache keeps the resulting     */
+/*  path-space triangle soup (pre canvas-transform) keyed by the full */
+/*  verb stream plus every parameter the tessellation depends on      */
+/*  (pixel_scale drives the flatten tolerance; stroke width/cap/join/ */
+/*  miter drive the outline). A hit only re-transforms and submits    */
+/*  the cached vertices, skipping flatten + ear-clip entirely.        */
+/*                                                                    */
+/*  Storage is inline in each entry: no heap churn, and struct        */
+/*  flux_canvas is zero-initialised at create so all entries start    */
+/*  invalid with nothing to free at destroy. Paths whose verb stream  */
+/*  or triangle output exceed the inline caps bypass the cache.       */
+/*  Stalled ear-clips, EVEN_ODD fills, and the stencil fallback are   */
+/*  never cached — their output is not a pure function of the key.    */
+/* ------------------------------------------------------------------ */
+
+#define FLUX_TESS_CACHE_CAP 32u         /* bounded LRU entries per canvas */
+#define FLUX_TESS_CACHE_MAX_SEGS 128u   /* verb-stream copy cap           */
+#define FLUX_TESS_CACHE_MAX_VERTS 1024u /* path-space vertex cap        */
+
+typedef struct flux_tess_cache_entry {
+    uint64_t hash;      /* FNV-1a over the verb stream + parameters */
+    uint64_t last_used; /* LRU tick; 0 == invalid                   */
+    uint32_t seg_count;
+    uint32_t vert_count;
+    float pixel_scale;  /* flatten tolerance input           */
+    float stroke_width; /* stroke entries; 0 on fills        */
+    float miter_limit;  /* effective limit (default 4 baked) */
+    uint32_t is_stroke;
+    uint32_t cap;       /* flux_line_cap   (stroke) */
+    uint32_t join;      /* flux_line_join  (stroke) */
+    uint32_t fill_rule; /* flux_fill_rule  (fill)   */
+    /* Secondary full-stream compare guards against hash collisions. */
+    flux_path_segment segs[FLUX_TESS_CACHE_MAX_SEGS];
+    flux_point verts[FLUX_TESS_CACHE_MAX_VERTS]; /* path space */
+} flux_tess_cache_entry;
+
 struct flux_canvas {
     atomic_uint ref_count;
     flux_device *device;   /* retained */
@@ -94,9 +187,24 @@ struct flux_canvas {
     uint32_t *scratch_lnk_next;            /* FLUX_CANVAS_PATH_SCRATCH_CAP */
     stroke_frame *scratch_frames;          /* FLUX_CANVAS_PATH_SCRATCH_CAP */
 
+    /* Tessellation result cache (see above). Self-contained inline
+     * storage; zero-initialised with the canvas, no destroy cleanup. */
+    flux_tess_cache_entry tess_cache[FLUX_TESS_CACHE_CAP];
+    uint64_t tess_cache_tick;
+    /* Diagnostics: hit/miss/store counters, cumulative since create. */
+    uint64_t tess_cache_hits, tess_cache_misses, tess_cache_stores;
+
     /* Diagnostics: cumulative count of draw calls dropped due to
      * transient ring exhaustion. Reset to 0 at canvas creation. */
     uint64_t dropped_draws;
+
+    /* Diagnostics (Vulkan backend only): cumulative submit() calls vs
+     * draw commands actually recorded. Consecutive submits with
+     * identical pipeline/scissor/push constants batch into a single
+     * vkCmdDraw, so recorded_draws <= submit_calls; the gap measures
+     * batching efficiency. Both stay 0 on the CPU backend (1:1, no
+     * command buffer). Reset to 0 at canvas creation. */
+    uint64_t submit_calls, recorded_draws;
 
     /* Transient host-resident glyph atlas for the CPU backend
      * (ADR-0019). draw_glyph_run sets this right before emitting GLYPH
@@ -113,6 +221,17 @@ struct flux_canvas {
      * uses it to pick the compositing routine. STENCIL_WRITE ignores
      * it (color writes are off). Defaults to SRC_OVER. */
     flux_blend_mode pending_blend;
+
+    /* Display-list segments (see "Display-list segments" above). The
+     * slot pool is allocated lazily on the first flux_canvas_begin_record
+     * and freed at destroy; the stack tracks nested recordings. */
+    flux_canvas_record_slot *record_slots;
+    flux_canvas_record_slot *record_stack[FLUX_CANVAS_RECORD_DEPTH_CAP];
+    uint32_t record_depth;
+    uint64_t record_tick; /* LRU clock */
+    size_t record_bytes;  /* total bytes across VALID segments */
+    /* Diagnostics: cumulative successful end_record / replay counts. */
+    uint64_t records_created, records_replayed;
 };
 
 /* Vertex layout matches std430 buffer_reference in
@@ -159,6 +278,53 @@ typedef struct flux_canvas_push {
 } flux_canvas_push;
 
 /* ------------------------------------------------------------------ */
+/*  Display-list segment bodies (forward-declared above)              */
+/* ------------------------------------------------------------------ */
+
+struct flux_record_op {
+    flux_canvas_push push; /* complete draw state (incl. baked inv_window_size) */
+    flux_recti scissor;    /* effective scissor at emit time                    */
+    uint32_t pipe_id;      /* canvas_pipe_id                                    */
+    uint32_t blend;        /* c->pending_blend at emit time                     */
+    uint32_t vert_offset;  /* into the segment's vertex buffer                  */
+    uint32_t vert_count;
+    /* Host R8 glyph atlas borrowed by the CPU backend (ADR-0019); NULL for
+     * non-glyph ops. Points into flux_text's persistent atlas buffer. */
+    const uint8_t *host_atlas;
+    uint32_t host_atlas_w;
+    uint32_t host_atlas_h;
+};
+
+struct flux_canvas_record_slot {
+    flux_canvas *owner;
+    uint64_t generation; /* bumped on release/evict/discard; invalidates handles */
+    uint64_t last_used;  /* LRU tick */
+    uint32_t state;      /* enum flux_record_slot_state */
+
+    /* Replay anchor: the segment is only valid under the exact canvas state
+     * it was recorded against — same framebuffer extent (push constants bake
+     * inv_window_size), same absolute transform (vertices are baked in
+     * physical pixels), same incoming scissor. */
+    flux_mat3x2 anchor_transform;
+    flux_recti anchor_scissor;
+    uint32_t fb_w, fb_h;
+
+    flux_record_op *ops;
+    uint32_t op_count, op_cap;
+    flux_canvas_vertex *verts;
+    uint32_t vert_count, vert_cap;
+
+    /* Resources referenced by recorded image/glyph draws, retained so
+     * recorded bindless handles can never dangle or be recycled. */
+    flux_image *images[FLUX_CANVAS_RECORD_IMG_CAP];
+    uint32_t image_count;
+    flux_sampler *samplers[FLUX_CANVAS_RECORD_SAMPLER_CAP];
+    uint32_t sampler_count;
+
+    size_t bytes; /* ops + verts, for budget accounting */
+};
+
+/* ------------------------------------------------------------------ */
 /*  Image (internal)                                                  */
 /*                                                                      */
 /*  struct flux_image + flux_image_create_compute_writable live in     */
@@ -173,19 +339,8 @@ typedef struct flux_canvas_push {
 /*  Path                                                              */
 /* ------------------------------------------------------------------ */
 
-typedef enum flux_path_op {
-    FLUX_PATH_MOVE = 0,
-    FLUX_PATH_LINE = 1,
-    FLUX_PATH_QUAD = 2,
-    FLUX_PATH_CUBIC = 3,
-    FLUX_PATH_CLOSE = 4,
-} flux_path_op;
-
-typedef struct flux_path_segment {
-    uint32_t op;  /* flux_path_op */
-    float pts[6]; /* up to a cubic's 3 control points */
-} flux_path_segment;
-
+/* flux_path_op / flux_path_segment live above struct flux_canvas
+ * (the tess cache embeds them). */
 struct flux_path {
     flux_path_segment *segments;
     uint32_t capacity;
@@ -251,6 +406,27 @@ void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id
                          const flux_canvas_vertex *verts, uint32_t vertex_count);
 
 /* ------------------------------------------------------------------ */
+/*  Display-list record/replay (record.c)                             */
+/* ------------------------------------------------------------------ */
+
+/* Single submission choke point: capture into every active recording
+ * (when any), then hand the batch to the backend. All front-end draw
+ * paths route through here instead of calling backend->submit directly
+ * so a recording never misses a draw. */
+void canvas_emit(flux_canvas *c, canvas_pipe_id id, const flux_canvas_push *push,
+                 const flux_canvas_vertex *verts, uint32_t vertex_count);
+
+/* Retain `img` in every active recording so recorded bindless handles
+ * stay valid until the segment is released/evicted. No-op without an
+ * active recording, a device, or an image. */
+void canvas_record_retain_image(flux_canvas *c, flux_image *img);
+void canvas_record_retain_sampler(flux_canvas *c, flux_sampler *sampler);
+
+/* Release every slot's buffers + retained images and free the pool.
+ * Called from flux_canvas_destroy. */
+void canvas_record_pool_destroy(flux_canvas *c);
+
+/* ------------------------------------------------------------------ */
 /*  Flattening                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -288,6 +464,30 @@ float signed_area(const flux_point *pts, uint32_t n);
 bool ear_clip_contour(flux_canvas_vertex *verts, uint32_t *v_count, uint32_t verts_cap,
                       flux_mat3x2 tx, flux_color color, flux_point *pts, uint32_t *prev,
                       uint32_t *next, uint32_t n);
+
+/* ------------------------------------------------------------------ */
+/*  Tessellation cache (defined in geometry_tess.c)                   */
+/* ------------------------------------------------------------------ */
+
+/* Look up `p` + the tessellation parameters in the canvas's cache.
+ * On a hit the cached path-space triangles are transformed by `tx`,
+ * submitted with `paint`, and true is returned — the caller is done.
+ * On a miss (miss counter bumped) the caller must tessellate with an
+ * IDENTITY transform so the output is cacheable path-space geometry,
+ * then call tess_cache_store_and_transform before submit. */
+bool tess_cache_lookup_submit(flux_canvas *c, const flux_path *p, const flux_paint *paint,
+                              bool is_stroke, float pixel_scale, float stroke_width,
+                              float miter_limit, flux_mat3x2 tx);
+
+/* After an identity-transform tessellation on a cache miss: store the
+ * path-space result (`verts`, `v_count`) in the cache when it is
+ * cacheable (!stalled, counts within the inline caps), then transform
+ * every vertex in place by `tx` so the caller's submit produces
+ * exactly what a transform-during-emit run would have produced. */
+void tess_cache_store_and_transform(flux_canvas *c, const flux_path *p, const flux_paint *paint,
+                                    bool is_stroke, float pixel_scale, float stroke_width,
+                                    float miter_limit, bool stalled, flux_canvas_vertex *verts,
+                                    uint32_t v_count, flux_mat3x2 tx);
 
 /* ------------------------------------------------------------------ */
 /*  Stroke                                                            */

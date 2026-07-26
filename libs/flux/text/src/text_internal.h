@@ -182,6 +182,35 @@ typedef struct txt_text_layout {
     float baseline; /* logical px, from top */
 } txt_text_layout;
 
+/* One cached shaped string. Keyed by (utf8 content, size_px, weight, italic,
+ * family, scale); `hash` is the precomputed content fingerprint so lookups
+ * only memcmp on a full scalar+hash match (effectively never). Scale stays
+ * in the key because hinting makes advances non-linear in scale — a layout
+ * shaped at scale 1 is not interchangeable with one shaped at scale 2.
+ *
+ * Slot lifecycle mirrors glyph_cache (occupied/live tri-state): evictions
+ * leave tombstones so probe chains stay intact; the table rehashes to
+ * collapse them.
+ *
+ * `utf8` and `glyphs` are owned copies, allocated at insert and freed when
+ * the entry is evicted or the table is reset. layout.glyphs always points
+ * at `glyphs`. */
+typedef struct txt_layout_entry {
+    bool occupied;
+    bool live;
+    uint32_t hash;      /* content fingerprint, cheap reject before memcmp */
+    uint32_t last_used; /* LRU/sweep tick                                 */
+    char *utf8;         /* owned copy of the source string                */
+    size_t len;
+    float size_px;
+    float weight;
+    bool italic;
+    flux_text_family family; /* resolved (never DEFAULT) */
+    float scale;
+    txt_text_layout layout;   /* layout.glyphs points at `glyphs` */
+    txt_placed_glyph *glyphs; /* owned placed-glyph copy          */
+} txt_layout_entry;
+
 struct flux_text {
     float scale;      /* device-pixel raster scale (flux_text_set_scale) */
     bool has_backend; /* false => degraded to monospace metrics only     */
@@ -240,25 +269,17 @@ struct flux_text {
     int8_t *run_levels_buf;
     int runs_cap;
 
-    /* Layout cache: an LRU cache of recently shaped strings. Avoids
-     * rebuilding the glyph list on every frame for static UI elements.
-     * The key is a content fingerprint (string content + style + scale). */
-    struct {
-        uint32_t last_used;
-        char *utf8;
-        size_t len;
-        size_t cap;
-        float size_px;
-        float weight;
-        bool italic;
-        flux_text_family family;
-        float scale;
-
-        txt_text_layout layout;
-        txt_placed_glyph *layout_buf;
-        int layout_cap;
-    } layout_cache[32];
-    uint32_t layout_cache_tick;
+    /* Layout cache: an open-addressing hash table of recently shaped
+     * strings (see layout.c). Avoids rebuilding the glyph list on every
+     * frame for static UI elements. The key is a content fingerprint
+     * (string content + style + scale). The table is allocated lazily on
+     * the first insert and grows up to TXT_LAYOUT_CACHE_MAX, after which
+     * idle entries are swept / the LRU entry is evicted. */
+    txt_layout_entry *layout_entries;
+    uint32_t layout_entries_cap;  /* power of two; 0 = not yet allocated */
+    uint32_t layout_entries_live; /* slots holding a valid entry          */
+    uint32_t layout_entries_tomb; /* occupied-but-evicted slots           */
+    uint32_t layout_cache_tick;   /* bumped once per layout build         */
 };
 
 /* ------------------------------------------------------------------ */
@@ -397,6 +418,11 @@ int txt_itemize(flux_text *t, int slot_idx, const char *utf8, size_t len);
  * (never DEFAULT). */
 bool txt_text_layout_build(flux_text *t, const char *utf8, size_t len, float size_px, float weight,
                            bool italic, flux_text_family family, float scale, txt_text_layout *out);
+
+/* layout.c — release every layout-cache entry's owned buffers and the hash
+ * table itself. Null-safe on a zeroed context; the table is reallocated
+ * lazily on the next insert. */
+void txt_layout_cache_reset(flux_text *t);
 
 /* face.c — engine lifecycle. txt_engine_init returns NULL if FreeType/
  * Fontconfig init or font discovery fails; the public flux_text_create then

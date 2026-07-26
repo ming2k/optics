@@ -81,6 +81,21 @@ int main(void) {
 
     flux_canvas_destroy(c);
 
+    /* ---- Clip follows the current HiDPI transform and cannot expand ---- */
+    EXPECT(flux_canvas_create_cpu(W, H, 2.0f, &c) == FLUX_OK);
+    EXPECT(flux_canvas_cpu_begin(c, &black) == FLUX_OK);
+    flux_canvas_clip_rect(c, (flux_rect){0, 0, 16, 32});
+    /* A later, larger clip intersects the first instead of replacing it. */
+    flux_canvas_clip_rect(c, (flux_rect){0, 0, 32, 32});
+    flux_canvas_fill_rect_color(c, (flux_rect){0, 0, 32, 32}, red);
+    flux_canvas_cpu_end(c);
+    fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
+    px(fb, stride, 24, 32, p); /* logical x=12: inside transformed clip */
+    EXPECT(p[0] > 250 && p[3] > 250);
+    px(fb, stride, 40, 32, p); /* logical x=20: outside transformed clip */
+    EXPECT(p[0] < 5 && p[3] > 250);
+    flux_canvas_destroy(c);
+
     /* ---- Linear gradient ---- */
     EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
     flux_gradient_stop stops[2] = {

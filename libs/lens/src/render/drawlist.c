@@ -16,12 +16,19 @@ static uint32_t hash_cmd(const lens_draw_cmd *c) {
     h = h * 31 + (uint32_t)(c->radius * 1000.0f);
     h = h * 31 + (uint32_t)(c->width * 1000.0f);
     h = h * 31 + (uint32_t)(c->text_size * 1000.0f);
+    h = h * 31 + (uint32_t)(c->text_weight * 1000.0f);
     if (c->text) {
         const char *p = c->text;
         while (*p)
             h = h * 31 + (unsigned char)*p++;
     }
     h = h * 31 + (uint32_t)c->icon_id;
+    /* kind-specific flags (e.g. connected-tab shoulders) and the
+     * borrowed image pointer also shape the pixels; without them a
+     * flag/weight/image-only change left cmd_hash — and thus
+     * subtree_changed — stale. */
+    h = h * 31 + c->flags;
+    h = h * 31 + (uint32_t)(uintptr_t)c->image;
     return h;
 }
 

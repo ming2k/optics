@@ -278,11 +278,24 @@ void flux_canvas_stroke_path(flux_canvas *c, const flux_path *p, const flux_pain
     if (paint->stroke_width <= 0.0f)
         return;
 
+    flux_mat3x2 tx = c->states[c->state_top].transform;
+    float pixel_scale = flux_canvas_mat3x2_pixel_scale(tx);
+
+    const float half = paint->stroke_width * 0.5f;
+    const float miter_limit = paint->miter_limit > 0.0f ? paint->miter_limit : 4.0f;
+
+    /* Cache lookup before flattening — a hit skips flatten + outline
+     * emission entirely. On a miss, stroke in path space (identity
+     * transform) so the result is cacheable; the store step re-applies
+     * `tx` before submit. */
+    if (tess_cache_lookup_submit(c, p, paint, true, pixel_scale, paint->stroke_width, miter_limit,
+                                 tx))
+        return;
+    flux_mat3x2 emit_tx = flux_mat3x2_identity();
+
     flux_point *pts = c->scratch_pts;
     flux_canvas_contour *cons = c->scratch_contours;
 
-    flux_mat3x2 tx = c->states[c->state_top].transform;
-    float pixel_scale = flux_canvas_mat3x2_pixel_scale(tx);
     /* Flatten into every subpath (contour), not just the first — a glyph
      * path commonly holds several (outline + interior strokes). */
     flatten_multi fm = flatten_path_to_contours(p, pixel_scale, pts, FLUX_CANVAS_PATH_SCRATCH_CAP,
@@ -295,16 +308,15 @@ void flux_canvas_stroke_path(flux_canvas *c, const flux_path *p, const flux_pain
     const uint32_t verts_cap = FLUX_CANVAS_PATH_SCRATCH_CAP * 3;
     uint32_t v_count = 0;
 
-    const float half = paint->stroke_width * 0.5f;
-    const float miter_limit = paint->miter_limit > 0.0f ? paint->miter_limit : 4.0f;
-
     for (uint32_t ci = 0; ci < fm.contour_count; ++ci) {
         flux_canvas_contour *co = &cons[ci];
         if (co->count < 2)
             continue;
-        stroke_one_contour(c, paint, tx, color, half, miter_limit, pts + co->start, co->count,
+        stroke_one_contour(c, paint, emit_tx, color, half, miter_limit, pts + co->start, co->count,
                            co->closed, co->first_x, co->first_y, verts, &v_count, verts_cap);
     }
 
+    tess_cache_store_and_transform(c, p, paint, true, pixel_scale, paint->stroke_width, miter_limit,
+                                   false, verts, v_count, tx);
     submit_triangles(c, paint, verts, v_count);
 }

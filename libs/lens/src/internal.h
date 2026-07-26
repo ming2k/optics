@@ -138,6 +138,23 @@ struct lens_node {
 
     /* damage tracking (per frame) */
     bool subtree_changed;
+    /* Geometry as of the last completed lens_render. `prev_rect` is updated
+     * during layout for next-frame hit testing, so it cannot also serve as
+     * the paint baseline: comparing final_rect to prev_rect after arrange
+     * would always report equality and let scroll/resize replay stale
+     * vertices. */
+    bool has_render_rect;
+    flux_rect render_rect;
+
+    /* display-list record of this subtree's emission (persistent;
+     * canvas-owned segment, replayed instead of re-emitting when the
+     * subtree is unchanged — see replay.c). record_clip is the lens
+     * clip argument at record time; record_text_gen is the flux-text
+     * atlas clear count at record time (a clear re-packs glyph texels,
+     * which freezes recorded UVs — records must not survive it). */
+    flux_canvas_record record;
+    flux_rect record_clip;
+    uint64_t record_text_gen;
 
     /* persistent per-node user state (lens_node_state) */
     void *state;
@@ -271,6 +288,16 @@ struct lens {
         flux_rect anchor;
         char text[128];
     } tooltip;
+    bool prev_tooltip_active; /* tooltip.active at the end of last frame;
+                               * a disappearing tooltip is damage too */
+
+    /* display-list records (render/replay.c). record_canvas owns the
+     * per-node segments (borrowed; refreshed every lensi_render_tree —
+     * a canvas switch drops every handle without releasing, as the old
+     * canvas may already be destroyed). record_text_gen snapshots the
+     * flux-text atlas clear count for the frame. */
+    flux_canvas *record_canvas;
+    uint64_t record_text_gen;
 };
 
 /* ================================================================== */
@@ -342,6 +369,9 @@ void lensi_overlay_constrain_current(lens *ui, flux_rect bounds);
 void lensi_overlay_layout(lens *ui);                                    /* post-arrange placement */
 void lensi_overlay_render(lens *ui, flux_canvas *canvas);
 void lensi_overlay_dismiss(lens *ui); /* click-outside + Esc (overlays only) */
+/* Run subtree change detection on this frame's floating-layer sub-roots
+ * (they are outside ui->root, so lensi_mark_dirty never reaches them). */
+void lensi_overlay_mark_dirty(lens *ui);
 /* Cursor sits inside any rendered floating layer (overlay or panel),
  * using last-frame geometry. Used by lensi_interact to eclipse base
  * widgets under a popup or chrome panel. */
@@ -367,6 +397,14 @@ void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd);
 flux_result lensi_render_tree(lens *ui, flux_canvas *canvas);
 void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect clip);
 void lensi_mark_dirty(lens *ui); /* per-frame subtree change detection */
+/* Bottom-up change detection rooted at `n` (replay.c). Exposed so the
+ * overlay layer can mark its sub-roots, which live outside ui->root. */
+bool lensi_mark_subtree_changed(lens_node *n);
+/* Drop a node's display-list record handle WITHOUT releasing the
+ * segment (replay.c). Used from store teardown, where the owning canvas
+ * may already be gone; a live canvas reclaims the slot via its LRU
+ * budget. */
+void lensi_node_drop_record(lens *ui, lens_node *n);
 
 /* text — lens's thin seam (seam.c) over the shared flux-text engine.
  * These take lens (routing to ui->text) and apply lens label

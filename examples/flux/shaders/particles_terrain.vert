@@ -63,6 +63,8 @@ void main()
         : mix(warm, hot, (hn - 0.5) * 2.0);
 
     /* Larger, brighter points ride the peaks so crests read as ridges. */
-    v_size = pc.point_size * (1.0 + hn * 1.5);
+    v_size = pc.point_size > 0.0
+        ? pc.point_size * (1.0 + hn * 1.5)
+        : 1.0;
     gl_PointSize = v_size;
 }

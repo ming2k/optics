@@ -57,6 +57,7 @@ if opt_canvas
     'src/canvas/image.c',
     'src/canvas/dmabuf.c',
     'src/canvas/renderer.c',
+    'src/canvas/record.c',
     'src/canvas/backend_vk.c',
     'src/canvas/backend_cpu.c',
   )

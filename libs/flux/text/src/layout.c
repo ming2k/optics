@@ -125,6 +125,252 @@ static bool layout_reserve(flux_text *t, int need) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Layout cache (open-addressing hash table)                          */
+/* ------------------------------------------------------------------ */
+
+/* Initial and hard-ceiling table capacities (powers of two). With the
+ * 0.5 load-factor trigger the table holds up to 512 strings before the
+ * first grow and 2048 at the ceiling — a settings page or table easily
+ * exceeds the old fixed 32-slot LRU, whose hit rate collapsed to 0 and
+ * forced a full re-shape of every visible string on every frame. */
+#define TXT_LAYOUT_CACHE_INIT 1024
+#define TXT_LAYOUT_CACHE_MAX 4096
+
+/* Load factor at which an insert grows the table (below MAX) or evicts
+ * (at MAX). Counts live + tombstone slots, as in glyph_cache: tombstones
+ * inflate probe chains just like live entries. */
+#define TXT_LAYOUT_LOAD_SHIFT 1 /* (live+tomb) * 2 >= cap */
+
+/* Idle age (in layout builds) beyond which an entry is dropped by a
+ * capacity-triggered sweep. A frame issues roughly two builds per visible
+ * string (measure + draw), so this is a generous "not seen in the last
+ * few frames" window that still lets a retired page's strings age out
+ * instead of pinning the table until an LRU churn evicts them one by
+ * one. Sweeping in a pass avoids the re-shape spike of a full clear. */
+#define TXT_LAYOUT_SWEEP_AGE 16384
+
+/* FNV-1a over the string bytes, then the scalar key fields folded in by
+ * bit pattern (floats are compared by exact equality in the key, so
+ * their bits are what must be hashed). */
+static uint32_t layout_hash(const char *utf8, size_t len, float size_px, float weight, bool italic,
+                            flux_text_family family, float scale) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < len; i++) {
+        h ^= (unsigned char)utf8[i];
+        h *= 16777619u;
+    }
+    uint32_t bits[4];
+    bits[0] = (uint32_t)len;
+    memcpy(&bits[1], &size_px, sizeof bits[1]);
+    memcpy(&bits[2], &weight, sizeof bits[2]);
+    memcpy(&bits[3], &scale, sizeof bits[3]);
+    for (int i = 0; i < 4; i++) {
+        h ^= bits[i];
+        h *= 16777619u;
+    }
+    h ^= ((uint32_t)family << 1) ^ (uint32_t)italic;
+    h *= 16777619u;
+    h ^= h >> 16;
+    return h;
+}
+
+static bool layout_entry_eq(const txt_layout_entry *e, uint32_t hash, const char *utf8, size_t len,
+                            float size_px, float weight, bool italic, flux_text_family family,
+                            float scale) {
+    return e->hash == hash && e->len == len && e->size_px == size_px && e->weight == weight &&
+           e->italic == italic && e->family == family && e->scale == scale &&
+           memcmp(e->utf8, utf8, len) == 0;
+}
+
+/* Probe for a live entry matching the full key. Returns NULL on miss.
+ * On hit, bumps the entry's use stamp so visible strings survive sweeps.
+ * The memcmp in layout_entry_eq is reached only on a hash + scalar-field
+ * match, i.e. effectively once per lookup — never a full-table scan. */
+static txt_layout_entry *layout_cache_lookup(flux_text *t, uint32_t hash, const char *utf8,
+                                             size_t len, float size_px, float weight, bool italic,
+                                             flux_text_family family, float scale) {
+    if (!t->layout_entries)
+        return NULL;
+    uint32_t mask = t->layout_entries_cap - 1u;
+    uint32_t idx = hash & mask;
+    for (uint32_t i = 0; i < t->layout_entries_cap; i++) {
+        txt_layout_entry *e = &t->layout_entries[idx];
+        /* Only a truly-empty slot terminates the chain; tombstones
+         * (occupied && !live) are skipped. */
+        if (!e->occupied)
+            return NULL;
+        if (e->live &&
+            layout_entry_eq(e, hash, utf8, len, size_px, weight, italic, family, scale)) {
+            e->last_used = t->layout_cache_tick;
+            return e;
+        }
+        idx = (idx + 1u) & mask;
+    }
+    return NULL;
+}
+
+/* Free an entry's owned buffers and mark the slot dead. The key fields
+ * stay behind as a tombstone so probe chains through the slot remain
+ * intact until the next rehash. */
+static void layout_entry_evict(flux_text *t, txt_layout_entry *e) {
+    free(e->utf8);
+    e->utf8 = NULL;
+    free(e->glyphs);
+    e->glyphs = NULL;
+    e->live = false;
+    t->layout_entries_live--;
+    t->layout_entries_tomb++;
+}
+
+/* Re-insert every live entry into a fresh, zeroed table of `new_cap`,
+ * dropping all tombstones. The stored hash is reused — the strings are
+ * not re-hashed. Returns true on success; on allocation failure the
+ * table is left untouched. */
+static bool layout_cache_rehash(flux_text *t, uint32_t new_cap) {
+    txt_layout_entry *fresh = calloc(new_cap, sizeof *fresh);
+    if (!fresh)
+        return false;
+    uint32_t mask = new_cap - 1u;
+    for (uint32_t i = 0; i < t->layout_entries_cap; i++) {
+        txt_layout_entry *old = &t->layout_entries[i];
+        if (!old->occupied || !old->live)
+            continue;
+        uint32_t idx = old->hash & mask;
+        while (fresh[idx].occupied)
+            idx = (idx + 1u) & mask;
+        fresh[idx] = *old;
+        fresh[idx].occupied = true;
+    }
+    free(t->layout_entries);
+    t->layout_entries = fresh;
+    t->layout_entries_cap = new_cap;
+    t->layout_entries_tomb = 0;
+    return true;
+}
+
+/* Capacity-triggered eviction at the table ceiling: first drop every
+ * entry idle longer than TXT_LAYOUT_SWEEP_AGE (one pass, no per-frame
+ * spike), then — if the working set genuinely exceeds the ceiling and
+ * nothing was idle — evict the single least-recently-used entry. */
+static void layout_cache_make_room(flux_text *t) {
+    uint32_t swept = 0;
+    for (uint32_t i = 0; i < t->layout_entries_cap; i++) {
+        txt_layout_entry *e = &t->layout_entries[i];
+        if (e->occupied && e->live &&
+            t->layout_cache_tick - e->last_used > TXT_LAYOUT_SWEEP_AGE) {
+            layout_entry_evict(t, e);
+            swept++;
+        }
+    }
+    if (swept > 0) {
+        /* Collapse the tombstones the sweep just made. */
+        (void)layout_cache_rehash(t, t->layout_entries_cap);
+        return;
+    }
+    txt_layout_entry *victim = NULL;
+    uint32_t oldest = UINT32_MAX;
+    for (uint32_t i = 0; i < t->layout_entries_cap; i++) {
+        txt_layout_entry *e = &t->layout_entries[i];
+        if (e->occupied && e->live && e->last_used < oldest) {
+            oldest = e->last_used;
+            victim = e;
+        }
+    }
+    if (victim)
+        layout_entry_evict(t, victim);
+}
+
+/* Insert a fresh entry for the key, copying the string and the placed
+ * glyphs out of the caller's scratch so they outlive this build. The
+ * returned entry's layout is fully populated. Returns NULL on allocation
+ * failure — the caller then proceeds uncached, as the old cache did. */
+static txt_layout_entry *layout_cache_insert(flux_text *t, uint32_t hash, const char *utf8,
+                                             size_t len, float size_px, float weight, bool italic,
+                                             flux_text_family family, float scale,
+                                             const txt_text_layout *layout) {
+    /* Lazy allocation: a measure-only or never-drawn context pays nothing. */
+    if (!t->layout_entries) {
+        t->layout_entries = calloc(TXT_LAYOUT_CACHE_INIT, sizeof *t->layout_entries);
+        if (!t->layout_entries)
+            return NULL;
+        t->layout_entries_cap = TXT_LAYOUT_CACHE_INIT;
+    }
+
+    /* Admission control: grow below the ceiling, evict at it. */
+    uint32_t used = t->layout_entries_live + t->layout_entries_tomb;
+    if ((used << TXT_LAYOUT_LOAD_SHIFT) >= t->layout_entries_cap) {
+        if (t->layout_entries_cap < TXT_LAYOUT_CACHE_MAX) {
+            (void)layout_cache_rehash(t, t->layout_entries_cap * 2u);
+        } else {
+            layout_cache_make_room(t);
+        }
+    }
+
+    uint32_t mask = t->layout_entries_cap - 1u;
+    uint32_t idx = hash & mask;
+    for (uint32_t i = 0; i < t->layout_entries_cap; i++) {
+        txt_layout_entry *e = &t->layout_entries[idx];
+        if (e->occupied && e->live) {
+            idx = (idx + 1u) & mask;
+            continue;
+        }
+        /* Empty slot or reusable tombstone. */
+        char *utf8_copy = malloc(len);
+        txt_placed_glyph *glyphs_copy =
+            malloc((size_t)layout->count * sizeof *glyphs_copy);
+        if (!utf8_copy || !glyphs_copy) {
+            free(utf8_copy);
+            free(glyphs_copy);
+            return NULL;
+        }
+        memcpy(utf8_copy, utf8, len);
+        memcpy(glyphs_copy, layout->glyphs, (size_t)layout->count * sizeof *glyphs_copy);
+
+        bool was_tomb = e->occupied;
+        *e = (txt_layout_entry){
+            .occupied = true,
+            .live = true,
+            .hash = hash,
+            .last_used = t->layout_cache_tick,
+            .utf8 = utf8_copy,
+            .len = len,
+            .size_px = size_px,
+            .weight = weight,
+            .italic = italic,
+            .family = family,
+            .scale = scale,
+            .layout = *layout,
+            .glyphs = glyphs_copy,
+        };
+        e->layout.glyphs = glyphs_copy;
+        t->layout_entries_live++;
+        if (was_tomb)
+            t->layout_entries_tomb--;
+        return e;
+    }
+    return NULL; /* unreachable: admission control always frees a slot */
+}
+
+void txt_layout_cache_reset(flux_text *t) {
+    if (!t)
+        return;
+    for (uint32_t i = 0; i < t->layout_entries_cap; i++) {
+        txt_layout_entry *e = &t->layout_entries[i];
+        if (!e->occupied)
+            continue;
+        free(e->utf8);
+        free(e->glyphs);
+    }
+    free(t->layout_entries);
+    t->layout_entries = NULL;
+    t->layout_entries_cap = 0;
+    t->layout_entries_live = 0;
+    t->layout_entries_tomb = 0;
+    /* tick is left monotonic so post-reset entries sort after pre-reset
+     * ones in sweep order. */
+}
+
+/* ------------------------------------------------------------------ */
 /*  Build                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -139,31 +385,16 @@ bool txt_text_layout_build(flux_text *t, const char *utf8, size_t len, float siz
 
     family = txt_resolve_family(t, family);
 
-    /* Layout cache: an LRU cache of recently shaped strings. Avoids
-     * rebuilding the glyph list on every frame for static UI elements.
-     * The key is a content fingerprint (string content + style + scale). */
-    int best_slot = 0;
-    uint32_t oldest = 0xFFFFFFFF;
+    /* Layout cache: hash lookup of a previously shaped string. The key is
+     * a content fingerprint (string content + style + scale); a hit avoids
+     * re-itemising and re-shaping a static string every frame. */
     t->layout_cache_tick++;
-
-    for (int i = 0; i < 32; i++) {
-        if (t->layout_cache[i].last_used == 0) {
-            best_slot = i;
-            oldest = 0;
-        } else if (t->layout_cache[i].last_used < oldest) {
-            oldest = t->layout_cache[i].last_used;
-            best_slot = i;
-        }
-
-        if (t->layout_cache[i].last_used > 0 && t->layout_cache[i].len == len &&
-            t->layout_cache[i].size_px == size_px && t->layout_cache[i].weight == weight &&
-            t->layout_cache[i].italic == italic && t->layout_cache[i].family == family &&
-            t->layout_cache[i].scale == scale && memcmp(t->layout_cache[i].utf8, utf8, len) == 0) {
-
-            t->layout_cache[i].last_used = t->layout_cache_tick;
-            *out = t->layout_cache[i].layout;
-            return out->count > 0;
-        }
+    uint32_t hash = layout_hash(utf8, len, size_px, weight, italic, family, scale);
+    txt_layout_entry *hit =
+        layout_cache_lookup(t, hash, utf8, len, size_px, weight, italic, family, scale);
+    if (hit) {
+        *out = hit->layout;
+        return out->count > 0;
     }
 
     int slot_idx = txt_family_to_slot(family, weight, italic);
@@ -281,45 +512,14 @@ bool txt_text_layout_build(flux_text *t, const char *utf8, size_t len, float siz
     out->baseline = max_ascent;
     out->height = max_ascent + max_descent;
     if (count > 0) {
-        /* Populate the cache slot. Allocate and copy the utf8 string and the
-         * glyph list so they outlive the caller and t->layout_buf. */
-        if (t->layout_cache[best_slot].cap < len) {
-            char *p = realloc(t->layout_cache[best_slot].utf8, len);
-            if (p) {
-                t->layout_cache[best_slot].utf8 = p;
-                t->layout_cache[best_slot].cap = len;
-            } else {
-                return true; /* fail gracefully (don't cache) */
-            }
-        }
-        memcpy(t->layout_cache[best_slot].utf8, utf8, len);
-
-        if (t->layout_cache[best_slot].layout_cap < count) {
-            txt_placed_glyph *p =
-                realloc(t->layout_cache[best_slot].layout_buf, count * sizeof(txt_placed_glyph));
-            if (p) {
-                t->layout_cache[best_slot].layout_buf = p;
-                t->layout_cache[best_slot].layout_cap = count;
-            } else {
-                return true;
-            }
-        }
-        memcpy(t->layout_cache[best_slot].layout_buf, t->layout_buf,
-               count * sizeof(txt_placed_glyph));
-
-        t->layout_cache[best_slot].len = len;
-        t->layout_cache[best_slot].size_px = size_px;
-        t->layout_cache[best_slot].weight = weight;
-        t->layout_cache[best_slot].italic = italic;
-        t->layout_cache[best_slot].family = family;
-        t->layout_cache[best_slot].scale = scale;
-
-        t->layout_cache[best_slot].layout = *out;
-        t->layout_cache[best_slot].layout.glyphs = t->layout_cache[best_slot].layout_buf;
-        t->layout_cache[best_slot].last_used = t->layout_cache_tick;
-
-        /* Point out->glyphs to the cached buffer so it outlives this call. */
-        out->glyphs = t->layout_cache[best_slot].layout_buf;
+        /* Populate the cache. The entry owns copies of the string and the
+         * glyph list so they outlive the caller and t->layout_buf. On
+         * allocation failure we simply proceed uncached. */
+        txt_layout_entry *e = layout_cache_insert(t, hash, utf8, len, size_px, weight, italic,
+                                                  family, scale, out);
+        if (e)
+            /* Point out->glyphs at the cached buffer so it outlives this call. */
+            out->glyphs = e->glyphs;
         return true;
     }
     return false;
@@ -345,13 +545,10 @@ static void style_unpack(flux_text *t, const flux_text_style *s, float *size_px,
 void flux_text_set_scale(flux_text *t, float scale) {
     if (!t)
         return;
-    float s = (scale > 0.0f) ? scale : 1.0f;
-    /* Scale participates in the layout cache key, so a change invalidates. */
-    if (t->scale != s) {
-        for (int i = 0; i < 32; i++)
-            t->layout_cache[i].last_used = 0;
-    }
-    t->scale = s;
+    /* Scale participates in the layout cache key, so entries shaped at the
+     * previous scale simply stop matching and age out via the sweep — no
+     * wholesale invalidation (and no re-shape spike) on a scale change. */
+    t->scale = (scale > 0.0f) ? scale : 1.0f;
 }
 
 float flux_text_scale(const flux_text *t) {
@@ -365,22 +562,16 @@ flux_text_family flux_text_default_family(const flux_text *t) {
 void flux_text_set_default_family(flux_text *t, flux_text_family family) {
     if (!t)
         return;
-    /* Normalise DEFAULT/invalid to a concrete family before storing. */
+    /* The cache key holds the *resolved* family, so a default change needs
+     * no invalidation: lookups resolve through the new default and simply
+     * miss entries cached under the old one. */
     switch (family) {
     case FLUX_TEXT_FAMILY_SANS:
     case FLUX_TEXT_FAMILY_SERIF:
     case FLUX_TEXT_FAMILY_MONO:
-        if (t->default_family != family) {
-            for (int i = 0; i < 32; i++)
-                t->layout_cache[i].last_used = 0;
-        }
         t->default_family = family;
         break;
     default:
-        if (t->default_family != FLUX_TEXT_FAMILY_SANS) {
-            for (int i = 0; i < 32; i++)
-                t->layout_cache[i].last_used = 0;
-        }
         t->default_family = FLUX_TEXT_FAMILY_SANS;
         break;
     }
@@ -404,8 +595,16 @@ flux_text_metrics flux_text_measure(flux_text *t, const char *utf8, size_t len,
     if (!t->has_backend)
         return txt_text_measure_mono(utf8, len, size_px, weight);
 
+    /* Measure at the context scale — the same key draw (via the canvas
+     * scale, which lens keeps in sync with flux_text_set_scale) and the
+     * caret/selection paths use — so a visible string is shaped once per
+     * frame, not twice. Hinting makes advances non-linear in scale, so
+     * sharing the entry is also the geometrically correct choice: the
+     * metrics match what draw actually places. */
+    float scale = (t->scale > 0.0f) ? t->scale : 1.0f;
+
     txt_text_layout L;
-    if (!txt_text_layout_build(t, utf8, len, size_px, weight, italic, family, 1.0f, &L))
+    if (!txt_text_layout_build(t, utf8, len, size_px, weight, italic, family, scale, &L))
         return m;
     m.width = L.width;
     m.height = L.height;
@@ -701,9 +900,10 @@ void flux_text_compact(flux_text *t) {
      * the largest input ever seen and stay that size until destroy. For a
      * one-off megabyte paste followed by ordinary typing, that wastes the
      * peak allocation indefinitely. flux_text_compact releases the scratch
-     * buffers back to empty and invalidates the layout cache; the next
-     * measure/draw/caret call reallocates to whatever size it actually
-     * needs. Cheap to call every frame, intended for the host's idle path. */
+     * buffers and the layout cache (entries + hash table) back to empty;
+     * the next measure/draw/caret call reallocates to whatever size it
+     * actually needs. Cheap to call every frame, intended for the host's
+     * idle path. */
     if (!t)
         return;
     free(t->layout_buf);
@@ -714,13 +914,5 @@ void flux_text_compact(flux_text *t) {
     free(t->run_levels_buf);
     t->run_levels_buf = NULL;
     t->runs_cap = 0;
-    for (int i = 0; i < 32; i++) {
-        t->layout_cache[i].last_used = 0;
-        free(t->layout_cache[i].utf8);
-        t->layout_cache[i].utf8 = NULL;
-        t->layout_cache[i].cap = 0;
-        free(t->layout_cache[i].layout_buf);
-        t->layout_cache[i].layout_buf = NULL;
-        t->layout_cache[i].layout_cap = 0;
-    }
+    txt_layout_cache_reset(t);
 }

@@ -53,3 +53,4 @@ a decision, write a new ADR and update the old one's status to
 | 0042 | [Lens virtualized table / data grid](0042-lens-virtualized-table.md) | Accepted |
 | 0043 | [Iris project foundations — L3 application toolkit](0043-iris-foundations.md) | Accepted |
 | 0044 | [Iris backend compile-time selection](0044-iris-backend-selection.md) | Accepted |
+| 0045 | [Iris host resource lifecycle callbacks](0045-iris-host-resource-lifecycle.md) | Accepted |

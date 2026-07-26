@@ -52,6 +52,7 @@ void lensi_store_destroy(lens *ui) {
             if (!s->slots[i].id)
                 continue;
             lens_node *n = s->slots[i].node;
+            lensi_node_drop_record(ui, n);
             if (n->state)
                 lensi_free(ui, n->state);
             lensi_free(ui, n);
@@ -128,6 +129,7 @@ void lensi_store_reap(lens *ui) {
             continue;
 
         /* reap: free node, tombstone-free by full rehash of the run */
+        lensi_node_drop_record(ui, n);
         if (n->state)
             lensi_free(ui, n->state);
         lensi_free(ui, n);

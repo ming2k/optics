@@ -31,7 +31,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(VkDevice device,
                                                 VkDeviceMemory *pMemory) {
     static PFN_vkAllocateMemory real_fn;
     if (!real_fn)
-        real_fn = (PFN_vkAllocateMemory)dlsym(RTLD_NEXT, "vkAllocateMemory");
+        *(void **)(&real_fn) = dlsym(RTLD_NEXT, "vkAllocateMemory");
 
     int remaining = atomic_load_explicit(&g_fail_remaining, memory_order_acquire);
     while (remaining > 0 &&

@@ -115,6 +115,11 @@ int main(void) {
         flux_device_vk_pipeline_cache_unlock(nullptr);
         EXPECT(flux_device_bindless_set(d) != VK_NULL_HANDLE);
         EXPECT(flux_device_bindless_layout(d) != VK_NULL_HANDLE);
+
+        VkPhysicalDeviceFeatures physical_features = {0};
+        vkGetPhysicalDeviceFeatures(flux_device_vk_physical_device(d), &physical_features);
+        EXPECT(flux_device_supports_large_points(d) == (bool)physical_features.largePoints);
+        EXPECT(!flux_device_supports_large_points(nullptr));
     }
 
     flux_device_release(d);

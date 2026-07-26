@@ -392,6 +392,16 @@ LENS_API bool lens_overflowed(const lens *ui);
  * lens_begin. */
 LENS_API bool lens_anim_pending(const lens *ui);
 
+/* True if the frame just built would paint anything different from what is
+ * already on screen: base-tree or floating-layer damage (geometry, draw
+ * lists, lifecycle), an appearing/disappearing overlay or tooltip, an eased
+ * value still in transit, or a focused text caret that needs its blink
+ * clock. A damage-driven host may skip the whole acquire/paint/present
+ * cycle when this returns false. Read-only; valid between lens_end and the
+ * next lens_begin. Resize/scale changes are host-visible, not lens state —
+ * the host must still paint the first frame after those itself. */
+LENS_API bool lens_frame_needs_repaint(const lens *ui);
+
 /* Accessibility reduced-motion switch. When enabled, every eased value in
  * lens resolves to its target within one frame — no fades, slides, or other
  * transitions — and lens_anim_pending stays false. The host owns the policy

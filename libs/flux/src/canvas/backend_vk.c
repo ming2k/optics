@@ -5,6 +5,8 @@
  * (pipeline layout, colour/stencil formats, MSAA + stencil attachments), the
  * render-pass envelope (barriers, attachments, resolve), scissor, pipeline
  * binding, and the draw tail (transient upload, push constants, vkCmdDraw).
+ * Consecutive state-identical submits are batched into a single vkCmdDraw;
+ * see the batch block in struct flux_vk_canvas.
  * The device-level pipeline cache itself lives in renderer.c
  * (get_canvas_pipeline_id); this file consumes it.
  *
@@ -41,6 +43,23 @@ typedef struct flux_vk_canvas {
     VkFormat stencil_format;   /* device stencil format, or UNDEFINED */
     VkPipeline bound_pipeline; /* last pipeline bound this pass */
     VkSampleCountFlagBits active_samples;
+
+    /* Open draw batch. Consecutive submits whose entire draw-visible
+     * state (pipeline, scissor, every push-constant byte except the
+     * vertex base address) matches — and whose transient slices land
+     * back-to-back in the ring — append their vertices to one run and
+     * share a single vkCmdDraw, recorded at flush time. The vertex
+     * shader pulls verts[gl_VertexIndex] with no per-draw base
+     * parameter, so a contiguous run draws identically to the per-
+     * submit draws it replaces (same order, same blending).
+     * pipeline == VK_NULL_HANDLE means no batch is open. */
+    struct {
+        VkPipeline pipeline;
+        flux_recti scissor;
+        flux_canvas_push push; /* verts_address = run base          */
+        VkDeviceSize end;      /* gpu address one past the run      */
+        uint32_t vertex_count;
+    } batch;
 
     /* Attachments are isolated by frame slot and destination class. A target
      * capture and the final surface pass can have different extents/formats in
@@ -248,6 +267,10 @@ static void vk_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) {
 /*  Pass envelope                                                     */
 /* ------------------------------------------------------------------ */
 
+/* Defined with the submit path below; end_pass must drain any open
+ * vertex batch before closing the render pass. */
+static void batch_flush(flux_canvas *c);
+
 static void unpack_clear(const flux_color *clear, flux_vec4 *out) {
     *out = (flux_vec4){0, 0, 0, 0};
     if (!clear)
@@ -436,6 +459,9 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     /* Don't pre-bind a pipeline — each draw picks the right one. Bind the
      * bindless set now; it's pipeline-layout-scoped and shared. */
     v->bound_pipeline = VK_NULL_HANDLE;
+    /* end_pass drains the batch; reset defensively so a pass that failed
+     * mid-begin never inherits a stale open batch. */
+    v->batch.pipeline = VK_NULL_HANDLE;
     VkDescriptorSet bindless = flux_device_bindless_set(c->device);
     if (bindless != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, v->layout, 0, 1, &bindless, 0,
@@ -448,6 +474,7 @@ static void vk_end_pass(const flux_canvas_backend *self, flux_canvas *c) {
     (void)self;
     if (!c->pass_active)
         return;
+    batch_flush(c);
     flux_frame_end_pass(c->frame);
     c->pass_active = false;
 
@@ -501,11 +528,46 @@ static bool vk_bind_program(const flux_canvas_backend *self, flux_canvas *c, can
                                c->pending_blend, &layout, &pipeline) != FLUX_OK)
         return false;
     if (v->bound_pipeline != pipeline) {
+        /* A pipeline change ends the open batch: its draw must be
+         * recorded before the new vkCmdBindPipeline, so batched
+         * vertices always execute under the pipeline they were
+         * submitted with. */
+        batch_flush(c);
         VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         v->bound_pipeline = pipeline;
     }
     return true;
+}
+
+/* Record the open batch's scissor + push constants + a single draw for
+ * every vertex accumulated so far, then close the batch. No-op when no
+ * batch is open. Invariant: an open batch's pipeline is always the
+ * bound one — vk_bind_program flushes before recording a new bind. */
+static void batch_flush(flux_canvas *c) {
+    flux_vk_canvas *v = vkc(c);
+    if (v->batch.pipeline == VK_NULL_HANDLE)
+        return;
+    VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
+    VkRect2D sc = {.offset = {v->batch.scissor.x, v->batch.scissor.y},
+                   .extent = {v->batch.scissor.w, v->batch.scissor.h}};
+    vkCmdSetScissor(cmd, 0, 1, &sc);
+    vkCmdPushConstants(cmd, v->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                       sizeof(v->batch.push), &v->batch.push);
+    vkCmdDraw(cmd, v->batch.vertex_count, 1, 0, 0);
+    c->recorded_draws++;
+    v->batch.pipeline = VK_NULL_HANDLE;
+}
+
+/* Every push-constant byte after verts_address must match for two
+ * submits to share a draw: paint kind, gradient stops, image/sampler
+ * bindless handles, UV remap. build_push zero-initialises the whole
+ * block, so padding compares deterministically; a false mismatch only
+ * splits a batch, never corrupts one. */
+static bool push_params_equal(const flux_canvas_push *a, const flux_canvas_push *b) {
+    return memcmp((const char *)a + offsetof(flux_canvas_push, inv_window_size),
+                  (const char *)b + offsetof(flux_canvas_push, inv_window_size),
+                  sizeof(flux_canvas_push) - offsetof(flux_canvas_push, inv_window_size)) == 0;
 }
 
 static void vk_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_pipe_id id,
@@ -515,6 +577,8 @@ static void vk_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_pi
         return;
     if (!vk_bind_program(self, c, id))
         return;
+    c->submit_calls++;
+    flux_vk_canvas *v = vkc(c);
 
     /* Vertices travel through the frame's transient ring; the shader reads
      * them by buffer-reference address (push.verts_address). */
@@ -529,15 +593,30 @@ static void vk_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_pi
 
     flux_canvas_push pc = *push;
     pc.verts_address = slice.gpu_address;
-
     flux_recti clip = c->states[c->state_top].scissor;
-    VkRect2D sc = {.offset = {clip.x, clip.y}, .extent = {clip.w, clip.h}};
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
-    vkCmdSetScissor(cmd, 0, 1, &sc);
-    vkCmdPushConstants(cmd, vkc(c)->layout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc),
-                       &pc);
-    vkCmdDraw(cmd, vertex_count, 1, 0, 0);
+
+    /* Append to the open batch when all draw-visible state matches and
+     * the new slice continues the batch's ring run. The ring is a bump
+     * allocator and flux_canvas_vertex is 16-byte/4-aligned, so slices
+     * from back-to-back canvas submits are exactly contiguous; any
+     * interleaved allocation or a wrap breaks contiguity and flushes. */
+    if (v->batch.pipeline == v->bound_pipeline && v->batch.end == slice.gpu_address &&
+        v->batch.scissor.x == clip.x && v->batch.scissor.y == clip.y &&
+        v->batch.scissor.w == clip.w && v->batch.scissor.h == clip.h &&
+        push_params_equal(&v->batch.push, &pc)) {
+        v->batch.vertex_count += vertex_count;
+        v->batch.end += vertex_count * sizeof(flux_canvas_vertex);
+        return;
+    }
+
+    /* State changed or the ring broke the run: draw what accumulated,
+     * then open a new batch. */
+    batch_flush(c);
+    v->batch.pipeline = v->bound_pipeline;
+    v->batch.scissor = clip;
+    v->batch.push = pc;
+    v->batch.end = slice.gpu_address + vertex_count * sizeof(flux_canvas_vertex);
+    v->batch.vertex_count = vertex_count;
 }
 
 static const flux_canvas_backend vk_backend = {

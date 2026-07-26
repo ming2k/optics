@@ -48,6 +48,8 @@ void main()
     float intensity = clamp((y + 0.5) / 1.5, 0.0, 1.0);
     v_color = mix(baseColor, highlight, intensity);
 
-    v_size = pc.point_size * (1.0 + intensity * 2.0 + ripple);
+    v_size = pc.point_size > 0.0
+        ? pc.point_size * (1.0 + intensity * 2.0 + ripple)
+        : 1.0;
     gl_PointSize = v_size;
 }
