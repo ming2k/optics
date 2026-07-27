@@ -54,8 +54,8 @@ extern "C" {
 /* ================================================================== */
 
 #define FLUX_TEXT_VERSION_MAJOR 0
-#define FLUX_TEXT_VERSION_MINOR 1
-#define FLUX_TEXT_VERSION_PATCH 0
+#define FLUX_TEXT_VERSION_MINOR 0
+#define FLUX_TEXT_VERSION_PATCH 1
 
 FLUX_API const char *flux_text_version_string(void);
 

@@ -47,8 +47,8 @@ extern "C" {
 #endif
 
 #define FLUX_SG_VERSION_MAJOR 0
-#define FLUX_SG_VERSION_MINOR 1
-#define FLUX_SG_VERSION_PATCH 0
+#define FLUX_SG_VERSION_MINOR 0
+#define FLUX_SG_VERSION_PATCH 1
 
 FLUX_SG_API const char *flux_sg_version_string(void);
 

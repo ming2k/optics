@@ -1,9 +1,9 @@
 project('optics', ['c'],
-  version : '0.2.3',
+  version : '0.0.1',
   license : 'MIT',
   meson_version : '>=1.8.0',
   default_options : [
-    'c_std=c2x',
+    'c_std=c23',
     'warning_level=3',
     'default_library=shared',
     'b_ndebug=if-release',
