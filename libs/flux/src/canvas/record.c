@@ -291,6 +291,10 @@ bool flux_canvas_replay(flux_canvas *c, flux_canvas_record rec) {
         return false;
     if (memcmp(&s->anchor_scissor, &cur->scissor, sizeof(flux_recti)) != 0)
         return false;
+    for (uint32_t i = 0; i < s->image_count; ++i) {
+        if (!canvas_track_foreign_image(c, s->images[i]))
+            return false;
+    }
 
     const flux_recti saved_scissor = cur->scissor;
     const flux_blend_mode saved_blend = c->pending_blend;

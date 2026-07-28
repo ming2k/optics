@@ -490,6 +490,7 @@ flux_result flux_image_import_dmabuf(flux_device *d, const flux_dmabuf_image_des
      * clear it so the success/fail paths below do not destroy it. */
     acquire_sem = VK_NULL_HANDLE;
     im->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    im->foreign_owned = false;
 
     VkImageViewCreateInfo ivci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,

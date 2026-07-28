@@ -607,9 +607,21 @@ typedef struct flux_timestamp_scope {
     uint32_t end_query; /* UINT32_MAX while open */
 } flux_timestamp_scope;
 
+typedef void *(*flux_frame_resource_retain_fn)(void *resource);
+typedef void (*flux_frame_resource_release_fn)(void *resource);
+
+typedef struct flux_frame_foreign_image {
+    VkImage image;
+    void *resource;
+    flux_frame_resource_release_fn release;
+    bool *foreign_owned;
+    bool acquired;
+} flux_frame_foreign_image;
+
 typedef struct flux_per_frame {
     VkCommandPool pool;
     VkCommandBuffer cmd;
+    VkCommandBuffer foreign_acquire_cmd;
     VkSemaphore image_acquired; /* binary; signalled by acquire */
     VkFence in_flight;          /* CPU waits here before reuse  */
 
@@ -629,6 +641,14 @@ typedef struct flux_per_frame {
      * in_flight; a successful wait on in_flight retires everything up
      * to this serial (see the device retire queue). */
     uint64_t submitted_serial;
+
+    /* Imported dma-buf images sampled by this batch. They stay retained
+     * through the slot fence and are returned to FOREIGN ownership in the
+     * same submission that samples them, so the exported completion fence
+     * also covers the ownership release. */
+    flux_frame_foreign_image *foreign_images;
+    uint32_t foreign_image_count;
+    uint32_t foreign_image_capacity;
 } flux_per_frame;
 
 typedef struct flux_transient_ring {
@@ -677,6 +697,15 @@ struct flux_frame {
     flux_mat4 scene_view_inv;
     bool scene_view_inv_valid;
 };
+
+/* Recorders call this before sampling an imported dma-buf. The first use in
+ * a frame retains resource until the frame slot's fence retires.
+ * flux_frame_submit prepends a FOREIGN -> graphics acquire when necessary and
+ * records the matching graphics -> FOREIGN release after all sampling. */
+bool flux_frame_track_foreign_image(flux_frame *frame, VkImage image, void *resource,
+                                    flux_frame_resource_retain_fn retain,
+                                    flux_frame_resource_release_fn release, bool *foreign_owned);
+void flux_frame_foreign_images_destroy(flux_surface *surface, flux_per_frame *per_frame);
 
 struct flux_surface {
     atomic_uint ref_count;

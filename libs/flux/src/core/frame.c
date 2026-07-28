@@ -133,6 +133,172 @@ static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen, b
 }
 
 /* ------------------------------------------------------------------ */
+/*  Imported dma-buf ownership                                       */
+/* ------------------------------------------------------------------ */
+
+static void foreign_images_clear(flux_per_frame *pf) {
+    for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
+        flux_frame_foreign_image *entry = &pf->foreign_images[i];
+        if (entry->release)
+            entry->release(entry->resource);
+    }
+    pf->foreign_image_count = 0;
+    if (!pf->foreign_images)
+        pf->foreign_image_capacity = 0;
+}
+
+void flux_frame_foreign_images_destroy(flux_surface *s, flux_per_frame *pf) {
+    foreign_images_clear(pf);
+    flux_internal_free(s->device, pf->foreign_images);
+    pf->foreign_images = nullptr;
+    pf->foreign_image_capacity = 0;
+}
+
+static bool foreign_images_grow(flux_surface *s, flux_per_frame *pf) {
+    uint32_t old_capacity = pf->foreign_image_capacity;
+    uint32_t new_capacity = old_capacity ? old_capacity * 2u : 8u;
+    size_t bytes = 0;
+    if (new_capacity < old_capacity ||
+        __builtin_mul_overflow((size_t)new_capacity, sizeof(*pf->foreign_images), &bytes)) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "too many foreign images in one frame");
+        return false;
+    }
+    flux_frame_foreign_image *grown = flux_internal_alloc(s->device, bytes);
+    if (!grown) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "foreign image frame tracking allocation failed");
+        return false;
+    }
+    if (pf->foreign_images) {
+        memcpy(grown, pf->foreign_images,
+               (size_t)pf->foreign_image_count * sizeof(*pf->foreign_images));
+        flux_internal_free(s->device, pf->foreign_images);
+    }
+    pf->foreign_images = grown;
+    pf->foreign_image_capacity = new_capacity;
+    return true;
+}
+
+bool flux_frame_track_foreign_image(flux_frame *f, VkImage image, void *resource,
+                                    flux_frame_resource_retain_fn retain,
+                                    flux_frame_resource_release_fn release, bool *foreign_owned) {
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING || !image || !resource ||
+        !retain || !release || !foreign_owned)
+        return false;
+
+    flux_surface *s = f->surface;
+    flux_per_frame *pf = &s->frames[f->slot];
+    for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
+        if (pf->foreign_images[i].resource == resource)
+            return true;
+    }
+    if (pf->foreign_image_count == pf->foreign_image_capacity && !foreign_images_grow(s, pf))
+        return false;
+
+    flux_frame_foreign_image *entry = &pf->foreign_images[pf->foreign_image_count];
+    *entry = (flux_frame_foreign_image){
+        .image = image,
+        .resource = retain(resource),
+        .release = release,
+        .foreign_owned = foreign_owned,
+        .acquired = *foreign_owned,
+    };
+    if (!entry->resource)
+        return false;
+
+    ++pf->foreign_image_count;
+    return true;
+}
+
+static VkResult foreign_images_record_acquire(flux_surface *s, flux_per_frame *pf,
+                                              bool *out_recorded) {
+    *out_recorded = false;
+    for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
+        if (pf->foreign_images[i].acquired) {
+            *out_recorded = true;
+            break;
+        }
+    }
+    if (!*out_recorded)
+        return VK_SUCCESS;
+
+    VkCommandBufferBeginInfo begin = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    VkResult vr = vkBeginCommandBuffer(pf->foreign_acquire_cmd, &begin);
+    if (vr != VK_SUCCESS)
+        return vr;
+
+    for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
+        const flux_frame_foreign_image *entry = &pf->foreign_images[i];
+        if (!entry->acquired)
+            continue;
+        VkImageMemoryBarrier2 barrier = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+            .srcAccessMask = 0,
+            .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT,
+            .dstQueueFamilyIndex = s->device->graphics_family,
+            .image = entry->image,
+            .subresourceRange =
+                {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .levelCount = 1,
+                    .layerCount = 1,
+                },
+        };
+        VkDependencyInfo dependency = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &barrier,
+        };
+        vkCmdPipelineBarrier2(pf->foreign_acquire_cmd, &dependency);
+    }
+    return vkEndCommandBuffer(pf->foreign_acquire_cmd);
+}
+
+static void foreign_images_record_release(flux_surface *s, flux_per_frame *pf) {
+    for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
+        const flux_frame_foreign_image *entry = &pf->foreign_images[i];
+        VkImageMemoryBarrier2 barrier = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            .srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
+            .dstAccessMask = 0,
+            .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = s->device->graphics_family,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT,
+            .image = entry->image,
+            .subresourceRange =
+                {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .levelCount = 1,
+                    .layerCount = 1,
+                },
+        };
+        VkDependencyInfo dependency = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &barrier,
+        };
+        vkCmdPipelineBarrier2(pf->cmd, &dependency);
+    }
+}
+
+static void foreign_images_submit_succeeded(flux_per_frame *pf) {
+    for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
+        if (pf->foreign_images[i].foreign_owned)
+            *pf->foreign_images[i].foreign_owned = true;
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Frame lifecycle                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -181,6 +347,7 @@ flux_result flux_surface_begin_frame(flux_surface *s, const flux_frame_begin_des
      * is FIFO, every batch up to its serial is done. Raise the retire
      * watermark so zombies parked before it are destroyed now. */
     flux_vk_note_graphics_completed(s->device, pf->submitted_serial);
+    foreign_images_clear(pf);
 
     /* Acquire. Offscreen surfaces have no swapchain (ADR-0013): the
      * image index is the frame slot and the fence wait above already
@@ -484,6 +651,18 @@ flux_result flux_frame_submit(flux_frame *f) {
         flux_frame_end_pass(f);
     }
 
+    foreign_images_record_release(s, pf);
+    bool foreign_acquire_recorded = false;
+    VkResult vr = foreign_images_record_acquire(s, pf, &foreign_acquire_recorded);
+    if (vr != VK_SUCCESS) {
+        f->state = FLUX_FRAME_STATE_INVALID;
+        s->frame_active = false;
+        if (!s->offscreen)
+            s->needs_recreate = true;
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "foreign image acquire recording failed", vr);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+
     bool copy_readback = s->offscreen_require_readback || f->readback_requested;
     if (copy_readback) {
         barrier_to_readback(pf->cmd, s->images[s->current_image]);
@@ -516,7 +695,7 @@ flux_result flux_frame_submit(flux_frame *f) {
 
     pf->ts_was_submitted = (pf->ts_scope_count > 0);
 
-    VkResult vr = vkEndCommandBuffer(pf->cmd);
+    vr = vkEndCommandBuffer(pf->cmd);
     if (vr != VK_SUCCESS) {
         f->state = FLUX_FRAME_STATE_INVALID;
         s->frame_active = false;
@@ -539,7 +718,15 @@ flux_result flux_frame_submit(flux_frame *f) {
     if (s->offscreen) {
         /* No acquire/present semaphores exist to wait on or signal;
          * the fence alone orders slot reuse and readback. */
-        VkCommandBufferSubmitInfo ocb = {
+        VkCommandBufferSubmitInfo command_buffers[2] = {0};
+        uint32_t command_buffer_count = 0;
+        if (foreign_acquire_recorded) {
+            command_buffers[command_buffer_count++] = (VkCommandBufferSubmitInfo){
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+                .commandBuffer = pf->foreign_acquire_cmd,
+            };
+        }
+        command_buffers[command_buffer_count++] = (VkCommandBufferSubmitInfo){
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
             .commandBuffer = pf->cmd,
         };
@@ -551,8 +738,8 @@ flux_result flux_frame_submit(flux_frame *f) {
         bool signal_sync = signal.semaphore != VK_NULL_HANDLE;
         VkSubmitInfo2 osi = {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .commandBufferInfoCount = 1,
-            .pCommandBufferInfos = &ocb,
+            .commandBufferInfoCount = command_buffer_count,
+            .pCommandBufferInfos = command_buffers,
             .signalSemaphoreInfoCount = signal_sync ? 1u : 0u,
             .pSignalSemaphoreInfos = signal_sync ? &signal : nullptr,
         };
@@ -563,6 +750,7 @@ flux_result flux_frame_submit(flux_frame *f) {
         pthread_mutex_unlock(&s->device->queue_lock);
         if (vr != VK_SUCCESS)
             return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
+        foreign_images_submit_succeeded(pf);
         s->last_submitted_slot = f->slot;
         if (copy_readback)
             s->last_readback_slot = f->slot;
@@ -588,7 +776,15 @@ flux_result flux_frame_submit(flux_frame *f) {
         .semaphore = s->render_finished[s->current_image],
         .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
     };
-    VkCommandBufferSubmitInfo cb = {
+    VkCommandBufferSubmitInfo command_buffers[2] = {0};
+    uint32_t command_buffer_count = 0;
+    if (foreign_acquire_recorded) {
+        command_buffers[command_buffer_count++] = (VkCommandBufferSubmitInfo){
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            .commandBuffer = pf->foreign_acquire_cmd,
+        };
+    }
+    command_buffers[command_buffer_count++] = (VkCommandBufferSubmitInfo){
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .commandBuffer = pf->cmd,
     };
@@ -596,8 +792,8 @@ flux_result flux_frame_submit(flux_frame *f) {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
         .waitSemaphoreInfoCount = 1,
         .pWaitSemaphoreInfos = &wait,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &cb,
+        .commandBufferInfoCount = command_buffer_count,
+        .pCommandBufferInfos = command_buffers,
         .signalSemaphoreInfoCount = 1,
         .pSignalSemaphoreInfos = &signal,
     };
@@ -608,6 +804,7 @@ flux_result flux_frame_submit(flux_frame *f) {
     pthread_mutex_unlock(&s->device->queue_lock);
     if (vr != VK_SUCCESS)
         return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
+    foreign_images_submit_succeeded(pf);
     if (copy_readback)
         s->last_readback_slot = f->slot;
     s->image_layouts[s->current_image] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;

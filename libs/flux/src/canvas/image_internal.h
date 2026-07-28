@@ -35,6 +35,8 @@ struct flux_image {
                                      * VK_NULL_HANDLE for normal images. */
     VkDeviceSize imported_size;     /* bytes noted into allocator stats for
                                      * imported_memory; 0 when unset */
+    bool foreign_owned;             /* imported dma-buf is currently owned by
+                                     * VK_QUEUE_FAMILY_FOREIGN_EXT */
     VkImageView view;
     flux_bindless_handle bindless; /* SAMPLED_IMAGE slot, FLUX_BINDLESS_INVALID if unbound */
     flux_bindless_handle

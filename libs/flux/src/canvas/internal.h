@@ -421,6 +421,7 @@ void canvas_emit(flux_canvas *c, canvas_pipe_id id, const flux_canvas_push *push
  * active recording, a device, or an image. */
 void canvas_record_retain_image(flux_canvas *c, flux_image *img);
 void canvas_record_retain_sampler(flux_canvas *c, flux_sampler *sampler);
+bool canvas_track_foreign_image(flux_canvas *c, flux_image *img);
 
 /* Release every slot's buffers + retained images and free the pool.
  * Called from flux_canvas_destroy. */

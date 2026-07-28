@@ -822,13 +822,16 @@ static flux_result init_per_frame(flux_surface *s, uint32_t slot) {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool = f->pool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
+        .commandBufferCount = 2,
     };
-    vr = vkAllocateCommandBuffers(s->device->device, &cbai, &f->cmd);
+    VkCommandBuffer command_buffers[2] = {0};
+    vr = vkAllocateCommandBuffers(s->device->device, &cbai, command_buffers);
     if (vr != VK_SUCCESS) {
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkAllocateCommandBuffers failed", vr);
         goto fail;
     }
+    f->cmd = command_buffers[0];
+    f->foreign_acquire_cmd = command_buffers[1];
 
     VkSemaphoreCreateInfo sem = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     vr = vkCreateSemaphore(s->device->device, &sem, nullptr, &f->image_acquired);
@@ -867,6 +870,7 @@ fail:
 static void destroy_per_frame(flux_surface *s, uint32_t slot) {
     flux_per_frame *f = &s->frames[slot];
     VkDevice d = s->device->device;
+    flux_frame_foreign_images_destroy(s, f);
     if (f->query_pool)
         vkDestroyQueryPool(d, f->query_pool, nullptr);
     if (f->in_flight)

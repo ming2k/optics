@@ -120,16 +120,73 @@ int main(void) {
                     EXPECT(flux_surface_export_dmabuf_explicit(surface, &exported, &sync_fd) ==
                            FLUX_OK);
                     EXPECT(fd_is_open(sync_fd));
-                    if (sync_fd >= 0)
-                        close(sync_fd);
                 } else {
                     EXPECT(flux_surface_export_dmabuf(surface, &exported) == FLUX_OK);
                 }
                 EXPECT(fd_is_open(exported));
-                if (exported >= 0)
-                    close(exported);
 
                 uint64_t produced_modifier = flux_surface_dmabuf_modifier(surface);
+                if (exported >= 0) {
+                    flux_dmabuf_image_desc imported_desc = FLUX_DMABUF_IMAGE_DESC_INIT;
+                    imported_desc.width = 16;
+                    imported_desc.height = 16;
+                    imported_desc.format = FLUX_FORMAT_BGRA8_UNORM;
+                    imported_desc.modifier = produced_modifier;
+                    imported_desc.plane_count = 1;
+                    imported_desc.planes[0].fd = exported;
+                    imported_desc.planes[0].stride = flux_surface_dmabuf_stride(surface);
+                    imported_desc.has_acquire_sync_fd = sync_fd >= 0;
+                    imported_desc.acquire_sync_fd = sync_fd;
+
+                    flux_image *sampled = nullptr;
+                    flux_result imported_result =
+                        flux_image_import_dmabuf(dd, &imported_desc, &sampled);
+                    if (imported_result == FLUX_OK) {
+                        EXPECT(!fd_is_open(exported));
+                        if (sync_fd >= 0)
+                            EXPECT(!fd_is_open(sync_fd));
+
+                        flux_surface_desc consumer_desc = FLUX_SURFACE_DESC_INIT;
+                        consumer_desc.width = 16;
+                        consumer_desc.height = 16;
+                        flux_surface *consumer = nullptr;
+                        EXPECT(flux_surface_create(dd, &consumer_desc, &consumer) == FLUX_OK);
+                        if (consumer) {
+                            flux_canvas_desc canvas_desc = FLUX_CANVAS_DESC_INIT;
+                            canvas_desc.surface = consumer;
+                            flux_canvas *canvas = nullptr;
+                            EXPECT(flux_canvas_create(&canvas_desc, &canvas) == FLUX_OK);
+                            if (canvas) {
+                                /* The second frame exercises the release from
+                                 * frame one and its matching reacquire. */
+                                for (uint32_t frame_index = 0; frame_index < 2; ++frame_index) {
+                                    flux_frame *consumer_frame = nullptr;
+                                    EXPECT(flux_surface_begin_frame(consumer, nullptr,
+                                                                    &consumer_frame) == FLUX_OK);
+                                    flux_color clear = flux_color_rgba(0, 0, 0, 255);
+                                    EXPECT(flux_canvas_begin(canvas, consumer_frame, &clear) ==
+                                           FLUX_OK);
+                                    flux_canvas_draw_image(canvas, sampled,
+                                                           (flux_rect){0, 0, 16, 16}, nullptr);
+                                    flux_canvas_end(canvas);
+                                    EXPECT(flux_frame_submit(consumer_frame) == FLUX_OK);
+                                    EXPECT(flux_frame_present(consumer_frame) == FLUX_OK);
+                                }
+                                flux_canvas_destroy(canvas);
+                            }
+                            flux_surface_release(consumer);
+                        }
+                        flux_image_release(sampled);
+                    } else {
+                        EXPECT(fd_is_open(exported));
+                        close(exported);
+                        if (sync_fd >= 0) {
+                            EXPECT(fd_is_open(sync_fd));
+                            close(sync_fd);
+                        }
+                    }
+                }
+
                 flux_surface_dmabuf_desc constrained = FLUX_SURFACE_DMABUF_DESC_INIT;
                 constrained.modifiers = &produced_modifier;
                 constrained.modifier_count = 1;

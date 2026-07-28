@@ -417,12 +417,29 @@ static uint32_t pack_uv(float u, float v) {
     return pu | (pv << 16);
 }
 
+static void *frame_retain_image(void *resource) {
+    return flux_image_retain(resource);
+}
+
+static void frame_release_image(void *resource) {
+    flux_image_release(resource);
+}
+
+bool canvas_track_foreign_image(flux_canvas *c, flux_image *img) {
+    if (!c || !img || !img->imported_memory)
+        return true;
+    return flux_frame_track_foreign_image(c->frame, img->image, img, frame_retain_image,
+                                          frame_release_image, &img->foreign_owned);
+}
+
 static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux_sampler *sampler,
                                            flux_bindless_handle sh, flux_rect dst, flux_rect src,
                                            flux_color tint, uint32_t kind) {
     /* Image draws need a GPU-resident texture (img->bindless): unsupported on
      * a headless CPU canvas. */
     if (!c->device || sh == FLUX_BINDLESS_INVALID)
+        return;
+    if (!canvas_track_foreign_image(c, img))
         return;
 
     flux_mat3x2 tx = c->states[c->state_top].transform;
@@ -628,6 +645,8 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
             return;
         atlas_w = desc->atlas->width;
         atlas_h = desc->atlas->height;
+        if (!canvas_track_foreign_image(c, desc->atlas))
+            return;
     }
 
     flux_mat3x2 tx = c->states[c->state_top].transform;
