@@ -120,5 +120,5 @@ pkg.generate(
   filebase    : 'iris',
   description : 'L3 application toolkit for the flux/lens stack',
   version     : meson.project_version(),
-  requires    : ['lens >= 0.1.0'],
+  requires    : ['lens >= ' + meson.project_version()],
 )

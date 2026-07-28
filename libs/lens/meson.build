@@ -71,6 +71,6 @@ pkg.generate(
   filebase    : 'lens',
   description : 'Immediate-mode UI over a retained core, built on flux',
   version     : meson.project_version(),
-  requires    : ['flux >= 0.1.0', 'flux-text >= 0.1.0'],
+  requires    : ['flux >= ' + meson.project_version(), 'flux-text >= ' + meson.project_version()],
 )
 
