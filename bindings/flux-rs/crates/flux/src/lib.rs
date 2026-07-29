@@ -1771,6 +1771,41 @@ pub fn dmabuf_sync_supported(device: &Device) -> bool {
     unsafe { sys::flux_dmabuf_sync_supported(device.raw) }
 }
 
+/// The single-plane DRM format modifiers a buffer of `format` may use to be
+/// both sampleable by this device and importable as external dma-buf memory —
+/// the set a compositor should advertise alongside the matching fourcc through
+/// `zwp_linux_dmabuf_v1` so clients allocate GPU-optimal (tiled/compressed)
+/// layouts instead of falling back to `DRM_FORMAT_MOD_LINEAR`.
+///
+/// Returns the modifiers on success. An unsupported format (no Vulkan
+/// equivalent) yields an empty `Vec`, not an error, so callers can advertise a
+/// format list unconditionally.
+pub fn dmabuf_format_modifiers(device: &Device, format: Format) -> Vec<u64> {
+    // Two-pass: probe the required length with count 0, then allocate and fill.
+    let mut count: u32 = 0;
+    let rc = unsafe {
+        sys::flux_dmabuf_format_modifiers(device.raw, format, std::ptr::null_mut(), &mut count)
+    };
+    // FLUX_OK with count 0 (no qualifiers, or device lacks dma-buf) is the
+    // common "nothing to advertise" path. An unsupported format is also mapped
+    // to empty here so the caller's format loop is uniform.
+    if rc != sys::flux_result::FLUX_OK && rc != sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT {
+        return Vec::new();
+    }
+    if count == 0 {
+        return Vec::new();
+    }
+    let mut mods = vec![0u64; count as usize];
+    let rc = unsafe {
+        sys::flux_dmabuf_format_modifiers(device.raw, format, mods.as_mut_ptr(), &mut count)
+    };
+    if rc != sys::flux_result::FLUX_OK {
+        return Vec::new();
+    }
+    mods.truncate(count as usize);
+    mods
+}
+
 /// The Vulkan device extensions dma-buf import requires. Pass to
 /// [`Device::new`].
 pub const DMABUF_DEVICE_EXTENSIONS: [&std::ffi::CStr; 5] = [

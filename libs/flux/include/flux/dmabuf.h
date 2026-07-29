@@ -82,6 +82,22 @@ FLUX_API bool flux_dmabuf_supported(const flux_device *d);
  * This is only required when flux_dmabuf_image_desc.has_acquire_sync_fd is true. */
 FLUX_API bool flux_dmabuf_sync_supported(const flux_device *d);
 
+/* Enumerate the single-plane DRM format modifiers a buffer of `format` may use
+ * to be both sampleable by this device and importable as external memory, i.e.
+ * the set a compositor may advertise alongside the matching fourcc through
+ * zwp_linux_dmabuf_v1 so clients allocate GPU-optimal (tiled/compressed)
+ * layouts rather than falling back to DRM_FORMAT_MOD_LINEAR.
+ *
+ * `out_modifiers` points to a caller-owned buffer of `*inout_count` slots.
+ * On FLUX_OK `*inout_count` receives the number of modifiers written. If the
+ * buffer is too small the call returns FLUX_ERROR_INVALID_ARGUMENT and sets
+ * `*inout_count` to the required length (without writing anything), so a
+ * two-pass caller can probe then allocate. Pass `format` as a flux_format
+ * matching the fourcc the host will advertise. */
+FLUX_NODISCARD FLUX_API flux_result flux_dmabuf_format_modifiers(flux_device *d, flux_format format,
+                                                                 uint64_t *out_modifiers,
+                                                                 uint32_t *inout_count);
+
 #ifdef __cplusplus
 }
 #endif

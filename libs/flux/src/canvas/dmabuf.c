@@ -124,6 +124,74 @@ static bool external_image_importable(flux_device *d, VkFormat format, uint64_t 
            height <= props.imageFormatProperties.maxExtent.height;
 }
 
+/* Enumerate the single-plane DRM modifiers a buffer of `vfmt` may use to be
+ * both sampleable and importable as external dma-buf memory: the set a
+ * compositor should advertise so clients allocate GPU-optimal layouts instead
+ * of falling back to DRM_FORMAT_MOD_LINEAR. Reuses the same two property
+ * queries that validate a concrete import. */
+static flux_result dmabuf_enum_sampleable_importable_modifiers(flux_device *d, VkFormat vfmt,
+                                                               uint64_t *out, uint32_t *inout_count) {
+    VkDrmFormatModifierPropertiesListEXT list = {
+        .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
+    };
+    VkFormatProperties2 props = {
+        .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2,
+        .pNext = &list,
+    };
+    vkGetPhysicalDeviceFormatProperties2(d->physical_device, vfmt, &props);
+    if (list.drmFormatModifierCount == 0) {
+        *inout_count = 0;
+        return FLUX_OK;
+    }
+
+    VkDrmFormatModifierPropertiesEXT *mods =
+        flux_internal_alloc(d, sizeof(*mods) * list.drmFormatModifierCount);
+    if (!mods)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    list.pDrmFormatModifierProperties = mods;
+    vkGetPhysicalDeviceFormatProperties2(d->physical_device, vfmt, &props);
+
+    /* A modifier qualifies when the device can sample it as a single-plane
+     * image and import it as external dma-buf memory. Dimensions are
+     * negotiated separately by clients, so the import check uses 1x1 only to
+     * probe format/modifier/handle compatibility. */
+    uint32_t qualified = 0;
+    for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {
+        const VkDrmFormatModifierPropertiesEXT *m = &mods[i];
+        if ((m->drmFormatModifierTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0)
+            continue;
+        if (m->drmFormatModifierPlaneCount != 1)
+            continue;
+        if (!external_image_importable(d, vfmt, m->drmFormatModifier, 1, 1))
+            continue;
+        ++qualified;
+    }
+
+    if (*inout_count < qualified) {
+        /* Two-pass contract: report the required length and let the caller
+         * retry with a larger buffer. Nothing is written in this case. */
+        *inout_count = qualified;
+        flux_internal_free(d, mods);
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+
+    uint32_t written = 0;
+    for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {
+        const VkDrmFormatModifierPropertiesEXT *m = &mods[i];
+        if ((m->drmFormatModifierTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0)
+            continue;
+        if (m->drmFormatModifierPlaneCount != 1)
+            continue;
+        if (!external_image_importable(d, vfmt, m->drmFormatModifier, 1, 1))
+            continue;
+        out[written++] = m->drmFormatModifier;
+    }
+    *inout_count = written;
+
+    flux_internal_free(d, mods);
+    return FLUX_OK;
+}
+
 static flux_result import_sync_fd_semaphore(flux_device *d, int acquire_sync_fd, VkSemaphore *out) {
     *out = VK_NULL_HANDLE;
     if (!d->has_external_semaphore_fd) {
@@ -266,6 +334,25 @@ bool flux_dmabuf_supported(const flux_device *d) {
 
 bool flux_dmabuf_sync_supported(const flux_device *d) {
     return d ? d->has_external_semaphore_fd : false;
+}
+
+flux_result flux_dmabuf_format_modifiers(flux_device *d, flux_format format,
+                                         uint64_t *out_modifiers, uint32_t *inout_count) {
+    if (!d || !inout_count)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (!out_modifiers && *inout_count != 0)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    /* A device missing the dma-buf extensions has no importable modifiers to
+     * report; surface the empty set rather than a capability error so a caller
+     * advertising formats still degrades to "no dmabuf" cleanly. */
+    if (!flux_dmabuf_supported(d)) {
+        *inout_count = 0;
+        return FLUX_OK;
+    }
+    VkFormat vfmt = flux_format_to_vk(format);
+    if (vfmt == VK_FORMAT_UNDEFINED)
+        return FLUX_ERROR_UNSUPPORTED;
+    return dmabuf_enum_sampleable_importable_modifiers(d, vfmt, out_modifiers, inout_count);
 }
 
 flux_result flux_image_import_dmabuf(flux_device *d, const flux_dmabuf_image_desc *desc,
