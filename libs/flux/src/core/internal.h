@@ -616,6 +616,9 @@ typedef struct flux_frame_foreign_image {
     flux_frame_resource_release_fn release;
     bool *foreign_owned;
     bool acquired;
+    /* Optional one-shot sync_file import for this use of a reusable
+     * dma-buf image. Destroyed only after the frame-slot fence retires. */
+    VkSemaphore acquire_semaphore;
 } flux_frame_foreign_image;
 
 typedef struct flux_per_frame {
@@ -647,6 +650,9 @@ typedef struct flux_per_frame {
      * same submission that samples them, so the exported completion fence
      * also covers the ownership release. */
     flux_frame_foreign_image *foreign_images;
+    /* Submit-time storage. One extra entry accommodates the window-system
+     * image-acquired semaphore before the foreign-image waits. */
+    VkSemaphoreSubmitInfo *foreign_waits;
     uint32_t foreign_image_count;
     uint32_t foreign_image_capacity;
 } flux_per_frame;
@@ -705,6 +711,9 @@ struct flux_frame {
 bool flux_frame_track_foreign_image(flux_frame *frame, VkImage image, void *resource,
                                     flux_frame_resource_retain_fn retain,
                                     flux_frame_resource_release_fn release, bool *foreign_owned);
+/* Attach a one-shot semaphore to an image already tracked by this frame.
+ * Takes ownership of `semaphore` only on success. */
+bool flux_frame_set_foreign_image_acquire(flux_frame *frame, void *resource, VkSemaphore semaphore);
 void flux_frame_foreign_images_destroy(flux_surface *surface, flux_per_frame *per_frame);
 
 struct flux_surface {

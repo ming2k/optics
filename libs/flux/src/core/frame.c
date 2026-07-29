@@ -136,9 +136,11 @@ static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen, b
 /*  Imported dma-buf ownership                                       */
 /* ------------------------------------------------------------------ */
 
-static void foreign_images_clear(flux_per_frame *pf) {
+static void foreign_images_clear(flux_surface *s, flux_per_frame *pf) {
     for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
         flux_frame_foreign_image *entry = &pf->foreign_images[i];
+        if (entry->acquire_semaphore)
+            vkDestroySemaphore(s->device->device, entry->acquire_semaphore, nullptr);
         if (entry->release)
             entry->release(entry->resource);
     }
@@ -148,9 +150,11 @@ static void foreign_images_clear(flux_per_frame *pf) {
 }
 
 void flux_frame_foreign_images_destroy(flux_surface *s, flux_per_frame *pf) {
-    foreign_images_clear(pf);
+    foreign_images_clear(s, pf);
     flux_internal_free(s->device, pf->foreign_images);
+    flux_internal_free(s->device, pf->foreign_waits);
     pf->foreign_images = nullptr;
+    pf->foreign_waits = nullptr;
     pf->foreign_image_capacity = 0;
 }
 
@@ -158,8 +162,11 @@ static bool foreign_images_grow(flux_surface *s, flux_per_frame *pf) {
     uint32_t old_capacity = pf->foreign_image_capacity;
     uint32_t new_capacity = old_capacity ? old_capacity * 2u : 8u;
     size_t bytes = 0;
+    size_t wait_bytes = 0;
     if (new_capacity < old_capacity ||
-        __builtin_mul_overflow((size_t)new_capacity, sizeof(*pf->foreign_images), &bytes)) {
+        __builtin_mul_overflow((size_t)new_capacity, sizeof(*pf->foreign_images), &bytes) ||
+        __builtin_mul_overflow((size_t)new_capacity + 1u, sizeof(*pf->foreign_waits),
+                               &wait_bytes)) {
         FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "too many foreign images in one frame");
         return false;
     }
@@ -168,12 +175,20 @@ static bool foreign_images_grow(flux_surface *s, flux_per_frame *pf) {
         FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "foreign image frame tracking allocation failed");
         return false;
     }
+    VkSemaphoreSubmitInfo *grown_waits = flux_internal_alloc(s->device, wait_bytes);
+    if (!grown_waits) {
+        flux_internal_free(s->device, grown);
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "foreign image wait allocation failed");
+        return false;
+    }
     if (pf->foreign_images) {
         memcpy(grown, pf->foreign_images,
                (size_t)pf->foreign_image_count * sizeof(*pf->foreign_images));
         flux_internal_free(s->device, pf->foreign_images);
     }
+    flux_internal_free(s->device, pf->foreign_waits);
     pf->foreign_images = grown;
+    pf->foreign_waits = grown_waits;
     pf->foreign_image_capacity = new_capacity;
     return true;
 }
@@ -201,12 +216,45 @@ bool flux_frame_track_foreign_image(flux_frame *f, VkImage image, void *resource
         .release = release,
         .foreign_owned = foreign_owned,
         .acquired = *foreign_owned,
+        .acquire_semaphore = VK_NULL_HANDLE,
     };
     if (!entry->resource)
         return false;
 
     ++pf->foreign_image_count;
     return true;
+}
+
+bool flux_frame_set_foreign_image_acquire(flux_frame *f, void *resource, VkSemaphore semaphore) {
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING || !resource || !semaphore)
+        return false;
+
+    flux_per_frame *pf = &f->surface->frames[f->slot];
+    for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
+        flux_frame_foreign_image *entry = &pf->foreign_images[i];
+        if (entry->resource != resource)
+            continue;
+        if (entry->acquire_semaphore)
+            return false;
+        entry->acquire_semaphore = semaphore;
+        return true;
+    }
+    return false;
+}
+
+static uint32_t foreign_images_build_waits(flux_per_frame *pf, uint32_t offset) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
+        VkSemaphore semaphore = pf->foreign_images[i].acquire_semaphore;
+        if (!semaphore)
+            continue;
+        pf->foreign_waits[offset + count++] = (VkSemaphoreSubmitInfo){
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .semaphore = semaphore,
+            .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        };
+    }
+    return count;
 }
 
 static VkResult foreign_images_record_acquire(flux_surface *s, flux_per_frame *pf,
@@ -347,7 +395,7 @@ flux_result flux_surface_begin_frame(flux_surface *s, const flux_frame_begin_des
      * is FIFO, every batch up to its serial is done. Raise the retire
      * watermark so zombies parked before it are destroyed now. */
     flux_vk_note_graphics_completed(s->device, pf->submitted_serial);
-    foreign_images_clear(pf);
+    foreign_images_clear(s, pf);
 
     /* Acquire. Offscreen surfaces have no swapchain (ADR-0013): the
      * image index is the frame slot and the fence wait above already
@@ -716,8 +764,9 @@ flux_result flux_frame_submit(flux_frame *f) {
     }
 
     if (s->offscreen) {
-        /* No acquire/present semaphores exist to wait on or signal;
-         * the fence alone orders slot reuse and readback. */
+        /* No window-system acquire semaphore exists. Reused imported
+         * dma-bufs may still contribute per-frame acquire-fence waits. */
+        uint32_t wait_count = foreign_images_build_waits(pf, 0);
         VkCommandBufferSubmitInfo command_buffers[2] = {0};
         uint32_t command_buffer_count = 0;
         if (foreign_acquire_recorded) {
@@ -738,6 +787,8 @@ flux_result flux_frame_submit(flux_frame *f) {
         bool signal_sync = signal.semaphore != VK_NULL_HANDLE;
         VkSubmitInfo2 osi = {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+            .waitSemaphoreInfoCount = wait_count,
+            .pWaitSemaphoreInfos = wait_count ? pf->foreign_waits : nullptr,
             .commandBufferInfoCount = command_buffer_count,
             .pCommandBufferInfos = command_buffers,
             .signalSemaphoreInfoCount = signal_sync ? 1u : 0u,
@@ -755,8 +806,8 @@ flux_result flux_frame_submit(flux_frame *f) {
         if (copy_readback)
             s->last_readback_slot = f->slot;
         s->image_layouts[s->current_image] = s->offscreen_exportable
-                                                  ? VK_IMAGE_LAYOUT_GENERAL
-                                                  : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                                                 ? VK_IMAGE_LAYOUT_GENERAL
+                                                 : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         s->image_foreign_owned[s->current_image] = s->offscreen_exportable;
         s->image_sync_exported[s->current_image] = false;
         f->state = FLUX_FRAME_STATE_SUBMITTED;
@@ -766,11 +817,19 @@ flux_result flux_frame_submit(flux_frame *f) {
     /* Windowed path: signal the acquired image's render-finished semaphore.
      * Indexing by image (rather than frame slot) makes reuse safe with respect
      * to the presentation engine. */
-    VkSemaphoreSubmitInfo wait = {
+    VkSemaphoreSubmitInfo window_wait = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = pf->image_acquired,
         .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
     };
+    uint32_t foreign_wait_count = foreign_images_build_waits(pf, 1);
+    const VkSemaphoreSubmitInfo *waits = &window_wait;
+    uint32_t wait_count = 1;
+    if (foreign_wait_count > 0) {
+        pf->foreign_waits[0] = window_wait;
+        waits = pf->foreign_waits;
+        wait_count += foreign_wait_count;
+    }
     VkSemaphoreSubmitInfo signal = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = s->render_finished[s->current_image],
@@ -790,8 +849,8 @@ flux_result flux_frame_submit(flux_frame *f) {
     };
     VkSubmitInfo2 si = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .waitSemaphoreInfoCount = 1,
-        .pWaitSemaphoreInfos = &wait,
+        .waitSemaphoreInfoCount = wait_count,
+        .pWaitSemaphoreInfos = waits,
         .commandBufferInfoCount = command_buffer_count,
         .pCommandBufferInfos = command_buffers,
         .signalSemaphoreInfoCount = 1,

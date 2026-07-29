@@ -368,6 +368,7 @@ Available iff the library was built with `-Dcanvas=true`. Linux only.
 | Symbol | Description |
 |--------|-------------|
 | `flux_image_import_dmabuf` | Imports a single-plane dma-buf with an explicit DRM format modifier as a sampled `flux_image`. On `FLUX_OK`, flux owns and closes the plane and acquire-sync file descriptors; on error the caller keeps them. `plane_count != 1` returns `FLUX_ERROR_UNSUPPORTED`. |
+| `flux_canvas_wait_dmabuf_acquire` | Adds a Linux sync-file wait for the current canvas frame before it samples an already-imported dma-buf image. Call after `flux_canvas_begin` and before drawing the image. Flux consumes the fd on success; the caller retains it on error. |
 | `flux_dmabuf_supported` | Returns `true` when the device was created with the external-memory and foreign-queue extensions dma-buf import requires. |
 | `flux_dmabuf_sync_supported` | Returns `true` when `acquire_sync_fd` import is available (`VK_KHR_external_semaphore_fd`). |
 

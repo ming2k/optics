@@ -18,7 +18,7 @@
 
 use std::fmt;
 use std::marker::PhantomData;
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
 pub use flux_sys as sys;
 
@@ -992,6 +992,21 @@ impl Canvas {
             .map(|c| c as *const u32)
             .unwrap_or(std::ptr::null());
         Error::check(unsafe { sys::flux_canvas_begin(self.raw, frame.raw, ptr) })
+    }
+
+    /// Wait a producer sync-file before this frame samples an already
+    /// imported dma-buf image.
+    ///
+    /// Call between [`Canvas::begin`] and [`Canvas::end`], before drawing the
+    /// image. Flux consumes `acquire_fence` on success; Rust closes it on
+    /// error. The wait is submitted to the GPU and does not block the caller.
+    pub fn wait_dmabuf_acquire(&self, image: &Image, acquire_fence: OwnedFd) -> Result<(), Error> {
+        let result = unsafe {
+            sys::flux_canvas_wait_dmabuf_acquire(self.raw, image.raw, acquire_fence.as_raw_fd())
+        };
+        Error::check(result)?;
+        std::mem::forget(acquire_fence);
+        Ok(())
     }
 
     /// Begin a Canvas pass with independent load and antialiasing policy.

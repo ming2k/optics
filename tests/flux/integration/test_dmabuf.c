@@ -80,6 +80,14 @@ int main(void) {
 
     fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
     if (fd >= 0) {
+        EXPECT(flux_canvas_wait_dmabuf_acquire(nullptr, nullptr, fd) ==
+               FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(fd_is_open(fd));
+        close(fd);
+    }
+
+    fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
         desc.planes[0].fd = fd;
         desc.plane_count = 2;
         desc.planes[1].fd = fd;
@@ -105,7 +113,19 @@ int main(void) {
         sd.next = &invalid_export;
         EXPECT(flux_surface_create(dd, &sd, &surface) == FLUX_ERROR_INVALID_ARGUMENT);
         EXPECT(surface == nullptr);
-        sd.next = nullptr;
+
+        uint64_t supported_modifiers[512];
+        uint32_t supported_modifier_count = 512;
+        EXPECT(flux_dmabuf_format_modifiers(dd, FLUX_FORMAT_BGRA8_UNORM, supported_modifiers,
+                                            &supported_modifier_count) == FLUX_OK);
+        flux_surface_dmabuf_desc exportable = FLUX_SURFACE_DMABUF_DESC_INIT;
+        if (supported_modifier_count > 0) {
+            exportable.modifiers = supported_modifiers;
+            exportable.modifier_count = supported_modifier_count;
+            sd.next = &exportable;
+        } else {
+            sd.next = nullptr;
+        }
 
         flux_result sr = flux_surface_create(dd, &sd, &surface);
         if (sr == FLUX_OK) {
@@ -158,14 +178,38 @@ int main(void) {
                             EXPECT(flux_canvas_create(&canvas_desc, &canvas) == FLUX_OK);
                             if (canvas) {
                                 /* The second frame exercises the release from
-                                 * frame one and its matching reacquire. */
+                                 * frame one and its matching reacquire. A new
+                                 * producer submission supplies a fresh
+                                 * sync_file without rebuilding `sampled`. */
                                 for (uint32_t frame_index = 0; frame_index < 2; ++frame_index) {
+                                    int reuse_sync_fd = -1;
+                                    if (frame_index == 1 && flux_dmabuf_sync_supported(dd)) {
+                                        flux_frame *producer_frame = nullptr;
+                                        EXPECT(flux_surface_begin_frame(
+                                                   surface, nullptr, &producer_frame) == FLUX_OK);
+                                        EXPECT(flux_frame_submit(producer_frame) == FLUX_OK);
+                                        EXPECT(flux_frame_present(producer_frame) == FLUX_OK);
+                                        int unused_dmabuf = -1;
+                                        EXPECT(flux_surface_export_dmabuf_explicit(
+                                                   surface, &unused_dmabuf, &reuse_sync_fd) ==
+                                               FLUX_OK);
+                                        EXPECT(fd_is_open(unused_dmabuf));
+                                        EXPECT(fd_is_open(reuse_sync_fd));
+                                        if (unused_dmabuf >= 0)
+                                            close(unused_dmabuf);
+                                    }
+
                                     flux_frame *consumer_frame = nullptr;
                                     EXPECT(flux_surface_begin_frame(consumer, nullptr,
                                                                     &consumer_frame) == FLUX_OK);
                                     flux_color clear = flux_color_rgba(0, 0, 0, 255);
                                     EXPECT(flux_canvas_begin(canvas, consumer_frame, &clear) ==
                                            FLUX_OK);
+                                    if (reuse_sync_fd >= 0) {
+                                        EXPECT(flux_canvas_wait_dmabuf_acquire(
+                                                   canvas, sampled, reuse_sync_fd) == FLUX_OK);
+                                        EXPECT(!fd_is_open(reuse_sync_fd));
+                                    }
                                     flux_canvas_draw_image(canvas, sampled,
                                                            (flux_rect){0, 0, 16, 16}, nullptr);
                                     flux_canvas_end(canvas);

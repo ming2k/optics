@@ -171,6 +171,7 @@ a Linux dma-buf file descriptor as a sampled `flux_image` for canvas draws.
 | `flux_dmabuf_plane` | One plane: `fd`, `offset`, and `stride`. |
 | `flux_dmabuf_image_desc` | Import descriptor tagged with `FLUX_TYPE_DMABUF_IMAGE_DESC`. |
 | `flux_image_import_dmabuf` | Creates a refcounted `flux_image` from a dma-buf. |
+| `flux_canvas_wait_dmabuf_acquire` | Waits a new producer sync-file before the current frame samples an already-imported dma-buf image. |
 | `flux_dmabuf_supported` | Returns whether the device was created with the required dma-buf extensions. |
 | `flux_dmabuf_sync_supported` | Returns whether acquire sync-file fds can be imported. |
 
@@ -207,6 +208,13 @@ imported image follows the normal `flux_image` lifecycle and is released with
 If no acquire fence is supplied, the caller must ensure the producer has
 completed writes and must keep the producer from writing concurrently while
 flux samples the image.
+
+For a producer that recommits an already-imported dma-buf with a new acquire
+fence, call `flux_canvas_wait_dmabuf_acquire` after `flux_canvas_begin` and
+before the first draw that samples that image. The wait is submitted to the
+GPU for the current frame; it does not block the calling CPU thread or require
+rebuilding the `flux_image`. On `FLUX_OK`, flux owns and closes the sync-file
+descriptor. On error, the caller retains ownership and must close it.
 
 ## Error model
 

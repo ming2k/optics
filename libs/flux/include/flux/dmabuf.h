@@ -40,6 +40,7 @@ extern "C" {
 /* flux_image lives in <flux/canvas.h>; forward-declare so this header
  * compiles without dragging the full canvas surface in. */
 typedef struct flux_image flux_image;
+typedef struct flux_canvas flux_canvas;
 
 #define FLUX_DMABUF_MAX_PLANES 4
 
@@ -72,6 +73,17 @@ typedef struct flux_dmabuf_image_desc {
 FLUX_NODISCARD FLUX_API flux_result flux_image_import_dmabuf(flux_device *d,
                                                              const flux_dmabuf_image_desc *desc,
                                                              flux_image **out);
+
+/* Wait a new producer sync_file before the current canvas frame samples an
+ * already-imported dma-buf image. This is the reusable-buffer counterpart to
+ * flux_dmabuf_image_desc.acquire_sync_fd: it avoids rebuilding the VkImage on
+ * every client commit.
+ *
+ * Call after flux_canvas_begin and before drawing `image`. On FLUX_OK flux
+ * owns and closes acquire_sync_fd; on error the caller keeps it. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_wait_dmabuf_acquire(flux_canvas *canvas,
+                                                                    flux_image *image,
+                                                                    int acquire_sync_fd);
 
 /* Whether the device was created with the extensions dma-buf import needs.
  * This is an extension-level check; use flux_image_import_dmabuf to validate
