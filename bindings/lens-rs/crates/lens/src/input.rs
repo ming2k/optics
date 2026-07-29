@@ -180,7 +180,9 @@ impl Input {
     /// (typically `lens_begin`'s caller) and remain valid for the duration
     /// the returned reference is used.
     pub unsafe fn from_raw_ref<'a>(raw: *const sys::lens_input) -> &'a Input {
-        &*(raw as *const Input)
+        // SAFETY: the caller guarantees `raw` is valid for `'a`; `Input` is
+        // transparent over `lens_input`, so alignment and layout are identical.
+        unsafe { &*(raw as *const Input) }
     }
 }
 

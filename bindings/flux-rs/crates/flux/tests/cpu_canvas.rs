@@ -1,7 +1,7 @@
 //! Headless software-canvas smoke test: exercises the CPU backend end to end
 //! from the safe Rust API with no GPU, device, or window.
 
-use flux::{rgba, Canvas, GradientStop};
+use flux::{Canvas, GradientStop, rgba};
 
 #[test]
 fn cpu_canvas_renders_and_reads_back() {

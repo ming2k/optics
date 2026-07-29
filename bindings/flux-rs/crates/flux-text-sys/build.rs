@@ -84,7 +84,9 @@ fn main() {
             search.push(':');
             search.push_str(&existing.to_string_lossy());
         }
-        env::set_var("PKG_CONFIG_PATH", &search);
+        // SAFETY: this build script is single-threaded, and this runs before
+        // invoking pkg-config, bindgen, or any other code that may spawn threads.
+        unsafe { env::set_var("PKG_CONFIG_PATH", &search) };
     }
 
     let lib = pkg_config::Config::new()
@@ -129,6 +131,7 @@ fn main() {
     }
 
     let bindings = bindgen::Builder::default()
+        .rust_edition(bindgen::RustEdition::Edition2024)
         .header("wrapper.h")
         .clang_args(&clang_args)
         .clang_arg("-std=c23")

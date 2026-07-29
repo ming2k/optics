@@ -397,11 +397,7 @@ impl std::error::Error for WatchError {}
 /// The fd to poll(2) for readability when watching, or `None` when not.
 pub fn color_scheme_watcher_fd() -> Option<std::os::unix::io::RawFd> {
     let fd = unsafe { sys::iris_color_scheme_watcher_fd() };
-    if fd < 0 {
-        None
-    } else {
-        Some(fd)
-    }
+    if fd < 0 { None } else { Some(fd) }
 }
 
 /// Drain pending D-Bus messages and fire the callback registered via

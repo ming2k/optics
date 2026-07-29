@@ -9,5 +9,5 @@ repository.workspace = true
 rust-version.workspace = true
 
 [build-dependencies]
-bindgen = "0.70"
+bindgen = "0.72"
 pkg-config = "0.3"

@@ -32,7 +32,7 @@ pub use lens_sys as sys;
 mod input;
 mod types;
 
-pub use input::{key, mods, Input, MouseButton};
+pub use input::{Input, MouseButton, key, mods};
 pub use types::{
     Align, Color, CursorHint, Icon, LayoutOpts, OverlayOpts, Rect, Response, TabStyle, TableColumn,
     TableOpts, TableResult, TabsOpts, TextMetrics, Theme,
@@ -102,7 +102,9 @@ impl Ui {
     /// `canvas` must be a live `flux_canvas` inside an open canvas envelope,
     /// and this `Ui` must have been created with [`Ui::with_device`].
     pub unsafe fn render(&mut self, canvas: *mut sys::flux_canvas) -> Result<(), Error> {
-        let rc = sys::lens_render(self.raw, canvas);
+        // SAFETY: the caller guarantees the canvas state; `self.raw` remains
+        // live for the duration of this mutable borrow.
+        let rc = unsafe { sys::lens_render(self.raw, canvas) };
         if rc != sys::flux_result::FLUX_OK {
             return Err(Error::Render(rc));
         }

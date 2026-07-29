@@ -258,10 +258,14 @@ impl Surface {
             width,
             height,
             vsync,
-            ..std::mem::zeroed()
+            // SAFETY: the bindgen descriptor is a C POD type; zero is the
+            // documented default for fields not initialized above.
+            ..unsafe { std::mem::zeroed() }
         };
         let mut out: *mut sys::flux_surface = std::ptr::null_mut();
-        Error::check(sys::flux_surface_create(device.raw, &desc, &mut out))?;
+        // SAFETY: `device` is live and the caller upholds the VkSurfaceKHR
+        // lifetime and instance requirements documented by this function.
+        Error::check(unsafe { sys::flux_surface_create(device.raw, &desc, &mut out) })?;
         Ok(Surface { raw: out })
     }
 
@@ -1669,9 +1673,13 @@ impl Image {
         offset: u32,
         stride: u32,
     ) -> Result<Image, Error> {
-        Self::import_dmabuf_impl(
-            device, width, height, format, modifier, fd, offset, stride, None,
-        )
+        // SAFETY: the caller guarantees the dma-buf descriptor requirements
+        // documented by this function; all values are forwarded unchanged.
+        unsafe {
+            Self::import_dmabuf_impl(
+                device, width, height, format, modifier, fd, offset, stride, None,
+            )
+        }
     }
 
     /// Import a dma-buf and wait a Linux `sync_file` acquire fence before the
@@ -1693,17 +1701,21 @@ impl Image {
         stride: u32,
         acquire_sync_fd: i32,
     ) -> Result<Image, Error> {
-        Self::import_dmabuf_impl(
-            device,
-            width,
-            height,
-            format,
-            modifier,
-            fd,
-            offset,
-            stride,
-            Some(acquire_sync_fd),
-        )
+        // SAFETY: the caller guarantees both file descriptors and the dma-buf
+        // metadata meet the requirements documented by this function.
+        unsafe {
+            Self::import_dmabuf_impl(
+                device,
+                width,
+                height,
+                format,
+                modifier,
+                fd,
+                offset,
+                stride,
+                Some(acquire_sync_fd),
+            )
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1725,7 +1737,9 @@ impl Image {
             format,
             modifier,
             plane_count: 1,
-            ..std::mem::zeroed()
+            // SAFETY: the bindgen descriptor is a C POD type; zero is the
+            // documented default for fields not initialized above.
+            ..unsafe { std::mem::zeroed() }
         };
         desc.planes[0] = sys::flux_dmabuf_plane { fd, offset, stride };
         if let Some(acquire_sync_fd) = acquire_sync_fd {
@@ -1733,7 +1747,9 @@ impl Image {
             desc.acquire_sync_fd = acquire_sync_fd;
         }
         let mut out: *mut sys::flux_image = std::ptr::null_mut();
-        Error::check(sys::flux_image_import_dmabuf(device.raw, &desc, &mut out))?;
+        // SAFETY: the caller of this function guarantees that `desc` describes
+        // valid dma-buf and optional sync-file descriptors.
+        Error::check(unsafe { sys::flux_image_import_dmabuf(device.raw, &desc, &mut out) })?;
         Ok(Image { raw: out })
     }
 
