@@ -9,14 +9,14 @@ rust-version.workspace = true
 links = "iris_rs"
 
 [dependencies]
-iris-sys = { path = "../iris-sys", version = "0.0.4" }
+iris-sys = { path = "../iris-sys", version = "0.0.5" }
 # lens (Rust bindings) is published from a separate repo (../lens-rs); flux
 # comes in transitively via lens. Paths work when the repos are siblings
 # under a common parent; for other layouts set up a Cargo [patch.crates-io]
 # in your workspace, or replace with git URLs / registry versions once
 # `lens` / `flux` are published.
-lens = { path = "../../../lens-rs/crates/lens", version = "0.0.4" }
-lens-sys = { path = "../../../lens-rs/crates/lens-sys", version = "0.0.4" }
+lens = { path = "../../../lens-rs/crates/lens", version = "0.0.5" }
+lens-sys = { path = "../../../lens-rs/crates/lens-sys", version = "0.0.5" }
 
 [[example]]
 name = "hello"

@@ -1,16 +1,16 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
   "crates/iris-sys",
   "crates/iris",
 ]
 
 [workspace.package]
-version = "0.0.4"
-edition = "2021"
+version = "0.0.5"
+edition = "2024"
 license = "MIT"
 repository = "https://github.com/ming2k/iris-rs"
-rust-version = "1.74"
+rust-version = "1.85"
 
 [profile.dev]
 opt-level = 0
