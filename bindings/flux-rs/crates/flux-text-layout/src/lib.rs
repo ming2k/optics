@@ -371,6 +371,7 @@ pub fn wrap_optimal_with(
 /// `j` ranges `0..=na`; `c` ranges `0..NCLASS`. The class discretisation is
 /// what makes the DP finite — the continuous shortfall is carried only
 /// implicitly through the class.
+#[allow(clippy::too_many_arguments)]
 fn knuth_plass_segment(
     seg_start: usize,
     na: usize,
@@ -428,8 +429,7 @@ fn knuth_plass_segment(
             if i == 0 {
                 best = 0.0;
             } else {
-                for cprev in 0..NCLASS {
-                    let (pcost, _, _) = dp[i][cprev];
+                for (cprev, &(pcost, _, _)) in dp[i].iter().enumerate() {
                     if pcost >= inf {
                         continue;
                     }
@@ -457,9 +457,9 @@ fn knuth_plass_segment(
 
     // Recover the cheapest final state and walk the back-pointers.
     let (mut end_c, mut end_cost) = (0usize, inf);
-    for c in 0..NCLASS {
-        if dp[na][c].0 < end_cost {
-            end_cost = dp[na][c].0;
+    for (c, state) in dp[na].iter().enumerate() {
+        if state.0 < end_cost {
+            end_cost = state.0;
             end_c = c;
         }
     }
@@ -620,7 +620,7 @@ fn is_cjk(ch: char) -> bool {
 /// its input from the single source of truth (the codepoint), matching how
 /// the C shaper derives the same fact from `run->script`.
 fn atom_is_cjk(input: &str, atom: Atom) -> bool {
-    input[atom.start..].chars().next().map_or(false, is_cjk)
+    input[atom.start..].chars().next().is_some_and(is_cjk)
 }
 
 /// The `(width, is_hard_break)` of the gap between atoms `idx - 1` and
@@ -687,15 +687,12 @@ fn is_no_end(ch: char) -> bool {
 
 /// Whether `atom`'s first character is no-start (must not begin a line).
 fn atom_no_start(input: &str, atom: Atom) -> bool {
-    input[atom.start..]
-        .chars()
-        .next()
-        .map_or(false, is_no_start)
+    input[atom.start..].chars().next().is_some_and(is_no_start)
 }
 
 /// Whether `atom`'s last character is no-end (must not end a line).
 fn atom_no_end(input: &str, atom: Atom) -> bool {
-    input[..atom.end].chars().last().map_or(false, is_no_end)
+    input[..atom.end].chars().last().is_some_and(is_no_end)
 }
 
 #[cfg(test)]
@@ -1015,12 +1012,12 @@ mod tests {
                     let first = para[l.lo..].chars().next();
                     let last = para[..l.hi].chars().last();
                     assert!(
-                        !first.map_or(false, is_no_start),
+                        !first.is_some_and(is_no_start),
                         "{strategy} @ {max_w}: line starts with no-start: {:?}",
                         &para[l.lo..l.hi]
                     );
                     assert!(
-                        !last.map_or(false, is_no_end),
+                        !last.is_some_and(is_no_end),
                         "{strategy} @ {max_w}: line ends with no-end: {:?}",
                         &para[l.lo..l.hi]
                     );
@@ -1036,13 +1033,13 @@ mod tests {
         // back onto line 1 (overflowing) instead.
         let Some(engine) = engine() else { return };
         let st = style();
-        let text = format!("aaaa\u{3002}bbbb"); // aaaa。bbbb
+        let text = String::from("aaaa\u{3002}bbbb"); // aaaa。bbbb
         let px = |r: std::ops::Range<usize>| (r.end - r.start) as f32 * 10.0;
         let lines = wrap_optimal_with(&engine, &text, &st, 50.0, px);
         for l in &lines {
             let first = text[l.lo..].chars().next();
             assert!(
-                !first.map_or(false, is_no_start),
+                !first.is_some_and(is_no_start),
                 "line starts with no-start: {:?}",
                 &text[l.lo..l.hi]
             );
@@ -1062,13 +1059,13 @@ mod tests {
         // onto the next line with "bbbb".
         let Some(engine) = engine() else { return };
         let st = style();
-        let text = format!("aaaa\u{ff08}bbbb"); // aaaa（bbbb
+        let text = String::from("aaaa\u{ff08}bbbb"); // aaaa（bbbb
         let px = |r: std::ops::Range<usize>| (r.end - r.start) as f32 * 10.0;
         let lines = wrap_optimal_with(&engine, &text, &st, 50.0, px);
         for l in &lines {
             let last = text[..l.hi].chars().last();
             assert!(
-                !last.map_or(false, is_no_end),
+                !last.is_some_and(is_no_end),
                 "line ends with no-end: {:?}",
                 &text[l.lo..l.hi]
             );

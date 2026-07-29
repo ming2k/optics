@@ -107,11 +107,15 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential meson ninja-build pkg-config glslang-tools rustc cargo \
+            build-essential meson ninja-build pkg-config glslang-tools \
             libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
             libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
             libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
             libsystemd-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Build and install C libraries
         run: |
@@ -122,7 +126,7 @@ jobs:
         working-directory: bindings/${{ matrix.workspace }}
         run: |
           cargo fmt --all -- --check
-          cargo clippy --all-targets -- -D warnings
-          cargo test --workspace
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
