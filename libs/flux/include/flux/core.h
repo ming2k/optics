@@ -175,6 +175,7 @@ typedef enum flux_struct_type {
     FLUX_TYPE_TARGET_DESC = 16,
     FLUX_TYPE_SURFACE_DMABUF_DESC = 17,
     FLUX_TYPE_SURFACE_READBACK_DESC = 18,
+    FLUX_TYPE_CANVAS_PASS_DESC = 19,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 

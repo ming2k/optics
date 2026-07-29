@@ -134,6 +134,28 @@ int main(void) {
     EXPECT(fb != nullptr && w == W && h == H);
     px(fb, stride, 32, 32, p);
     EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
+
+    /* Descriptor LOAD preserves the previous pass, while explicit NONE
+     * permits a clear without asking the backend for multisampling. */
+    flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
+    pd.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
+    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_OK);
+    flux_canvas_end_frame(c);
+    fb = flux_canvas_read_pixels(c, &w, &h, &stride);
+    px(fb, stride, 32, 32, p);
+    EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
+
+    flux_color blue = flux_color_rgba_premul(0, 0, 255, 255);
+    pd.clear_color = &blue;
+    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_OK);
+    flux_canvas_end_frame(c);
+    fb = flux_canvas_read_pixels(c, &w, &h, &stride);
+    px(fb, stride, 32, 32, p);
+    EXPECT(p[0] < 5 && p[1] < 5 && p[2] > 250 && p[3] > 250);
+
+    pd.clear_color = nullptr;
+    pd.antialias = FLUX_CANVAS_ANTIALIAS_MSAA_4X;
+    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
     flux_canvas_destroy(c);
 
     TEST_SUMMARY();

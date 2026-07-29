@@ -223,6 +223,27 @@ typedef struct flux_canvas_desc {
 
 #define FLUX_CANVAS_DESC_INIT {.type = FLUX_TYPE_CANVAS_DESC}
 
+/* GPU attachment-antialiasing policy for one Canvas pass. AUTO preserves the
+ * pre-v0.0.5 behaviour: a clearing pass uses 4x MSAA and a loading pass
+ * renders directly into its one-sample destination. NONE always uses the
+ * one-sample GPU target. MSAA_4X requires a clear colour because a
+ * multisample attachment cannot load a one-sample resolve destination. The
+ * CPU backend accepts the policy and retains its native software rasterizer. */
+typedef enum flux_canvas_antialias {
+    FLUX_CANVAS_ANTIALIAS_AUTO = 0,
+    FLUX_CANVAS_ANTIALIAS_NONE = 1,
+    FLUX_CANVAS_ANTIALIAS_MSAA_4X = 2,
+} flux_canvas_antialias;
+
+typedef struct flux_canvas_pass_desc {
+    flux_struct_type type; /* FLUX_TYPE_CANVAS_PASS_DESC */
+    const void *next;
+    const flux_color *clear_color; /* non-NULL: clear; NULL: load */
+    flux_canvas_antialias antialias;
+} flux_canvas_pass_desc;
+
+#define FLUX_CANVAS_PASS_DESC_INIT {.type = FLUX_TYPE_CANVAS_PASS_DESC}
+
 /* Create a canvas on the selected backend. GPU canvases need desc->surface;
  * CPU canvases need desc->width/height (see flux/canvas_cpu.h for a convenience
  * wrapper and pixel readback). Destroy with flux_canvas_destroy. */
@@ -248,6 +269,13 @@ FLUX_API float flux_canvas_get_scale(const flux_canvas *c);
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_frame(flux_canvas *c, flux_frame *f,
                                                             const flux_color *clear_color);
 FLUX_API void flux_canvas_end_frame(flux_canvas *c);
+
+/* Descriptor form of flux_canvas_begin_frame. This makes attachment load
+ * semantics and antialiasing independent: compositor/image-heavy passes can
+ * clear a one-sample target without allocating and resolving a 4x attachment,
+ * while vector UI keeps the AUTO default. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_pass(flux_canvas *c, flux_frame *f,
+                                                           const flux_canvas_pass_desc *desc);
 
 /* GPU-specific spelling of begin_frame/end_frame (f is required). Kept for
  * source compatibility; equivalent to flux_canvas_begin_frame with a frame. */
@@ -281,6 +309,8 @@ FLUX_API const uint8_t *flux_canvas_read_pixels(flux_canvas *c, uint32_t *width,
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_target(flux_canvas *c, flux_frame *f,
                                                              flux_image *target,
                                                              const flux_color *clear_color);
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_target_pass(
+    flux_canvas *c, flux_frame *f, flux_image *target, const flux_canvas_pass_desc *desc);
 FLUX_API void flux_canvas_end_target(flux_canvas *c);
 
 /* State stack. All draws and state mutators between flux_canvas_begin

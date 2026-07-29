@@ -141,11 +141,26 @@ void flux_canvas_destroy(flux_canvas *c) {
 /*  Pass envelope                                                     */
 /* ------------------------------------------------------------------ */
 
-flux_result flux_canvas_begin_frame(flux_canvas *c, flux_frame *f, const flux_color *clear) {
-    if (!c)
+static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_image *target,
+                                          const flux_canvas_pass_desc *desc) {
+    if (!c || !desc)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    if (desc->type != FLUX_TYPE_CANVAS_PASS_DESC) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_CANVAS_PASS_DESC");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->antialias != FLUX_CANVAS_ANTIALIAS_AUTO &&
+        desc->antialias != FLUX_CANVAS_ANTIALIAS_NONE &&
+        desc->antialias != FLUX_CANVAS_ANTIALIAS_MSAA_4X) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid Canvas antialias mode");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->antialias == FLUX_CANVAS_ANTIALIAS_MSAA_4X && !desc->clear_color) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "4x MSAA Canvas pass requires a clear colour");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     if (c->recording) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "flux_canvas_begin_frame called twice without _end");
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas pass begun twice without end");
         return FLUX_ERROR_INVALID_STATE;
     }
     /* A GPU canvas records into a frame's command buffer; a CPU canvas has
@@ -158,13 +173,25 @@ flux_result flux_canvas_begin_frame(flux_canvas *c, flux_frame *f, const flux_co
     c->state_top = 0;
     c->states[0].transform = flux_mat3x2_scale(c->content_scale, c->content_scale);
 
-    flux_result r = c->backend->begin_pass(c->backend, c, f, nullptr, clear);
+    flux_result r = c->backend->begin_pass(c->backend, c, f, target, desc->clear_color,
+                                           desc->antialias);
     if (r != FLUX_OK) {
         c->frame = nullptr;
         return r;
     }
     c->recording = true;
     return FLUX_OK;
+}
+
+flux_result flux_canvas_begin_pass(flux_canvas *c, flux_frame *f,
+                                   const flux_canvas_pass_desc *desc) {
+    return canvas_begin_pass_impl(c, f, nullptr, desc);
+}
+
+flux_result flux_canvas_begin_frame(flux_canvas *c, flux_frame *f, const flux_color *clear) {
+    flux_canvas_pass_desc desc = FLUX_CANVAS_PASS_DESC_INIT;
+    desc.clear_color = clear;
+    return flux_canvas_begin_pass(c, f, &desc);
 }
 
 void flux_canvas_end_frame(flux_canvas *c) {
@@ -201,28 +228,16 @@ const uint8_t *flux_canvas_read_pixels(flux_canvas *c, uint32_t *width, uint32_t
 
 flux_result flux_canvas_begin_target(flux_canvas *c, flux_frame *f, flux_image *target,
                                      const flux_color *clear) {
+    flux_canvas_pass_desc desc = FLUX_CANVAS_PASS_DESC_INIT;
+    desc.clear_color = clear;
+    return flux_canvas_begin_target_pass(c, f, target, &desc);
+}
+
+flux_result flux_canvas_begin_target_pass(flux_canvas *c, flux_frame *f, flux_image *target,
+                                          const flux_canvas_pass_desc *desc) {
     if (!c || !f || !target)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    /* A target pass may not nest inside an active pass (frame or target). */
-    if (c->pass_active) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
-                  "flux_canvas_begin_target while a pass is already active");
-        return FLUX_ERROR_INVALID_STATE;
-    }
-
-    c->frame = f;
-    c->state_top = 0;
-    c->states[0].transform = flux_mat3x2_scale(c->content_scale, c->content_scale);
-
-    /* Format/extent validation and all GPU work (target transition, MSAA +
-     * stencil, resolve into `target`) live in the backend. */
-    flux_result r = c->backend->begin_pass(c->backend, c, f, target, clear);
-    if (r != FLUX_OK) {
-        c->frame = nullptr;
-        return r;
-    }
-    c->recording = true;
-    return FLUX_OK;
+    return canvas_begin_pass_impl(c, f, target, desc);
 }
 
 void flux_canvas_end_target(flux_canvas *c) {

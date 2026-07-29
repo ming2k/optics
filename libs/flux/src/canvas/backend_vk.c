@@ -284,7 +284,8 @@ static void unpack_clear(const flux_color *clear, flux_vec4 *out) {
 }
 
 static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c, flux_frame *f,
-                                 flux_image *target, const flux_color *clear) {
+                                 flux_image *target, const flux_color *clear,
+                                 flux_canvas_antialias antialias) {
     (void)self;
     flux_vk_canvas *v = vkc(c);
 
@@ -306,9 +307,11 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     unpack_clear(clear, &cc);
 
     /* A multisample attachment cannot LOAD the contents of its one-sample
-     * resolve destination. CLEAR therefore uses the usual 4x MSAA + resolve
-     * path, while LOAD renders directly into the one-sample surface/target. */
-    bool use_msaa = clear != nullptr;
+     * resolve destination. AUTO preserves the historical CLEAR => 4x MSAA,
+     * LOAD => single-sample policy; explicit NONE lets image-heavy or
+     * compositor passes clear without allocating and resolving a 4x target. */
+    bool use_msaa = antialias == FLUX_CANVAS_ANTIALIAS_MSAA_4X ||
+                    (antialias == FLUX_CANVAS_ANTIALIAS_AUTO && clear != nullptr);
     VkSampleCountFlagBits samples = use_msaa ? FLUX_CANVAS_SAMPLES : VK_SAMPLE_COUNT_1_BIT;
     flux_pass_attachment att = {
         .load_op = clear ? FLUX_LOAD_CLEAR : FLUX_LOAD_LOAD,

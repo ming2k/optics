@@ -890,6 +890,40 @@ pub struct Canvas {
     borrowed: bool,
 }
 
+/// GPU attachment antialiasing for one [`Canvas`] pass.
+///
+/// CPU canvases accept this policy and retain their native software
+/// antialiasing.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum CanvasAntialias {
+    /// Preserve Flux's compatibility policy: clearing passes use 4x MSAA,
+    /// while loading passes render directly into the one-sample destination.
+    #[default]
+    Auto,
+    /// Render directly into the one-sample destination.
+    None,
+    /// Render with 4x MSAA and resolve. Requires `clear: Some(_)`.
+    Msaa4x,
+}
+
+impl CanvasAntialias {
+    fn raw(self) -> sys::flux_canvas_antialias {
+        match self {
+            Self::Auto => sys::flux_canvas_antialias::FLUX_CANVAS_ANTIALIAS_AUTO,
+            Self::None => sys::flux_canvas_antialias::FLUX_CANVAS_ANTIALIAS_NONE,
+            Self::Msaa4x => sys::flux_canvas_antialias::FLUX_CANVAS_ANTIALIAS_MSAA_4X,
+        }
+    }
+}
+
+/// Load and antialiasing policy for one [`Canvas`] pass.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct CanvasPassOptions {
+    /// `Some(color)` clears the destination; `None` preserves its contents.
+    pub clear: Option<u32>,
+    pub antialias: CanvasAntialias,
+}
+
 impl Canvas {
     /// Wrap a raw `flux_canvas*` as a non-owning view. The returned handle does
     /// **not** call `flux_canvas_destroy` on drop — the real owner (e.g. iris,
@@ -956,6 +990,21 @@ impl Canvas {
         Error::check(unsafe { sys::flux_canvas_begin(self.raw, frame.raw, ptr) })
     }
 
+    /// Begin a Canvas pass with independent load and antialiasing policy.
+    pub fn begin_pass(&self, frame: &Frame<'_>, options: CanvasPassOptions) -> Result<(), Error> {
+        let clear = options.clear;
+        let desc = sys::flux_canvas_pass_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_CANVAS_PASS_DESC,
+            clear_color: clear
+                .as_ref()
+                .map(|color| color as *const u32)
+                .unwrap_or(std::ptr::null()),
+            antialias: options.antialias.raw(),
+            ..unsafe { std::mem::zeroed() }
+        };
+        Error::check(unsafe { sys::flux_canvas_begin_pass(self.raw, frame.raw, &desc) })
+    }
+
     /// Begin a Canvas pass into a sampleable offscreen render-target image.
     /// `Some(clear)` uses the Canvas MSAA resolve path; `None` loads the
     /// image's existing contents for composition after a scene pass.
@@ -970,6 +1019,29 @@ impl Canvas {
             .map(|c| c as *const u32)
             .unwrap_or(std::ptr::null());
         Error::check(unsafe { sys::flux_canvas_begin_target(self.raw, frame.raw, target.raw, ptr) })
+    }
+
+    /// Begin an offscreen-target pass with independent load and antialiasing
+    /// policy.
+    pub fn begin_target_pass(
+        &self,
+        frame: &Frame<'_>,
+        target: &Image,
+        options: CanvasPassOptions,
+    ) -> Result<(), Error> {
+        let clear = options.clear;
+        let desc = sys::flux_canvas_pass_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_CANVAS_PASS_DESC,
+            clear_color: clear
+                .as_ref()
+                .map(|color| color as *const u32)
+                .unwrap_or(std::ptr::null()),
+            antialias: options.antialias.raw(),
+            ..unsafe { std::mem::zeroed() }
+        };
+        Error::check(unsafe {
+            sys::flux_canvas_begin_target_pass(self.raw, frame.raw, target.raw, &desc)
+        })
     }
 
     /// End an offscreen Canvas pass and restore the target to a sampleable

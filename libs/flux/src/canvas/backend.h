@@ -49,7 +49,8 @@ struct flux_canvas_backend {
      * full-extent scissor, and sets c->stencil_available for the geometry
      * fallback. On success the caller sets c->recording/pass_active. */
     flux_result (*begin_pass)(const flux_canvas_backend *self, flux_canvas *c, flux_frame *f,
-                              flux_image *target, const flux_color *clear);
+                              flux_image *target, const flux_color *clear,
+                              flux_canvas_antialias antialias);
 
     /* Close the pass opened by begin_pass, emitting any trailing transition
      * (e.g. an offscreen target back to shader-read layout). */

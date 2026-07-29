@@ -480,24 +480,26 @@ static void cpu_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) 
 }
 
 static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *c, flux_frame *f,
-                                  flux_image *target, const flux_color *clear) {
+                                  flux_image *target, const flux_color *clear,
+                                  flux_canvas_antialias antialias) {
     (void)self;
     (void)f;
+    (void)antialias;
     if (target) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "CPU canvas has no offscreen target (v1)");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
     flux_cpu_canvas *v = cpu(c);
 
-    vec4f cc = {0, 0, 0, 0};
-    if (clear)
-        cc = unpack_premul(*clear);
-    size_t n = (size_t)v->sw * v->sh;
-    for (size_t i = 0; i < n; ++i) {
-        v->fb[i * 4 + 0] = cc.r;
-        v->fb[i * 4 + 1] = cc.g;
-        v->fb[i * 4 + 2] = cc.b;
-        v->fb[i * 4 + 3] = cc.a;
+    if (clear) {
+        vec4f cc = unpack_premul(*clear);
+        size_t n = (size_t)v->sw * v->sh;
+        for (size_t i = 0; i < n; ++i) {
+            v->fb[i * 4 + 0] = cc.r;
+            v->fb[i * 4 + 1] = cc.g;
+            v->fb[i * 4 + 2] = cc.b;
+            v->fb[i * 4 + 3] = cc.a;
+        }
     }
 
     c->pass_active = true;
@@ -658,7 +660,11 @@ flux_result flux_canvas_create_cpu(uint32_t width, uint32_t height, float scale,
 flux_result flux_canvas_cpu_begin(flux_canvas *c, const flux_color *clear) {
     if (!c || c->backend != flux_canvas_backend_cpu())
         return FLUX_ERROR_INVALID_ARGUMENT;
-    return flux_canvas_begin_frame(c, nullptr, clear);
+    /* Keep the CPU convenience API's historical NULL => transparent-clear
+     * contract. The unified descriptor API uses NULL => LOAD consistently
+     * across backends. */
+    flux_color transparent = 0;
+    return flux_canvas_begin_frame(c, nullptr, clear ? clear : &transparent);
 }
 
 void flux_canvas_cpu_end(flux_canvas *c) {

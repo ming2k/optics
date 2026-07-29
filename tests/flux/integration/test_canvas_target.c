@@ -58,6 +58,31 @@ int main(void) {
 
     static uint8_t px[BYTES];
 
+    /* --- explicit one-sample clears for compositor/image-heavy passes --- */
+    {
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+
+        flux_color teal = flux_color_rgba(17, 101, 149, 255);
+        flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
+        pd.clear_color = &teal;
+        pd.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
+        EXPECT(flux_canvas_begin_target_pass(canvas, frame, target, &pd) == FLUX_OK);
+        flux_canvas_end_target(canvas);
+
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        pd.clear_color = &black;
+        EXPECT(flux_canvas_begin_pass(canvas, frame, &pd) == FLUX_OK);
+        flux_canvas_draw_image(canvas, target, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        flux_canvas_end(canvas);
+
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        const uint8_t *centre = &px[(H / 2 * W + W / 2) * 4];
+        EXPECT(centre[0] == 17 && centre[1] == 101 && centre[2] == 149 && centre[3] == 255);
+    }
+
     /* --- capture a half-black / half-white edge, blur it, composite --- */
     {
         flux_frame *frame = nullptr;
