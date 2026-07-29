@@ -605,7 +605,7 @@ impl<'surface> Frame<'surface> {
         };
         let color_attachment = sys::flux_pass_attachment {
             view: if target.is_null() {
-                Default::default()
+                std::ptr::null_mut()
             } else {
                 unsafe { sys::flux_image_vk_image_view(target) }
             },

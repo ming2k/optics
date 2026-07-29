@@ -130,3 +130,38 @@ jobs:
           cargo test --workspace --locked
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+
+  bindings-msrv:
+    name: rust bindings (MSRV 1.85.0)
+    runs-on: ubuntu-24.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential meson ninja-build pkg-config glslang-tools \
+            libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
+            libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
+            libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
+            libsystemd-dev
+
+      - name: Install Rust 1.85.0
+        run: rustup toolchain install 1.85.0 --profile minimal
+
+      - name: Build and install C libraries
+        run: |
+          meson setup build -Dexamples=false -Dtests=false --buildtype=release
+          sudo meson install -C build
+
+      - name: Check all workspaces on MSRV
+        run: |
+          cargo +1.85.0 check --manifest-path bindings/flux-rs/Cargo.toml \
+            --workspace --all-targets --locked
+          cargo +1.85.0 check --manifest-path bindings/lens-rs/Cargo.toml \
+            --workspace --all-targets --locked
+          cargo +1.85.0 check --manifest-path bindings/iris-rs/Cargo.toml \
+            --workspace --all-targets --locked
