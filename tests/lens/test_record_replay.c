@@ -234,10 +234,57 @@ static void test_scroll_clip_invalidates_container_records(void) {
     fixture_close(&f);
 }
 
+/* HiDPI scale (scale = 2.0f): scissor clip rects must not double-scale
+ * into device-device pixel space, which would scissor out valid content
+ * near the top/left edge of scroll and table containers. */
+static void test_hidpi_scroll_clip_alignment(void) {
+    fixture f;
+    f.ui = NULL;
+    f.canvas = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &f.ui) == FLUX_OK);
+    /* CPU canvas created at physical resolution 2*W x 2*H (scale = 2.0) */
+    CHECK(flux_canvas_create_cpu(W * 2, H * 2, 2.0f, &f.canvas) == FLUX_OK);
+    lens_set_scale(f.ui, 2.0f);
+
+    const lens_input hidpi_in = {.display_size = {W, H}, .cursor = {50, 50}, .dt_seconds = 0.016f};
+
+    lens_begin(f.ui, &hidpi_in);
+    lens_size(f.ui, W, H);
+    lens_scroll_begin(f.ui, "hidpi_scroll");
+    lens_label(f.ui, "Visible Label");
+    lens_scroll_end(f.ui);
+    lens_end(f.ui);
+
+    flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
+    CHECK(flux_canvas_cpu_begin(f.canvas, &clear) == FLUX_OK);
+    CHECK(lens_render(f.ui, f.canvas) == FLUX_OK);
+    flux_canvas_cpu_end(f.canvas);
+
+    /* Verify that non-zero pixels were drawn in the framebuffer (i.e. the label
+     * was not clipped out by a 4x-shifted scissor). */
+    uint32_t pw = 0, ph = 0, stride = 0;
+    const uint8_t *fb = flux_canvas_cpu_pixels(f.canvas, &pw, &ph, &stride);
+    CHECK(fb != NULL && pw == W * 2 && ph == H * 2);
+
+    bool found_non_zero = false;
+    for (size_t i = 0; i < (size_t)ph * stride; i++) {
+        if (fb[i] > 0) {
+            found_non_zero = true;
+            break;
+        }
+    }
+    CHECK(found_non_zero == true);
+
+    flux_canvas_destroy(f.canvas);
+    lens_destroy(f.ui);
+}
+
 int main(void) {
     test_static_frame_replays();
     test_leaf_change_rerecords_sibling_replays();
     test_scale_switch_invalidates_all();
     test_scroll_clip_invalidates_container_records();
+    test_hidpi_scroll_clip_alignment();
     return TEST_REPORT();
 }
+

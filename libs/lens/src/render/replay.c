@@ -308,13 +308,7 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
             command_clip_stack[command_clip_depth++] = command_clip;
             command_clip = rect_intersect(command_clip, r);
             flux_canvas_save(canvas);
-            if (scale != 1.0f) {
-                flux_rect device_clip = {command_clip.x * scale, command_clip.y * scale,
-                                         command_clip.w * scale, command_clip.h * scale};
-                flux_canvas_clip_rect(canvas, device_clip);
-            } else {
-                flux_canvas_clip_rect(canvas, command_clip);
-            }
+            flux_canvas_clip_rect(canvas, command_clip);
             break;
         }
         case LENS_DRAW_CLIP_POP:
@@ -414,17 +408,7 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
             return;
         }
         flux_canvas_save(canvas);
-        /* flux_canvas_clip_rect sets the scissor directly; it does not
-         * apply the current canvas transform.  Convert logical clip to
-         * device pixels to match the scale transform set in
-         * lensi_render_tree (ADR-0030). */
-        if (scale != 1.0f) {
-            flux_rect device_clip = {clip.x * scale, clip.y * scale, clip.w * scale,
-                                     clip.h * scale};
-            flux_canvas_clip_rect(canvas, device_clip);
-        } else {
-            flux_canvas_clip_rect(canvas, clip);
-        }
+        flux_canvas_clip_rect(canvas, clip);
         pushed_canvas_clip = true;
     }
 
