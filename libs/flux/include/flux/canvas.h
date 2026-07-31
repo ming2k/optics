@@ -240,6 +240,17 @@ typedef struct flux_canvas_pass_desc {
     const void *next;
     const flux_color *clear_color; /* non-NULL: clear; NULL: load */
     flux_canvas_antialias antialias;
+    /* Dirty rectangle for a partial-frame pass, in framebuffer pixels.
+     * `render_width/height == 0` selects the full surface extent (legacy
+     * behaviour); the offset then must also be zero. When non-zero the
+     * dynamic-rendering renderArea is constrained to this rectangle, so a
+     * `clear_color`-driven clear touches only the dirty region and the rest of
+     * the image is preserved (the caller must arrange the surrounding image to
+     * already hold valid contents). */
+    int32_t render_offset_x;
+    int32_t render_offset_y;
+    uint32_t render_width;
+    uint32_t render_height;
 } flux_canvas_pass_desc;
 
 #define FLUX_CANVAS_PASS_DESC_INIT {.type = FLUX_TYPE_CANVAS_PASS_DESC}

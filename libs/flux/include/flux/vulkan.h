@@ -313,6 +313,14 @@ typedef struct flux_pass_desc {
      * the frame surface extent. Attachment views must cover this area. */
     uint32_t width;
     uint32_t height;
+    /* Optional render-area origin (top-left), in framebuffer pixels, for
+     * partial-frame passes. Zero (the default) reproduces the legacy
+     * full-extent behaviour. Combined with a non-default load_op this lets a
+     * caller restrict the cleared/scissored region to a dirty rectangle while
+     * preserving the rest of the image: the dynamic-rendering renderArea
+     * governs both the clear rectangle and the rasterizer scissor. */
+    int32_t render_offset_x;
+    int32_t render_offset_y;
 } flux_pass_desc;
 
 #define FLUX_PASS_DESC_INIT {.type = FLUX_TYPE_PASS_DESC}

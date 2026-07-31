@@ -574,10 +574,15 @@ void flux_frame_begin_pass(flux_frame *f, const flux_pass_desc *desc) {
     VkExtent2D render_extent = s->extent;
     if (desc && desc->width > 0 && desc->height > 0)
         render_extent = (VkExtent2D){desc->width, desc->height};
+    /* A partial-frame pass (dirty-rect update) carries a non-zero origin;
+     * otherwise the renderArea starts at (0,0). */
+    int32_t render_offset_x = desc ? desc->render_offset_x : 0;
+    int32_t render_offset_y = desc ? desc->render_offset_y : 0;
 
     VkRenderingInfo ri = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = {.offset = {0, 0}, .extent = render_extent},
+        .renderArea = {.offset = {render_offset_x, render_offset_y},
+                       .extent = render_extent},
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &color,
