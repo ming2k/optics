@@ -38,7 +38,7 @@ static void draw_chaos(flux_canvas *c, flux_arena *arena, float W, float H, flux
         flux_paint g =
             flux_paint_radial_gradient((flux_point){W * 0.85f, H * 0.15f}, W * 0.6f, stops, 2);
         flux_path *p = nullptr;
-        flux_path_create(&p, arena);
+        (void)flux_path_create(&p, arena);
         if (p) {
             flux_path_add_rect(p, (flux_rect){0, 0, W, H});
             flux_canvas_fill_path(c, p, &g);
@@ -54,7 +54,7 @@ static void draw_chaos(flux_canvas *c, flux_arena *arena, float W, float H, flux
         flux_paint g =
             flux_paint_radial_gradient((flux_point){W * 0.15f, H * 0.85f}, W * 0.6f, stops, 2);
         flux_path *p = nullptr;
-        flux_path_create(&p, arena);
+        (void)flux_path_create(&p, arena);
         if (p) {
             flux_path_add_rect(p, (flux_rect){0, 0, W, H});
             flux_canvas_fill_path(c, p, &g);
@@ -139,7 +139,7 @@ int main(void) {
             ndesc.height = 256;
             ndesc.format = FLUX_FORMAT_RGBA8_UNORM;
             ndesc.initial_data = noise_data;
-            flux_image_create(device, &ndesc, &noise_img);
+            (void)flux_image_create(device, &ndesc, &noise_img);
             free(noise_data);
         }
     }

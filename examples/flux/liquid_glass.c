@@ -78,7 +78,7 @@ static void draw_chaos(flux_canvas *c, flux_arena *arena, float W, float H, flux
         flux_paint g =
             flux_paint_radial_gradient((flux_point){W * 0.85f, H * 0.15f}, W * 0.6f, stops, 2);
         flux_path *p = nullptr;
-        flux_path_create(&p, arena);
+        (void)flux_path_create(&p, arena);
         if (p) {
             flux_path_add_rect(p, (flux_rect){0, 0, W, H});
             flux_canvas_fill_path(c, p, &g);
@@ -94,7 +94,7 @@ static void draw_chaos(flux_canvas *c, flux_arena *arena, float W, float H, flux
         flux_paint g =
             flux_paint_radial_gradient((flux_point){W * 0.15f, H * 0.85f}, W * 0.6f, stops, 2);
         flux_path *p = nullptr;
-        flux_path_create(&p, arena);
+        (void)flux_path_create(&p, arena);
         if (p) {
             flux_path_add_rect(p, (flux_rect){0, 0, W, H});
             flux_canvas_fill_path(c, p, &g);
@@ -247,7 +247,7 @@ int main(void) {
             ndesc.height = 256;
             ndesc.format = FLUX_FORMAT_RGBA8_UNORM;
             ndesc.initial_data = noise_data;
-            flux_image_create(device, &ndesc, &noise_img);
+            (void)flux_image_create(device, &ndesc, &noise_img);
             free(noise_data);
         }
     }
@@ -278,7 +278,6 @@ int main(void) {
         flux_surface_get_info(surface, &info);
         float W = (float)info.width;
         float H = (float)info.height;
-        float t = (float)glfwGetTime();
 
         /* ===== STEP 1: CAPTURE the chaotic scene into `capture` ===== */
         {
@@ -432,7 +431,7 @@ int main(void) {
 
         /* Sun icon */
         flux_path *p_sun = nullptr;
-        flux_path_create(&p_sun, &arena);
+        (void)flux_path_create(&p_sun, &arena);
         if (p_sun) {
             flux_path_add_circle(p_sun, ix_sun, iy, 7.0f);
             for (int i = 0; i < 8; i++) {
@@ -445,7 +444,7 @@ int main(void) {
 
         /* Moon icon */
         flux_path *p_moon = nullptr;
-        flux_path_create(&p_moon, &arena);
+        (void)flux_path_create(&p_moon, &arena);
         if (p_moon) {
             float mr = 13.0f;
             flux_path_move_to(p_moon, ix_moon + mr * 0.3f, iy - mr);
@@ -458,7 +457,7 @@ int main(void) {
 
         /* Sunrise icon */
         flux_path *p_sunrise = nullptr;
-        flux_path_create(&p_sunrise, &arena);
+        (void)flux_path_create(&p_sunrise, &arena);
         if (p_sunrise) {
             float r = 10.0f;
             float k = r * 0.55228f;
