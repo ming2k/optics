@@ -88,13 +88,21 @@ typedef struct effect_liquid_glass_push {
     uint32_t group_width;
     uint32_t group_height;
     uint32_t shape_count;
+    float shadow_alpha;
+    float shadow_blur;
+    float shadow_offset_y;
+    float size_reference;
+    float size_scale_min;
+    float tint_strength;
+    float frost_strength;
+    uint32_t tint_color;
 } effect_liquid_glass_push;
 
 static_assert(sizeof(effect_blur_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_blur_push exceeds device-wide push budget");
 static_assert(sizeof(effect_backdrop_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_backdrop_push exceeds device-wide push budget");
-static_assert(sizeof(effect_liquid_glass_push) == 124,
+static_assert(sizeof(effect_liquid_glass_push) == 156,
               "effect_liquid_glass_push no longer matches its shader block");
 static_assert(sizeof(effect_liquid_glass_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_liquid_glass_push exceeds device-wide push budget");
@@ -874,12 +882,15 @@ static bool valid_liquid_glass_desc(const flux_liquid_glass_desc *desc) {
     if (!isfinite(desc->refraction) || !isfinite(desc->chromatic_aberration) ||
         !isfinite(desc->saturation) || !isfinite(desc->brightness) || !isfinite(desc->edge_width) ||
         !isfinite(desc->glare) || !isfinite(desc->light_direction.x) ||
-        !isfinite(desc->light_direction.y) || !isfinite(desc->opacity))
+        !isfinite(desc->light_direction.y) || !isfinite(desc->opacity) ||
+        !isfinite(desc->size_reference) || !isfinite(desc->size_scale_min) ||
+        !isfinite(desc->tint_strength) || !isfinite(desc->frost_strength))
         return false;
     for (uint32_t i = 0; i < desc->group_count; ++i) {
         const flux_liquid_glass_group *group = &desc->groups[i];
         if (group->shape_count < 1u || group->shape_count > 2u || !isfinite(group->blend_radius) ||
-            !isfinite(group->opacity))
+            !isfinite(group->opacity) || !isfinite(group->shadow_alpha) ||
+            !isfinite(group->shadow_blur) || !isfinite(group->shadow_offset_y))
             return false;
         for (uint32_t j = 0; j < group->shape_count; ++j) {
             if (!finite_rect(group->shapes[j].bounds) || !isfinite(group->shapes[j].corner_radius))
@@ -897,9 +908,10 @@ static void copy_shape(float out[4], flux_liquid_glass_shape shape) {
 }
 
 static bool liquid_glass_group_dispatch_bounds(const flux_liquid_glass_group *group,
-                                               uint32_t image_width, uint32_t image_height,
-                                               uint32_t *out_x, uint32_t *out_y,
-                                               uint32_t *out_width, uint32_t *out_height) {
+                                               float shadow_reach, uint32_t image_width,
+                                               uint32_t image_height, uint32_t *out_x,
+                                               uint32_t *out_y, uint32_t *out_width,
+                                               uint32_t *out_height) {
     float x0 = group->shapes[0].bounds.x;
     float y0 = group->shapes[0].bounds.y;
     float x1 = x0 + group->shapes[0].bounds.w;
@@ -911,9 +923,10 @@ static bool liquid_glass_group_dispatch_bounds(const flux_liquid_glass_group *gr
         x1 = fmaxf(x1, second.x + second.w);
         y1 = fmaxf(y1, second.y + second.h);
     }
-    /* Smooth union may bow beyond the source SDFs. Two extra pixels cover
-     * analytic antialiasing even when blend_radius is zero. */
-    float pad = fmaxf(group->blend_radius, 0.0f) + 2.0f;
+    /* Smooth union may bow beyond the source SDFs, and the drop shadow
+     * reaches shadow_reach pixels further out. Two extra pixels cover
+     * analytic antialiasing. */
+    float pad = fmaxf(fmaxf(group->blend_radius, 0.0f), fmaxf(shadow_reach, 0.0f)) + 2.0f;
     int64_t ix0 = (int64_t)floorf(x0 - pad);
     int64_t iy0 = (int64_t)floorf(y0 - pad);
     int64_t ix1 = (int64_t)ceilf(x1 + pad);
@@ -984,9 +997,14 @@ flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flu
     bool dispatched = false;
     for (uint32_t i = 0; i < desc->group_count; ++i) {
         const flux_liquid_glass_group *group = &desc->groups[i];
+        /* The body's shadow reaches its downward offset plus the falloff. */
+        float shadow_reach =
+            group->shadow_alpha > 0.0f ? fmaxf(group->shadow_offset_y, 0.0f) +
+                                             2.0f * fmaxf(group->shadow_blur, 0.0f)
+                                       : 0.0f;
         uint32_t origin_x = 0, origin_y = 0, group_width = 0, group_height = 0;
-        if (!liquid_glass_group_dispatch_bounds(group, input->width, input->height, &origin_x,
-                                                &origin_y, &group_width, &group_height))
+        if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, input->width, input->height,
+                                                &origin_x, &origin_y, &group_width, &group_height))
             continue;
         if (dispatched)
             barrier_compute_write_to_write(command, slot->output->image);
@@ -1015,6 +1033,14 @@ flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flu
             .group_width = group_width,
             .group_height = group_height,
             .shape_count = group->shape_count,
+            .shadow_alpha = fminf(fmaxf(group->shadow_alpha, 0.0f), 1.0f),
+            .shadow_blur = fmaxf(group->shadow_blur, 0.0f),
+            .shadow_offset_y = group->shadow_offset_y,
+            .size_reference = fmaxf(desc->size_reference, 0.0f),
+            .size_scale_min = fminf(fmaxf(desc->size_scale_min, 0.0f), 1.0f),
+            .tint_strength = fmaxf(desc->tint_strength, 0.0f),
+            .frost_strength = fmaxf(desc->frost_strength, 0.0f),
+            .tint_color = group->tint_color,
         };
         copy_shape(push.shape0, group->shapes[0]);
         if (group->shape_count == 2u)

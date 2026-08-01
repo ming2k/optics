@@ -173,11 +173,8 @@ int main(void) {
         flux_image *blurred = nullptr;
         EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
-        flux_liquid_glass_group body = {
-            .shapes = {{.bounds = {16, 16, 32, 32}, .corner_radius = 16}},
-            .shape_count = 1,
-            .opacity = 1.0f,
-        };
+        flux_liquid_glass_group body = FLUX_LIQUID_GLASS_GROUP_INIT;
+        body.shapes[0] = (flux_liquid_glass_shape){.bounds = {16, 16, 32, 32}, .corner_radius = 16};
         flux_liquid_glass_desc gd = FLUX_LIQUID_GLASS_DESC_INIT;
         gd.input = target;
         gd.blurred_input = blurred;

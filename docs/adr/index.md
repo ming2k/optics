@@ -55,3 +55,4 @@ a decision, write a new ADR and update the old one's status to
 | 0044 | [Iris backend compile-time selection](0044-iris-backend-selection.md) | Accepted |
 | 0045 | [Iris host resource lifecycle callbacks](0045-iris-host-resource-lifecycle.md) | Accepted |
 | 0046 | [Liquid glass as a convex-lens material](0046-liquid-glass-convex-lens-model.md) | Accepted |
+| 0047 | [Caller-owned policy boundary for flux effects](0047-caller-owned-policy-boundary-for-flux-effects.md) | Accepted |

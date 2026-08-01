@@ -109,26 +109,54 @@ typedef struct flux_liquid_glass_shape {
 
 /* One glass body. A second shape may be smoothly fused into the first,
  * allowing spring-driven droplets or controls to merge without a seam.
- * shape_count must be 1 or 2. */
+ * shape_count must be 1 or 2.
+ *
+ * Per-body optical character is caller policy, used verbatim:
+ * - shadow_alpha / shadow_blur / shadow_offset_y: the drop shadow cast by
+ *   the body's own SDF (alpha 0 disables it);
+ * - tint_color: 0xRRGGBB multiplier on the adaptive body tint, for
+ *   accent-tinted glass (0xFFFFFF keeps the neutral smoke/pearl pair). */
 typedef struct flux_liquid_glass_group {
     flux_liquid_glass_shape shapes[2];
     uint32_t shape_count;
     float blend_radius;
     float opacity;
+    float shadow_alpha;
+    float shadow_blur;
+    float shadow_offset_y;
+    uint32_t tint_color;
 } flux_liquid_glass_group;
+
+/* Neutral baseline for designated-initializer use: a single visible body
+ * with no shadow and the neutral tint, so omitted fields can never turn
+ * the glass black. Override the fields a body actually needs. */
+#define FLUX_LIQUID_GLASS_GROUP_INIT                                                             \
+    {.shape_count = 1, .opacity = 1.0f, .tint_color = 0xFFFFFFu}
 
 /* Reusable frame-slot-safe liquid-glass compositor. `input` is the sharp
  * backdrop capture and `blurred_input` is normally the output of
  * flux_blur_filter_apply for the same capture. Both inputs and the returned
  * image have the same extent. The output is transparent outside the exact
- * analytic SDF, so drawing it over the sharp desktop performs the complete
- * glass composite without a separate rectangular clip.
+ * analytic SDF plus the drop-shadow falloff, so drawing it over the sharp
+ * desktop performs the complete glass composite without a separate
+ * rectangular clip.
  *
  * Distances are capture-image pixels. refraction controls the lens offset,
  * chromatic_aberration separates the RGB samples along the surface normal,
  * edge_width controls the curved rim thickness, and glare is the directional
  * highlight strength. saturation and brightness are multipliers; opacity is
- * additionally multiplied by each group's opacity. */
+ * additionally multiplied by each group's opacity. Drop shadows are
+ * configured per group — see flux_liquid_glass_group.
+ *
+ * Every policy knob is caller-owned; only the curve shapes (the lens
+ * profile, the falloff curves) are the material's identity and stay in the
+ * shader. Rim band and lensing scale down for small bodies: size_reference
+ * is the body size (small side, px) at which effects render at full
+ * strength — 0 disables the scaling so every body uses the raw
+ * parameters — and size_scale_min floors the factor. tint_strength and
+ * frost_strength multiply the adaptive body tint and the scattering layer
+ * (1.0 = the reference recipe), letting callers dial a body between
+ * clearer and frostier without forking the material. */
 typedef struct flux_liquid_glass_desc {
     flux_struct_type type; /* FLUX_TYPE_LIQUID_GLASS_DESC */
     const void *next;
@@ -144,6 +172,10 @@ typedef struct flux_liquid_glass_desc {
     float glare;
     flux_point light_direction;
     float opacity;
+    float size_reference;
+    float size_scale_min;
+    float tint_strength;
+    float frost_strength;
 } flux_liquid_glass_desc;
 
 #define FLUX_LIQUID_GLASS_DESC_INIT                                                                \
@@ -155,7 +187,11 @@ typedef struct flux_liquid_glass_desc {
      .edge_width = 18.0f,                                                                          \
      .glare = 0.55f,                                                                               \
      .light_direction = {-0.45f, -0.89f},                                                          \
-     .opacity = 1.0f}
+     .opacity = 1.0f,                                                                              \
+     .size_reference = 72.0f,                                                                      \
+     .size_scale_min = 0.15f,                                                                      \
+     .tint_strength = 1.0f,                                                                        \
+     .frost_strength = 1.0f}
 
 typedef struct flux_liquid_glass_filter flux_liquid_glass_filter;
 

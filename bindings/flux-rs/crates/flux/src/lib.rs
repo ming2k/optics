@@ -1883,15 +1883,28 @@ pub struct LiquidGlassShape {
 
 /// One independently composited glass body. `merged` is smoothly unioned
 /// with `primary`, which is useful for spring-driven droplets and controls.
+///
+/// Per-body optical character is caller policy, used verbatim: the drop
+/// shadow (alpha 0 disables it) and `tint_color`, an RGB multiplier on the
+/// adaptive body tint for accent-tinted glass (`[255, 255, 255]` = neutral).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LiquidGlassGroup {
     pub primary: LiquidGlassShape,
     pub merged: Option<LiquidGlassShape>,
     pub blend_radius: f32,
     pub opacity: f32,
+    pub shadow_alpha: f32,
+    pub shadow_blur: f32,
+    pub shadow_offset_y: f32,
+    pub tint_color: [u8; 3],
 }
 
 /// Optical properties shared by all bodies in one liquid-glass dispatch.
+/// Drop shadows are per body — see [`LiquidGlassGroup`].
+///
+/// Every policy knob lives here or on the group; only the curve shapes
+/// (lens profile, falloff curves) are the material's identity and stay in
+/// the shader.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LiquidGlassParams {
     pub refraction: f32,
@@ -1902,6 +1915,15 @@ pub struct LiquidGlassParams {
     pub glare: f32,
     pub light_direction: (f32, f32),
     pub opacity: f32,
+    /// Body small-side size (px) at which rim and lensing render at full
+    /// strength; smaller bodies scale them down. 0 disables scaling.
+    pub size_reference: f32,
+    /// Floor of the size-scaling factor.
+    pub size_scale_min: f32,
+    /// Multiplier on the adaptive body tint (1.0 = reference recipe).
+    pub tint_strength: f32,
+    /// Multiplier on the scattering layer (1.0 = reference recipe).
+    pub frost_strength: f32,
 }
 
 impl Default for LiquidGlassParams {
@@ -1915,6 +1937,10 @@ impl Default for LiquidGlassParams {
             glare: 0.55,
             light_direction: (-0.45, -0.89),
             opacity: 1.0,
+            size_reference: 72.0,
+            size_scale_min: 0.15,
+            tint_strength: 1.0,
+            frost_strength: 1.0,
         }
     }
 }
@@ -1933,7 +1959,8 @@ impl LiquidGlassFilter {
 
     /// Refract `input` through analytic rounded SDFs, mixing in the matching
     /// realtime `blurred` capture for local frost. The returned image is
-    /// transparent outside the SDF and borrows this filter's frame slot.
+    /// transparent outside the SDF and its drop-shadow falloff, and borrows
+    /// this filter's frame slot.
     pub fn apply<'filter>(
         &'filter mut self,
         frame: &Frame<'_>,
@@ -1966,6 +1993,12 @@ impl LiquidGlassFilter {
                     shape_count,
                     blend_radius: group.blend_radius,
                     opacity: group.opacity,
+                    shadow_alpha: group.shadow_alpha,
+                    shadow_blur: group.shadow_blur,
+                    shadow_offset_y: group.shadow_offset_y,
+                    tint_color: (u32::from(group.tint_color[0]) << 16)
+                        | (u32::from(group.tint_color[1]) << 8)
+                        | u32::from(group.tint_color[2]),
                 }
             })
             .collect();
@@ -1986,6 +2019,10 @@ impl LiquidGlassFilter {
                 y: params.light_direction.1,
             },
             opacity: params.opacity,
+            size_reference: params.size_reference,
+            size_scale_min: params.size_scale_min,
+            tint_strength: params.tint_strength,
+            frost_strength: params.frost_strength,
             ..Default::default()
         };
         let mut raw = std::ptr::null_mut();

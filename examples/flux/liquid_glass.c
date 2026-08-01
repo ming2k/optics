@@ -325,6 +325,10 @@ int main(void) {
             .shape_count = 2,
             .blend_radius = 24.0f,
             .opacity = 1.0f,
+            .shadow_alpha = 0.20f,
+            .shadow_blur = 12.0f,
+            .shadow_offset_y = 6.0f,
+            .tint_color = 0xFFFFFFu,
         };
         flux_liquid_glass_desc gd = FLUX_LIQUID_GLASS_DESC_INIT;
         gd.input = capture;
@@ -350,18 +354,7 @@ int main(void) {
         /* Sharp backdrop: draw the captured scene. */
         flux_canvas_draw_image(canvas, capture, (flux_rect){0, 0, W, H}, nullptr);
 
-        /* Drop shadow. */
-        {
-            flux_path *sh = nullptr;
-            (void)flux_path_create(&sh, &arena);
-            if (sh) {
-                flux_path_add_round_rect(sh, (flux_rect){gx + 4.0f, gy + 8.0f, gw, gh}, gr);
-                flux_paint p = flux_paint_default();
-                p.color = flux_color_rgba_premul(0, 0, 0, 40);
-                flux_canvas_fill_path(canvas, sh, &p);
-            }
-        }
-
+        /* The glass pass casts the body's SDF drop shadow itself. */
         flux_canvas_draw_image(canvas, glass_output, (flux_rect){0, 0, W, H}, nullptr);
 
         /* Active thumb indicator (behind Sun icon). */

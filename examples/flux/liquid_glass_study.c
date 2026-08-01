@@ -96,25 +96,18 @@ static void draw_study_scene(flux_canvas *c) {
         float sy = 76.0f + (float)((i * 97) % 380);
         fill(c, sx, sy, 10.0f, 10.0f, 252, 244, 220);
     }
+    /* Pure white field: the uniform-bright separation probe the dock pill
+     * must survive. */
+    fill(c, 820.0f, 430.0f, 460.0f, 370.0f, 252, 252, 254);
     /* Bright/dark hard split running under the dock band. */
     fill(c, 0.0f, 520.0f, (float)W, 4.0f, 250, 250, 250);
 }
 
-static void shadow_for(flux_canvas *c, flux_arena *arena, flux_rect r, float radius) {
-    flux_path *sh = nullptr;
-    (void)flux_path_create(&sh, arena);
-    if (!sh)
-        return;
-    flux_path_add_round_rect(sh, (flux_rect){r.x, r.y + 10.0f, r.w, r.h}, radius);
-    flux_paint p = flux_paint_default();
-    p.color = flux_color_rgba_premul(0, 0, 0, 72);
-    flux_canvas_fill_path(c, sh, &p);
-}
-
 int main(int argc, char **argv) {
     const char *out_path = argc > 1 ? argv[1] : "glass_study.ppm";
-    float opt[6] = {12.0f, 20.0f, 0.55f, 1.08f, 1.0f, 1.5f}; /* r, ew, glare, sat, bri, ca */
-    for (int i = 2; i < argc && i - 2 < 6; ++i)
+    /* r, ew, glare, sat, bri, ca, size_ref */
+    float opt[7] = {12.0f, 20.0f, 0.55f, 1.08f, 1.0f, 1.5f, 72.0f};
+    for (int i = 2; i < argc && i - 2 < 7; ++i)
         opt[i - 2] = (float)atof(argv[i]);
 
     flux_device_desc ddesc = FLUX_DEVICE_DESC_INIT;
@@ -181,9 +174,21 @@ int main(int argc, char **argv) {
 
     const flux_rect pill = {60.0f, 560.0f, 1160.0f, 90.0f};
     const flux_rect panel = {430.0f, 140.0f, 420.0f, 260.0f};
-    flux_liquid_glass_group groups[3] = {
-        {.shapes = {{.bounds = pill, .corner_radius = 45.0f}}, .shape_count = 1, .opacity = 1.0f},
-        {.shapes = {{.bounds = panel, .corner_radius = 32.0f}}, .shape_count = 1, .opacity = 1.0f},
+    flux_liquid_glass_group groups[5] = {
+        {.shapes = {{.bounds = pill, .corner_radius = 45.0f}},
+         .shape_count = 1,
+         .opacity = 1.0f,
+         .shadow_alpha = 0.20f,
+         .shadow_blur = 12.0f,
+         .shadow_offset_y = 6.0f,
+         .tint_color = 0xFFFFFFu},
+        {.shapes = {{.bounds = panel, .corner_radius = 32.0f}},
+         .shape_count = 1,
+         .opacity = 1.0f,
+         .shadow_alpha = 0.22f,
+         .shadow_blur = 14.0f,
+         .shadow_offset_y = 7.0f,
+         .tint_color = 0xFFFFFFu},
         {.shapes =
              {
                  {.bounds = {120.0f, 200.0f, 96.0f, 96.0f}, .corner_radius = 48.0f},
@@ -191,19 +196,41 @@ int main(int argc, char **argv) {
              },
          .shape_count = 2,
          .blend_radius = 28.0f,
-         .opacity = 1.0f},
+         .opacity = 1.0f,
+         .shadow_alpha = 0.20f,
+         .shadow_blur = 10.0f,
+         .shadow_offset_y = 5.0f,
+         /* Cool accent tint: per-body tinting must read through the glass. */
+         .tint_color = 0xC8E0FFu},
+        /* HUD-chip scale with its own component shadow. */
+        {.shapes = {{.bounds = {880.0f, 500.0f, 240.0f, 32.0f}, .corner_radius = 16.0f}},
+         .shape_count = 1,
+         .opacity = 1.0f,
+         .shadow_alpha = 0.16f,
+         .shadow_blur = 4.0f,
+         .shadow_offset_y = 2.0f,
+         .tint_color = 0xFFFFFFu},
+        /* Dock-handle scale: a 6 px stadium indicator still casts a shadow. */
+        {.shapes = {{.bounds = {560.0f, 700.0f, 140.0f, 6.0f}, .corner_radius = 3.0f}},
+         .shape_count = 1,
+         .opacity = 1.0f,
+         .shadow_alpha = 0.20f,
+         .shadow_blur = 4.2f,
+         .shadow_offset_y = 2.1f,
+         .tint_color = 0xFFFFFFu},
     };
     flux_liquid_glass_desc gd = FLUX_LIQUID_GLASS_DESC_INIT;
     gd.input = capture;
     gd.blurred_input = blurred;
     gd.groups = groups;
-    gd.group_count = 3;
+    gd.group_count = 5;
     gd.refraction = opt[0];
     gd.edge_width = opt[1];
     gd.glare = opt[2];
     gd.saturation = opt[3];
     gd.brightness = opt[4];
     gd.chromatic_aberration = opt[5];
+    gd.size_reference = opt[6];
     flux_image *glass_out = nullptr;
     if (flux_liquid_glass_filter_apply(glass, frame, &gd, &glass_out) != FLUX_OK)
         return 1;
@@ -212,10 +239,20 @@ int main(int argc, char **argv) {
     if (flux_canvas_begin(canvas, frame, &clear) != FLUX_OK)
         return 1;
     flux_canvas_draw_image(canvas, capture, (flux_rect){0, 0, W, H}, nullptr);
-    shadow_for(canvas, &arena, pill, 45.0f);
-    shadow_for(canvas, &arena, panel, 32.0f);
-    flux_arena_reset(&arena);
     flux_canvas_draw_image(canvas, glass_out, (flux_rect){0, 0, W, H}, nullptr);
+    /* The dock's painted foreground layer over the collapsed handle:
+     * white at 64/255, exactly as collapsing_dock_material draws it. */
+    {
+        flux_path *hp = nullptr;
+        (void)flux_path_create(&hp, &arena);
+        if (hp) {
+            flux_path_add_round_rect(hp, (flux_rect){560.0f, 700.0f, 140.0f, 6.0f}, 3.0f);
+            flux_paint paint = flux_paint_default();
+            paint.color = flux_color_rgba_premul(255, 255, 255, 64);
+            flux_canvas_fill_path(canvas, hp, &paint);
+        }
+    }
+    flux_arena_reset(&arena);
     flux_canvas_end(canvas);
 
     if (flux_frame_request_readback(frame) != FLUX_OK)
