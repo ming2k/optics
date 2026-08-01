@@ -452,6 +452,23 @@ impl Frame {
         unsafe { sys::lens_image(self.ui, image, w, h) };
     }
 
+    /// Draw a host-owned raster image modulated by a premultiplied `tint`.
+    /// Opaque white preserves the source; white with a lower alpha fades it.
+    ///
+    /// # Safety
+    /// `image` follows the same lifetime and ownership contract as
+    /// [`Frame::image`].
+    pub unsafe fn image_tinted(
+        &mut self,
+        image: *mut sys::flux_image,
+        w: f32,
+        h: f32,
+        tint: Color,
+    ) {
+        // SAFETY: ui is live for the frame; image outlives render (caller's contract).
+        unsafe { sys::lens_image_tinted(self.ui, image, w, h, tint.raw()) };
+    }
+
     /// A flat icon-only button for navigation strips and toolbars: transparent
     /// at rest, with a subtle fill on hover. Returns `true` on the frame it is
     /// clicked.

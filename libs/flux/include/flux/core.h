@@ -176,6 +176,8 @@ typedef enum flux_struct_type {
     FLUX_TYPE_SURFACE_DMABUF_DESC = 17,
     FLUX_TYPE_SURFACE_READBACK_DESC = 18,
     FLUX_TYPE_CANVAS_PASS_DESC = 19,
+    FLUX_TYPE_LIQUID_GLASS_DESC = 20,
+    FLUX_TYPE_MESH_SKIN_DESC = 21,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -618,8 +620,9 @@ FLUX_NODISCARD FLUX_API flux_result flux_surface_export_dmabuf(flux_surface *s, 
  * flux_surface_export_dmabuf, this does not wait for the GPU on the CPU.
  * Both descriptors belong to the caller on success. Requires
  * VK_KHR_external_semaphore_fd and may be called once per submitted slot. */
-FLUX_NODISCARD FLUX_API flux_result
-flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, int *out_sync_fd);
+FLUX_NODISCARD FLUX_API flux_result flux_surface_export_dmabuf_explicit(flux_surface *s,
+                                                                        int *out_fd,
+                                                                        int *out_sync_fd);
 
 /* Offscreen surfaces: the frame slot index of the most recently submitted
  * frame (0..frames_in_flight-1), or UINT32_MAX before the first submit.

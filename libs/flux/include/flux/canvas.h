@@ -360,6 +360,12 @@ FLUX_API void flux_canvas_stroke_rrect(flux_canvas *c, flux_rect r, float radius
 FLUX_API void flux_canvas_draw_image(flux_canvas *c, flux_image *image, flux_rect dst,
                                      const flux_paint *optional_paint);
 
+/* Draw an image clipped by an analytic rounded rectangle. The clip follows
+ * translation and uniform scale and is antialiased in framebuffer space;
+ * radius >= min(dst.w,dst.h)/2 produces a circle. */
+FLUX_API void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *image, flux_rect dst,
+                                           float radius, const flux_paint *optional_paint);
+
 /* Draw a sub-rectangle of `image` into `dst`. `src` is the sampled region
  * in NORMALISED texture coordinates {u, v, du, dv} where (0,0,1,1) is the
  * whole image. Used by compositors that need source-crop (Wayland

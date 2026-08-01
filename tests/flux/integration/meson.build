@@ -96,6 +96,16 @@ if opt_scene
   test('scene_render', test_scene_render, suite : 'integration')
 endif
 
+# A generated, tiny VRM + VRMA pair keeps humanoid retargeting and animation
+# sampling under CI without committing developer avatar assets.
+if get_option('scene-graph')
+  test_scene_graph_animation = executable('test_scene_graph_animation',
+    'test_scene_graph_animation.c',
+    dependencies : [test_helpers_dep, flux_sg_dep],
+  )
+  test('scene_graph_animation', test_scene_graph_animation, suite : 'integration')
+endif
+
 test_allocator = executable('test_allocator',
   'test_allocator.c',
   dependencies : [test_helpers_dep],

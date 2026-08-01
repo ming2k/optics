@@ -54,6 +54,36 @@ static flux_mesh *make_quad(flux_device *d, float half, float z) {
     return m;
 }
 
+static flux_mesh *make_skinned_quad(flux_device *d, float half) {
+    flux_vertex verts[4] = {
+        {{-half, -half, 0}, {0, 0, 1}, {0, 0}},
+        {{half, -half, 0}, {0, 0, 1}, {1, 0}},
+        {{half, half, 0}, {0, 0, 1}, {1, 1}},
+        {{-half, half, 0}, {0, 0, 1}, {0, 1}},
+    };
+    flux_skin_vertex skin_verts[4] = {
+        {.joints = {0}, .weights = {1, 0, 0, 0}},
+        {.joints = {0}, .weights = {1, 0, 0, 0}},
+        {.joints = {0}, .weights = {1, 0, 0, 0}},
+        {.joints = {0}, .weights = {1, 0, 0, 0}},
+    };
+    uint32_t idx[6] = {0, 1, 2, 0, 2, 3};
+    flux_mesh_skin_desc sd = {
+        .type = FLUX_TYPE_MESH_SKIN_DESC,
+        .vertices = skin_verts,
+    };
+    flux_mesh_desc md = {
+        .type = FLUX_TYPE_MESH_DESC,
+        .next = &sd,
+        .vertices = verts,
+        .vertex_count = 4,
+        .indices = idx,
+        .index_count = 6,
+    };
+    flux_mesh *mesh = nullptr;
+    return flux_mesh_create(d, &md, &mesh) == FLUX_OK ? mesh : nullptr;
+}
+
 /* Shared per-frame plumbing: begin frame, prepare a flux-owned depth target,
  * begin a pass with a dark clear + depth clear, set viewport/scissor through
  * the backend-neutral helpers, run `draw`, end, submit, present. */
@@ -124,6 +154,17 @@ typedef struct phong_case {
 static void draw_phong_case(flux_frame *f, const flux_camera *cam, void *user) {
     phong_case *c = user;
     flux_scene_draw_mesh_lit(f, cam, flux_mat4_identity(), c->quad, c->mat, &c->light);
+}
+
+typedef struct skin_case {
+    flux_mesh *quad;
+    flux_material *material;
+    flux_mat4 palette[1];
+} skin_case;
+
+static void draw_skin_case(flux_frame *f, const flux_camera *cam, void *user) {
+    skin_case *c = user;
+    flux_scene_draw_mesh_skinned(f, cam, flux_mat4_identity(), c->quad, c->material, c->palette, 1);
 }
 
 int main(void) {
@@ -244,6 +285,31 @@ int main(void) {
         EXPECT(dark[0] < lit[0] / 2);
 
         flux_material_release(c.mat);
+        flux_mesh_release(c.quad);
+    }
+
+    /* --- GPU skinning: a one-joint palette translates the bind-pose quad. --- */
+    {
+        skin_case c = {0};
+        c.quad = make_skinned_quad(d, 0.4f);
+        c.palette[0] = flux_mat4_translate(1.0f, 0.0f, 0.0f);
+        EXPECT(c.quad != nullptr);
+        flux_material_desc md = {
+            .type = FLUX_TYPE_MATERIAL_DESC,
+            .kind = FLUX_MATERIAL_UNLIT,
+            .base_color = {1, 0, 0, 1},
+            .color_format = color_fmt,
+            .depth_format = FLUX_DEPTH_FORMAT,
+        };
+        EXPECT(flux_material_create(d, &md, &c.material) == FLUX_OK);
+        EXPECT(render_frame(s, depth, &cam, draw_skin_case, &c) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        const uint8_t *old_centre = px_at(px, W / 2, H / 2);
+        const uint8_t *translated = px_at(px, W / 2 + 15, H / 2);
+        EXPECT(old_centre[0] < 20);
+        EXPECT(translated[0] > 200 && translated[1] < 30);
+        flux_material_release(c.material);
         flux_mesh_release(c.quad);
     }
 

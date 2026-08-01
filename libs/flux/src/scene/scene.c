@@ -28,6 +28,12 @@ alignas(uint32_t) static const unsigned char scene_phong_vert_spv[] = {
 alignas(uint32_t) static const unsigned char scene_phong_frag_spv[] = {
 #embed "scene_phong.frag.spv"
 };
+alignas(uint32_t) static const unsigned char scene_unlit_skin_vert_spv[] = {
+#embed "scene_unlit_skin.vert.spv"
+};
+alignas(uint32_t) static const unsigned char scene_phong_skin_vert_spv[] = {
+#embed "scene_phong_skin.vert.spv"
+};
 
 /* ================================================================== */
 /*  Camera                                                            */
@@ -62,6 +68,9 @@ struct flux_mesh {
     VkBuffer index_buffer; /* VK_NULL_HANDLE if non-indexed */
     flux_vk_alloc index_alloc;
     uint32_t index_count;
+
+    VkBuffer skin_buffer; /* VK_NULL_HANDLE for a static mesh */
+    flux_vk_alloc skin_alloc;
 };
 
 flux_result flux_mesh_create(flux_device *d, const flux_mesh_desc *desc, flux_mesh **out) {
@@ -75,11 +84,17 @@ flux_result flux_mesh_create(flux_device *d, const flux_mesh_desc *desc, flux_me
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "mesh has no vertices");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
+    const flux_mesh_skin_desc *skin = desc->next;
+    if (skin && (skin->type != FLUX_TYPE_MESH_SKIN_DESC || skin->next || !skin->vertices)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid flux_mesh_skin_desc");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     *out = nullptr;
 
     flux_mesh *m = flux_internal_alloc(d, sizeof(*m));
     if (!m)
         return FLUX_ERROR_OUT_OF_MEMORY;
+    memset(m, 0, sizeof(*m));
     atomic_init(&m->ref_count, 1u);
     m->device = flux_device_retain(d);
     m->vertex_count = desc->vertex_count;
@@ -109,10 +124,27 @@ flux_result flux_mesh_create(flux_device *d, const flux_mesh_desc *desc, flux_me
             goto fail;
     }
 
+    if (skin) {
+        VkDeviceSize sbytes = (VkDeviceSize)desc->vertex_count * sizeof(flux_skin_vertex);
+        r = flux_vk_alloc_buffer(
+            d, sbytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            /*wants_device_address=*/false, &m->skin_buffer, &m->skin_alloc);
+        if (r != FLUX_OK)
+            goto fail;
+        r = flux_vk_upload_to_buffer(d, m->skin_buffer, 0, skin->vertices, sbytes);
+        if (r != FLUX_OK)
+            goto fail;
+    }
+
     *out = m;
     return FLUX_OK;
 
 fail:
+    if (m->skin_buffer)
+        vkDestroyBuffer(d->device, m->skin_buffer, nullptr);
+    if (m->skin_alloc.memory)
+        flux_vk_deallocate(d, &m->skin_alloc);
     if (m->index_buffer)
         vkDestroyBuffer(d->device, m->index_buffer, nullptr);
     if (m->index_alloc.memory)
@@ -147,6 +179,8 @@ void flux_mesh_release(flux_mesh *m) {
     flux_device_retire_buffer(d, m->vertex_buffer, &m->vertex_alloc);
     if (m->index_buffer)
         flux_device_retire_buffer(d, m->index_buffer, &m->index_alloc);
+    if (m->skin_buffer)
+        flux_device_retire_buffer(d, m->skin_buffer, &m->skin_alloc);
     flux_internal_free(d, m);
     flux_device_release(d);
 }
@@ -169,11 +203,15 @@ struct flux_material {
     uint32_t push_bytes;
     VkPipelineLayout layout;
     VkPipeline pipeline;
+    VkPipeline skinned_pipeline;
 };
 
 typedef struct scene_push {
     float mvp[16];
     float color[4];
+    uint64_t joint_palette_address;
+    uint32_t joint_count;
+    uint32_t _pad;
 } scene_push;
 
 static_assert(sizeof(scene_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
@@ -200,6 +238,9 @@ typedef struct scene_phong_params {
     float light_dir_shininess[4]; /* xyz = travel direction, w = exponent */
     float light_color_ambient[4]; /* rgb = light colour, w = ambient      */
     float eye_specular[4];        /* xyz = world eye pos, w = strength    */
+    uint64_t joint_palette_address;
+    uint32_t joint_count;
+    uint32_t _pad;
 } scene_phong_params;
 
 static VkShaderModule make_module(VkDevice d, const void *bytes, size_t len) {
@@ -213,37 +254,45 @@ static VkShaderModule make_module(VkDevice d, const void *bytes, size_t len) {
 }
 
 static flux_result create_material_pipeline(flux_material *mat, VkFormat color_fmt,
-                                            VkFormat depth_fmt) {
+                                            VkFormat depth_fmt, bool skinned,
+                                            VkPipeline *out_pipeline) {
     VkDevice d = mat->device->device;
 
-    VkPushConstantRange push = {
-        .stageFlags = mat->push_stages,
-        .offset = 0,
-        .size = mat->push_bytes,
-    };
-    /* Every pipeline includes the device bindless set at slot 0,
-     * even pipelines that don't reach for it. Future materials
-     * (textured, PBR) will index it without re-layout. */
-    VkDescriptorSetLayout bindless_layout = flux_device_bindless_layout(mat->device);
-    VkPipelineLayoutCreateInfo plci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = bindless_layout != VK_NULL_HANDLE ? 1u : 0u,
-        .pSetLayouts = bindless_layout != VK_NULL_HANDLE ? &bindless_layout : nullptr,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &push,
-    };
-    VkResult vr = vkCreatePipelineLayout(d, &plci, nullptr, &mat->layout);
-    if (vr != VK_SUCCESS) {
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "scene pipeline layout", vr);
-        return FLUX_ERROR_BACKEND_FAILURE;
+    VkResult vr = VK_SUCCESS;
+    if (!mat->layout) {
+        VkPushConstantRange push = {
+            .stageFlags = mat->push_stages,
+            .offset = 0,
+            .size = mat->push_bytes,
+        };
+        /* Every pipeline includes the device bindless set at slot 0,
+         * even pipelines that don't reach for it. Future materials
+         * (textured, PBR) will index it without re-layout. */
+        VkDescriptorSetLayout bindless_layout = flux_device_bindless_layout(mat->device);
+        VkPipelineLayoutCreateInfo plci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .setLayoutCount = bindless_layout != VK_NULL_HANDLE ? 1u : 0u,
+            .pSetLayouts = bindless_layout != VK_NULL_HANDLE ? &bindless_layout : nullptr,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &push,
+        };
+        vr = vkCreatePipelineLayout(d, &plci, nullptr, &mat->layout);
+        if (vr != VK_SUCCESS) {
+            FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "scene pipeline layout", vr);
+            return FLUX_ERROR_BACKEND_FAILURE;
+        }
     }
 
     VkShaderModule vs, fs;
     if (mat->kind == FLUX_MATERIAL_PHONG) {
-        vs = make_module(d, scene_phong_vert_spv, sizeof(scene_phong_vert_spv));
+        vs = skinned
+                 ? make_module(d, scene_phong_skin_vert_spv, sizeof(scene_phong_skin_vert_spv))
+                 : make_module(d, scene_phong_vert_spv, sizeof(scene_phong_vert_spv));
         fs = make_module(d, scene_phong_frag_spv, sizeof(scene_phong_frag_spv));
     } else {
-        vs = make_module(d, scene_unlit_vert_spv, sizeof(scene_unlit_vert_spv));
+        vs = skinned
+                 ? make_module(d, scene_unlit_skin_vert_spv, sizeof(scene_unlit_skin_vert_spv))
+                 : make_module(d, scene_unlit_vert_spv, sizeof(scene_unlit_vert_spv));
         fs = make_module(d, scene_unlit_frag_spv, sizeof(scene_unlit_frag_spv));
     }
     if (!vs || !fs) {
@@ -266,12 +315,19 @@ static flux_result create_material_pipeline(flux_material *mat, VkFormat color_f
          .pName = "main"},
     };
 
-    VkVertexInputBindingDescription vbind = {
-        .binding = 0,
-        .stride = sizeof(flux_vertex),
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+    VkVertexInputBindingDescription vbind[2] = {
+        {
+            .binding = 0,
+            .stride = sizeof(flux_vertex),
+            .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        },
+        {
+            .binding = 1,
+            .stride = sizeof(flux_skin_vertex),
+            .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        },
     };
-    VkVertexInputAttributeDescription vattr[3] = {
+    VkVertexInputAttributeDescription vattr[5] = {
         {.location = 0,
          .binding = 0,
          .format = VK_FORMAT_R32G32B32_SFLOAT,
@@ -284,12 +340,20 @@ static flux_result create_material_pipeline(flux_material *mat, VkFormat color_f
          .binding = 0,
          .format = VK_FORMAT_R32G32_SFLOAT,
          .offset = offsetof(flux_vertex, uv)},
+        {.location = 3,
+         .binding = 1,
+         .format = VK_FORMAT_R16G16B16A16_UINT,
+         .offset = offsetof(flux_skin_vertex, joints)},
+        {.location = 4,
+         .binding = 1,
+         .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+         .offset = offsetof(flux_skin_vertex, weights)},
     };
     VkPipelineVertexInputStateCreateInfo vi = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 1,
-        .pVertexBindingDescriptions = &vbind,
-        .vertexAttributeDescriptionCount = 3,
+        .vertexBindingDescriptionCount = skinned ? 2u : 1u,
+        .pVertexBindingDescriptions = vbind,
+        .vertexAttributeDescriptionCount = skinned ? 5u : 3u,
         .pVertexAttributeDescriptions = vattr,
     };
     VkPipelineInputAssemblyStateCreateInfo ia = {
@@ -356,8 +420,7 @@ static flux_result create_material_pipeline(flux_material *mat, VkFormat color_f
         .layout = mat->layout,
     };
     flux_device_vk_pipeline_cache_lock(mat->device);
-    vr = vkCreateGraphicsPipelines(d, mat->device->pipeline_cache, 1, &gpci, nullptr,
-                                   &mat->pipeline);
+    vr = vkCreateGraphicsPipelines(d, mat->device->pipeline_cache, 1, &gpci, nullptr, out_pipeline);
     flux_device_vk_pipeline_cache_unlock(mat->device);
     vkDestroyShaderModule(d, vs, nullptr);
     vkDestroyShaderModule(d, fs, nullptr);
@@ -389,6 +452,7 @@ flux_result flux_material_create(flux_device *d, const flux_material_desc *desc,
     flux_material *m = flux_internal_alloc(d, sizeof(*m));
     if (!m)
         return FLUX_ERROR_OUT_OF_MEMORY;
+    memset(m, 0, sizeof(*m));
     atomic_init(&m->ref_count, 1u);
     m->device = flux_device_retain(d);
     m->kind = desc->kind;
@@ -403,9 +467,14 @@ flux_result flux_material_create(flux_device *d, const flux_material_desc *desc,
         m->push_bytes = sizeof(scene_push);
     }
 
-    flux_result r = create_material_pipeline(m, flux_format_to_vk(desc->color_format),
-                                             flux_format_to_vk(desc->depth_format));
+    VkFormat color_format = flux_format_to_vk(desc->color_format);
+    VkFormat depth_format = flux_format_to_vk(desc->depth_format);
+    flux_result r = create_material_pipeline(m, color_format, depth_format, false, &m->pipeline);
+    if (r == FLUX_OK)
+        r = create_material_pipeline(m, color_format, depth_format, true, &m->skinned_pipeline);
     if (r != FLUX_OK) {
+        if (m->pipeline)
+            vkDestroyPipeline(d->device, m->pipeline, nullptr);
         if (m->layout)
             vkDestroyPipelineLayout(d->device, m->layout, nullptr);
         flux_device_release(d);
@@ -430,6 +499,8 @@ void flux_material_release(flux_material *m) {
     flux_device *d = m->device;
     if (m->pipeline)
         vkDestroyPipeline(d->device, m->pipeline, nullptr);
+    if (m->skinned_pipeline)
+        vkDestroyPipeline(d->device, m->skinned_pipeline, nullptr);
     if (m->layout)
         vkDestroyPipelineLayout(d->device, m->layout, nullptr);
     flux_internal_free(d, m);
@@ -488,6 +559,9 @@ static void fill_phong_params(scene_phong_params *p, const flux_mat4 *view_inv, 
     p->eye_specular[1] = view_inv->m[13];
     p->eye_specular[2] = view_inv->m[14];
     p->eye_specular[3] = material->specular;
+    p->joint_palette_address = 0;
+    p->joint_count = 0;
+    p->_pad = 0;
 }
 
 /* Inverse of the camera's view matrix, cached on the frame: one memcmp
@@ -506,7 +580,8 @@ static const flux_mat4 *scene_cached_view_inv(flux_frame *f, const flux_camera *
 }
 
 static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, flux_mesh *mesh,
-                       flux_material *material, const flux_scene_light *light) {
+                       flux_material *material, const flux_scene_light *light,
+                       const flux_mat4 *joint_matrices, uint32_t joint_count) {
     if (!f || !cam || !mesh || !material)
         return;
 
@@ -518,6 +593,18 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
      * flux_mat4_multiply which mirrors math notation a*b). */
     flux_mat4 view_proj = flux_mat4_multiply(cam->projection, cam->view);
     flux_mat4 mvp = flux_mat4_multiply(view_proj, world);
+    bool skinned = mesh->skin_buffer && joint_matrices && joint_count > 0;
+    uint64_t palette_address = 0;
+    if (skinned) {
+        size_t palette_bytes = (size_t)joint_count * sizeof(flux_mat4);
+        if (joint_count != palette_bytes / sizeof(flux_mat4))
+            return;
+        flux_transient palette;
+        if (flux_frame_alloc_transient(f, palette_bytes, 16, &palette) != FLUX_OK)
+            return;
+        memcpy(palette.cpu, joint_matrices, palette_bytes);
+        palette_address = palette.gpu_address;
+    }
 
     /* Skip redundant rebinds: the frame mirrors the bindings scene
      * last made on this command buffer (reset every begin_frame).
@@ -527,9 +614,10 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
      * are not mirrored; interleaving another module's graphics pass
      * between scene passes of one frame is outside scene's contract
      * (each scene pass is expected to own its draws). */
-    if (f->scene_bound_pipeline != material->pipeline) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->pipeline);
-        f->scene_bound_pipeline = material->pipeline;
+    VkPipeline pipeline = skinned ? material->skinned_pipeline : material->pipeline;
+    if (f->scene_bound_pipeline != pipeline) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        f->scene_bound_pipeline = pipeline;
     }
 
     /* Bind the device bindless set at slot 0 to match the pipeline
@@ -548,24 +636,30 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
         if (flux_frame_alloc_transient(f, sizeof(scene_phong_params), 16, &slice) != FLUX_OK) {
             return; /* draw dropped; alloc_transient set the error */
         }
-        fill_phong_params(slice.cpu, scene_cached_view_inv(f, cam), world, material, light);
+        scene_phong_params *params = slice.cpu;
+        fill_phong_params(params, scene_cached_view_inv(f, cam), world, material, light);
+        params->joint_palette_address = palette_address;
+        params->joint_count = skinned ? joint_count : 0;
 
         scene_phong_push pc;
         memcpy(pc.mvp, mvp.m, sizeof(pc.mvp));
         pc.params_address = slice.gpu_address;
         vkCmdPushConstants(cmd, material->layout, material->push_stages, 0, sizeof(pc), &pc);
     } else {
-        scene_push pc;
+        scene_push pc = {0};
         memcpy(pc.mvp, mvp.m, sizeof(pc.mvp));
         pc.color[0] = material->base_color.x;
         pc.color[1] = material->base_color.y;
         pc.color[2] = material->base_color.z;
         pc.color[3] = material->base_color.w;
+        pc.joint_palette_address = palette_address;
+        pc.joint_count = skinned ? joint_count : 0;
         vkCmdPushConstants(cmd, material->layout, material->push_stages, 0, sizeof(pc), &pc);
     }
 
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &mesh->vertex_buffer, &offset);
+    VkBuffer vertex_buffers[2] = {mesh->vertex_buffer, mesh->skin_buffer};
+    VkDeviceSize offsets[2] = {0, 0};
+    vkCmdBindVertexBuffers(cmd, 0, skinned ? 2u : 1u, vertex_buffers, offsets);
 
     if (mesh->index_count > 0 && mesh->index_buffer) {
         vkCmdBindIndexBuffer(cmd, mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -577,11 +671,24 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
 
 void flux_scene_draw_mesh(flux_frame *f, const flux_camera *cam, flux_mat4 world, flux_mesh *mesh,
                           flux_material *material) {
-    scene_draw(f, cam, world, mesh, material, nullptr);
+    scene_draw(f, cam, world, mesh, material, nullptr, nullptr, 0);
 }
 
 void flux_scene_draw_mesh_lit(flux_frame *f, const flux_camera *cam, flux_mat4 world,
                               flux_mesh *mesh, flux_material *material,
                               const flux_scene_light *light) {
-    scene_draw(f, cam, world, mesh, material, light);
+    scene_draw(f, cam, world, mesh, material, light, nullptr, 0);
+}
+
+void flux_scene_draw_mesh_skinned(flux_frame *f, const flux_camera *cam, flux_mat4 world,
+                                  flux_mesh *mesh, flux_material *material,
+                                  const flux_mat4 *joint_matrices, uint32_t joint_count) {
+    scene_draw(f, cam, world, mesh, material, nullptr, joint_matrices, joint_count);
+}
+
+void flux_scene_draw_mesh_skinned_lit(flux_frame *f, const flux_camera *cam, flux_mat4 world,
+                                      flux_mesh *mesh, flux_material *material,
+                                      const flux_scene_light *light,
+                                      const flux_mat4 *joint_matrices, uint32_t joint_count) {
+    scene_draw(f, cam, world, mesh, material, light, joint_matrices, joint_count);
 }

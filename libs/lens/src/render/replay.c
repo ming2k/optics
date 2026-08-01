@@ -277,8 +277,8 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
                          * correct when the parent constrains the node below
                          * its intrinsic padded height. */
                         if (!measured_text)
-                            tm = lensi_text_measure_label(ui, c->text, c->text_size,
-                                                          c->text_weight);
+                            tm =
+                                lensi_text_measure_label(ui, c->text, c->text_size, c->text_weight);
                         y = r.y + (r.h - tm.height) * 0.5f;
                         if (y < r.y)
                             y = r.y;
@@ -296,8 +296,11 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
             /* Host-owned raster texture (e.g. a decoded application icon),
              * scaled to fill the resolved rect. NULL image is a no-op so a
              * failed icon decode does not crash the frame. */
-            if (c->image)
-                flux_canvas_draw_image(canvas, c->image, r, NULL);
+            if (c->image) {
+                flux_paint paint = flux_paint_default();
+                paint.color = c->color;
+                flux_canvas_draw_image(canvas, c->image, r, &paint);
+            }
             break;
 
         case LENS_DRAW_CLIP_PUSH: {
@@ -561,8 +564,8 @@ flux_result lens_render(lens *ui, flux_canvas *canvas) {
         }
 
         if (ui->text) {
-            flux_text_draw(ui->text, canvas, &ui->arena, x + pad, y + pad,
-                           ui->tooltip.text, strlen(ui->tooltip.text),
+            flux_text_draw(ui->text, canvas, &ui->arena, x + pad, y + pad, ui->tooltip.text,
+                           strlen(ui->tooltip.text),
                            &(flux_text_style){.size_px = size, .color = t->color_fg});
         }
         if (scaled)

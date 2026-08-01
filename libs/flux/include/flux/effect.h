@@ -98,6 +98,77 @@ FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_apply(flux_blur_filter *fil
                                                            flux_image **out);
 
 /* ------------------------------------------------------------------ */
+/*  SDF liquid glass                                                  */
+/* ------------------------------------------------------------------ */
+
+/* One rounded-rectangle volume in capture-image pixel coordinates. */
+typedef struct flux_liquid_glass_shape {
+    flux_rect bounds;
+    float corner_radius;
+} flux_liquid_glass_shape;
+
+/* One glass body. A second shape may be smoothly fused into the first,
+ * allowing spring-driven droplets or controls to merge without a seam.
+ * shape_count must be 1 or 2. */
+typedef struct flux_liquid_glass_group {
+    flux_liquid_glass_shape shapes[2];
+    uint32_t shape_count;
+    float blend_radius;
+    float opacity;
+} flux_liquid_glass_group;
+
+/* Reusable frame-slot-safe liquid-glass compositor. `input` is the sharp
+ * backdrop capture and `blurred_input` is normally the output of
+ * flux_blur_filter_apply for the same capture. Both inputs and the returned
+ * image have the same extent. The output is transparent outside the exact
+ * analytic SDF, so drawing it over the sharp desktop performs the complete
+ * glass composite without a separate rectangular clip.
+ *
+ * Distances are capture-image pixels. refraction controls the lens offset,
+ * chromatic_aberration separates the RGB samples along the surface normal,
+ * edge_width controls the curved rim thickness, and glare is the directional
+ * highlight strength. saturation and brightness are multipliers; opacity is
+ * additionally multiplied by each group's opacity. */
+typedef struct flux_liquid_glass_desc {
+    flux_struct_type type; /* FLUX_TYPE_LIQUID_GLASS_DESC */
+    const void *next;
+    flux_image *input;
+    flux_image *blurred_input;
+    const flux_liquid_glass_group *groups;
+    uint32_t group_count;
+    float refraction;
+    float chromatic_aberration;
+    float saturation;
+    float brightness;
+    float edge_width;
+    float glare;
+    flux_point light_direction;
+    float opacity;
+} flux_liquid_glass_desc;
+
+#define FLUX_LIQUID_GLASS_DESC_INIT                                                                \
+    {.type = FLUX_TYPE_LIQUID_GLASS_DESC,                                                          \
+     .refraction = 8.0f,                                                                           \
+     .chromatic_aberration = 1.25f,                                                                \
+     .saturation = 1.08f,                                                                          \
+     .brightness = 1.02f,                                                                          \
+     .edge_width = 18.0f,                                                                          \
+     .glare = 0.55f,                                                                               \
+     .light_direction = {-0.45f, -0.89f},                                                          \
+     .opacity = 1.0f}
+
+typedef struct flux_liquid_glass_filter flux_liquid_glass_filter;
+
+FLUX_NODISCARD FLUX_API flux_result flux_liquid_glass_filter_create(flux_device *device,
+                                                                    flux_liquid_glass_filter **out);
+FLUX_NODISCARD FLUX_API flux_liquid_glass_filter *
+flux_liquid_glass_filter_retain(flux_liquid_glass_filter *filter);
+FLUX_API void flux_liquid_glass_filter_release(flux_liquid_glass_filter *filter);
+FLUX_NODISCARD FLUX_API flux_result
+flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flux_frame *frame,
+                               const flux_liquid_glass_desc *desc, flux_image **out);
+
+/* ------------------------------------------------------------------ */
 /*  Promote a transient output to a caller-owned image                */
 /* ------------------------------------------------------------------ */
 

@@ -53,14 +53,93 @@ FLUX_SG_API void flux_sg_scene_release(flux_sg_scene *scene) {
     for (uint32_t i = 0; i < scene->prim_count; ++i)
         if (scene->prims[i].mesh)
             flux_mesh_release(scene->prims[i].mesh);
+    for (uint32_t i = 0; i < scene->node_count; ++i)
+        free(scene->nodes[i].name);
+    for (uint32_t i = 0; i < scene->skin_count; ++i) {
+        free(scene->skins[i].joints);
+        free(scene->skins[i].inverse_bind);
+        free(scene->skins[i].palette);
+    }
     free(scene->prims);
     free(scene->nodes);
+    free(scene->skins);
     free(scene->roots);
     free(scene);
 }
 
 FLUX_SG_API uint32_t flux_sg_scene_primitive_count(const flux_sg_scene *scene) {
     return scene ? scene->prim_count : 0;
+}
+
+FLUX_SG_API bool flux_sg_scene_humanoid_bone_position(const flux_sg_scene *scene,
+                                                       const char *bone_name,
+                                                       flux_vec3 *out_position) {
+    if (!scene || !bone_name || !out_position)
+        return false;
+    int bone = sg_human_bone_index(bone_name, false);
+    if (bone < 0)
+        return false;
+    int node = scene->human_bones[bone];
+    if (node < 0 || (uint32_t)node >= scene->node_count)
+        return false;
+    *out_position = flux_vec3_make(scene->nodes[node].world.m[12], scene->nodes[node].world.m[13],
+                                   scene->nodes[node].world.m[14]);
+    return true;
+}
+
+static flux_mat4 node_local(const flux_sg_node *node) {
+    flux_mat4 t = flux_mat4_translate(node->translation.x, node->translation.y, node->translation.z);
+    flux_mat4 r = flux_mat4_rotation_quat(node->rotation);
+    flux_mat4 s = flux_mat4_scale(node->scale.x, node->scale.y, node->scale.z);
+    return flux_mat4_multiply(t, flux_mat4_multiply(r, s));
+}
+
+void sg_update_worlds(flux_sg_scene *scene) {
+    if (!scene)
+        return;
+    for (uint32_t i = 0; i < scene->node_count; ++i) {
+        flux_sg_node *node = &scene->nodes[i];
+        node->local = node_local(node);
+        node->world = node->parent < 0 ? node->local : flux_mat4_identity();
+    }
+    /* glTF node arrays are not required to be topologically sorted. Repeated
+     * propagation converges within max tree depth without recursion or a
+     * temporary allocation. */
+    for (uint32_t pass = 0; pass < scene->node_count; ++pass)
+        for (uint32_t i = 0; i < scene->node_count; ++i) {
+            flux_sg_node *node = &scene->nodes[i];
+            if (node->parent >= 0 && (uint32_t)node->parent < scene->node_count)
+                node->world = flux_mat4_multiply(scene->nodes[node->parent].world, node->local);
+        }
+}
+
+void sg_update_rest_world_rotations(flux_sg_scene *scene) {
+    if (!scene)
+        return;
+    for (uint32_t i = 0; i < scene->node_count; ++i)
+        scene->nodes[i].rest_world_rotation = scene->nodes[i].rest_rotation;
+    for (uint32_t pass = 0; pass < scene->node_count; ++pass)
+        for (uint32_t i = 0; i < scene->node_count; ++i) {
+            flux_sg_node *node = &scene->nodes[i];
+            if (node->parent >= 0 && (uint32_t)node->parent < scene->node_count)
+                node->rest_world_rotation = flux_quat_normalize(flux_quat_multiply(
+                    scene->nodes[node->parent].rest_world_rotation, node->rest_rotation));
+        }
+}
+
+void sg_update_skin_palettes(flux_sg_scene *scene) {
+    if (!scene)
+        return;
+    for (uint32_t si = 0; si < scene->skin_count; ++si) {
+        flux_sg_skin *skin = &scene->skins[si];
+        for (uint32_t ji = 0; ji < skin->joint_count; ++ji) {
+            int node = skin->joints[ji];
+            skin->palette[ji] =
+                node >= 0 && (uint32_t)node < scene->node_count
+                    ? flux_mat4_multiply(scene->nodes[node].world, skin->inverse_bind[ji])
+                    : flux_mat4_identity();
+        }
+    }
 }
 
 /* Expand [*wmin, *wmax] to contain the 8 corners of [bmin, bmax] after
@@ -141,11 +220,26 @@ FLUX_SG_API void flux_sg_draw(flux_frame *frame, const flux_camera *cam, const f
             const flux_sg_primitive *p = &scene->prims[k];
             if (!p->mesh)
                 continue;
-            if (opts->light)
+            const flux_sg_skin *skin =
+                n->skin >= 0 && (uint32_t)n->skin < scene->skin_count ? &scene->skins[n->skin]
+                                                                      : NULL;
+            if (skin && skin->joint_count > 0) {
+                /* Palettes already produce model/world-space positions, so
+                 * the draw world is identity (world * inverse(world) form). */
+                flux_mat4 identity = flux_mat4_identity();
+                if (opts->light)
+                    flux_scene_draw_mesh_skinned_lit(frame, cam, identity, p->mesh, opts->material,
+                                                      opts->light, skin->palette,
+                                                      skin->joint_count);
+                else
+                    flux_scene_draw_mesh_skinned(frame, cam, identity, p->mesh, opts->material,
+                                                  skin->palette, skin->joint_count);
+            } else if (opts->light) {
                 flux_scene_draw_mesh_lit(frame, cam, n->world, p->mesh, opts->material,
                                          opts->light);
-            else
+            } else {
                 flux_scene_draw_mesh(frame, cam, n->world, p->mesh, opts->material);
+            }
         }
     }
     /* A scene with no nodes (mesh-only file) still has primitives; draw them

@@ -13,6 +13,15 @@ executable('compute_fill',
   c_args       : ['--embed-dir=' + meson.current_build_dir()],
 )
 
+# Headless liquid-glass A/B harness — offscreen surface + PPM readback,
+# no GLFW. Gated on -Deffect=true like the windowed demo.
+if opt_effect
+  executable('liquid_glass_study',
+    'liquid_glass_study.c',
+    dependencies : [flux_dep, m_dep],
+  )
+endif
+
 # Windowed triangle example — needs GLFW.
 if not glfw_dep.found()
   warning('GLFW not found; skipping hello_triangle example.')
@@ -71,12 +80,6 @@ if opt_effect
   executable('liquid_glass',
     'liquid_glass.c',
     dependencies : [flux_dep, glfw_dep, m_dep],
-  )
-
-  # Headless offscreen snapshot of the same effect (no window needed).
-  executable('liquid_glass_shot',
-    'liquid_glass_shot.c',
-    dependencies : [flux_dep, m_dep],
   )
 endif
 

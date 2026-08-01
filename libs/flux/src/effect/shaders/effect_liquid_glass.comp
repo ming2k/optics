@@ -1,0 +1,198 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+/*
+ * Analytic liquid-glass compositor — convex-lens model.
+ *
+ * The body is treated as a thin lens slab: optically flat in the interior
+ * (backdrop passes through undistorted) with a curved rim band of
+ * `edge_width` px whose slope follows a clamped spherical-cap profile.
+ * The same rounded-rectangle SDF drives coverage, the rim parameterisation
+ * and the refraction normal, so no layer can disagree at a corner. Two
+ * SDFs can be smoothly unioned into one body for liquid/spring merges.
+ *
+ * Layer stack, evaluated per pixel inside the analytic coverage:
+ *   1. LENSING — refraction displaces the sharp backdrop inward along the
+ *      rim normal (convex-lens magnification), with per-channel bend for
+ *      chromatic dispersion confined to the rim band.
+ *   2. SCATTER — a small frost mix, growing slightly through the rim band.
+ *   3. ADAPTIVE TINT — opposes backdrop luminance: pearl lift over dark
+ *      content, smoke dim over bright content (legibility layer).
+ *   4. LIGHT — a thin directional key line hugging the silhouette on the
+ *      light-facing side, a soft sheen across the rim, a shadow-side dark
+ *      line opposite the key, and a faint transmitted-light trough inside
+ *      the bottom rim. Nothing here is a broad additive wash: the rim
+ *      reads as sculpted light, not as a white halo.
+ */
+
+layout(set = 0, binding = 0) uniform texture2D u_sampled[];
+layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+layout(set = 0, binding = 2) uniform sampler u_samplers[];
+
+layout(push_constant) uniform PC {
+    uint input_handle;
+    uint blurred_handle;
+    uint sampler_handle;
+    uint output_handle;
+    uint width;
+    uint height;
+    uint origin_x;
+    uint origin_y;
+    vec4 shape0;
+    vec4 shape1;
+    float radius0;
+    float radius1;
+    float blend_radius;
+    float opacity;
+    float refraction;
+    float chromatic_aberration;
+    float saturation;
+    float brightness;
+    float edge_width;
+    float glare;
+    float light_x;
+    float light_y;
+    uint group_width;
+    uint group_height;
+    uint shape_count;
+} pc;
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+vec4 sample_image(uint handle, vec2 uv)
+{
+    return texture(
+        sampler2D(
+            u_sampled[nonuniformEXT(handle & 0x0FFFFFFFu)],
+            u_samplers[nonuniformEXT(pc.sampler_handle & 0x0FFFFFFFu)]
+        ),
+        clamp(uv, vec2(0.0), vec2(1.0))
+    );
+}
+
+float rounded_rect_sdf(vec2 p, vec4 bounds, float requested_radius)
+{
+    vec2 half_extent = max(bounds.zw * 0.5, vec2(0.001));
+    vec2 centre = bounds.xy + half_extent;
+    float radius = clamp(requested_radius, 0.0, min(half_extent.x, half_extent.y));
+    vec2 q = abs(p - centre) - half_extent + radius;
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+float smooth_union(float a, float b, float radius)
+{
+    if (radius <= 0.001) return min(a, b);
+    float h = clamp(0.5 + 0.5 * (b - a) / radius, 0.0, 1.0);
+    return mix(b, a, h) - radius * h * (1.0 - h);
+}
+
+float glass_sdf(vec2 p)
+{
+    float d = rounded_rect_sdf(p, pc.shape0, pc.radius0);
+    if (pc.shape_count > 1u) {
+        d = smooth_union(d, rounded_rect_sdf(p, pc.shape1, pc.radius1), pc.blend_radius);
+    }
+    return d;
+}
+
+vec3 adjust_saturation(vec3 colour, float saturation)
+{
+    float luminance = dot(colour, vec3(0.2126, 0.7152, 0.0722));
+    return mix(vec3(luminance), colour, saturation);
+}
+
+void main()
+{
+    uvec2 local = gl_GlobalInvocationID.xy;
+    if (local.x >= pc.group_width || local.y >= pc.group_height) return;
+    uvec2 pixel = local + uvec2(pc.origin_x, pc.origin_y);
+    if (pixel.x >= pc.width || pixel.y >= pc.height) return;
+
+    vec2 p = vec2(pixel) + 0.5;
+    float d = glass_sdf(p);
+    /* One physical pixel of analytic antialiasing; coverage is also the only
+     * output alpha, preventing blur from leaking beyond rounded corners. */
+    float coverage = 1.0 - smoothstep(-0.75, 0.75, d);
+    if (coverage <= 0.0) return;
+
+    /* Outward rim normal from the SDF gradient. Wide taps keep the normal
+     * stable through smooth-union necks. */
+    float dx = glass_sdf(p + vec2(1.5, 0.0)) - glass_sdf(p - vec2(1.5, 0.0));
+    float dy = glass_sdf(p + vec2(0.0, 1.5)) - glass_sdf(p - vec2(0.0, 1.5));
+    vec2 rim_normal = normalize(vec2(dx, dy) + vec2(1e-6));
+
+    /* Rim parameter: 1 at the silhouette, 0 where the lens flattens out. */
+    float edge = max(pc.edge_width, 1.0);
+    float u = clamp(1.0 + d / edge, 0.0, 1.0);
+    /* Convex-lens bend profile: spherical-cap slope u/sqrt(1-u²), clamped
+     * where the physical cap would turn vertical, then normalised to 0..1.
+     * The interior stays at exactly 0 — no centre distortion. */
+    float lens = min(u * inversesqrt(1.0 - u * u + 0.02), 3.0) * (1.0 / 3.0);
+
+    vec2 inv_extent = 1.0 / vec2(pc.width, pc.height);
+    vec2 uv = p * inv_extent;
+    vec2 normal_uv = rim_normal * inv_extent;
+
+    /* Lensing: sample the sharp backdrop inward along the rim normal —
+     * a magnifier, strongest at the silhouette. Dispersion separates the
+     * red/blue bend, so fringes live only inside the rim band. */
+    float bend_g = pc.refraction * lens;
+    float bend_r = (pc.refraction + pc.chromatic_aberration) * lens;
+    float bend_b = max(pc.refraction - pc.chromatic_aberration, 0.0) * lens;
+    vec3 refracted;
+    refracted.r = sample_image(pc.input_handle, uv - normal_uv * bend_r).r;
+    refracted.g = sample_image(pc.input_handle, uv - normal_uv * bend_g).g;
+    refracted.b = sample_image(pc.input_handle, uv - normal_uv * bend_b).b;
+    vec3 frost = sample_image(pc.blurred_handle, uv - normal_uv * bend_g * 0.5).rgb;
+
+    /* Scatter: mostly clear body; soft scattering grows through the rim. */
+    float frost_amount = clamp(0.08 + 0.20 * u * u, 0.0, 1.0);
+    vec3 colour = mix(refracted, frost, frost_amount);
+    colour = adjust_saturation(colour, max(pc.saturation, 0.0));
+
+    /* Adaptive body tint, opposing the backdrop: pearl over dark content,
+     * smoke over bright. Weakest inside the rim band, where lensing and
+     * light already provide separation. */
+    float backdrop_luminance = dot(frost, vec3(0.2126, 0.7152, 0.0722));
+    float dark_backdrop = 1.0 - smoothstep(0.20, 0.62, backdrop_luminance);
+    vec3 tint_colour = mix(vec3(0.045, 0.05, 0.065), vec3(1.0), dark_backdrop);
+    float tint_amount = mix(0.16, 0.10, dark_backdrop) * (0.65 + 0.35 * (1.0 - u));
+    colour = mix(colour, tint_colour, tint_amount);
+    colour *= max(pc.brightness, 0.0);
+
+    /* Light. key_dir points from the shape toward the key light. The
+     * parameter is the light's position direction (default up-left;
+     * y runs downward), so light-facing edges have n·key > 0. */
+    vec2 key_dir = normalize(vec2(pc.light_x, pc.light_y) + vec2(1e-6));
+    float facing = max(dot(rim_normal, key_dir), 0.0);
+    float away = max(dot(rim_normal, -key_dir), 0.0);
+
+    /* 1) Key line: a ~2 px gaussian hugging the silhouette on the
+     * light-facing side. This — not a broad rim wash — is the highlight. */
+    float line = exp(-(d + 0.75) * (d + 0.75) / 2.88);
+    colour += vec3(1.0) * (pc.glare * 1.05 * pow(facing, 1.6) * line);
+
+    /* 2) Soft sheen across the rim band, keyed to the light. */
+    colour += vec3(1.0) * (pc.glare * 0.10 * facing * facing * u * u);
+
+    /* 3) Fresnel env sheen: direction-modulated, so it brightens the top
+     * and dies at the bottom instead of ringing the whole silhouette. */
+    float fresnel = u * u * u * u;
+    colour += vec3(1.0) * (pc.glare * 0.12 * fresnel * (0.15 + 0.85 * facing * facing));
+
+    /* 4) Shadow side: a thin dark line opposite the key light. */
+    colour *= 1.0 - 0.22 * pc.glare * pow(away, 1.8) * line;
+
+    /* 5) Transmitted-light trough: faint concentration just inside the
+     * bottom rim, where light through the lens pools. */
+    float trough = away * away * smoothstep(0.25, 0.75, u) * (1.0 - smoothstep(0.85, 1.0, u));
+    colour += vec3(1.0) * (0.05 * pc.glare * trough);
+
+    /* Sub-LSB dither: smooth studio gradients band visibly in rgba8. */
+    float dither = fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+    colour += dither * (1.5 / 255.0);
+
+    float alpha = coverage * clamp(pc.opacity, 0.0, 1.0);
+    imageStore(u_storage[nonuniformEXT(pc.output_handle & 0x0FFFFFFFu)], ivec2(pixel),
+               vec4(colour * alpha, alpha));
+}

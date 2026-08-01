@@ -72,5 +72,12 @@ void main()
          * Opaque white preserves the source; white with lower alpha is the
          * usual fade/cross-fade control. */
         out_color = texel * v_color;
+        if (pc.kind == 5u) {
+            vec2 q = abs(v_pos - pc.image_dst.xy) - (pc.image_dst.zw - pc.grad_radius);
+            float distance = min(max(q.x, q.y), 0.0)
+                           + length(max(q, vec2(0.0))) - pc.grad_radius;
+            float coverage = clamp(0.5 - distance / max(fwidth(distance), 1e-4), 0.0, 1.0);
+            out_color *= coverage;
+        }
     }
 }

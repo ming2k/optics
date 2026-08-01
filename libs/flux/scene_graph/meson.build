@@ -9,6 +9,7 @@ flux_sg_inc = include_directories('include')
 flux_sg_sources = files(
   'src/json.c',
   'src/glb.c',
+  'src/animation.c',
   'src/scene_graph.c',
 )
 
@@ -16,7 +17,7 @@ flux_sg_lib = library('flux_scene_graph',
   flux_sg_sources,
   include_directories : flux_sg_inc,
   c_args              : ['-DFLUX_SG_BUILDING=1'],
-  dependencies        : [flux_dep],
+  dependencies        : [flux_dep, m_dep],
   gnu_symbol_visibility : 'hidden',
   install             : true,
 )
@@ -26,7 +27,7 @@ install_headers('include/flux-scene-graph/scene-graph.h', subdir : 'flux-scene-g
 flux_sg_dep = declare_dependency(
   link_with           : flux_sg_lib,
   include_directories : flux_sg_inc,
-  dependencies        : [flux_dep],
+  dependencies        : [flux_dep, m_dep],
 )
 
 pkg.generate(
@@ -37,5 +38,3 @@ pkg.generate(
   version      : meson.project_version(),
   requires     : 'flux',
 )
-
-

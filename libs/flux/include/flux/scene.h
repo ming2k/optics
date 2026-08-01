@@ -52,6 +52,22 @@ typedef struct flux_mesh_desc {
 
 #define FLUX_MESH_DESC_INIT {.type = FLUX_TYPE_MESH_DESC}
 
+/* Optional `flux_mesh_desc.next` payload for GPU skinning. Joint indices are
+ * local to the palette supplied at draw time; weights are normalised by the
+ * content loader, but the shader defensively handles a zero-sum vertex. */
+typedef struct flux_skin_vertex {
+    uint16_t joints[4];
+    float weights[4];
+} flux_skin_vertex;
+
+typedef struct flux_mesh_skin_desc {
+    flux_struct_type type; /* FLUX_TYPE_MESH_SKIN_DESC */
+    const void *next;
+    const flux_skin_vertex *vertices; /* exactly mesh_desc.vertex_count */
+} flux_mesh_skin_desc;
+
+#define FLUX_MESH_SKIN_DESC_INIT {.type = FLUX_TYPE_MESH_SKIN_DESC}
+
 FLUX_NODISCARD FLUX_API flux_result flux_mesh_create(flux_device *d, const flux_mesh_desc *desc,
                                                      flux_mesh **out);
 FLUX_NODISCARD FLUX_API flux_mesh *flux_mesh_retain(flux_mesh *m);
@@ -144,6 +160,19 @@ FLUX_API void flux_scene_draw_mesh(flux_frame *f, const flux_camera *cam, flux_m
 FLUX_API void flux_scene_draw_mesh_lit(flux_frame *f, const flux_camera *cam, flux_mat4 world,
                                        flux_mesh *mesh, flux_material *material,
                                        const flux_scene_light *light);
+
+/* GPU-skinned variants. `joint_matrices` transform bind-pose vertices in mesh
+ * space and are borrowed only for this call: the matrices are copied into the
+ * frame's transient ring before recording the draw. A mesh not created with a
+ * flux_mesh_skin_desc, or an empty palette, is drawn through the static path. */
+FLUX_API void flux_scene_draw_mesh_skinned(flux_frame *f, const flux_camera *cam, flux_mat4 world,
+                                           flux_mesh *mesh, flux_material *material,
+                                           const flux_mat4 *joint_matrices, uint32_t joint_count);
+
+FLUX_API void flux_scene_draw_mesh_skinned_lit(
+    flux_frame *f, const flux_camera *cam, flux_mat4 world, flux_mesh *mesh,
+    flux_material *material, const flux_scene_light *light, const flux_mat4 *joint_matrices,
+    uint32_t joint_count);
 
 #ifdef __cplusplus
 }

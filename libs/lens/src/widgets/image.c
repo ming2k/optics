@@ -8,7 +8,7 @@
  * falls back to the theme font size. Identity is stack-derived like
  * lens_icon, so repeated calls in a loop (dock tiles, launcher rows) each
  * resolve to a distinct node. */
-LENS_API void lens_image(lens *ui, flux_image *image, float w, float h) {
+static void image_impl(lens *ui, flux_image *image, float w, float h, flux_color tint) {
     ui->next_disabled = false;
     ui->next_error = false;
     lens_id nid = lensi_gen_widget_id(ui, "");
@@ -36,8 +36,17 @@ LENS_API void lens_image(lens *ui, flux_image *image, float w, float h) {
                         (lens_draw_cmd){
                             .kind = LENS_DRAW_IMAGE,
                             .rel = {0, 0, w, h},
+                            .color = tint,
                             .image = image,
                         });
+}
+
+LENS_API void lens_image(lens *ui, flux_image *image, float w, float h) {
+    image_impl(ui, image, w, h, flux_color_rgba_premul(255, 255, 255, 255));
+}
+
+LENS_API void lens_image_tinted(lens *ui, flux_image *image, float w, float h, flux_color tint) {
+    image_impl(ui, image, w, h, tint);
 }
 
 /* Texture-backed variant of icon_button_impl: identical hover/active/click
@@ -108,8 +117,11 @@ static bool image_button_impl(lens *ui, flux_image *image, bool active) {
     if (image) {
         float ix = (w - s) * 0.5f;
         float iy = (h - s) * 0.5f;
-        lensi_drawlist_push(
-            ui, n, (lens_draw_cmd){.kind = LENS_DRAW_IMAGE, .rel = {ix, iy, s, s}, .image = image});
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_IMAGE,
+                                            .rel = {ix, iy, s, s},
+                                            .color = flux_color_rgba_premul(255, 255, 255, 255),
+                                            .image = image});
 
         float feedback = active ? 0.65f + n->hover_t * 0.35f : n->hover_t;
         if (feedback > 0.001f) {

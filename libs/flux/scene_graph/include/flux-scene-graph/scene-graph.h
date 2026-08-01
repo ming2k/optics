@@ -7,14 +7,17 @@
  *
  * Supported subset (v0.1):
  *   - Binary glTF (.glb) with one embedded buffer (the BIN chunk).
- *   - Indexed primitives with POSITION, NORMAL, and optional TEXCOORD_0.
- *   - A single scene/node tree; node transforms compose into world matrices.
+ *   - Indexed primitives with POSITION, NORMAL, optional TEXCOORD_0, and
+ *     JOINTS_0/WEIGHTS_0 GPU skinning.
+ *   - A single scene/node tree; mutable TRS poses compose into world matrices.
+ *   - glTF animation sampling (STEP/LINEAR/CUBICSPLINE) and external VRM
+ *     Animation 1.0 clips retargeted onto VRM 0.x or VRM 1.0 humanoid rigs.
  *   - Per-primitive default material is PHONG; callers may override.
  *
  * Out of subset (skipped, not fatal): external buffers/URIs, images/textures,
- * skins/morph/animation, KHR extensions, multiple scenes. These remain future
- * work; the loader reports FLUX_ERROR_UNSUPPORTED only when a mesh cannot be
- * built at all.
+ * morph targets, KHR material extensions, and multiple scenes. These remain
+ * future work; the loader reports FLUX_ERROR_UNSUPPORTED only when a mesh
+ * cannot be built at all.
  */
 #ifndef FLUX_SCENE_GRAPH_H
 #define FLUX_SCENE_GRAPH_H
@@ -62,6 +65,7 @@ FLUX_SG_API const char *flux_sg_version_string(void);
  * parsed from the glTF material; the application supplies the flux_material
  * at draw time (it owns the render-target formats). */
 typedef struct flux_sg_scene flux_sg_scene;
+typedef struct flux_sg_animation flux_sg_animation;
 
 /* Parse a .glb (binary glTF 2.0) and build GPU resources on `device`.
  * On success `*out` is a scene with refcount 1. Returns:
@@ -85,6 +89,32 @@ FLUX_SG_API uint32_t flux_sg_scene_primitive_count(const flux_sg_scene *scene);
  * model without hardcoding per-asset constants. */
 FLUX_SG_API bool flux_sg_scene_bounds(const flux_sg_scene *scene, flux_vec3 *out_min,
                                       flux_vec3 *out_max);
+
+/* Current model-space position of a VRM humanoid bone (for example "head" or
+ * "hips"). Useful for cameras and attachments that must follow animation. */
+FLUX_SG_API bool flux_sg_scene_humanoid_bone_position(const flux_sg_scene *scene,
+                                                       const char *bone_name,
+                                                       flux_vec3 *out_position);
+
+/* Load the first animation from a binary glTF/VRMA file and bind its channels
+ * to `target`. VRMC_vrm_animation humanoid channels are retargeted by bone
+ * identity, including VRM 0.x thumb-name compatibility and rest-pose rotation
+ * conversion. Ordinary glTF clips fall back to node-name matching. The clip
+ * retains `target` and remains permanently bound to that exact scene. */
+FLUX_SG_API flux_result flux_sg_load_animation_glb(const flux_sg_scene *target,
+                                                   const void *glb_bytes, size_t byte_count,
+                                                   flux_sg_animation **out);
+FLUX_SG_API flux_sg_animation *flux_sg_animation_retain(flux_sg_animation *animation);
+FLUX_SG_API void flux_sg_animation_release(flux_sg_animation *animation);
+FLUX_SG_API float flux_sg_animation_duration(const flux_sg_animation *animation);
+FLUX_SG_API uint32_t flux_sg_animation_channel_count(const flux_sg_animation *animation);
+
+/* Reset to the model rest pose, then sample and apply the clip. When `loop` is
+ * true, time wraps by duration; otherwise it clamps to the last key. */
+FLUX_SG_API flux_result flux_sg_scene_apply_animation(flux_sg_scene *scene,
+                                                      const flux_sg_animation *animation,
+                                                      float time_seconds, bool loop);
+FLUX_SG_API void flux_sg_scene_reset_pose(flux_sg_scene *scene);
 
 /* ================================================================== */
 /*  Draw                                                              */

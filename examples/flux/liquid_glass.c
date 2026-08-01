@@ -1,5 +1,5 @@
 /*
- * liquid_glass — Apple-style translucent glass over a chaotic backdrop.
+ * liquid_glass — analytic thick liquid glass over a chaotic backdrop.
  *
  * A demo of REAL backdrop blur: the glass panel blurs whatever the canvas
  * has actually rendered behind it, not a static stand-in texture. This
@@ -7,30 +7,14 @@
  *
  *   1. CAPTURE  — render the chaotic scene into a flux_image via
  *      flux_canvas_begin_target / end_target.
- *   2. EFFECT   — blur the captured image with flux_effect_blur.
- *   3. COMPOSITE — draw the sharp capture as the backdrop, then draw the
- *      blurred capture behind the glass (clipped to its rounded shape),
- *      then the glass layers (fresnel rim, volume frost, specular sheen).
- *
- * The glass itself is built from three physical principles, each a gradient
- * layer clipped to the rounded shape (flux_path_add_round_rect + gradient
- * fills, which evaluate per-fragment in screen space):
- *
- *   1. FRESNEL EDGE  — reflectance rises where the view grazes the surface
- *      (the rim). A radial gradient, transparent at the centre and bright
- *      white at the perimeter, produces the hard glossy shell.
- *   2. VOLUME / THICKNESS — the interior reads as a fluid mass: more frosted
- *      where thick (centre), clearer where thin (toward the rim). A radial
- *      gradient drives the frost; a cool blue-white tint reads as glass.
- *   3. SMOOTH TRANSITION — every layer's coverage comes from a rounded-rect
- *      path and its intensity from a continuous radial field, so the
- *      gradient rolls smoothly edge→interior with no seam.
+ *   2. EFFECT   — create fixed-cost frost, then feed sharp + frosted images
+ *      to flux_liquid_glass_filter_apply. Its analytic SDF drives refraction,
+ *      chromatic dispersion, Fresnel/glare and exact rounded alpha.
+ *   3. COMPOSITE — draw the sharp capture and the transparent glass output.
  *
  * Key flux APIs:  flux_image_create_render_target, flux_canvas_begin_target,
- *                 flux_canvas_end_target, flux_effect_blur, flux_effect_reset,
- *                 flux_canvas_draw_image, flux_canvas_clip_rect,
- *                 flux_path_add_round_rect, flux_canvas_fill_path,
- *                 flux_paint_radial_gradient, flux_paint_linear_gradient
+ *                 flux_canvas_end_target, flux_blur_filter_apply,
+ *                 flux_liquid_glass_filter_apply, flux_canvas_draw_image
  *
  * Plumbing (raw Vulkan, not flux): GLFW window + VkSurfaceKHR creation.
  * Requires -Deffect=true.
@@ -229,6 +213,13 @@ int main(void) {
         fprintf(stderr, "render-target create failed\n");
         return 1;
     }
+    flux_blur_filter *blur_filter = nullptr;
+    flux_liquid_glass_filter *glass_filter = nullptr;
+    if (flux_blur_filter_create(device, &blur_filter) != FLUX_OK ||
+        flux_liquid_glass_filter_create(device, &glass_filter) != FLUX_OK) {
+        fprintf(stderr, "liquid-glass filters create failed\n");
+        return 1;
+    }
     /* Create static noise texture for grain. */
     flux_image *noise_img = nullptr;
     {
@@ -253,13 +244,24 @@ int main(void) {
     }
 
     int frame_no = 0;
+    double previous_time = glfwGetTime();
+    float droplet_position = 0.0f;
+    float droplet_velocity = 0.0f;
     while (!glfwWindowShouldClose(win)) {
         glfwPollEvents();
 
-        /* Effect leases are device-wide and may be referenced by either frame
-         * slot. A single begin_frame fence is not a global quiescent point. */
-        flux_device_wait_idle(device);
-        flux_effect_reset(device);
+        double now = glfwGetTime();
+        float dt = fminf(fmaxf((float)(now - previous_time), 0.0f), 1.0f / 30.0f);
+        previous_time = now;
+        float droplet_target = fmodf((float)now, 5.0f) < 2.5f ? 0.0f : 1.0f;
+        /* Semi-implicit damped spring. Each target change overshoots before
+         * settling, while the two SDFs form and release a continuous neck. */
+        const float spring_stiffness = 72.0f;
+        const float spring_damping = 11.0f;
+        float spring_force = (droplet_target - droplet_position) * spring_stiffness -
+                             droplet_velocity * spring_damping;
+        droplet_velocity += spring_force * dt;
+        droplet_position += droplet_velocity * dt;
 
         flux_frame *frame = nullptr;
         r = flux_surface_begin_frame(surface, nullptr, &frame);
@@ -292,19 +294,50 @@ int main(void) {
             flux_canvas_end_target(canvas);
         }
 
-        /* ===== STEP 2: BLUR the captured scene (compute, no active pass) ===== */
+        /* Toggle body plus a small spring-driven droplet. Their rounded SDFs
+         * are smoothly unioned by the liquid-glass pass. */
+        float gw = 340.0f;
+        float gh = 100.0f;
+        float gx = W * 0.5f - gw * 0.5f;
+        float gy = H * 0.5f - gh * 0.5f;
+        float gr = gh * 0.5f;
+        float cx = gx + gw * 0.5f;
+        float cy = gy + gh * 0.5f;
+
+        /* ===== STEP 2: FROST + ANALYTIC GLASS (no active pass) ===== */
         flux_image *blurred = nullptr;
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = capture;
-        /* sigma kept in the tested regime (see test_canvas_target).
-         * sigma=18 here previously made each frame blow past the 2 s
-         * frame fence on weak / software Vulkan, saturating the shared
-         * display device and freezing the compositor. */
-        bd.sigma = 6.0f;
-        VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
-        r = flux_effect_blur(cmd, &bd, &blurred);
+        bd.sigma = 12.0f;
+        r = flux_blur_filter_apply(blur_filter, frame, &bd, &blurred);
         if (r != FLUX_OK) {
             fprintf(stderr, "blur: %s\n", flux_result_string(r));
+            break;
+        }
+        flux_liquid_glass_group body = {
+            .shapes =
+                {
+                    {.bounds = {gx, gy, gw, gh}, .corner_radius = gr},
+                    {.bounds = {gx + gw - 22.0f + droplet_position * 84.0f, gy + 11.0f, 78.0f,
+                                78.0f},
+                     .corner_radius = 39.0f},
+                },
+            .shape_count = 2,
+            .blend_radius = 24.0f,
+            .opacity = 1.0f,
+        };
+        flux_liquid_glass_desc gd = FLUX_LIQUID_GLASS_DESC_INIT;
+        gd.input = capture;
+        gd.blurred_input = blurred;
+        gd.groups = &body;
+        gd.group_count = 1;
+        gd.refraction = 13.0f;
+        gd.chromatic_aberration = 1.6f;
+        gd.edge_width = 22.0f;
+        flux_image *glass_output = nullptr;
+        r = flux_liquid_glass_filter_apply(glass_filter, frame, &gd, &glass_output);
+        if (r != FLUX_OK) {
+            fprintf(stderr, "liquid glass: %s\n", flux_result_string(r));
             break;
         }
 
@@ -316,16 +349,6 @@ int main(void) {
 
         /* Sharp backdrop: draw the captured scene. */
         flux_canvas_draw_image(canvas, capture, (flux_rect){0, 0, W, H}, nullptr);
-
-        /* Toggle switch (pill shape) centered. */
-        float gw = 340.0f;
-        float gh = 100.0f;
-        float gx = W * 0.5f - gw * 0.5f;
-        float gy = H * 0.5f - gh * 0.5f;
-        float gr = gh * 0.5f;
-        flux_rect glass = {gx, gy, gw, gh};
-        float cx = gx + gw * 0.5f;
-        float cy = gy + gh * 0.5f;
 
         /* Drop shadow. */
         {
@@ -339,30 +362,7 @@ int main(void) {
             }
         }
 
-        /* Blurred backdrop, scoped to the glass region. */
-        flux_canvas_save(canvas);
-        flux_canvas_clip_rect(canvas, glass);
-        if (blurred) {
-            flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, W, H}, nullptr);
-        }
-
-        /* Build the rounded glass shape once, reuse. */
-        flux_path *shape = nullptr;
-        (void)flux_path_create(&shape, &arena);
-        if (shape)
-            flux_path_add_round_rect(shape, glass, gr);
-
-        /* Volume / Color tint. Warm pinkish-purple glass tint. */
-        if (shape) {
-            flux_gradient_stop stops[4] = {
-                {0.00f, flux_color_rgba_premul(170, 110, 140, 160)},
-                {0.50f, flux_color_rgba_premul(150, 90, 130, 130)},
-                {0.85f, flux_color_rgba_premul(130, 80, 120, 100)},
-                {1.00f, flux_color_rgba_premul(110, 70, 110, 70)},
-            };
-            flux_paint vol = flux_paint_radial_gradient((flux_point){cx, cy}, gw * 0.6f, stops, 4);
-            flux_canvas_fill_path(canvas, shape, &vol);
-        }
+        flux_canvas_draw_image(canvas, glass_output, (flux_rect){0, 0, W, H}, nullptr);
 
         /* Active thumb indicator (behind Sun icon). */
         {
@@ -376,43 +376,6 @@ int main(void) {
                 flux_paint pt = flux_paint_default();
                 pt.color = flux_color_rgba_premul(255, 230, 220, 140);
                 flux_canvas_fill_path(canvas, tp, &pt);
-            }
-        }
-        flux_canvas_restore(canvas);
-
-        /* Fresnel Edge & Specular */
-        if (shape) {
-            flux_gradient_stop stops[4] = {
-                {0.60f, flux_color_rgba_premul(0, 0, 0, 0)},
-                {0.85f, flux_color_rgba_premul(255, 230, 240, 30)},
-                {0.96f, flux_color_rgba_premul(255, 240, 250, 120)},
-                {1.00f, flux_color_rgba_premul(255, 255, 255, 200)},
-            };
-            flux_paint fres =
-                flux_paint_radial_gradient((flux_point){cx, cy}, gw * 0.55f, stops, 4);
-            flux_canvas_fill_path(canvas, shape, &fres);
-
-            flux_gradient_stop s_stops[3] = {
-                {0.00f, flux_color_rgba_premul(255, 255, 255, 90)},
-                {0.45f, flux_color_rgba_premul(255, 255, 255, 20)},
-                {1.00f, flux_color_rgba_premul(0, 0, 0, 0)},
-            };
-            flux_paint sheen = flux_paint_linear_gradient(
-                (flux_point){gx, gy}, (flux_point){gx, gy + gh * 0.45f}, s_stops, 3);
-            flux_canvas_fill_path(canvas, shape, &sheen);
-        }
-
-        /* Border hairlines */
-        {
-            flux_path *hair = nullptr;
-            (void)flux_path_create(&hair, &arena);
-            if (hair) {
-                flux_path_add_round_rect(hair, glass, gr);
-                flux_paint sp = flux_paint_default();
-                sp.color = flux_color_rgba_premul(255, 255, 255, 120);
-                sp.stroke_width = 1.0f;
-                sp.join = FLUX_JOIN_ROUND;
-                flux_canvas_stroke_path(canvas, hair, &sp);
             }
         }
 
@@ -502,6 +465,8 @@ int main(void) {
     }
 
     flux_device_wait_idle(device);
+    flux_liquid_glass_filter_release(glass_filter);
+    flux_blur_filter_release(blur_filter);
     if (noise_img)
         flux_image_release(noise_img);
     if (capture)

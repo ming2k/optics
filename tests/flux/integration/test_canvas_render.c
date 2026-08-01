@@ -110,6 +110,12 @@ static void draw_rotated_image(flux_canvas *canvas, void *user) {
     flux_canvas_restore(canvas);
 }
 
+static void draw_round_image(flux_canvas *canvas, void *user) {
+    image_transform_case *tc = user;
+    flux_canvas_draw_image_rrect(canvas, tc->image, (flux_rect){32, 32, 64, 64}, 32.0f,
+                                 nullptr);
+}
+
 static void record_rotated_image(flux_canvas *canvas, void *user) {
     image_record_case *tc = user;
     EXPECT(flux_canvas_begin_record(canvas));
@@ -371,6 +377,12 @@ int main(void) {
                 },
             .record = FLUX_CANVAS_RECORD_INIT,
         };
+        EXPECT(render_frame(s, canvas, draw_round_image, &tc.image) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, 64, 64)[0] > 80); /* image centre survives */
+        EXPECT(px_at(px, 33, 33)[0] < 8);  /* square corner is clipped */
+
         EXPECT(render_frame(s, canvas, record_rotated_image, &tc) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);

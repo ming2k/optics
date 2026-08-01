@@ -32,6 +32,10 @@ alignas(uint32_t) static const unsigned char effect_backdrop_spv[] = {
 #embed "effect_backdrop.comp.spv"
 };
 
+alignas(uint32_t) static const unsigned char effect_liquid_glass_spv[] = {
+#embed "effect_liquid_glass.comp.spv"
+};
+
 /* Push-constant block — must match the layout in effect_blur.comp. */
 typedef struct effect_blur_push {
     uint32_t in_handle;
@@ -57,10 +61,43 @@ typedef struct effect_backdrop_push {
     uint32_t mode; /* 0 downsample, 1 upsample, 2 copy */
 } effect_backdrop_push;
 
+/* Push-constant block — must match effect_liquid_glass.comp exactly. */
+typedef struct effect_liquid_glass_push {
+    uint32_t input_handle;
+    uint32_t blurred_handle;
+    uint32_t sampler_handle;
+    uint32_t output_handle;
+    uint32_t width;
+    uint32_t height;
+    uint32_t origin_x;
+    uint32_t origin_y;
+    float shape0[4];
+    float shape1[4];
+    float radius0;
+    float radius1;
+    float blend_radius;
+    float opacity;
+    float refraction;
+    float chromatic_aberration;
+    float saturation;
+    float brightness;
+    float edge_width;
+    float glare;
+    float light_x;
+    float light_y;
+    uint32_t group_width;
+    uint32_t group_height;
+    uint32_t shape_count;
+} effect_liquid_glass_push;
+
 static_assert(sizeof(effect_blur_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_blur_push exceeds device-wide push budget");
 static_assert(sizeof(effect_backdrop_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_backdrop_push exceeds device-wide push budget");
+static_assert(sizeof(effect_liquid_glass_push) == 124,
+              "effect_liquid_glass_push no longer matches its shader block");
+static_assert(sizeof(effect_liquid_glass_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
+              "effect_liquid_glass_push exceeds device-wide push budget");
 
 #define EFFECT_BLUR_WG 16u
 #define EFFECT_BLUR_RADIUS_MAX 64
@@ -98,8 +135,9 @@ typedef struct output_entry {
 
 typedef struct effect_state {
     pthread_mutex_t lock;
-    flux_compute_pipeline *blur_pipeline;     /* lazily built; shared across calls */
-    flux_compute_pipeline *backdrop_pipeline; /* fixed-cost live-compositor filter */
+    flux_compute_pipeline *blur_pipeline;         /* lazily built; shared across calls */
+    flux_compute_pipeline *backdrop_pipeline;     /* fixed-cost live-compositor filter */
+    flux_compute_pipeline *liquid_glass_pipeline; /* analytic SDF glass composite */
     intermediate_entry *intermediates;
     output_entry *outputs;
 } effect_state;
@@ -117,6 +155,18 @@ struct flux_blur_filter {
     atomic_uint ref_count;
     flux_device *device; /* retained; slot images hold weak device refs */
     blur_filter_slot slots[FLUX_MAX_FRAMES_IN_FLIGHT];
+};
+
+typedef struct liquid_glass_filter_slot {
+    uint32_t width;
+    uint32_t height;
+    flux_image *output;
+} liquid_glass_filter_slot;
+
+struct flux_liquid_glass_filter {
+    atomic_uint ref_count;
+    flux_device *device;
+    liquid_glass_filter_slot slots[FLUX_MAX_FRAMES_IN_FLIGHT];
 };
 
 static void effect_state_destroy(flux_device *d) {
@@ -142,6 +192,8 @@ static void effect_state_destroy(flux_device *d) {
         flux_compute_pipeline_release(st->blur_pipeline);
     if (st->backdrop_pipeline)
         flux_compute_pipeline_release(st->backdrop_pipeline);
+    if (st->liquid_glass_pipeline)
+        flux_compute_pipeline_release(st->liquid_glass_pipeline);
     pthread_mutex_destroy(&st->lock);
     flux_internal_free(d, st);
     d->effect_state = nullptr;
@@ -290,6 +342,21 @@ static flux_result ensure_backdrop_pipeline(flux_device *d, effect_state *st) {
     return FLUX_OK;
 }
 
+static flux_result ensure_liquid_glass_pipeline(flux_device *d, effect_state *st) {
+    if (st->liquid_glass_pipeline)
+        return FLUX_OK;
+    flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
+    pdesc.spirv = (const uint32_t *)effect_liquid_glass_spv;
+    pdesc.spirv_word_count = sizeof(effect_liquid_glass_spv) / sizeof(uint32_t);
+    pdesc.entry_point = "main";
+    pdesc.push_constant_bytes = sizeof(effect_liquid_glass_push);
+    flux_result r = flux_compute_pipeline_create(d, &pdesc, &st->liquid_glass_pipeline);
+    if (r != FLUX_OK)
+        return r;
+    flux_compute_pipeline_make_device_weak(st->liquid_glass_pipeline);
+    return FLUX_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Barrier helpers                                                   */
 /* ------------------------------------------------------------------ */
@@ -350,6 +417,102 @@ static void barrier_reuse_to_compute_write(VkCommandBuffer cmd, VkImage image) {
         .pImageMemoryBarriers = &b,
     };
     vkCmdPipelineBarrier2(cmd, &di);
+}
+
+static void clear_liquid_glass_output(VkCommandBuffer cmd, VkImage image) {
+    VkImageSubresourceRange range = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .levelCount = 1,
+        .layerCount = 1,
+    };
+    VkImageMemoryBarrier2 before = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask =
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = image,
+        .subresourceRange = range,
+    };
+    VkDependencyInfo before_info = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &before,
+    };
+    vkCmdPipelineBarrier2(cmd, &before_info);
+    VkClearColorValue transparent = {.float32 = {0.0f, 0.0f, 0.0f, 0.0f}};
+    vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_GENERAL, &transparent, 1, &range);
+
+    VkImageMemoryBarrier2 after = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = image,
+        .subresourceRange = range,
+    };
+    VkDependencyInfo after_info = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &after,
+    };
+    vkCmdPipelineBarrier2(cmd, &after_info);
+}
+
+static void barrier_compute_write_to_write(VkCommandBuffer cmd, VkImage image) {
+    VkImageMemoryBarrier2 barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = image,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    VkDependencyInfo info = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier,
+    };
+    vkCmdPipelineBarrier2(cmd, &info);
+}
+
+static void barrier_clear_to_fragment_read(VkCommandBuffer cmd, VkImage image) {
+    VkImageMemoryBarrier2 barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = image,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    VkDependencyInfo info = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier,
+    };
+    vkCmdPipelineBarrier2(cmd, &info);
 }
 
 static flux_result record_blur_dispatch(effect_state *st, flux_device *d, VkCommandBuffer cmd,
@@ -641,6 +804,234 @@ flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
     blur_filter_slot *slot = &filter->slots[index];
     record_backdrop_filter(st, filter->device, flux_frame_vk_command_buffer(frame), input, slot,
                            desc->sigma);
+    *out = slot->output;
+    return FLUX_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reusable analytic liquid glass                                    */
+/* ------------------------------------------------------------------ */
+
+flux_result flux_liquid_glass_filter_create(flux_device *device, flux_liquid_glass_filter **out) {
+    if (!device || !out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = nullptr;
+    flux_liquid_glass_filter *filter = flux_internal_alloc(device, sizeof(*filter));
+    if (!filter)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    atomic_init(&filter->ref_count, 1u);
+    filter->device = flux_device_retain(device);
+    *out = filter;
+    return FLUX_OK;
+}
+
+flux_liquid_glass_filter *flux_liquid_glass_filter_retain(flux_liquid_glass_filter *filter) {
+    if (filter)
+        atomic_fetch_add_explicit(&filter->ref_count, 1u, memory_order_relaxed);
+    return filter;
+}
+
+void flux_liquid_glass_filter_release(flux_liquid_glass_filter *filter) {
+    if (!filter)
+        return;
+    if (atomic_fetch_sub_explicit(&filter->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return;
+    flux_device *device = filter->device;
+    for (uint32_t i = 0; i < FLUX_MAX_FRAMES_IN_FLIGHT; ++i) {
+        if (filter->slots[i].output)
+            flux_image_release(filter->slots[i].output);
+    }
+    flux_internal_free(device, filter);
+    flux_device_release(device);
+}
+
+static flux_result liquid_glass_ensure_slot(flux_liquid_glass_filter *filter, uint32_t index,
+                                            const flux_image *input) {
+    liquid_glass_filter_slot *slot = &filter->slots[index];
+    if (slot->output && slot->width == input->width && slot->height == input->height)
+        return FLUX_OK;
+    if (slot->output)
+        flux_image_release(slot->output);
+    *slot = (liquid_glass_filter_slot){0};
+    flux_result r = flux_image_create_compute_writable(filter->device, input->width, input->height,
+                                                       EFFECT_STORAGE_FORMAT, &slot->output);
+    if (r != FLUX_OK)
+        return r;
+    slot->width = input->width;
+    slot->height = input->height;
+    return FLUX_OK;
+}
+
+static bool finite_rect(flux_rect rect) {
+    return isfinite(rect.x) && isfinite(rect.y) && isfinite(rect.w) && isfinite(rect.h) &&
+           rect.w > 0.0f && rect.h > 0.0f;
+}
+
+static bool valid_liquid_glass_desc(const flux_liquid_glass_desc *desc) {
+    if (desc->type != FLUX_TYPE_LIQUID_GLASS_DESC || !desc->input || !desc->blurred_input ||
+        !desc->groups || desc->group_count == 0u || desc->group_count > 64u)
+        return false;
+    if (!isfinite(desc->refraction) || !isfinite(desc->chromatic_aberration) ||
+        !isfinite(desc->saturation) || !isfinite(desc->brightness) || !isfinite(desc->edge_width) ||
+        !isfinite(desc->glare) || !isfinite(desc->light_direction.x) ||
+        !isfinite(desc->light_direction.y) || !isfinite(desc->opacity))
+        return false;
+    for (uint32_t i = 0; i < desc->group_count; ++i) {
+        const flux_liquid_glass_group *group = &desc->groups[i];
+        if (group->shape_count < 1u || group->shape_count > 2u || !isfinite(group->blend_radius) ||
+            !isfinite(group->opacity))
+            return false;
+        for (uint32_t j = 0; j < group->shape_count; ++j) {
+            if (!finite_rect(group->shapes[j].bounds) || !isfinite(group->shapes[j].corner_radius))
+                return false;
+        }
+    }
+    return true;
+}
+
+static void copy_shape(float out[4], flux_liquid_glass_shape shape) {
+    out[0] = shape.bounds.x;
+    out[1] = shape.bounds.y;
+    out[2] = shape.bounds.w;
+    out[3] = shape.bounds.h;
+}
+
+static bool liquid_glass_group_dispatch_bounds(const flux_liquid_glass_group *group,
+                                               uint32_t image_width, uint32_t image_height,
+                                               uint32_t *out_x, uint32_t *out_y,
+                                               uint32_t *out_width, uint32_t *out_height) {
+    float x0 = group->shapes[0].bounds.x;
+    float y0 = group->shapes[0].bounds.y;
+    float x1 = x0 + group->shapes[0].bounds.w;
+    float y1 = y0 + group->shapes[0].bounds.h;
+    if (group->shape_count == 2u) {
+        flux_rect second = group->shapes[1].bounds;
+        x0 = fminf(x0, second.x);
+        y0 = fminf(y0, second.y);
+        x1 = fmaxf(x1, second.x + second.w);
+        y1 = fmaxf(y1, second.y + second.h);
+    }
+    /* Smooth union may bow beyond the source SDFs. Two extra pixels cover
+     * analytic antialiasing even when blend_radius is zero. */
+    float pad = fmaxf(group->blend_radius, 0.0f) + 2.0f;
+    int64_t ix0 = (int64_t)floorf(x0 - pad);
+    int64_t iy0 = (int64_t)floorf(y0 - pad);
+    int64_t ix1 = (int64_t)ceilf(x1 + pad);
+    int64_t iy1 = (int64_t)ceilf(y1 + pad);
+    ix0 = ix0 < 0 ? 0 : ix0;
+    iy0 = iy0 < 0 ? 0 : iy0;
+    ix1 = ix1 > (int64_t)image_width ? image_width : ix1;
+    iy1 = iy1 > (int64_t)image_height ? image_height : iy1;
+    if (ix1 <= ix0 || iy1 <= iy0)
+        return false;
+    *out_x = (uint32_t)ix0;
+    *out_y = (uint32_t)iy0;
+    *out_width = (uint32_t)(ix1 - ix0);
+    *out_height = (uint32_t)(iy1 - iy0);
+    return true;
+}
+
+flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flux_frame *frame,
+                                           const flux_liquid_glass_desc *desc, flux_image **out) {
+    if (!filter || !frame || !desc || !out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = nullptr;
+    if (!valid_liquid_glass_desc(desc)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid liquid glass descriptor");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING || frame->pass_active) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "liquid glass requires a recording frame pass boundary");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    flux_image *input = desc->input;
+    flux_image *blurred = desc->blurred_input;
+    if (frame->surface->device != filter->device || input->device != filter->device ||
+        blurred->device != filter->device) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                  "liquid glass filter, frame, and inputs use different devices");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (input->width != blurred->width || input->height != blurred->height ||
+        (input->format != FLUX_FORMAT_RGBA8_UNORM && input->format != FLUX_FORMAT_BGRA8_UNORM) ||
+        blurred->format != FLUX_FORMAT_RGBA8_UNORM || input->bindless == FLUX_BINDLESS_INVALID ||
+        blurred->bindless == FLUX_BINDLESS_INVALID) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                  "liquid glass inputs must be same-size sampled RGBA8/BGRA8 images");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    uint32_t index = flux_frame_index(frame);
+    if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
+        return FLUX_ERROR_OUT_OF_RANGE;
+    flux_result result = liquid_glass_ensure_slot(filter, index, input);
+    if (result != FLUX_OK)
+        return result;
+
+    effect_state *state = effect_state_get_or_init(filter->device);
+    if (!state)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    pthread_mutex_lock(&state->lock);
+    result = ensure_liquid_glass_pipeline(filter->device, state);
+    pthread_mutex_unlock(&state->lock);
+    if (result != FLUX_OK)
+        return result;
+
+    liquid_glass_filter_slot *slot = &filter->slots[index];
+    VkCommandBuffer command = flux_frame_vk_command_buffer(frame);
+    clear_liquid_glass_output(command, slot->output->image);
+
+    bool dispatched = false;
+    for (uint32_t i = 0; i < desc->group_count; ++i) {
+        const flux_liquid_glass_group *group = &desc->groups[i];
+        uint32_t origin_x = 0, origin_y = 0, group_width = 0, group_height = 0;
+        if (!liquid_glass_group_dispatch_bounds(group, input->width, input->height, &origin_x,
+                                                &origin_y, &group_width, &group_height))
+            continue;
+        if (dispatched)
+            barrier_compute_write_to_write(command, slot->output->image);
+        effect_liquid_glass_push push = {
+            .input_handle = input->bindless,
+            .blurred_handle = blurred->bindless,
+            .sampler_handle = flux_device_default_sampler_handle(filter->device),
+            .output_handle = slot->output->bindless_storage,
+            .width = input->width,
+            .height = input->height,
+            .origin_x = origin_x,
+            .origin_y = origin_y,
+            .radius0 = fmaxf(group->shapes[0].corner_radius, 0.0f),
+            .radius1 =
+                group->shape_count == 2u ? fmaxf(group->shapes[1].corner_radius, 0.0f) : 0.0f,
+            .blend_radius = fmaxf(group->blend_radius, 0.0f),
+            .opacity = fminf(fmaxf(group->opacity * desc->opacity, 0.0f), 1.0f),
+            .refraction = fmaxf(desc->refraction, 0.0f),
+            .chromatic_aberration = fmaxf(desc->chromatic_aberration, 0.0f),
+            .saturation = fmaxf(desc->saturation, 0.0f),
+            .brightness = fmaxf(desc->brightness, 0.0f),
+            .edge_width = fmaxf(desc->edge_width, 1.0f),
+            .glare = fmaxf(desc->glare, 0.0f),
+            .light_x = desc->light_direction.x,
+            .light_y = desc->light_direction.y,
+            .group_width = group_width,
+            .group_height = group_height,
+            .shape_count = group->shape_count,
+        };
+        copy_shape(push.shape0, group->shapes[0]);
+        if (group->shape_count == 2u)
+            copy_shape(push.shape1, group->shapes[1]);
+        uint32_t gx = (group_width + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
+        uint32_t gy = (group_height + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
+        flux_compute_dispatch(command, state->liquid_glass_pipeline, &push, sizeof(push), gx, gy,
+                              1u);
+        dispatched = true;
+    }
+    /* Clear-only output is still a transfer write; normally at least one
+     * clipped group dispatched and this covers compute -> fragment sampling. */
+    if (dispatched) {
+        barrier_compute_write_to_read(command, slot->output->image);
+    } else {
+        barrier_clear_to_fragment_read(command, slot->output->image);
+    }
     *out = slot->output;
     return FLUX_OK;
 }

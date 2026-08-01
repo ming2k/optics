@@ -126,8 +126,19 @@ if opt_scene
     output  : 'scene_phong.frag.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
   )
+  scene_unlit_skin_vert_spv = custom_target('scene_unlit_skin.vert.spv',
+    input   : 'src/scene/shaders/scene_unlit_skin.vert',
+    output  : 'scene_unlit_skin.vert.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  scene_phong_skin_vert_spv = custom_target('scene_phong_skin.vert.spv',
+    input   : 'src/scene/shaders/scene_phong_skin.vert',
+    output  : 'scene_phong_skin.vert.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
   flux_extra_inputs += [scene_unlit_vert_spv, scene_unlit_frag_spv,
-                        scene_phong_vert_spv, scene_phong_frag_spv]
+                        scene_phong_vert_spv, scene_phong_frag_spv,
+                        scene_unlit_skin_vert_spv, scene_phong_skin_vert_spv]
   if not flux_c_args.contains('--embed-dir=' + meson.current_build_dir())
     flux_c_args += '--embed-dir=' + meson.current_build_dir()
   endif
@@ -153,7 +164,13 @@ if opt_effect
     output  : 'effect_backdrop.comp.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
   )
-  flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv]
+  effect_liquid_glass_comp_spv = custom_target('effect_liquid_glass.comp.spv',
+    input   : 'src/effect/shaders/effect_liquid_glass.comp',
+    output  : 'effect_liquid_glass.comp.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
+                        effect_liquid_glass_comp_spv]
   if not flux_c_args.contains('--embed-dir=' + meson.current_build_dir())
     flux_c_args += '--embed-dir=' + meson.current_build_dir()
   endif

@@ -1,8 +1,9 @@
 //! Safe Rust bindings to the `flux-scene-graph` glTF content layer.
 //!
 //! [`Scene`] parses an in-memory binary glTF (`.glb`), owns the uploaded mesh
-//! resources, reports world-space bounds for automatic framing, and records
-//! draws into an active [`flux::ScenePass`].
+//! resources, reports world-space bounds for automatic framing, samples glTF
+//! and VRM Animation clips, and records static or GPU-skinned draws into an
+//! active [`flux::ScenePass`].
 
 #![deny(rust_2018_idioms)]
 
@@ -103,6 +104,42 @@ impl Scene {
         }
     }
 
+    /// Current model-space position of a named VRM humanoid bone.
+    pub fn humanoid_bone_position(&self, bone_name: &str) -> Option<[f32; 3]> {
+        let bone_name = std::ffi::CString::new(bone_name).ok()?;
+        let mut position = sys::flux_vec3::default();
+        unsafe {
+            sys::flux_sg_scene_humanoid_bone_position(self.raw, bone_name.as_ptr(), &mut position)
+        }
+        .then_some([position.x, position.y, position.z])
+    }
+
+    /// Load and bind the first glTF animation in `bytes`. VRM Animation 1.0
+    /// clips are retargeted onto this scene's VRM humanoid rig.
+    pub fn animation_from_glb(&self, bytes: &[u8]) -> Result<Animation, Error> {
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe {
+            sys::flux_sg_load_animation_glb(self.raw, bytes.as_ptr().cast(), bytes.len(), &mut raw)
+        })?;
+        Ok(Animation { raw })
+    }
+
+    /// Reset to the rest pose and apply `animation` at `time_seconds`.
+    pub fn apply_animation(
+        &mut self,
+        animation: &Animation,
+        time_seconds: f32,
+        looping: bool,
+    ) -> Result<(), Error> {
+        Error::check(unsafe {
+            sys::flux_sg_scene_apply_animation(self.raw, animation.raw, time_seconds, looping)
+        })
+    }
+
+    pub fn reset_pose(&mut self) {
+        unsafe { sys::flux_sg_scene_reset_pose(self.raw) };
+    }
+
     pub fn draw(
         &self,
         pass: &ScenePass<'_, '_>,
@@ -126,6 +163,30 @@ impl Scene {
                 &opts,
             )
         };
+    }
+}
+
+/// A decoded animation clip bound to the scene that loaded it. Applying it to
+/// another scene returns [`Error`] instead of using incompatible node indices.
+pub struct Animation {
+    raw: *mut sys::flux_sg_animation,
+}
+
+impl Animation {
+    #[must_use]
+    pub fn duration(&self) -> f32 {
+        unsafe { sys::flux_sg_animation_duration(self.raw) }
+    }
+
+    #[must_use]
+    pub fn channel_count(&self) -> u32 {
+        unsafe { sys::flux_sg_animation_channel_count(self.raw) }
+    }
+}
+
+impl Drop for Animation {
+    fn drop(&mut self) {
+        unsafe { sys::flux_sg_animation_release(self.raw) };
     }
 }
 

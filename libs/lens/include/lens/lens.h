@@ -643,6 +643,9 @@ LENS_API void lens_icon(lens *ui, lens_icon_id id, float size);
  * other (so `lens_image(ui, img, 32, 0)` is a 32×32 square). Both zero falls
  * back to the theme font size. */
 LENS_API void lens_image(lens *ui, flux_image *image, float w, float h);
+/* As lens_image, with a premultiplied tint applied to the texture. Opaque
+ * white preserves the source; white with a lower alpha fades it. */
+LENS_API void lens_image_tinted(lens *ui, flux_image *image, float w, float h, flux_color tint);
 /* Texture-backed variants of lens_icon_button / lens_icon_button_active:
  * identical hover/active/click behaviour, but draw the host-owned raster
  * image where the glyph would be. NULL image draws the background only

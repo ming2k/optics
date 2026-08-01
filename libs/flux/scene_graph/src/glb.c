@@ -34,14 +34,7 @@ static uint32_t rd_u32(const uint8_t *p) {
 #define CHUNK_JSON 0x4E4F534Au /* "JSON" */
 #define CHUNK_BIN 0x004E4942u  /* "BIN\0" */
 
-typedef struct {
-    const uint8_t *json;
-    size_t json_len;
-    const uint8_t *bin;
-    size_t bin_len;
-} glb;
-
-static flux_result glb_parse(const void *bytes, size_t len, glb *out) {
+flux_result sg_glb_parse(const void *bytes, size_t len, sg_glb *out) {
     const uint8_t *p = bytes;
     if (len < 12)
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -80,23 +73,16 @@ static flux_result glb_parse(const void *bytes, size_t len, glb *out) {
 /*  Accessor resolution                                               */
 /* ------------------------------------------------------------------ */
 
-#define CT_BYTE 5120
-#define CT_UBYTE 5121
-#define CT_SHORT 5122
-#define CT_USHORT 5123
-#define CT_UINT 5125
-#define CT_FLOAT 5126
-
 static size_t comp_size(int comp) {
     switch (comp) {
-    case CT_BYTE:
-    case CT_UBYTE:
+    case SG_CT_BYTE:
+    case SG_CT_UBYTE:
         return 1;
-    case CT_SHORT:
-    case CT_USHORT:
+    case SG_CT_SHORT:
+    case SG_CT_USHORT:
         return 2;
-    case CT_UINT:
-    case CT_FLOAT:
+    case SG_CT_UINT:
+    case SG_CT_FLOAT:
         return 4;
     default:
         return 0;
@@ -116,9 +102,9 @@ static bool json_size(const jv *v, size_t fallback, size_t *out) {
 
 /* Resolve accessor `idx` to a fully bounds-checked span in its bufferView.
  * Returns NULL for malformed data as well as unsupported accessor forms. */
-static const uint8_t *accessor_data(const jv *root, int idx, const uint8_t *bin, size_t bin_len,
-                                    const uint8_t **base, size_t base_len, int *comp, int *comps,
-                                    size_t *count, size_t *stride) {
+const uint8_t *sg_accessor_data(const jv *root, int idx, const uint8_t *bin, size_t bin_len,
+                                int *comp, int *comps, size_t *count, size_t *stride,
+                                bool *normalized) {
     if (idx < 0)
         return NULL;
     const jv *accs = jv_obj_get(root, "accessors");
@@ -150,9 +136,6 @@ static const uint8_t *accessor_data(const jv *root, int idx, const uint8_t *bin,
     if (buf == 0 && bin) {
         seg = bin;
         seglen = bin_len;
-    } else if (base && *base) {
-        seg = *base;
-        seglen = base_len;
     }
     if (!seg || bv_off > seglen || bv_len > seglen - bv_off || a_off > bv_len)
         return NULL;
@@ -177,8 +160,13 @@ static const uint8_t *accessor_data(const jv *root, int idx, const uint8_t *bin,
         *comps = 3;
     else if (type && strcmp(type, "VEC4") == 0)
         *comps = 4;
+    else if (type && strcmp(type, "MAT4") == 0)
+        *comps = 16;
     else
         return NULL;
+
+    if (normalized)
+        *normalized = jv_bool(jv_obj_get(acc, "normalized"), false);
 
     size_t element_size = csize * (size_t)*comps;
     if (bv_stride == 0)
@@ -197,32 +185,36 @@ static const uint8_t *accessor_data(const jv *root, int idx, const uint8_t *bin,
 /* Read one accessor element as up to 4 floats (normalising integer types to
  * float in [0,1] for normalised colour/UV channels — glTF normalised is not
  * yet honoured; integers are converted directly). */
-static void read_floats(const uint8_t *ptr, int comp, int comps, float *out) {
+void sg_read_floats(const uint8_t *ptr, int comp, int comps, bool normalized, float *out) {
     for (int i = 0; i < comps; ++i) {
         const uint8_t *e = ptr + (size_t)i * comp_size(comp);
         switch (comp) {
-        case CT_FLOAT: {
+        case SG_CT_FLOAT: {
             uint32_t bits = rd_u32(e);
             memcpy(&out[i], &bits, sizeof(bits));
             break;
         }
-        case CT_USHORT:
-            out[i] = (float)((uint16_t)e[0] | ((uint16_t)e[1] << 8));
+        case SG_CT_USHORT: {
+            uint16_t value = (uint16_t)e[0] | ((uint16_t)e[1] << 8);
+            out[i] = normalized ? (float)value / 65535.0f : (float)value;
             break;
-        case CT_UINT:
+        }
+        case SG_CT_UINT:
             out[i] = (float)rd_u32(e);
             break;
-        case CT_UBYTE:
-            out[i] = (float)*e;
+        case SG_CT_UBYTE:
+            out[i] = normalized ? (float)*e / 255.0f : (float)*e;
             break;
-        case CT_BYTE:
-            out[i] = (float)(int8_t)*e;
+        case SG_CT_BYTE: {
+            int8_t value = (int8_t)*e;
+            out[i] = normalized ? fmaxf((float)value / 127.0f, -1.0f) : (float)value;
             break;
-        case CT_SHORT: {
+        }
+        case SG_CT_SHORT: {
             uint16_t bits = (uint16_t)e[0] | ((uint16_t)e[1] << 8);
             int16_t value;
             memcpy(&value, &bits, sizeof(value));
-            out[i] = (float)value;
+            out[i] = normalized ? fmaxf((float)value / 32767.0f, -1.0f) : (float)value;
             break;
         }
         default:
@@ -246,40 +238,69 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
     int pos_acc = (int)jv_num(attr(prim, "POSITION"), -1);
     int nrm_acc = (int)jv_num(attr(prim, "NORMAL"), -1);
     int uv_acc = (int)jv_num(attr(prim, "TEXCOORD_0"), -1);
+    int joint_acc = (int)jv_num(attr(prim, "JOINTS_0"), -1);
+    int weight_acc = (int)jv_num(attr(prim, "WEIGHTS_0"), -1);
 
     int pcomp = 0, pcomps = 0;
     size_t pcount = 0, pstride = 0;
-    const uint8_t *pos_ptr = pos_acc >= 0 ? accessor_data(root, pos_acc, bin, bin_len, NULL, 0,
-                                                          &pcomp, &pcomps, &pcount, &pstride)
-                                          : NULL;
-    if (!pos_ptr || pcomp != CT_FLOAT || pcomps != 3 || pcount == 0)
+    bool pnormalized = false;
+    const uint8_t *pos_ptr = pos_acc >= 0
+                                 ? sg_accessor_data(root, pos_acc, bin, bin_len, &pcomp, &pcomps,
+                                                    &pcount, &pstride, &pnormalized)
+                                 : NULL;
+    if (!pos_ptr || pcomp != SG_CT_FLOAT || pcomps != 3 || pcount == 0)
         return false;
 
     int ncomp = 0, ncomps = 0;
     size_t ncount = 0, nstride = 0;
-    const uint8_t *nrm_ptr = (nrm_acc >= 0) ? accessor_data(root, nrm_acc, bin, bin_len, NULL, 0,
-                                                            &ncomp, &ncomps, &ncount, &nstride)
-                                            : NULL;
-    bool have_n = nrm_ptr && ncomp == CT_FLOAT && ncomps == 3 && ncount == pcount;
+    bool nnormalized = false;
+    const uint8_t *nrm_ptr = nrm_acc >= 0
+                                 ? sg_accessor_data(root, nrm_acc, bin, bin_len, &ncomp, &ncomps,
+                                                    &ncount, &nstride, &nnormalized)
+                                 : NULL;
+    bool have_n = nrm_ptr && ncomp == SG_CT_FLOAT && ncomps == 3 && ncount == pcount;
 
     int ucomp = 0, ucomps = 0;
     size_t ucount = 0, ustride = 0;
-    const uint8_t *uv_ptr = (uv_acc >= 0) ? accessor_data(root, uv_acc, bin, bin_len, NULL, 0,
-                                                          &ucomp, &ucomps, &ucount, &ustride)
-                                          : NULL;
-    bool have_uv = uv_ptr && ucomp == CT_FLOAT && ucomps == 2 && ucount == pcount;
+    bool unormalized = false;
+    const uint8_t *uv_ptr = uv_acc >= 0
+                                ? sg_accessor_data(root, uv_acc, bin, bin_len, &ucomp, &ucomps,
+                                                   &ucount, &ustride, &unormalized)
+                                : NULL;
+    bool have_uv = uv_ptr && ucomp == SG_CT_FLOAT && ucomps == 2 && ucount == pcount;
+
+    int jcomp = 0, jcomps = 0, wcomp = 0, wcomps = 0;
+    size_t jcount = 0, jstride = 0, wcount = 0, wstride = 0;
+    bool jnormalized = false, wnormalized = false;
+    const uint8_t *joint_ptr =
+        joint_acc >= 0 ? sg_accessor_data(root, joint_acc, bin, bin_len, &jcomp, &jcomps, &jcount,
+                                          &jstride, &jnormalized)
+                       : NULL;
+    const uint8_t *weight_ptr =
+        weight_acc >= 0
+            ? sg_accessor_data(root, weight_acc, bin, bin_len, &wcomp, &wcomps, &wcount, &wstride,
+                               &wnormalized)
+            : NULL;
+    bool have_skin = joint_ptr && weight_ptr && jcomps == 4 && wcomps == 4 && jcount == pcount &&
+                     wcount == pcount && (jcomp == SG_CT_UBYTE || jcomp == SG_CT_USHORT) &&
+                     (wcomp == SG_CT_FLOAT || wcomp == SG_CT_UBYTE || wcomp == SG_CT_USHORT);
 
     if (pcount > UINT32_MAX || pcount > SIZE_MAX / sizeof(flux_vertex))
         return false;
     flux_vertex *verts = malloc(pcount * sizeof(flux_vertex));
     if (!verts)
         return false;
+    flux_skin_vertex *skin_verts = have_skin ? malloc(pcount * sizeof(*skin_verts)) : NULL;
+    if (have_skin && !skin_verts) {
+        free(verts);
+        return false;
+    }
     flux_vec3 aabb_min = {FLT_MAX, FLT_MAX, FLT_MAX};
     flux_vec3 aabb_max = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
     for (size_t i = 0; i < pcount; ++i) {
         const uint8_t *pp = pos_ptr + i * pstride;
         float p[3] = {0, 0, 0};
-        read_floats(pp, CT_FLOAT, 3, p);
+        sg_read_floats(pp, SG_CT_FLOAT, 3, false, p);
         verts[i].position[0] = p[0];
         verts[i].position[1] = p[1];
         verts[i].position[2] = p[2];
@@ -298,7 +319,7 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
 
         if (have_n) {
             float n[3] = {0, 0, 0};
-            read_floats(nrm_ptr + i * nstride, CT_FLOAT, 3, n);
+            sg_read_floats(nrm_ptr + i * nstride, SG_CT_FLOAT, 3, false, n);
             verts[i].normal[0] = n[0];
             verts[i].normal[1] = n[1];
             verts[i].normal[2] = n[2];
@@ -307,11 +328,36 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
         }
         if (have_uv) {
             float uv[2] = {0, 0};
-            read_floats(uv_ptr + i * ustride, CT_FLOAT, 2, uv);
+            sg_read_floats(uv_ptr + i * ustride, SG_CT_FLOAT, 2, false, uv);
             verts[i].uv[0] = uv[0];
             verts[i].uv[1] = uv[1];
         } else {
             verts[i].uv[0] = verts[i].uv[1] = 0.0f;
+        }
+        if (have_skin) {
+            float joints[4] = {0}, weights[4] = {0};
+            sg_read_floats(joint_ptr + i * jstride, jcomp, 4, false, joints);
+            sg_read_floats(weight_ptr + i * wstride, wcomp, 4, wnormalized, weights);
+            float total = 0.0f;
+            for (int k = 0; k < 4; ++k) {
+                if (joints[k] < 0.0f || joints[k] > 65535.0f) {
+                    free(skin_verts);
+                    free(verts);
+                    return false;
+                }
+                skin_verts[i].joints[k] = (uint16_t)joints[k];
+                skin_verts[i].weights[k] = fmaxf(weights[k], 0.0f);
+                total += skin_verts[i].weights[k];
+            }
+            if (total > FLT_EPSILON) {
+                for (int k = 0; k < 4; ++k)
+                    skin_verts[i].weights[k] /= total;
+            } else {
+                skin_verts[i].weights[0] = 1.0f;
+                skin_verts[i].weights[1] = 0.0f;
+                skin_verts[i].weights[2] = 0.0f;
+                skin_verts[i].weights[3] = 0.0f;
+            }
         }
     }
 
@@ -323,31 +369,37 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
         int icomp = 0, icomps = 0;
         size_t icount = 0, istride = 0;
         const uint8_t *ip =
-            accessor_data(root, idx_acc, bin, bin_len, NULL, 0, &icomp, &icomps, &icount, &istride);
+            sg_accessor_data(root, idx_acc, bin, bin_len, &icomp, &icomps, &icount, &istride,
+                             NULL);
         if (!ip || icomps != 1 || icount == 0) {
+            free(skin_verts);
             free(verts);
             return false;
         }
-        if (icomp != CT_UBYTE && icomp != CT_USHORT && icomp != CT_UINT) {
+        if (icomp != SG_CT_UBYTE && icomp != SG_CT_USHORT && icomp != SG_CT_UINT) {
+            free(skin_verts);
             free(verts);
             return false;
         }
         if (icount > UINT32_MAX || icount > SIZE_MAX / sizeof(uint32_t)) {
+            free(skin_verts);
             free(verts);
             return false;
         }
         idx = malloc(icount * sizeof(uint32_t));
         if (!idx) {
+            free(skin_verts);
             free(verts);
             return false;
         }
         for (size_t i = 0; i < icount; ++i) {
             const uint8_t *value = ip + i * istride;
-            idx[i] = icomp == CT_UBYTE    ? value[0]
-                     : icomp == CT_USHORT ? ((uint32_t)value[0] | ((uint32_t)value[1] << 8))
-                                          : rd_u32(value);
+            idx[i] = icomp == SG_CT_UBYTE    ? value[0]
+                     : icomp == SG_CT_USHORT ? ((uint32_t)value[0] | ((uint32_t)value[1] << 8))
+                                             : rd_u32(value);
             if (idx[i] >= pcount) {
                 free(idx);
+                free(skin_verts);
                 free(verts);
                 return false;
             }
@@ -356,11 +408,13 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
     } else {
         idx_count = pcount;
         if (idx_count > SIZE_MAX / sizeof(uint32_t)) {
+            free(skin_verts);
             free(verts);
             return false;
         }
         idx = malloc(idx_count * sizeof(uint32_t));
         if (!idx) {
+            free(skin_verts);
             free(verts);
             return false;
         }
@@ -368,8 +422,13 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
             idx[i] = (uint32_t)i;
     }
 
+    flux_mesh_skin_desc sd = {
+        .type = FLUX_TYPE_MESH_SKIN_DESC,
+        .vertices = skin_verts,
+    };
     flux_mesh_desc md = {
         .type = FLUX_TYPE_MESH_DESC,
+        .next = have_skin ? &sd : NULL,
         .vertices = verts,
         .vertex_count = (uint32_t)pcount,
         .indices = idx,
@@ -377,6 +436,7 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
     };
     flux_mesh *mesh = NULL;
     flux_result r = flux_mesh_create(dev, &md, &mesh);
+    free(skin_verts);
     free(verts);
     free(idx);
     if (r != FLUX_OK)
@@ -405,39 +465,98 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
 /*  Node tree + world matrices                                        */
 /* ------------------------------------------------------------------ */
 
-static void read_node_local(const jv *node, flux_sg_node *n) {
-    const jv *m = jv_obj_get(node, "matrix");
-    if (m && m->kind == J_ARR && m->arr.count >= 16) {
-        /* glTF matrix is column-major; flux_mat4.m is column-major. */
-        for (int i = 0; i < 16; ++i)
-            n->local.m[i] = (float)jv_num(jv_arr_at(m, (size_t)i), 0.0);
+static flux_quat quat_from_rotation_columns(const float r[9]) {
+    flux_quat q;
+    float trace = r[0] + r[4] + r[8];
+    if (trace > 0.0f) {
+        float s = sqrtf(trace + 1.0f) * 2.0f;
+        q = (flux_quat){(r[7] - r[5]) / s, (r[2] - r[6]) / s, (r[3] - r[1]) / s,
+                        0.25f * s};
+    } else if (r[0] > r[4] && r[0] > r[8]) {
+        float s = sqrtf(1.0f + r[0] - r[4] - r[8]) * 2.0f;
+        q = (flux_quat){0.25f * s, (r[1] + r[3]) / s, (r[2] + r[6]) / s,
+                        (r[7] - r[5]) / s};
+    } else if (r[4] > r[8]) {
+        float s = sqrtf(1.0f + r[4] - r[0] - r[8]) * 2.0f;
+        q = (flux_quat){(r[1] + r[3]) / s, 0.25f * s, (r[5] + r[7]) / s,
+                        (r[2] - r[6]) / s};
+    } else {
+        float s = sqrtf(1.0f + r[8] - r[0] - r[4]) * 2.0f;
+        q = (flux_quat){(r[2] + r[6]) / s, (r[5] + r[7]) / s, 0.25f * s,
+                        (r[3] - r[1]) / s};
+    }
+    return flux_quat_normalize(q);
+}
+
+static void decompose_matrix(flux_mat4 m, flux_vec3 *t, flux_quat *q, flux_vec3 *s) {
+    *t = flux_vec3_make(m.m[12], m.m[13], m.m[14]);
+    s->x = sqrtf(m.m[0] * m.m[0] + m.m[1] * m.m[1] + m.m[2] * m.m[2]);
+    s->y = sqrtf(m.m[4] * m.m[4] + m.m[5] * m.m[5] + m.m[6] * m.m[6]);
+    s->z = sqrtf(m.m[8] * m.m[8] + m.m[9] * m.m[9] + m.m[10] * m.m[10]);
+    if (s->x < FLT_EPSILON || s->y < FLT_EPSILON || s->z < FLT_EPSILON) {
+        *q = flux_quat_identity();
         return;
     }
-    /* TRS (defaults: identity translation/rotation, unit scale). */
-    flux_vec3 t = {0, 0, 0};
-    flux_quat q = flux_quat_identity();
-    flux_vec3 s = {1, 1, 1};
-    const jv *tv = jv_obj_get(node, "translation");
-    if (tv && tv->kind == J_ARR && tv->arr.count >= 3) {
-        t = flux_vec3_make((float)jv_num(jv_arr_at(tv, 0), 0), (float)jv_num(jv_arr_at(tv, 1), 0),
-                           (float)jv_num(jv_arr_at(tv, 2), 0));
+    flux_vec3 c0 = flux_vec3_make(m.m[0] / s->x, m.m[1] / s->x, m.m[2] / s->x);
+    flux_vec3 c1 = flux_vec3_make(m.m[4] / s->y, m.m[5] / s->y, m.m[6] / s->y);
+    flux_vec3 c2 = flux_vec3_make(m.m[8] / s->z, m.m[9] / s->z, m.m[10] / s->z);
+    if (flux_vec3_dot(flux_vec3_cross(c0, c1), c2) < 0.0f) {
+        s->x = -s->x;
+        c0 = flux_vec3_scale(c0, -1.0f);
     }
-    const jv *qv = jv_obj_get(node, "rotation");
-    if (qv && qv->kind == J_ARR && qv->arr.count >= 4) {
-        q.x = (float)jv_num(jv_arr_at(qv, 0), 0);
-        q.y = (float)jv_num(jv_arr_at(qv, 1), 0);
-        q.z = (float)jv_num(jv_arr_at(qv, 2), 0);
-        q.w = (float)jv_num(jv_arr_at(qv, 3), 1);
+    /* quat_from_rotation_columns consumes a row-major 3x3 matrix.  glTF and
+     * flux_mat4 store the basis vectors as columns, so transpose while
+     * flattening instead of accidentally interpreting the inverse rotation. */
+    float r[9] = {c0.x, c1.x, c2.x, c0.y, c1.y, c2.y, c0.z, c1.z, c2.z};
+    *q = quat_from_rotation_columns(r);
+}
+
+void sg_read_node(const jv *node, flux_sg_node *n) {
+    n->parent = -1;
+    n->mesh_first = -1;
+    n->skin = -1;
+    n->rest_translation = flux_vec3_make(0, 0, 0);
+    n->rest_rotation = flux_quat_identity();
+    n->rest_scale = flux_vec3_make(1, 1, 1);
+    const jv *m = jv_obj_get(node, "matrix");
+    if (m && m->kind == J_ARR && m->arr.count >= 16) {
+        flux_mat4 matrix;
+        for (int i = 0; i < 16; ++i)
+            matrix.m[i] = (float)jv_num(jv_arr_at(m, (size_t)i), 0.0);
+        decompose_matrix(matrix, &n->rest_translation, &n->rest_rotation, &n->rest_scale);
+    } else {
+        const jv *tv = jv_obj_get(node, "translation");
+        if (tv && tv->kind == J_ARR && tv->arr.count >= 3)
+            n->rest_translation =
+                flux_vec3_make((float)jv_num(jv_arr_at(tv, 0), 0),
+                               (float)jv_num(jv_arr_at(tv, 1), 0),
+                               (float)jv_num(jv_arr_at(tv, 2), 0));
+        const jv *qv = jv_obj_get(node, "rotation");
+        if (qv && qv->kind == J_ARR && qv->arr.count >= 4)
+            n->rest_rotation = flux_quat_normalize((flux_quat){
+                (float)jv_num(jv_arr_at(qv, 0), 0), (float)jv_num(jv_arr_at(qv, 1), 0),
+                (float)jv_num(jv_arr_at(qv, 2), 0), (float)jv_num(jv_arr_at(qv, 3), 1)});
+        const jv *sv = jv_obj_get(node, "scale");
+        if (sv && sv->kind == J_ARR && sv->arr.count >= 3)
+            n->rest_scale = flux_vec3_make((float)jv_num(jv_arr_at(sv, 0), 1),
+                                           (float)jv_num(jv_arr_at(sv, 1), 1),
+                                           (float)jv_num(jv_arr_at(sv, 2), 1));
     }
-    const jv *sv = jv_obj_get(node, "scale");
-    if (sv && sv->kind == J_ARR && sv->arr.count >= 3) {
-        s = flux_vec3_make((float)jv_num(jv_arr_at(sv, 0), 1), (float)jv_num(jv_arr_at(sv, 1), 1),
-                           (float)jv_num(jv_arr_at(sv, 2), 1));
+    n->translation = n->rest_translation;
+    n->rotation = n->rest_rotation;
+    n->scale = n->rest_scale;
+    flux_mat4 t = flux_mat4_translate(n->translation.x, n->translation.y, n->translation.z);
+    flux_mat4 r = flux_mat4_rotation_quat(n->rotation);
+    flux_mat4 s = flux_mat4_scale(n->scale.x, n->scale.y, n->scale.z);
+    n->local = flux_mat4_multiply(t, flux_mat4_multiply(r, s));
+    n->world = flux_mat4_identity();
+    n->rest_world_rotation = flux_quat_identity();
+    const jv *name = jv_obj_get(node, "name");
+    if (name && name->kind == J_STR) {
+        n->name = malloc(name->str.len + 1);
+        if (n->name)
+            memcpy(n->name, name->str.data, name->str.len + 1);
     }
-    flux_mat4 T = flux_mat4_translate(t.x, t.y, t.z);
-    flux_mat4 R = flux_mat4_rotation_quat(q);
-    flux_mat4 S = flux_mat4_scale(s.x, s.y, s.z);
-    n->local = flux_mat4_multiply(T, flux_mat4_multiply(R, S));
 }
 
 /* ------------------------------------------------------------------ */
@@ -445,8 +564,8 @@ static void read_node_local(const jv *node, flux_sg_node *n) {
 /* ------------------------------------------------------------------ */
 
 flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_sg_scene *sc) {
-    glb g;
-    flux_result r = glb_parse(bytes, len, &g);
+    sg_glb g;
+    flux_result r = sg_glb_parse(bytes, len, &g);
     if (r != FLUX_OK)
         return r;
 
@@ -485,6 +604,8 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
     int *roots = NULL;
     uint32_t root_n = 0;
     flux_sg_node *narr = NULL;
+    flux_sg_skin *skin_arr = NULL;
+    uint32_t skin_count = 0;
 
     for (uint32_t mi = 0; mi < mesh_count; ++mi) {
         const jv *mesh = jv_arr_at(meshes, mi);
@@ -523,18 +644,14 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
             goto oom;
         for (uint32_t ni = 0; ni < node_count; ++ni) {
             flux_sg_node *n = &narr[ni];
-            n->parent = -1;
-            n->local = flux_mat4_identity();
-            n->world = flux_mat4_identity();
-            n->mesh_first = -1;
-            n->mesh_prim_count = 0;
             const jv *node = jv_arr_at(nodes, ni);
-            read_node_local(node, n);
+            sg_read_node(node, n);
             int mi = (int)jv_num(jv_obj_get(node, "mesh"), -1);
             if (mi >= 0 && (uint32_t)mi < mesh_count) {
                 n->mesh_first = mesh_prim_start[mi];
                 n->mesh_prim_count = mesh_prim_count[mi];
             }
+            n->skin = (int)jv_num(jv_obj_get(node, "skin"), -1);
         }
         /* Resolve parent links from `children`. */
         for (uint32_t ni = 0; ni < node_count; ++ni) {
@@ -549,6 +666,56 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
             }
         }
     }
+
+    /* Skins: joint node indices plus inverse bind matrices. Palettes are kept
+     * CPU-side and refreshed whenever the pose changes; draw copies them into
+     * the frame transient ring for GPU skinning. */
+    const jv *skins = jv_obj_get(root, "skins");
+    skin_count = skins && skins->kind == J_ARR ? (uint32_t)skins->arr.count : 0;
+    if (skin_count) {
+        skin_arr = calloc(skin_count, sizeof(*skin_arr));
+        if (!skin_arr)
+            goto oom;
+        for (uint32_t si = 0; si < skin_count; ++si) {
+            const jv *skin_json = jv_arr_at(skins, si);
+            const jv *joints = jv_obj_get(skin_json, "joints");
+            if (!joints || joints->kind != J_ARR || joints->arr.count == 0 ||
+                joints->arr.count > UINT32_MAX)
+                goto malformed;
+            flux_sg_skin *skin = &skin_arr[si];
+            skin->joint_count = (uint32_t)joints->arr.count;
+            skin->joints = malloc(skin->joint_count * sizeof(*skin->joints));
+            skin->inverse_bind = malloc(skin->joint_count * sizeof(*skin->inverse_bind));
+            skin->palette = malloc(skin->joint_count * sizeof(*skin->palette));
+            if (!skin->joints || !skin->inverse_bind || !skin->palette)
+                goto oom;
+            for (uint32_t ji = 0; ji < skin->joint_count; ++ji) {
+                int node_index = (int)jv_num(jv_arr_at(joints, ji), -1);
+                if (node_index < 0 || (uint32_t)node_index >= node_count)
+                    goto malformed;
+                skin->joints[ji] = node_index;
+                skin->inverse_bind[ji] = flux_mat4_identity();
+            }
+            int ibm_acc = (int)jv_num(jv_obj_get(skin_json, "inverseBindMatrices"), -1);
+            if (ibm_acc >= 0) {
+                int comp = 0, comps = 0;
+                size_t count = 0, stride = 0;
+                bool normalized = false;
+                const uint8_t *ibm =
+                    sg_accessor_data(root, ibm_acc, g.bin, g.bin_len, &comp, &comps, &count,
+                                     &stride, &normalized);
+                if (!ibm || comp != SG_CT_FLOAT || comps != 16 || count != skin->joint_count)
+                    goto malformed;
+                for (uint32_t ji = 0; ji < skin->joint_count; ++ji)
+                    sg_read_floats(ibm + (size_t)ji * stride, comp, 16, false,
+                                   skin->inverse_bind[ji].m);
+            }
+        }
+    }
+
+    for (uint32_t ni = 0; ni < node_count; ++ni)
+        if (narr[ni].skin < 0 || (uint32_t)narr[ni].skin >= skin_count)
+            narr[ni].skin = -1;
 
     /* Roots: the default scene's nodes, else every parentless node. */
     int scene_idx = (int)jv_num(jv_obj_get(root, "scene"), -1);
@@ -571,40 +738,24 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
                 roots[root_n++] = (int)ni;
     }
 
-    /* Resolve world matrices: BFS from roots (parents precede children). */
-    for (uint32_t i = 0; i < root_n; ++i) {
-        if (roots[i] >= 0 && (uint32_t)roots[i] < node_count)
-            narr[roots[i]].world = narr[roots[i]].local;
-    }
-    /* Propagate to children. node_count is small; iterate to fixpoint. */
-    for (uint32_t pass = 0; pass < node_count; ++pass) {
-        bool changed = false;
-        for (uint32_t ni = 0; ni < node_count; ++ni) {
-            if (narr[ni].parent < 0)
-                continue;
-            flux_sg_node *n = &narr[ni];
-            flux_sg_node *p = &narr[ni]; /* placeholder; set below */
-            int par = n->parent;
-            if (par < 0 || (uint32_t)par >= node_count)
-                continue;
-            flux_mat4 w = flux_mat4_multiply(narr[par].world, n->local);
-            /* Simple convergence: recompute every pass; stop when stable. */
-            if (memcmp(&w, &n->world, sizeof(flux_mat4)) != 0) {
-                n->world = w;
-                changed = true;
-            }
-            (void)p;
-        }
-        if (!changed)
-            break;
-    }
-
     sc->prims = prims;
     sc->prim_count = (uint32_t)prim_n;
     sc->nodes = narr;
     sc->node_count = node_count;
+    sc->skins = skin_arr;
+    sc->skin_count = skin_count;
     sc->roots = roots;
     sc->root_count = root_n;
+    for (int i = 0; i < SG_HUMAN_BONE_COUNT; ++i)
+        sc->human_bones[i] = -1;
+    const jv *extensions = jv_obj_get(root, "extensions");
+    if (jv_obj_get(extensions, "VRMC_vrm"))
+        sg_read_humanoid(root, "VRMC_vrm", false, sc->human_bones);
+    else if (jv_obj_get(extensions, "VRM"))
+        sg_read_humanoid(root, "VRM", true, sc->human_bones);
+    sg_update_worlds(sc);
+    sg_update_rest_world_rotations(sc);
+    sg_update_skin_palettes(sc);
     free(mesh_prim_start);
     free(mesh_prim_count);
     jv_free(root);
@@ -615,10 +766,42 @@ oom:
         if (prims[i].mesh)
             flux_mesh_release(prims[i].mesh);
     free(prims);
+    if (narr)
+        for (uint32_t i = 0; i < node_count; ++i)
+            free(narr[i].name);
     free(narr);
+    if (skin_arr)
+        for (uint32_t i = 0; i < skin_count; ++i) {
+            free(skin_arr[i].joints);
+            free(skin_arr[i].inverse_bind);
+            free(skin_arr[i].palette);
+        }
+    free(skin_arr);
     free(roots);
     free(mesh_prim_start);
     free(mesh_prim_count);
     jv_free(root);
     return FLUX_ERROR_OUT_OF_MEMORY;
+
+malformed:
+    for (size_t i = 0; i < prim_n; ++i)
+        if (prims[i].mesh)
+            flux_mesh_release(prims[i].mesh);
+    free(prims);
+    if (narr)
+        for (uint32_t i = 0; i < node_count; ++i)
+            free(narr[i].name);
+    free(narr);
+    if (skin_arr)
+        for (uint32_t i = 0; i < skin_count; ++i) {
+            free(skin_arr[i].joints);
+            free(skin_arr[i].inverse_bind);
+            free(skin_arr[i].palette);
+        }
+    free(skin_arr);
+    free(roots);
+    free(mesh_prim_start);
+    free(mesh_prim_count);
+    jv_free(root);
+    return FLUX_ERROR_INVALID_ARGUMENT;
 }

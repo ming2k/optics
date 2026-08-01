@@ -1266,6 +1266,16 @@ impl Canvas {
         unsafe { sys::flux_canvas_draw_image(self.raw, image.raw, dst, std::ptr::null()) };
     }
 
+    /// Draw an image clipped to an antialiased rounded rectangle. Set
+    /// `radius` to half the destination size for a circular portrait.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_image_rrect(&self, image: &Image, x: f32, y: f32, w: f32, h: f32, radius: f32) {
+        let dst = sys::flux_rect { x, y, w, h };
+        unsafe {
+            sys::flux_canvas_draw_image_rrect(self.raw, image.raw, dst, radius, std::ptr::null())
+        };
+    }
+
     /// Draw a sub-rectangle of `image` into `dst`. `src` is the sampled
     /// region in normalised texture coordinates `{u, v, du, dv}` where
     /// `(0.0, 0.0, 1.0, 1.0)` samples the whole image. Used for
@@ -1850,6 +1860,158 @@ pub struct BlurredImage<'filter> {
 
 impl BlurredImage<'_> {
     /// Draw the blurred output through the Canvas image pipeline.
+    pub fn draw(&self, canvas: &Canvas, x: f32, y: f32, width: f32, height: f32) {
+        let destination = sys::flux_rect {
+            x,
+            y,
+            w: width,
+            h: height,
+        };
+        unsafe { sys::flux_canvas_draw_image(canvas.raw, self.raw, destination, std::ptr::null()) };
+    }
+}
+
+/// One rounded-rectangle volume in backdrop-capture pixel coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiquidGlassShape {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub corner_radius: f32,
+}
+
+/// One independently composited glass body. `merged` is smoothly unioned
+/// with `primary`, which is useful for spring-driven droplets and controls.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiquidGlassGroup {
+    pub primary: LiquidGlassShape,
+    pub merged: Option<LiquidGlassShape>,
+    pub blend_radius: f32,
+    pub opacity: f32,
+}
+
+/// Optical properties shared by all bodies in one liquid-glass dispatch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiquidGlassParams {
+    pub refraction: f32,
+    pub chromatic_aberration: f32,
+    pub saturation: f32,
+    pub brightness: f32,
+    pub edge_width: f32,
+    pub glare: f32,
+    pub light_direction: (f32, f32),
+    pub opacity: f32,
+}
+
+impl Default for LiquidGlassParams {
+    fn default() -> Self {
+        Self {
+            refraction: 8.0,
+            chromatic_aberration: 1.25,
+            saturation: 1.08,
+            brightness: 1.02,
+            edge_width: 18.0,
+            glare: 0.55,
+            light_direction: (-0.45, -0.89),
+            opacity: 1.0,
+        }
+    }
+}
+
+/// Reusable analytic liquid-glass compositor with one output per frame slot.
+pub struct LiquidGlassFilter {
+    raw: *mut sys::flux_liquid_glass_filter,
+}
+
+impl LiquidGlassFilter {
+    pub fn new(device: &Device) -> Result<Self, Error> {
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_liquid_glass_filter_create(device.raw, &mut raw) })?;
+        Ok(Self { raw })
+    }
+
+    /// Refract `input` through analytic rounded SDFs, mixing in the matching
+    /// realtime `blurred` capture for local frost. The returned image is
+    /// transparent outside the SDF and borrows this filter's frame slot.
+    pub fn apply<'filter>(
+        &'filter mut self,
+        frame: &Frame<'_>,
+        input: &Image,
+        blurred: &BlurredImage<'_>,
+        groups: &[LiquidGlassGroup],
+        params: LiquidGlassParams,
+    ) -> Result<LiquidGlassImage<'filter>, Error> {
+        let raw_shape = |shape: LiquidGlassShape| sys::flux_liquid_glass_shape {
+            bounds: sys::flux_rect {
+                x: shape.x,
+                y: shape.y,
+                w: shape.width,
+                h: shape.height,
+            },
+            corner_radius: shape.corner_radius,
+        };
+        let raw_groups: Vec<sys::flux_liquid_glass_group> = groups
+            .iter()
+            .map(|group| {
+                let mut shapes = [raw_shape(group.primary), raw_shape(group.primary)];
+                let shape_count = if let Some(merged) = group.merged {
+                    shapes[1] = raw_shape(merged);
+                    2
+                } else {
+                    1
+                };
+                sys::flux_liquid_glass_group {
+                    shapes,
+                    shape_count,
+                    blend_radius: group.blend_radius,
+                    opacity: group.opacity,
+                }
+            })
+            .collect();
+        let desc = sys::flux_liquid_glass_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_LIQUID_GLASS_DESC,
+            input: input.raw,
+            blurred_input: blurred.raw,
+            groups: raw_groups.as_ptr(),
+            group_count: u32::try_from(raw_groups.len()).unwrap_or(u32::MAX),
+            refraction: params.refraction,
+            chromatic_aberration: params.chromatic_aberration,
+            saturation: params.saturation,
+            brightness: params.brightness,
+            edge_width: params.edge_width,
+            glare: params.glare,
+            light_direction: sys::flux_point {
+                x: params.light_direction.0,
+                y: params.light_direction.1,
+            },
+            opacity: params.opacity,
+            ..Default::default()
+        };
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe {
+            sys::flux_liquid_glass_filter_apply(self.raw, frame.raw, &desc, &mut raw)
+        })?;
+        Ok(LiquidGlassImage {
+            raw,
+            _filter: PhantomData,
+        })
+    }
+}
+
+impl Drop for LiquidGlassFilter {
+    fn drop(&mut self) {
+        unsafe { sys::flux_liquid_glass_filter_release(self.raw) };
+    }
+}
+
+/// Borrowed full-capture liquid-glass composite.
+pub struct LiquidGlassImage<'filter> {
+    raw: *mut sys::flux_image,
+    _filter: PhantomData<&'filter mut LiquidGlassFilter>,
+}
+
+impl LiquidGlassImage<'_> {
     pub fn draw(&self, canvas: &Canvas, x: f32, y: f32, width: f32, height: f32) {
         let destination = sys::flux_rect {
             x,

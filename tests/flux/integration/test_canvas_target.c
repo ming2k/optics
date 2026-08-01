@@ -55,6 +55,8 @@ int main(void) {
 
     flux_blur_filter *blur_filter = nullptr;
     EXPECT(flux_blur_filter_create(d, &blur_filter) == FLUX_OK);
+    flux_liquid_glass_filter *glass_filter = nullptr;
+    EXPECT(flux_liquid_glass_filter_create(d, &glass_filter) == FLUX_OK);
 
     static uint8_t px[BYTES];
 
@@ -152,6 +154,56 @@ int main(void) {
         EXPECT(overlay[0] < 5 && overlay[1] > 250 && overlay[2] < 5);
         EXPECT(px[(H / 2 * W + 4) * 4] < 16);
         EXPECT(px[(H / 2 * W + (W - 4)) * 4] > 240);
+    }
+
+    /* --- liquid glass: the analytic rounded SDF masks every optical layer --- */
+    {
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        EXPECT(flux_canvas_begin_target(canvas, frame, target, &black) == FLUX_OK);
+        flux_canvas_fill_rect_color(canvas,
+                                    (flux_rect){(float)(W / 2), 0.0f, (float)(W / 2), (float)H},
+                                    flux_color_rgba_premul(255, 255, 255, 255));
+        flux_canvas_end_target(canvas);
+
+        flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+        bd.input = target;
+        bd.sigma = 8.0f;
+        flux_image *blurred = nullptr;
+        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+
+        flux_liquid_glass_group body = {
+            .shapes = {{.bounds = {16, 16, 32, 32}, .corner_radius = 16}},
+            .shape_count = 1,
+            .opacity = 1.0f,
+        };
+        flux_liquid_glass_desc gd = FLUX_LIQUID_GLASS_DESC_INIT;
+        gd.input = target;
+        gd.blurred_input = blurred;
+        gd.groups = &body;
+        gd.group_count = 1;
+        gd.refraction = 6.0f;
+        flux_image *glass = nullptr;
+        EXPECT(flux_liquid_glass_filter_apply(glass_filter, frame, &gd, &glass) == FLUX_OK);
+        EXPECT(glass != nullptr);
+
+        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        flux_canvas_draw_image(canvas, target, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        flux_canvas_draw_image(canvas, glass, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        flux_canvas_end(canvas);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        memset(px, 0, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+
+        /* The rounded-rect bounding-box corner is outside the SDF and stays
+         * exactly sharp/black. The centre crosses the captured hard edge and
+         * therefore contains visibly refracted/frosted intermediate values. */
+        const uint8_t *dead_corner = &px[(16 * W + 16) * 4];
+        const uint8_t *glass_centre = &px[(32 * W + 32) * 4];
+        EXPECT(dead_corner[0] < 5 && dead_corner[1] < 5 && dead_corner[2] < 5);
+        EXPECT(glass_centre[0] > 16 && glass_centre[0] < 245);
     }
 
     /* --- reusable blur cycles through and safely reuses frame slots --- */
@@ -287,6 +339,7 @@ int main(void) {
     }
 
     flux_device_wait_idle(d);
+    flux_liquid_glass_filter_release(glass_filter);
     flux_blur_filter_release(blur_filter);
     flux_image_release(target);
     flux_canvas_destroy(canvas);
