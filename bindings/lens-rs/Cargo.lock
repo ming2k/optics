@@ -71,14 +71,14 @@ checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
 
 [[package]]
 name = "flux"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "flux-sys",
 ]
 
 [[package]]
 name = "flux-sys"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "lens"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "flux",
  "lens-sys",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "lens-sys"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "bindgen",
  "pkg-config",

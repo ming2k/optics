@@ -8,11 +8,11 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-flux-text = { path = "../flux-text", version = "0.0.7" }
+flux-text = { path = "../flux-text", version = "0.0.8" }
 # flux-text-sys is a direct dep so its `links = "flux-text"` metadata
 # (DEP_FLUX_TEXT_RPATHS) is visible to this crate's build.rs, which relays the
 # meson-build-tree rpath to the wrap unit-test binary. Not used in source.
-flux-text-sys = { path = "../flux-text-sys", version = "0.0.7" }
+flux-text-sys = { path = "../flux-text-sys", version = "0.0.8" }
 # flux-sys stays a direct dep so DEP_FLUX_RPATHS (libflux.so dir) is visible
 # too; libflux_text.so depends on libflux.so at runtime.
-flux-sys = { path = "../flux-sys", version = "0.0.7" }
+flux-sys = { path = "../flux-sys", version = "0.0.8" }

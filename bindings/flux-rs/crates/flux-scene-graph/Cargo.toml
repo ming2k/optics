@@ -8,5 +8,5 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-flux = { path = "../flux", version = "0.0.7" }
-flux-scene-graph-sys = { path = "../flux-scene-graph-sys", version = "0.0.7" }
+flux = { path = "../flux", version = "0.0.8" }
+flux-scene-graph-sys = { path = "../flux-scene-graph-sys", version = "0.0.8" }
