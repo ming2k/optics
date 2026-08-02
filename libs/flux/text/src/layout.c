@@ -621,8 +621,92 @@ flux_text_metrics flux_text_measure(flux_text *t, const char *utf8, size_t len,
  * handful. Stack-resident so the hot path never allocates. */
 #define TEXT_RUN_BATCH 256
 
-void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
-                    const char *utf8, size_t len, const flux_text_style *style) {
+/* Emit one already-shaped layout pass. Keeping the offset outside glyph
+ * rasterisation means every contour sample reuses the exact same cache entry
+ * and subpixel phase as the foreground; only destination vertices move. */
+static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_layout *L, float x,
+                             float y, float offset_x, float offset_y, flux_color color) {
+    float scale = L->scale;
+    float inv_scale = L->inv_scale;
+
+    /* Baseline snaps once to an integer device row (no vertical subpixel);
+     * every glyph shares it so mixed-face runs sit on one baseline. */
+    float baseline_dev = roundf((y + L->baseline) * scale);
+
+    /* Whole run batched through flux_canvas_draw_glyph_run (flux
+     * ADR-0010): one draw call per TEXT_RUN_BATCH glyphs instead of a
+     * draw + push-constant update per glyph. */
+    flux_glyph_quad quads[TEXT_RUN_BATCH];
+    flux_glyph_run_desc run = FLUX_GLYPH_RUN_DESC_INIT;
+    run.atlas = t->atlas;
+    if (!t->atlas) {
+        /* Device-less CPU canvas (ADR-0019): feed the host R8 coverage buffer
+         * straight to the CPU rasteriser instead of a GPU image. */
+        run.host_coverage = t->atlas_pixels;
+        run.host_atlas_w = ATLAS_W;
+        run.host_atlas_h = ATLAS_H;
+    }
+    run.quads = quads;
+
+    uint32_t n = 0;
+    for (int i = 0; i < L->count; i++) {
+        const txt_placed_glyph *g = &L->glyphs[i];
+
+        /* Horizontal subpixel positioning: keep the fractional pen, split it
+         * into an integer device origin and a phase; the glyph is rasterised
+         * with that phase baked in so spacing stays even and crisp without
+         * snapping the pen (which is what made gaps jitter). */
+        float pen_dev = (x + g->x) * scale;
+        float origin = floorf(pen_dev);
+        int phase;
+        if (g->subpixel) {
+            phase = (int)lroundf((pen_dev - origin) * TXT_SUBPIXEL_PHASES);
+            if (phase >= TXT_SUBPIXEL_PHASES) {
+                phase = 0;
+                origin += 1.0f;
+            }
+        } else {
+            /* CJK: integer-snap. One cache entry per glyph regardless of
+             * pen fraction, so the working set is not multiplied by the
+             * subpixel-phase count. */
+            phase = 0;
+        }
+
+        glyph_entry *e = txt_glyph_get(t, g->face_id, g->gid, L->rpx, (uint8_t)phase);
+        if (!e || e->w <= 0 || e->h <= 0)
+            continue;
+
+        float dst_x_dev = origin + (float)e->left;
+        float dst_y_dev = baseline_dev - roundf(g->y_off * scale) - (float)e->top;
+
+        quads[n++] = (flux_glyph_quad){
+            .sx = dst_x_dev * inv_scale + offset_x,
+            .sy = dst_y_dev * inv_scale + offset_y,
+            .sw = (float)e->w * inv_scale,
+            .sh = (float)e->h * inv_scale,
+            .ax = e->atlas_x,
+            .ay = e->atlas_y,
+            .aw = (uint16_t)e->w,
+            .ah = (uint16_t)e->h,
+            .color = color,
+        };
+        if (n == TEXT_RUN_BATCH) {
+            txt_atlas_flush(t);
+            run.quad_count = n;
+            flux_canvas_draw_glyph_run(canvas, &run);
+            n = 0;
+        }
+    }
+    if (n > 0) {
+        txt_atlas_flush(t);
+        run.quad_count = n;
+        flux_canvas_draw_glyph_run(canvas, &run);
+    }
+}
+
+static void text_draw_impl(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
+                           const char *utf8, size_t len, const flux_text_style *style,
+                           flux_color outline_color, float outline_width) {
     (void)arena;
     /* `atlas` is NULL on a device-less CPU canvas, but the host R8 coverage
      * buffer `atlas_pixels` is still live (txt_atlas_init allocates it
@@ -647,81 +731,38 @@ void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float 
     if (!txt_text_layout_build(t, utf8, len, size_px, weight, italic, family, scale, &L))
         return;
 
-    float inv_scale = L.inv_scale;
-
-    /* Baseline snaps once to an integer device row (no vertical subpixel);
-     * every glyph shares it so mixed-face runs sit on one baseline. */
-    float baseline_dev = roundf((y + L.baseline) * scale);
-
-    /* Whole run batched through flux_canvas_draw_glyph_run (flux
-     * ADR-0010): one draw call per TEXT_RUN_BATCH glyphs instead of a
-     * draw + push-constant update per glyph. */
-    flux_glyph_quad quads[TEXT_RUN_BATCH];
-    flux_glyph_run_desc run = FLUX_GLYPH_RUN_DESC_INIT;
-    run.atlas = t->atlas;
-    if (!t->atlas) {
-        /* Device-less CPU canvas (ADR-0019): feed the host R8 coverage buffer
-         * straight to the CPU rasteriser instead of a GPU image. */
-        run.host_coverage = t->atlas_pixels;
-        run.host_atlas_w = ATLAS_W;
-        run.host_atlas_h = ATLAS_H;
-    }
-    run.quads = quads;
-
-    uint32_t n = 0;
-    for (int i = 0; i < L.count; i++) {
-        const txt_placed_glyph *g = &L.glyphs[i];
-
-        /* Horizontal subpixel positioning: keep the fractional pen, split it
-         * into an integer device origin and a phase; the glyph is rasterised
-         * with that phase baked in so spacing stays even and crisp without
-         * snapping the pen (which is what made gaps jitter). */
-        float pen_dev = (x + g->x) * scale;
-        float origin = floorf(pen_dev);
-        int phase;
-        if (g->subpixel) {
-            phase = (int)lroundf((pen_dev - origin) * TXT_SUBPIXEL_PHASES);
-            if (phase >= TXT_SUBPIXEL_PHASES) {
-                phase = 0;
-                origin += 1.0f;
-            }
-        } else {
-            /* CJK: integer-snap. One cache entry per glyph regardless of
-             * pen fraction, so the working set is not multiplied by the
-             * subpixel-phase count. */
-            phase = 0;
-        }
-
-        glyph_entry *e = txt_glyph_get(t, g->face_id, g->gid, L.rpx, (uint8_t)phase);
-        if (!e || e->w <= 0 || e->h <= 0)
-            continue;
-
-        float dst_x_dev = origin + (float)e->left;
-        float dst_y_dev = baseline_dev - roundf(g->y_off * scale) - (float)e->top;
-
-        quads[n++] = (flux_glyph_quad){
-            .sx = dst_x_dev * inv_scale,
-            .sy = dst_y_dev * inv_scale,
-            .sw = (float)e->w * inv_scale,
-            .sh = (float)e->h * inv_scale,
-            .ax = e->atlas_x,
-            .ay = e->atlas_y,
-            .aw = (uint16_t)e->w,
-            .ah = (uint16_t)e->h,
-            .color = color,
+    if (outline_width > 0.0f && isfinite(outline_width) && outline_color != 0) {
+        /* Eight samples form a compact, near-circular dilation of the glyph
+         * coverage. Diagonals are normalised so the requested width remains
+         * the contour radius instead of growing by sqrt(2). Every outline
+         * pass precedes the foreground pass, including for runs longer than
+         * TEXT_RUN_BATCH, so a batch boundary can never darken earlier text. */
+        const float diagonal = outline_width * 0.70710678f;
+        const flux_point offsets[8] = {
+            {-outline_width, 0.0f},
+            {outline_width, 0.0f},
+            {0.0f, -outline_width},
+            {0.0f, outline_width},
+            {-diagonal, -diagonal},
+            {diagonal, -diagonal},
+            {-diagonal, diagonal},
+            {diagonal, diagonal},
         };
-        if (n == TEXT_RUN_BATCH) {
-            txt_atlas_flush(t);
-            run.quad_count = n;
-            flux_canvas_draw_glyph_run(canvas, &run);
-            n = 0;
-        }
+        for (size_t i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++)
+            draw_layout_pass(t, canvas, &L, x, y, offsets[i].x, offsets[i].y, outline_color);
     }
-    if (n > 0) {
-        txt_atlas_flush(t);
-        run.quad_count = n;
-        flux_canvas_draw_glyph_run(canvas, &run);
-    }
+    draw_layout_pass(t, canvas, &L, x, y, 0.0f, 0.0f, color);
+}
+
+void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
+                    const char *utf8, size_t len, const flux_text_style *style) {
+    text_draw_impl(t, canvas, arena, x, y, utf8, len, style, 0, 0.0f);
+}
+
+void flux_text_draw_outlined(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
+                             const char *utf8, size_t len, const flux_text_style *style,
+                             flux_color outline_color, float outline_width) {
+    text_draw_impl(t, canvas, arena, x, y, utf8, len, style, outline_color, outline_width);
 }
 
 /* ------------------------------------------------------------------ */

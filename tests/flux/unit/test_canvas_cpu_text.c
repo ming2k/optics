@@ -38,6 +38,8 @@ int main(void) {
     style.size_px = 24.0f;
     style.color = white;
     flux_text_draw(t, c, nullptr, 8.0f, 8.0f, "Aa", 2, &style);
+    flux_text_draw_outlined(t, c, nullptr, 72.0f, 8.0f, "Aa", 2, &style,
+                            flux_color_rgba_premul(255, 0, 0, 255), 2.0f);
 
     flux_canvas_cpu_end(c);
 
@@ -47,17 +49,23 @@ int main(void) {
 
     /* Count lit (non-black) pixels in the band where the text should sit. */
     int lit = 0;
+    int outline = 0;
     for (uint32_t y = 0; y < H; y++) {
         for (uint32_t x = 0; x < W; x++) {
             const uint8_t *p = fb + (size_t)y * stride + x * 4;
             if (p[0] > 40 || p[1] > 40 || p[2] > 40)
                 lit++;
+            if (p[0] > 80 && p[0] > p[1] * 2 && p[0] > p[2] * 2)
+                outline++;
         }
     }
     /* A 24px glyph should deposit well over a hundred lit pixels. The exact
      * count is font-dependent, so a loose floor is enough to prove the host
      * atlas path produced ink (vs. the old behaviour of zero). */
     EXPECT(lit > 100);
+    /* The outlined run must retain visible contour pixels after its opaque
+     * white foreground is painted over the centre. */
+    EXPECT(outline > 20);
 
     flux_canvas_destroy(c);
     flux_text_destroy(t);

@@ -197,6 +197,16 @@ struct flux_material {
     flux_device *device;
     flux_material_kind kind;
     flux_vec4 base_color;
+    flux_image *base_color_image;
+    flux_sampler *base_color_sampler;
+    flux_vec2 uv_offset;
+    flux_vec2 uv_scale;
+    float uv_rotation;
+    float alpha_cutoff;
+    flux_material_alpha_mode alpha_mode;
+    bool double_sided;
+    flux_bindless_handle image_handle;
+    flux_bindless_handle sampler_handle;
     float shininess; /* PHONG only */
     float specular;  /* PHONG only */
     VkShaderStageFlags push_stages;
@@ -206,26 +216,31 @@ struct flux_material {
     VkPipeline skinned_pipeline;
 };
 
-typedef struct scene_push {
+/* All material variants keep the push block small and place per-draw state
+ * in the frame transient ring. */
+typedef struct scene_params_push {
     float mvp[16];
-    float color[4];
+    uint64_t params_address;
+} scene_params_push;
+
+static_assert(sizeof(scene_params_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
+              "scene_params_push exceeds FLUX_DEVICE_REQUIRED_PUSH_BYTES");
+
+/* Shared surface block, std430. Mirrors the leading fields of UnlitParams
+ * and the material fields of PhongParams in the scene shaders. */
+typedef struct scene_surface_params {
+    float base_color[4];
+    float uv_scale_offset[4]; /* scale.xy, offset.xy */
+    float uv_rotation_alpha_cutoff[4]; /* cos, sin, cutoff, unused */
+    uint32_t texture_info[4]; /* image, sampler, alpha mode, textured */
+} scene_surface_params;
+
+typedef struct scene_unlit_params {
+    scene_surface_params surface;
     uint64_t joint_palette_address;
     uint32_t joint_count;
     uint32_t _pad;
-} scene_push;
-
-static_assert(sizeof(scene_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
-              "scene_push exceeds FLUX_DEVICE_REQUIRED_PUSH_BYTES");
-
-/* Phong push: MVP plus the buffer-device-address of the per-draw
- * scene_phong_params block in the frame's transient ring. */
-typedef struct scene_phong_push {
-    float mvp[16];
-    uint64_t params_address;
-} scene_phong_push;
-
-static_assert(sizeof(scene_phong_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
-              "scene_phong_push exceeds FLUX_DEVICE_REQUIRED_PUSH_BYTES");
+} scene_unlit_params;
 
 /* Per-draw lighting block, std430. Field-for-field mirror of the
  * PhongParams buffer_reference block in scene_phong.vert/.frag. */
@@ -234,7 +249,7 @@ typedef struct scene_phong_params {
     float nrm0[4]; /* normal matrix columns:            */
     float nrm1[4]; /*   transpose(inverse(mat3(world))) */
     float nrm2[4];
-    float base_color[4];
+    scene_surface_params surface;
     float light_dir_shininess[4]; /* xyz = travel direction, w = exponent */
     float light_color_ambient[4]; /* rgb = light colour, w = ambient      */
     float eye_specular[4];        /* xyz = world eye pos, w = strength    */
@@ -368,7 +383,7 @@ static flux_result create_material_pipeline(flux_material *mat, VkFormat color_f
     VkPipelineRasterizationStateCreateInfo rs = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = VK_POLYGON_MODE_FILL,
-        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .cullMode = mat->double_sided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT,
         .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .lineWidth = 1.0f,
     };
@@ -379,11 +394,18 @@ static flux_result create_material_pipeline(flux_material *mat, VkFormat color_f
     VkPipelineDepthStencilStateCreateInfo ds = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable = depth_fmt != VK_FORMAT_UNDEFINED,
-        .depthWriteEnable = depth_fmt != VK_FORMAT_UNDEFINED,
+        .depthWriteEnable = depth_fmt != VK_FORMAT_UNDEFINED &&
+                            mat->alpha_mode != FLUX_MATERIAL_ALPHA_BLEND,
         .depthCompareOp = VK_COMPARE_OP_LESS,
     };
     VkPipelineColorBlendAttachmentState ba = {
-        .blendEnable = VK_FALSE,
+        .blendEnable = mat->alpha_mode == FLUX_MATERIAL_ALPHA_BLEND,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
         .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
     };
@@ -443,6 +465,15 @@ flux_result flux_material_create(flux_device *d, const flux_material_desc *desc,
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "unknown flux_material_kind");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
+    const flux_material_surface_desc *surface = desc->next;
+    if (surface &&
+        (surface->type != FLUX_TYPE_MATERIAL_SURFACE_DESC || surface->next ||
+         (surface->alpha_mode != FLUX_MATERIAL_ALPHA_OPAQUE &&
+          surface->alpha_mode != FLUX_MATERIAL_ALPHA_MASK &&
+          surface->alpha_mode != FLUX_MATERIAL_ALPHA_BLEND))) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid flux_material_surface_desc");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     if (desc->color_format == FLUX_FORMAT_UNDEFINED) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "material color_format is required");
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -457,14 +488,46 @@ flux_result flux_material_create(flux_device *d, const flux_material_desc *desc,
     m->device = flux_device_retain(d);
     m->kind = desc->kind;
     m->base_color = desc->base_color;
+    m->uv_scale = flux_vec2_make(1.0f, 1.0f);
+    m->alpha_cutoff = 0.5f;
+    m->alpha_mode = FLUX_MATERIAL_ALPHA_OPAQUE;
+    m->image_handle = FLUX_BINDLESS_INVALID;
+    m->sampler_handle = FLUX_BINDLESS_INVALID;
+    if (surface) {
+        m->base_color_image = flux_image_retain(surface->base_color_image);
+        m->base_color_sampler = m->base_color_image
+                                    ? flux_sampler_retain(surface->base_color_sampler)
+                                    : NULL;
+        m->uv_offset = surface->uv_offset;
+        m->uv_scale = surface->uv_scale;
+        m->uv_rotation = surface->uv_rotation;
+        m->alpha_cutoff = surface->alpha_cutoff;
+        m->alpha_mode = surface->alpha_mode;
+        m->double_sided = surface->double_sided;
+        if (m->base_color_image) {
+            m->image_handle = flux_image_bindless_handle(m->base_color_image);
+            m->sampler_handle = m->base_color_sampler
+                                    ? flux_sampler_bindless_handle(m->base_color_sampler)
+                                    : flux_device_default_sampler_handle(d);
+            if (m->image_handle == FLUX_BINDLESS_INVALID ||
+                m->sampler_handle == FLUX_BINDLESS_INVALID) {
+                FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "material bindless texture unavailable");
+                flux_sampler_release(m->base_color_sampler);
+                flux_image_release(m->base_color_image);
+                flux_internal_free(d, m);
+                flux_device_release(d);
+                return FLUX_ERROR_BACKEND_FAILURE;
+            }
+        }
+    }
     m->shininess = desc->shininess > 0.0f ? desc->shininess : SCENE_PHONG_DEFAULT_SHININESS;
     m->specular = desc->specular;
     if (desc->kind == FLUX_MATERIAL_PHONG) {
         m->push_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        m->push_bytes = sizeof(scene_phong_push);
+        m->push_bytes = sizeof(scene_params_push);
     } else {
-        m->push_stages = VK_SHADER_STAGE_VERTEX_BIT;
-        m->push_bytes = sizeof(scene_push);
+        m->push_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        m->push_bytes = sizeof(scene_params_push);
     }
 
     VkFormat color_format = flux_format_to_vk(desc->color_format);
@@ -477,8 +540,10 @@ flux_result flux_material_create(flux_device *d, const flux_material_desc *desc,
             vkDestroyPipeline(d->device, m->pipeline, nullptr);
         if (m->layout)
             vkDestroyPipelineLayout(d->device, m->layout, nullptr);
-        flux_device_release(d);
+        flux_sampler_release(m->base_color_sampler);
+        flux_image_release(m->base_color_image);
         flux_internal_free(d, m);
+        flux_device_release(d);
         return r;
     }
     *out = m;
@@ -503,8 +568,14 @@ void flux_material_release(flux_material *m) {
         vkDestroyPipeline(d->device, m->skinned_pipeline, nullptr);
     if (m->layout)
         vkDestroyPipelineLayout(d->device, m->layout, nullptr);
+    flux_sampler_release(m->base_color_sampler);
+    flux_image_release(m->base_color_image);
     flux_internal_free(d, m);
     flux_device_release(d);
+}
+
+flux_material_alpha_mode flux_material_get_alpha_mode(const flux_material *m) {
+    return m ? m->alpha_mode : FLUX_MATERIAL_ALPHA_OPAQUE;
 }
 
 /* ================================================================== */
@@ -516,6 +587,25 @@ void flux_material_release(flux_material *m) {
  * non-uniform scale); the eye position is the translation column of
  * the inverted view matrix, provided by the caller (cached per frame —
  * see scene_cached_view_inv). */
+static void fill_surface_params(scene_surface_params *p, const flux_material *material) {
+    p->base_color[0] = material->base_color.x;
+    p->base_color[1] = material->base_color.y;
+    p->base_color[2] = material->base_color.z;
+    p->base_color[3] = material->base_color.w;
+    p->uv_scale_offset[0] = material->uv_scale.x;
+    p->uv_scale_offset[1] = material->uv_scale.y;
+    p->uv_scale_offset[2] = material->uv_offset.x;
+    p->uv_scale_offset[3] = material->uv_offset.y;
+    p->uv_rotation_alpha_cutoff[0] = cosf(material->uv_rotation);
+    p->uv_rotation_alpha_cutoff[1] = sinf(material->uv_rotation);
+    p->uv_rotation_alpha_cutoff[2] = material->alpha_cutoff;
+    p->uv_rotation_alpha_cutoff[3] = 0.0f;
+    p->texture_info[0] = material->image_handle;
+    p->texture_info[1] = material->sampler_handle;
+    p->texture_info[2] = (uint32_t)material->alpha_mode;
+    p->texture_info[3] = material->base_color_image ? 1u : 0u;
+}
+
 static void fill_phong_params(scene_phong_params *p, const flux_mat4 *view_inv, flux_mat4 world,
                               const flux_material *material, const flux_scene_light *light) {
     static const flux_scene_light default_light = FLUX_SCENE_LIGHT_DEFAULT;
@@ -537,10 +627,7 @@ static void fill_phong_params(scene_phong_params *p, const flux_mat4 *view_inv, 
         col[3] = 0.0f;
     }
 
-    p->base_color[0] = material->base_color.x;
-    p->base_color[1] = material->base_color.y;
-    p->base_color[2] = material->base_color.z;
-    p->base_color[3] = material->base_color.w;
+    fill_surface_params(&p->surface, material);
 
     flux_vec3 dir = flux_vec3_normalize(light->direction);
     if (flux_vec3_length(dir) == 0.0f)
@@ -641,19 +728,23 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
         params->joint_palette_address = palette_address;
         params->joint_count = skinned ? joint_count : 0;
 
-        scene_phong_push pc;
+        scene_params_push pc;
         memcpy(pc.mvp, mvp.m, sizeof(pc.mvp));
         pc.params_address = slice.gpu_address;
         vkCmdPushConstants(cmd, material->layout, material->push_stages, 0, sizeof(pc), &pc);
     } else {
-        scene_push pc = {0};
+        flux_transient slice;
+        if (flux_frame_alloc_transient(f, sizeof(scene_unlit_params), 16, &slice) != FLUX_OK)
+            return;
+        scene_unlit_params *params = slice.cpu;
+        fill_surface_params(&params->surface, material);
+        params->joint_palette_address = palette_address;
+        params->joint_count = skinned ? joint_count : 0;
+        params->_pad = 0;
+
+        scene_params_push pc = {0};
         memcpy(pc.mvp, mvp.m, sizeof(pc.mvp));
-        pc.color[0] = material->base_color.x;
-        pc.color[1] = material->base_color.y;
-        pc.color[2] = material->base_color.z;
-        pc.color[3] = material->base_color.w;
-        pc.joint_palette_address = palette_address;
-        pc.joint_count = skinned ? joint_count : 0;
+        pc.params_address = slice.gpu_address;
         vkCmdPushConstants(cmd, material->layout, material->push_stages, 0, sizeof(pc), &pc);
     }
 

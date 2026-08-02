@@ -162,9 +162,19 @@ typedef struct skin_case {
     flux_mat4 palette[1];
 } skin_case;
 
+typedef struct texture_case {
+    flux_mesh *quad;
+    flux_material *material;
+} texture_case;
+
 static void draw_skin_case(flux_frame *f, const flux_camera *cam, void *user) {
     skin_case *c = user;
     flux_scene_draw_mesh_skinned(f, cam, flux_mat4_identity(), c->quad, c->material, c->palette, 1);
+}
+
+static void draw_texture_case(flux_frame *f, const flux_camera *cam, void *user) {
+    texture_case *c = user;
+    flux_scene_draw_mesh(f, cam, flux_mat4_identity(), c->quad, c->material);
 }
 
 int main(void) {
@@ -309,6 +319,81 @@ int main(void) {
         const uint8_t *translated = px_at(px, W / 2 + 15, H / 2);
         EXPECT(old_centre[0] < 20);
         EXPECT(translated[0] > 200 && translated[1] < 30);
+        flux_material_release(c.material);
+        flux_mesh_release(c.quad);
+    }
+
+    /* --- Textured UNLIT: sRGB sample, UV transform, OPAQUE/MASK/BLEND. --- */
+    {
+        texture_case c = {.quad = make_quad(d, 1.5f, 0.0f)};
+        /* First texel is half-alpha red; second is transparent green. */
+        const uint8_t texels[8] = {255, 0, 0, 128, 0, 255, 0, 0};
+        flux_image_desc image_desc = FLUX_IMAGE_DESC_INIT;
+        image_desc.width = 2;
+        image_desc.height = 1;
+        image_desc.format = FLUX_FORMAT_RGBA8_SRGB;
+        image_desc.initial_data = texels;
+        flux_image *image = nullptr;
+        EXPECT(flux_image_create(d, &image_desc, &image) == FLUX_OK);
+
+        flux_sampler_desc sampler_desc = FLUX_SAMPLER_DESC_INIT;
+        sampler_desc.min_filter = FLUX_FILTER_NEAREST;
+        sampler_desc.mag_filter = FLUX_FILTER_NEAREST;
+        sampler_desc.address_u = FLUX_ADDRESS_CLAMP_TO_EDGE;
+        sampler_desc.address_v = FLUX_ADDRESS_CLAMP_TO_EDGE;
+        flux_sampler *sampler = nullptr;
+        EXPECT(flux_sampler_create(d, &sampler_desc, &sampler) == FLUX_OK);
+
+        flux_material_surface_desc surface = FLUX_MATERIAL_SURFACE_DESC_INIT;
+        surface.base_color_image = image;
+        surface.base_color_sampler = sampler;
+        surface.uv_scale = (flux_vec2){0, 0};
+        surface.uv_offset = (flux_vec2){0.25f, 0.5f};
+        flux_material_desc material_desc = {
+            .type = FLUX_TYPE_MATERIAL_DESC,
+            .next = &surface,
+            .kind = FLUX_MATERIAL_UNLIT,
+            .base_color = {1, 1, 1, 1},
+            .color_format = color_fmt,
+            .depth_format = FLUX_DEPTH_FORMAT,
+        };
+
+        /* OPAQUE ignores sampled alpha: the red texel is fully visible. */
+        EXPECT(flux_material_create(d, &material_desc, &c.material) == FLUX_OK);
+        EXPECT(render_frame(s, depth, &cam, draw_texture_case, &c) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        const uint8_t *opaque = px_at(px, W / 2, H / 2);
+        EXPECT(opaque[0] > 220 && opaque[1] < 30 && opaque[2] < 30);
+        flux_material_release(c.material);
+
+        /* UV offset selects the transparent green texel; MASK discards it. */
+        surface.alpha_mode = FLUX_MATERIAL_ALPHA_MASK;
+        surface.alpha_cutoff = 0.5f;
+        surface.uv_offset = (flux_vec2){0.75f, 0.5f};
+        EXPECT(flux_material_create(d, &material_desc, &c.material) == FLUX_OK);
+        EXPECT(render_frame(s, depth, &cam, draw_texture_case, &c) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        const uint8_t *masked = px_at(px, W / 2, H / 2);
+        EXPECT(masked[0] < 20 && masked[1] < 20 && masked[2] < 20);
+        flux_material_release(c.material);
+
+        /* BLEND uses straight source alpha and leaves depth writes disabled. */
+        surface.alpha_mode = FLUX_MATERIAL_ALPHA_BLEND;
+        surface.uv_offset = (flux_vec2){0.25f, 0.5f};
+        surface.double_sided = true;
+        EXPECT(flux_material_create(d, &material_desc, &c.material) == FLUX_OK);
+        /* Material owns retained references after successful creation. */
+        flux_sampler_release(sampler);
+        flux_image_release(image);
+        EXPECT(render_frame(s, depth, &cam, draw_texture_case, &c) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        const uint8_t *blended = px_at(px, W / 2, H / 2);
+        EXPECT(blended[0] > 100 && blended[0] < 160);
+        EXPECT(blended[1] < 30 && blended[2] < 30);
+
         flux_material_release(c.material);
         flux_mesh_release(c.quad);
     }

@@ -13,7 +13,7 @@ convention):
 | [`flux-text`]      | Safe wrapper over `flux-text-sys`, Layer-0 shaping surface.  |
 | [`flux-text-layout`] | Pure-Rust Layer-1 line wrapping on top of `flux-text`.     |
 | [`flux-scene-graph-sys`] | Raw bindgen FFI to `libflux-scene-graph`.          |
-| [`flux-scene-graph`] | Safe glTF scene loading, bounds, and scene-pass drawing. |
+| [`flux-scene-graph`] | Safe glTF scene, material/texture, animation, bounds, and drawing layer. |
 
 [flux]: https://github.com/ming2k/flux
 [`flux-sys`]: crates/flux-sys/
@@ -90,6 +90,15 @@ The safe `flux` crate exposes sampleable `Image::render_target` images,
 frame-slot-safe `BlurFilter`. Together they support a live compositor path
 without transient-pool growth or device-wide waits: Canvas background → scene
 pass → Canvas foreground → fixed-cost Dual-Kawase blur → final composite.
+
+## glTF and VRM materials
+
+`Scene::from_glb_with_materials` decodes referenced embedded PNG/JPEG
+base-color textures with bounded resource limits and creates per-primitive
+UNLIT or PHONG materials for a specified render target. The loader maps sRGB
+base color, UV0 plus `KHR_texture_transform`, glTF samplers, alpha modes,
+alpha cutoff, and double-sided state. Use `Scene::draw_materials` to render the
+installed material table; `Scene::draw` remains the one-material override.
 
 ## License
 

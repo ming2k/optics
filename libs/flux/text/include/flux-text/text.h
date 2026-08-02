@@ -186,6 +186,17 @@ FLUX_API flux_text_metrics flux_text_measure(flux_text *t, const char *utf8, siz
 FLUX_API void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
                              const char *utf8, size_t len, const flux_text_style *style);
 
+/* Draw a run with a contour behind the foreground glyphs. `outline_width`
+ * is the outward visual radius in logical pixels; values <= 0 preserve the
+ * regular draw. The contour reuses the shaped run and coverage atlas, so it
+ * does not duplicate glyph storage. Keep the treatment opt-in: it is meant
+ * for text floating over variable imagery or translucent material, not as a
+ * replacement for choosing a legible foreground/background pair. */
+FLUX_API void flux_text_draw_outlined(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x,
+                                      float y, const char *utf8, size_t len,
+                                      const flux_text_style *style, flux_color outline_color,
+                                      float outline_width);
+
 /* ================================================================== */
 /*  Caret and selection mapping (BiDi-correct)                       */
 /* ================================================================== */

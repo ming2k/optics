@@ -495,6 +495,16 @@ LENS_API void lens_spacer(lens *ui, float size);     /* fixed empty main-axis ga
 /*  the full lens_response — use the matching `*_ex` form below.        */
 /* ================================================================== */
 
+/* Optional contour behind foreground content that floats over imagery or a
+ * translucent material. The width is an outward visual radius in logical
+ * pixels. Zero width or a transparent colour disables it. This remains an
+ * explicit per-widget treatment so ordinary content does not accidentally
+ * acquire a decorative outline. */
+typedef struct lens_foreground_outline {
+    flux_color color;
+    float width;
+} lens_foreground_outline;
+
 LENS_API bool lens_button(lens *ui, const char *label);
 /* Inline text action for breadcrumbs and secondary navigation. It has no
  * surface at rest and indicates hover/focus with an accent underline without
@@ -515,6 +525,10 @@ LENS_API void lens_label_ex(lens *ui, const char *text, float size);
 LENS_API void lens_label_wrapped(lens *ui, const char *text, float max_width);
 LENS_API void lens_label_wrapped_ex(lens *ui, const char *text, float size, float max_width);
 LENS_API void lens_label_compact_ex(lens *ui, const char *text, float size);
+/* Compact label with an opt-in contour; intrinsic layout remains identical to
+ * lens_label_compact_ex and the contour paints outside the glyph coverage. */
+LENS_API void lens_label_compact_outlined_ex(lens *ui, const char *text, float size,
+                                             lens_foreground_outline outline);
 LENS_API void lens_title(lens *ui, const char *text);
 LENS_API void lens_heading(lens *ui, const char *text, int level);
 LENS_API bool lens_checkbox(lens *ui, const char *label, bool *value);
@@ -636,6 +650,9 @@ LENS_API void lens_progress(lens *ui, const char *label, float value);
 LENS_API void lens_separator(lens *ui);
 
 LENS_API void lens_icon(lens *ui, lens_icon_id id, float size);
+/* Vector glyph with the same opt-in foreground contour as outlined text. */
+LENS_API void lens_icon_outlined(lens *ui, lens_icon_id id, float size,
+                                 lens_foreground_outline outline);
 /* A host-owned raster image drawn as a widget (e.g. an application icon).
  * `image` is borrowed for the frame — the caller owns it and it must remain
  * valid until `lens_render` returns. `w`/`h` are the desired logical size;
@@ -646,6 +663,10 @@ LENS_API void lens_image(lens *ui, flux_image *image, float w, float h);
 /* As lens_image, with a premultiplied tint applied to the texture. Opaque
  * white preserves the source; white with a lower alpha fades it. */
 LENS_API void lens_image_tinted(lens *ui, flux_image *image, float w, float h, flux_color tint);
+/* Tinted image with an alpha-derived contour underlay. The underlay expands
+ * around the requested box without changing its intrinsic layout size. */
+LENS_API void lens_image_tinted_outlined(lens *ui, flux_image *image, float w, float h,
+                                         flux_color tint, lens_foreground_outline outline);
 /* Texture-backed variants of lens_icon_button / lens_icon_button_active:
  * identical hover/active/click behaviour, but draw the host-owned raster
  * image where the glyph would be. NULL image draws the background only

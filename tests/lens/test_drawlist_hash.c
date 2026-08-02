@@ -1,4 +1,4 @@
-/* test_drawlist_hash.c — hash_cmd must cover flags / text_weight / image.
+/* test_drawlist_hash.c — hash_cmd must cover every pixel-affecting field.
  *
  * subtree_changed is driven by cmd_hash (ADR-0030 damage tracking).
  * hash_cmd used to skip flags (e.g. connected-tab shoulders),
@@ -78,6 +78,14 @@ int main(void) {
     CHECK(frame_with_cmd(ui, text) == false); /* identical → unchanged */
     text.text_weight = 700.0f;
     CHECK(frame_with_cmd(ui, text) == true); /* weight-only → changed */
+    CHECK(frame_with_cmd(ui, text) == false);
+
+    /* Foreground-contour changes must invalidate recorded pixels too. */
+    text.outline_color = 0x80000000u;
+    CHECK(frame_with_cmd(ui, text) == true);
+    CHECK(frame_with_cmd(ui, text) == false);
+    text.outline_width = 0.75f;
+    CHECK(frame_with_cmd(ui, text) == true);
     CHECK(frame_with_cmd(ui, text) == false);
 
     lens_destroy(ui);

@@ -54,6 +54,21 @@ or report through `flux_get_last_error` as noted.
 | `flux_buffer_mapped` | Returns the persistent mapped pointer, or `NULL` for a `FLUX_BUFFER_GPU_LOCAL` buffer. |
 | `flux_buffer_size` | Returns the buffer's size in bytes. |
 
+### Image
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_image_create` | Creates a core sampled GPU image (8-bit color formats), optionally uploads `initial_data`, and registers it in the bindless heap. |
+| `flux_image_create_render_target` | Creates a color-attachment image with undefined initial contents. Its first target pass performs the initial transition and makes it sampleable on finish. |
+| `flux_image_retain` | Increments the refcount; returns the same handle. |
+| `flux_image_release` | Decrements the refcount; destroys at zero. Null-safe. |
+| `flux_image_width` | Returns the image width. |
+| `flux_image_height` | Returns the image height. |
+| `flux_image_format` | Returns the image's `flux_format`. |
+| `flux_image_update_region` | Synchronously uploads pixels into an in-bounds sub-region. The bindless handle and view stay valid across the update. |
+| `flux_frame_prepare_image_target` | Transitions a new or sampleable render-target image to color-attachment layout for a caller-recorded pass. |
+| `flux_frame_finish_image_target` | Restores a caller-recorded image target to sampleable layout after its pass. |
+
 ### Render Target
 
 | Symbol | Description |
@@ -296,21 +311,6 @@ are `void`-returning; segments dropped on arena exhaustion are counted.
 | `flux_path_add_circle` | Appends a circle as a closed contour. |
 | `flux_path_dropped_count` | Number of segments rejected because the arena was exhausted. Non-zero means data was silently dropped. |
 
-### Image
-
-| Symbol | Description |
-|--------|-------------|
-| `flux_image_create` | Creates a sampled GPU image (8-bit color formats), optionally uploading `initial_data`, and registers it in the bindless heap. |
-| `flux_image_create_render_target` | Creates a color-attachment image with undefined initial contents. Its first target pass performs the initial transition and makes it sampleable on finish. Its extent may differ from the surface for downsampled effects. |
-| `flux_image_retain` | Increments the refcount; returns the same handle. |
-| `flux_image_release` | Decrements the refcount; destroys at zero. Null-safe. |
-| `flux_image_width` | Returns the image width. |
-| `flux_image_height` | Returns the image height. |
-| `flux_image_format` | Returns the image's `flux_format`. |
-| `flux_image_update_region` | Synchronously uploads pixels into an in-bounds sub-region. The bindless handle and view stay valid across the update. |
-| `flux_frame_prepare_image_target` | Transitions a new or sampleable render-target image to color-attachment layout for a caller-recorded pass. |
-| `flux_frame_finish_image_target` | Restores a caller-recorded image target to sampleable layout after its pass. |
-
 ### Canvas
 
 | Symbol | Description |
@@ -383,9 +383,10 @@ Available iff the library was built with `-Dscene=true`.
 | `flux_mesh_create` | Uploads vertices (and optional 32-bit indices) into device-local buffers via a one-shot staging copy. |
 | `flux_mesh_retain` | Increments the refcount; returns the same handle. |
 | `flux_mesh_release` | Decrements the refcount; destroys at zero. Null-safe. |
-| `flux_material_create` | Creates a material pipeline of the given kind (`FLUX_MATERIAL_UNLIT` or `FLUX_MATERIAL_PHONG`) compatible with the stated color and depth target formats. For PHONG, `shininess <= 0` selects the default specular exponent (32) and `specular` 0 disables the highlight. |
+| `flux_material_create` | Creates a material pipeline of the given kind (`FLUX_MATERIAL_UNLIT` or `FLUX_MATERIAL_PHONG`) compatible with the stated color and depth target formats. An optional `flux_material_surface_desc` adds a retained base-color image/sampler, UV transform, alpha mode/cutoff, and double-sided state. For PHONG, `shininess <= 0` selects the default specular exponent (32) and `specular` 0 disables the highlight. |
 | `flux_material_retain` | Increments the refcount; returns the same handle. |
 | `flux_material_release` | Decrements the refcount; destroys at zero. Null-safe. |
+| `flux_material_get_alpha_mode` | Returns OPAQUE for NULL, otherwise the immutable material alpha mode. Content layers use it to phase depth-writing and blended draws. |
 | `flux_scene_draw_mesh` | Records one mesh + material draw into the frame's active pass. The pass attachments must match the material's formats exactly. No-op when any argument is `NULL`. PHONG materials are lit with `FLUX_SCENE_LIGHT_DEFAULT`. |
 | `flux_scene_draw_mesh_lit` | Same as `flux_scene_draw_mesh` with an explicit `flux_scene_light` (`NULL` selects the default). UNLIT materials ignore the light. The light is consumed during the call. |
 

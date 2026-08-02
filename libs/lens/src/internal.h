@@ -54,8 +54,10 @@ typedef struct lens_draw_cmd {
      * a negative x anchors the rectangle to the trailing edge. */
     flux_rect rel;
     flux_color color;
+    flux_color outline_color; /* opt-in foreground contour */
     float radius;
     float width;      /* border width */
+    float outline_width;
     const char *text; /* LENS_DRAW_TEXT: arena-copied utf8 */
     float text_size;
     float text_weight; /* 0 = use theme default */

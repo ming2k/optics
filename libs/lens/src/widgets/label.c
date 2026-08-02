@@ -230,7 +230,8 @@ void lens_label_wrapped_ex(lens *ui, const char *text, float size, float max_wid
     label_wrapped(ui, text, size, max_width);
 }
 
-void lens_label_compact_ex(lens *ui, const char *text, float size) {
+static void label_compact_impl(lens *ui, const char *text, float size,
+                               lens_foreground_outline outline) {
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -252,9 +253,20 @@ void lens_label_compact_ex(lens *ui, const char *text, float size) {
                         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
                                         .rel = {0, y, 0, 0},
                                         .color = ui->theme.color_fg,
+                                        .outline_color = outline.color,
+                                        .outline_width = outline.width > 0.0f ? outline.width : 0.0f,
                                         .text = text,
                                         .text_size = size,
                                         .text_weight = 0.0f});
 
     ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
+}
+
+void lens_label_compact_ex(lens *ui, const char *text, float size) {
+    label_compact_impl(ui, text, size, (lens_foreground_outline){0});
+}
+
+void lens_label_compact_outlined_ex(lens *ui, const char *text, float size,
+                                    lens_foreground_outline outline) {
+    label_compact_impl(ui, text, size, outline);
 }

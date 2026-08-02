@@ -316,7 +316,7 @@ impl Surface {
     /// external consumer accepts. Flux intersects `modifiers` with the Vulkan
     /// device's renderable, single-plane, dma-buf-exportable modifier set.
     ///
-    /// This is the direct-display/zero-copy constructor: unlike [`offscreen`],
+    /// This is the direct-display/zero-copy constructor: unlike [`Surface::offscreen`],
     /// it fails instead of silently creating an ordinary non-exportable image
     /// when no producer/consumer modifier is shared.
     pub fn offscreen_dmabuf(
@@ -754,6 +754,89 @@ pub enum MaterialKind {
     Phong,
 }
 
+/// Alpha interpretation and fixed-function blending for a scene material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MaterialAlphaMode {
+    #[default]
+    Opaque,
+    Mask,
+    Blend,
+}
+
+/// Texture sampling filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Filter {
+    Nearest,
+    #[default]
+    Linear,
+}
+
+/// Texture coordinate address mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AddressMode {
+    #[default]
+    Repeat,
+    ClampToEdge,
+    MirroredRepeat,
+    ClampToBorder,
+}
+
+/// Parameters for a refcounted bindless sampler.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SamplerDesc {
+    pub min_filter: Filter,
+    pub mag_filter: Filter,
+    pub mipmap_mode: Filter,
+    pub address_u: AddressMode,
+    pub address_v: AddressMode,
+    pub address_w: AddressMode,
+    pub max_anisotropy: f32,
+}
+
+impl Default for SamplerDesc {
+    fn default() -> Self {
+        Self {
+            min_filter: Filter::Linear,
+            mag_filter: Filter::Linear,
+            mipmap_mode: Filter::Linear,
+            address_u: AddressMode::Repeat,
+            address_v: AddressMode::Repeat,
+            address_w: AddressMode::Repeat,
+            max_anisotropy: 1.0,
+        }
+    }
+}
+
+/// Base-colour texture and UV transform borrowed during material creation.
+#[derive(Clone, Copy)]
+pub struct MaterialTexture<'a> {
+    pub image: &'a Image,
+    pub sampler: Option<&'a Sampler>,
+    pub uv_offset: [f32; 2],
+    pub uv_scale: [f32; 2],
+    pub uv_rotation: f32,
+}
+
+/// Optional surface state layered onto a built-in material.
+#[derive(Clone, Copy)]
+pub struct MaterialOptions<'a> {
+    pub base_color_texture: Option<MaterialTexture<'a>>,
+    pub alpha_mode: MaterialAlphaMode,
+    pub alpha_cutoff: f32,
+    pub double_sided: bool,
+}
+
+impl Default for MaterialOptions<'_> {
+    fn default() -> Self {
+        Self {
+            base_color_texture: None,
+            alpha_mode: MaterialAlphaMode::Opaque,
+            alpha_cutoff: 0.5,
+            double_sided: false,
+        }
+    }
+}
+
 /// Parameters for a built-in scene material.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MaterialDesc {
@@ -772,19 +855,67 @@ pub struct Material {
 
 impl Material {
     pub fn new(device: &Device, desc: MaterialDesc) -> Result<Material, Error> {
+        Self::new_impl(device, desc, None)
+    }
+
+    pub fn new_with_options(
+        device: &Device,
+        desc: MaterialDesc,
+        options: MaterialOptions<'_>,
+    ) -> Result<Material, Error> {
+        Self::new_impl(device, desc, Some(options))
+    }
+
+    fn new_impl(
+        device: &Device,
+        desc: MaterialDesc,
+        options: Option<MaterialOptions<'_>>,
+    ) -> Result<Material, Error> {
         let kind = match desc.kind {
             MaterialKind::Unlit => sys::flux_material_kind::FLUX_MATERIAL_UNLIT,
             MaterialKind::Phong => sys::flux_material_kind::FLUX_MATERIAL_PHONG,
         };
+        let raw_surface = options.map(|options| {
+            let texture = options.base_color_texture;
+            let alpha_mode = match options.alpha_mode {
+                MaterialAlphaMode::Opaque => {
+                    sys::flux_material_alpha_mode::FLUX_MATERIAL_ALPHA_OPAQUE
+                }
+                MaterialAlphaMode::Mask => sys::flux_material_alpha_mode::FLUX_MATERIAL_ALPHA_MASK,
+                MaterialAlphaMode::Blend => {
+                    sys::flux_material_alpha_mode::FLUX_MATERIAL_ALPHA_BLEND
+                }
+            };
+            sys::flux_material_surface_desc {
+                type_: sys::flux_struct_type::FLUX_TYPE_MATERIAL_SURFACE_DESC,
+                base_color_image: texture
+                    .map(|value| value.image.as_raw())
+                    .unwrap_or(std::ptr::null_mut()),
+                base_color_sampler: texture
+                    .and_then(|value| value.sampler)
+                    .map(Sampler::as_raw)
+                    .unwrap_or(std::ptr::null_mut()),
+                uv_offset: vec2(texture.map(|value| value.uv_offset).unwrap_or([0.0, 0.0])),
+                uv_scale: vec2(texture.map(|value| value.uv_scale).unwrap_or([1.0, 1.0])),
+                uv_rotation: texture.map(|value| value.uv_rotation).unwrap_or(0.0),
+                alpha_mode,
+                alpha_cutoff: options.alpha_cutoff,
+                double_sided: options.double_sided,
+                ..Default::default()
+            }
+        });
         let raw_desc = sys::flux_material_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_MATERIAL_DESC,
+            next: raw_surface
+                .as_ref()
+                .map(|value| value as *const _ as *const std::ffi::c_void)
+                .unwrap_or(std::ptr::null()),
             kind,
             base_color: vec4(desc.base_color),
             color_format: desc.color_format,
             depth_format: desc.depth_format,
             shininess: desc.shininess,
             specular: desc.specular,
-            ..Default::default()
         };
         let mut raw = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_material_create(device.raw, &raw_desc, &mut raw) })?;
@@ -793,6 +924,54 @@ impl Material {
 
     pub fn as_raw(&self) -> *mut sys::flux_material {
         self.raw
+    }
+}
+
+/// Refcounted bindless texture sampler.
+pub struct Sampler {
+    raw: *mut sys::flux_sampler,
+}
+
+impl Sampler {
+    pub fn new(device: &Device, desc: SamplerDesc) -> Result<Self, Error> {
+        fn filter(value: Filter) -> sys::flux_filter {
+            match value {
+                Filter::Nearest => sys::flux_filter::FLUX_FILTER_NEAREST,
+                Filter::Linear => sys::flux_filter::FLUX_FILTER_LINEAR,
+            }
+        }
+        fn address(value: AddressMode) -> sys::flux_address_mode {
+            match value {
+                AddressMode::Repeat => sys::flux_address_mode::FLUX_ADDRESS_REPEAT,
+                AddressMode::ClampToEdge => sys::flux_address_mode::FLUX_ADDRESS_CLAMP_TO_EDGE,
+                AddressMode::MirroredRepeat => sys::flux_address_mode::FLUX_ADDRESS_MIRRORED_REPEAT,
+                AddressMode::ClampToBorder => sys::flux_address_mode::FLUX_ADDRESS_CLAMP_TO_BORDER,
+            }
+        }
+        let raw_desc = sys::flux_sampler_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_SAMPLER_DESC,
+            min_filter: filter(desc.min_filter),
+            mag_filter: filter(desc.mag_filter),
+            mipmap_mode: filter(desc.mipmap_mode),
+            address_u: address(desc.address_u),
+            address_v: address(desc.address_v),
+            address_w: address(desc.address_w),
+            max_anisotropy: desc.max_anisotropy,
+            ..Default::default()
+        };
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_sampler_create(device.raw, &raw_desc, &mut raw) })?;
+        Ok(Self { raw })
+    }
+
+    pub fn as_raw(&self) -> *mut sys::flux_sampler {
+        self.raw
+    }
+}
+
+impl Drop for Sampler {
+    fn drop(&mut self) {
+        unsafe { sys::flux_sampler_release(self.raw) };
     }
 }
 
@@ -855,6 +1034,10 @@ fn vec3(v: [f32; 3]) -> sys::flux_vec3 {
         y: v[1],
         z: v[2],
     }
+}
+
+fn vec2(v: [f32; 2]) -> sys::flux_vec2 {
+    sys::flux_vec2 { x: v[0], y: v[1] }
 }
 
 fn vec4(v: [f32; 4]) -> sys::flux_vec4 {

@@ -3,8 +3,8 @@
 //! frame drives the widget set through the safe wrapper. No GPU required.
 
 use lens::{
-    Align, Color, Input, LayoutOpts, MouseButton, TabStyle, TableColumn, TableOpts, TabsOpts,
-    TextBuf, Theme, Ui,
+    Align, Color, ForegroundOutline, Input, LayoutOpts, MouseButton, TabStyle, TableColumn,
+    TableOpts, TabsOpts, TextBuf, Theme, Ui,
 };
 
 #[test]
@@ -29,6 +29,9 @@ fn headless_frame_drives_widgets() {
         f.column(|f| {
             f.title("Settings");
             f.label("A label");
+            let outline = ForegroundOutline::new(Color::rgba(0, 0, 0, 160), 0.75);
+            f.label_compact_outlined_sized("12:34", 14.0, outline);
+            f.icon_outlined(lens::Icon::Globe, 16.0, outline);
             f.separator();
             f.checkbox("Wrap", &mut wrap);
             f.switch("Compact mode", &mut wrap);

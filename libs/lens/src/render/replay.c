@@ -284,10 +284,15 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
                             y = r.y;
                     }
 
-                    flux_text_draw(ui->text, canvas, &ui->arena, x, y, c->text, vlen,
-                                   &(flux_text_style){.size_px = c->text_size,
-                                                      .weight = c->text_weight,
-                                                      .color = c->color});
+                    const flux_text_style style = {.size_px = c->text_size,
+                                                   .weight = c->text_weight,
+                                                   .color = c->color};
+                    if (c->outline_width > 0.0f && c->outline_color != 0) {
+                        flux_text_draw_outlined(ui->text, canvas, &ui->arena, x, y, c->text, vlen,
+                                                &style, c->outline_color, c->outline_width);
+                    } else {
+                        flux_text_draw(ui->text, canvas, &ui->arena, x, y, c->text, vlen, &style);
+                    }
                 }
             }
             break;
@@ -297,6 +302,14 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
              * scaled to fill the resolved rect. NULL image is a no-op so a
              * failed icon decode does not crash the frame. */
             if (c->image) {
+                if (c->outline_width > 0.0f && c->outline_color != 0) {
+                    float edge = c->outline_width;
+                    flux_rect underlay = {r.x - edge, r.y - edge, r.w + edge * 2.0f,
+                                          r.h + edge * 2.0f};
+                    flux_paint outline = flux_paint_default();
+                    outline.color = c->outline_color;
+                    flux_canvas_draw_image(canvas, c->image, underlay, &outline);
+                }
                 flux_paint paint = flux_paint_default();
                 paint.color = c->color;
                 flux_canvas_draw_image(canvas, c->image, r, &paint);
@@ -370,11 +383,25 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
 
             flux_paint paint = flux_paint_solid(c->color);
             if (lens_icon_render_modes[c->icon_id] == LENSI_ICON_RENDER_FILL) {
+                if (c->outline_width > 0.0f && c->outline_color != 0) {
+                    flux_paint outline = flux_paint_solid(c->outline_color);
+                    outline.stroke_width = c->outline_width * 2.0f;
+                    outline.cap = FLUX_CAP_ROUND;
+                    outline.join = FLUX_JOIN_ROUND;
+                    flux_canvas_stroke_path(canvas, p, &outline);
+                }
                 flux_canvas_fill_path(canvas, p, &paint);
             } else {
                 paint.stroke_width = c->width > 0 ? c->width : 2.0f * s;
                 paint.cap = FLUX_CAP_ROUND;
                 paint.join = FLUX_JOIN_ROUND;
+                if (c->outline_width > 0.0f && c->outline_color != 0) {
+                    flux_paint outline = flux_paint_solid(c->outline_color);
+                    outline.stroke_width = paint.stroke_width + c->outline_width * 2.0f;
+                    outline.cap = FLUX_CAP_ROUND;
+                    outline.join = FLUX_JOIN_ROUND;
+                    flux_canvas_stroke_path(canvas, p, &outline);
+                }
                 flux_canvas_stroke_path(canvas, p, &paint);
             }
             break;

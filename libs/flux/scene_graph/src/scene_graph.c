@@ -60,11 +60,45 @@ FLUX_SG_API void flux_sg_scene_release(flux_sg_scene *scene) {
         free(scene->skins[i].inverse_bind);
         free(scene->skins[i].palette);
     }
+    for (uint32_t i = 0; i < scene->material_count; ++i)
+        flux_material_release(scene->materials[i]);
+    flux_material_release(scene->fallback_material);
+    free(scene->materials);
     free(scene->prims);
     free(scene->nodes);
     free(scene->skins);
     free(scene->roots);
     free(scene);
+}
+
+FLUX_SG_API flux_result flux_sg_scene_set_materials(flux_sg_scene *scene,
+                                                    flux_material *const *materials,
+                                                    uint32_t material_count,
+                                                    flux_material *fallback) {
+    if (!scene || (material_count > 0 && !materials))
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_material **replacement = NULL;
+    if (material_count > 0) {
+        replacement = calloc(material_count, sizeof(*replacement));
+        if (!replacement)
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        for (uint32_t i = 0; i < material_count; ++i)
+            replacement[i] = flux_material_retain(materials[i]);
+    }
+    flux_material *replacement_fallback = flux_material_retain(fallback);
+
+    flux_material **old = scene->materials;
+    uint32_t old_count = scene->material_count;
+    flux_material *old_fallback = scene->fallback_material;
+    scene->materials = replacement;
+    scene->material_count = material_count;
+    scene->fallback_material = replacement_fallback;
+
+    for (uint32_t i = 0; i < old_count; ++i)
+        flux_material_release(old[i]);
+    flux_material_release(old_fallback);
+    free(old);
+    return FLUX_OK;
 }
 
 FLUX_SG_API uint32_t flux_sg_scene_primitive_count(const flux_sg_scene *scene) {
@@ -207,53 +241,80 @@ FLUX_SG_API bool flux_sg_scene_bounds(const flux_sg_scene *scene, flux_vec3 *out
     return true;
 }
 
+static flux_material *primitive_material(const flux_sg_scene *scene,
+                                         const flux_sg_primitive *primitive,
+                                         flux_material *override) {
+    if (override)
+        return override;
+    int index = primitive->material_index;
+    if (index >= 0 && (uint32_t)index < scene->material_count && scene->materials[index])
+        return scene->materials[index];
+    return scene->fallback_material;
+}
+
+static void draw_primitive(flux_frame *frame, const flux_camera *cam, flux_mat4 world,
+                           const flux_sg_primitive *primitive, flux_material *material,
+                           const flux_scene_light *light, const flux_sg_skin *skin) {
+    if (!primitive->mesh || !material)
+        return;
+    if (skin && skin->joint_count > 0) {
+        /* Skin palettes already produce model/world-space positions, so the
+         * draw world is identity (world * inverse(world) form). */
+        flux_mat4 identity = flux_mat4_identity();
+        if (light)
+            flux_scene_draw_mesh_skinned_lit(frame, cam, identity, primitive->mesh, material,
+                                              light, skin->palette, skin->joint_count);
+        else
+            flux_scene_draw_mesh_skinned(frame, cam, identity, primitive->mesh, material,
+                                          skin->palette, skin->joint_count);
+    } else if (light) {
+        flux_scene_draw_mesh_lit(frame, cam, world, primitive->mesh, material, light);
+    } else {
+        flux_scene_draw_mesh(frame, cam, world, primitive->mesh, material);
+    }
+}
+
 FLUX_SG_API void flux_sg_draw(flux_frame *frame, const flux_camera *cam, const flux_sg_scene *scene,
                               const flux_sg_draw_opts *opts) {
-    if (!frame || !cam || !scene || !opts || !opts->material)
+    if (!frame || !cam || !scene || !opts)
         return;
 
-    for (uint32_t ni = 0; ni < scene->node_count; ++ni) {
-        const flux_sg_node *n = &scene->nodes[ni];
-        if (n->mesh_first < 0 || n->mesh_prim_count <= 0)
-            continue;
-        for (int k = n->mesh_first; k < n->mesh_first + n->mesh_prim_count; ++k) {
-            const flux_sg_primitive *p = &scene->prims[k];
-            if (!p->mesh)
+    /* glTF alpha semantics require all depth-writing OPAQUE/MASK draws before
+     * depth-reading, non-writing BLEND draws. Source order remains stable
+     * within each phase for layered avatar materials. */
+    for (int blend_phase = 0; blend_phase < 2; ++blend_phase) {
+        for (uint32_t ni = 0; ni < scene->node_count; ++ni) {
+            const flux_sg_node *n = &scene->nodes[ni];
+            if (n->mesh_first < 0 || n->mesh_prim_count <= 0)
                 continue;
-            const flux_sg_skin *skin =
-                n->skin >= 0 && (uint32_t)n->skin < scene->skin_count ? &scene->skins[n->skin]
-                                                                      : NULL;
-            if (skin && skin->joint_count > 0) {
-                /* Palettes already produce model/world-space positions, so
-                 * the draw world is identity (world * inverse(world) form). */
-                flux_mat4 identity = flux_mat4_identity();
-                if (opts->light)
-                    flux_scene_draw_mesh_skinned_lit(frame, cam, identity, p->mesh, opts->material,
-                                                      opts->light, skin->palette,
-                                                      skin->joint_count);
-                else
-                    flux_scene_draw_mesh_skinned(frame, cam, identity, p->mesh, opts->material,
-                                                  skin->palette, skin->joint_count);
-            } else if (opts->light) {
-                flux_scene_draw_mesh_lit(frame, cam, n->world, p->mesh, opts->material,
-                                         opts->light);
-            } else {
-                flux_scene_draw_mesh(frame, cam, n->world, p->mesh, opts->material);
+            for (int k = n->mesh_first; k < n->mesh_first + n->mesh_prim_count; ++k) {
+                if ((uint32_t)k >= scene->prim_count)
+                    break;
+                const flux_sg_primitive *p = &scene->prims[k];
+                flux_material *material = primitive_material(scene, p, opts->material);
+                bool blend = material && flux_material_get_alpha_mode(material) ==
+                                             FLUX_MATERIAL_ALPHA_BLEND;
+                if (!material || blend != (blend_phase != 0))
+                    continue;
+                const flux_sg_skin *skin =
+                    n->skin >= 0 && (uint32_t)n->skin < scene->skin_count
+                        ? &scene->skins[n->skin]
+                        : NULL;
+                draw_primitive(frame, cam, n->world, p, material, opts->light, skin);
             }
         }
-    }
-    /* A scene with no nodes (mesh-only file) still has primitives; draw them
-     * with an identity world so a flat .glb is visible. */
-    if (scene->node_count == 0) {
-        flux_mat4 id = flux_mat4_identity();
-        for (uint32_t k = 0; k < scene->prim_count; ++k) {
-            if (!scene->prims[k].mesh)
-                continue;
-            if (opts->light)
-                flux_scene_draw_mesh_lit(frame, cam, id, scene->prims[k].mesh, opts->material,
-                                         opts->light);
-            else
-                flux_scene_draw_mesh(frame, cam, id, scene->prims[k].mesh, opts->material);
+
+        /* A scene with no nodes (mesh-only file) still has primitives. */
+        if (scene->node_count == 0) {
+            flux_mat4 identity = flux_mat4_identity();
+            for (uint32_t k = 0; k < scene->prim_count; ++k) {
+                const flux_sg_primitive *p = &scene->prims[k];
+                flux_material *material = primitive_material(scene, p, opts->material);
+                bool blend = material && flux_material_get_alpha_mode(material) ==
+                                             FLUX_MATERIAL_ALPHA_BLEND;
+                if (material && blend == (blend_phase != 0))
+                    draw_primitive(frame, cam, identity, p, material, opts->light, NULL);
+            }
         }
     }
 }

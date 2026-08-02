@@ -25,12 +25,10 @@ extern "C" {
 
 typedef struct flux_canvas flux_canvas;
 
-/* flux_sampler lives in <flux/vulkan.h>; forward-declare here so
- * flux_canvas_draw_image_sampled compiles without dragging the
- * Vulkan header into every canvas.h consumer. Mirrors the existing
- * forward declaration of flux_image inside <flux/vulkan.h>. */
+/* flux_sampler lives in <flux/vulkan.h>; forward-declare it so sampled image
+ * drawing does not pull Vulkan declarations into every Canvas consumer.
+ * flux_image is a core resource and is already declared by <flux/core.h>. */
 typedef struct flux_sampler flux_sampler;
-typedef struct flux_image flux_image;
 
 /* ------------------------------------------------------------------ */
 /*  Paint                                                             */
@@ -142,57 +140,6 @@ FLUX_API void flux_path_add_circle(flux_path *p, float cx, float cy, float radiu
  * void-returning (Cairo/Skia-style); this accessor lets a caller
  * detect overflow without consulting flux_get_last_error. */
 FLUX_API uint32_t flux_path_dropped_count(const flux_path *p);
-
-/* ------------------------------------------------------------------ */
-/*  Image                                                             */
-/* ------------------------------------------------------------------ */
-
-typedef struct flux_image_desc {
-    flux_struct_type type; /* FLUX_TYPE_IMAGE_DESC */
-    const void *next;
-    uint32_t width;
-    uint32_t height;
-    flux_format format;       /* must be an 8-bit colour format */
-    const void *initial_data; /* optional; size = w*h*bytes_per_pixel */
-} flux_image_desc;
-
-#define FLUX_IMAGE_DESC_INIT {.type = FLUX_TYPE_IMAGE_DESC}
-
-FLUX_NODISCARD FLUX_API flux_result flux_image_create(flux_device *d, const flux_image_desc *desc,
-                                                      flux_image **out);
-
-/* Create a render-target image for flux_canvas_begin_target (ADR-0017):
- * COLOR_ATTACHMENT | SAMPLED usage, 1 sample, with undefined initial contents.
- * The first target pass performs its initial layout transition in the frame;
- * after that pass finishes the image is sampleable. Released with
- * flux_image_release. */
-FLUX_NODISCARD FLUX_API flux_result flux_image_create_render_target(flux_device *d, uint32_t width,
-                                                                    uint32_t height,
-                                                                    flux_format fmt,
-                                                                    flux_image **out);
-FLUX_NODISCARD FLUX_API flux_image *flux_image_retain(flux_image *i);
-FLUX_API void flux_image_release(flux_image *i);
-FLUX_API uint32_t flux_image_width(const flux_image *i);
-FLUX_API uint32_t flux_image_height(const flux_image *i);
-FLUX_API flux_format flux_image_format(const flux_image *i);
-
-/* Transition a new or sampleable render-target image into colour-attachment
- * state for a caller-recorded pass, then restore it to sampleable state. Prepare before
- * flux_frame_begin_pass and finish immediately after flux_frame_end_pass.
- * The image must come from flux_image_create_render_target. */
-FLUX_NODISCARD FLUX_API flux_result flux_frame_prepare_image_target(flux_frame *f,
-                                                                    flux_image *target);
-FLUX_NODISCARD FLUX_API flux_result flux_frame_finish_image_target(flux_frame *f,
-                                                                   flux_image *target);
-
-/* Upload `bytes` of `data` into a sub-region of an existing image.
- * The region must be in-bounds; `bytes` must be at least
- * w * h * bytes_per_pixel. The image is stalled briefly while the
- * upload completes (synchronous, one-shot command buffer). Bindless
- * handle and image view remain valid across the update. */
-FLUX_NODISCARD FLUX_API flux_result flux_image_update_region(flux_image *image, uint32_t x,
-                                                             uint32_t y, uint32_t w, uint32_t h,
-                                                             const void *data, size_t bytes);
 
 /* ------------------------------------------------------------------ */
 /*  Canvas lifecycle + drawing                                        */

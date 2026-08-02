@@ -9,10 +9,10 @@ lookup surfaces for this checkout.
 | Header                | Always available | Contents                                                              |
 |-----------------------|------------------|-----------------------------------------------------------------------|
 | `<flux/flux.h>`       | Yes              | Umbrella; pulls in every enabled module.                              |
-| `<flux/core.h>`       | Yes              | Device, surface, frame, buffer, allocator, logger, results, version.  |
+| `<flux/core.h>`       | Yes              | Device, surface, frame, buffer, sampled image, allocator, logger, results, version. |
 | `<flux/math.h>`       | Yes              | Vector, matrix, quaternion, colour, arena. No Vulkan dependency.      |
 | `<flux/vulkan.h>`     | Yes              | Raw Vulkan handle accessors, sampler, graphics pipeline, pass.        |
-| `<flux/canvas.h>`     | Iff `-Dcanvas=true`  | 2D drawing: image, path, paint, canvas.                            |
+| `<flux/canvas.h>`     | Iff `-Dcanvas=true`  | 2D drawing: path, paint, image drawing, canvas.                    |
 | `<flux/canvas_cpu.h>` | Iff `-Dcanvas=true`  | Headless software (CPU) canvas: `flux_canvas_create_cpu`, pixel readback. No Vulkan. |
 | `<flux/dmabuf.h>`     | Iff `-Dcanvas=true`  | Linux dma-buf import into sampled `flux_image` objects.            |
 | `<flux/scene.h>`      | Iff `-Dscene=true`   | 3D primitives: camera, mesh, material, draw.                       |
@@ -57,6 +57,8 @@ pointer is **retained by the constructor**:
 | `flux_image_desc.initial_data`          | No (copied once at upload time) |
 | `flux_dmabuf_image_desc.planes[].fd`    | Yes, only when `flux_image_import_dmabuf` returns `FLUX_OK` |
 | `flux_mesh_desc.vertices` / `indices`   | No (copied once at upload time) |
+| `flux_material_surface_desc.base_color_image` | Yes |
+| `flux_material_surface_desc.base_color_sampler` | Yes |
 
 The retain happens at `_create`; the matching release happens at the
 container's final `_release`. Callers are free to drop their own
@@ -107,6 +109,21 @@ deferred submission.
 | `flux_scene_draw_mesh` | Records `vkCmdBindPipeline` + push constants + `vkCmdBindVertexBuffers` + `vkCmdDrawIndexed`. |
 | `flux_compute_dispatch` | Records `vkCmdBindPipeline` + bindless set + push constants + `vkCmdDispatch`. |
 | `flux_graphics_pipeline_bind` | Records `vkCmdBindPipeline` + bindless set + push constants. |
+
+## Scene-graph content layer
+
+`flux-scene-graph` preserves glTF primitive material indices. C hosts install
+an index-aligned material table with `flux_sg_scene_set_materials`; a NULL
+`flux_sg_draw_opts.material` selects that table, while a non-NULL value
+overrides the complete scene.
+
+The safe Rust binding exposes
+`Scene::from_glb_with_materials(device, bytes, MaterialTarget)` and
+`Scene::draw_materials`. It supports embedded PNG/JPEG base-color textures,
+UV0, `KHR_texture_transform`, `KHR_materials_unlit`, glTF sampler state,
+OPAQUE/MASK/BLEND, alpha cutoff, and double-sided materials. Referenced
+external images and non-zero texture-coordinate sets return `LoadError`
+instead of silently rendering an incomplete material.
 
 The pipeline-bound state is cached per-canvas / per-pass so an
 identical paint kind drawn N times in a row produces N `vkCmdDraw`

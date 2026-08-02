@@ -359,6 +359,33 @@ static void test_title_and_heading_sizes(void) {
     lens_destroy(ui);
 }
 
+static void test_compact_outlined_label_preserves_intrinsic_metrics(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {200, 80}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_row(ui);
+    lens_push_id(ui, "plain");
+    lens_label_compact_ex(ui, "12:34", 14.0f);
+    lens_pop_id(ui);
+    lens_push_id(ui, "outlined");
+    lens_label_compact_outlined_ex(
+        ui, "12:34", 14.0f,
+        (lens_foreground_outline){
+            .color = flux_color_rgba_premul(0, 0, 0, 180), .width = 0.75f});
+    lens_pop_id(ui);
+    lens_close(ui);
+    lens_end(ui);
+
+    lens_node *row = lens_node_first_child(lens_root(ui));
+    lens_node *plain = lens_node_first_child(row);
+    lens_node *outlined = lens_node_next_sibling(plain);
+    CHECK_NEAR(lens_node_bounds(plain).w, lens_node_bounds(outlined).w, 0.01f);
+    CHECK_NEAR(lens_node_bounds(plain).h, lens_node_bounds(outlined).h, 0.01f);
+    lens_destroy(ui);
+}
+
 static void test_wrapped_label_respects_width_and_grows_height(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
@@ -400,6 +427,7 @@ int main(void) {
     test_scroll_offset();
     test_scroll_thumb_drag();
     test_title_and_heading_sizes();
+    test_compact_outlined_label_preserves_intrinsic_metrics();
     test_wrapped_label_respects_width_and_grows_height();
     return TEST_REPORT();
 }

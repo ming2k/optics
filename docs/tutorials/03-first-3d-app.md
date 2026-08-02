@@ -107,7 +107,9 @@ it on shutdown.
 ## What you now know
 
 - `flux_mesh` is GPU vertex + index buffers; refcounted.
-- `flux_material` (unlit) is a colour-per-mesh; refcounted.
+- `flux_material` (unlit or Phong) is refcounted and may retain a sampled
+  base-color image/sampler through `flux_material_surface_desc`. See
+  [How to Texture a Mesh](../how-to/texture-a-mesh.md).
 - The caller owns the depth image; you supply it in the pass descriptor.
 - 4×4 matrices are column-major and Vulkan-friendly.
 

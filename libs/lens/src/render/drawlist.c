@@ -9,12 +9,14 @@
 static uint32_t hash_cmd(const lens_draw_cmd *c) {
     uint32_t h = (uint32_t)c->kind;
     h = h * 31 + c->color;
+    h = h * 31 + c->outline_color;
     h = h * 31 + (uint32_t)(c->rel.x * 1000.0f);
     h = h * 31 + (uint32_t)(c->rel.y * 1000.0f);
     h = h * 31 + (uint32_t)(c->rel.w * 1000.0f);
     h = h * 31 + (uint32_t)(c->rel.h * 1000.0f);
     h = h * 31 + (uint32_t)(c->radius * 1000.0f);
     h = h * 31 + (uint32_t)(c->width * 1000.0f);
+    h = h * 31 + (uint32_t)(c->outline_width * 1000.0f);
     h = h * 31 + (uint32_t)(c->text_size * 1000.0f);
     h = h * 31 + (uint32_t)(c->text_weight * 1000.0f);
     if (c->text) {

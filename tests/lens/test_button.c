@@ -120,7 +120,9 @@ static void test_badged_icon_button_respects_tile_size(void) {
     lens_destroy(ui);
 }
 
-static size_t rendered_icon_pixels(lens_icon_id icon, bool *center_lit) {
+static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_lit,
+                                                lens_foreground_outline outline,
+                                                size_t *outline_pixels) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_theme theme = lens_theme_dark();
@@ -129,7 +131,7 @@ static size_t rendered_icon_pixels(lens_icon_id icon, bool *center_lit) {
 
     lens_input input = {.display_size = {24, 24}, .dt_seconds = 0.016f};
     lens_begin(ui, &input);
-    lens_icon(ui, icon, 24.0f);
+    lens_icon_outlined(ui, icon, 24.0f, outline);
     lens_end(ui);
 
     flux_canvas *canvas = NULL;
@@ -145,17 +147,26 @@ static size_t rendered_icon_pixels(lens_icon_id icon, bool *center_lit) {
     const uint8_t *center = fb + (size_t)12 * stride + (size_t)12 * 4;
     *center_lit = center[0] > 16 || center[1] > 16 || center[2] > 16;
     size_t lit = 0;
+    size_t contour = 0;
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             const uint8_t *pixel = fb + (size_t)y * stride + (size_t)x * 4;
             if (pixel[0] > 16 || pixel[1] > 16 || pixel[2] > 16)
                 lit++;
+            if (pixel[0] > 80 && pixel[0] > pixel[1] * 2 && pixel[0] > pixel[2] * 2)
+                contour++;
         }
     }
 
     flux_canvas_destroy(canvas);
     lens_destroy(ui);
+    if (outline_pixels)
+        *outline_pixels = contour;
     return lit;
+}
+
+static size_t rendered_icon_pixels(lens_icon_id icon, bool *center_lit) {
+    return rendered_icon_pixels_with_outline(icon, center_lit, (lens_foreground_outline){0}, NULL);
 }
 
 static void test_material_rounded_star_pair_uses_filled_svg_paths(void) {
@@ -167,6 +178,39 @@ static void test_material_rounded_star_pair_uses_filled_svg_paths(void) {
     CHECK(filled_pixels > 0);
     CHECK(!outline_center);
     CHECK(filled_center);
+}
+
+static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_begin(ui, &IN0);
+    lens_row(ui);
+    lens_push_id(ui, "plain");
+    lens_icon(ui, LENS_ICON_GLOBE, 24.0f);
+    lens_pop_id(ui);
+    lens_push_id(ui, "outlined");
+    lens_icon_outlined(ui, LENS_ICON_GLOBE, 24.0f,
+                       (lens_foreground_outline){
+                           .color = flux_color_rgba_premul(255, 0, 0, 255), .width = 2.0f});
+    lens_pop_id(ui);
+    lens_close(ui);
+    lens_end(ui);
+    lens_node *row = lens_node_first_child(lens_root(ui));
+    lens_node *plain = lens_node_first_child(row);
+    lens_node *outlined = lens_node_next_sibling(plain);
+    CHECK_NEAR(lens_node_bounds(plain).w, lens_node_bounds(outlined).w, 0.01f);
+    CHECK_NEAR(lens_node_bounds(plain).h, lens_node_bounds(outlined).h, 0.01f);
+    lens_destroy(ui);
+
+    bool center_lit = false;
+    size_t contour = 0;
+    size_t lit = rendered_icon_pixels_with_outline(
+        LENS_ICON_GLOBE, &center_lit,
+        (lens_foreground_outline){
+            .color = flux_color_rgba_premul(255, 0, 0, 255), .width = 2.0f},
+        &contour);
+    CHECK(lit > 0);
+    CHECK(contour > 0);
 }
 
 static void test_icon_toggle_swaps_glyph_without_selected_surface(void) {
@@ -243,6 +287,7 @@ int main(void) {
     test_button_no_click_when_disabled();
     test_badged_icon_button_respects_tile_size();
     test_material_rounded_star_pair_uses_filled_svg_paths();
+    test_icon_outline_adds_a_contour_without_changing_intrinsic_size();
     test_icon_toggle_swaps_glyph_without_selected_surface();
     test_icon_button_requests_pointer_cursor();
     return TEST_REPORT();

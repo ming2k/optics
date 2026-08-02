@@ -142,6 +142,23 @@ int main(void) {
     if (load_result != FLUX_OK)
         fprintf(stderr, "target GLB load failed: %s\n", flux_result_string(load_result));
     EXPECT(load_result == FLUX_OK);
+    if (scene) {
+        flux_material_desc material_desc = {
+            .type = FLUX_TYPE_MATERIAL_DESC,
+            .kind = FLUX_MATERIAL_UNLIT,
+            .base_color = {1, 1, 1, 1},
+            .color_format = FLUX_FORMAT_RGBA8_UNORM,
+        };
+        flux_material *material = NULL;
+        EXPECT(flux_material_create(device, &material_desc, &material) == FLUX_OK);
+        flux_material *table[1] = {material};
+        EXPECT(flux_sg_scene_set_materials(scene, table, 1, material) == FLUX_OK);
+        /* The scene retains both table and fallback references. */
+        flux_material_release(material);
+        EXPECT(flux_sg_scene_set_materials(scene, NULL, 0, NULL) == FLUX_OK);
+        EXPECT(flux_sg_scene_set_materials(NULL, NULL, 0, NULL) ==
+               FLUX_ERROR_INVALID_ARGUMENT);
+    }
     flux_sg_animation *animation = NULL;
     if (scene)
         EXPECT(flux_sg_load_animation_glb(scene, animation_glb.bytes, animation_glb.size,

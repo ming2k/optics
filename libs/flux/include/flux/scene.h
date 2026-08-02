@@ -82,6 +82,7 @@ FLUX_API void flux_mesh_release(flux_mesh *m);
 /* ------------------------------------------------------------------ */
 
 typedef struct flux_material flux_material;
+typedef struct flux_sampler flux_sampler;
 
 typedef enum flux_material_kind {
     FLUX_MATERIAL_UNLIT = 0,
@@ -92,6 +93,32 @@ typedef enum flux_material_kind {
     /* PBR will be added at the end when it ships. Append-only —
      * never repurpose existing values. */
 } flux_material_kind;
+
+typedef enum flux_material_alpha_mode {
+    FLUX_MATERIAL_ALPHA_OPAQUE = 0,
+    FLUX_MATERIAL_ALPHA_MASK = 1,
+    FLUX_MATERIAL_ALPHA_BLEND = 2,
+} flux_material_alpha_mode;
+
+/* Optional `flux_material_desc.next` payload for a sampled base-colour
+ * texture and glTF-compatible surface state. The material retains image and
+ * sampler. A NULL sampler selects Flux's linear clamp-to-edge sampler.
+ * UV transform order is scale, counter-clockwise rotation, then offset. */
+typedef struct flux_material_surface_desc {
+    flux_struct_type type; /* FLUX_TYPE_MATERIAL_SURFACE_DESC */
+    const void *next;
+    flux_image *base_color_image;     /* optional */
+    flux_sampler *base_color_sampler; /* optional; ignored without image */
+    flux_vec2 uv_offset;
+    flux_vec2 uv_scale;
+    float uv_rotation;
+    flux_material_alpha_mode alpha_mode;
+    float alpha_cutoff; /* MASK only; glTF default is 0.5 */
+    bool double_sided;
+} flux_material_surface_desc;
+
+#define FLUX_MATERIAL_SURFACE_DESC_INIT                                                        \
+    {.type = FLUX_TYPE_MATERIAL_SURFACE_DESC, .uv_scale = {1.0f, 1.0f}, .alpha_cutoff = 0.5f}
 
 typedef struct flux_material_desc {
     flux_struct_type type; /* FLUX_TYPE_MATERIAL_DESC */
@@ -122,6 +149,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_material_create(flux_device *d,
                                                          flux_material **out);
 FLUX_NODISCARD FLUX_API flux_material *flux_material_retain(flux_material *m);
 FLUX_API void flux_material_release(flux_material *m);
+FLUX_API flux_material_alpha_mode flux_material_get_alpha_mode(const flux_material *m);
 
 /* ------------------------------------------------------------------ */
 /*  Light (value type)                                                */

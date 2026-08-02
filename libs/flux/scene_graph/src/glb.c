@@ -444,11 +444,13 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
 
     out_prim->mesh = mesh;
     out_prim->base_color = flux_vec4_make(1.0f, 1.0f, 1.0f, 1.0f);
+    out_prim->material_index = -1;
     out_prim->aabb_min = aabb_min;
     out_prim->aabb_max = aabb_max;
 
     /* Map the glTF material's base colour, if any. */
     int mat_idx = (int)jv_num(jv_obj_get(prim, "material"), -1);
+    out_prim->material_index = mat_idx;
     const jv *mats = jv_obj_get(root, "materials");
     const jv *mat = jv_arr_at(mats, (size_t)mat_idx);
     const jv *pbr = mat ? jv_obj_get(mat, "pbrMetallicRoughness") : NULL;

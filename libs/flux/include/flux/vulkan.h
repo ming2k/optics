@@ -22,11 +22,6 @@
 extern "C" {
 #endif
 
-/* flux_image lives in <flux/canvas.h>; forward-declare here so the
- * accessors below compile without dragging the full canvas header
- * into every vulkan.h consumer. */
-typedef struct flux_image flux_image;
-
 /* ================================================================== */
 /*  Raw handle accessors                                              */
 /* ================================================================== */

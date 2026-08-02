@@ -1,4 +1,4 @@
-#include "internal.h"
+#include "../core/image_internal.h"
 
 #include <stdio.h>
 #include <string.h>

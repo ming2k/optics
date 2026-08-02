@@ -333,7 +333,7 @@ struct flux_canvas_record_slot {
 /*  geometry helpers, or path/paint internals.                         */
 /* ------------------------------------------------------------------ */
 
-#include "image_internal.h"
+#include "../core/image_internal.h"
 
 /* ------------------------------------------------------------------ */
 /*  Path                                                              */

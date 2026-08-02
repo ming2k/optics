@@ -1,26 +1,32 @@
 #version 450
-
-/*
- * Unlit scene vertex shader.
- *
- * Vertex format matches flux_vertex (position vec3, normal vec3,
- * uv vec2 — 32 bytes per vertex). Normal and uv are accepted for
- * compatibility with the mesh format but unused by unlit.
- */
+#extension GL_EXT_buffer_reference : require
 
 layout(location = 0) in vec3 a_position;
-layout(location = 1) in vec3 a_normal;   /* unused for unlit */
-layout(location = 2) in vec2 a_uv;       /* unused for unlit */
+layout(location = 1) in vec3 a_normal;
+layout(location = 2) in vec2 a_uv;
+
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer JointPalette {
+    mat4 joints[];
+};
+
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer UnlitParams {
+    vec4 base_color;
+    vec4 uv_scale_offset;
+    vec4 uv_rotation_alpha_cutoff;
+    uvec4 texture_info;
+    JointPalette palette;
+    uint joint_count;
+};
 
 layout(push_constant) uniform PC {
     mat4 mvp;
-    vec4 color;
+    UnlitParams params;
 } pc;
 
-layout(location = 0) out vec4 v_color;
+layout(location = 0) out vec2 v_uv;
 
 void main()
 {
     gl_Position = pc.mvp * vec4(a_position, 1.0);
-    v_color     = pc.color;
+    v_uv = a_uv;
 }

@@ -67,6 +67,7 @@ bool jv_bool(const jv *v, bool fallback);
 typedef struct flux_sg_primitive {
     flux_mesh *mesh;
     flux_vec4 base_color; /* linear; parsed from pbrMetallicRoughness */
+    int material_index;   /* -1 selects the installed fallback */
     flux_vec3 aabb_min;   /* local-space AABB of the mesh vertices,  */
     flux_vec3 aabb_max;   /* used by flux_sg_scene_bounds for framing */
 } flux_sg_primitive;
@@ -138,6 +139,9 @@ struct flux_sg_scene {
     uint32_t node_count;
     flux_sg_skin *skins;
     uint32_t skin_count;
+    flux_material **materials;
+    uint32_t material_count;
+    flux_material *fallback_material;
     int *roots; /* node indices */
     uint32_t root_count;
     int human_bones[SG_HUMAN_BONE_COUNT];

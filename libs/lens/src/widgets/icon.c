@@ -1,7 +1,7 @@
 #include "../internal.h"
 #include <stdio.h>
 
-LENS_API void lens_icon(lens *ui, lens_icon_id id, float size) {
+static void icon_impl(lens *ui, lens_icon_id id, float size, lens_foreground_outline outline) {
     if ((unsigned)id >= LENS_ICON_COUNT)
         return;
     const lens_theme *t = &ui->theme;
@@ -26,9 +26,20 @@ LENS_API void lens_icon(lens *ui, lens_icon_id id, float size) {
                             .kind = LENS_DRAW_ICON,
                             .rel = {0, 0, s, s},
                             .color = t->color_fg,
+                            .outline_color = outline.color,
+                            .outline_width = outline.width > 0.0f ? outline.width : 0.0f,
                             .width = 2.0f * (s / 24.0f),
                             .icon_id = id,
                         });
+}
+
+LENS_API void lens_icon(lens *ui, lens_icon_id id, float size) {
+    icon_impl(ui, id, size, (lens_foreground_outline){0});
+}
+
+LENS_API void lens_icon_outlined(lens *ui, lens_icon_id id, float size,
+                                 lens_foreground_outline outline) {
+    icon_impl(ui, id, size, outline);
 }
 
 /* Flat ("ghost") icon button for navigation strips and toolbars. Transparent

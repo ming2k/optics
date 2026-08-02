@@ -12,7 +12,7 @@
  *   - fixed-cost multi-resolution filter for animated backdrops
  */
 
-#include "../canvas/image_internal.h" /* struct flux_image + create_compute_writable */
+#include "../core/image_internal.h" /* struct flux_image + create_compute_writable */
 #include "../compute/internal.h"      /* flux_compute_pipeline_make_device_weak */
 #include "../core/internal.h"
 #include <flux/compute.h>

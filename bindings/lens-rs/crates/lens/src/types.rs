@@ -100,6 +100,44 @@ impl Color {
     }
 }
 
+/// A restrained contour drawn behind text, vector icons, or alpha-backed
+/// images that float over variable imagery or translucent material.
+///
+/// The contour is deliberately opt-in. Use it to preserve foreground
+/// separation where the background cannot be predicted, not as a global
+/// decoration for ordinary content.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForegroundOutline {
+    pub color: Color,
+    /// Outward visual radius in logical pixels.
+    pub width: f32,
+}
+
+impl ForegroundOutline {
+    pub fn new(color: Color, width: f32) -> Self {
+        Self {
+            color,
+            width: width.max(0.0),
+        }
+    }
+
+    pub(crate) fn raw(self) -> sys::lens_foreground_outline {
+        sys::lens_foreground_outline {
+            color: self.color.raw(),
+            width: self.width.max(0.0),
+        }
+    }
+}
+
+impl Default for ForegroundOutline {
+    fn default() -> Self {
+        Self {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+        }
+    }
+}
+
 /// Cross-axis alignment, mirroring `lens_align`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Align {

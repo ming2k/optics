@@ -34,8 +34,8 @@ mod types;
 
 pub use input::{Input, MouseButton, key, mods};
 pub use types::{
-    Align, Color, CursorHint, Icon, LayoutOpts, OverlayOpts, Rect, Response, TabStyle, TableColumn,
-    TableOpts, TableResult, TabsOpts, TextMetrics, Theme,
+    Align, Color, CursorHint, ForegroundOutline, Icon, LayoutOpts, OverlayOpts, Rect, Response,
+    TabStyle, TableColumn, TableOpts, TableResult, TabsOpts, TextMetrics, Theme,
 };
 
 /// The retained UI context. Owns the persistent tree, layout, and draw list.
@@ -439,6 +439,13 @@ impl Frame {
         unsafe { sys::lens_icon(self.ui, id.raw(), size) };
     }
 
+    /// Draw an icon glyph with a contour behind its shape. Its intrinsic
+    /// layout size is identical to [`Self::icon`].
+    pub fn icon_outlined(&mut self, id: Icon, size: f32, outline: ForegroundOutline) {
+        // SAFETY: ui is live for the frame; outline is a value descriptor.
+        unsafe { sys::lens_icon_outlined(self.ui, id.raw(), size, outline.raw()) };
+    }
+
     /// Draw a host-owned raster image (e.g. a decoded application icon),
     /// scaled to fill a `w`×`h` logical box.
     ///
@@ -467,6 +474,24 @@ impl Frame {
     ) {
         // SAFETY: ui is live for the frame; image outlives render (caller's contract).
         unsafe { sys::lens_image_tinted(self.ui, image, w, h, tint.raw()) };
+    }
+
+    /// Draw a tinted host-owned raster image with an alpha-derived contour
+    /// underlay. Its intrinsic layout size matches [`Self::image_tinted`].
+    ///
+    /// # Safety
+    /// `image` follows the lifetime and ownership contract of
+    /// [`Frame::image`].
+    pub unsafe fn image_tinted_outlined(
+        &mut self,
+        image: *mut sys::flux_image,
+        w: f32,
+        h: f32,
+        tint: Color,
+        outline: ForegroundOutline,
+    ) {
+        // SAFETY: ui is live; image lifetime is the caller's contract.
+        unsafe { sys::lens_image_tinted_outlined(self.ui, image, w, h, tint.raw(), outline.raw()) };
     }
 
     /// A flat icon-only button for navigation strips and toolbars: transparent
@@ -956,6 +981,19 @@ impl Frame {
         let c = cstr(text);
         // SAFETY: ui is live; c outlives the call.
         unsafe { sys::lens_label_compact_ex(self.ui, c.as_ptr(), size) };
+    }
+
+    /// A compact label with a contour behind the glyphs. Intrinsic metrics
+    /// remain identical to [`Self::label_compact_sized`].
+    pub fn label_compact_outlined_sized(
+        &mut self,
+        text: &str,
+        size: f32,
+        outline: ForegroundOutline,
+    ) {
+        let c = cstr(text);
+        // SAFETY: ui is live; c outlives the call; outline is a value descriptor.
+        unsafe { sys::lens_label_compact_outlined_ex(self.ui, c.as_ptr(), size, outline.raw()) };
     }
 
     /// A title (larger, emphasized label).

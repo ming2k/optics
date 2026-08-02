@@ -12,10 +12,12 @@
  *   - A single scene/node tree; mutable TRS poses compose into world matrices.
  *   - glTF animation sampling (STEP/LINEAR/CUBICSPLINE) and external VRM
  *     Animation 1.0 clips retargeted onto VRM 0.x or VRM 1.0 humanoid rigs.
- *   - Per-primitive default material is PHONG; callers may override.
+ *   - Per-primitive materials may be installed by the host; callers may
+ *     still override every primitive with one material at draw time.
  *
- * Out of subset (skipped, not fatal): external buffers/URIs, images/textures,
- * morph targets, KHR material extensions, and multiple scenes. These remain
+ * Out of subset (skipped, not fatal): external buffers/URIs, image decoding,
+ * morph targets, and multiple scenes. Image decoding and glTF material
+ * construction live in the safe Rust content layer. These remain
  * future work; the loader reports FLUX_ERROR_UNSUPPORTED only when a mesh
  * cannot be built at all.
  */
@@ -79,6 +81,15 @@ FLUX_SG_API flux_result flux_sg_load_glb(flux_device *device, const void *glb_by
 FLUX_SG_API flux_sg_scene *flux_sg_scene_retain(flux_sg_scene *scene);
 FLUX_SG_API void flux_sg_scene_release(flux_sg_scene *scene);
 
+/* Transactionally replace the scene-owned per-index material table and
+ * fallback material. Every non-NULL material is retained. Primitive material
+ * indices come directly from glTF; missing/out-of-range entries use fallback.
+ * Passing an empty table and NULL fallback clears installed materials. */
+FLUX_SG_API flux_result flux_sg_scene_set_materials(flux_sg_scene *scene,
+                                                    flux_material *const *materials,
+                                                    uint32_t material_count,
+                                                    flux_material *fallback);
+
 /* Number of mesh primitives in the scene (diagnostic). */
 FLUX_SG_API uint32_t flux_sg_scene_primitive_count(const flux_sg_scene *scene);
 
@@ -121,9 +132,8 @@ FLUX_SG_API void flux_sg_scene_reset_pose(flux_sg_scene *scene);
 /* ================================================================== */
 
 typedef struct flux_sg_draw_opts {
-    /* Required: the material to draw primitives with. The scene is
-     * format-agnostic and owns no material; the host creates one matching
-     * its render target. NULL => the draw is a no-op. */
+    /* Optional whole-scene override. NULL selects the scene's installed
+     * per-primitive materials and fallback. */
     flux_material *material;
     /* NULL = FLUX_SCENE_LIGHT_DEFAULT. Ignored by UNLIT materials. */
     const flux_scene_light *light;
@@ -132,8 +142,8 @@ typedef struct flux_sg_draw_opts {
 /* Record one flux_scene_draw_mesh(_lit) per primitive, composed with each
  * node's world matrix. Must be called inside flux_frame_begin_pass /
  * flux_frame_end_pass on a pass whose attachments match `opts->material`'s
- * color/depth formats. No-op if frame/cam/scene is NULL or opts->material
- * is NULL. */
+ * color/depth formats. OPAQUE/MASK primitives are recorded before BLEND
+ * primitives. No-op if frame/cam/scene/opts is NULL. */
 FLUX_SG_API void flux_sg_draw(flux_frame *frame, const flux_camera *cam, const flux_sg_scene *scene,
                               const flux_sg_draw_opts *opts);
 

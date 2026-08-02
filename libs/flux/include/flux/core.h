@@ -178,6 +178,7 @@ typedef enum flux_struct_type {
     FLUX_TYPE_CANVAS_PASS_DESC = 19,
     FLUX_TYPE_LIQUID_GLASS_DESC = 20,
     FLUX_TYPE_MESH_SKIN_DESC = 21,
+    FLUX_TYPE_MATERIAL_SURFACE_DESC = 22,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -214,7 +215,54 @@ typedef struct flux_frame flux_frame;
 typedef struct flux_readback flux_readback;
 typedef struct flux_buffer flux_buffer;
 typedef struct flux_target flux_target;
-/* flux_image lives in <flux/canvas.h> — it's a canvas/2D concept. */
+typedef struct flux_image flux_image;
+
+/* ------------------------------------------------------------------ */
+/*  Sampled image (refcounted GPU resource)                           */
+/* ------------------------------------------------------------------ */
+
+/* Images are core GPU resources shared by canvas, scene, and effect
+ * modules. Pixel uploads are tightly packed and copied before create/update
+ * returns. Render-target helpers keep the image sampleable between passes. */
+typedef struct flux_image_desc {
+    flux_struct_type type; /* FLUX_TYPE_IMAGE_DESC */
+    const void *next;
+    uint32_t width;
+    uint32_t height;
+    flux_format format;       /* must be an 8-bit colour format */
+    const void *initial_data; /* optional; size = w*h*bytes_per_pixel */
+} flux_image_desc;
+
+#define FLUX_IMAGE_DESC_INIT {.type = FLUX_TYPE_IMAGE_DESC}
+
+FLUX_NODISCARD FLUX_API flux_result flux_image_create(flux_device *d,
+                                                      const flux_image_desc *desc,
+                                                      flux_image **out);
+FLUX_NODISCARD FLUX_API flux_image *flux_image_retain(flux_image *image);
+FLUX_API void flux_image_release(flux_image *image);
+FLUX_API uint32_t flux_image_width(const flux_image *image);
+FLUX_API uint32_t flux_image_height(const flux_image *image);
+FLUX_API flux_format flux_image_format(const flux_image *image);
+
+/* Create a COLOR_ATTACHMENT | SAMPLED image with undefined initial contents.
+ * Prepare it immediately before flux_frame_begin_pass and finish it after
+ * flux_frame_end_pass; outside that interval it is sampleable. */
+FLUX_NODISCARD FLUX_API flux_result flux_image_create_render_target(flux_device *d,
+                                                                    uint32_t width,
+                                                                    uint32_t height,
+                                                                    flux_format format,
+                                                                    flux_image **out);
+FLUX_NODISCARD FLUX_API flux_result flux_frame_prepare_image_target(flux_frame *frame,
+                                                                    flux_image *target);
+FLUX_NODISCARD FLUX_API flux_result flux_frame_finish_image_target(flux_frame *frame,
+                                                                   flux_image *target);
+
+/* Upload tightly packed pixels into an in-bounds sub-region. The image view
+ * and bindless handle remain valid across the update. */
+FLUX_NODISCARD FLUX_API flux_result flux_image_update_region(flux_image *image, uint32_t x,
+                                                             uint32_t y, uint32_t width,
+                                                             uint32_t height, const void *data,
+                                                             size_t bytes);
 
 /* Emit a printf-style diagnostic through a device's logger (if any).
  * No-op when the device has no logger wired. Modules that treat

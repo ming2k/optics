@@ -9,8 +9,10 @@
 
 use std::fmt;
 
-use flux::{Camera, Device, Material, SceneLight, ScenePass};
+use flux::{Camera, Device, Format, Material, SceneLight, ScenePass};
 use flux_scene_graph_sys as sys;
+
+mod materials;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Error(pub sys::flux_result);
@@ -45,6 +47,71 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+/// Render-target formats used to construct a GLB's per-primitive materials.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MaterialTarget {
+    pub color_format: Format,
+    pub depth_format: Format,
+}
+
+/// Failure while validating a GLB or constructing its GPU material resources.
+#[derive(Debug)]
+pub enum LoadError {
+    Scene(Error),
+    Gltf(gltf::Error),
+    Image(image::ImageError),
+    Flux(flux::Error),
+    Unsupported(String),
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Scene(error) => error.fmt(f),
+            Self::Gltf(error) => write!(f, "invalid glTF: {error}"),
+            Self::Image(error) => write!(f, "failed to decode glTF image: {error}"),
+            Self::Flux(error) => error.fmt(f),
+            Self::Unsupported(message) => write!(f, "unsupported glTF material: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Scene(error) => Some(error),
+            Self::Gltf(error) => Some(error),
+            Self::Image(error) => Some(error),
+            Self::Flux(error) => Some(error),
+            Self::Unsupported(_) => None,
+        }
+    }
+}
+
+impl From<Error> for LoadError {
+    fn from(value: Error) -> Self {
+        Self::Scene(value)
+    }
+}
+
+impl From<gltf::Error> for LoadError {
+    fn from(value: gltf::Error) -> Self {
+        Self::Gltf(value)
+    }
+}
+
+impl From<image::ImageError> for LoadError {
+    fn from(value: image::ImageError) -> Self {
+        Self::Image(value)
+    }
+}
+
+impl From<flux::Error> for LoadError {
+    fn from(value: flux::Error) -> Self {
+        Self::Flux(value)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bounds {
@@ -85,6 +152,36 @@ impl Scene {
             )
         })?;
         Ok(Scene { raw })
+    }
+
+    /// Load a GLB together with its base-colour textures and per-primitive
+    /// materials. Image data is decoded with bounded resource limits, uploaded
+    /// as sRGB, and retained by the installed materials.
+    pub fn from_glb_with_materials(
+        device: &Device,
+        bytes: &[u8],
+        target: MaterialTarget,
+    ) -> Result<Scene, LoadError> {
+        let gltf = gltf::Gltf::from_slice(bytes)?;
+        let (materials, fallback) = materials::load(device, &gltf, target)?;
+        let scene = Self::from_glb(device, bytes)?;
+        let raw_materials: Vec<*mut sys::flux_material> = materials
+            .iter()
+            .map(|material| material.as_raw() as *mut sys::flux_material)
+            .collect();
+        Error::check(unsafe {
+            sys::flux_sg_scene_set_materials(
+                scene.raw,
+                if raw_materials.is_empty() {
+                    std::ptr::null()
+                } else {
+                    raw_materials.as_ptr()
+                },
+                raw_materials.len() as u32,
+                fallback.as_raw() as *mut sys::flux_material,
+            )
+        })?;
+        Ok(scene)
     }
 
     pub fn primitive_count(&self) -> u32 {
@@ -150,6 +247,32 @@ impl Scene {
         let raw_light = light.map(SceneLight::as_raw);
         let opts = sys::flux_sg_draw_opts {
             material: material.as_raw() as *mut sys::flux_material,
+            light: raw_light
+                .as_ref()
+                .map(|value| value as *const _ as *const sys::flux_scene_light)
+                .unwrap_or(std::ptr::null()),
+        };
+        unsafe {
+            sys::flux_sg_draw(
+                pass.as_raw() as *mut sys::flux_frame,
+                camera.as_raw() as *const sys::flux_camera,
+                self.raw,
+                &opts,
+            )
+        };
+    }
+
+    /// Draw using the per-primitive materials installed by
+    /// [`Scene::from_glb_with_materials`].
+    pub fn draw_materials(
+        &self,
+        pass: &ScenePass<'_, '_>,
+        camera: &Camera,
+        light: Option<&SceneLight>,
+    ) {
+        let raw_light = light.map(SceneLight::as_raw);
+        let opts = sys::flux_sg_draw_opts {
+            material: std::ptr::null_mut(),
             light: raw_light
                 .as_ref()
                 .map(|value| value as *const _ as *const sys::flux_scene_light)

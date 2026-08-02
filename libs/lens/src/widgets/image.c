@@ -8,7 +8,8 @@
  * falls back to the theme font size. Identity is stack-derived like
  * lens_icon, so repeated calls in a loop (dock tiles, launcher rows) each
  * resolve to a distinct node. */
-static void image_impl(lens *ui, flux_image *image, float w, float h, flux_color tint) {
+static void image_impl(lens *ui, flux_image *image, float w, float h, flux_color tint,
+                       lens_foreground_outline outline) {
     ui->next_disabled = false;
     ui->next_error = false;
     lens_id nid = lensi_gen_widget_id(ui, "");
@@ -37,16 +38,24 @@ static void image_impl(lens *ui, flux_image *image, float w, float h, flux_color
                             .kind = LENS_DRAW_IMAGE,
                             .rel = {0, 0, w, h},
                             .color = tint,
+                            .outline_color = outline.color,
+                            .outline_width = outline.width > 0.0f ? outline.width : 0.0f,
                             .image = image,
                         });
 }
 
 LENS_API void lens_image(lens *ui, flux_image *image, float w, float h) {
-    image_impl(ui, image, w, h, flux_color_rgba_premul(255, 255, 255, 255));
+    image_impl(ui, image, w, h, flux_color_rgba_premul(255, 255, 255, 255),
+               (lens_foreground_outline){0});
 }
 
 LENS_API void lens_image_tinted(lens *ui, flux_image *image, float w, float h, flux_color tint) {
-    image_impl(ui, image, w, h, tint);
+    image_impl(ui, image, w, h, tint, (lens_foreground_outline){0});
+}
+
+LENS_API void lens_image_tinted_outlined(lens *ui, flux_image *image, float w, float h,
+                                         flux_color tint, lens_foreground_outline outline) {
+    image_impl(ui, image, w, h, tint, outline);
 }
 
 /* Texture-backed variant of icon_button_impl: identical hover/active/click
