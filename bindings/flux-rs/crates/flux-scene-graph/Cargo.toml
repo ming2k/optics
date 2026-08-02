@@ -8,7 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-flux = { path = "../flux", version = "0.0.8" }
-flux-scene-graph-sys = { path = "../flux-scene-graph-sys", version = "0.0.8" }
+flux = { path = "../flux", version = "0.0.9" }
+flux-scene-graph-sys = { path = "../flux-scene-graph-sys", version = "0.0.9" }
 gltf = { version = "1.4.1", default-features = false, features = ["KHR_materials_unlit", "KHR_texture_transform"] }
 image = { version = "=0.25.8", default-features = false, features = ["jpeg", "png"] }
