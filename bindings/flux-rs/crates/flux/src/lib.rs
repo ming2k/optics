@@ -1780,6 +1780,43 @@ impl Canvas {
         };
     }
 
+    /// Draw an image through one antialiased rounded clip independent of its
+    /// destination. Reuse the same clip for every image in a composed surface
+    /// tree so only the complete preview receives rounded corners.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_image_clipped_rrect_with_paint(
+        &self,
+        image: &Image,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        clip_x: f32,
+        clip_y: f32,
+        clip_w: f32,
+        clip_h: f32,
+        radius: f32,
+        paint: &Paint,
+    ) {
+        let dst = sys::flux_rect { x, y, w, h };
+        let clip = sys::flux_rect {
+            x: clip_x,
+            y: clip_y,
+            w: clip_w,
+            h: clip_h,
+        };
+        unsafe {
+            sys::flux_canvas_draw_image_clipped_rrect(
+                self.raw,
+                image.raw,
+                dst,
+                clip,
+                radius,
+                paint.as_raw(),
+            )
+        };
+    }
+
     /// Draw a sub-rectangle of `image` into `dst`. `src` is the sampled
     /// region in normalised texture coordinates `{u, v, du, dv}` where
     /// `(0.0, 0.0, 1.0, 1.0)` samples the whole image. Used for

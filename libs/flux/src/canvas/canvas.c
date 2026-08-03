@@ -534,7 +534,7 @@ bool canvas_track_foreign_image(flux_canvas *c, flux_image *img) {
 static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux_sampler *sampler,
                                            flux_bindless_handle sh, flux_rect dst, flux_rect src,
                                            flux_color tint, flux_blend_mode blend, uint32_t kind,
-                                           float radius) {
+                                           const flux_rect *rounded_clip, float radius) {
     /* Image draws need a GPU-resident texture (img->bindless): unsupported on
      * a headless CPU canvas. */
     if (!c->device || sh == FLUX_BINDLESS_INVALID)
@@ -576,14 +576,15 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
     pc.image_src[1] = src.y;
     pc.image_src[2] = src.w;
     pc.image_src[3] = src.h;
-    if (kind == 5u) {
+    if (rounded_clip) {
         float scale = flux_canvas_mat3x2_pixel_scale(tx);
-        flux_point center = {dst.x + dst.w * 0.5f, dst.y + dst.h * 0.5f};
+        flux_point center = {rounded_clip->x + rounded_clip->w * 0.5f,
+                             rounded_clip->y + rounded_clip->h * 0.5f};
         flux_point transformed = flux_mat3x2_transform_point(tx, center);
         pc.image_dst[0] = transformed.x;
         pc.image_dst[1] = transformed.y;
-        pc.image_dst[2] = dst.w * 0.5f * scale;
-        pc.image_dst[3] = dst.h * 0.5f * scale;
+        pc.image_dst[2] = rounded_clip->w * 0.5f * scale;
+        pc.image_dst[3] = rounded_clip->h * 0.5f * scale;
         pc.grad_radius = fminf(fmaxf(radius * scale, 0.0f),
                                fminf(pc.image_dst[2], pc.image_dst[3]));
     }
@@ -679,7 +680,8 @@ void flux_canvas_draw_image(flux_canvas *c, flux_image *img, flux_rect dst,
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
     flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
     flux_blend_mode blend = paint ? paint->blend : FLUX_BLEND_SRC_OVER;
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, blend, 3u, 0.0f);
+    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, blend, 3u, NULL,
+                                   0.0f);
 }
 
 void flux_canvas_draw_image_opaque(flux_canvas *c, flux_image *img, flux_rect dst) {
@@ -688,7 +690,7 @@ void flux_canvas_draw_image_opaque(flux_canvas *c, flux_image *img, flux_rect ds
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
     draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE,
                                    flux_color_rgba_premul(255, 255, 255, 255), FLUX_BLEND_SRC, 6u,
-                                   0.0f);
+                                   NULL, 0.0f);
 }
 
 void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *img, flux_rect dst, float radius,
@@ -698,7 +700,18 @@ void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *img, flux_rect dst
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
     flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
     flux_blend_mode blend = paint ? paint->blend : FLUX_BLEND_SRC_OVER;
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, blend, 5u,
+    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, blend, 5u, &dst,
+                                   radius);
+}
+
+void flux_canvas_draw_image_clipped_rrect(flux_canvas *c, flux_image *img, flux_rect dst,
+                                          flux_rect clip, float radius, const flux_paint *paint) {
+    if (!c || !c->recording || !img || clip.w <= 0.0f || clip.h <= 0.0f)
+        return;
+    flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
+    flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
+    flux_blend_mode blend = paint ? paint->blend : FLUX_BLEND_SRC_OVER;
+    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, blend, 5u, &clip,
                                    radius);
 }
 
@@ -707,8 +720,8 @@ void flux_canvas_draw_image_sub(flux_canvas *c, flux_image *img, flux_rect dst, 
         return;
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
     draw_image_with_sampler_handle(c, img, NULL, sh, dst, src,
-                                   flux_color_rgba_premul(255, 255, 255, 255),
-                                   FLUX_BLEND_SRC_OVER, 3u, 0.0f);
+                                   flux_color_rgba_premul(255, 255, 255, 255), FLUX_BLEND_SRC_OVER,
+                                   3u, NULL, 0.0f);
 }
 
 void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image *img, flux_rect dst,
@@ -718,7 +731,7 @@ void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image *img, flux_rec
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
     draw_image_with_sampler_handle(c, img, NULL, sh, dst, src,
                                    flux_color_rgba_premul(255, 255, 255, 255), FLUX_BLEND_SRC, 6u,
-                                   0.0f);
+                                   NULL, 0.0f);
 }
 
 void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *img, flux_sampler *sampler,
@@ -728,7 +741,7 @@ void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *img, flux_sample
     flux_bindless_handle sh = flux_sampler_bindless_handle(sampler);
     flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
     flux_blend_mode blend = paint ? paint->blend : FLUX_BLEND_SRC_OVER;
-    draw_image_with_sampler_handle(c, img, sampler, sh, dst, FLUX_SRC_WHOLE, tint, blend, 3u,
+    draw_image_with_sampler_handle(c, img, sampler, sh, dst, FLUX_SRC_WHOLE, tint, blend, 3u, NULL,
                                    0.0f);
 }
 
@@ -737,8 +750,8 @@ void flux_canvas_draw_image_coverage(flux_canvas *c, flux_image *img, flux_rect 
     if (!c || !c->recording || !img)
         return;
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint,
-                                   FLUX_BLEND_SRC_OVER, 4u, 0.0f);
+    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, FLUX_BLEND_SRC_OVER,
+                                   4u, NULL, 0.0f);
 }
 
 void flux_canvas_draw_image_coverage_sub(flux_canvas *c, flux_image *img, flux_rect dst,
@@ -746,7 +759,7 @@ void flux_canvas_draw_image_coverage_sub(flux_canvas *c, flux_image *img, flux_r
     if (!c || !c->recording || !img)
         return;
     flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, src, tint, FLUX_BLEND_SRC_OVER, 4u,
+    draw_image_with_sampler_handle(c, img, NULL, sh, dst, src, tint, FLUX_BLEND_SRC_OVER, 4u, NULL,
                                    0.0f);
 }
 

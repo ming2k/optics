@@ -345,6 +345,15 @@ FLUX_API void flux_canvas_draw_image_opaque(flux_canvas *c, flux_image *image, f
 FLUX_API void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *image, flux_rect dst,
                                            float radius, const flux_paint *optional_paint);
 
+/* Draw an image through an analytic rounded clip that is independent of the
+ * image destination. This is the compositor path for a window assembled from
+ * several surface images: every draw receives the same clip, so the complete
+ * subtree has one antialiased silhouette instead of rounding each surface.
+ * The clip follows translation and uniform scale. */
+FLUX_API void flux_canvas_draw_image_clipped_rrect(flux_canvas *c, flux_image *image, flux_rect dst,
+                                                   flux_rect clip, float radius,
+                                                   const flux_paint *optional_paint);
+
 /* Draw a sub-rectangle of `image` into `dst`. `src` is the sampled region
  * in NORMALISED texture coordinates {u, v, du, dv} where (0,0,1,1) is the
  * whole image. Used by compositors that need source-crop (Wayland

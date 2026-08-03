@@ -157,6 +157,12 @@ static void draw_round_image(flux_canvas *canvas, void *user) {
                                  nullptr);
 }
 
+static void draw_image_through_independent_round_clip(flux_canvas *canvas, void *user) {
+    image_transform_case *tc = user;
+    flux_canvas_draw_image_clipped_rrect(canvas, tc->image, (flux_rect){16, 16, 96, 96},
+                                         (flux_rect){32, 32, 64, 64}, 16.0f, &tc->paint);
+}
+
 static void draw_opaque_image(flux_canvas *canvas, void *user) {
     flux_canvas_draw_image_opaque(canvas, user, (flux_rect){0, 0, (float)W, (float)H});
 }
@@ -454,6 +460,14 @@ int main(void) {
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         EXPECT(px_at(px, 64, 64)[0] > 80); /* image centre survives */
         EXPECT(px_at(px, 33, 33)[0] < 8);  /* square corner is clipped */
+
+        EXPECT(render_frame(s, canvas, draw_image_through_independent_round_clip, &tc.image) ==
+               FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, 64, 64)[0] > 40); /* destination content survives */
+        EXPECT(px_at(px, 24, 64)[0] < 8);  /* inside dst, outside shared clip */
+        EXPECT(px_at(px, 33, 33)[0] < 8);  /* shared clip has analytic corners */
 
         EXPECT(render_frame(s, canvas, record_rotated_image, &tc) == FLUX_OK);
         memset(px, 0xCD, BYTES);

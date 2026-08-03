@@ -59,3 +59,4 @@ a decision, write a new ADR and update the old one's status to
 | 0048 | [Textured surface materials and core images](0048-textured-surface-materials-and-core-images.md) | Accepted |
 | 0049 | [Strict DRM identity for Vulkan device selection](0049-strict-drm-vulkan-device-selection.md) | Accepted |
 | 0050 | [Single-body liquid-glass focus field](0050-single-body-liquid-glass-focus-field.md) | Accepted |
+| 0051 | [Independent rounded image clip for composed previews](0051-independent-rounded-image-clip.md) | Accepted |
