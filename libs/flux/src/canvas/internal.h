@@ -163,6 +163,17 @@ struct flux_canvas {
      * old bail-out behaviour. Replaces a direct peek at the GPU stencil view. */
     bool stencil_available;
 
+    /* True only for an explicitly requested no-stencil pass. Geometry that
+     * cannot be represented without the stencil-then-cover fallback must
+     * diagnose and drop the draw instead of silently substituting different
+     * fill semantics. CPU and Vulkan backends set this identically. */
+    bool stencil_forbidden;
+
+    /* Sticky error for the active pass. Void draw calls cannot return a
+     * stencil-contract violation directly, so checked pass termination exposes
+     * it without relying on thread-local diagnostic polling. First error wins. */
+    flux_result pass_error;
+
     /* Physical framebuffer size of the active pass, set by the backend at
      * begin_pass. build_push reads it for the NDC transform, so the front end
      * needs no surface handle while recording (the CPU backend has none). */
@@ -233,6 +244,46 @@ struct flux_canvas {
     /* Diagnostics: cumulative successful end_record / replay counts. */
     uint64_t records_created, records_replayed;
 };
+
+/* Internal, ABI-independent pass policy. The public descriptor's pNext chain
+ * is parsed exactly once by canvas.c; backends consume this normalized value
+ * and never inspect extension memory themselves. */
+typedef struct canvas_pass_config {
+    const flux_color *clear_color;
+    flux_canvas_antialias antialias;
+    int32_t render_offset_x;
+    int32_t render_offset_y;
+    uint32_t render_width;
+    uint32_t render_height;
+    bool skip_stencil;
+} canvas_pass_config;
+
+/* Resolve the public zero-means-full render-area convention against one
+ * concrete framebuffer. Both backends use this so CPU and Vulkan reject the
+ * same malformed/out-of-bounds descriptors and begin with the same scissor. */
+static inline bool canvas_pass_render_area(const canvas_pass_config *config, uint32_t fb_width,
+                                           uint32_t fb_height, flux_recti *out) {
+    if (!config || !out || fb_width == 0 || fb_height == 0)
+        return false;
+    bool default_extent = config->render_width == 0 && config->render_height == 0;
+    if (default_extent) {
+        if (config->render_offset_x != 0 || config->render_offset_y != 0)
+            return false;
+        *out = (flux_recti){0, 0, fb_width, fb_height};
+        return true;
+    }
+    if (config->render_width == 0 || config->render_height == 0 || config->render_offset_x < 0 ||
+        config->render_offset_y < 0)
+        return false;
+    uint32_t x = (uint32_t)config->render_offset_x;
+    uint32_t y = (uint32_t)config->render_offset_y;
+    if (x >= fb_width || y >= fb_height || config->render_width > fb_width - x ||
+        config->render_height > fb_height - y)
+        return false;
+    *out = (flux_recti){config->render_offset_x, config->render_offset_y, config->render_width,
+                        config->render_height};
+    return true;
+}
 
 /* Vertex layout matches std430 buffer_reference in
  * src/canvas/shaders/canvas_solid.vert. The forward declaration above
@@ -374,17 +425,17 @@ typedef enum canvas_pipe_id {
 
 flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format,
                                 VkSampleCountFlagBits samples, flux_paint_kind kind,
-                                flux_blend_mode blend, VkPipelineLayout *out_layout,
-                                VkPipeline *out_pipeline);
+                                flux_blend_mode blend, bool with_stencil,
+                                VkPipelineLayout *out_layout, VkPipeline *out_pipeline);
 flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
                                    VkSampleCountFlagBits samples, canvas_pipe_id id,
-                                   flux_blend_mode blend, VkPipelineLayout *out_layout,
-                                   VkPipeline *out_pipeline);
+                                   flux_blend_mode blend, bool with_stencil,
+                                   VkPipelineLayout *out_layout, VkPipeline *out_pipeline);
 
-/* Stencil format every canvas pipeline (and the canvas's stencil
- * attachment) uses on this device. Probed once: S8_UINT preferred,
- * combined depth-stencil fallbacks; VK_FORMAT_UNDEFINED when nothing
- * supports DEPTH_STENCIL_ATTACHMENT in optimal tiling. */
+/* Stencil format used by stencil-capable Canvas passes/pipeline variants on
+ * this device. Probed once: S8_UINT preferred, combined depth-stencil
+ * fallbacks; VK_FORMAT_UNDEFINED when nothing supports the attachment. The
+ * independent no-stencil variants always use VK_FORMAT_UNDEFINED. */
 VkFormat flux_canvas_stencil_format(flux_device *d);
 
 void *canvas_state_get_or_init(flux_device *d);

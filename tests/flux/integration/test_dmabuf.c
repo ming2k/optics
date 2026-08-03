@@ -177,13 +177,15 @@ int main(void) {
                             flux_canvas *canvas = nullptr;
                             EXPECT(flux_canvas_create(&canvas_desc, &canvas) == FLUX_OK);
                             if (canvas) {
-                                /* The second frame exercises the release from
-                                 * frame one and its matching reacquire. A new
-                                 * producer submission supplies a fresh
-                                 * sync_file without rebuilding `sampled`. */
-                                for (uint32_t frame_index = 0; frame_index < 2; ++frame_index) {
+                                /* Repeated frames exercise release/reacquire
+                                 * without rebuilding `sampled`. Eight frames
+                                 * wrap the three frame slots twice, proving a
+                                 * consumed temporary SYNC_FD payload can retire
+                                 * behind the slot fence and its VkSemaphore can
+                                 * be imported again from the pool. */
+                                for (uint32_t frame_index = 0; frame_index < 8; ++frame_index) {
                                     int reuse_sync_fd = -1;
-                                    if (frame_index == 1 && flux_dmabuf_sync_supported(dd)) {
+                                    if (frame_index > 0 && flux_dmabuf_sync_supported(dd)) {
                                         flux_frame *producer_frame = nullptr;
                                         EXPECT(flux_surface_begin_frame(
                                                    surface, nullptr, &producer_frame) == FLUX_OK);

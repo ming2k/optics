@@ -192,13 +192,93 @@ static flux_result dmabuf_enum_sampleable_importable_modifiers(flux_device *d, V
     return FLUX_OK;
 }
 
-static flux_result import_sync_fd_semaphore(flux_device *d, int acquire_sync_fd, VkSemaphore *out) {
-    *out = VK_NULL_HANDLE;
-    if (!d->has_external_semaphore_fd) {
-        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "acquire_sync_fd requires VK_KHR_external_semaphore_fd");
-        return FLUX_ERROR_UNSUPPORTED;
+static VkSemaphore create_sync_fd_semaphore(flux_device *d) {
+    VkExportSemaphoreCreateInfo export_info = {
+        .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+        .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+    };
+    VkSemaphoreCreateInfo sci = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = &export_info,
+    };
+    VkSemaphore semaphore = VK_NULL_HANDLE;
+    VkResult vr = vkCreateSemaphore(d->device, &sci, nullptr, &semaphore);
+    if (vr != VK_SUCCESS) {
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dma-buf acquire semaphore create failed", vr);
+        return VK_NULL_HANDLE;
+    }
+    return semaphore;
+}
+
+VkSemaphore flux_dmabuf_acquire_semaphore_take(flux_device *d) {
+    if (!d || !d->device || !d->has_external_semaphore_fd)
+        return VK_NULL_HANDLE;
+
+    VkSemaphore semaphore = VK_NULL_HANDLE;
+    if (d->dmabuf_acquire_pool_lock_initialized) {
+        pthread_mutex_lock(&d->dmabuf_acquire_pool_lock);
+        if (d->dmabuf_acquire_pool_count > 0)
+            semaphore = d->dmabuf_acquire_pool[--d->dmabuf_acquire_pool_count];
+        pthread_mutex_unlock(&d->dmabuf_acquire_pool_lock);
+    }
+    return semaphore ? semaphore : create_sync_fd_semaphore(d);
+}
+
+void flux_dmabuf_acquire_semaphore_recycle(flux_device *d, VkSemaphore semaphore) {
+    if (!d || !d->device || !semaphore)
+        return;
+    if (!d->dmabuf_acquire_pool_lock_initialized) {
+        vkDestroySemaphore(d->device, semaphore, nullptr);
+        return;
     }
 
+    pthread_mutex_lock(&d->dmabuf_acquire_pool_lock);
+    if (d->dmabuf_acquire_pool_count == d->dmabuf_acquire_pool_capacity) {
+        uint32_t next_capacity = d->dmabuf_acquire_pool_capacity
+                                     ? d->dmabuf_acquire_pool_capacity * 2u
+                                     : 8u;
+        VkSemaphore *grown = flux_internal_alloc(d, (size_t)next_capacity * sizeof(*grown));
+        if (grown) {
+            if (d->dmabuf_acquire_pool_count > 0)
+                memcpy(grown, d->dmabuf_acquire_pool,
+                       (size_t)d->dmabuf_acquire_pool_count * sizeof(*grown));
+            flux_internal_free(d, d->dmabuf_acquire_pool);
+            d->dmabuf_acquire_pool = grown;
+            d->dmabuf_acquire_pool_capacity = next_capacity;
+        }
+    }
+    if (d->dmabuf_acquire_pool_count < d->dmabuf_acquire_pool_capacity) {
+        d->dmabuf_acquire_pool[d->dmabuf_acquire_pool_count++] = semaphore;
+        semaphore = VK_NULL_HANDLE;
+    }
+    pthread_mutex_unlock(&d->dmabuf_acquire_pool_lock);
+
+    if (semaphore)
+        vkDestroySemaphore(d->device, semaphore, nullptr);
+}
+
+void flux_dmabuf_acquire_semaphore_pool_destroy(flux_device *d) {
+    if (!d)
+        return;
+    if (d->dmabuf_acquire_pool_lock_initialized)
+        pthread_mutex_lock(&d->dmabuf_acquire_pool_lock);
+    VkSemaphore *pool = d->dmabuf_acquire_pool;
+    uint32_t count = d->dmabuf_acquire_pool_count;
+    d->dmabuf_acquire_pool = nullptr;
+    d->dmabuf_acquire_pool_count = 0;
+    d->dmabuf_acquire_pool_capacity = 0;
+    if (d->dmabuf_acquire_pool_lock_initialized)
+        pthread_mutex_unlock(&d->dmabuf_acquire_pool_lock);
+
+    if (d->device) {
+        for (uint32_t i = 0; i < count; ++i)
+            vkDestroySemaphore(d->device, pool[i], nullptr);
+    }
+    flux_internal_free(d, pool);
+}
+
+static flux_result import_sync_fd_payload(flux_device *d, int acquire_sync_fd,
+                                          VkSemaphore semaphore) {
     int import_fd = dup(acquire_sync_fd);
     if (import_fd < 0) {
         flux_result dr =
@@ -206,7 +286,6 @@ static flux_result import_sync_fd_semaphore(flux_device *d, int acquire_sync_fd,
         FLUX_FAIL(dr, "failed to duplicate acquire_sync_fd for Vulkan import");
         return dr;
     }
-    bool fd_transferred = false;
 
     PFN_vkImportSemaphoreFdKHR pImportSemaphoreFd =
         (PFN_vkImportSemaphoreFdKHR)vkGetDeviceProcAddr(d->device, "vkImportSemaphoreFdKHR");
@@ -216,41 +295,54 @@ static flux_result import_sync_fd_semaphore(flux_device *d, int acquire_sync_fd,
         return FLUX_ERROR_UNSUPPORTED;
     }
 
-    VkExportSemaphoreCreateInfo export_info = {
-        .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
-        .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
-    };
-    VkSemaphoreCreateInfo sci = {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-        .pNext = &export_info,
-    };
-    VkResult vr = vkCreateSemaphore(d->device, &sci, nullptr, out);
-    if (vr != VK_SUCCESS) {
-        close(import_fd);
-        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dma-buf acquire semaphore create failed", vr);
-        return FLUX_ERROR_BACKEND_FAILURE;
-    }
-
     VkImportSemaphoreFdInfoKHR import_info = {
         .sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR,
-        .semaphore = *out,
+        .semaphore = semaphore,
         .flags = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT,
         .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
         .fd = import_fd,
     };
-    vr = pImportSemaphoreFd(d->device, &import_info);
-    if (vr == VK_SUCCESS)
-        fd_transferred = true;
+    VkResult vr = pImportSemaphoreFd(d->device, &import_info);
     if (vr != VK_SUCCESS) {
-        if (!fd_transferred)
-            close(import_fd);
-        vkDestroySemaphore(d->device, *out, nullptr);
-        *out = VK_NULL_HANDLE;
+        close(import_fd);
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "dma-buf acquire semaphore import failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
-
+    /* A successful SYNC_FD import transfers ownership of import_fd. */
     return FLUX_OK;
+}
+
+static flux_result import_sync_fd_semaphore(flux_device *d, int acquire_sync_fd, VkSemaphore *out) {
+    *out = VK_NULL_HANDLE;
+    if (!d->has_external_semaphore_fd) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "acquire_sync_fd requires VK_KHR_external_semaphore_fd");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    VkSemaphore semaphore = create_sync_fd_semaphore(d);
+    if (!semaphore)
+        return FLUX_ERROR_BACKEND_FAILURE;
+    flux_result r = import_sync_fd_payload(d, acquire_sync_fd, semaphore);
+    if (r != FLUX_OK) {
+        vkDestroySemaphore(d->device, semaphore, nullptr);
+        return r;
+    }
+    *out = semaphore;
+    return FLUX_OK;
+}
+
+static flux_result import_sync_fd_semaphore_pooled(flux_device *d, int acquire_sync_fd,
+                                                   VkSemaphore *out) {
+    *out = flux_dmabuf_acquire_semaphore_take(d);
+    if (!*out)
+        return FLUX_ERROR_BACKEND_FAILURE;
+    flux_result r = import_sync_fd_payload(d, acquire_sync_fd, *out);
+    if (r != FLUX_OK) {
+        /* The import did not install a temporary payload, so this handle is
+         * safe to destroy immediately. */
+        vkDestroySemaphore(d->device, *out, nullptr);
+        *out = VK_NULL_HANDLE;
+    }
+    return r;
 }
 
 /* The FOREIGN -> graphics-family acquire transition is submitted
@@ -326,14 +418,11 @@ fail:
 }
 
 bool flux_dmabuf_supported(const flux_device *d) {
-    if (!d)
-        return false;
-    return d->has_external_memory_fd && d->has_external_memory_dma_buf &&
-           d->has_image_drm_format_modifier && d->has_queue_family_foreign;
+    return d && (d->enabled_features & FLUX_DEVICE_FEATURE_DMABUF) != 0;
 }
 
 bool flux_dmabuf_sync_supported(const flux_device *d) {
-    return d ? d->has_external_semaphore_fd : false;
+    return d && (d->enabled_features & FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE) != 0;
 }
 
 flux_result flux_dmabuf_format_modifiers(flux_device *d, flux_format format,
@@ -374,7 +463,7 @@ flux_result flux_canvas_wait_dmabuf_acquire(flux_canvas *canvas, flux_image *ima
     }
 
     VkSemaphore semaphore = VK_NULL_HANDLE;
-    flux_result r = import_sync_fd_semaphore(canvas->device, acquire_sync_fd, &semaphore);
+    flux_result r = import_sync_fd_semaphore_pooled(canvas->device, acquire_sync_fd, &semaphore);
     if (r != FLUX_OK)
         return r;
     if (!flux_frame_set_foreign_image_acquire(canvas->frame, image, semaphore)) {

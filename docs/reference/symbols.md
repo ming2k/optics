@@ -32,7 +32,11 @@ or report through `flux_get_last_error` as noted.
 
 | Symbol | Description |
 |--------|-------------|
-| `flux_device_create` | Creates the Vulkan instance, picks a physical device, creates the logical device, queues, bindless heap, and pipeline cache. `desc.headless = true` skips all surface and presentation requirements. |
+| `flux_device_drm_node_desc` | Optional `flux_device_desc.next` extension that requires a Vulkan physical device whose `VK_EXT_physical_device_drm` primary or render identity matches `drm_major:drm_minor`. No match returns `FLUX_ERROR_UNSUPPORTED`. |
+| `flux_device_features_desc` | Optional `flux_device_desc.next` extension carrying required and optional semantic capabilities. Required capabilities filter physical devices; optional capabilities are enabled on the selected device when supported. |
+| `flux_device_enabled_features` | Returns the semantic capabilities enabled on the logical device, including complete legacy extension bundles. |
+| `flux_device_get_drm_identity` | Returns the selected Vulkan physical device's DRM primary/render major/minor pairs without exposing raw Vulkan queries. |
+| `flux_device_create` | Creates the Vulkan instance, picks a physical device, creates the logical device, queues, bindless heap, and pipeline cache. `desc.headless = true` skips all surface and presentation requirements; `flux_device_drm_node_desc` makes GPU selection strict. |
 | `flux_device_retain` | Increments the refcount; returns the same handle. |
 | `flux_device_release` | Decrements the refcount; destroys the device (persisting the pipeline cache) at zero. Null-safe. |
 | `flux_device_wait_idle` | Blocks until every queue on the device is idle. |
@@ -369,8 +373,9 @@ Available iff the library was built with `-Dcanvas=true`. Linux only.
 |--------|-------------|
 | `flux_image_import_dmabuf` | Imports a single-plane dma-buf with an explicit DRM format modifier as a sampled `flux_image`. On `FLUX_OK`, flux owns and closes the plane and acquire-sync file descriptors; on error the caller keeps them. `plane_count != 1` returns `FLUX_ERROR_UNSUPPORTED`. |
 | `flux_canvas_wait_dmabuf_acquire` | Adds a Linux sync-file wait for the current canvas frame before it samples an already-imported dma-buf image. Call after `flux_canvas_begin` and before drawing the image. Flux consumes the fd on success; the caller retains it on error. |
-| `flux_dmabuf_supported` | Returns `true` when the device was created with the external-memory and foreign-queue extensions dma-buf import requires. |
-| `flux_dmabuf_sync_supported` | Returns `true` when `acquire_sync_fd` import is available (`VK_KHR_external_semaphore_fd`). |
+| `flux_dmabuf_supported` | Returns `true` when the complete `FLUX_DEVICE_FEATURE_DMABUF` capability is enabled. |
+| `flux_dmabuf_sync_supported` | Returns `true` when the complete `FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE` capability is enabled. |
+| `flux_dmabuf_format_modifiers` | Enumerates only single-plane modifiers proven sampleable and externally importable for a `flux_format`; callers must not synthesize unreported fallbacks. |
 
 ## `<flux/scene.h>`
 

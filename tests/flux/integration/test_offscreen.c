@@ -34,6 +34,10 @@ static const uint8_t *px_at(const uint8_t *px, uint32_t x, uint32_t y) {
     return px + (y * W + x) * 4u;
 }
 
+static const uint8_t *px_at_width(const uint8_t *px, uint32_t width, uint32_t x, uint32_t y) {
+    return px + (y * width + x) * 4u;
+}
+
 static bool near8(uint8_t got, uint8_t want) {
     int d = (int)got - (int)want;
     return d >= -2 && d <= 2; /* UNORM round-trip tolerance */
@@ -78,6 +82,35 @@ static flux_result render_solid_frame(flux_surface *s, flux_canvas *canvas, flux
         if (r != FLUX_OK)
             return r;
     }
+    r = flux_frame_submit(frame);
+    if (r != FLUX_OK)
+        return r;
+    return flux_frame_present(frame);
+}
+
+static flux_result render_pattern_region(flux_surface *s, flux_canvas *canvas,
+                                         const flux_readback_region *region) {
+    flux_frame *frame = nullptr;
+    flux_result r = flux_surface_begin_frame(s, nullptr, &frame);
+    if (r != FLUX_OK)
+        return r;
+    flux_color clear = flux_color_rgba(CLEAR_R, CLEAR_G, CLEAR_B, 255);
+    r = flux_canvas_begin(canvas, frame, &clear);
+    if (r != FLUX_OK)
+        return r;
+    flux_canvas_fill_rect_color(canvas, (flux_rect){W / 4.0f, H / 4.0f, W / 2.0f, H / 2.0f},
+                                flux_color_rgba(255, 255, 255, 255));
+    flux_canvas_fill_rect_color(canvas, (flux_rect){W - 12.0f, 4.0f, 8.0f, 8.0f},
+                                flux_color_rgba(0, 64, 255, 255));
+    flux_canvas_end(canvas);
+    const flux_readback_region empty = {.x = 1, .y = 1, .width = 0, .height = 1};
+    const flux_readback_region outside = {.x = W, .y = 0, .width = 1, .height = 1};
+    EXPECT(flux_frame_request_readback_region(frame, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(flux_frame_request_readback_region(frame, &empty) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(flux_frame_request_readback_region(frame, &outside) == FLUX_ERROR_OUT_OF_RANGE);
+    r = flux_frame_request_readback_region(frame, region);
+    if (r != FLUX_OK)
+        return r;
     r = flux_frame_submit(frame);
     if (r != FLUX_OK)
         return r;
@@ -260,6 +293,10 @@ int main(void) {
         flux_readback *snapshot = nullptr;
         EXPECT(flux_surface_take_readback(snapshot_surface, &snapshot) == FLUX_OK);
         EXPECT(snapshot != nullptr);
+        flux_readback_region full_region = {0};
+        flux_readback_get_region(snapshot, &full_region);
+        EXPECT(full_region.x == 0 && full_region.y == 0);
+        EXPECT(full_region.width == W && full_region.height == H);
         EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) ==
                FLUX_ERROR_UNSUPPORTED);
         memset(px, 0xCD, BYTES);
@@ -274,6 +311,61 @@ int main(void) {
         flux_surface_release(snapshot_surface);
     }
 
+    /* --- region snapshot copies only the requested image offset/extent --- */
+    {
+        flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+        sd.width = W;
+        sd.height = H;
+        flux_surface *region_surface = nullptr;
+        EXPECT(flux_surface_create(d, &sd, &region_surface) == FLUX_OK);
+        flux_canvas *region_canvas = nullptr;
+        flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
+        cd.surface = region_surface;
+        EXPECT(flux_canvas_create(&cd, &region_canvas) == FLUX_OK);
+
+        EXPECT(flux_surface_prepare_readback_region(nullptr, 12, 12) ==
+               FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_surface_prepare_readback_region(region_surface, 0, 12) ==
+               FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_surface_prepare_readback_region(region_surface, W + 1, 12) ==
+               FLUX_ERROR_OUT_OF_RANGE);
+        EXPECT(flux_surface_prepare_readback_region(region_surface, 12, 12) == FLUX_OK);
+
+        const flux_readback_region wanted = {.x = W - 14, .y = 2, .width = 12, .height = 12};
+        EXPECT(render_pattern_region(region_surface, region_canvas, &wanted) == FLUX_OK);
+        flux_device_wait_idle(d);
+        bool ready = false;
+        EXPECT(flux_surface_read_pixels_ready(region_surface, &ready) == FLUX_OK);
+        EXPECT(ready);
+
+        flux_readback *snapshot = nullptr;
+        EXPECT(flux_surface_take_readback(region_surface, &snapshot) == FLUX_OK);
+        flux_readback_region got = {1, 1, 1, 1};
+        flux_readback_get_region(nullptr, &got);
+        EXPECT(got.x == 0 && got.y == 0 && got.width == 0 && got.height == 0);
+        flux_readback_get_region(snapshot, &got);
+        EXPECT(got.x == wanted.x && got.y == wanted.y);
+        EXPECT(got.width == wanted.width && got.height == wanted.height);
+
+        uint8_t crop[12u * 12u * 4u];
+        EXPECT(flux_readback_read_pixels(snapshot, crop, sizeof(crop) - 1) ==
+               FLUX_ERROR_INVALID_ARGUMENT);
+        memset(crop, 0xCD, sizeof(crop));
+        EXPECT(flux_readback_read_pixels(snapshot, crop, sizeof(crop)) == FLUX_OK);
+        const uint8_t *clear = px_at_width(crop, wanted.width, 0, 0); /* surface 50,2 */
+        EXPECT(near8(clear[0], CLEAR_R) && near8(clear[1], CLEAR_G) &&
+               near8(clear[2], CLEAR_B));
+        const uint8_t *blue = px_at_width(crop, wanted.width, 2, 2); /* surface 52,4 */
+        EXPECT(blue[0] < 5 && near8(blue[1], 64) && blue[2] > 250 && blue[3] == 255);
+        const uint8_t *outside = px_at_width(crop, wanted.width, 10, 10); /* surface 60,12 */
+        EXPECT(near8(outside[0], CLEAR_R) && near8(outside[1], CLEAR_G) &&
+               near8(outside[2], CLEAR_B));
+        flux_readback_release(snapshot);
+
+        flux_canvas_destroy(region_canvas);
+        flux_surface_release(region_surface);
+    }
+
     /* --- readback desc: pinned non-exportable, readback always works --- */
     {
         flux_surface_readback_desc rb = FLUX_SURFACE_READBACK_DESC_INIT;
@@ -286,6 +378,7 @@ int main(void) {
         EXPECT(flux_surface_create(d, &sd, &rs) == FLUX_OK);
         EXPECT(rs != nullptr);
         EXPECT(!flux_surface_exportable(rs));
+        EXPECT(flux_surface_prepare_readback_region(rs, 12, 12) == FLUX_ERROR_UNSUPPORTED);
         bool ready = false;
         EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_ERROR_INVALID_STATE);
 

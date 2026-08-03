@@ -93,6 +93,14 @@ test_scene_camera = executable('test_scene_camera',
 )
 test('scene_camera', test_scene_camera, suite : 'unit')
 
+# Pure region policy for persistent liquid-glass slots: outward/clamped body
+# bounds, previous+current clearing, disjoint preservation, and the 64+64 cap.
+test_liquid_glass_regions = executable('test_liquid_glass_regions',
+  'test_liquid_glass_regions.c',
+  dependencies : [test_helpers_dep],
+)
+test('liquid_glass_regions', test_liquid_glass_regions, suite : 'unit')
+
 # glyph_cache compiles its single source file directly (matching the
 # test_canvas_tess pattern). The cache is a pure data structure with no
 # Vulkan / FreeType / Fontconfig dependencies, so this test runs on any

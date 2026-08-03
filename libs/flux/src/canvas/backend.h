@@ -44,13 +44,14 @@ struct flux_canvas_backend {
 
     /* Open a render pass. `target` selects the destination: NULL renders to
      * the canvas's surface (swapchain), non-NULL renders into an offscreen
-     * flux_image (ADR-0017). `clear` is an optional clear colour. The backend
-     * sets up attachments/barriers, binds shared descriptor state, primes the
-     * full-extent scissor, and sets c->stencil_available for the geometry
-     * fallback. On success the caller sets c->recording/pass_active. */
+     * flux_image (ADR-0017). `config` is the normalized clear, antialias,
+     * dirty-render-area, and stencil policy parsed once by the front end from
+     * the stable public descriptor plus its pNext extensions. The backend sets
+     * up attachments/barriers, primes the render-area scissor, and sets
+     * c->stencil_available for the geometry fallback. On success the caller
+     * sets c->recording/pass_active. */
     flux_result (*begin_pass)(const flux_canvas_backend *self, flux_canvas *c, flux_frame *f,
-                              flux_image *target, const flux_color *clear,
-                              flux_canvas_antialias antialias);
+                              flux_image *target, const canvas_pass_config *config);
 
     /* Close the pass opened by begin_pass, emitting any trailing transition
      * (e.g. an offscreen target back to shader-read layout). */

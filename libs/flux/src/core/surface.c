@@ -41,8 +41,7 @@ struct flux_readback {
     flux_device *device;
     flux_staging_buf *staging;
     VkFormat format;
-    uint32_t width;
-    uint32_t height;
+    flux_readback_region region;
 };
 
 static void image_storage_free(flux_device *d, flux_surface_image_storage *storage) {
@@ -426,6 +425,7 @@ static void offscreen_destroy_images(flux_surface *s) {
         s->readback_staging = NULL;
     }
     s->last_readback_slot = UINT32_MAX;
+    s->last_readback_region = (flux_readback_region){0};
     for (uint32_t i = 0; i < s->image_count; ++i) {
         if (s->image_views[i])
             vkDestroyImageView(s->device->device, s->image_views[i], nullptr);
@@ -446,14 +446,37 @@ static void offscreen_destroy_images(flux_surface *s) {
     surface_free_image_storage(s);
 }
 
-static bool modifier_allowed(uint64_t modifier, const uint64_t *allowed, uint32_t allowed_count) {
-    if (!allowed)
-        return true;
-    for (uint32_t i = 0; i < allowed_count; ++i) {
-        if (allowed[i] == modifier)
-            return true;
-    }
-    return false;
+static bool offscreen_modifier_exportable(flux_device *d, VkFormat format, uint64_t modifier) {
+    VkPhysicalDeviceExternalImageFormatInfo eifi = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    VkPhysicalDeviceImageDrmFormatModifierInfoEXT mfi = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT,
+        .pNext = &eifi,
+        .drmFormatModifier = modifier,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    VkPhysicalDeviceImageFormatInfo2 ifi = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+        .pNext = &mfi,
+        .format = format,
+        .type = VK_IMAGE_TYPE_2D,
+        .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+    };
+    VkExternalImageFormatProperties efp = {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES,
+    };
+    VkImageFormatProperties2 ifp = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+        .pNext = &efp,
+    };
+    VkResult vr = vkGetPhysicalDeviceImageFormatProperties2(d->physical_device, &ifi, &ifp);
+    return vr == VK_SUCCESS &&
+           (efp.externalMemoryProperties.externalMemoryFeatures &
+            VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
 }
 
 /* One color image per frame slot; image index == frame slot, so the
@@ -483,8 +506,8 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
     s->hdr_actual = false;
 
     /* Decide whether offscreen images should be exportable as dma-buf. This
-     * requires the device's external-memory / DRM-modifier extensions and a
-     * linear-tiling modifier that supports colour-attachment + transfer. When
+     * requires the device's external-memory / DRM-modifier extensions and an
+     * exportable modifier that supports colour-attachment + transfer. When
      * the host wants zero-copy presentation via linux-dmabuf, it enables the
      * extensions at flux_device_create and we pick the exportable path here.
      * Otherwise we fall back to the original OPTIMAL-tiling slab-allocated
@@ -498,9 +521,14 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
     uint64_t chosen_modifier = 0;
     bool use_modifier = false;
     if (want_export) {
-        /* Query which modifiers support rendering + readback for BGRA8. We
-         * prefer LINEAR (portable, single-plane, always present on the
-         * export side); fall back to the first supported modifier. */
+        /* Query which modifiers support rendering + readback for BGRA8.
+         * `allowed_modifiers`, when present, is a producer preference order:
+         * compositors put device-native tiled layouts first and LINEAR last.
+         * Respecting that order is essential for high-resolution animated
+         * scanout targets; unconditionally preferring LINEAR turns every
+         * frame into an uncompressed full-image memory write. Without an
+         * explicit order, prefer any native layout and keep LINEAR as the
+         * compatibility fallback. */
         VkDrmFormatModifierPropertiesListEXT list = {
             .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
         };
@@ -518,67 +546,47 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
                 const uint32_t need = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
                                       VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
                                       VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-                bool found_linear = false;
-                bool found_any = false;
-                for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {
-                    if ((mods[i].drmFormatModifierTilingFeatures & need) != need)
-                        continue;
-                    if (mods[i].drmFormatModifierPlaneCount != 1)
-                        continue;
-                    if (!modifier_allowed(mods[i].drmFormatModifier, allowed_modifiers,
-                                          allowed_modifier_count))
-                        continue;
-                    if (mods[i].drmFormatModifier == FLUX_DRM_FORMAT_MOD_LINEAR) {
-                        found_linear = true;
-                        break;
+                if (allowed_modifiers && allowed_modifier_count > 0) {
+                    for (uint32_t preferred = 0;
+                         preferred < allowed_modifier_count && !use_modifier; ++preferred) {
+                        for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {
+                            if (mods[i].drmFormatModifier != allowed_modifiers[preferred])
+                                continue;
+                            if ((mods[i].drmFormatModifierTilingFeatures & need) != need ||
+                                mods[i].drmFormatModifierPlaneCount != 1)
+                                continue;
+                            if (!offscreen_modifier_exportable(d, s->format,
+                                                               mods[i].drmFormatModifier))
+                                continue;
+                            chosen_modifier = mods[i].drmFormatModifier;
+                            use_modifier = true;
+                            break;
+                        }
                     }
-                    if (!found_any) {
-                        chosen_modifier = mods[i].drmFormatModifier;
-                        found_any = true;
+                } else {
+                    /* Two passes: native/tiled first, LINEAR only if no native
+                     * exportable modifier is available. */
+                    for (uint32_t fallback = 0; fallback < 2 && !use_modifier; ++fallback) {
+                        for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {
+                            bool linear =
+                                mods[i].drmFormatModifier == FLUX_DRM_FORMAT_MOD_LINEAR;
+                            if (linear != (fallback == 1))
+                                continue;
+                            if ((mods[i].drmFormatModifierTilingFeatures & need) != need ||
+                                mods[i].drmFormatModifierPlaneCount != 1)
+                                continue;
+                            if (!offscreen_modifier_exportable(d, s->format,
+                                                               mods[i].drmFormatModifier))
+                                continue;
+                            chosen_modifier = mods[i].drmFormatModifier;
+                            use_modifier = true;
+                            break;
+                        }
                     }
                 }
-                if (found_linear)
-                    chosen_modifier = FLUX_DRM_FORMAT_MOD_LINEAR;
-                use_modifier = found_linear || found_any;
                 flux_internal_free(d, mods);
             }
         }
-    }
-
-    if (use_modifier) {
-        /* Validate the chosen modifier is actually exportable as a dma-buf. */
-        VkPhysicalDeviceExternalImageFormatInfo eifi = {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
-            .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
-        };
-        VkPhysicalDeviceImageDrmFormatModifierInfoEXT mfi = {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT,
-            .pNext = &eifi,
-            .drmFormatModifier = chosen_modifier,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        };
-        VkPhysicalDeviceImageFormatInfo2 ifi = {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
-            .pNext = &mfi,
-            .format = s->format,
-            .type = VK_IMAGE_TYPE_2D,
-            .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
-            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        };
-        VkExternalImageFormatProperties efp = {
-            .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES,
-        };
-        VkImageFormatProperties2 ifp = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
-            .pNext = &efp,
-        };
-        VkResult vr = vkGetPhysicalDeviceImageFormatProperties2(d->physical_device, &ifi, &ifp);
-        bool exportable =
-            (vr == VK_SUCCESS) && (efp.externalMemoryProperties.externalMemoryFeatures &
-                                   VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
-        if (!exportable)
-            use_modifier = false;
     }
 
     if (allowed_modifiers && !use_modifier) {
@@ -779,6 +787,7 @@ void flux_surface_destroy_swapchain(flux_surface *s) {
         s->readback_staging = NULL;
     }
     s->last_readback_slot = UINT32_MAX;
+    s->last_readback_region = (flux_readback_region){0};
     for (uint32_t i = 0; i < s->image_count; ++i) {
         if (s->image_views[i])
             vkDestroyImageView(s->device->device, s->image_views[i], nullptr);
@@ -909,6 +918,7 @@ flux_result flux_surface_create(flux_device *device, const flux_surface_desc *de
     s->hdr_preferred = desc->hdr_preferred;
     s->last_submitted_slot = UINT32_MAX;
     s->last_readback_slot = UINT32_MAX;
+    s->last_readback_region = (flux_readback_region){0};
     s->frames_in_flight = device->frames_in_flight;
     if (s->frames_in_flight > FLUX_MAX_FRAMES_IN_FLIGHT)
         s->frames_in_flight = FLUX_MAX_FRAMES_IN_FLIGHT;
@@ -1079,6 +1089,7 @@ flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h) {
         s->current_frame = 0;
         s->last_submitted_slot = UINT32_MAX; /* old contents are gone */
         s->last_readback_slot = UINT32_MAX;
+        s->last_readback_region = (flux_readback_region){0};
         return offscreen_create_images(s, w, h, s->offscreen_allowed_modifiers,
                                        s->offscreen_allowed_modifier_count);
     }
@@ -1108,7 +1119,18 @@ void flux_surface_get_info(const flux_surface *s, flux_surface_info *out) {
 /*  Frame readback                                                    */
 /* ------------------------------------------------------------------ */
 
-flux_result flux_surface_prepare_readback(flux_surface *s) {
+static flux_result readback_byte_size(uint32_t width, uint32_t height, size_t *out) {
+    if (!width || !height)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    size_t needed;
+    if (__builtin_mul_overflow((size_t)width, (size_t)height, &needed) ||
+        __builtin_mul_overflow(needed, 4u, &needed))
+        return FLUX_ERROR_OUT_OF_RANGE;
+    *out = needed;
+    return FLUX_OK;
+}
+
+static flux_result ensure_readback_staging(flux_surface *s, uint32_t width, uint32_t height) {
     if (!s)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (!s->readback_supported) {
@@ -1116,14 +1138,68 @@ flux_result flux_surface_prepare_readback(flux_surface *s) {
                   "surface images do not support transfer-source readback");
         return FLUX_ERROR_UNSUPPORTED;
     }
-    if (s->readback_staging)
-        return FLUX_OK;
-    size_t needed;
-    if (__builtin_mul_overflow((size_t)s->extent.width, (size_t)s->extent.height, &needed) ||
-        __builtin_mul_overflow(needed, 4u, &needed))
+    if (!width || !height)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (width > s->extent.width || height > s->extent.height) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "readback extent exceeds surface extent");
         return FLUX_ERROR_OUT_OF_RANGE;
-    return flux_vk_staging_acquire(s->device, needed, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                   &s->readback_staging);
+    }
+    size_t needed;
+    flux_result r = readback_byte_size(width, height, &needed);
+    if (r != FLUX_OK)
+        return r;
+    if (s->readback_staging && s->readback_staging->capacity >= needed)
+        return FLUX_OK;
+
+    /* Allocate first so allocation failure preserves the previous immutable
+     * snapshot. A larger successful request replaces it only after its frame
+     * fence proves the old staging is no longer referenced by the GPU. */
+    flux_staging_buf *replacement = NULL;
+    r = flux_vk_staging_acquire(s->device, needed, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                &replacement);
+    if (r != FLUX_OK)
+        return r;
+    if (s->readback_staging && s->last_readback_slot != UINT32_MAX) {
+        VkResult vr = vkWaitForFences(s->device->device, 1,
+                                      &s->frames[s->last_readback_slot].in_flight, VK_TRUE,
+                                      FLUX_DEFAULT_FRAME_TIMEOUT_NS);
+        if (vr == VK_TIMEOUT) {
+            flux_vk_staging_release(s->device, replacement);
+            return FLUX_ERROR_TIMEOUT;
+        }
+        if (vr != VK_SUCCESS) {
+            flux_result wait_result = vr == VK_ERROR_DEVICE_LOST ? FLUX_ERROR_DEVICE_LOST
+                                                                  : FLUX_ERROR_BACKEND_FAILURE;
+            FLUX_FAIL_VK(wait_result, "readback staging resize fence wait failed", vr);
+            flux_vk_staging_release(s->device, replacement);
+            return wait_result;
+        }
+    }
+    flux_staging_buf *previous = s->readback_staging;
+    s->readback_staging = replacement;
+    if (previous) {
+        flux_vk_staging_release(s->device, previous);
+        s->last_readback_slot = UINT32_MAX;
+        s->last_readback_region = (flux_readback_region){0};
+    }
+    return FLUX_OK;
+}
+
+flux_result flux_surface_prepare_readback_region(flux_surface *s, uint32_t width,
+                                                 uint32_t height) {
+    if (s && s->offscreen_require_readback &&
+        (width != s->extent.width || height != s->extent.height)) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                  "region staging is unsupported on require_readback surfaces");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    return ensure_readback_staging(s, width, height);
+}
+
+flux_result flux_surface_prepare_readback(flux_surface *s) {
+    if (!s)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    return ensure_readback_staging(s, s->extent.width, s->extent.height);
 }
 
 flux_result flux_surface_read_pixels_ready(flux_surface *s, bool *out_ready) {
@@ -1160,6 +1236,11 @@ flux_result flux_surface_take_readback(flux_surface *s, flux_readback **out) {
                   "require_readback staging remains owned by its surface");
         return FLUX_ERROR_UNSUPPORTED;
     }
+    if (s->frame_active && s->frame_slot.readback_requested) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "cannot detach readback staging before the requesting frame is submitted");
+        return FLUX_ERROR_INVALID_STATE;
+    }
     if (!s->readback_staging || s->last_readback_slot == UINT32_MAX) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "no captured frame is available to detach");
         return FLUX_ERROR_INVALID_STATE;
@@ -1184,11 +1265,11 @@ flux_result flux_surface_take_readback(flux_surface *s, flux_readback **out) {
         .device = flux_device_retain(s->device),
         .staging = s->readback_staging,
         .format = s->format,
-        .width = s->extent.width,
-        .height = s->extent.height,
+        .region = s->last_readback_region,
     };
     s->readback_staging = NULL;
     s->last_readback_slot = UINT32_MAX;
+    s->last_readback_region = (flux_readback_region){0};
     *out = readback;
     return FLUX_OK;
 }
@@ -1197,7 +1278,8 @@ flux_result flux_readback_read_pixels(const flux_readback *readback, void *dst, 
     if (!readback || !dst)
         return FLUX_ERROR_INVALID_ARGUMENT;
     size_t needed;
-    if (__builtin_mul_overflow((size_t)readback->width, (size_t)readback->height, &needed) ||
+    if (__builtin_mul_overflow((size_t)readback->region.width,
+                               (size_t)readback->region.height, &needed) ||
         __builtin_mul_overflow(needed, 4u, &needed))
         return FLUX_ERROR_OUT_OF_RANGE;
     if (bytes < needed) {
@@ -1212,7 +1294,8 @@ flux_result flux_readback_read_pixels(const flux_readback *readback, void *dst, 
     if (readback->format == VK_FORMAT_B8G8R8A8_UNORM ||
         readback->format == VK_FORMAT_B8G8R8A8_SRGB) {
         uint8_t *out_px = dst;
-        for (size_t i = 0; i < (size_t)readback->width * readback->height; ++i) {
+        for (size_t i = 0;
+             i < (size_t)readback->region.width * readback->region.height; ++i) {
             out_px[i * 4u + 0u] = src[i * 4u + 2u];
             out_px[i * 4u + 1u] = src[i * 4u + 1u];
             out_px[i * 4u + 2u] = src[i * 4u + 0u];
@@ -1222,6 +1305,13 @@ flux_result flux_readback_read_pixels(const flux_readback *readback, void *dst, 
         memcpy(dst, src, needed);
     }
     return FLUX_OK;
+}
+
+void flux_readback_get_region(const flux_readback *readback,
+                              flux_readback_region *out_region) {
+    if (!out_region)
+        return;
+    *out_region = readback ? readback->region : (flux_readback_region){0};
 }
 
 void flux_readback_release(flux_readback *readback) {
@@ -1247,9 +1337,16 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
                   "windowed readback requires flux_frame_request_readback");
         return FLUX_ERROR_UNSUPPORTED;
     }
-    size_t needed = (size_t)s->extent.width * s->extent.height * 4u;
+    uint32_t read_width =
+        persistent_staging ? s->last_readback_region.width : s->extent.width;
+    uint32_t read_height =
+        persistent_staging ? s->last_readback_region.height : s->extent.height;
+    size_t needed;
+    flux_result size_result = readback_byte_size(read_width, read_height, &needed);
+    if (size_result != FLUX_OK)
+        return size_result;
     if (bytes < needed) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "dst too small for width * height * 4 bytes");
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "dst too small for captured readback extent");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
 
@@ -1332,7 +1429,7 @@ flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
     if (s->format == VK_FORMAT_B8G8R8A8_UNORM || s->format == VK_FORMAT_B8G8R8A8_SRGB) {
         const uint8_t *src = (const uint8_t *)staging->alloc.mapped;
         uint8_t *out_px = (uint8_t *)dst;
-        for (size_t i = 0; i < (size_t)s->extent.width * s->extent.height; ++i) {
+        for (size_t i = 0; i < (size_t)read_width * read_height; ++i) {
             out_px[i * 4u + 0u] = src[i * 4u + 2u];
             out_px[i * 4u + 1u] = src[i * 4u + 1u];
             out_px[i * 4u + 2u] = src[i * 4u + 0u];

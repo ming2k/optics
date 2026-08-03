@@ -84,19 +84,13 @@ flux_device *test_helpers_make_headless_device(void) {
 }
 
 flux_device *test_helpers_make_dmabuf_device(void) {
-    static const char *const exts[] = {
-        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
-        VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
-        VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
-        VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
-        VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
-    };
+    flux_device_features_desc features = FLUX_DEVICE_FEATURES_DESC_INIT;
+    features.required = FLUX_DEVICE_FEATURE_DMABUF | FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
     flux_device_desc d = FLUX_DEVICE_DESC_INIT;
+    d.next = &features;
     d.headless = true;
     d.frames_in_flight = 1;
     d.validation = FLUX_VALIDATION_OFF;
-    d.required_device_extensions = exts;
-    d.required_device_extension_count = 5;
     flux_device *out = nullptr;
     if (flux_device_create(&d, &out) != FLUX_OK)
         return nullptr;

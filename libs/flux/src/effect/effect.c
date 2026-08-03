@@ -12,15 +12,17 @@
  *   - fixed-cost multi-resolution filter for animated backdrops
  */
 
+#include "../compute/internal.h"    /* flux_compute_pipeline_make_device_weak */
 #include "../core/image_internal.h" /* struct flux_image + create_compute_writable */
-#include "../compute/internal.h"      /* flux_compute_pipeline_make_device_weak */
 #include "../core/internal.h"
+#include "liquid_glass_regions.h"
 #include <flux/compute.h>
 #include <flux/effect.h>
 #include <flux/vulkan.h>
 
 #include <math.h>
 #include <stdalign.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,6 +36,10 @@ alignas(uint32_t) static const unsigned char effect_backdrop_spv[] = {
 
 alignas(uint32_t) static const unsigned char effect_liquid_glass_spv[] = {
 #embed "effect_liquid_glass.comp.spv"
+};
+
+alignas(uint32_t) static const unsigned char effect_storage_clear_spv[] = {
+#embed "effect_storage_clear.comp.spv"
 };
 
 /* Push-constant block — must match the layout in effect_blur.comp. */
@@ -59,6 +65,10 @@ typedef struct effect_backdrop_push {
     uint32_t output_height;
     float offset;
     uint32_t mode; /* 0 downsample, 1 upsample, 2 copy */
+    uint32_t origin_x;
+    uint32_t origin_y;
+    uint32_t region_width;
+    uint32_t region_height;
 } effect_backdrop_push;
 
 /* Push-constant block — must match effect_liquid_glass.comp exactly. */
@@ -98,14 +108,39 @@ typedef struct effect_liquid_glass_push {
     uint32_t tint_color;
 } effect_liquid_glass_push;
 
+/* Push-constant block — must match effect_storage_clear.comp exactly. */
+typedef struct effect_storage_clear_push {
+    uint32_t output_handle;
+    uint32_t width;
+    uint32_t height;
+    uint32_t origin_x;
+    uint32_t origin_y;
+    uint32_t region_width;
+    uint32_t region_height;
+} effect_storage_clear_push;
+
 static_assert(sizeof(effect_blur_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_blur_push exceeds device-wide push budget");
+static_assert(sizeof(flux_effect_blur_desc) == 32,
+              "flux_effect_blur_desc ABI size changed; use its next chain instead");
+static_assert(sizeof(flux_effect_blur_regions_desc) == 32,
+              "flux_effect_blur_regions_desc ABI layout changed unexpectedly");
 static_assert(sizeof(effect_backdrop_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_backdrop_push exceeds device-wide push budget");
+static_assert(sizeof(effect_backdrop_push) == 52,
+              "effect_backdrop_push no longer matches its shader block");
+static_assert(offsetof(effect_backdrop_push, origin_x) == 36,
+              "effect_backdrop_push origin no longer matches its shader block");
+static_assert(offsetof(effect_backdrop_push, region_height) == 48,
+              "effect_backdrop_push region no longer matches its shader block");
 static_assert(sizeof(effect_liquid_glass_push) == 156,
               "effect_liquid_glass_push no longer matches its shader block");
 static_assert(sizeof(effect_liquid_glass_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_liquid_glass_push exceeds device-wide push budget");
+static_assert(sizeof(effect_storage_clear_push) == 28,
+              "effect_storage_clear_push no longer matches its shader block");
+static_assert(sizeof(effect_storage_clear_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
+              "effect_storage_clear_push exceeds device-wide push budget");
 
 #define EFFECT_BLUR_WG 16u
 #define EFFECT_BLUR_RADIUS_MAX 64
@@ -143,9 +178,10 @@ typedef struct output_entry {
 
 typedef struct effect_state {
     pthread_mutex_t lock;
-    flux_compute_pipeline *blur_pipeline;         /* lazily built; shared across calls */
-    flux_compute_pipeline *backdrop_pipeline;     /* fixed-cost live-compositor filter */
-    flux_compute_pipeline *liquid_glass_pipeline; /* analytic SDF glass composite */
+    flux_compute_pipeline *blur_pipeline;          /* lazily built; shared across calls */
+    flux_compute_pipeline *backdrop_pipeline;      /* fixed-cost live-compositor filter */
+    flux_compute_pipeline *liquid_glass_pipeline;  /* analytic SDF glass composite */
+    flux_compute_pipeline *storage_clear_pipeline; /* region-limited transparent clear */
     intermediate_entry *intermediates;
     output_entry *outputs;
 } effect_state;
@@ -169,6 +205,9 @@ typedef struct liquid_glass_filter_slot {
     uint32_t width;
     uint32_t height;
     flux_image *output;
+    bool initialized;
+    uint32_t previous_count;
+    liquid_glass_region previous[LIQUID_GLASS_MAX_GROUPS];
 } liquid_glass_filter_slot;
 
 struct flux_liquid_glass_filter {
@@ -202,6 +241,8 @@ static void effect_state_destroy(flux_device *d) {
         flux_compute_pipeline_release(st->backdrop_pipeline);
     if (st->liquid_glass_pipeline)
         flux_compute_pipeline_release(st->liquid_glass_pipeline);
+    if (st->storage_clear_pipeline)
+        flux_compute_pipeline_release(st->storage_clear_pipeline);
     pthread_mutex_destroy(&st->lock);
     flux_internal_free(d, st);
     d->effect_state = nullptr;
@@ -365,6 +406,21 @@ static flux_result ensure_liquid_glass_pipeline(flux_device *d, effect_state *st
     return FLUX_OK;
 }
 
+static flux_result ensure_storage_clear_pipeline(flux_device *d, effect_state *st) {
+    if (st->storage_clear_pipeline)
+        return FLUX_OK;
+    flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
+    pdesc.spirv = (const uint32_t *)effect_storage_clear_spv;
+    pdesc.spirv_word_count = sizeof(effect_storage_clear_spv) / sizeof(uint32_t);
+    pdesc.entry_point = "main";
+    pdesc.push_constant_bytes = sizeof(effect_storage_clear_push);
+    flux_result r = flux_compute_pipeline_create(d, &pdesc, &st->storage_clear_pipeline);
+    if (r != FLUX_OK)
+        return r;
+    flux_compute_pipeline_make_device_weak(st->storage_clear_pipeline);
+    return FLUX_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Barrier helpers                                                   */
 /* ------------------------------------------------------------------ */
@@ -427,52 +483,6 @@ static void barrier_reuse_to_compute_write(VkCommandBuffer cmd, VkImage image) {
     vkCmdPipelineBarrier2(cmd, &di);
 }
 
-static void clear_liquid_glass_output(VkCommandBuffer cmd, VkImage image) {
-    VkImageSubresourceRange range = {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .levelCount = 1,
-        .layerCount = 1,
-    };
-    VkImageMemoryBarrier2 before = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask =
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
-        .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = image,
-        .subresourceRange = range,
-    };
-    VkDependencyInfo before_info = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &before,
-    };
-    vkCmdPipelineBarrier2(cmd, &before_info);
-    VkClearColorValue transparent = {.float32 = {0.0f, 0.0f, 0.0f, 0.0f}};
-    vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_GENERAL, &transparent, 1, &range);
-
-    VkImageMemoryBarrier2 after = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
-        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = image,
-        .subresourceRange = range,
-    };
-    VkDependencyInfo after_info = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &after,
-    };
-    vkCmdPipelineBarrier2(cmd, &after_info);
-}
-
 static void barrier_compute_write_to_write(VkCommandBuffer cmd, VkImage image) {
     VkImageMemoryBarrier2 barrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -498,29 +508,25 @@ static void barrier_compute_write_to_write(VkCommandBuffer cmd, VkImage image) {
     vkCmdPipelineBarrier2(cmd, &info);
 }
 
-static void barrier_clear_to_fragment_read(VkCommandBuffer cmd, VkImage image) {
-    VkImageMemoryBarrier2 barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
-        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    VkDependencyInfo info = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrier,
-    };
-    vkCmdPipelineBarrier2(cmd, &info);
+static void record_storage_clear_regions(effect_state *state, VkCommandBuffer command,
+                                         flux_image *output, const liquid_glass_region *regions,
+                                         uint32_t region_count) {
+    for (uint32_t i = 0; i < region_count; ++i) {
+        liquid_glass_region region = regions[i];
+        effect_storage_clear_push push = {
+            .output_handle = output->bindless_storage,
+            .width = output->width,
+            .height = output->height,
+            .origin_x = region.x,
+            .origin_y = region.y,
+            .region_width = region.width,
+            .region_height = region.height,
+        };
+        uint32_t gx = (region.width + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
+        uint32_t gy = (region.height + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
+        flux_compute_dispatch(command, state->storage_clear_pipeline, &push, sizeof(push), gx, gy,
+                              1u);
+    }
 }
 
 static flux_result record_blur_dispatch(effect_state *st, flux_device *d, VkCommandBuffer cmd,
@@ -574,6 +580,11 @@ flux_result flux_effect_blur(VkCommandBuffer cmd, const flux_effect_blur_desc *d
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (desc->type != FLUX_TYPE_EFFECT_BLUR_DESC) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_EFFECT_BLUR_DESC");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->next) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                  "exact blur does not accept reusable-blur extensions");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
     if (!desc->input) {
@@ -723,9 +734,44 @@ fail:
     return r;
 }
 
+static bool map_effect_region(const flux_effect_region *region, uint32_t root_width,
+                              uint32_t root_height, uint32_t output_width,
+                              uint32_t output_height, uint32_t *out_x, uint32_t *out_y,
+                              uint32_t *out_width, uint32_t *out_height) {
+    uint64_t x0 = region->x < root_width ? region->x : root_width;
+    uint64_t y0 = region->y < root_height ? region->y : root_height;
+    uint64_t x1 = (uint64_t)region->x + region->width;
+    uint64_t y1 = (uint64_t)region->y + region->height;
+    if (x1 > root_width)
+        x1 = root_width;
+    if (y1 > root_height)
+        y1 = root_height;
+    if (x1 <= x0 || y1 <= y0)
+        return false;
+
+    /* Map outward so a fractional pyramid edge can never discard a source
+     * pixel requested by the caller. */
+    uint64_t ox0 = x0 * output_width / root_width;
+    uint64_t oy0 = y0 * output_height / root_height;
+    uint64_t ox1 = (x1 * output_width + root_width - 1u) / root_width;
+    uint64_t oy1 = (y1 * output_height + root_height - 1u) / root_height;
+    if (ox1 > output_width)
+        ox1 = output_width;
+    if (oy1 > output_height)
+        oy1 = output_height;
+    if (ox1 <= ox0 || oy1 <= oy0)
+        return false;
+    *out_x = (uint32_t)ox0;
+    *out_y = (uint32_t)oy0;
+    *out_width = (uint32_t)(ox1 - ox0);
+    *out_height = (uint32_t)(oy1 - oy0);
+    return true;
+}
+
 static void record_backdrop_pass(effect_state *st, flux_device *device, VkCommandBuffer cmd,
                                  flux_image *input, flux_image *output, float offset,
-                                 uint32_t mode) {
+                                 uint32_t mode, uint32_t root_width, uint32_t root_height,
+                                 const flux_effect_region *regions, uint32_t region_count) {
     barrier_reuse_to_compute_write(cmd, output->image);
     effect_backdrop_push pc = {
         .in_handle = input->bindless,
@@ -738,15 +784,34 @@ static void record_backdrop_pass(effect_state *st, flux_device *device, VkComman
         .offset = offset,
         .mode = mode,
     };
-    uint32_t gx = (output->width + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
-    uint32_t gy = (output->height + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
-    flux_compute_dispatch(cmd, st->backdrop_pipeline, &pc, sizeof(pc), gx, gy, 1u);
+    if (!regions || region_count == 0) {
+        pc.region_width = output->width;
+        pc.region_height = output->height;
+        uint32_t gx = (output->width + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
+        uint32_t gy = (output->height + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
+        flux_compute_dispatch(cmd, st->backdrop_pipeline, &pc, sizeof(pc), gx, gy, 1u);
+    } else {
+        bool dispatched = false;
+        for (uint32_t i = 0; i < region_count; ++i) {
+            if (!map_effect_region(&regions[i], root_width, root_height, output->width,
+                                   output->height, &pc.origin_x, &pc.origin_y, &pc.region_width,
+                                   &pc.region_height))
+                continue;
+            if (dispatched)
+                barrier_compute_write_to_write(cmd, output->image);
+            uint32_t gx = (pc.region_width + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
+            uint32_t gy = (pc.region_height + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
+            flux_compute_dispatch(cmd, st->backdrop_pipeline, &pc, sizeof(pc), gx, gy, 1u);
+            dispatched = true;
+        }
+    }
     barrier_compute_write_to_read(cmd, output->image);
 }
 
 static void record_backdrop_filter(effect_state *st, flux_device *device, VkCommandBuffer cmd,
                                    flux_image *input, blur_filter_slot *slot,
-                                   float requested_sigma) {
+                                   float requested_sigma, const flux_effect_region *regions,
+                                   uint32_t region_count) {
     float sigma = requested_sigma;
     if (!(sigma == sigma) || sigma < 0.0f)
         sigma = 0.0f;
@@ -754,17 +819,22 @@ static void record_backdrop_filter(effect_state *st, flux_device *device, VkComm
         sigma = FLUX_EFFECT_BLUR_SIGMA_MAX;
 
     if (sigma == 0.0f) {
-        record_backdrop_pass(st, device, cmd, input, slot->output, 0.0f, 2u);
+        record_backdrop_pass(st, device, cmd, input, slot->output, 0.0f, 2u, input->width,
+                             input->height, regions, region_count);
         return;
     }
 
     /* Two pyramid levels provide a wide UI blur with fixed work. Sigma tunes
      * the sub-texel offsets rather than growing a per-pixel kernel loop. */
     float offset = fminf(fmaxf(sigma * 0.25f, 0.5f), 2.5f);
-    record_backdrop_pass(st, device, cmd, input, slot->half, offset, 0u);
-    record_backdrop_pass(st, device, cmd, slot->half, slot->quarter, offset, 0u);
-    record_backdrop_pass(st, device, cmd, slot->quarter, slot->half, offset, 1u);
-    record_backdrop_pass(st, device, cmd, slot->half, slot->output, offset, 1u);
+    record_backdrop_pass(st, device, cmd, input, slot->half, offset, 0u, input->width,
+                         input->height, regions, region_count);
+    record_backdrop_pass(st, device, cmd, slot->half, slot->quarter, offset, 0u, input->width,
+                         input->height, regions, region_count);
+    record_backdrop_pass(st, device, cmd, slot->quarter, slot->half, offset, 1u, input->width,
+                         input->height, regions, region_count);
+    record_backdrop_pass(st, device, cmd, slot->half, slot->output, offset, 1u, input->width,
+                         input->height, regions, region_count);
 }
 
 flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
@@ -774,6 +844,13 @@ flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
     *out = nullptr;
     if (desc->type != FLUX_TYPE_EFFECT_BLUR_DESC || !desc->input) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid reusable blur descriptor");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    const flux_effect_blur_regions_desc *region_desc = desc->next;
+    if (region_desc &&
+        (region_desc->type != FLUX_TYPE_EFFECT_BLUR_REGIONS_DESC || region_desc->next ||
+         (region_desc->region_count > 0 && !region_desc->regions))) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid reusable blur regions extension");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
     if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING || frame->pass_active) {
@@ -791,6 +868,24 @@ flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
         input->bindless == FLUX_BINDLESS_INVALID) {
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "reusable blur input must be sampled RGBA8/BGRA8 UNORM");
         return FLUX_ERROR_UNSUPPORTED;
+    }
+    const flux_effect_region *regions = region_desc ? region_desc->regions : nullptr;
+    uint32_t region_count = region_desc ? region_desc->region_count : 0u;
+    if (region_count > 0) {
+        bool any_valid = false;
+        for (uint32_t i = 0; i < region_count; ++i) {
+            uint32_t x, y, width, height;
+            if (map_effect_region(&regions[i], input->width, input->height, input->width,
+                                  input->height, &x, &y, &width, &height)) {
+                any_valid = true;
+                break;
+            }
+        }
+        if (!any_valid) {
+            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                      "reusable blur region list has no pixels inside the input");
+            return FLUX_ERROR_INVALID_ARGUMENT;
+        }
     }
     uint32_t index = flux_frame_index(frame);
     if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
@@ -811,7 +906,7 @@ flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
 
     blur_filter_slot *slot = &filter->slots[index];
     record_backdrop_filter(st, filter->device, flux_frame_vk_command_buffer(frame), input, slot,
-                           desc->sigma);
+                           desc->sigma, regions, region_count);
     *out = slot->output;
     return FLUX_OK;
 }
@@ -877,7 +972,7 @@ static bool finite_rect(flux_rect rect) {
 
 static bool valid_liquid_glass_desc(const flux_liquid_glass_desc *desc) {
     if (desc->type != FLUX_TYPE_LIQUID_GLASS_DESC || !desc->input || !desc->blurred_input ||
-        !desc->groups || desc->group_count == 0u || desc->group_count > 64u)
+        desc->group_count > LIQUID_GLASS_MAX_GROUPS || (desc->group_count > 0u && !desc->groups))
         return false;
     if (!isfinite(desc->refraction) || !isfinite(desc->chromatic_aberration) ||
         !isfinite(desc->saturation) || !isfinite(desc->brightness) || !isfinite(desc->edge_width) ||
@@ -905,43 +1000,6 @@ static void copy_shape(float out[4], flux_liquid_glass_shape shape) {
     out[1] = shape.bounds.y;
     out[2] = shape.bounds.w;
     out[3] = shape.bounds.h;
-}
-
-static bool liquid_glass_group_dispatch_bounds(const flux_liquid_glass_group *group,
-                                               float shadow_reach, uint32_t image_width,
-                                               uint32_t image_height, uint32_t *out_x,
-                                               uint32_t *out_y, uint32_t *out_width,
-                                               uint32_t *out_height) {
-    float x0 = group->shapes[0].bounds.x;
-    float y0 = group->shapes[0].bounds.y;
-    float x1 = x0 + group->shapes[0].bounds.w;
-    float y1 = y0 + group->shapes[0].bounds.h;
-    if (group->shape_count == 2u) {
-        flux_rect second = group->shapes[1].bounds;
-        x0 = fminf(x0, second.x);
-        y0 = fminf(y0, second.y);
-        x1 = fmaxf(x1, second.x + second.w);
-        y1 = fmaxf(y1, second.y + second.h);
-    }
-    /* Smooth union may bow beyond the source SDFs, and the drop shadow
-     * reaches shadow_reach pixels further out. Two extra pixels cover
-     * analytic antialiasing. */
-    float pad = fmaxf(fmaxf(group->blend_radius, 0.0f), fmaxf(shadow_reach, 0.0f)) + 2.0f;
-    int64_t ix0 = (int64_t)floorf(x0 - pad);
-    int64_t iy0 = (int64_t)floorf(y0 - pad);
-    int64_t ix1 = (int64_t)ceilf(x1 + pad);
-    int64_t iy1 = (int64_t)ceilf(y1 + pad);
-    ix0 = ix0 < 0 ? 0 : ix0;
-    iy0 = iy0 < 0 ? 0 : iy0;
-    ix1 = ix1 > (int64_t)image_width ? image_width : ix1;
-    iy1 = iy1 > (int64_t)image_height ? image_height : iy1;
-    if (ix1 <= ix0 || iy1 <= iy0)
-        return false;
-    *out_x = (uint32_t)ix0;
-    *out_y = (uint32_t)iy0;
-    *out_width = (uint32_t)(ix1 - ix0);
-    *out_height = (uint32_t)(iy1 - iy0);
-    return true;
 }
 
 flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flux_frame *frame,
@@ -981,31 +1039,59 @@ flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flu
     if (result != FLUX_OK)
         return result;
 
+    liquid_glass_filter_slot *slot = &filter->slots[index];
+    liquid_glass_region current[LIQUID_GLASS_MAX_GROUPS];
+    uint32_t current_group_indices[LIQUID_GLASS_MAX_GROUPS];
+    uint32_t current_count = 0u;
+    for (uint32_t i = 0; i < desc->group_count; ++i) {
+        const flux_liquid_glass_group *group = &desc->groups[i];
+        /* The body's shadow reaches its downward offset plus the falloff. */
+        float shadow_reach = group->shadow_alpha > 0.0f ? fmaxf(group->shadow_offset_y, 0.0f) +
+                                                              2.0f * fmaxf(group->shadow_blur, 0.0f)
+                                                        : 0.0f;
+        liquid_glass_region region;
+        if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, input->width, input->height,
+                                                &region))
+            continue;
+        current[current_count] = region;
+        current_group_indices[current_count] = i;
+        ++current_count;
+    }
+
+    liquid_glass_region clear_regions[LIQUID_GLASS_MAX_CLEAR_REGIONS];
+    uint32_t clear_count = 0u;
+    if (!liquid_glass_build_clear_regions(
+            slot->initialized, input->width, input->height, slot->previous, slot->previous_count,
+            current, current_count, clear_regions, LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "liquid glass clear-region state is inconsistent");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+
     effect_state *state = effect_state_get_or_init(filter->device);
     if (!state)
         return FLUX_ERROR_OUT_OF_MEMORY;
     pthread_mutex_lock(&state->lock);
-    result = ensure_liquid_glass_pipeline(filter->device, state);
+    if (clear_count > 0u)
+        result = ensure_storage_clear_pipeline(filter->device, state);
+    if (result == FLUX_OK && current_count > 0u)
+        result = ensure_liquid_glass_pipeline(filter->device, state);
     pthread_mutex_unlock(&state->lock);
     if (result != FLUX_OK)
         return result;
 
-    liquid_glass_filter_slot *slot = &filter->slots[index];
     VkCommandBuffer command = flux_frame_vk_command_buffer(frame);
-    clear_liquid_glass_output(command, slot->output->image);
+    if (clear_count > 0u) {
+        if (slot->initialized)
+            barrier_reuse_to_compute_write(command, slot->output->image);
+        record_storage_clear_regions(state, command, slot->output, clear_regions, clear_count);
+        if (current_count > 0u)
+            barrier_compute_write_to_write(command, slot->output->image);
+    }
 
     bool dispatched = false;
-    for (uint32_t i = 0; i < desc->group_count; ++i) {
-        const flux_liquid_glass_group *group = &desc->groups[i];
-        /* The body's shadow reaches its downward offset plus the falloff. */
-        float shadow_reach =
-            group->shadow_alpha > 0.0f ? fmaxf(group->shadow_offset_y, 0.0f) +
-                                             2.0f * fmaxf(group->shadow_blur, 0.0f)
-                                       : 0.0f;
-        uint32_t origin_x = 0, origin_y = 0, group_width = 0, group_height = 0;
-        if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, input->width, input->height,
-                                                &origin_x, &origin_y, &group_width, &group_height))
-            continue;
+    for (uint32_t i = 0; i < current_count; ++i) {
+        const flux_liquid_glass_group *group = &desc->groups[current_group_indices[i]];
+        liquid_glass_region region = current[i];
         if (dispatched)
             barrier_compute_write_to_write(command, slot->output->image);
         effect_liquid_glass_push push = {
@@ -1015,8 +1101,8 @@ flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flu
             .output_handle = slot->output->bindless_storage,
             .width = input->width,
             .height = input->height,
-            .origin_x = origin_x,
-            .origin_y = origin_y,
+            .origin_x = region.x,
+            .origin_y = region.y,
             .radius0 = fmaxf(group->shapes[0].corner_radius, 0.0f),
             .radius1 =
                 group->shape_count == 2u ? fmaxf(group->shapes[1].corner_radius, 0.0f) : 0.0f,
@@ -1030,8 +1116,8 @@ flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flu
             .glare = fmaxf(desc->glare, 0.0f),
             .light_x = desc->light_direction.x,
             .light_y = desc->light_direction.y,
-            .group_width = group_width,
-            .group_height = group_height,
+            .group_width = region.width,
+            .group_height = region.height,
             .shape_count = group->shape_count,
             .shadow_alpha = fminf(fmaxf(group->shadow_alpha, 0.0f), 1.0f),
             .shadow_blur = fmaxf(group->shadow_blur, 0.0f),
@@ -1045,19 +1131,22 @@ flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flu
         copy_shape(push.shape0, group->shapes[0]);
         if (group->shape_count == 2u)
             copy_shape(push.shape1, group->shapes[1]);
-        uint32_t gx = (group_width + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
-        uint32_t gy = (group_height + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
+        uint32_t gx = (region.width + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
+        uint32_t gy = (region.height + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
         flux_compute_dispatch(command, state->liquid_glass_pipeline, &push, sizeof(push), gx, gy,
                               1u);
         dispatched = true;
     }
-    /* Clear-only output is still a transfer write; normally at least one
-     * clipped group dispatched and this covers compute -> fragment sampling. */
-    if (dispatched) {
+    /* Both the transparent region clear and liquid material are compute
+     * storage writes. Make the persistent output visible to its following
+     * Canvas sample, including a clear-only apply after all groups disappear. */
+    if (clear_count > 0u || dispatched)
         barrier_compute_write_to_read(command, slot->output->image);
-    } else {
-        barrier_clear_to_fragment_read(command, slot->output->image);
-    }
+
+    if (current_count > 0u)
+        memcpy(slot->previous, current, current_count * sizeof(current[0]));
+    slot->previous_count = current_count;
+    slot->initialized = true;
     *out = slot->output;
     return FLUX_OK;
 }

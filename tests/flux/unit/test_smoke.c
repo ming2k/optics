@@ -6,7 +6,29 @@
 #include "test_helpers.h"
 #include <flux/flux.h>
 #include <flux/vulkan.h>
+#include <stdlib.h>
 #include <string.h>
+
+static uint32_t selected_drm_nodes(flux_device *device, flux_device_drm_node_desc out[2]) {
+    flux_drm_device_identity identity;
+    if (!flux_device_get_drm_identity(device, &identity))
+        return 0;
+
+    uint32_t found = 0;
+    if (identity.has_primary) {
+        out[found] = (flux_device_drm_node_desc)FLUX_DEVICE_DRM_NODE_DESC_INIT;
+        out[found].drm_major = identity.primary.major;
+        out[found].drm_minor = identity.primary.minor;
+        found++;
+    }
+    if (identity.has_render && found < 2) {
+        out[found] = (flux_device_drm_node_desc)FLUX_DEVICE_DRM_NODE_DESC_INIT;
+        out[found].drm_major = identity.render.major;
+        out[found].drm_minor = identity.render.minor;
+        found++;
+    }
+    return found;
+}
 
 int main(void) {
     /* --- version --- */
@@ -46,8 +68,60 @@ int main(void) {
      * leaking on the success path.
      */
     {
+        flux_drm_device_identity identity = {
+            .has_primary = true,
+            .has_render = true,
+        };
+        EXPECT(flux_device_enabled_features(nullptr) == 0);
+        EXPECT(!flux_device_get_drm_identity(nullptr, &identity));
+        EXPECT(!identity.has_primary);
+        EXPECT(!identity.has_render);
+    }
+
+    {
+        flux_device_features_desc features = FLUX_DEVICE_FEATURES_DESC_INIT;
+        features.required = UINT64_C(1) << 63;
+        flux_device_desc desc = FLUX_DEVICE_DESC_INIT;
+        desc.next = &features;
+        desc.headless = true;
+        desc.validation = FLUX_VALIDATION_OFF;
+        flux_device *d = nullptr;
+        EXPECT(flux_device_create(&desc, &d) == FLUX_ERROR_UNSUPPORTED);
+        EXPECT(d == nullptr);
+    }
+
+    {
+        flux_device_features_desc tail = FLUX_DEVICE_FEATURES_DESC_INIT;
+        flux_device_features_desc head = FLUX_DEVICE_FEATURES_DESC_INIT;
+        head.next = &tail;
+        flux_device_desc desc = FLUX_DEVICE_DESC_INIT;
+        desc.next = &head;
+        desc.headless = true;
+        desc.validation = FLUX_VALIDATION_OFF;
+        flux_device *d = nullptr;
+        EXPECT(flux_device_create(&desc, &d) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(d == nullptr);
+    }
+
+    {
+        flux_device_drm_node_desc tail = FLUX_DEVICE_DRM_NODE_DESC_INIT;
+        flux_device_drm_node_desc head = FLUX_DEVICE_DRM_NODE_DESC_INIT;
+        head.next = &tail;
+        flux_device_desc desc = FLUX_DEVICE_DESC_INIT;
+        desc.next = &head;
+        desc.headless = true;
+        desc.validation = FLUX_VALIDATION_OFF;
+        flux_device *d = nullptr;
+        EXPECT(flux_device_create(&desc, &d) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(d == nullptr);
+    }
+
+    {
+        flux_device_features_desc features = FLUX_DEVICE_FEATURES_DESC_INIT;
+        features.optional = FLUX_DEVICE_FEATURE_DMABUF | FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
         flux_device_desc desc = {
             .type = FLUX_TYPE_DEVICE_DESC,
+            .next = &features,
             .headless = true,
             .frames_in_flight = 2,
             .validation = FLUX_VALIDATION_OFF,
@@ -61,6 +135,34 @@ int main(void) {
             EXPECT(flux_device_vk_device(d) != VK_NULL_HANDLE);
             EXPECT(flux_device_vk_graphics_queue(d) != VK_NULL_HANDLE);
             EXPECT(flux_device_vk_pipeline_cache(d) != VK_NULL_HANDLE);
+            flux_device_feature_flags enabled = flux_device_enabled_features(d);
+            EXPECT((enabled & FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE) == 0 ||
+                   (enabled & FLUX_DEVICE_FEATURE_DMABUF) != 0);
+
+            flux_device_drm_node_desc selected[2];
+            uint32_t selected_count = selected_drm_nodes(d, selected);
+            for (uint32_t i = 0; i < selected_count; ++i) {
+                flux_device_desc matched = FLUX_DEVICE_DESC_INIT;
+                matched.next = &selected[i];
+                matched.headless = true;
+                matched.validation = FLUX_VALIDATION_OFF;
+                flux_device *same_gpu = nullptr;
+                EXPECT(flux_device_create(&matched, &same_gpu) == FLUX_OK);
+                EXPECT(same_gpu != nullptr);
+                flux_device_release(same_gpu);
+            }
+
+            flux_device_drm_node_desc impossible = FLUX_DEVICE_DRM_NODE_DESC_INIT;
+            impossible.drm_major = UINT32_MAX;
+            impossible.drm_minor = UINT32_MAX;
+            flux_device_desc constrained = FLUX_DEVICE_DESC_INIT;
+            constrained.next = &impossible;
+            constrained.headless = true;
+            constrained.validation = FLUX_VALIDATION_OFF;
+            flux_device *wrong_gpu = nullptr;
+            EXPECT(flux_device_create(&constrained, &wrong_gpu) == FLUX_ERROR_UNSUPPORTED);
+            EXPECT(wrong_gpu == nullptr);
+
             flux_device_release(d);
         } else {
             EXPECT(d == nullptr);

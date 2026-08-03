@@ -480,25 +480,35 @@ static void cpu_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) 
 }
 
 static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *c, flux_frame *f,
-                                  flux_image *target, const flux_color *clear,
-                                  flux_canvas_antialias antialias) {
+                                  flux_image *target, const canvas_pass_config *config) {
     (void)self;
     (void)f;
-    (void)antialias;
+    (void)config->antialias;
     if (target) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "CPU canvas has no offscreen target (v1)");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
     flux_cpu_canvas *v = cpu(c);
+    flux_recti area;
+    if (!canvas_pass_render_area(config, v->width, v->height, &area)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "Canvas render area is invalid or out of bounds");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
 
-    if (clear) {
-        vec4f cc = unpack_premul(*clear);
-        size_t n = (size_t)v->sw * v->sh;
-        for (size_t i = 0; i < n; ++i) {
-            v->fb[i * 4 + 0] = cc.r;
-            v->fb[i * 4 + 1] = cc.g;
-            v->fb[i * 4 + 2] = cc.b;
-            v->fb[i * 4 + 3] = cc.a;
+    if (config->clear_color) {
+        vec4f cc = unpack_premul(*config->clear_color);
+        uint32_t x0 = (uint32_t)area.x * FLUX_CPU_SS;
+        uint32_t y0 = (uint32_t)area.y * FLUX_CPU_SS;
+        uint32_t x1 = ((uint32_t)area.x + area.w) * FLUX_CPU_SS;
+        uint32_t y1 = ((uint32_t)area.y + area.h) * FLUX_CPU_SS;
+        for (uint32_t y = y0; y < y1; ++y) {
+            for (uint32_t x = x0; x < x1; ++x) {
+                size_t i = (size_t)y * v->sw + x;
+                v->fb[i * 4 + 0] = cc.r;
+                v->fb[i * 4 + 1] = cc.g;
+                v->fb[i * 4 + 2] = cc.b;
+                v->fb[i * 4 + 3] = cc.a;
+            }
         }
     }
 
@@ -506,9 +516,10 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
     c->target_pass = false;
     c->target = nullptr;
     c->stencil_available = false; /* fills fall back to ear-clip only */
+    c->stencil_forbidden = config->skip_stencil;
     c->fb_width = v->width;
     c->fb_height = v->height;
-    c->states[0].scissor = (flux_recti){0, 0, v->width, v->height};
+    c->states[0].scissor = area;
     return FLUX_OK;
 }
 

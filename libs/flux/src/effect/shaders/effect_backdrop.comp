@@ -24,6 +24,10 @@ layout(push_constant) uniform PC {
     uint output_height;
     float offset;
     uint mode; /* 0 = downsample, 1 = upsample, 2 = copy */
+    uint origin_x;
+    uint origin_y;
+    uint region_width;
+    uint region_height;
 } pc;
 
 layout(local_size_x = 16, local_size_y = 16) in;
@@ -41,7 +45,9 @@ vec4 sample_input(uint image_handle, uint sampler_handle, vec2 uv)
 
 void main()
 {
-    uvec2 p = gl_GlobalInvocationID.xy;
+    uvec2 local = gl_GlobalInvocationID.xy;
+    if (local.x >= pc.region_width || local.y >= pc.region_height) return;
+    uvec2 p = local + uvec2(pc.origin_x, pc.origin_y);
     if (p.x >= pc.output_width || p.y >= pc.output_height) return;
 
     uint ih = pc.in_handle & 0x0FFFFFFFu;

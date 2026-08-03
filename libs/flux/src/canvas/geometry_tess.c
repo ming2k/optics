@@ -449,18 +449,25 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
 
     /* EVEN_ODD needs the stencil path even for simple inputs: the
      * ear-clip + hole-bridging pipeline computes nonzero winding, not
-     * parity. If the backend has no stencil (CPU), fall back to the
-     * nonzero ear-clip path; the rendered output will then differ
-     * from GPU EVEN_ODD but stays well-defined. */
+     * parity. An explicitly requested no-stencil pass is a strict contract:
+     * diagnose and drop the draw rather than silently changing fill rules.
+     * Default CPU / stencil-less-device passes retain the legacy nonzero
+     * fallback for compatibility. */
     bool even_odd = (paint->fill_rule == FLUX_FILL_EVEN_ODD);
+    if (even_odd && c->stencil_forbidden) {
+        if (c->pass_error == FLUX_OK)
+            c->pass_error = FLUX_ERROR_INVALID_STATE;
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "EVEN_ODD path fill requires stencil in a no-stencil Canvas pass");
+        return;
+    }
     if (even_odd && c->stencil_available) {
         flux_point *pts0 = c->scratch_pts;
         flux_canvas_contour *cons0 = c->scratch_contours;
         flux_mat3x2 tx0 = c->states[c->state_top].transform;
         float pixel_scale0 = flux_canvas_mat3x2_pixel_scale(tx0);
-        flatten_multi fm0 =
-            flatten_path_to_contours(p, pixel_scale0, pts0, FLUX_CANVAS_PATH_SCRATCH_CAP, cons0,
-                                     FLUX_CANVAS_MAX_CONTOURS);
+        flatten_multi fm0 = flatten_path_to_contours(
+            p, pixel_scale0, pts0, FLUX_CANVAS_PATH_SCRATCH_CAP, cons0, FLUX_CANVAS_MAX_CONTOURS);
         if (fm0.contour_count == 0 || fm0.point_count < 3)
             return;
         struct contour_info infos_eo[FLUX_CANVAS_MAX_CONTOURS];
@@ -567,9 +574,18 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
                 stalled = true;
             }
         }
-        if (stalled && c->stencil_available) {
-            fill_path_stencil_cover(c, paint, tx, pts, infos, fm.contour_count, false);
-            return;
+        if (stalled) {
+            if (c->stencil_available) {
+                fill_path_stencil_cover(c, paint, tx, pts, infos, fm.contour_count, false);
+                return;
+            }
+            if (c->stencil_forbidden) {
+                if (c->pass_error == FLUX_OK)
+                    c->pass_error = FLUX_ERROR_INVALID_STATE;
+                FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                          "self-intersecting path requires stencil in a no-stencil Canvas pass");
+                return;
+            }
         }
         if (cacheable)
             tess_cache_store_and_transform(c, p, paint, false, pixel_scale, 0.0f, 0.0f, stalled,
@@ -712,12 +728,21 @@ void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint 
         }
     }
 
-    if (stalled && c->stencil_available) {
-        /* Drop the partial triangulation and redo the whole fill via
-         * stencil winding — it handles holes natively, so the merged
-         * pieces that DID triangulate are simply superseded. */
-        fill_path_stencil_cover(c, paint, tx, pts, infos_orig, fm.contour_count, false);
-        return;
+    if (stalled) {
+        if (c->stencil_available) {
+            /* Drop the partial triangulation and redo the whole fill via
+             * stencil winding — it handles holes natively, so the merged
+             * pieces that DID triangulate are simply superseded. */
+            fill_path_stencil_cover(c, paint, tx, pts, infos_orig, fm.contour_count, false);
+            return;
+        }
+        if (c->stencil_forbidden) {
+            if (c->pass_error == FLUX_OK)
+                c->pass_error = FLUX_ERROR_INVALID_STATE;
+            FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                      "self-intersecting path requires stencil in a no-stencil Canvas pass");
+            return;
+        }
     }
 
     if (cacheable)

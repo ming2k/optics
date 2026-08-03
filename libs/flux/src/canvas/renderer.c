@@ -48,23 +48,29 @@ static VkShaderModule make_module(VkDevice d, const void *bytes, size_t len) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Device-cached pipeline (per swapchain format and sample count)    */
+/*  Device-cached pipeline (format, samples, and stencil contract)    */
 /*                                                                    */
 /*  flux_canvas_create previously built a fresh VkPipeline per        */
 /*  canvas (~ms each). With multiple short-lived canvases (typical    */
 /*  for flux-ui-style UIs) that cost added up. The pipeline depends   */
-/*  only on (color_format, samples), so we cache it on the device     */
+/*  only on (color_format, samples, stencil contract), so we cache it */
 /*  and share it across canvases. Pipelines outlive any individual    */
 /*  canvas; the device's canvas_state_destroy hook frees them.        */
 /* ------------------------------------------------------------------ */
 
 #define CANVAS_PIPELINE_CACHE_CAP 8
 #define CANVAS_SAMPLE_VARIANT_COUNT 2
+#define CANVAS_STENCIL_VARIANT_COUNT 2
 #define CANVAS_BLEND_VARIANT_COUNT 4 /* SRC_OVER, SRC, PLUS, MULTIPLY */
 
 enum canvas_sample_variant {
     CANVAS_SAMPLE_SINGLE = 0,
     CANVAS_SAMPLE_MSAA,
+};
+
+enum canvas_stencil_variant {
+    CANVAS_NO_STENCIL = 0,
+    CANVAS_WITH_STENCIL,
 };
 
 static int canvas_sample_variant(VkSampleCountFlagBits samples) {
@@ -84,7 +90,8 @@ static int canvas_blend_variant(flux_blend_mode b) {
 typedef struct canvas_cache_entry {
     VkFormat color_format; /* VK_FORMAT_UNDEFINED = unused slot */
     VkPipelineLayout layout;
-    VkPipeline pipelines[CANVAS_SAMPLE_VARIANT_COUNT][CANVAS_PIPE_COUNT][CANVAS_BLEND_VARIANT_COUNT];
+    VkPipeline pipelines[CANVAS_STENCIL_VARIANT_COUNT][CANVAS_SAMPLE_VARIANT_COUNT]
+                        [CANVAS_PIPE_COUNT][CANVAS_BLEND_VARIANT_COUNT];
 } canvas_cache_entry;
 
 typedef struct canvas_module_state {
@@ -100,11 +107,13 @@ static void canvas_state_destroy(flux_device *d) {
         return;
     for (uint32_t i = 0; i < CANVAS_PIPELINE_CACHE_CAP; ++i) {
         canvas_cache_entry *e = &st->entries[i];
-        for (uint32_t sample = 0; sample < CANVAS_SAMPLE_VARIANT_COUNT; ++sample)
-            for (uint32_t k = 0; k < CANVAS_PIPE_COUNT; ++k)
-                for (uint32_t b = 0; b < CANVAS_BLEND_VARIANT_COUNT; ++b)
-                    if (e->pipelines[sample][k][b])
-                        vkDestroyPipeline(d->device, e->pipelines[sample][k][b], nullptr);
+        for (uint32_t stencil = 0; stencil < CANVAS_STENCIL_VARIANT_COUNT; ++stencil)
+            for (uint32_t sample = 0; sample < CANVAS_SAMPLE_VARIANT_COUNT; ++sample)
+                for (uint32_t k = 0; k < CANVAS_PIPE_COUNT; ++k)
+                    for (uint32_t b = 0; b < CANVAS_BLEND_VARIANT_COUNT; ++b)
+                        if (e->pipelines[stencil][sample][k][b])
+                            vkDestroyPipeline(d->device, e->pipelines[stencil][sample][k][b],
+                                              nullptr);
         if (e->layout)
             vkDestroyPipelineLayout(d->device, e->layout, nullptr);
     }
@@ -147,9 +156,9 @@ void *canvas_state_get_or_init(flux_device *d) {
     return published;
 }
 
-/* Probe the stencil attachment format once per device. Every canvas
- * pass carries a stencil attachment of this format and every canvas
- * pipeline declares it, so the choice must be device-wide and stable.
+/* Probe the stencil attachment format once per device. Stencil-capable
+ * passes and pipeline variants use this device-wide stable choice;
+ * no-stencil variants independently declare VK_FORMAT_UNDEFINED.
  * Caller must hold st->lock. */
 static VkFormat stencil_format_locked(flux_device *d, canvas_module_state *st) {
     if (!st->stencil_format_probed) {
@@ -216,14 +225,18 @@ static flux_result build_canvas_layout(flux_device *device, VkPipelineLayout *ou
  * Pipelines are owned by the device. */
 flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
                                    VkSampleCountFlagBits samples, canvas_pipe_id id,
-                                   flux_blend_mode blend, VkPipelineLayout *out_layout,
-                                   VkPipeline *out_pipeline) {
+                                   flux_blend_mode blend, bool with_stencil,
+                                   VkPipelineLayout *out_layout, VkPipeline *out_pipeline) {
     int sample_variant = canvas_sample_variant(samples);
     int blend_variant = canvas_blend_variant(blend);
-    if (sample_variant < 0 || id < 0 || id >= CANVAS_PIPE_COUNT) {
+    bool stencil_program = id == CANVAS_PIPE_STENCIL_WRITE || id == CANVAS_PIPE_STENCIL_WRITE_EO ||
+                           id == CANVAS_PIPE_COVER_SOLID || id == CANVAS_PIPE_COVER_GRADIENT;
+    if (sample_variant < 0 || id < 0 || id >= CANVAS_PIPE_COUNT ||
+        (stencil_program && !with_stencil)) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid canvas pipeline sample count or id");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
+    int stencil_variant = with_stencil ? CANVAS_WITH_STENCIL : CANVAS_NO_STENCIL;
     canvas_module_state *st = canvas_state_get_or_init(device);
     if (!st)
         return FLUX_ERROR_OUT_OF_MEMORY;
@@ -262,16 +275,23 @@ flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
     }
     *out_layout = slot->layout;
 
-    if (!slot->pipelines[sample_variant][id][blend_variant]) {
-        flux_result r = build_canvas_pipeline(device, color_format, stencil_format_locked(device, st),
-                                              samples, id, blend, slot->layout,
-                                              &slot->pipelines[sample_variant][id][blend_variant]);
+    if (!slot->pipelines[stencil_variant][sample_variant][id][blend_variant]) {
+        VkFormat stencil_format =
+            with_stencil ? stencil_format_locked(device, st) : VK_FORMAT_UNDEFINED;
+        if (with_stencil && stencil_format == VK_FORMAT_UNDEFINED) {
+            pthread_mutex_unlock(&st->lock);
+            FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "canvas stencil format unavailable");
+            return FLUX_ERROR_UNSUPPORTED;
+        }
+        flux_result r = build_canvas_pipeline(
+            device, color_format, stencil_format, samples, id, blend, slot->layout,
+            &slot->pipelines[stencil_variant][sample_variant][id][blend_variant]);
         if (r != FLUX_OK) {
             pthread_mutex_unlock(&st->lock);
             return r;
         }
     }
-    *out_pipeline = slot->pipelines[sample_variant][id][blend_variant];
+    *out_pipeline = slot->pipelines[stencil_variant][sample_variant][id][blend_variant];
     pthread_mutex_unlock(&st->lock);
     return FLUX_OK;
 }
@@ -281,15 +301,15 @@ flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
  * flux_canvas_draw_image, not paint.kind). */
 flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format,
                                 VkSampleCountFlagBits samples, flux_paint_kind kind,
-                                flux_blend_mode blend, VkPipelineLayout *out_layout,
-                                VkPipeline *out_pipeline) {
+                                flux_blend_mode blend, bool with_stencil,
+                                VkPipelineLayout *out_layout, VkPipeline *out_pipeline) {
     canvas_pipe_id id = CANVAS_PIPE_SOLID;
     if ((uint32_t)kind == 0xffu)
         id = CANVAS_PIPE_IMAGE;
     else if (kind == FLUX_PAINT_LINEAR_GRADIENT || kind == FLUX_PAINT_RADIAL_GRADIENT)
         id = CANVAS_PIPE_GRADIENT;
-    return get_canvas_pipeline_id(device, color_format, samples, id, blend, out_layout,
-                                  out_pipeline);
+    return get_canvas_pipeline_id(device, color_format, samples, id, blend, with_stencil,
+                                  out_layout, out_pipeline);
 }
 
 static flux_result build_canvas_pipeline(flux_device *device, VkFormat color_format,

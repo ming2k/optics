@@ -43,6 +43,7 @@ typedef struct flux_vk_canvas {
     VkFormat stencil_format;   /* device stencil format, or UNDEFINED */
     VkPipeline bound_pipeline; /* last pipeline bound this pass */
     VkSampleCountFlagBits active_samples;
+    bool active_stencil; /* active pass really binds a stencil attachment */
 
     /* Open draw batch. Consecutive submits whose entire draw-visible
      * state (pipeline, scissor, every push-constant byte except the
@@ -233,13 +234,28 @@ static flux_result vk_canvas_init(const flux_canvas_backend *self, flux_canvas *
             /* Warm the default SRC_OVER pipeline for each id; non-default
              * blend variants are built lazily on first use. */
             VkPipeline warm;
-            flux_result r = get_canvas_pipeline_id(d, v->color_format, sample_counts[sample],
-                                                   (canvas_pipe_id)id, FLUX_BLEND_SRC_OVER,
-                                                   &v->layout, &warm);
-            if (r != FLUX_OK) {
-                flux_internal_free(d, v);
-                c->backend_data = nullptr;
-                return r;
+            if (v->stencil_format != VK_FORMAT_UNDEFINED) {
+                flux_result r = get_canvas_pipeline_id(d, v->color_format, sample_counts[sample],
+                                                       (canvas_pipe_id)id, FLUX_BLEND_SRC_OVER,
+                                                       true, &v->layout, &warm);
+                if (r != FLUX_OK) {
+                    flux_internal_free(d, v);
+                    c->backend_data = nullptr;
+                    return r;
+                }
+            }
+            bool stencil_program =
+                id == CANVAS_PIPE_STENCIL_WRITE || id == CANVAS_PIPE_STENCIL_WRITE_EO ||
+                id == CANVAS_PIPE_COVER_SOLID || id == CANVAS_PIPE_COVER_GRADIENT;
+            if (!stencil_program) {
+                flux_result r = get_canvas_pipeline_id(d, v->color_format, sample_counts[sample],
+                                                       (canvas_pipe_id)id, FLUX_BLEND_SRC_OVER,
+                                                       false, &v->layout, &warm);
+                if (r != FLUX_OK) {
+                    flux_internal_free(d, v);
+                    c->backend_data = nullptr;
+                    return r;
+                }
             }
         }
     }
@@ -284,8 +300,7 @@ static void unpack_clear(const flux_color *clear, flux_vec4 *out) {
 }
 
 static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c, flux_frame *f,
-                                 flux_image *target, const flux_color *clear,
-                                 flux_canvas_antialias antialias) {
+                                 flux_image *target, const canvas_pass_config *config) {
     (void)self;
     flux_vk_canvas *v = vkc(c);
 
@@ -293,6 +308,11 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     flux_surface_get_info(c->surface, &info);
     uint32_t w = target ? target->width : info.width;
     uint32_t h = target ? target->height : info.height;
+    flux_recti area;
+    if (!canvas_pass_render_area(config, w, h, &area)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "Canvas render area is invalid or out of bounds");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     v->color_format =
         target ? flux_format_to_vk(target->format) : flux_surface_vk_format(c->surface);
     if (v->color_format == VK_FORMAT_UNDEFINED)
@@ -304,17 +324,18 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
         target ? &v->target_attachments[slot] : &v->surface_attachments[slot];
 
     flux_vec4 cc;
-    unpack_clear(clear, &cc);
+    unpack_clear(config->clear_color, &cc);
 
     /* A multisample attachment cannot LOAD the contents of its one-sample
      * resolve destination. AUTO preserves the historical CLEAR => 4x MSAA,
      * LOAD => single-sample policy; explicit NONE lets image-heavy or
      * compositor passes clear without allocating and resolving a 4x target. */
-    bool use_msaa = antialias == FLUX_CANVAS_ANTIALIAS_MSAA_4X ||
-                    (antialias == FLUX_CANVAS_ANTIALIAS_AUTO && clear != nullptr);
+    bool use_msaa =
+        config->antialias == FLUX_CANVAS_ANTIALIAS_MSAA_4X ||
+        (config->antialias == FLUX_CANVAS_ANTIALIAS_AUTO && config->clear_color != nullptr);
     VkSampleCountFlagBits samples = use_msaa ? FLUX_CANVAS_SAMPLES : VK_SAMPLE_COUNT_1_BIT;
     flux_pass_attachment att = {
-        .load_op = clear ? FLUX_LOAD_CLEAR : FLUX_LOAD_LOAD,
+        .load_op = config->clear_color ? FLUX_LOAD_CLEAR : FLUX_LOAD_LOAD,
         .store_op = use_msaa ? FLUX_STORE_DONT_CARE : FLUX_STORE_STORE,
         .clear_color = cc,
     };
@@ -388,13 +409,17 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
             att.resolve_to_surface = true;
     }
 
-    /* Canvas-owned stencil attachment (ADR-0014). The canvas pipelines all
-     * declare this format, so when the device has one the pass must carry it —
-     * even if no fill needs the fallback this frame. */
+    /* Canvas-owned stencil attachment (ADR-0014). A no-stencil pass is a
+     * distinct dynamic-rendering contract: it neither allocates nor barriers
+     * an image, and its pipelines declare VK_FORMAT_UNDEFINED. Default passes
+     * retain the historical stencil fallback and therefore bind the matching
+     * attachment whenever the device exposes a supported format. */
     flux_pass_depth_attachment stencil_att;
     canvas_owned_image *stencil = nullptr;
-    bool has_stencil = stencil_ensure(c, attachments, w, h, samples, &stencil);
-    if (v->stencil_format != VK_FORMAT_UNDEFINED && !has_stencil) {
+    bool has_stencil = false;
+    if (!config->skip_stencil)
+        has_stencil = stencil_ensure(c, attachments, w, h, samples, &stencil);
+    if (!config->skip_stencil && v->stencil_format != VK_FORMAT_UNDEFINED && !has_stencil) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas stencil attachment unavailable");
         return FLUX_ERROR_BACKEND_FAILURE;
     }
@@ -434,8 +459,10 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
         .color_attachment_count = 1,
         .color_attachments = &att,
         .stencil = has_stencil ? &stencil_att : nullptr,
-        .width = w,
-        .height = h,
+        .width = area.w,
+        .height = area.h,
+        .render_offset_x = area.x,
+        .render_offset_y = area.y,
     };
 
     flux_frame_begin_pass(f, &pass);
@@ -443,9 +470,11 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     c->target_pass = (target != nullptr);
     c->target = target;
     c->stencil_available = has_stencil;
+    c->stencil_forbidden = config->skip_stencil;
     c->fb_width = w;
     c->fb_height = h;
     v->active_samples = samples;
+    v->active_stencil = has_stencil;
 
     VkViewport vp = {.x = 0.0f,
                      .y = 0.0f,
@@ -453,8 +482,8 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
                      .height = (float)h,
                      .minDepth = 0.0f,
                      .maxDepth = 1.0f};
-    VkRect2D sc = {.offset = {0, 0}, .extent = {w, h}};
-    c->states[0].scissor = (flux_recti){0, 0, w, h};
+    VkRect2D sc = {.offset = {area.x, area.y}, .extent = {area.w, area.h}};
+    c->states[0].scissor = area;
 
     VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
     vkCmdSetViewport(cmd, 0, 1, &vp);
@@ -525,10 +554,19 @@ static void vk_set_scissor(const flux_canvas_backend *self, flux_canvas *c, flux
 static bool vk_bind_program(const flux_canvas_backend *self, flux_canvas *c, canvas_pipe_id id) {
     (void)self;
     flux_vk_canvas *v = vkc(c);
+    bool stencil_program = id == CANVAS_PIPE_STENCIL_WRITE || id == CANVAS_PIPE_STENCIL_WRITE_EO ||
+                           id == CANVAS_PIPE_COVER_SOLID || id == CANVAS_PIPE_COVER_GRADIENT;
+    if (stencil_program && !v->active_stencil) {
+        if (c->pass_error == FLUX_OK)
+            c->pass_error = FLUX_ERROR_INVALID_STATE;
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "stencil-dependent Canvas draw used in a no-stencil pass");
+        return false;
+    }
     VkPipelineLayout layout;
     VkPipeline pipeline;
-    if (get_canvas_pipeline_id(c->device, v->color_format, v->active_samples, id,
-                               c->pending_blend, &layout, &pipeline) != FLUX_OK)
+    if (get_canvas_pipeline_id(c->device, v->color_format, v->active_samples, id, c->pending_blend,
+                               v->active_stencil, &layout, &pipeline) != FLUX_OK)
         return false;
     if (v->bound_pipeline != pipeline) {
         /* A pipeline change ends the open batch: its draw must be

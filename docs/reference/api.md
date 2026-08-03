@@ -174,8 +174,50 @@ you upgrade across a minor bump.
 Post-1.0, base desc layouts are frozen. Library-side additions ride a chained
 extension struct accessed through `next`. The library walks that chain looking
 for `flux_struct_type` discriminators it knows; unknown extensions are ignored.
-This is the same pattern Vulkan uses for ABI-stable feature growth. No public
-extension structs are defined in the current pre-1.0 API.
+This is the same pattern Vulkan uses for ABI-stable feature growth.
+
+### Semantic device capabilities
+
+Chain `flux_device_features_desc` to request backend-neutral capabilities.
+`required` capabilities participate in physical-device filtering. `optional`
+capabilities are enabled when the normally selected device supports their
+complete implementation. Query the result with
+`flux_device_enabled_features`.
+
+```c
+flux_device_features_desc features = FLUX_DEVICE_FEATURES_DESC_INIT;
+features.required = FLUX_DEVICE_FEATURE_DMABUF;
+features.optional = FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
+
+flux_device_desc device = FLUX_DEVICE_DESC_INIT;
+device.next = &features;
+```
+
+The semantic interface owns the Vulkan extension bundle. Use
+`required_device_extensions` only for platform or application extensions that
+do not have a Flux capability.
+
+### DRM physical-device constraint
+
+Chain `flux_device_drm_node_desc` to `flux_device_desc.next` to require the
+Vulkan physical device associated with a Linux DRM primary or render node:
+
+```c
+flux_device_drm_node_desc drm = FLUX_DEVICE_DRM_NODE_DESC_INIT;
+drm.drm_major = 226;
+drm.drm_minor = 1;
+
+flux_device_desc device = FLUX_DEVICE_DESC_INIT;
+device.next = &drm;
+device.headless = true;
+```
+
+Flux compares the pair with the primary and render identities reported by
+`VK_EXT_physical_device_drm` before applying its normal feature checks and
+device scoring. Missing extension support or no exact match returns
+`FLUX_ERROR_UNSUPPORTED`; selection never falls back to another GPU.
+`flux_device_get_drm_identity` returns the selected device's available primary
+and render identities without requiring raw Vulkan access.
 
 ## dma-buf Import
 
@@ -189,25 +231,20 @@ a Linux dma-buf file descriptor as a sampled `flux_image` for canvas draws.
 | `flux_dmabuf_image_desc` | Import descriptor tagged with `FLUX_TYPE_DMABUF_IMAGE_DESC`. |
 | `flux_image_import_dmabuf` | Creates a refcounted `flux_image` from a dma-buf. |
 | `flux_canvas_wait_dmabuf_acquire` | Waits a new producer sync-file before the current frame samples an already-imported dma-buf image. |
-| `flux_dmabuf_supported` | Returns whether the device was created with the required dma-buf extensions. |
+| `flux_dmabuf_supported` | Returns whether the complete dma-buf capability is enabled. |
 | `flux_dmabuf_sync_supported` | Returns whether acquire sync-file fds can be imported. |
 
-The device must be created with these Vulkan device extensions in
-`flux_device_desc.required_device_extensions`:
+Request dma-buf import and optional sync-file interoperability through the
+semantic device feature extension:
 
 ```c
-static const char *const dmabuf_exts[] = {
-    VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
-    VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
-    VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
-    VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
-};
+flux_device_features_desc features = FLUX_DEVICE_FEATURES_DESC_INIT;
+features.required = FLUX_DEVICE_FEATURE_DMABUF;
+features.optional = FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
 ```
 
-Add `VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME` when
-`flux_dmabuf_image_desc.has_acquire_sync_fd` is true. In that mode,
-`acquire_sync_fd` is imported as a Linux sync_file fence and waited before
-flux samples the image.
+When `FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE` is enabled, `acquire_sync_fd` is
+imported as a Linux sync_file fence and waited before Flux samples the image.
 
 `flux_image_import_dmabuf` currently accepts single-plane, sampled color
 formats only. It validates the exact DRM format modifier against the selected
@@ -215,6 +252,10 @@ physical device, verifies that the format/modifier is externally importable,
 and acquires image ownership from `VK_QUEUE_FAMILY_FOREIGN_EXT` before
 creating the bindless view. Multi-plane YCbCr imports are not implemented and
 return `FLUX_ERROR_UNSUPPORTED`.
+
+`flux_dmabuf_format_modifiers` returns only modifiers proven sampleable and
+externally importable. Callers must not add an unreported
+`DRM_FORMAT_MOD_LINEAR` fallback.
 
 On `FLUX_OK`, flux owns and closes the file descriptors in
 `flux_dmabuf_image_desc.planes` and `acquire_sync_fd` when provided. On any

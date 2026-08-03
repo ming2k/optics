@@ -139,8 +139,12 @@ static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen, b
 static void foreign_images_clear(flux_surface *s, flux_per_frame *pf) {
     for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
         flux_frame_foreign_image *entry = &pf->foreign_images[i];
-        if (entry->acquire_semaphore)
-            vkDestroySemaphore(s->device->device, entry->acquire_semaphore, nullptr);
+        if (entry->acquire_semaphore) {
+            if (entry->acquire_wait_submitted)
+                flux_dmabuf_acquire_semaphore_recycle(s->device, entry->acquire_semaphore);
+            else
+                vkDestroySemaphore(s->device->device, entry->acquire_semaphore, nullptr);
+        }
         if (entry->release)
             entry->release(entry->resource);
     }
@@ -217,6 +221,7 @@ bool flux_frame_track_foreign_image(flux_frame *f, VkImage image, void *resource
         .foreign_owned = foreign_owned,
         .acquired = *foreign_owned,
         .acquire_semaphore = VK_NULL_HANDLE,
+        .acquire_wait_submitted = false,
     };
     if (!entry->resource)
         return false;
@@ -237,6 +242,7 @@ bool flux_frame_set_foreign_image_acquire(flux_frame *f, void *resource, VkSemap
         if (entry->acquire_semaphore)
             return false;
         entry->acquire_semaphore = semaphore;
+        entry->acquire_wait_submitted = false;
         return true;
     }
     return false;
@@ -341,6 +347,8 @@ static void foreign_images_record_release(flux_surface *s, flux_per_frame *pf) {
 
 static void foreign_images_submit_succeeded(flux_per_frame *pf) {
     for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
+        if (pf->foreign_images[i].acquire_semaphore)
+            pf->foreign_images[i].acquire_wait_submitted = true;
         if (pf->foreign_images[i].foreign_owned)
             *pf->foreign_images[i].foreign_owned = true;
     }
@@ -508,11 +516,43 @@ acquired:
 flux_result flux_frame_request_readback(flux_frame *f) {
     if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
         return FLUX_ERROR_INVALID_STATE;
+    flux_readback_region full = {
+        .width = f->surface->extent.width,
+        .height = f->surface->extent.height,
+    };
+    return flux_frame_request_readback_region(f, &full);
+}
+
+flux_result flux_frame_request_readback_region(flux_frame *f,
+                                               const flux_readback_region *region) {
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
+        return FLUX_ERROR_INVALID_STATE;
+    if (!region || !region->width || !region->height)
+        return FLUX_ERROR_INVALID_ARGUMENT;
     flux_surface *s = f->surface;
-    flux_result r = flux_surface_prepare_readback(s);
+    if (region->x > s->extent.width || region->y > s->extent.height ||
+        region->width > s->extent.width - region->x ||
+        region->height > s->extent.height - region->y || region->x > INT32_MAX ||
+        region->y > INT32_MAX) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "readback region lies outside surface extent");
+        return FLUX_ERROR_OUT_OF_RANGE;
+    }
+    /* A require_readback offscreen surface continuously snapshots the complete
+     * image for its legacy surface-owned read_pixels API. It cannot expose a
+     * detachable region snapshot without changing that contract. */
+    if (s->offscreen_require_readback &&
+        (region->x != 0 || region->y != 0 || region->width != s->extent.width ||
+         region->height != s->extent.height)) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                  "region capture is unsupported on require_readback surfaces");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    flux_result r =
+        flux_surface_prepare_readback_region(s, region->width, region->height);
     if (r != FLUX_OK)
         return r;
     f->readback_requested = true;
+    f->readback_region = *region;
     return FLUX_OK;
 }
 
@@ -717,11 +757,18 @@ flux_result flux_frame_submit(flux_frame *f) {
     }
 
     bool copy_readback = s->offscreen_require_readback || f->readback_requested;
+    flux_readback_region readback_region = s->offscreen_require_readback
+                                              ? (flux_readback_region){
+                                                    .width = s->extent.width,
+                                                    .height = s->extent.height,
+                                                }
+                                              : f->readback_region;
     if (copy_readback) {
         barrier_to_readback(pf->cmd, s->images[s->current_image]);
         VkBufferImageCopy region = {
             .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
-            .imageExtent = {s->extent.width, s->extent.height, 1},
+            .imageOffset = {(int32_t)readback_region.x, (int32_t)readback_region.y, 0},
+            .imageExtent = {readback_region.width, readback_region.height, 1},
         };
         vkCmdCopyImageToBuffer(pf->cmd, s->images[s->current_image],
                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s->readback_staging->buffer, 1,
@@ -808,8 +855,10 @@ flux_result flux_frame_submit(flux_frame *f) {
             return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
         foreign_images_submit_succeeded(pf);
         s->last_submitted_slot = f->slot;
-        if (copy_readback)
+        if (copy_readback) {
             s->last_readback_slot = f->slot;
+            s->last_readback_region = readback_region;
+        }
         s->image_layouts[s->current_image] = s->offscreen_exportable
                                                  ? VK_IMAGE_LAYOUT_GENERAL
                                                  : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -869,8 +918,10 @@ flux_result flux_frame_submit(flux_frame *f) {
     if (vr != VK_SUCCESS)
         return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
     foreign_images_submit_succeeded(pf);
-    if (copy_readback)
+    if (copy_readback) {
         s->last_readback_slot = f->slot;
+        s->last_readback_region = readback_region;
+    }
     s->image_layouts[s->current_image] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     f->state = FLUX_FRAME_STATE_SUBMITTED;
     return FLUX_OK;

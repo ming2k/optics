@@ -169,8 +169,13 @@ if opt_effect
     output  : 'effect_liquid_glass.comp.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
   )
+  effect_storage_clear_comp_spv = custom_target('effect_storage_clear.comp.spv',
+    input   : 'src/effect/shaders/effect_storage_clear.comp',
+    output  : 'effect_storage_clear.comp.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  )
   flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
-                        effect_liquid_glass_comp_spv]
+                        effect_liquid_glass_comp_spv, effect_storage_clear_comp_spv]
   if not flux_c_args.contains('--embed-dir=' + meson.current_build_dir())
     flux_c_args += '--embed-dir=' + meson.current_build_dir()
   endif

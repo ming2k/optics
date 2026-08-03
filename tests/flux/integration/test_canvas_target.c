@@ -23,6 +23,46 @@
 #define BYTES (W * H * 4u)
 #define BACKDROP_W 640u
 #define BACKDROP_H 360u
+#define TEST_FRAME_SLOTS 3u /* mirrors FLUX_MAX_FRAMES_IN_FLIGHT */
+
+static uint32_t render_liquid_glass_frame(flux_surface *surface, flux_canvas *canvas,
+                                          flux_image *target, flux_blur_filter *blur_filter,
+                                          flux_liquid_glass_filter *glass_filter,
+                                          const flux_liquid_glass_group *groups,
+                                          uint32_t group_count, uint8_t *pixels) {
+    flux_frame *frame = nullptr;
+    EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+    uint32_t slot = flux_frame_index(frame);
+
+    flux_color source = flux_color_rgba(96, 144, 208, 255);
+    EXPECT(flux_canvas_begin_target(canvas, frame, target, &source) == FLUX_OK);
+    flux_canvas_end_target(canvas);
+
+    flux_effect_blur_desc blur_desc = FLUX_EFFECT_BLUR_DESC_INIT;
+    blur_desc.input = target;
+    blur_desc.sigma = 2.0f;
+    flux_image *blurred = nullptr;
+    EXPECT(flux_blur_filter_apply(blur_filter, frame, &blur_desc, &blurred) == FLUX_OK);
+
+    flux_liquid_glass_desc glass_desc = FLUX_LIQUID_GLASS_DESC_INIT;
+    glass_desc.input = target;
+    glass_desc.blurred_input = blurred;
+    glass_desc.groups = groups;
+    glass_desc.group_count = group_count;
+    glass_desc.refraction = 0.0f;
+    flux_image *glass = nullptr;
+    EXPECT(flux_liquid_glass_filter_apply(glass_filter, frame, &glass_desc, &glass) == FLUX_OK);
+
+    flux_color black = flux_color_rgba(0, 0, 0, 255);
+    EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+    flux_canvas_draw_image(canvas, glass, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+    flux_canvas_end(canvas);
+    EXPECT(flux_frame_submit(frame) == FLUX_OK);
+    EXPECT(flux_frame_present(frame) == FLUX_OK);
+    memset(pixels, 0xCD, BYTES);
+    EXPECT(flux_surface_read_pixels(surface, pixels, BYTES) == FLUX_OK);
+    return slot;
+}
 
 int main(void) {
     flux_device *d = test_helpers_make_headless_device();
@@ -59,6 +99,7 @@ int main(void) {
     EXPECT(flux_liquid_glass_filter_create(d, &glass_filter) == FLUX_OK);
 
     static uint8_t px[BYTES];
+    static uint8_t full_blur_px[BYTES];
 
     /* --- explicit one-sample clears for compositor/image-heavy passes --- */
     {
@@ -127,7 +168,64 @@ int main(void) {
         /* far sides stay near-black / near-white */
         EXPECT(px[(H / 2 * W + 0) * 4 + 0] < 16);
         EXPECT(px[(H / 2 * W + (W - 1)) * 4 + 0] > 240);
+        memcpy(full_blur_px, px, BYTES);
         printf("capture+blur+composite edge: left=%u right=%u (softened)\n", edge_left, edge_right);
+    }
+
+    /* --- reusable region blur matches the full pass away from its halo --- */
+    {
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+
+        /* A wholly clipped list is rejected instead of returning stale slot
+         * pixels under the guise of a valid blurred image. */
+        flux_effect_region invalid_region = {.x = W + 8u, .y = H + 8u, .width = 4u, .height = 4u};
+        flux_effect_blur_regions_desc invalid_regions = FLUX_EFFECT_BLUR_REGIONS_DESC_INIT;
+        invalid_regions.regions = &invalid_region;
+        invalid_regions.region_count = 1;
+        flux_effect_blur_desc invalid_blur = FLUX_EFFECT_BLUR_DESC_INIT;
+        invalid_blur.next = &invalid_regions;
+        invalid_blur.input = target;
+        invalid_blur.sigma = 6.0f;
+        flux_image *blurred = nullptr;
+        EXPECT(flux_blur_filter_apply(blur_filter, frame, &invalid_blur, &blurred) ==
+               FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(blurred == nullptr);
+
+        /* The requested dispatch includes a 16px halo. Only the 24x24 inner
+         * rectangle is consumed below; its pixels must match the full-image
+         * reference produced by the previous frame. */
+        flux_effect_region region = {.x = 4u, .y = 4u, .width = 56u, .height = 56u};
+        flux_effect_blur_regions_desc regions = FLUX_EFFECT_BLUR_REGIONS_DESC_INIT;
+        regions.regions = &region;
+        regions.region_count = 1;
+        flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+        bd.next = &regions;
+        bd.input = target;
+        bd.sigma = 6.0f;
+        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        EXPECT(blurred != nullptr);
+
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        flux_canvas_draw_image_sub(canvas, blurred, (flux_rect){20, 20, 24, 24},
+                                   (flux_rect){20.0f / W, 20.0f / H, 24.0f / W, 24.0f / H});
+        flux_canvas_end(canvas);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        memset(px, 0, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+
+        for (uint32_t y = 20; y < 44; ++y) {
+            for (uint32_t x = 20; x < 44; ++x) {
+                for (uint32_t channel = 0; channel < 4; ++channel) {
+                    uint8_t actual = px[(y * W + x) * 4 + channel];
+                    uint8_t expected = full_blur_px[(y * W + x) * 4 + channel];
+                    int delta = (int)actual - (int)expected;
+                    EXPECT(delta >= -2 && delta <= 2);
+                }
+            }
+        }
     }
 
     /* --- LOAD a captured target, overlay, then composite it unchanged --- */
@@ -201,6 +299,97 @@ int main(void) {
         const uint8_t *glass_centre = &px[(32 * W + 32) * 4];
         EXPECT(dead_corner[0] < 5 && dead_corner[1] < 5 && dead_corner[2] < 5);
         EXPECT(glass_centre[0] > 16 && glass_centre[0] < 245);
+    }
+
+    /* --- persistent liquid output clears only previous + current footprints --- */
+    {
+        flux_liquid_glass_filter *persistent_filter = nullptr;
+        EXPECT(flux_liquid_glass_filter_create(d, &persistent_filter) == FLUX_OK);
+        bool seen[TEST_FRAME_SLOTS] = {false};
+
+        flux_liquid_glass_group left = FLUX_LIQUID_GLASS_GROUP_INIT;
+        left.shapes[0] = (flux_liquid_glass_shape){
+            .bounds = {4.0f, 24.0f, 16.0f, 16.0f},
+            .corner_radius = 8.0f,
+        };
+        for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
+            uint32_t slot = render_liquid_glass_frame(s, canvas, target, blur_filter,
+                                                      persistent_filter, &left, 1u, px);
+            EXPECT(slot < TEST_FRAME_SLOTS);
+            if (slot < TEST_FRAME_SLOTS)
+                seen[slot] = true;
+            const uint8_t *left_centre = &px[(32u * W + 12u) * 4u];
+            const uint8_t *right_centre = &px[(32u * W + 52u) * 4u];
+            EXPECT(left_centre[0] > 10u || left_centre[1] > 10u || left_centre[2] > 10u);
+            EXPECT(right_centre[0] < 5u && right_centre[1] < 5u && right_centre[2] < 5u);
+        }
+        /* Reusing each slot with a disjoint body must remove the old body
+         * without clearing the empty middle of the output. */
+        flux_liquid_glass_group right = FLUX_LIQUID_GLASS_GROUP_INIT;
+        right.shapes[0] = (flux_liquid_glass_shape){
+            .bounds = {44.0f, 24.0f, 16.0f, 16.0f},
+            .corner_radius = 8.0f,
+        };
+        bool reused_previous_slot = false;
+        for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
+            uint32_t slot = render_liquid_glass_frame(s, canvas, target, blur_filter,
+                                                      persistent_filter, &right, 1u, px);
+            EXPECT(slot < TEST_FRAME_SLOTS);
+            if (slot < TEST_FRAME_SLOTS && seen[slot])
+                reused_previous_slot = true;
+            const uint8_t *old_centre = &px[(32u * W + 12u) * 4u];
+            const uint8_t *new_centre = &px[(32u * W + 52u) * 4u];
+            const uint8_t *outside = &px[(4u * W + 32u) * 4u];
+            EXPECT(old_centre[0] < 5u && old_centre[1] < 5u && old_centre[2] < 5u);
+            EXPECT(new_centre[0] > 10u || new_centre[1] > 10u || new_centre[2] > 10u);
+            EXPECT(outside[0] < 5u && outside[1] < 5u && outside[2] < 5u);
+        }
+        EXPECT(reused_previous_slot);
+
+        /* All clear dispatches happen before material dispatches. The second
+         * group's padded dispatch region covers x=28 but its SDF does not; an
+         * incorrect clear-before-each-group implementation erases group 0 at
+         * that pixel. */
+        flux_liquid_glass_group overlapping[2] = {
+            FLUX_LIQUID_GLASS_GROUP_INIT,
+            FLUX_LIQUID_GLASS_GROUP_INIT,
+        };
+        overlapping[0].shapes[0] = (flux_liquid_glass_shape){
+            .bounds = {16.0f, 24.0f, 16.0f, 16.0f},
+            .corner_radius = 2.0f,
+        };
+        overlapping[1].shapes[0] = (flux_liquid_glass_shape){
+            .bounds = {30.0f, 24.0f, 16.0f, 16.0f},
+            .corner_radius = 2.0f,
+        };
+        bool overlap_seen[TEST_FRAME_SLOTS] = {false};
+        for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
+            uint32_t slot = render_liquid_glass_frame(s, canvas, target, blur_filter,
+                                                      persistent_filter, overlapping, 2u, px);
+            if (slot < TEST_FRAME_SLOTS)
+                overlap_seen[slot] = true;
+            const uint8_t *first_only = &px[(32u * W + 28u) * 4u];
+            const uint8_t *second_centre = &px[(32u * W + 38u) * 4u];
+            EXPECT(first_only[0] > 10u || first_only[1] > 10u || first_only[2] > 10u);
+            EXPECT(second_centre[0] > 10u || second_centre[1] > 10u || second_centre[2] > 10u);
+        }
+
+        /* An empty group list is the explicit disappearance operation: only
+         * the previous footprints are cleared and the persistent image becomes
+         * transparent again. */
+        bool cleared_reused_slot = false;
+        for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
+            uint32_t slot = render_liquid_glass_frame(s, canvas, target, blur_filter,
+                                                      persistent_filter, nullptr, 0u, px);
+            if (slot < TEST_FRAME_SLOTS && overlap_seen[slot])
+                cleared_reused_slot = true;
+            const uint8_t *old_first = &px[(32u * W + 28u) * 4u];
+            const uint8_t *old_second = &px[(32u * W + 38u) * 4u];
+            EXPECT(old_first[0] < 5u && old_first[1] < 5u && old_first[2] < 5u);
+            EXPECT(old_second[0] < 5u && old_second[1] < 5u && old_second[2] < 5u);
+        }
+        EXPECT(cleared_reused_slot);
+        flux_liquid_glass_filter_release(persistent_filter);
     }
 
     /* --- reusable blur cycles through and safely reuses frame slots --- */

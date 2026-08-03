@@ -296,6 +296,8 @@ struct flux_device {
     bool has_image_drm_format_modifier;
     bool has_external_semaphore_fd;
     bool has_queue_family_foreign;
+    flux_device_feature_flags enabled_features;
+    flux_drm_device_identity drm_identity;
 
     uint32_t graphics_family;
     VkQueue graphics_queue;
@@ -317,6 +319,15 @@ struct flux_device {
      * which funnels them through this same lock. */
     pthread_mutex_t queue_lock;
     bool queue_lock_initialized;
+
+    /* Reusable external SYNC_FD semaphores for per-frame dma-buf acquire
+     * waits. A semaphore enters this pool only after the frame-slot fence
+     * proves its temporary imported payload was consumed. */
+    pthread_mutex_t dmabuf_acquire_pool_lock;
+    bool dmabuf_acquire_pool_lock_initialized;
+    VkSemaphore *dmabuf_acquire_pool;
+    uint32_t dmabuf_acquire_pool_count;
+    uint32_t dmabuf_acquire_pool_capacity;
 
     /* Deferred resource destruction (retire queue). A released image or
      * buffer may still be referenced by batches in flight on the
@@ -617,8 +628,10 @@ typedef struct flux_frame_foreign_image {
     bool *foreign_owned;
     bool acquired;
     /* Optional one-shot sync_file import for this use of a reusable
-     * dma-buf image. Destroyed only after the frame-slot fence retires. */
+     * dma-buf image. Recycled only after the frame-slot fence retires and a
+     * successful queue submit proves the temporary payload was consumed. */
     VkSemaphore acquire_semaphore;
+    bool acquire_wait_submitted;
 } flux_frame_foreign_image;
 
 typedef struct flux_per_frame {
@@ -681,6 +694,9 @@ struct flux_frame {
     flux_frame_state state;
     bool pass_active; /* true between begin_pass and end_pass */
     bool readback_requested;
+    /* Exact physical-pixel source region copied when readback_requested is
+     * true. Full-frame compatibility requests populate the surface extent. */
+    flux_readback_region readback_region;
 
     /* Scene-draw caches (scene.c). begin_frame re-initialises this
      * whole struct, so they are per-frame by construction.
@@ -714,6 +730,11 @@ bool flux_frame_track_foreign_image(flux_frame *frame, VkImage image, void *reso
 /* Attach a one-shot semaphore to an image already tracked by this frame.
  * Takes ownership of `semaphore` only on success. */
 bool flux_frame_set_foreign_image_acquire(flux_frame *frame, void *resource, VkSemaphore semaphore);
+
+/* External SYNC_FD semaphore pool used by reusable dma-buf per-frame waits. */
+VkSemaphore flux_dmabuf_acquire_semaphore_take(flux_device *device);
+void flux_dmabuf_acquire_semaphore_recycle(flux_device *device, VkSemaphore semaphore);
+void flux_dmabuf_acquire_semaphore_pool_destroy(flux_device *device);
 void flux_frame_foreign_images_destroy(flux_surface *surface, flux_per_frame *per_frame);
 
 struct flux_surface {
@@ -764,6 +785,9 @@ struct flux_surface {
      * graphics command buffer, so readiness is the frame fence and CPU
      * readback needs no second queue submission. */
     flux_staging_buf *readback_staging;
+    /* Region most recently copied into readback_staging. Valid exactly when
+     * last_readback_slot != UINT32_MAX. */
+    flux_readback_region last_readback_region;
     uint64_t offscreen_modifier; /* DRM_FORMAT_MOD_* (0 = invalid) */
     uint32_t offscreen_stride;   /* bytes per row of plane 0 */
     /* Optional consumer modifier constraint copied from the surface extension

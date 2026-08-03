@@ -179,6 +179,10 @@ typedef enum flux_struct_type {
     FLUX_TYPE_LIQUID_GLASS_DESC = 20,
     FLUX_TYPE_MESH_SKIN_DESC = 21,
     FLUX_TYPE_MATERIAL_SURFACE_DESC = 22,
+    FLUX_TYPE_EFFECT_BLUR_REGIONS_DESC = 23,
+    FLUX_TYPE_CANVAS_NO_STENCIL_DESC = 24,
+    FLUX_TYPE_DEVICE_DRM_NODE_DESC = 25,
+    FLUX_TYPE_DEVICE_FEATURES_DESC = 26,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -318,6 +322,54 @@ typedef enum flux_validation_mode {
     FLUX_VALIDATION_ON = 2,
 } flux_validation_mode;
 
+/* Optional flux_device_desc extension that makes physical-device selection
+ * strict. The target is a Linux DRM primary or render node identified by its
+ * character-device major/minor pair. A Vulkan physical device matches when
+ * VK_EXT_physical_device_drm reports the target as either its primary or
+ * render node. If the extension is unavailable or no matching device also
+ * satisfies the base descriptor, flux_device_create returns
+ * FLUX_ERROR_UNSUPPORTED; it never falls back to a different GPU. */
+typedef struct flux_device_drm_node_desc {
+    flux_struct_type type; /* FLUX_TYPE_DEVICE_DRM_NODE_DESC */
+    const void *next;
+    uint32_t drm_major;
+    uint32_t drm_minor;
+} flux_device_drm_node_desc;
+
+#define FLUX_DEVICE_DRM_NODE_DESC_INIT {.type = FLUX_TYPE_DEVICE_DRM_NODE_DESC}
+
+/* Semantic device capabilities. These keep callers independent of the Vulkan
+ * extension bundle used by the current backend. A required capability rejects
+ * physical devices that cannot provide it. An optional capability is enabled
+ * when the normally selected physical device supports its complete bundle. */
+typedef uint64_t flux_device_feature_flags;
+
+#define FLUX_DEVICE_FEATURE_DMABUF 0x0000000000000001ULL
+#define FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE 0x0000000000000002ULL
+
+typedef struct flux_device_features_desc {
+    flux_struct_type type; /* FLUX_TYPE_DEVICE_FEATURES_DESC */
+    const void *next;
+    flux_device_feature_flags required;
+    flux_device_feature_flags optional;
+} flux_device_features_desc;
+
+#define FLUX_DEVICE_FEATURES_DESC_INIT {.type = FLUX_TYPE_DEVICE_FEATURES_DESC}
+
+/* DRM character-device identities reported by the selected Vulkan physical
+ * device. `has_primary` / `has_render` gate the corresponding value. */
+typedef struct flux_drm_node_identity {
+    uint32_t major;
+    uint32_t minor;
+} flux_drm_node_identity;
+
+typedef struct flux_drm_device_identity {
+    bool has_primary;
+    flux_drm_node_identity primary;
+    bool has_render;
+    flux_drm_node_identity render;
+} flux_drm_device_identity;
+
 typedef struct flux_device_desc {
     flux_struct_type type; /* FLUX_TYPE_DEVICE_DESC */
     const void *next;
@@ -352,6 +404,17 @@ typedef struct flux_device_desc {
 
 FLUX_NODISCARD FLUX_API flux_result flux_device_create(const flux_device_desc *desc,
                                                        flux_device **out_device);
+
+/* Semantic capabilities enabled on the logical device. This includes
+ * capabilities requested through flux_device_features_desc and capabilities
+ * implied by a complete legacy required-device-extension bundle. */
+FLUX_API flux_device_feature_flags flux_device_enabled_features(const flux_device *d);
+
+/* Returns the DRM primary/render identities of the selected Vulkan physical
+ * device. The output is zeroed and false is returned when
+ * VK_EXT_physical_device_drm is unavailable or reports neither node. */
+FLUX_API bool flux_device_get_drm_identity(const flux_device *d,
+                                           flux_drm_device_identity *out_identity);
 
 FLUX_NODISCARD FLUX_API flux_device *flux_device_retain(flux_device *d);
 FLUX_API void flux_device_release(flux_device *d);
@@ -581,6 +644,16 @@ typedef struct flux_surface_info {
     bool hdr; /* surface is actually HDR */
 } flux_surface_info;
 
+/* Pixel-aligned surface region used by asynchronous frame readback. Coordinates
+ * are in the rendered surface's top-left-origin physical pixel space. Width and
+ * height must be non-zero and the complete region must lie inside the surface. */
+typedef struct flux_readback_region {
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+} flux_readback_region;
+
 FLUX_NODISCARD FLUX_API flux_result flux_surface_create(flux_device *device,
                                                         const flux_surface_desc *desc,
                                                         flux_surface **out_surface);
@@ -598,7 +671,9 @@ FLUX_API flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h
 FLUX_API void flux_surface_get_info(const flux_surface *s, flux_surface_info *out);
 
 /* Read back a captured frame as tightly packed RGBA8, row-major, top-left
- * origin (`width * height * 4` bytes; `bytes` must be at least that).
+ * origin (`captured_width * captured_height * 4` bytes; `bytes` must be at
+ * least that). A full-frame request uses the surface extent; a region request
+ * uses that region's extent.
  * Windowed and exportable surfaces require flux_frame_request_readback on the
  * submitted frame. Plain offscreen surfaces retain their legacy behaviour of
  * reading the most recently submitted image. Waits for the relevant GPU work
@@ -613,6 +688,14 @@ FLUX_NODISCARD FLUX_API flux_result flux_surface_read_pixels(flux_surface *s, vo
  * retires this staging, so callers may prepare again afterward. */
 FLUX_NODISCARD FLUX_API flux_result flux_surface_prepare_readback(flux_surface *s);
 
+/* Preallocate persistent staging for a future region readback. Only the
+ * requested extent affects allocation; x/y are supplied on the frame request.
+ * Existing sufficiently large staging is reused. The full-frame prepare API
+ * above is equivalent to passing the surface extent here. */
+FLUX_NODISCARD FLUX_API flux_result flux_surface_prepare_readback_region(flux_surface *s,
+                                                                         uint32_t width,
+                                                                         uint32_t height);
+
 /* Non-blocking readiness query for a frame copied to persistent readback
  * staging. `out_ready` becomes true once that frame's image-to-buffer copy has
  * completed. Returns FLUX_ERROR_INVALID_STATE before the first captured frame
@@ -624,13 +707,18 @@ FLUX_NODISCARD FLUX_API flux_result flux_surface_read_pixels_ready(flux_surface 
 /* Detach a completed on-demand snapshot from its surface without copying its
  * pixels. The returned immutable handle owns the mapped staging allocation,
  * can outlive or move to a different thread from the surface, and is consumed
- * with flux_readback_read_pixels before flux_readback_release. This is
+ * with flux_readback_read_pixels before flux_readback_release. Query its exact
+ * source offset/extent with flux_readback_get_region. This is
  * unsupported for require_readback surfaces, whose staging is continuously
  * surface-owned. The caller should first observe `out_ready == true`. */
 FLUX_NODISCARD FLUX_API flux_result flux_surface_take_readback(flux_surface *s,
                                                                flux_readback **out_readback);
 FLUX_NODISCARD FLUX_API flux_result flux_readback_read_pixels(const flux_readback *readback,
                                                               void *dst, size_t bytes);
+/* Return the exact surface region captured by an immutable readback. `out_region`
+ * is zeroed when `readback` is NULL. */
+FLUX_API void flux_readback_get_region(const flux_readback *readback,
+                                       flux_readback_region *out_region);
 FLUX_API void flux_readback_release(flux_readback *readback);
 
 /* Offscreen surfaces only (and only when the device had the dma-buf
@@ -707,6 +795,13 @@ FLUX_NODISCARD FLUX_API flux_result flux_surface_begin_frame(flux_surface *s,
  * retrieved with flux_surface_read_pixels. A later request replaces the
  * surface's previous snapshot. */
 FLUX_NODISCARD FLUX_API flux_result flux_frame_request_readback(flux_frame *f);
+
+/* Capture only `region` from this frame into tightly packed staging. The copy
+ * is recorded in the frame's existing graphics submission using
+ * VkBufferImageCopy.imageOffset/imageExtent, so GPU traffic and CPU conversion
+ * are proportional to the selected region rather than the whole surface. */
+FLUX_NODISCARD FLUX_API flux_result
+flux_frame_request_readback_region(flux_frame *f, const flux_readback_region *region);
 
 /* Frames follow a strict single-use state machine:
  * begin_frame -> submit -> present. Calling either transition out of order or

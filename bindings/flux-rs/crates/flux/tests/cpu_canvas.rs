@@ -12,7 +12,7 @@ fn cpu_canvas_renders_and_reads_back() {
 
     c.begin_cpu(Some(black)).expect("begin");
     c.fill_rrect(8.0, 8.0, 48.0, 48.0, 12.0, red);
-    c.end();
+    c.end_checked().expect("end checked CPU pass");
 
     let (w, h, stride, px) = c.read_pixels().expect("CPU backend exposes pixels");
     assert_eq!((w, h), (64, 64));

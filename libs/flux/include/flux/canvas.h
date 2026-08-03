@@ -202,6 +202,24 @@ typedef struct flux_canvas_pass_desc {
 
 #define FLUX_CANVAS_PASS_DESC_INIT {.type = FLUX_TYPE_CANVAS_PASS_DESC}
 
+/* Optional pNext extension for an attachment-free Canvas pass. When enabled,
+ * no stencil image is allocated, transitioned, cleared, or attached, and the
+ * Vulkan pipelines declare VK_FORMAT_UNDEFINED for stencil. Use only for
+ * draws whose semantics never require stencil (for example solid/image
+ * compositor blits). A stencil-dependent path fill is dropped; checked pass
+ * termination returns FLUX_ERROR_INVALID_STATE (and also records the
+ * diagnostic for flux_get_last_error) instead of silently misrendering.
+ *
+ * Keeping this policy in a tagged extension preserves the stable size and
+ * layout of flux_canvas_pass_desc for callers built against older headers. */
+typedef struct flux_canvas_no_stencil_desc {
+    flux_struct_type type; /* FLUX_TYPE_CANVAS_NO_STENCIL_DESC */
+    const void *next;
+    bool enabled;
+} flux_canvas_no_stencil_desc;
+
+#define FLUX_CANVAS_NO_STENCIL_DESC_INIT {.type = FLUX_TYPE_CANVAS_NO_STENCIL_DESC}
+
 /* Create a canvas on the selected backend. GPU canvases need desc->surface;
  * CPU canvases need desc->width/height (see flux/canvas_cpu.h for a convenience
  * wrapper and pixel readback). Destroy with flux_canvas_destroy. */
@@ -227,6 +245,11 @@ FLUX_API float flux_canvas_get_scale(const flux_canvas *c);
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_frame(flux_canvas *c, flux_frame *f,
                                                             const flux_color *clear_color);
 FLUX_API void flux_canvas_end_frame(flux_canvas *c);
+/* Checked counterpart: always closes a valid frame pass and returns its first
+ * sticky draw-time error (notably a stencil-dependent draw attempted inside a
+ * no-stencil pass). The error belongs only to this pass; begin resets it and
+ * successful termination returns FLUX_OK. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_frame_checked(flux_canvas *c);
 
 /* Descriptor form of flux_canvas_begin_frame. This makes attachment load
  * semantics and antialiasing independent: compositor/image-heavy passes can
@@ -240,6 +263,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_pass(flux_canvas *c, flux_
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin(flux_canvas *c, flux_frame *f,
                                                       const flux_color *clear_color);
 FLUX_API void flux_canvas_end(flux_canvas *c);
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_checked(flux_canvas *c);
 
 /* Snapshot the canvas' pixels as premultiplied RGBA8 (row-major; *stride is
  * bytes/row). Backend-polymorphic: implemented by the CPU backend (returns its
@@ -270,6 +294,8 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_target(flux_canvas *c, flu
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_target_pass(
     flux_canvas *c, flux_frame *f, flux_image *target, const flux_canvas_pass_desc *desc);
 FLUX_API void flux_canvas_end_target(flux_canvas *c);
+/* Checked target-pass counterpart; see flux_canvas_end_frame_checked. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_target_checked(flux_canvas *c);
 
 /* State stack. All draws and state mutators between flux_canvas_begin
  * and flux_canvas_end record into the bound frame; calls outside that
@@ -301,11 +327,17 @@ FLUX_API void flux_canvas_fill_rrect(flux_canvas *c, flux_rect r, float radius, 
 FLUX_API void flux_canvas_stroke_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color,
                                        float width);
 /* Draw an RGBA image. When `optional_paint` is non-NULL, its premultiplied
- * solid `color` modulates the image; opaque white preserves it and white with
- * a lower alpha fades it. Other paint fields are currently ignored. Canvas
- * transforms, including rotation and non-uniform scale, apply to the quad. */
+ * solid `color` modulates the image and its blend mode controls compositing;
+ * opaque white preserves it and white with a lower alpha fades it. Other paint
+ * fields are ignored. Canvas transforms, including rotation and non-uniform
+ * scale, apply to the quad. */
 FLUX_API void flux_canvas_draw_image(flux_canvas *c, flux_image *image, flux_rect dst,
                                      const flux_paint *optional_paint);
+
+/* Draw an alpha-free RGB image. The sampled alpha channel is ignored and the
+ * result is forced opaque, then replaces the destination with SRC blending.
+ * Intended for XRGB/XBGR dma-bufs whose unused X bits are not alpha data. */
+FLUX_API void flux_canvas_draw_image_opaque(flux_canvas *c, flux_image *image, flux_rect dst);
 
 /* Draw an image clipped by an analytic rounded rectangle. The clip follows
  * translation and uniform scale and is antialiased in framebuffer space;
@@ -321,6 +353,16 @@ FLUX_API void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *image, fl
  * remap in the fragment shader; this entry point only exposes it. */
 FLUX_API void flux_canvas_draw_image_sub(flux_canvas *c, flux_image *image, flux_rect dst,
                                          flux_rect src);
+
+/* Draw a sub-rectangle of an alpha-free RGB image. Combines the source-crop
+ * of flux_canvas_draw_image_sub with the SRC-replace, alpha-forced-opaque
+ * behaviour of flux_canvas_draw_image_opaque: the sampled alpha channel is
+ * ignored, the result is forced opaque, and the destination is replaced with
+ * SRC blending (no destination read). For XRGB/XBGR dma-bufs that use Wayland
+ * `wp_viewport.set_source` — the undefined X bits are never interpreted as
+ * sampled alpha and no framebuffer readback occurs even when cropped. */
+FLUX_API void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image *image, flux_rect dst,
+                                                flux_rect src);
 
 /* Sample `image` with `sampler` instead of the canvas-internal linear
  * default. Pass FLUX_FILTER_NEAREST samplers for pixel-aligned blits

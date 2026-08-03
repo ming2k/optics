@@ -7,6 +7,11 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `DeviceOptions`, `DeviceFeatures`, and `Device::new_with_options` request
+  required or optional DMA-BUF capabilities without exposing Vulkan extension
+  bundles. `Device::enabled_features` reports the negotiated result, and
+  `Device::drm_identity` returns the selected GPU's primary/render node
+  identities without raw Vulkan queries.
 - `Frame::request_readback` captures the exact frame being submitted on
   windowed and offscreen surfaces. `Surface::prepare_readback` can preallocate
   staging outside the trigger frame, while `Surface::read_pixels_ready`

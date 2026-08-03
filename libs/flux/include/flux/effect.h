@@ -51,6 +51,20 @@ extern "C" {
  * via a direct copy; no kernel work runs). */
 #define FLUX_EFFECT_BLUR_SIGMA_MAX 64.0f
 
+/* One input-pixel dispatch region for the reusable realtime blur. The filter
+ * maps it outward through every pyramid level and leaves pixels outside all
+ * regions untouched. Because later pyramid passes sample neighbouring
+ * intermediate pixels, callers must expand each region by the blur sampling
+ * footprint and consume only the unexpanded interior. This lets compositors
+ * blur disjoint chrome bands (for example a top HUD and bottom Dock) without
+ * dispatching over the empty full-screen bounding box between them. */
+typedef struct flux_effect_region {
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+} flux_effect_region;
+
 typedef struct flux_effect_blur_desc {
     flux_struct_type type; /* FLUX_TYPE_EFFECT_BLUR_DESC */
     const void *next;
@@ -59,6 +73,20 @@ typedef struct flux_effect_blur_desc {
 } flux_effect_blur_desc;
 
 #define FLUX_EFFECT_BLUR_DESC_INIT {.type = FLUX_TYPE_EFFECT_BLUR_DESC}
+
+/* Optional `flux_effect_blur_desc.next` payload for region-aware reusable
+ * blur. Keeping this in the extension chain preserves the binary size and
+ * layout of flux_effect_blur_desc. A NULL extension means the full input.
+ * This extension is accepted by flux_blur_filter_apply only; the exact
+ * flux_effect_blur operator rejects it. */
+typedef struct flux_effect_blur_regions_desc {
+    flux_struct_type type; /* FLUX_TYPE_EFFECT_BLUR_REGIONS_DESC */
+    const void *next;
+    const flux_effect_region *regions;
+    uint32_t region_count;
+} flux_effect_blur_regions_desc;
+
+#define FLUX_EFFECT_BLUR_REGIONS_DESC_INIT {.type = FLUX_TYPE_EFFECT_BLUR_REGIONS_DESC}
 
 /* Record the blur into `cmd`. The pipeline is created lazily on
  * first use per device and cached for the device's lifetime.
@@ -156,7 +184,9 @@ typedef struct flux_liquid_glass_group {
  * parameters — and size_scale_min floors the factor. tint_strength and
  * frost_strength multiply the adaptive body tint and the scattering layer
  * (1.0 = the reference recipe), letting callers dial a body between
- * clearer and frostier without forking the material. */
+ * clearer and frostier without forking the material. group_count may be zero
+ * (and groups NULL) to clear any footprints retained by this frame slot after
+ * all bodies disappear; otherwise it is capped at 64. */
 typedef struct flux_liquid_glass_desc {
     flux_struct_type type; /* FLUX_TYPE_LIQUID_GLASS_DESC */
     const void *next;

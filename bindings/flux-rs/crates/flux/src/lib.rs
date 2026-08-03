@@ -50,6 +50,100 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// Linux DRM character-device identity used to constrain Vulkan physical
+/// device selection. The node may be either a primary (`cardN`) or render
+/// (`renderDN`) node; Flux accepts only the physical device that reports it
+/// through `VK_EXT_physical_device_drm`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrmNode {
+    pub major: u32,
+    pub minor: u32,
+}
+
+impl DrmNode {
+    fn raw(self) -> sys::flux_device_drm_node_desc {
+        sys::flux_device_drm_node_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_DEVICE_DRM_NODE_DESC,
+            next: std::ptr::null(),
+            drm_major: self.major,
+            drm_minor: self.minor,
+        }
+    }
+}
+
+/// DRM identities reported by the Vulkan physical device selected by Flux.
+/// A display-capable device commonly exposes both a privileged primary node
+/// and an unprivileged render node; either may be absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrmDeviceIdentity {
+    pub primary: Option<DrmNode>,
+    pub render: Option<DrmNode>,
+}
+
+/// Semantic device capabilities requested independently of the Vulkan
+/// extensions used by Flux's current backend.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DeviceFeatures(u64);
+
+impl DeviceFeatures {
+    pub const NONE: Self = Self(0);
+    pub const DMABUF: Self = Self(sys::FLUX_DEVICE_FEATURE_DMABUF as u64);
+    pub const DMABUF_SYNC_FILE: Self = Self(sys::FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE as u64);
+
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+
+    pub const fn contains(self, required: Self) -> bool {
+        (self.0 & required.0) == required.0
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl std::ops::BitOr for DeviceFeatures {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for DeviceFeatures {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+/// Options for semantic device creation. Required features reject a device
+/// that cannot provide them; optional features are enabled on the normally
+/// selected device when their complete implementation is available.
+pub struct DeviceOptions<'a> {
+    pub headless: bool,
+    pub instance_extensions: &'a [&'a std::ffi::CStr],
+    pub device_extensions: &'a [&'a std::ffi::CStr],
+    pub frames_in_flight: u32,
+    pub drm_node: Option<DrmNode>,
+    pub required_features: DeviceFeatures,
+    pub optional_features: DeviceFeatures,
+}
+
+impl<'a> Default for DeviceOptions<'a> {
+    fn default() -> Self {
+        Self {
+            headless: false,
+            instance_extensions: &[],
+            device_extensions: &[],
+            frames_in_flight: 0,
+            drm_node: None,
+            required_features: DeviceFeatures::NONE,
+            optional_features: DeviceFeatures::NONE,
+        }
+    }
+}
+
 /// A flux device: the root GPU object. Refcounted in C; this handle owns one
 /// reference and releases it on drop — unless it was constructed via
 /// [`Device::borrow_raw`], in which case it is a non-owning view and `Drop`
@@ -77,13 +171,71 @@ impl Device {
         device_extensions: &[&std::ffi::CStr],
         frames_in_flight: u32,
     ) -> Result<Device, Error> {
-        let inst: Vec<*const std::os::raw::c_char> =
-            instance_extensions.iter().map(|s| s.as_ptr()).collect();
-        let dev: Vec<*const std::os::raw::c_char> =
-            device_extensions.iter().map(|s| s.as_ptr()).collect();
+        Self::new_with_options(DeviceOptions {
+            headless,
+            instance_extensions,
+            device_extensions,
+            frames_in_flight,
+            ..DeviceOptions::default()
+        })
+    }
+
+    /// Create a device strictly bound to the physical GPU that owns
+    /// `drm_node`. Selection fails rather than falling back to a different
+    /// Vulkan device when the node cannot be matched.
+    pub fn new_for_drm_node(
+        drm_node: DrmNode,
+        headless: bool,
+        instance_extensions: &[&std::ffi::CStr],
+        device_extensions: &[&std::ffi::CStr],
+        frames_in_flight: u32,
+    ) -> Result<Device, Error> {
+        Self::new_with_options(DeviceOptions {
+            headless,
+            instance_extensions,
+            device_extensions,
+            frames_in_flight,
+            drm_node: Some(drm_node),
+            ..DeviceOptions::default()
+        })
+    }
+
+    /// Create a device from semantic capability requirements plus optional
+    /// low-level Vulkan extension escape hatches.
+    pub fn new_with_options(options: DeviceOptions<'_>) -> Result<Device, Error> {
+        let inst: Vec<*const std::os::raw::c_char> = options
+            .instance_extensions
+            .iter()
+            .map(|s| s.as_ptr())
+            .collect();
+        let dev: Vec<*const std::os::raw::c_char> = options
+            .device_extensions
+            .iter()
+            .map(|s| s.as_ptr())
+            .collect();
+        let mut drm_extension = options.drm_node.map(DrmNode::raw);
+        let mut features_extension = (!options.required_features.is_empty()
+            || !options.optional_features.is_empty())
+        .then(|| sys::flux_device_features_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_DEVICE_FEATURES_DESC,
+            next: std::ptr::null(),
+            required: options.required_features.bits(),
+            optional: options.optional_features.bits(),
+        });
+
+        let mut next = std::ptr::null();
+        if let Some(features) = features_extension.as_mut() {
+            features.next = next;
+            next = features as *const _ as *const std::ffi::c_void;
+        }
+        if let Some(drm) = drm_extension.as_mut() {
+            drm.next = next;
+            next = drm as *const _ as *const std::ffi::c_void;
+        }
 
         let desc = sys::flux_device_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_DEVICE_DESC,
+            next,
             required_instance_extensions: if inst.is_empty() {
                 std::ptr::null()
             } else {
@@ -96,8 +248,8 @@ impl Device {
                 dev.as_ptr()
             },
             required_device_extension_count: dev.len() as u32,
-            headless,
-            frames_in_flight,
+            headless: options.headless,
+            frames_in_flight: options.frames_in_flight,
             ..unsafe { std::mem::zeroed() }
         };
 
@@ -143,6 +295,31 @@ impl Device {
     /// cast the pointer at that seam.
     pub fn as_raw(&self) -> *mut sys::flux_device {
         self.raw
+    }
+
+    /// Semantic capabilities enabled on this logical device.
+    pub fn enabled_features(&self) -> DeviceFeatures {
+        DeviceFeatures(unsafe { sys::flux_device_enabled_features(self.raw) })
+    }
+
+    /// DRM primary/render identities reported by the selected Vulkan physical
+    /// device. Returns `None` when the Vulkan driver exposes no reliable DRM
+    /// identity.
+    pub fn drm_identity(&self) -> Option<DrmDeviceIdentity> {
+        let mut raw = sys::flux_drm_device_identity::default();
+        if !unsafe { sys::flux_device_get_drm_identity(self.raw, &mut raw) } {
+            return None;
+        }
+        Some(DrmDeviceIdentity {
+            primary: raw.has_primary.then_some(DrmNode {
+                major: raw.primary.major,
+                minor: raw.primary.minor,
+            }),
+            render: raw.has_render.then_some(DrmNode {
+                major: raw.render.major,
+                minor: raw.render.minor,
+            }),
+        })
     }
 
     /// Raw `VkInstance` flux created. Feed to `ash` (as a `u64` via `as_raw`)
@@ -214,11 +391,55 @@ pub struct Readback {
     raw: *mut sys::flux_readback,
 }
 
+/// Pixel-aligned physical surface region captured by a frame readback.
+/// Coordinates use the surface's top-left origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadbackRegion {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl ReadbackRegion {
+    fn raw(self) -> sys::flux_readback_region {
+        sys::flux_readback_region {
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    /// Number of tightly packed RGBA8 bytes in this region.
+    pub fn byte_len(self) -> Option<usize> {
+        if self.width == 0 || self.height == 0 {
+            return None;
+        }
+        let pixels = usize::try_from(self.width)
+            .ok()?
+            .checked_mul(usize::try_from(self.height).ok()?)?;
+        pixels.checked_mul(4)
+    }
+}
+
 // The C handle exclusively owns immutable mapped staging and uses the
 // device's locked staging cache when released.
 unsafe impl Send for Readback {}
 
 impl Readback {
+    /// Exact surface region represented by this immutable snapshot.
+    pub fn region(&self) -> ReadbackRegion {
+        let mut raw = sys::flux_readback_region::default();
+        unsafe { sys::flux_readback_get_region(self.raw, &mut raw) };
+        ReadbackRegion {
+            x: raw.x,
+            y: raw.y,
+            width: raw.width,
+            height: raw.height,
+        }
+    }
+
     /// Copy and normalize the snapshot to tightly packed RGBA8.
     pub fn read_pixels(&self, dst: &mut [u8]) -> Result<(), Error> {
         Error::check(unsafe {
@@ -355,9 +576,11 @@ impl Surface {
     }
 
     /// Read back an immutable frame snapshot as tightly packed RGBA8,
-    /// row-major, top-left origin. `dst` must be at least
-    /// `width * height * 4` bytes. Windowed and exportable surfaces must first
-    /// request the snapshot through [`Frame::request_readback`].
+    /// row-major, top-left origin. `dst` must be at least the captured extent's
+    /// `width * height * 4` bytes. A full-frame request uses the surface extent;
+    /// a region request uses [`ReadbackRegion::byte_len`]. Windowed and
+    /// exportable surfaces must first request a snapshot through
+    /// [`Frame::request_readback`] or [`Frame::request_readback_region`].
     pub fn read_pixels(&self, dst: &mut [u8]) -> Result<(), Error> {
         Error::check(unsafe {
             sys::flux_surface_read_pixels(
@@ -373,6 +596,13 @@ impl Surface {
     /// first use. Re-run it after resizing the surface.
     pub fn prepare_readback(&self) -> Result<(), Error> {
         Error::check(unsafe { sys::flux_surface_prepare_readback(self.raw) })
+    }
+
+    /// Preallocate persistent staging for a future region readback. Existing
+    /// staging with sufficient capacity is reused. Both dimensions must be
+    /// non-zero and no larger than the surface extent.
+    pub fn prepare_readback_region(&self, width: u32, height: u32) -> Result<(), Error> {
+        Error::check(unsafe { sys::flux_surface_prepare_readback_region(self.raw, width, height) })
     }
 
     /// Whether the most recently captured frame is available for
@@ -397,6 +627,14 @@ impl Surface {
     /// single-plane BGRA8 dma-bufs. Windowed surfaces are never exportable.
     pub fn is_exportable(&self) -> bool {
         unsafe { sys::flux_surface_exportable(self.raw) }
+    }
+
+    /// DRM format modifier selected for this exportable offscreen surface.
+    /// `None` means this is not a dma-buf-exportable surface; `Some(0)` is the
+    /// valid `DRM_FORMAT_MOD_LINEAR` modifier rather than absence.
+    pub fn dmabuf_modifier(&self) -> Option<u64> {
+        self.is_exportable()
+            .then(|| unsafe { sys::flux_surface_dmabuf_modifier(self.raw) })
     }
 
     /// Export the most recently submitted offscreen frame without a pixel
@@ -524,6 +762,15 @@ impl<'surface> Frame<'surface> {
     /// Later frames do not change the snapshot.
     pub fn request_readback(&mut self) -> Result<(), Error> {
         Error::check(unsafe { sys::flux_frame_request_readback(self.raw) })
+    }
+
+    /// Copy only `region` from this frame into tightly packed immutable
+    /// readback staging. The Vulkan copy and later CPU normalization are both
+    /// proportional to the selected extent; no full-surface intermediate is
+    /// produced.
+    pub fn request_readback_region(&mut self, region: ReadbackRegion) -> Result<(), Error> {
+        let raw = region.raw();
+        Error::check(unsafe { sys::flux_frame_request_readback_region(self.raw, &raw) })
     }
 
     /// Submit recorded work to the GPU and advance to the submitted state.
@@ -1109,6 +1356,62 @@ pub struct CanvasPassOptions {
     /// `Some(color)` clears the destination; `None` preserves its contents.
     pub clear: Option<u32>,
     pub antialias: CanvasAntialias,
+    /// Optional dirty rectangle in physical framebuffer pixels. `None` uses
+    /// the complete destination. Both clearing and drawing are constrained to
+    /// this rectangle while pixels outside it remain untouched.
+    pub render_area: Option<CanvasRenderArea>,
+    /// Open a genuine no-stencil pass for callers that emit only operations
+    /// whose semantics never require stencil (e.g. solid/image compositor
+    /// blits). No stencil image is allocated, transitioned, cleared, or bound;
+    /// Vulkan uses a separate pipeline variant with an undefined stencil
+    /// format. A stencil-dependent path is dropped with an explicit Flux error
+    /// instead of being silently misrendered; use [`Canvas::end_checked`] or
+    /// [`Canvas::end_target_checked`] to receive that error.
+    pub skip_stencil: bool,
+}
+
+/// Physical-pixel render area for a partial Canvas pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanvasRenderArea {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Build the stable base pass descriptor and its optional stack-owned pNext
+/// extension, then invoke `f` while every referenced value is alive. Keeping
+/// the no-stencil policy out of the base structure preserves C ABI compatibility
+/// with applications compiled against older Flux headers.
+fn with_raw_canvas_pass_desc<T>(
+    options: CanvasPassOptions,
+    f: impl FnOnce(&sys::flux_canvas_pass_desc) -> T,
+) -> T {
+    let clear = options.clear;
+    let area = options.render_area;
+    let no_stencil = sys::flux_canvas_no_stencil_desc {
+        type_: sys::flux_struct_type::FLUX_TYPE_CANVAS_NO_STENCIL_DESC,
+        next: std::ptr::null(),
+        enabled: true,
+    };
+    let desc = sys::flux_canvas_pass_desc {
+        type_: sys::flux_struct_type::FLUX_TYPE_CANVAS_PASS_DESC,
+        next: if options.skip_stencil {
+            (&no_stencil as *const sys::flux_canvas_no_stencil_desc).cast()
+        } else {
+            std::ptr::null()
+        },
+        clear_color: clear
+            .as_ref()
+            .map(|color| color as *const u32)
+            .unwrap_or(std::ptr::null()),
+        antialias: options.antialias.raw(),
+        render_offset_x: area.map_or(0, |area| area.x),
+        render_offset_y: area.map_or(0, |area| area.y),
+        render_width: area.map_or(0, |area| area.width),
+        render_height: area.map_or(0, |area| area.height),
+    };
+    f(&desc)
 }
 
 impl Canvas {
@@ -1194,17 +1497,9 @@ impl Canvas {
 
     /// Begin a Canvas pass with independent load and antialiasing policy.
     pub fn begin_pass(&self, frame: &Frame<'_>, options: CanvasPassOptions) -> Result<(), Error> {
-        let clear = options.clear;
-        let desc = sys::flux_canvas_pass_desc {
-            type_: sys::flux_struct_type::FLUX_TYPE_CANVAS_PASS_DESC,
-            clear_color: clear
-                .as_ref()
-                .map(|color| color as *const u32)
-                .unwrap_or(std::ptr::null()),
-            antialias: options.antialias.raw(),
-            ..unsafe { std::mem::zeroed() }
-        };
-        Error::check(unsafe { sys::flux_canvas_begin_pass(self.raw, frame.raw, &desc) })
+        with_raw_canvas_pass_desc(options, |desc| {
+            Error::check(unsafe { sys::flux_canvas_begin_pass(self.raw, frame.raw, desc) })
+        })
     }
 
     /// Begin a Canvas pass into a sampleable offscreen render-target image.
@@ -1231,18 +1526,10 @@ impl Canvas {
         target: &Image,
         options: CanvasPassOptions,
     ) -> Result<(), Error> {
-        let clear = options.clear;
-        let desc = sys::flux_canvas_pass_desc {
-            type_: sys::flux_struct_type::FLUX_TYPE_CANVAS_PASS_DESC,
-            clear_color: clear
-                .as_ref()
-                .map(|color| color as *const u32)
-                .unwrap_or(std::ptr::null()),
-            antialias: options.antialias.raw(),
-            ..unsafe { std::mem::zeroed() }
-        };
-        Error::check(unsafe {
-            sys::flux_canvas_begin_target_pass(self.raw, frame.raw, target.raw, &desc)
+        with_raw_canvas_pass_desc(options, |desc| {
+            Error::check(unsafe {
+                sys::flux_canvas_begin_target_pass(self.raw, frame.raw, target.raw, desc)
+            })
         })
     }
 
@@ -1250,6 +1537,13 @@ impl Canvas {
     /// image layout.
     pub fn end_target(&self) {
         unsafe { sys::flux_canvas_end_target(self.raw) };
+    }
+
+    /// End an offscreen pass and surface any sticky draw-time contract error.
+    /// No-stencil compositor passes should prefer this over [`Self::end_target`]
+    /// so a future stencil-dependent draw cannot be silently dropped.
+    pub fn end_target_checked(&self) -> Result<(), Error> {
+        Error::check(unsafe { sys::flux_canvas_end_target_checked(self.raw) })
     }
 
     /// Unified, backend-agnostic pass bracket. Pass `Some(frame)` for a GPU
@@ -1271,6 +1565,12 @@ impl Canvas {
 
     pub fn end(&self) {
         unsafe { sys::flux_canvas_end(self.raw) };
+    }
+
+    /// End a surface pass and surface any sticky draw-time contract error.
+    /// No-stencil compositor passes should use this checked form.
+    pub fn end_checked(&self) -> Result<(), Error> {
+        Error::check(unsafe { sys::flux_canvas_end_checked(self.raw) })
     }
 
     /// Snapshot the canvas' pixels as premultiplied RGBA8 (row-major). Returns
@@ -1449,6 +1749,27 @@ impl Canvas {
         unsafe { sys::flux_canvas_draw_image(self.raw, image.raw, dst, std::ptr::null()) };
     }
 
+    /// Draw an alpha-free RGB image, forcing opaque output and replacing the
+    /// destination. This is the correct path for XRGB/XBGR DMA-BUF imports.
+    pub fn draw_image_opaque(&self, image: &Image, x: f32, y: f32, w: f32, h: f32) {
+        let dst = sys::flux_rect { x, y, w, h };
+        unsafe { sys::flux_canvas_draw_image_opaque(self.raw, image.raw, dst) };
+    }
+
+    /// Draw an image using the tint and fixed-function blend mode in `paint`.
+    pub fn draw_image_with_paint(
+        &self,
+        image: &Image,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        paint: &Paint,
+    ) {
+        let dst = sys::flux_rect { x, y, w, h };
+        unsafe { sys::flux_canvas_draw_image(self.raw, image.raw, dst, paint.as_raw()) };
+    }
+
     /// Draw an image clipped to an antialiased rounded rectangle. Set
     /// `radius` to half the destination size for a circular portrait.
     #[allow(clippy::too_many_arguments)]
@@ -1489,6 +1810,39 @@ impl Canvas {
             h: src_dv,
         };
         unsafe { sys::flux_canvas_draw_image_sub(self.raw, image.raw, dst, src) };
+    }
+
+    /// Draw a sub-rectangle of an alpha-free RGB image, SRC-replace with
+    /// alpha forced opaque (no destination read). Combines the source-crop of
+    /// [`Self::draw_image_sub`] with the opaque behaviour of
+    /// [`Self::draw_image_opaque`]. For XRGB/XBGR dma-bufs using
+    /// `wp_viewport.set_source`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_image_opaque_sub(
+        &self,
+        image: &Image,
+        dst_x: f32,
+        dst_y: f32,
+        dst_w: f32,
+        dst_h: f32,
+        src_u: f32,
+        src_v: f32,
+        src_du: f32,
+        src_dv: f32,
+    ) {
+        let dst = sys::flux_rect {
+            x: dst_x,
+            y: dst_y,
+            w: dst_w,
+            h: dst_h,
+        };
+        let src = sys::flux_rect {
+            x: src_u,
+            y: src_v,
+            w: src_du,
+            h: src_dv,
+        };
+        unsafe { sys::flux_canvas_draw_image_opaque_sub(self.raw, image.raw, dst, src) };
     }
 
     pub fn as_raw(&self) -> *mut sys::flux_canvas {
@@ -1602,6 +1956,27 @@ impl Drop for Arena {
 //  Paint + Path
 // =====================================================================
 
+/// Fixed-function blend mode used by Canvas paints.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum BlendMode {
+    #[default]
+    SrcOver,
+    Src,
+    Plus,
+    Multiply,
+}
+
+impl BlendMode {
+    fn raw(self) -> sys::flux_blend_mode {
+        match self {
+            Self::SrcOver => sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            Self::Src => sys::flux_blend_mode::FLUX_BLEND_SRC,
+            Self::Plus => sys::flux_blend_mode::FLUX_BLEND_PLUS,
+            Self::Multiply => sys::flux_blend_mode::FLUX_BLEND_MULTIPLY,
+        }
+    }
+}
+
 /// How the open ends of a stroked subpath are rendered
 /// (mirrors `flux_line_cap`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1689,6 +2064,12 @@ impl Paint {
     /// Stroke corner join (default [`LineJoin::Miter`]).
     pub fn with_join(mut self, join: LineJoin) -> Self {
         self.raw.join = join.raw();
+        self
+    }
+
+    /// Select the fixed-function blend operation for this paint.
+    pub fn with_blend(mut self, blend: BlendMode) -> Self {
+        self.raw.blend = blend.raw();
         self
     }
 
@@ -1997,6 +2378,18 @@ pub struct BlurFilter {
     raw: *mut sys::flux_blur_filter,
 }
 
+/// Input-pixel region whose realtime blur output must be valid. Regions may
+/// be disjoint; pixels outside them are left untouched in the reusable effect
+/// images. Callers should include the blur sampling footprint around the
+/// visible destination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlurRegion {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
 impl BlurFilter {
     pub fn new(device: &Device) -> Result<BlurFilter, Error> {
         let mut raw = std::ptr::null_mut();
@@ -2014,8 +2407,48 @@ impl BlurFilter {
         input: &Image,
         sigma: f32,
     ) -> Result<BlurredImage<'filter>, Error> {
+        self.apply_regions(frame, input, sigma, &[])
+    }
+
+    /// Record a realtime blur only for `regions`. An empty list preserves the
+    /// full-image behaviour of [`Self::apply`]. Each region is mapped outward
+    /// through the fixed two-level pyramid, so separated compositor chrome
+    /// bands do not pay for the empty bounding box between them.
+    pub fn apply_regions<'filter>(
+        &'filter mut self,
+        frame: &Frame<'_>,
+        input: &Image,
+        sigma: f32,
+        regions: &[BlurRegion],
+    ) -> Result<BlurredImage<'filter>, Error> {
+        let raw_regions: Vec<sys::flux_effect_region> = regions
+            .iter()
+            .map(|region| sys::flux_effect_region {
+                x: region.x,
+                y: region.y,
+                width: region.width,
+                height: region.height,
+            })
+            .collect();
+        let region_count = u32::try_from(raw_regions.len())
+            .map_err(|_| Error(sys::flux_result::FLUX_ERROR_OUT_OF_RANGE))?;
+        let region_desc = sys::flux_effect_blur_regions_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_EFFECT_BLUR_REGIONS_DESC,
+            regions: if raw_regions.is_empty() {
+                std::ptr::null()
+            } else {
+                raw_regions.as_ptr()
+            },
+            region_count,
+            ..Default::default()
+        };
         let desc = sys::flux_effect_blur_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_EFFECT_BLUR_DESC,
+            next: if raw_regions.is_empty() {
+                std::ptr::null()
+            } else {
+                (&region_desc as *const sys::flux_effect_blur_regions_desc).cast()
+            },
             input: input.raw,
             sigma,
             ..Default::default()
@@ -2143,7 +2576,8 @@ impl LiquidGlassFilter {
     /// Refract `input` through analytic rounded SDFs, mixing in the matching
     /// realtime `blurred` capture for local frost. The returned image is
     /// transparent outside the SDF and its drop-shadow falloff, and borrows
-    /// this filter's frame slot.
+    /// this filter's frame slot. An empty `groups` slice clears footprints
+    /// retained by that slot after all glass bodies disappear.
     pub fn apply<'filter>(
         &'filter mut self,
         frame: &Frame<'_>,
@@ -2189,7 +2623,11 @@ impl LiquidGlassFilter {
             type_: sys::flux_struct_type::FLUX_TYPE_LIQUID_GLASS_DESC,
             input: input.raw,
             blurred_input: blurred.raw,
-            groups: raw_groups.as_ptr(),
+            groups: if raw_groups.is_empty() {
+                std::ptr::null()
+            } else {
+                raw_groups.as_ptr()
+            },
             group_count: u32::try_from(raw_groups.len()).unwrap_or(u32::MAX),
             refraction: params.refraction,
             chromatic_aberration: params.chromatic_aberration,
@@ -2262,9 +2700,8 @@ pub fn dmabuf_sync_supported(device: &Device) -> bool {
 /// `zwp_linux_dmabuf_v1` so clients allocate GPU-optimal (tiled/compressed)
 /// layouts instead of falling back to `DRM_FORMAT_MOD_LINEAR`.
 ///
-/// Returns the modifiers on success. An unsupported format (no Vulkan
-/// equivalent) yields an empty `Vec`, not an error, so callers can advertise a
-/// format list unconditionally.
+/// Returns the modifiers on success. An unsupported format yields an empty
+/// `Vec`; callers must omit it rather than synthesize an unreported fallback.
 pub fn dmabuf_format_modifiers(device: &Device, format: Format) -> Vec<u64> {
     // Two-pass: probe the required length with count 0, then allocate and fill.
     let mut count: u32 = 0;
@@ -2291,8 +2728,9 @@ pub fn dmabuf_format_modifiers(device: &Device, format: Format) -> Vec<u64> {
     mods
 }
 
-/// The Vulkan device extensions dma-buf import requires. Pass to
-/// [`Device::new`].
+/// Low-level Vulkan device extensions used by DMA-BUF import. New callers
+/// should request [`DeviceFeatures::DMABUF`] through [`DeviceOptions`]; this
+/// list remains available for compatibility and unusual Vulkan interop.
 pub const DMABUF_DEVICE_EXTENSIONS: [&std::ffi::CStr; 5] = [
     c"VK_KHR_external_memory",
     c"VK_KHR_external_memory_fd",
@@ -2301,13 +2739,37 @@ pub const DMABUF_DEVICE_EXTENSIONS: [&std::ffi::CStr; 5] = [
     c"VK_EXT_queue_family_foreign",
 ];
 
-/// Optional Vulkan device extension used to import/export Linux sync_file
-/// fences alongside dma-bufs.
+/// Low-level Vulkan device extension used for Linux sync_file interop. New
+/// callers should request [`DeviceFeatures::DMABUF_SYNC_FILE`].
 pub const DMABUF_SYNC_DEVICE_EXTENSIONS: [&std::ffi::CStr; 1] = [c"VK_KHR_external_semaphore_fd"];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drm_node_maps_to_strict_device_extension() {
+        let raw = DrmNode {
+            major: 226,
+            minor: 128,
+        }
+        .raw();
+        assert_eq!(
+            raw.type_,
+            sys::flux_struct_type::FLUX_TYPE_DEVICE_DRM_NODE_DESC
+        );
+        assert!(raw.next.is_null());
+        assert_eq!(raw.drm_major, 226);
+        assert_eq!(raw.drm_minor, 128);
+    }
+
+    #[test]
+    fn semantic_device_features_compose_without_vulkan_names() {
+        let features = DeviceFeatures::DMABUF | DeviceFeatures::DMABUF_SYNC_FILE;
+        assert!(features.contains(DeviceFeatures::DMABUF));
+        assert!(features.contains(DeviceFeatures::DMABUF_SYNC_FILE));
+        assert!(!DeviceFeatures::NONE.contains(DeviceFeatures::DMABUF));
+    }
 
     #[test]
     fn image_data_len_validates_supported_formats() {
@@ -2322,6 +2784,40 @@ mod tests {
         assert_eq!(
             image_data_len(1, 1, Format::FLUX_FORMAT_RGBA16_SFLOAT).unwrap_err(),
             Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED)
+        );
+    }
+
+    #[test]
+    fn readback_region_byte_len_is_checked() {
+        assert_eq!(
+            ReadbackRegion {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 7,
+            }
+            .byte_len(),
+            None
+        );
+        assert_eq!(
+            ReadbackRegion {
+                x: 17,
+                y: 9,
+                width: 12,
+                height: 7,
+            }
+            .byte_len(),
+            Some(12 * 7 * 4)
+        );
+        assert_eq!(
+            ReadbackRegion {
+                x: 0,
+                y: 0,
+                width: u32::MAX,
+                height: u32::MAX,
+            }
+            .byte_len(),
+            None
         );
     }
 }

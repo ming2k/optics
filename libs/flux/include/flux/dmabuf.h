@@ -6,13 +6,10 @@
  * the canvas can sample without a CPU pixel copy, using
  * VK_EXT_external_memory_dma_buf and VK_EXT_image_drm_format_modifier.
  *
- * Enable the required device extensions at flux_device_create by listing
- * them in required_device_extensions:
- *   VK_KHR_external_memory_fd
- *   VK_EXT_external_memory_dma_buf
- *   VK_EXT_image_drm_format_modifier
- *   VK_EXT_queue_family_foreign
- *   VK_KHR_external_semaphore_fd when using acquire_sync_fd
+ * Request FLUX_DEVICE_FEATURE_DMABUF through flux_device_features_desc at
+ * flux_device_create. Request FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE when using
+ * acquire_sync_fd. Flux owns the Vulkan extension bundle behind those
+ * semantic capabilities.
  *   VK_KHR_sampler_ycbcr_conversion (+ its deps) for future planar formats
  *
  * Design contract:
@@ -85,9 +82,9 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_wait_dmabuf_acquire(flux_canvas 
                                                                     flux_image *image,
                                                                     int acquire_sync_fd);
 
-/* Whether the device was created with the extensions dma-buf import needs.
- * This is an extension-level check; use flux_image_import_dmabuf to validate
- * a specific format/modifier pair. */
+/* Whether the logical device has the complete dma-buf import capability.
+ * Use flux_dmabuf_format_modifiers or flux_image_import_dmabuf to validate a
+ * specific format/modifier pair. */
 FLUX_API bool flux_dmabuf_supported(const flux_device *d);
 
 /* Whether acquire_sync_fd can be imported through VK_KHR_external_semaphore_fd.

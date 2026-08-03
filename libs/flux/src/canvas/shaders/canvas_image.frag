@@ -72,6 +72,11 @@ void main()
          * Opaque white preserves the source; white with lower alpha is the
          * usual fade/cross-fade control. */
         out_color = texel * v_color;
+        /* Alpha-free RGB import (kind 6): DRM XRGB/XBGR leaves the X bits
+         * semantically undefined, so never feed the sampled value into the
+         * output alpha channel or the blend equation. */
+        if (pc.kind == 6u)
+            out_color.a = 1.0;
         if (pc.kind == 5u) {
             vec2 q = abs(v_pos - pc.image_dst.xy) - (pc.image_dst.zw - pc.grad_radius);
             float distance = min(max(q.x, q.y), 0.0)

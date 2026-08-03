@@ -48,6 +48,40 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas, draw_fn dr
     return flux_frame_present(frame);
 }
 
+static flux_result render_frame_no_stencil(flux_surface *s, flux_canvas *canvas, draw_fn draw,
+                                           void *user) {
+    flux_frame *frame = nullptr;
+    flux_result r = flux_surface_begin_frame(s, nullptr, &frame);
+    if (r != FLUX_OK)
+        return r;
+
+    flux_color clear = flux_color_rgba(0, 0, 0, 255);
+    flux_canvas_pass_desc pass = FLUX_CANVAS_PASS_DESC_INIT;
+    pass.clear_color = &clear;
+    pass.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
+    flux_canvas_no_stencil_desc no_stencil = FLUX_CANVAS_NO_STENCIL_DESC_INIT;
+    no_stencil.enabled = true;
+    /* Unknown pNext entries are skipped for forward compatibility. Putting
+     * one before the known extension exercises real chained parsing rather
+     * than only the one-node happy path. */
+    const struct {
+        flux_struct_type type;
+        const void *next;
+    } future_extension = {FLUX_TYPE_UNKNOWN, &no_stencil};
+    pass.next = &future_extension;
+    r = flux_canvas_begin_pass(canvas, frame, &pass);
+    if (r != FLUX_OK)
+        return r;
+    draw(canvas, user);
+    flux_result pass_result = flux_canvas_end_checked(canvas);
+
+    r = flux_frame_submit(frame);
+    if (r != FLUX_OK)
+        return r;
+    r = flux_frame_present(frame);
+    return pass_result != FLUX_OK ? pass_result : r;
+}
+
 /* --- draw callbacks ------------------------------------------------ */
 
 static void draw_linear_gradient(flux_canvas *canvas, void *user) {
@@ -71,6 +105,13 @@ static void draw_stroke(flux_canvas *canvas, void *user) {
 static void draw_donut(flux_canvas *canvas, void *user) {
     flux_path *p = user;
     flux_paint paint = flux_paint_solid(flux_color_rgba(255, 255, 255, 255));
+    flux_canvas_fill_path(canvas, p, &paint);
+}
+
+static void draw_even_odd_path(flux_canvas *canvas, void *user) {
+    flux_path *p = user;
+    flux_paint paint = flux_paint_solid(flux_color_rgba(255, 255, 255, 255));
+    paint.fill_rule = FLUX_FILL_EVEN_ODD;
     flux_canvas_fill_path(canvas, p, &paint);
 }
 
@@ -114,6 +155,10 @@ static void draw_round_image(flux_canvas *canvas, void *user) {
     image_transform_case *tc = user;
     flux_canvas_draw_image_rrect(canvas, tc->image, (flux_rect){32, 32, 64, 64}, 32.0f,
                                  nullptr);
+}
+
+static void draw_opaque_image(flux_canvas *canvas, void *user) {
+    flux_canvas_draw_image_opaque(canvas, user, (flux_rect){0, 0, (float)W, (float)H});
 }
 
 static void record_rotated_image(flux_canvas *canvas, void *user) {
@@ -201,6 +246,33 @@ int main(void) {
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         EXPECT(px_at(px, 4, 4)[2] > 180);   /* first blue tile */
         EXPECT(px_at(px, 60, 60)[0] > 180); /* last red tile */
+    }
+
+    /* --- true no-stencil pass: normal solid pipelines remain valid while
+     * dynamic rendering binds no stencil attachment. This also exercises the
+     * independent VK_FORMAT_UNDEFINED pipeline variant under validation. --- */
+    {
+        EXPECT(render_frame_no_stencil(s, canvas, draw_batchable_rects, nullptr) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, 4, 4)[2] > 180);
+        EXPECT(px_at(px, 60, 60)[0] > 180);
+        EXPECT(px_at(px, W - 2, H - 2)[0] < 20);
+    }
+
+    /* A stencil-dependent fill in that strict pass is explicitly rejected;
+     * it must not silently fall back to nonzero semantics or bind a stencil
+     * pipeline incompatible with the attachment-free render pass. */
+    {
+        flux_path *p = nullptr;
+        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        flux_path_add_rect(p, (flux_rect){16, 16, 64, 64});
+        EXPECT(render_frame_no_stencil(s, canvas, draw_even_odd_path, p) ==
+               FLUX_ERROR_INVALID_STATE);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, 32, 32)[0] < 20);
+        flux_arena_reset(&arena);
     }
 
     /* --- linear gradient: red → blue across x --- */
@@ -413,6 +485,24 @@ int main(void) {
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         EXPECT(memcmp(live, px, sizeof live) == 0);
         flux_canvas_record_release(canvas, tc.record);
+    }
+
+    /* --- alpha-free image import ignores the undefined X channel --- */
+    {
+        const uint8_t xrgb_px[4] = {37, 113, 211, 0};
+        flux_image_desc idesc = FLUX_IMAGE_DESC_INIT;
+        idesc.width = 1;
+        idesc.height = 1;
+        idesc.format = FLUX_FORMAT_RGBA8_UNORM;
+        idesc.initial_data = xrgb_px;
+        flux_image *image = nullptr;
+        EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
+        EXPECT(render_frame_no_stencil(s, canvas, draw_opaque_image, image) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        const uint8_t *centre = px_at(px, W / 2, H / 2);
+        EXPECT(centre[0] == 37 && centre[1] == 113 && centre[2] == 211 && centre[3] == 255);
+        flux_image_release(image);
     }
 
     /* --- batched glyph run (ADR-0010): two quads, one atlas, one

@@ -80,6 +80,79 @@ static bool has_extension(const VkExtensionProperties *exts, uint32_t n, const c
     return false;
 }
 
+#define FLUX_DEVICE_FEATURE_KNOWN_MASK                                                             \
+    (FLUX_DEVICE_FEATURE_DMABUF | FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE)
+
+static const char *const dmabuf_feature_extensions[] = {
+    VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+    VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
+    VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
+    VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
+};
+
+static bool extension_bundle_supported(const VkExtensionProperties *available, uint32_t count,
+                                       const char *const *extensions, uint32_t extension_count) {
+    for (uint32_t i = 0; i < extension_count; ++i) {
+        if (!has_extension(available, count, extensions[i]))
+            return false;
+    }
+    return true;
+}
+
+static bool feature_bundle_supported(const VkExtensionProperties *available, uint32_t count,
+                                     flux_device_feature_flags features) {
+    if ((features & FLUX_DEVICE_FEATURE_DMABUF) != 0 &&
+        !extension_bundle_supported(
+            available, count, dmabuf_feature_extensions,
+            (uint32_t)(sizeof(dmabuf_feature_extensions) / sizeof(dmabuf_feature_extensions[0])))) {
+        return false;
+    }
+    if ((features & FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE) != 0 &&
+        (!extension_bundle_supported(available, count, dmabuf_feature_extensions,
+                                     (uint32_t)(sizeof(dmabuf_feature_extensions) /
+                                                sizeof(dmabuf_feature_extensions[0]))) ||
+         !has_extension(available, count, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME))) {
+        return false;
+    }
+    return (features & ~FLUX_DEVICE_FEATURE_KNOWN_MASK) == 0;
+}
+
+typedef struct flux_device_config {
+    const flux_device_drm_node_desc *drm_node;
+    const flux_device_features_desc *features;
+} flux_device_config;
+
+static flux_result parse_device_extensions(const flux_device_desc *desc,
+                                           flux_device_config *config) {
+    const struct {
+        flux_struct_type type;
+        const void *next;
+    } *extension = desc->next;
+    while (extension) {
+        if (extension->type == FLUX_TYPE_DEVICE_DRM_NODE_DESC) {
+            if (config->drm_node) {
+                FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "duplicate device DRM-node extension");
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            }
+            config->drm_node = (const void *)extension;
+        } else if (extension->type == FLUX_TYPE_DEVICE_FEATURES_DESC) {
+            if (config->features) {
+                FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "duplicate device-features extension");
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            }
+            config->features = (const void *)extension;
+        }
+        /* Unknown tagged extensions are ignored for forward compatibility,
+         * matching the other public descriptor-chain parsers. */
+        extension = extension->next;
+    }
+    if (config->features && (config->features->required & ~FLUX_DEVICE_FEATURE_KNOWN_MASK) != 0) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "unknown required semantic device feature");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    return FLUX_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Instance                                                          */
 /* ------------------------------------------------------------------ */
@@ -239,7 +312,8 @@ static int score_device(VkPhysicalDevice pd) {
     }
 }
 
-static bool device_meets_requirements(VkPhysicalDevice pd, const flux_device_desc *desc) {
+static bool device_meets_requirements(VkPhysicalDevice pd, const flux_device_desc *desc,
+                                      flux_device_feature_flags required_features) {
     uint32_t qcount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, nullptr);
     if (qcount == 0)
@@ -255,7 +329,7 @@ static bool device_meets_requirements(VkPhysicalDevice pd, const flux_device_des
     if (!has_graphics)
         return false;
 
-    if (desc->required_device_extension_count > 0) {
+    if (desc->required_device_extension_count > 0 || required_features != 0) {
         uint32_t count = 0;
         if (vkEnumerateDeviceExtensionProperties(pd, nullptr, &count, nullptr) != VK_SUCCESS ||
             count == 0)
@@ -267,6 +341,8 @@ static bool device_meets_requirements(VkPhysicalDevice pd, const flux_device_des
         bool supported = vr == VK_SUCCESS;
         for (uint32_t i = 0; supported && i < desc->required_device_extension_count; ++i)
             supported = has_extension(available, count, desc->required_device_extensions[i]);
+        if (supported)
+            supported = feature_bundle_supported(available, count, required_features);
         free(available);
         if (!supported)
             return false;
@@ -288,7 +364,65 @@ static bool device_meets_requirements(VkPhysicalDevice pd, const flux_device_des
            have12.bufferDeviceAddress && have12.descriptorIndexing && have12.hostQueryReset;
 }
 
-static flux_result pick_physical_device(flux_device *d, const flux_device_desc *desc) {
+static bool physical_device_has_extension(VkPhysicalDevice pd, const char *name) {
+    uint32_t count = 0;
+    if (vkEnumerateDeviceExtensionProperties(pd, nullptr, &count, nullptr) != VK_SUCCESS ||
+        count == 0)
+        return false;
+    VkExtensionProperties *available = calloc(count, sizeof(*available));
+    if (!available)
+        return false;
+    VkResult vr = vkEnumerateDeviceExtensionProperties(pd, nullptr, &count, available);
+    bool present = vr == VK_SUCCESS && has_extension(available, count, name);
+    free(available);
+    return present;
+}
+
+static bool physical_device_drm_identity(VkPhysicalDevice pd, flux_drm_device_identity *out) {
+    *out = (flux_drm_device_identity){0};
+    if (!physical_device_has_extension(pd, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME))
+        return false;
+
+    VkPhysicalDeviceDrmPropertiesEXT drm = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT,
+    };
+    VkPhysicalDeviceProperties2 properties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &drm,
+    };
+    vkGetPhysicalDeviceProperties2(pd, &properties);
+
+    if (drm.hasPrimary && drm.primaryMajor >= 0 && drm.primaryMajor <= UINT32_MAX &&
+        drm.primaryMinor >= 0 && drm.primaryMinor <= UINT32_MAX) {
+        out->has_primary = true;
+        out->primary.major = (uint32_t)drm.primaryMajor;
+        out->primary.minor = (uint32_t)drm.primaryMinor;
+    }
+    if (drm.hasRender && drm.renderMajor >= 0 && drm.renderMajor <= UINT32_MAX &&
+        drm.renderMinor >= 0 && drm.renderMinor <= UINT32_MAX) {
+        out->has_render = true;
+        out->render.major = (uint32_t)drm.renderMajor;
+        out->render.minor = (uint32_t)drm.renderMinor;
+    }
+    return out->has_primary || out->has_render;
+}
+
+static bool device_matches_drm_node(VkPhysicalDevice pd,
+                                    const flux_device_drm_node_desc *required) {
+    if (!required)
+        return true;
+    flux_drm_device_identity identity;
+    if (!physical_device_drm_identity(pd, &identity))
+        return false;
+    return (identity.has_primary && identity.primary.major == required->drm_major &&
+            identity.primary.minor == required->drm_minor) ||
+           (identity.has_render && identity.render.major == required->drm_major &&
+            identity.render.minor == required->drm_minor);
+}
+
+static flux_result pick_physical_device(flux_device *d, const flux_device_desc *desc,
+                                        const flux_device_drm_node_desc *drm_node,
+                                        flux_device_feature_flags required_features) {
     uint32_t count = 0;
     VkResult vr = vkEnumeratePhysicalDevices(d->instance, &count, nullptr);
     if (vr != VK_SUCCESS) {
@@ -313,7 +447,9 @@ static flux_result pick_physical_device(flux_device *d, const flux_device_desc *
     VkPhysicalDevice best = VK_NULL_HANDLE;
     int best_score = -1;
     for (uint32_t i = 0; i < count; ++i) {
-        if (!device_meets_requirements(pds[i], desc))
+        if (!device_matches_drm_node(pds[i], drm_node))
+            continue;
+        if (!device_meets_requirements(pds[i], desc, required_features))
             continue;
         int s = score_device(pds[i]);
         if (s > best_score) {
@@ -324,12 +460,18 @@ static flux_result pick_physical_device(flux_device *d, const flux_device_desc *
     free(pds);
 
     if (best == VK_NULL_HANDLE || best_score < 0) {
-        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
-                  "no Vulkan device satisfies the required features and extensions");
+        if (drm_node) {
+            FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                      "no Vulkan device matches the required DRM node and features/extensions");
+        } else {
+            FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                      "no Vulkan device satisfies the required features and extensions");
+        }
         return FLUX_ERROR_UNSUPPORTED;
     }
 
     d->physical_device = best;
+    (void)physical_device_drm_identity(best, &d->drm_identity);
     vkGetPhysicalDeviceProperties(d->physical_device, &d->props);
     vkGetPhysicalDeviceMemoryProperties(d->physical_device, &d->mem_props);
 
@@ -424,7 +566,40 @@ static flux_result pick_queue_families(flux_device *d) {
 /*  Logical device                                                    */
 /* ------------------------------------------------------------------ */
 
-static flux_result create_logical_device(flux_device *d, const flux_device_desc *desc) {
+static flux_result append_device_extension(const char **extensions, uint32_t *count,
+                                           const char *extension) {
+    for (uint32_t i = 0; i < *count; ++i) {
+        if (strcmp(extensions[i], extension) == 0)
+            return FLUX_OK;
+    }
+    if (*count >= MAX_EXT) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "too many device extensions");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    extensions[(*count)++] = extension;
+    return FLUX_OK;
+}
+
+static flux_result append_feature_extensions(const char **extensions, uint32_t *count,
+                                             flux_device_feature_flags features) {
+    if ((features & (FLUX_DEVICE_FEATURE_DMABUF | FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE)) != 0) {
+        for (uint32_t i = 0; i < (uint32_t)(sizeof(dmabuf_feature_extensions) /
+                                            sizeof(dmabuf_feature_extensions[0]));
+             ++i) {
+            flux_result r =
+                append_device_extension(extensions, count, dmabuf_feature_extensions[i]);
+            if (r != FLUX_OK)
+                return r;
+        }
+    }
+    if ((features & FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE) != 0)
+        return append_device_extension(extensions, count,
+                                       VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
+    return FLUX_OK;
+}
+
+static flux_result create_logical_device(flux_device *d, const flux_device_desc *desc,
+                                         const flux_device_features_desc *features) {
     /* Device extensions: caller-required plus optional extensions the
      * library consumes itself when the driver advertises them (e.g.
      * VK_EXT_memory_budget). Vulkan 1.3 features (sync2, dynamic
@@ -433,11 +608,10 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
     const char *device_exts[MAX_EXT];
     uint32_t device_ext_count = 0;
     for (uint32_t i = 0; i < desc->required_device_extension_count; ++i) {
-        if (device_ext_count >= MAX_EXT) {
-            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "too many device extensions");
-            return FLUX_ERROR_INVALID_ARGUMENT;
-        }
-        device_exts[device_ext_count++] = desc->required_device_extensions[i];
+        flux_result r = append_device_extension(device_exts, &device_ext_count,
+                                                desc->required_device_extensions[i]);
+        if (r != FLUX_OK)
+            return r;
     }
 
     /* Enumerate what the physical device advertises: validates the
@@ -463,6 +637,21 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
         }
     }
 
+    flux_device_feature_flags enabled_semantic = features ? features->required : 0;
+    flux_device_feature_flags optional =
+        features ? features->optional & FLUX_DEVICE_FEATURE_KNOWN_MASK : 0;
+    for (flux_device_feature_flags bit = UINT64_C(1); bit <= FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
+         bit <<= 1) {
+        if ((optional & bit) != 0 && feature_bundle_supported(available, avail, bit))
+            enabled_semantic |= bit;
+    }
+    flux_result feature_result =
+        append_feature_extensions(device_exts, &device_ext_count, enabled_semantic);
+    if (feature_result != FLUX_OK) {
+        free(available);
+        return feature_result;
+    }
+
     /* Validate that the physical device advertises every required ext. */
     for (uint32_t i = 0; i < device_ext_count; ++i) {
         if (!available || !has_extension(available, avail, device_exts[i])) {
@@ -475,9 +664,13 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
     /* Enable VK_EXT_memory_budget when advertised. Without this the
      * budget query in flux_device_memory_budget chains a struct whose
      * extension is not enabled, which the spec forbids. */
-    if (available && has_extension(available, avail, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME) &&
-        device_ext_count < MAX_EXT) {
-        device_exts[device_ext_count++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
+    if (available && has_extension(available, avail, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
+        flux_result memory_budget_result = append_device_extension(
+            device_exts, &device_ext_count, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+        if (memory_budget_result != FLUX_OK) {
+            free(available);
+            return memory_budget_result;
+        }
     }
     free(available);
     (void)required_device_ext_baseline;
@@ -494,6 +687,13 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
         } else if (strcmp(device_exts[i], VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME) == 0) {
             d->has_queue_family_foreign = true;
         }
+    }
+    d->enabled_features = enabled_semantic;
+    if (d->has_external_memory_fd && d->has_external_memory_dma_buf &&
+        d->has_image_drm_format_modifier && d->has_queue_family_foreign) {
+        d->enabled_features |= FLUX_DEVICE_FEATURE_DMABUF;
+        if (d->has_external_semaphore_fd)
+            d->enabled_features |= FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
     }
 
     /* Feature chain: enable Vulkan 1.3 features we rely on globally. */
@@ -686,6 +886,11 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
     }
     *out = nullptr;
 
+    flux_device_config config = {0};
+    flux_result r = parse_device_extensions(desc, &config);
+    if (r != FLUX_OK)
+        return r;
+
     flux_device *d = calloc(1, sizeof(*d));
     if (!d) {
         FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "device alloc");
@@ -719,11 +924,11 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
         }
     }
 
-    flux_result r;
     r = create_instance(d, desc);
     if (r != FLUX_OK)
         goto fail;
-    r = pick_physical_device(d, desc);
+    flux_device_feature_flags required_features = config.features ? config.features->required : 0;
+    r = pick_physical_device(d, desc, config.drm_node, required_features);
     if (r != FLUX_OK)
         goto fail;
     r = pick_queue_families(d);
@@ -737,7 +942,7 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
         r = FLUX_ERROR_UNSUPPORTED;
         goto fail;
     }
-    r = create_logical_device(d, desc);
+    r = create_logical_device(d, desc, config.features);
     if (r != FLUX_OK)
         goto fail;
     if (pthread_mutex_init(&d->queue_lock, nullptr) != 0) {
@@ -746,6 +951,12 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
         goto fail;
     }
     d->queue_lock_initialized = true;
+    if (pthread_mutex_init(&d->dmabuf_acquire_pool_lock, nullptr) != 0) {
+        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "dma-buf acquire semaphore pool lock init failed");
+        r = FLUX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->dmabuf_acquire_pool_lock_initialized = true;
     if (pthread_mutex_init(&d->pipeline_cache_lock, nullptr) != 0) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "pipeline cache lock init failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
@@ -809,6 +1020,7 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
 
 fail:
     /* Tear down partial state. */
+    flux_dmabuf_acquire_semaphore_pool_destroy(d);
     flux_bindless_heap_destroy(d);
     flux_vk_allocator_destroy(d);
     if (d->upload_pending_lock_initialized) {
@@ -839,6 +1051,10 @@ fail:
         pthread_mutex_destroy(&d->queue_lock);
         d->queue_lock_initialized = false;
     }
+    if (d->dmabuf_acquire_pool_lock_initialized) {
+        pthread_mutex_destroy(&d->dmabuf_acquire_pool_lock);
+        d->dmabuf_acquire_pool_lock_initialized = false;
+    }
     if (d->pipeline_cache)
         vkDestroyPipelineCache(d->device, d->pipeline_cache, nullptr);
     if (d->device)
@@ -854,6 +1070,20 @@ fail:
         vkDestroyInstance(d->instance, nullptr);
     free(d);
     return r;
+}
+
+flux_device_feature_flags flux_device_enabled_features(const flux_device *d) {
+    return d ? d->enabled_features : 0;
+}
+
+bool flux_device_get_drm_identity(const flux_device *d, flux_drm_device_identity *out_identity) {
+    if (!out_identity)
+        return false;
+    *out_identity = (flux_drm_device_identity){0};
+    if (!d || (!d->drm_identity.has_primary && !d->drm_identity.has_render))
+        return false;
+    *out_identity = d->drm_identity;
+    return true;
 }
 
 flux_device *flux_device_retain(flux_device *d) {
@@ -900,6 +1130,7 @@ void flux_device_release(flux_device *d) {
 
     if (d->default_sampler)
         vkDestroySampler(d->device, d->default_sampler, nullptr);
+    flux_dmabuf_acquire_semaphore_pool_destroy(d);
     /* The device is idle: every parked zombie is safe to destroy. This
      * must run before the bindless heap and allocator go away — zombie
      * teardown returns slots to the heap and memory to the allocator. */
@@ -933,6 +1164,10 @@ void flux_device_release(flux_device *d) {
     if (d->queue_lock_initialized) {
         pthread_mutex_destroy(&d->queue_lock);
         d->queue_lock_initialized = false;
+    }
+    if (d->dmabuf_acquire_pool_lock_initialized) {
+        pthread_mutex_destroy(&d->dmabuf_acquire_pool_lock);
+        d->dmabuf_acquire_pool_lock_initialized = false;
     }
     if (d->pipeline_cache)
         vkDestroyPipelineCache(d->device, d->pipeline_cache, nullptr);
