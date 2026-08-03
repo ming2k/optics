@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "aho-corasick"
-version = "1.1.4"
+version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
+checksum = "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba"
 dependencies = [
  "memchr",
 ]
@@ -54,9 +54,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "clang-sys"
-version = "1.8.1"
+version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
+checksum = "157a8ba7b480713b56f4c09fd13fc3e0a22a5dfab8097ba61cbc5feef950788a"
 dependencies = [
  "glob",
  "libc",
@@ -71,14 +71,14 @@ checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
 
 [[package]]
 name = "flux"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "flux-sys",
 ]
 
 [[package]]
 name = "flux-sys"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "lens"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "flux",
  "lens-sys",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "lens-sys"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "bindgen",
  "pkg-config",

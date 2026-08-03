@@ -3,7 +3,7 @@
 #include "../internal.h"
 
 const char *lens_version_string(void) {
-    return "0.0.9";
+    return "0.0.10";
 }
 
 void *lensi_alloc(lens *ui, size_t bytes) {

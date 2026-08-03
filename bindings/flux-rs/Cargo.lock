@@ -10,9 +10,9 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "aho-corasick"
-version = "1.1.4"
+version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
+checksum = "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba"
 dependencies = [
  "memchr",
 ]
@@ -84,9 +84,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "clang-sys"
-version = "1.8.1"
+version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
+checksum = "157a8ba7b480713b56f4c09fd13fc3e0a22a5dfab8097ba61cbc5feef950788a"
 dependencies = [
  "glob",
  "libc",
@@ -129,14 +129,14 @@ dependencies = [
 
 [[package]]
 name = "flux"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "flux-sys",
 ]
 
 [[package]]
 name = "flux-scene-graph"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "flux",
  "flux-scene-graph-sys",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "flux-scene-graph-sys"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "flux-sys"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "flux-text"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "flux",
  "flux-text-sys",
@@ -170,7 +170,7 @@ dependencies = [
 
 [[package]]
 name = "flux-text-layout"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "flux-sys",
  "flux-text",
@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "flux-text-sys"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "bindgen",
  "pkg-config",
