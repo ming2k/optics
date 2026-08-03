@@ -106,6 +106,7 @@ typedef struct effect_liquid_glass_push {
     float tint_strength;
     float frost_strength;
     uint32_t tint_color;
+    float focus_strength;
 } effect_liquid_glass_push;
 
 /* Push-constant block — must match effect_storage_clear.comp exactly. */
@@ -133,7 +134,7 @@ static_assert(offsetof(effect_backdrop_push, origin_x) == 36,
               "effect_backdrop_push origin no longer matches its shader block");
 static_assert(offsetof(effect_backdrop_push, region_height) == 48,
               "effect_backdrop_push region no longer matches its shader block");
-static_assert(sizeof(effect_liquid_glass_push) == 156,
+static_assert(sizeof(effect_liquid_glass_push) == 160,
               "effect_liquid_glass_push no longer matches its shader block");
 static_assert(sizeof(effect_liquid_glass_push) <= FLUX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_liquid_glass_push exceeds device-wide push budget");
@@ -965,11 +966,6 @@ static flux_result liquid_glass_ensure_slot(flux_liquid_glass_filter *filter, ui
     return FLUX_OK;
 }
 
-static bool finite_rect(flux_rect rect) {
-    return isfinite(rect.x) && isfinite(rect.y) && isfinite(rect.w) && isfinite(rect.h) &&
-           rect.w > 0.0f && rect.h > 0.0f;
-}
-
 static bool valid_liquid_glass_desc(const flux_liquid_glass_desc *desc) {
     if (desc->type != FLUX_TYPE_LIQUID_GLASS_DESC || !desc->input || !desc->blurred_input ||
         desc->group_count > LIQUID_GLASS_MAX_GROUPS || (desc->group_count > 0u && !desc->groups))
@@ -982,15 +978,8 @@ static bool valid_liquid_glass_desc(const flux_liquid_glass_desc *desc) {
         !isfinite(desc->tint_strength) || !isfinite(desc->frost_strength))
         return false;
     for (uint32_t i = 0; i < desc->group_count; ++i) {
-        const flux_liquid_glass_group *group = &desc->groups[i];
-        if (group->shape_count < 1u || group->shape_count > 2u || !isfinite(group->blend_radius) ||
-            !isfinite(group->opacity) || !isfinite(group->shadow_alpha) ||
-            !isfinite(group->shadow_blur) || !isfinite(group->shadow_offset_y))
+        if (!liquid_glass_group_is_valid(&desc->groups[i]))
             return false;
-        for (uint32_t j = 0; j < group->shape_count; ++j) {
-            if (!finite_rect(group->shapes[j].bounds) || !isfinite(group->shapes[j].corner_radius))
-                return false;
-        }
     }
     return true;
 }
@@ -1104,8 +1093,10 @@ flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flu
             .origin_x = region.x,
             .origin_y = region.y,
             .radius0 = fmaxf(group->shapes[0].corner_radius, 0.0f),
-            .radius1 =
-                group->shape_count == 2u ? fmaxf(group->shapes[1].corner_radius, 0.0f) : 0.0f,
+            .radius1 = group->focus_strength > 0.0f
+                           ? fmaxf(group->focus.corner_radius, 0.0f)
+                           : (group->shape_count == 2u ? fmaxf(group->shapes[1].corner_radius, 0.0f)
+                                                       : 0.0f),
             .blend_radius = fmaxf(group->blend_radius, 0.0f),
             .opacity = fminf(fmaxf(group->opacity * desc->opacity, 0.0f), 1.0f),
             .refraction = fmaxf(desc->refraction, 0.0f),
@@ -1127,9 +1118,12 @@ flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flu
             .tint_strength = fmaxf(desc->tint_strength, 0.0f),
             .frost_strength = fmaxf(desc->frost_strength, 0.0f),
             .tint_color = group->tint_color,
+            .focus_strength = fminf(fmaxf(group->focus_strength, 0.0f), 1.0f),
         };
         copy_shape(push.shape0, group->shapes[0]);
-        if (group->shape_count == 2u)
+        if (group->focus_strength > 0.0f)
+            copy_shape(push.shape1, group->focus);
+        else if (group->shape_count == 2u)
             copy_shape(push.shape1, group->shapes[1]);
         uint32_t gx = (region.width + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
         uint32_t gy = (region.height + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;

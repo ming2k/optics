@@ -63,6 +63,7 @@ layout(push_constant) uniform PC {
     float tint_strength;
     float frost_strength;
     uint tint_color;
+    float focus_strength;
 } pc;
 
 layout(local_size_x = 16, local_size_y = 16) in;
@@ -103,6 +104,15 @@ float glass_sdf(vec2 p)
     return d;
 }
 
+float focus_field(vec2 p)
+{
+    if (pc.focus_strength <= 0.0) return 0.0;
+    float d = rounded_rect_sdf(p, pc.shape1, pc.radius1);
+    float small_side = min(pc.shape1.z, pc.shape1.w);
+    float feather = clamp(small_side * 0.08, 6.0, 14.0);
+    return (1.0 - smoothstep(-feather, feather, d)) * clamp(pc.focus_strength, 0.0, 1.0);
+}
+
 vec3 adjust_saturation(vec3 colour, float saturation)
 {
     float luminance = dot(colour, vec3(0.2126, 0.7152, 0.0722));
@@ -118,6 +128,7 @@ void main()
 
     vec2 p = vec2(pixel) + 0.5;
     float d = glass_sdf(p);
+    float focus = focus_field(p);
     /* One physical pixel of analytic antialiasing; coverage is also the
      * body's output alpha, preventing blur from leaking beyond corners. */
     float coverage = 1.0 - smoothstep(-0.75, 0.75, d);
@@ -185,6 +196,7 @@ void main()
 
     /* Scatter: mostly clear body; soft scattering grows through the rim. */
     float frost_amount = clamp((0.08 + 0.20 * u * u) * pc.frost_strength, 0.0, 1.0);
+    frost_amount *= 1.0 - 0.62 * focus;
     vec3 colour = mix(refracted, frost, frost_amount);
     colour = adjust_saturation(colour, max(pc.saturation, 0.0));
 
@@ -199,8 +211,19 @@ void main()
     vec3 tint_colour = mix(vec3(0.045, 0.05, 0.065), vec3(1.0), dark_backdrop) * tint_rgb;
     float tint_amount = mix(0.24, 0.10, dark_backdrop) * (0.65 + 0.35 * (1.0 - u)) *
                         pc.tint_strength;
+    tint_amount *= 1.0 - 0.48 * focus;
     colour = mix(colour, tint_colour, tint_amount);
     colour *= max(pc.brightness, 0.0);
+
+    /* Selected content is a focus field inside this body, never another
+     * body. It becomes clearer and slightly more chromatic, while a restrained
+     * directional gain preserves the scene's own hue. There is deliberately
+     * no additive white wash or edge ring to read as a nested material. */
+    vec2 focus_uv = clamp((p - pc.shape1.xy) / max(pc.shape1.zw, vec2(1.0)), vec2(0.0), vec2(1.0));
+    float focus_key = clamp(1.05 - dot(focus_uv, vec2(0.35, 0.65)), 0.0, 1.0);
+    float focus_luminance = dot(colour, vec3(0.2126, 0.7152, 0.0722));
+    colour = mix(vec3(focus_luminance), colour, 1.0 + 0.08 * focus);
+    colour *= 1.0 + 0.018 * focus * (0.40 + 0.60 * focus_key);
 
     /* Light. key_dir points from the shape toward the key light. The
      * parameter is the light's position direction (default up-left;

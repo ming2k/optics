@@ -2497,12 +2497,25 @@ pub struct LiquidGlassShape {
     pub corner_radius: f32,
 }
 
+/// One soft optical emphasis field inside an existing glass body.
+///
+/// The field changes local clarity and directional light; it does not create
+/// another SDF body. Its shape must remain inside the primary body's bounds,
+/// and it is mutually exclusive with a merged secondary shape.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiquidGlassFocus {
+    pub shape: LiquidGlassShape,
+    pub strength: f32,
+}
+
 /// One independently composited glass body. `merged` is smoothly unioned
 /// with `primary`, which is useful for spring-driven droplets and controls.
 ///
 /// Per-body optical character is caller policy, used verbatim: the drop
-/// shadow (alpha 0 disables it) and `tint_color`, an RGB multiplier on the
-/// adaptive body tint for accent-tinted glass (`[255, 255, 255]` = neutral).
+/// shadow (alpha 0 disables it), `tint_color`, an RGB multiplier on the
+/// adaptive body tint for accent-tinted glass (`[255, 255, 255]` = neutral),
+/// and an optional single-body optical `focus` field. Focus and `merged` are
+/// mutually exclusive.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LiquidGlassGroup {
     pub primary: LiquidGlassShape,
@@ -2513,6 +2526,7 @@ pub struct LiquidGlassGroup {
     pub shadow_blur: f32,
     pub shadow_offset_y: f32,
     pub tint_color: [u8; 3],
+    pub focus: Option<LiquidGlassFocus>,
 }
 
 /// Optical properties shared by all bodies in one liquid-glass dispatch.
@@ -2616,6 +2630,11 @@ impl LiquidGlassFilter {
                     tint_color: (u32::from(group.tint_color[0]) << 16)
                         | (u32::from(group.tint_color[1]) << 8)
                         | u32::from(group.tint_color[2]),
+                    focus: group
+                        .focus
+                        .map(|focus| raw_shape(focus.shape))
+                        .unwrap_or_else(|| raw_shape(group.primary)),
+                    focus_strength: group.focus.map_or(0.0, |focus| focus.strength),
                 }
             })
             .collect();

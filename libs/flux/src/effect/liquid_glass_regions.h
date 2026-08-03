@@ -17,6 +17,42 @@ typedef struct liquid_glass_region {
     uint32_t height;
 } liquid_glass_region;
 
+static inline bool liquid_glass_finite_rect(flux_rect rect) {
+    return isfinite(rect.x) && isfinite(rect.y) && isfinite(rect.w) && isfinite(rect.h) &&
+           rect.w > 0.0f && rect.h > 0.0f;
+}
+
+static inline bool liquid_glass_rect_contains(flux_rect outer, flux_rect inner) {
+    double outer_right = (double)outer.x + outer.w;
+    double outer_bottom = (double)outer.y + outer.h;
+    double inner_right = (double)inner.x + inner.w;
+    double inner_bottom = (double)inner.y + inner.h;
+    return inner.x >= outer.x && inner.y >= outer.y && inner_right <= outer_right &&
+           inner_bottom <= outer_bottom;
+}
+
+/* Validate one body's geometry and optical policy. A positive focus is an
+ * interior field of a single body, never a second body or a smooth-union
+ * participant, so its bounds must remain inside the primary shape. */
+static inline bool liquid_glass_group_is_valid(const flux_liquid_glass_group *group) {
+    if (!group || group->shape_count < 1u || group->shape_count > 2u ||
+        !isfinite(group->blend_radius) || !isfinite(group->opacity) ||
+        !isfinite(group->shadow_alpha) || !isfinite(group->shadow_blur) ||
+        !isfinite(group->shadow_offset_y) || !isfinite(group->focus_strength))
+        return false;
+    for (uint32_t j = 0; j < group->shape_count; ++j) {
+        if (!liquid_glass_finite_rect(group->shapes[j].bounds) ||
+            !isfinite(group->shapes[j].corner_radius))
+            return false;
+    }
+    if (group->focus_strength > 0.0f &&
+        (group->shape_count != 1u || !liquid_glass_finite_rect(group->focus.bounds) ||
+         !isfinite(group->focus.corner_radius) ||
+         !liquid_glass_rect_contains(group->shapes[0].bounds, group->focus.bounds)))
+        return false;
+    return true;
+}
+
 /* Conservative physical-pixel footprint of one analytic body, including the
  * smooth-union bow, antialiasing, and drop-shadow falloff. The result is
  * clipped to the storage image and is therefore directly dispatchable. */

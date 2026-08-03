@@ -143,7 +143,12 @@ typedef struct flux_liquid_glass_shape {
  * - shadow_alpha / shadow_blur / shadow_offset_y: the drop shadow cast by
  *   the body's own SDF (alpha 0 disables it);
  * - tint_color: 0xRRGGBB multiplier on the adaptive body tint, for
- *   accent-tinted glass (0xFFFFFF keeps the neutral smoke/pearl pair). */
+ *   accent-tinted glass (0xFFFFFF keeps the neutral smoke/pearl pair);
+ * - focus / focus_strength: one soft optical emphasis field inside a
+ *   single-shape body. It changes clarity and directional light without
+ *   creating or outlining another glass body. Focus bounds must remain
+ *   inside shapes[0]. Focus and smooth union are mutually exclusive because
+ *   both reuse the secondary-shape shader slot. */
 typedef struct flux_liquid_glass_group {
     flux_liquid_glass_shape shapes[2];
     uint32_t shape_count;
@@ -153,13 +158,14 @@ typedef struct flux_liquid_glass_group {
     float shadow_blur;
     float shadow_offset_y;
     uint32_t tint_color;
+    flux_liquid_glass_shape focus;
+    float focus_strength;
 } flux_liquid_glass_group;
 
 /* Neutral baseline for designated-initializer use: a single visible body
  * with no shadow and the neutral tint, so omitted fields can never turn
  * the glass black. Override the fields a body actually needs. */
-#define FLUX_LIQUID_GLASS_GROUP_INIT                                                             \
-    {.shape_count = 1, .opacity = 1.0f, .tint_color = 0xFFFFFFu}
+#define FLUX_LIQUID_GLASS_GROUP_INIT {.shape_count = 1, .opacity = 1.0f, .tint_color = 0xFFFFFFu}
 
 /* Reusable frame-slot-safe liquid-glass compositor. `input` is the sharp
  * backdrop capture and `blurred_input` is normally the output of

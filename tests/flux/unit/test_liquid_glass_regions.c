@@ -18,6 +18,26 @@ static bool contains_region(const liquid_glass_region *regions, uint32_t count,
 }
 
 int main(void) {
+    /* Focus is an interior field of one body, not a second outline/body. */
+    flux_liquid_glass_group focused = FLUX_LIQUID_GLASS_GROUP_INIT;
+    focused.shapes[0] = (flux_liquid_glass_shape){
+        .bounds = {10.0f, 20.0f, 100.0f, 60.0f},
+        .corner_radius = 18.0f,
+    };
+    focused.focus = (flux_liquid_glass_shape){
+        .bounds = {20.0f, 28.0f, 40.0f, 44.0f},
+        .corner_radius = 12.0f,
+    };
+    focused.focus_strength = 1.0f;
+    EXPECT(liquid_glass_group_is_valid(&focused));
+    focused.shape_count = 2u;
+    focused.shapes[1] = focused.focus;
+    EXPECT(!liquid_glass_group_is_valid(&focused));
+    focused.shape_count = 1u;
+    focused.focus.bounds.x = 80.0f;
+    focused.focus.bounds.w = 40.0f;
+    EXPECT(!liquid_glass_group_is_valid(&focused));
+
     /* Bounds include smooth-union/shadow padding, round outward, and clamp. */
     flux_liquid_glass_group group = FLUX_LIQUID_GLASS_GROUP_INIT;
     group.shapes[0] = (flux_liquid_glass_shape){

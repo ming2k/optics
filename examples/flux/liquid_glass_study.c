@@ -188,7 +188,11 @@ int main(int argc, char **argv) {
          .shadow_alpha = 0.22f,
          .shadow_blur = 14.0f,
          .shadow_offset_y = 7.0f,
-         .tint_color = 0xFFFFFFu},
+         .tint_color = 0xFFFFFFu,
+         /* One selected region changes the parent body's optics; it is not
+          * another glass body and therefore casts no nested rim or shadow. */
+         .focus = {.bounds = {474.0f, 184.0f, 212.0f, 156.0f}, .corner_radius = 18.0f},
+         .focus_strength = 1.0f},
         {.shapes =
              {
                  {.bounds = {120.0f, 200.0f, 96.0f, 96.0f}, .corner_radius = 48.0f},
