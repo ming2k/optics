@@ -79,6 +79,21 @@ vec4 sample_image(uint handle, vec2 uv)
     );
 }
 
+/* Groups share one persistent premultiplied output. Preserve material already
+ * written by lower groups when a later body's translucent shadow or AA fringe
+ * reaches it. The dispatches are ordered by storage read/write barriers. */
+void store_source_over(uvec2 pixel, vec4 source)
+{
+    vec4 destination = imageLoad(
+        u_storage[nonuniformEXT(pc.output_handle & 0x0FFFFFFFu)], ivec2(pixel)
+    );
+    imageStore(
+        u_storage[nonuniformEXT(pc.output_handle & 0x0FFFFFFFu)],
+        ivec2(pixel),
+        source + destination * (1.0 - source.a)
+    );
+}
+
 float rounded_rect_sdf(vec2 p, vec4 bounds, float requested_radius)
 {
     vec2 half_extent = max(bounds.zw * 0.5, vec2(0.001));
@@ -155,8 +170,7 @@ void main()
     shadow *= clamp(pc.opacity, 0.0, 1.0);
     if (coverage <= 0.0) {
         if (shadow <= 0.002) return;
-        imageStore(u_storage[nonuniformEXT(pc.output_handle & 0x0FFFFFFFu)], ivec2(pixel),
-                   vec4(0.0, 0.0, 0.0, shadow));
+        store_source_over(pixel, vec4(0.0, 0.0, 0.0, shadow));
         return;
     }
 
@@ -267,6 +281,5 @@ void main()
      * semi-transparent body. */
     float alpha = coverage * clamp(pc.opacity, 0.0, 1.0);
     alpha = alpha + shadow * (1.0 - alpha);
-    imageStore(u_storage[nonuniformEXT(pc.output_handle & 0x0FFFFFFFu)], ivec2(pixel),
-               vec4(colour * alpha, alpha));
+    store_source_over(pixel, vec4(colour * alpha, alpha));
 }

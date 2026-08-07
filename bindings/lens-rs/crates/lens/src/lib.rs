@@ -1118,6 +1118,33 @@ impl Frame {
         unsafe { sys::lens_textfield(self.ui, c.as_ptr(), buf.as_mut_ptr(), buf.cap()) }
     }
 
+    /// As [`Frame::textfield`], but shows `placeholder` as a hint while the
+    /// buffer is empty and the field is unfocused.
+    pub fn textfield_placeholder(
+        &mut self,
+        label: &str,
+        buf: &mut TextBuf,
+        placeholder: &str,
+    ) -> bool {
+        let c = cstr(label);
+        let hint = cstr(placeholder);
+        // SAFETY: ui is live; c, hint and buf outlive the call; buf is
+        // NUL-terminated with capacity buf.cap().
+        let r = unsafe {
+            sys::lens_textfield_ex(
+                self.ui,
+                sys::lens_textfield_opts {
+                    label: c.as_ptr(),
+                    buf: buf.as_mut_ptr(),
+                    buf_cap: buf.cap(),
+                    placeholder: hint.as_ptr(),
+                    ..Default::default()
+                },
+            )
+        };
+        r.changed
+    }
+
     /// A multi-line text editor with a minimum visible height.
     pub fn textarea(&mut self, label: &str, buf: &mut TextBuf, min_height: f32) -> bool {
         let c = cstr(label);

@@ -458,6 +458,8 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0);
     lensi_node_semantics(ui, n, LENS_ROLE_TEXTFIELD, label, buf, sem_flags);
 
+    /* The descriptor form reports the edit through lens_response.changed. */
+    r.changed = changed;
     ui->last_response = r;
     return changed;
 }

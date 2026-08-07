@@ -509,6 +509,35 @@ static void barrier_compute_write_to_write(VkCommandBuffer cmd, VkImage image) {
     vkCmdPipelineBarrier2(cmd, &info);
 }
 
+/* Liquid-glass groups source-over the persistent storage image. Make an
+ * earlier group's write visible to both imageLoad and imageStore in the next
+ * group; a write-only dependency lets a later shadow replace the body below
+ * it instead of compositing over it. */
+static void barrier_compute_write_to_read_write(VkCommandBuffer cmd, VkImage image) {
+    VkImageMemoryBarrier2 barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = image,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    VkDependencyInfo info = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier,
+    };
+    vkCmdPipelineBarrier2(cmd, &info);
+}
+
 static void record_storage_clear_regions(effect_state *state, VkCommandBuffer command,
                                          flux_image *output, const liquid_glass_region *regions,
                                          uint32_t region_count) {
@@ -1074,7 +1103,7 @@ flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flu
             barrier_reuse_to_compute_write(command, slot->output->image);
         record_storage_clear_regions(state, command, slot->output, clear_regions, clear_count);
         if (current_count > 0u)
-            barrier_compute_write_to_write(command, slot->output->image);
+            barrier_compute_write_to_read_write(command, slot->output->image);
     }
 
     bool dispatched = false;
@@ -1082,7 +1111,7 @@ flux_result flux_liquid_glass_filter_apply(flux_liquid_glass_filter *filter, flu
         const flux_liquid_glass_group *group = &desc->groups[current_group_indices[i]];
         liquid_glass_region region = current[i];
         if (dispatched)
-            barrier_compute_write_to_write(command, slot->output->image);
+            barrier_compute_write_to_read_write(command, slot->output->image);
         effect_liquid_glass_push push = {
             .input_handle = input->bindless,
             .blurred_handle = blurred->bindless,

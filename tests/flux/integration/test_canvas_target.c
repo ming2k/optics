@@ -374,6 +374,33 @@ int main(void) {
             EXPECT(second_centre[0] > 10u || second_centre[1] > 10u || second_centre[2] > 10u);
         }
 
+        /* A later body's shadow is source-over material, not a replacement
+         * for an earlier body. This mirrors a popover whose shadow footprint
+         * reaches a Dock below it: the Dock must remain visible underneath
+         * the translucent shadow instead of becoming a black cut-out. */
+        flux_liquid_glass_group shadow_overlap[2] = {
+            FLUX_LIQUID_GLASS_GROUP_INIT,
+            FLUX_LIQUID_GLASS_GROUP_INIT,
+        };
+        shadow_overlap[0].shapes[0] = (flux_liquid_glass_shape){
+            .bounds = {8.0f, 36.0f, 48.0f, 20.0f},
+            .corner_radius = 6.0f,
+        };
+        shadow_overlap[1].shapes[0] = (flux_liquid_glass_shape){
+            .bounds = {16.0f, 8.0f, 32.0f, 20.0f},
+            .corner_radius = 6.0f,
+        };
+        shadow_overlap[1].shadow_alpha = 0.7f;
+        shadow_overlap[1].shadow_blur = 6.0f;
+        shadow_overlap[1].shadow_offset_y = 6.0f;
+        for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
+            render_liquid_glass_frame(s, canvas, target, blur_filter, persistent_filter,
+                                      shadow_overlap, 2u, px);
+            const uint8_t *dock_under_shadow = &px[(40u * W + 32u) * 4u];
+            EXPECT(dock_under_shadow[0] > 10u || dock_under_shadow[1] > 10u ||
+                   dock_under_shadow[2] > 10u);
+        }
+
         /* An empty group list is the explicit disappearance operation: only
          * the previous footprints are cleared and the persistent image becomes
          * transparent again. */

@@ -681,6 +681,10 @@ LENS_API bool lens_icon_button(lens *ui, lens_icon_id id);
  * An accent rail and accent glyph are added only when the theme explicitly
  * sets active_indicator_width above 0. */
 LENS_API bool lens_icon_button_active(lens *ui, lens_icon_id id, bool active);
+/* As lens_icon_button_active, but the active state is a self-contained
+ * rounded color_active tile with an accent glyph — suited to segmented view
+ * toggles — and never uses an accent rail. */
+LENS_API bool lens_icon_button_active_rounded(lens *ui, lens_icon_id id, bool active);
 /* Rounded icon tile with an explicit logical glyph size and optional
  * top-right text badge (for example "1" on repeat-one). The tile stays flat
  * at rest, gains a rounded hover/active surface, and never uses an accent

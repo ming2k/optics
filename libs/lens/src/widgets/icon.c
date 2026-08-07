@@ -7,24 +7,31 @@ static void icon_impl(lens *ui, lens_icon_id id, float size, lens_foreground_out
     const lens_theme *t = &ui->theme;
     ui->next_disabled = false;
     ui->next_error = false;
-    lens_id nid = lensi_gen_widget_id(ui, "");
+    /* Bare icons carry no label, so hash (scope, kind, sibling sequence)
+     * like containers and spacers: two lens_icon calls in one scope must not
+     * share a node — with a label-less widget id both glyphs' draw commands
+     * would pile onto the first icon's slot while the second slot stays
+     * empty. */
+    lens_id nid = lensi_gen_container_id(ui, "icon");
     lens_node *n = lensi_store_touch(ui, nid);
     if (!n)
         return;
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float s = size > 0 ? size : t->font_size;
-    if (n->fixed_w > 0)
-        s = n->fixed_w;
-    if (n->fixed_h > 0 && n->fixed_h < s)
-        s = n->fixed_h;
-    n->measured = (flux_point){s, s};
+    /* `size` is the glyph size. A pending size_next only reserves the layout
+     * box — it must not silently rescale the glyph; the glyph is centered
+     * inside the box instead. */
+    float glyph = size > 0 ? size : t->font_size;
+    float bw = n->fixed_w > 0 ? n->fixed_w : glyph;
+    float bh = n->fixed_h > 0 ? n->fixed_h : glyph;
+    n->measured = (flux_point){bw, bh};
+    float s = fminf(glyph, fminf(bw, bh));
 
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){
                             .kind = LENS_DRAW_ICON,
-                            .rel = {0, 0, s, s},
+                            .rel = {(bw - s) * 0.5f, (bh - s) * 0.5f, s, s},
                             .color = t->color_fg,
                             .outline_color = outline.color,
                             .outline_width = outline.width > 0.0f ? outline.width : 0.0f,
@@ -90,8 +97,11 @@ static bool icon_button_impl(lens *ui, icon_button_spec spec) {
         h = n->fixed_h;
     n->measured = (flux_point){w, h};
 
+    /* The glyph only steps aside for a few pixels of breathing room —
+     * subtracting the full theme padding would crush it on compact
+     * fixed-size targets (a 32 px button would render an 8 px glyph). */
     float max_s = w < h ? w : h;
-    max_s -= 2.0f * pad;
+    max_s -= 8.0f;
     if (max_s < 1.0f)
         max_s = 1.0f;
     /* Keep glyph size independent from a larger square hit target. */
@@ -192,6 +202,16 @@ LENS_API bool lens_icon_button_active(lens *ui, lens_icon_id id, bool active) {
     return icon_button_impl(
         ui, (icon_button_spec){
                 .icon = id, .identity = identity, .active_surface = active, .checked = active});
+}
+
+LENS_API bool lens_icon_button_active_rounded(lens *ui, lens_icon_id id, bool active) {
+    char identity[32];
+    snprintf(identity, sizeof(identity), "##icon%d", (int)id);
+    return icon_button_impl(ui, (icon_button_spec){.icon = id,
+                                                   .identity = identity,
+                                                   .rounded = true,
+                                                   .active_surface = active,
+                                                   .checked = active});
 }
 
 LENS_API bool lens_icon_button_badged(lens *ui, lens_icon_id id, const char *badge,
