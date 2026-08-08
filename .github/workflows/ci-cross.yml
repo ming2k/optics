@@ -1,0 +1,123 @@
+name: ci-cross
+
+# Cross-platform gate: native Windows + macOS builds, plus a Linux-hosted
+# zig-cc compile check that keeps Windows-only translation units honest
+# without needing a Windows runner for every iteration.
+#
+# Suites: 'integration'/'bench'/'fuzz' need a real GPU (or lavapipe) — the
+# GPU-less GitHub runners skip them here. The 'unit' suite is designed to
+# stay green without a Vulkan ICD (see tests/flux/integration/meson.build).
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: build & test (windows-2022, clang-cl)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      # Vulkan SDK provides headers, vulkan-1.lib and glslangValidator.exe.
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.1.1
+        with:
+          version: 1.4.321.0
+
+      - name: Install meson/ninja + clang
+        run: |
+          python -m pip install --upgrade pip
+          pip install meson ninja
+
+      # freetype2 / harfbuzz / fribidi resolve via subprojects/*.wrap
+      # fallback (wrap-mode default: system first, wrap when missing).
+      # fontconfig is Linux-only — font discovery uses DirectWrite here.
+      - name: Configure
+        shell: bash
+        run: |
+          meson setup build -Dexamples=false -Dtests=true \
+            --buildtype=debugoptimized \
+            -Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled
+
+      - name: Compile
+        shell: bash
+        run: meson compile -C build
+
+      - name: Test (no GPU suites)
+        shell: bash
+        run: |
+          meson test -C build --print-errorlogs \
+            --no-suite integration --no-suite bench --no-suite fuzz
+
+  macos:
+    name: build & test (macos-14, MoltenVK)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          brew install meson ninja glslang \
+            molten-vk vulkan-loader vulkan-headers \
+            freetype harfbuzz fribidi
+
+      # Homebrew's vulkan-loader ships vulkan.pc; MoltenVK is plugged in as
+      # the ICD. flux auto-enables VK_KHR_portability_enumeration /
+      # VK_KHR_portability_subset when advertised (required by MoltenVK).
+      - name: Configure
+        run: |
+          meson setup build -Dexamples=false -Dtests=true \
+            -Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled
+
+      - name: Compile
+        run: meson compile -C build
+
+      - name: Test (no GPU suites)
+        env:
+          VK_ICD_FILENAMES: /opt/homebrew/share/vulkan/icd.d/MoltenVK_icd.json
+        run: |
+          meson test -C build --print-errorlogs \
+            --no-suite integration --no-suite bench --no-suite fuzz
+
+  windows-zig-compile-check:
+    name: windows TU compile check (zig cc, ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vulkan + FreeType headers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libvulkan-dev libfreetype-dev
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      # Compile-check every Windows-only translation unit (Win32 backend,
+      # DirectWrite font resolution) against zig's bundled MinGW headers.
+      # Discovery-based: new *_win32.c / *_directwrite.c files join the gate
+      # automatically.
+      - name: Compile-check Windows translation units
+        run: |
+          files=$(git ls-files 'libs/**/*.c' | grep -E '_(win32|directwrite)\.c$' || true)
+          if [ -z "$files" ]; then
+            echo "no Windows-only TUs yet — nothing to check"
+            exit 0
+          fi
+          echo "$files" | xargs tools/zig-win32-check.sh \
+            -Ilibs/flux/include -Ilibs/flux/text/include -Ilibs/flux/text/src \
+            -Ilibs/lens/include -Ilibs/iris/include -Ilibs/iris/src \
+            -I/usr/include/freetype2 \
+            -DFLUX_HAVE_CANVAS=1 -DFLUX_HAVE_SCENE=1 \
+            -DFLUX_HAVE_COMPUTE=1 -DFLUX_HAVE_EFFECT=1

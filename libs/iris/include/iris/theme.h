@@ -1,17 +1,20 @@
 /*
  * iris/theme.h — system colour-scheme query + live watching.
  *
- * Reads the user's colour-scheme preference at startup, and (when libsystemd
- * is available at build time) watches for live changes via the
- * org.freedesktop.portal.Settings D-Bus signal SettingChanged.
+ * Reads the user's colour-scheme preference at startup, and (when the
+ * platform supports it) watches for live changes.
  *
- * Startup query is always available. Live watching requires:
- *   - libsystemd (sd-bus) at build time
- *   - an xdg-desktop-portal backend at runtime
+ * Startup query is always available. Live watching is callback-based: the
+ * platform watches the OS setting on its own (on Linux, a dedicated thread
+ * pumps the org.freedesktop.portal.Settings D-Bus signal SettingChanged)
+ * and delivers changes on the iris main thread — the thread running
+ * iris_app_run — via the backend's wakeup seam. No fd, poll mask, or pump
+ * call is exposed here; each backend wires delivery into its own event
+ * loop (Wayland: poll; Win32: thread messages; Cocoa: CFRunLoop).
  *
- * When live watching is unavailable, iris_watch_system_color_scheme
- * returns non-zero and callers fall back to the startup-only behaviour
- * (no live updates; restart the app to pick up a change).
+ * When live watching is unavailable, iris_color_scheme_watch returns
+ * non-zero and callers fall back to the startup-only behaviour (no live
+ * updates; restart the app to pick up a change).
  */
 #ifndef IRIS_THEME_H
 #define IRIS_THEME_H
@@ -37,44 +40,38 @@ IRIS_API iris_color_scheme iris_query_system_color_scheme(void);
 IRIS_API bool iris_system_prefers_dark(void);
 
 /* ================================================================== */
-/*  Live watching (optional; requires libsystemd at build time)       */
+/*  Live watching (optional; platform support varies)                 */
 /* ================================================================== */
 
-/* Callback invoked whenever the system colour scheme changes. Runs on the
- * thread that pumps the watcher (see iris_pump_color_scheme_watcher). */
+/* Callback invoked whenever the system colour scheme changes.
+ *
+ * Threading guarantee: `cb` always runs on the iris main thread (the
+ * thread executing iris_app_run), serialized with the event loop — it is
+ * safe to touch lens or any other main-thread-affine state from it.
+ * Delivery requires a running iris_app_run loop: changes detected while
+ * no loop is active are dropped. */
 typedef void (*iris_color_scheme_changed_fn)(iris_color_scheme new_scheme, void *user);
 
 /* Begin watching the system colour scheme. Returns:
- *    0  watching started; pump the fd returned by
- *       iris_color_scheme_watcher_fd and call
- *       iris_pump_color_scheme_watcher when readable
- *   -1  watching unavailable (libsystemd not linked, or D-Bus / portal
- *       unreachable). Caller should fall back to startup-only query.
+ *    0  watching started
+ *   -1  watching unavailable (no platform support, or the OS settings
+ *       source is unreachable). Caller should fall back to startup-only
+ *       query.
  *
  * `cb` is invoked on the first detected change after this call. The current
  * value is NOT reported at startup — call iris_query_system_color_scheme
- * to seed it. */
-IRIS_API int iris_watch_system_color_scheme(iris_color_scheme_changed_fn cb, void *user);
+ * to seed it.
+ *
+ * One watcher per process: calling this again while watching replaces the
+ * callback and user pointer (and returns 0). Must be called from the iris
+ * main thread. */
+IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb, void *user);
 
-/* The fd to poll(2) for readability, or -1 when not watching. When the fd
- * is readable, call iris_pump_color_scheme_watcher to drain and dispatch. */
-IRIS_API int iris_color_scheme_watcher_fd(void);
-
-/* The poll(2) event mask to wait on for the watcher fd, as reported by the
- * underlying D-Bus connection (sd_bus_get_events). This is NOT a fixed POLLIN:
- * an sd-bus socket is level-triggered and may report POLLIN at the kernel even
- * when sd-bus has no work, so polling a hard-coded POLLIN spins the event loop.
- * Callers must use this mask for the fd's `events` field. Returns 0 when not
- * watching (caller should then skip the fd). */
-IRIS_API short iris_color_scheme_watcher_poll_events(void);
-
-/* Drain pending D-Bus messages and dispatch the callback registered via
- * iris_watch_system_color_scheme if the colour scheme changed. Safe to
- * call spuriously (no-op when nothing is pending). */
-IRIS_API void iris_pump_color_scheme_watcher(void);
-
-/* Stop watching and release D-Bus resources. Safe to call when not watching. */
-IRIS_API void iris_stop_color_scheme_watcher(void);
+/* Stop watching and release platform resources. Blocks until the
+ * platform's watcher thread (if any) has exited; `cb` is guaranteed not
+ * to run after this returns. Safe to call when not watching. Must be
+ * called from the iris main thread. */
+IRIS_API void iris_color_scheme_unwatch(void);
 
 #ifdef __cplusplus
 }

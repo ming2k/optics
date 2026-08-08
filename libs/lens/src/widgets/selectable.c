@@ -87,7 +87,7 @@ static bool selectable_impl(lens *ui, lens_icon_id icon, const char *label, bool
                             (lens_draw_cmd){.kind = LENS_DRAW_ICON,
                                             .rel = {x, icon_y, icon_size, icon_size},
                                             .color = fg,
-                                            .width = 1.75f * (icon_size / 24.0f),
+                                            .width = 2.0f * (icon_size / 24.0f),
                                             .icon_id = icon});
         x += icon_size + icon_gap;
     }

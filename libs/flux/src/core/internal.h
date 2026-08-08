@@ -7,9 +7,10 @@
 #include <flux/core.h>
 #include <flux/math.h>   /* flux_mat4 (flux_frame scene caches) */
 #include <flux/vulkan.h> /* flux_bindless_handle */
-#include <pthread.h>
 #include <stdatomic.h>
 #include <vulkan/vulkan.h>
+
+#include "platform.h" /* flux_platform_mutex + friends (OS shims) */
 
 /* Set the structured error info for this thread. Pass __func__ /
  * __FILE__ / __LINE__ at the call site. message and backend_code may
@@ -98,7 +99,7 @@ typedef struct flux_vk_block {
 
 typedef struct flux_vk_allocator {
     flux_vk_block *blocks;
-    pthread_mutex_t lock;
+    flux_platform_mutex lock;
     bool lock_initialized;
     /* Diagnostics — counted under the lock. */
     uint64_t bytes_in_use;
@@ -186,7 +187,7 @@ typedef struct flux_bindless_heap {
      * the Vulkan API are externally synchronised for the same set,
      * so we cover both the slot allocator and the descriptor write
      * under one lock. */
-    pthread_mutex_t lock;
+    flux_platform_mutex lock;
     bool lock_initialized;
 } flux_bindless_heap;
 
@@ -317,13 +318,13 @@ struct flux_device {
      * the queues (observed as an ANV double-free when a wait raced a
      * concurrent submit), so they must go through flux_vk_wait_idle,
      * which funnels them through this same lock. */
-    pthread_mutex_t queue_lock;
+    flux_platform_mutex queue_lock;
     bool queue_lock_initialized;
 
     /* Reusable external SYNC_FD semaphores for per-frame dma-buf acquire
      * waits. A semaphore enters this pool only after the frame-slot fence
      * proves its temporary imported payload was consumed. */
-    pthread_mutex_t dmabuf_acquire_pool_lock;
+    flux_platform_mutex dmabuf_acquire_pool_lock;
     bool dmabuf_acquire_pool_lock_initialized;
     VkSemaphore *dmabuf_acquire_pool;
     uint32_t dmabuf_acquire_pool_count;
@@ -338,9 +339,9 @@ struct flux_device {
      * parked as zombies tagged with the graphics submission serial and
      * destroyed only once a fence wait proves the queue passed every
      * batch that could reference them. */
-    atomic_uint_fast64_t submit_serial;     /* graphics-queue batch counter */
-    atomic_uint_fast64_t completed_serial;  /* highest batch proven done    */
-    pthread_mutex_t retire_lock;
+    atomic_uint_fast64_t submit_serial;    /* graphics-queue batch counter */
+    atomic_uint_fast64_t completed_serial; /* highest batch proven done    */
+    flux_platform_mutex retire_lock;
     bool retire_lock_initialized;
     flux_retire_zombie *retire_head; /* FIFO; tags are non-decreasing */
     flux_retire_zombie **retire_tail;
@@ -353,11 +354,11 @@ struct flux_device {
      * flush's parked fence proves the GPU retired the batch.
      * upload_lock serialises batch state and all vkCmd* recording into
      * batch_cmd. */
-    pthread_mutex_t upload_lock;
+    flux_platform_mutex upload_lock;
     bool upload_lock_initialized;
     bool upload_batch_open;
-    VkCommandPool upload_batch_pool;   /* VK_NULL_HANDLE when no batch ever opened */
-    VkCommandBuffer upload_batch_cmd;  /* recording while open */
+    VkCommandPool upload_batch_pool;         /* VK_NULL_HANDLE when no batch ever opened */
+    VkCommandBuffer upload_batch_cmd;        /* recording while open */
     flux_staging_buf *upload_batch_stagings; /* checked-out list, `next` chained */
 
     /* Deferred upload retirement. Every one-shot upload submission parks
@@ -365,7 +366,7 @@ struct flux_device {
      * fence. Guarded by its own lock; recycled by sweep (non-blocking,
      * called from the upload entry points) or drain (waits, called from
      * flux_device_memory_stats and device teardown). */
-    pthread_mutex_t upload_pending_lock;
+    flux_platform_mutex upload_pending_lock;
     bool upload_pending_lock_initialized;
     flux_upload_pending *upload_pending_head;
 
@@ -379,7 +380,7 @@ struct flux_device {
      * the cache is capped (see FLUX_VK_STAGING_CACHE_CAP in oneshot.c).
      * Checked-out entries are owned by the caller; the idle list is
      * drained at device teardown, after the device is known idle. */
-    pthread_mutex_t staging_lock;
+    flux_platform_mutex staging_lock;
     bool staging_lock_initialized;
     flux_staging_buf *staging_idle;
     uint64_t staging_idle_bytes;
@@ -399,13 +400,13 @@ struct flux_device {
     /* Protects publication of lazily-created per-module state slots. The lock
      * is held only while reading or publishing pointers and hooks; allocation,
      * Vulkan calls, and module locks must remain outside it. */
-    pthread_mutex_t module_state_lock;
+    flux_platform_mutex module_state_lock;
     bool module_state_lock_initialized;
 
     /* Vulkan requires external synchronisation for every operation that reads
      * or mutates the shared VkPipelineCache, including pipeline creation and
      * vkGetPipelineCacheData. Raw-cache users lock it through vulkan.h. */
-    pthread_mutex_t pipeline_cache_lock;
+    flux_platform_mutex pipeline_cache_lock;
     bool pipeline_cache_lock_initialized;
     VkPipelineCache pipeline_cache;
 
@@ -505,8 +506,8 @@ VkResult flux_vk_submit_upload(flux_device *d, VkQueue queue, VkCommandBuffer cm
                                VkSemaphore signal_sem, VkPipelineStageFlags2 signal_stage,
                                VkFence *out_fence, uint64_t *out_serial);
 void flux_vk_upload_pending_park(flux_device *d, VkFence fence, VkCommandPool pool,
-                                 VkCommandPool pool2, VkSemaphore sem,
-                                 flux_staging_buf *stagings, uint64_t serial);
+                                 VkCommandPool pool2, VkSemaphore sem, flux_staging_buf *stagings,
+                                 uint64_t serial);
 /* Same as flux_vk_upload_pending_park but tags each pool with its queue
  * family so the recycle path can return it to the transient pool cache
  * instead of destroying it. Pass UINT32_MAX for an unknown family. */

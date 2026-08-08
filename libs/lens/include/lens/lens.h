@@ -332,6 +332,21 @@ LENS_API lens_theme lens_theme_dark(void);
 /*  Text seam (ADR-0033)                                              */
 /* ================================================================== */
 
+/* Typeface family for subsequently built widgets. Values mirror
+ * flux_text_family so the seam can cast between them. LENS_TEXT_FAMILY_DEFAULT
+ * keeps the engine's default (sans-serif). Like lens_set_theme, this is a
+ * context switch read at widget-build time: set it, build the widgets that
+ * need another voice (e.g. a serif display title), then set it back. */
+typedef enum lens_text_family {
+    LENS_TEXT_FAMILY_DEFAULT = 0,
+    LENS_TEXT_FAMILY_SANS = 1,
+    LENS_TEXT_FAMILY_SERIF = 2,
+    LENS_TEXT_FAMILY_MONO = 3,
+} lens_text_family;
+
+LENS_API void lens_set_text_family(lens *ui, lens_text_family family);
+LENS_API lens_text_family lens_get_text_family(const lens *ui);
+
 typedef struct lens_text_metrics {
     float width;
     float height;

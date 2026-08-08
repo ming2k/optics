@@ -1,8 +1,9 @@
 /* app.c — iris_app_run dispatcher.
  *
- * Today there is exactly one backend (Linux/Wayland); iris_app_run is a
- * thin forwarder. The indirection exists so future backends (Win32, Cocoa)
- * can be selected at link time without changing the public API.
+ * Exactly one platform backend is compiled into libiris, selected at meson
+ * configure time (ADR-0044): IRIS_BACKEND_WAYLAND, IRIS_BACKEND_WIN32, or
+ * IRIS_BACKEND_COCOA. iris_app_run forwards to that backend; the public
+ * headers never change per platform.
  *
  * If IRIS_BUILD_NO_BACKEND is defined at compile time, iris_app_run
  * returns a non-zero code immediately. This lets platform-less CI builds
@@ -11,14 +12,15 @@
 
 #include <iris/app.h>
 
-#ifndef IRIS_BUILD_NO_BACKEND
-int iris_app_run_wayland(const iris_app_config *cfg);
-void iris_request_animation_frame_wayland(void);
-#endif
+#include "platform_internal.h"
 
 IRIS_API void iris_request_animation_frame(void) {
-#ifndef IRIS_BUILD_NO_BACKEND
+#if defined(IRIS_BACKEND_WAYLAND)
     iris_request_animation_frame_wayland();
+#elif defined(IRIS_BACKEND_WIN32)
+    iris_request_animation_frame_win32();
+#elif defined(IRIS_BACKEND_COCOA)
+    iris_request_animation_frame_cocoa();
 #endif
 }
 
@@ -29,9 +31,13 @@ IRIS_API int iris_app_run(const iris_app_config *cfg) {
     if (!cfg) {
         return 1;
     }
-#ifdef IRIS_BUILD_NO_BACKEND
-    return 2;
-#else
+#if defined(IRIS_BACKEND_WAYLAND)
     return iris_app_run_wayland(cfg);
+#elif defined(IRIS_BACKEND_WIN32)
+    return iris_app_run_win32(cfg);
+#elif defined(IRIS_BACKEND_COCOA)
+    return iris_app_run_cocoa(cfg);
+#else
+    return 2; /* IRIS_BUILD_NO_BACKEND */
 #endif
 }

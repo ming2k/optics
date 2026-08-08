@@ -6,7 +6,7 @@
 .
 ├── bindings/           Rust workspaces for flux, lens, and iris
 ├── docs/               Tutorials, guides, reference, decisions, and dev docs
-├── examples/           C examples grouped by library or sibling
+├── examples/           C examples per library, plus showcase/ effect demos
 ├── libs/
 │   ├── flux/           Vulkan rendering, text, and scene-graph siblings
 │   ├── lens/           Headless UI engine

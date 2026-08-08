@@ -99,6 +99,32 @@ impl PaintHost {
 /// code should use [`PaintHost`], which also exposes the device.
 pub type PaintCanvas = PaintHost;
 
+/// A thin wrapper over the raw pointers iris hands to the optional start
+/// callback: the lens context and the flux device iris owns for this app.
+/// The callback runs once — after iris has created its device, canvas and
+/// lens context, before the first frame — which makes it the right place to
+/// set up device-dependent resources (text shapers, image uploads) without
+/// installing a per-frame paint callback: a non-NULL `paint` disables the
+/// backend's idle frame-skip, a start hook costs nothing per frame. The same
+/// device-borrow rule as [`PaintHost::device`] applies.
+pub struct StartHost {
+    ui: *mut std::ffi::c_void,
+    device: *mut std::ffi::c_void,
+}
+
+impl StartHost {
+    /// The raw `lens*`, live for the whole run.
+    pub fn ui(&self) -> *mut std::ffi::c_void {
+        self.ui
+    }
+
+    /// The raw `flux_device*` iris owns. Borrow it — never open a second
+    /// device in the same process.
+    pub fn device(&self) -> *mut std::ffi::c_void {
+        self.device
+    }
+}
+
 /// Errors returned by [`Application::run`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunError {
@@ -200,11 +226,43 @@ impl Application {
         B: FnMut(&mut Frame, &Input),
         P: FnMut(PaintHost) + 'static,
     {
+        Self::run_impl(config, None::<fn(StartHost) -> bool>, build, paint)
+    }
+
+    /// Like [`Application::run`], plus a one-shot `start` callback that iris
+    /// invokes after its device/canvas/lens setup and before the first frame
+    /// (see [`StartHost`]). The callback returning `false` aborts the run.
+    pub fn run_with_start<B, P, S>(
+        config: Config,
+        start: S,
+        build: B,
+        paint: Option<P>,
+    ) -> Result<(), RunError>
+    where
+        B: FnMut(&mut Frame, &Input),
+        P: FnMut(PaintHost) + 'static,
+        S: FnMut(StartHost) -> bool,
+    {
+        Self::run_impl(config, Some(start), build, paint)
+    }
+
+    fn run_impl<B, P, S>(
+        config: Config,
+        start: Option<S>,
+        build: B,
+        paint: Option<P>,
+    ) -> Result<(), RunError>
+    where
+        B: FnMut(&mut Frame, &Input),
+        P: FnMut(PaintHost) + 'static,
+        S: FnMut(StartHost) -> bool,
+    {
         // Box the closures so they have a stable address to pass through the
         // C trampoline. Each gets its own box; both share the `user` pointer
         // via a small wrapper struct.
         let build_box: Box<B> = Box::new(build);
         let paint_box: Option<Box<P>> = paint.map(Box::new);
+        let start_box: Option<Box<S>> = start.map(Box::new);
 
         // SAFETY: the trampolines cast `user` back to the right box type and
         // call it. The boxes outlive `iris_app_run` (held by `run_state`
@@ -212,18 +270,20 @@ impl Application {
         let mut run_state = RunState {
             build: build_box,
             paint: paint_box,
+            start: start_box,
         };
 
-        extern "C" fn build_trampoline<B, P>(
+        extern "C" fn build_trampoline<B, P, S>(
             ui: *mut sys::lens,
             in_: *const sys::lens_input,
             user: *mut std::os::raw::c_void,
         ) where
             B: FnMut(&mut Frame, &Input),
             P: FnMut(PaintHost),
+            S: FnMut(StartHost) -> bool,
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S>) };
                 // Cast the iris_sys view of `lens` / `lens_input` to lens's
                 // own bindgen view. Both come from the same C declaration, so
                 // the layouts are identical; the types are just nominally
@@ -242,7 +302,7 @@ impl Application {
             }));
         }
 
-        extern "C" fn paint_trampoline<B, P>(
+        extern "C" fn paint_trampoline<B, P, S>(
             canvas: *mut sys::flux_canvas,
             device: *mut sys::flux_device,
             scale: f32,
@@ -250,9 +310,10 @@ impl Application {
         ) where
             B: FnMut(&mut Frame, &Input),
             P: FnMut(PaintHost),
+            S: FnMut(StartHost) -> bool,
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S>) };
                 if let Some(p) = run.paint.as_mut() {
                     p(PaintHost {
                         canvas: canvas as *mut std::ffi::c_void,
@@ -263,24 +324,44 @@ impl Application {
             }));
         }
 
-        // Monomorphise two trampolines for the actual (B, P) pair. When
-        // `paint` is `None` we still need *a* paint fn pointer to satisfy
-        // the C signature; passing NULL lets the C side skip the call
-        // entirely, so this branch is a pure no-op.
-        let (build_fn, paint_fn, user_ptr): (
-            sys::iris_build_fn,
-            sys::iris_paint_fn,
-            *mut std::os::raw::c_void,
-        ) = if run_state.paint.is_some() {
-            let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
-            (
-                Some(build_trampoline::<B, P>),
-                Some(paint_trampoline::<B, P>),
-                user_ptr,
-            )
+        extern "C" fn start_trampoline<B, P, S>(
+            ui: *mut sys::lens,
+            device: *mut sys::flux_device,
+            user: *mut std::os::raw::c_void,
+        ) -> bool
+        where
+            B: FnMut(&mut Frame, &Input),
+            P: FnMut(PaintHost),
+            S: FnMut(StartHost) -> bool,
+        {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S>) };
+                match run.start.as_mut() {
+                    Some(s) => s(StartHost {
+                        ui: ui as *mut std::ffi::c_void,
+                        device: device as *mut std::ffi::c_void,
+                    }),
+                    None => true,
+                }
+            }))
+            .unwrap_or(false)
+        }
+
+        // Monomorphise the trampolines for the actual (B, P, S) triple. When
+        // `paint`/`start` are `None` we still need *a* fn pointer of each
+        // type to satisfy the C signature; passing NULL lets the C side skip
+        // the call entirely, so those branches are pure no-ops — and a NULL
+        // paint keeps the backend's idle frame-skip engaged.
+        let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
+        let paint_fn: sys::iris_paint_fn = if run_state.paint.is_some() {
+            Some(paint_trampoline::<B, P, S>)
         } else {
-            let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
-            (Some(build_trampoline::<B, P>), None, user_ptr)
+            None
+        };
+        let start_fn: sys::iris_start_fn = if run_state.start.is_some() {
+            Some(start_trampoline::<B, P, S>)
+        } else {
+            None
         };
 
         let cfg = sys::iris_app_config {
@@ -290,9 +371,9 @@ impl Application {
             height: config.height,
             dark: config.dark,
             log_raw: config.log_raw,
-            start: None,
+            start: start_fn,
             stop: None,
-            build: build_fn,
+            build: Some(build_trampoline::<B, P, S>),
             paint: paint_fn,
             user: user_ptr,
         };
@@ -305,13 +386,14 @@ impl Application {
     }
 }
 
-/// Holds both closures through the C trampoline. Generic over `B` and `P`
-/// so each trampoline can cast the opaque `user` pointer back to a type
-/// that knows the concrete closure shapes. When `P` is absent the second
-/// slot is `None` and the paint trampoline is never installed.
-struct RunState<B: FnMut(&mut Frame, &Input), P: FnMut(PaintHost)> {
+/// Holds the closures through the C trampolines. Generic over `B`, `P` and
+/// `S` so each trampoline can cast the opaque `user` pointer back to a type
+/// that knows the concrete closure shapes. When `P`/`S` are absent the
+/// slots are `None` and the matching trampolines are never installed.
+struct RunState<B: FnMut(&mut Frame, &Input), P: FnMut(PaintHost), S: FnMut(StartHost) -> bool> {
     build: Box<B>,
     paint: Option<Box<P>>,
+    start: Option<Box<S>>,
 }
 
 /// System colour-scheme preference (queried at startup).
@@ -350,10 +432,11 @@ pub type ColorSchemeChangedFn =
     extern "C" fn(scheme: sys::iris_color_scheme, user: *mut std::os::raw::c_void);
 
 /// Begin watching the system colour scheme. Returns `Ok(())` on success and
-/// an `Err` when live watching is unavailable (no libsystemd at build time,
-/// or D-Bus / portal unreachable). On success, drain
-/// [`color_scheme_watcher_fd`] in your event loop and call
-/// [`pump_color_scheme_watcher`] when readable.
+/// an `Err` when live watching is unavailable (no platform support, or the
+/// OS settings source is unreachable) — callers then fall back to the
+/// startup-only [`query_system_color_scheme`]. Changes are delivered on the
+/// iris main thread through the backend's event loop; no fd/pump plumbing
+/// is exposed.
 ///
 /// # Safety
 ///
@@ -366,7 +449,7 @@ pub unsafe fn watch_system_color_scheme(
     cb: ColorSchemeChangedFn,
     user: *mut std::os::raw::c_void,
 ) -> Result<(), WatchError> {
-    let rc = unsafe { sys::iris_watch_system_color_scheme(Some(cb), user) };
+    let rc = unsafe { sys::iris_color_scheme_watch(Some(cb), user) };
     if rc == 0 {
         Ok(())
     } else {
@@ -384,32 +467,19 @@ pub enum WatchError {
 impl std::fmt::Display for WatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WatchError::Unavailable => write!(
-                f,
-                "live theme watching unavailable (need libsystemd + xdg-desktop-portal)"
-            ),
+            WatchError::Unavailable => {
+                write!(f, "live theme watching unavailable on this platform/host")
+            }
         }
     }
 }
 
 impl std::error::Error for WatchError {}
 
-/// The fd to poll(2) for readability when watching, or `None` when not.
-pub fn color_scheme_watcher_fd() -> Option<std::os::unix::io::RawFd> {
-    let fd = unsafe { sys::iris_color_scheme_watcher_fd() };
-    if fd < 0 { None } else { Some(fd) }
-}
-
-/// Drain pending D-Bus messages and fire the callback registered via
-/// [`watch_system_color_scheme`] if the colour scheme changed. Safe to call
-/// spuriously.
-pub fn pump_color_scheme_watcher() {
-    unsafe { sys::iris_pump_color_scheme_watcher() }
-}
-
-/// Stop watching and release D-Bus resources.
+/// Stop watching and release platform resources. Safe to call when not
+/// watching.
 pub fn stop_color_scheme_watcher() {
-    unsafe { sys::iris_stop_color_scheme_watcher() }
+    unsafe { sys::iris_color_scheme_unwatch() }
 }
 
 /// Cursor appearance the host wants iris to show over its window.
@@ -608,7 +678,7 @@ mod tests {
     fn watch_error_display() {
         assert_eq!(
             WatchError::Unavailable.to_string(),
-            "live theme watching unavailable (need libsystemd + xdg-desktop-portal)"
+            "live theme watching unavailable on this platform/host"
         );
     }
 

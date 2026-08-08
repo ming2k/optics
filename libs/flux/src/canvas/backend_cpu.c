@@ -9,7 +9,10 @@
  *   - rounded-rect SDF  (canvas_sdf.frag):      analytic distance-field coverage
  * Edge anti-aliasing comes from 4x supersampled triangle coverage (the GPU
  * path uses 4x MSAA); blending is premultiplied SRC_OVER, matching the Vulkan
- * pipeline's blend state.
+ * pipeline's blend state. Stencil-then-cover fills (ADR-0014) are honoured
+ * with a sample-resolution accumulation buffer: STENCIL_WRITE adds signed
+ * winding, STENCIL_WRITE_EO toggles parity, COVER_* tests != 0 and resets —
+ * so even-odd and self-intersecting fills match the GPU pixel-for-pixel.
  *
  * Unsupported (they need GPU-resident textures): image draws. Glyph draws
  * ARE supported on a device-less canvas via a host-resident R8 coverage
@@ -34,6 +37,14 @@ typedef struct flux_cpu_canvas {
     uint32_t sw, sh;        /* sample-buffer size = width*SS, height*SS */
     float *fb;              /* premultiplied RGBA, sw*sh*4, row-major */
     uint8_t *rgba8;         /* cached downsampled 8-bit view (width*height*4) */
+    /* Stencil-then-cover accumulation (ADR-0014), one int8 per sample,
+     * lazily allocated on the first stencil submit. STENCIL_WRITE adds the
+     * triangle's signed winding, STENCIL_WRITE_EO toggles parity; COVER_*
+     * submits draw where the value is != 0 and the buffer resets to zero —
+     * the same contract the GPU pipeline implements with a real stencil
+     * attachment (INCR_WRAP/DECR_WRAP vs INVERT, cover resets). */
+    int8_t *stencil;
+    bool stencil_active;
 } flux_cpu_canvas;
 
 static inline flux_cpu_canvas *cpu(flux_canvas *c) {
@@ -131,6 +142,84 @@ static inline bool edge_is_top_left(float ax, float ay, float bx, float by) {
     return dy < 0.0f || (dy == 0.0f && dx > 0.0f);
 }
 
+/* Rasterize one triangle into the stencil accumulation buffer (no colour
+ * writes, mirroring the GPU's stencil-only pass). EO mode toggles per-sample
+ * parity (the GPU's INVERT); otherwise the triangle's signed winding is
+ * accumulated (its INCR_WRAP/DECR_WRAP) — the original orientation supplies
+ * the sign. Coverage uses the same top-left rule as raster_tri so stencil
+ * and colour agree on shared edges. */
+static void raster_stencil_tri(flux_cpu_canvas *v, flux_recti clip, const flux_canvas_vertex *a,
+                               const flux_canvas_vertex *b, const flux_canvas_vertex *c,
+                               bool eo) {
+    const float ss = (float)FLUX_CPU_SS;
+    float ax = a->pos[0] * ss, ay = a->pos[1] * ss;
+    float bx = b->pos[0] * ss, by = b->pos[1] * ss;
+    float cx = c->pos[0] * ss, cy = c->pos[1] * ss;
+    float area = edge(ax, ay, bx, by, cx, cy);
+    if (fabsf(area) < 1e-7f)
+        return;
+    int8_t sign = 1;
+    if (area < 0.0f) {
+        /* Swap to a positive-area walk for the coverage test; the winding
+         * contribution keeps the original orientation's sign. */
+        sign = -1;
+        float t = bx;
+        bx = cx;
+        cx = t;
+        t = by;
+        by = cy;
+        cy = t;
+    }
+
+    bool edge0_inclusive = edge_is_top_left(bx, by, cx, cy);
+    bool edge1_inclusive = edge_is_top_left(cx, cy, ax, ay);
+    bool edge2_inclusive = edge_is_top_left(ax, ay, bx, by);
+
+    int cx0 = clip.x * FLUX_CPU_SS, cy0 = clip.y * FLUX_CPU_SS;
+    int cx1 = (clip.x + (int)clip.w) * FLUX_CPU_SS, cy1 = (clip.y + (int)clip.h) * FLUX_CPU_SS;
+
+    int minx = (int)floorf(fminf(ax, fminf(bx, cx)));
+    int maxx = (int)ceilf(fmaxf(ax, fmaxf(bx, cx)));
+    int miny = (int)floorf(fminf(ay, fminf(by, cy)));
+    int maxy = (int)ceilf(fmaxf(ay, fmaxf(by, cy)));
+    if (minx < cx0)
+        minx = cx0;
+    if (miny < cy0)
+        miny = cy0;
+    if (maxx > cx1)
+        maxx = cx1;
+    if (maxy > cy1)
+        maxy = cy1;
+    if (minx < 0)
+        minx = 0;
+    if (miny < 0)
+        miny = 0;
+    if (maxx > (int)v->sw)
+        maxx = (int)v->sw;
+    if (maxy > (int)v->sh)
+        maxy = (int)v->sh;
+
+    for (int sy = miny; sy < maxy; ++sy) {
+        for (int sx = minx; sx < maxx; ++sx) {
+            float fx = (float)sx + 0.5f;
+            float fy = (float)sy + 0.5f;
+            float e0 = edge(bx, by, cx, cy, fx, fy);
+            float e1 = edge(cx, cy, ax, ay, fx, fy);
+            float e2 = edge(ax, ay, bx, by, fx, fy);
+            if (e0 < 0.0f || (e0 == 0.0f && !edge0_inclusive) || e1 < 0.0f ||
+                (e1 == 0.0f && !edge1_inclusive) || e2 < 0.0f || (e2 == 0.0f && !edge2_inclusive))
+                continue;
+            int8_t *cell = &v->stencil[(size_t)sy * v->sw + sx];
+            if (eo) {
+                *cell ^= 1;
+            } else {
+                int w = (int)*cell + sign; /* clamp, winding is not expected to be deep */
+                *cell = (int8_t)(w > 127 ? 127 : (w < -128 ? -128 : w));
+            }
+        }
+    }
+}
+
 /* Rasterize one triangle into the sample buffer, one blended sample per
  * hi-res texel. Vertex positions are in canvas (output) space; they are scaled
  * by SS here. Fragment shaders evaluate at the equivalent canvas coordinate.
@@ -163,6 +252,10 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
         area = -area;
     }
     float inv_area = 1.0f / area;
+    /* Cover passes draw only where the stencil accumulation is non-zero
+     * (ADR-0014); every other pipe ignores the buffer. */
+    const bool stencil_test =
+        v->stencil_active && (id == CANVAS_PIPE_COVER_SOLID || id == CANVAS_PIPE_COVER_GRADIENT);
     vec4f ca = unpack_premul(va->color), cb = unpack_premul(vb->color),
           cc = unpack_premul(vc->color);
 
@@ -204,6 +297,8 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
             float e2 = edge(ax, ay, bx, by, fx, fy);
             if (e0 < 0.0f || (e0 == 0.0f && !edge0_inclusive) || e1 < 0.0f ||
                 (e1 == 0.0f && !edge1_inclusive) || e2 < 0.0f || (e2 == 0.0f && !edge2_inclusive))
+                continue;
+            if (stencil_test && v->stencil[(size_t)sy * v->sw + sx] == 0)
                 continue;
             float w0 = e0 * inv_area;
             float w1 = e1 * inv_area;
@@ -475,6 +570,7 @@ static void cpu_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) 
         return;
     free(v->fb);
     free(v->rgba8);
+    free(v->stencil);
     free(v);
     c->backend_data = nullptr;
 }
@@ -515,8 +611,15 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
     c->pass_active = true;
     c->target_pass = false;
     c->target = nullptr;
-    c->stencil_available = false; /* fills fall back to ear-clip only */
+    /* The CPU rasteriser implements stencil-then-cover with a host
+     * accumulation buffer (see cpu_submit), so fills take the same path as
+     * the GPU backend instead of the ear-clip fallback. */
+    c->stencil_available = true;
     c->stencil_forbidden = config->skip_stencil;
+    if (v->stencil) {
+        memset(v->stencil, 0, (size_t)v->sw * v->sh);
+        v->stencil_active = false;
+    }
     c->fb_width = v->width;
     c->fb_height = v->height;
     c->states[0].scissor = area;
@@ -551,6 +654,24 @@ static void cpu_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_p
     flux_cpu_canvas *v = cpu(c);
     flux_recti clip = c->states[c->state_top].scissor;
 
+    /* Stencil-only pass: accumulate winding / parity into the sample-rate
+     * buffer; no colour is written (the GPU masks colour off for these
+     * pipes). The matching COVER_* submit below consumes and resets it. */
+    if (id == CANVAS_PIPE_STENCIL_WRITE || id == CANVAS_PIPE_STENCIL_WRITE_EO) {
+        if (!v->stencil) {
+            if ((size_t)v->sw > SIZE_MAX / (size_t)v->sh / sizeof(int8_t))
+                return;
+            v->stencil = calloc((size_t)v->sw * v->sh, sizeof(int8_t));
+            if (!v->stencil)
+                return;
+        }
+        bool eo = id == CANVAS_PIPE_STENCIL_WRITE_EO;
+        for (uint32_t i = 0; i + 3 <= vertex_count; i += 3)
+            raster_stencil_tri(v, clip, &verts[i], &verts[i + 1], &verts[i + 2], eo);
+        v->stencil_active = true;
+        return;
+    }
+
     /* Glyph runs sample a host R8 atlas on the CPU backend (ADR-0019). Each
      * quad is six vertices (two tris); blit them directly. Image draws still
      * have no host source, so they stay unsupported. */
@@ -570,6 +691,13 @@ static void cpu_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_p
     for (uint32_t i = 0; i + 3 <= vertex_count; i += 3)
         raster_tri(v, clip, id, push, c->pending_blend, &verts[i], &verts[i + 1],
                    &verts[i + 2]);
+
+    /* A cover submit consumes the accumulation: reset to zero like the GPU's
+     * stencil attachment after its cover pass. */
+    if (v->stencil_active && (id == CANVAS_PIPE_COVER_SOLID || id == CANVAS_PIPE_COVER_GRADIENT)) {
+        memset(v->stencil, 0, (size_t)v->sw * v->sh);
+        v->stencil_active = false;
+    }
 }
 
 static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canvas *c,

@@ -35,7 +35,9 @@ static size_t utf8_prev_boundary(const char *text, size_t pos) {
 
 static flux_text_metrics measure_slice(lens *ui, const char *text, size_t len, float size) {
     return flux_text_measure(ui->text, text, len,
-                             &(flux_text_style){.size_px = size, .weight = 0.0f});
+                             &(flux_text_style){.size_px = size,
+                                                .weight = 0.0f,
+                                                .family = (flux_text_family)ui->text_family});
 }
 
 /* Pick the next visual line in [start, len). Whole words are preferred; a
@@ -59,7 +61,9 @@ static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t st
 
     const char *segment = text + start;
     size_t segment_len = segment_end - start;
-    const flux_text_style style = {.size_px = size, .weight = 0.0f};
+    const flux_text_style style = {.size_px = size,
+                                   .weight = 0.0f,
+                                   .family = (flux_text_family)ui->text_family};
     size_t cut = flux_text_byte_for_x(ui->text, segment, segment_len, max_width, &style);
     if (cut > segment_len)
         cut = segment_len;

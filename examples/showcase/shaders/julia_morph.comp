@@ -1,0 +1,76 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+/*
+ * julia_morph — escape-time Julia set for z = z² + c, one thread per pixel.
+ *
+ * z starts at the pixel's complex coordinate; c is a per-frame constant the
+ * host slides around the circle |c| = 0.7885, so the set continuously morphs
+ * between connected blobs, dendrites and Cantor dust as c crosses the
+ * Mandelbrot boundary. Interior pixels are black; exterior pixels get a
+ * smooth (fractional) iteration count mapped through a cosine palette whose
+ * phase drifts slowly with time.
+ *
+ * Bindless layout (matches the device-wide heap):
+ *   set 0, binding 1 — STORAGE_IMAGE[]   (the only binding used here)
+ */
+
+layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+
+/* Flat scalars only: 4-byte members keep the C and GLSL layouts identical
+ * (no std430 vec2 padding). 24 bytes total. */
+layout(push_constant) uniform PC {
+    uint  out_handle; /* storage image bindless slot      */
+    uint  width;      /* output extent in pixels          */
+    uint  height;
+    float c_re;       /* Julia constant, animated on host */
+    float c_im;
+    float time;       /* seconds; drives the palette phase */
+} pc;
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+const int MAX_ITER = 256;
+
+/* Cosine palette (after Inigo Quilez): a + b*cos(2π*(t + d)) with
+ * a = b = 0.5, d staggered per channel. */
+vec3 palette(float t) {
+    return vec3(0.5) + vec3(0.5) * cos(6.2831853 * (t + vec3(0.0, 0.1, 0.2)));
+}
+
+void main() {
+    uvec2 p = gl_GlobalInvocationID.xy;
+    if (p.x >= pc.width || p.y >= pc.height) return;
+
+    /* Pixel → complex plane: the height spans [-1.5, 1.5], the width
+     * follows the aspect ratio so the set is never stretched. The
+     * +imaginary axis points up. */
+    float aspect = float(pc.width) / float(pc.height);
+    vec2  uv = (vec2(p) + 0.5) / vec2(float(pc.width), float(pc.height));
+    vec2  z = vec2((uv.x * 2.0 - 1.0) * 1.5 * aspect,
+                   (1.0 - uv.y * 2.0) * 1.5);
+    vec2  c = vec2(pc.c_re, pc.c_im);
+
+    /* Escape time. The large bailout (2^16) keeps the fractional
+     * correction nu = log2(log2|z|) accurate, giving band-free colours. */
+    float iter = float(MAX_ITER);
+    for (int i = 0; i < MAX_ITER; ++i) {
+        z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+        float r2 = dot(z, z);
+        if (r2 > 65536.0) {
+            float log_zn = 0.5 * log(r2);                /* ln|z|         */
+            float nu = log(log_zn * 1.442695) * 1.442695; /* log2(log2|z|) */
+            iter = max(float(i) + 1.0 - nu, 0.0);
+            break;
+        }
+    }
+
+    uint oh = pc.out_handle & 0x0FFFFFFFu;
+    if (iter >= float(MAX_ITER)) {
+        /* Interior: flat black so the set silhouette reads clearly. */
+        imageStore(u_storage[nonuniformEXT(oh)], ivec2(p), vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    float t = iter * 0.04 + pc.time * 0.03;
+    imageStore(u_storage[nonuniformEXT(oh)], ivec2(p), vec4(palette(t), 1.0));
+}

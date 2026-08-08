@@ -28,7 +28,7 @@
 #define ITEMIZE_STACK_CP 256
 
 /* Resolve a per-codepoint script, letting Common/Inherited extend the run. */
-static hb_script_t resolve_script(hb_unicode_funcs_t *uf, FcChar32 cp, hb_script_t cur) {
+static hb_script_t resolve_script(hb_unicode_funcs_t *uf, uint32_t cp, hb_script_t cur) {
     hb_script_t sc = hb_unicode_script(uf, cp);
     if (sc == HB_SCRIPT_COMMON || sc == HB_SCRIPT_INHERITED || sc == HB_SCRIPT_UNKNOWN)
         return cur != HB_SCRIPT_INVALID ? cur : sc;
@@ -143,7 +143,7 @@ int txt_itemize(flux_text *t, int slot_idx, const char *utf8, size_t len) {
 
     int ncp = 0;
     for (size_t b = 0; b < blen;) {
-        FcChar32 cp;
+        uint32_t cp;
         int adv = txt_utf8_decode(utf8 + b, blen - b, &cp);
         cps[ncp] = (FriBidiChar)cp;
         bos[ncp] = (uint32_t)b;

@@ -1,30 +1,35 @@
 glslang = find_program('glslangValidator', required : true)
 
+# C23 #embed bakes SPIR-V into the example binaries; toolchains without it
+# (MSVC cl, Apple Clang) take the tools/spv2h.py generated headers instead
+# (same arrays, selected per TU via __has_embed). --embed-dir is probed
+# because MSVC rejects unknown options outright.
+examples_embed_dir_arg = cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
+spv2h_py = import('python').find_installation('python3')
+spv2h    = files('../../tools/spv2h.py')
+
 # Headless compute example — built unconditionally.
 fill_comp_spv = custom_target('fill.comp.spv',
   input   : 'shaders/fill.comp',
   output  : 'fill.comp.spv',
   command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
 )
+fill_comp_h = custom_target('fill_comp_spv.h',
+  input   : fill_comp_spv,
+  output  : 'fill_comp_spv.h',
+  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'fill_spv'],
+)
 executable('compute_fill',
   'compute_fill.c',
   fill_comp_spv,
+  fill_comp_h,
   dependencies : [flux_dep, m_dep],
-  c_args       : ['--embed-dir=' + meson.current_build_dir()],
+  c_args       : examples_embed_dir_arg,
 )
 
-# Headless liquid-glass A/B harness — offscreen surface + PPM readback,
-# no GLFW. Gated on -Deffect=true like the windowed demo.
-if opt_effect
-  executable('liquid_glass_study',
-    'liquid_glass_study.c',
-    dependencies : [flux_dep, m_dep],
-  )
-endif
-
-# Windowed triangle example — needs GLFW.
+# Windowed examples — need GLFW. (Effect showcases live in examples/showcase/.)
 if not glfw_dep.found()
-  warning('GLFW not found; skipping hello_triangle example.')
+  warning('GLFW not found; skipping windowed flux examples.')
   subdir_done()
 endif
 
@@ -38,30 +43,24 @@ triangle_frag_spv = custom_target('triangle.frag.spv',
   output  : 'triangle.frag.spv',
   command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
 )
+triangle_vert_h = custom_target('triangle_vert_spv.h',
+  input   : triangle_vert_spv,
+  output  : 'triangle_vert_spv.h',
+  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'triangle_vert_spv'],
+)
+triangle_frag_h = custom_target('triangle_frag_spv.h',
+  input   : triangle_frag_spv,
+  output  : 'triangle_frag_spv.h',
+  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'triangle_frag_spv'],
+)
 executable('hello_triangle',
   'hello_triangle.c',
   triangle_vert_spv,
   triangle_frag_spv,
+  triangle_vert_h,
+  triangle_frag_h,
   dependencies : [flux_dep, glfw_dep, m_dep],
-  c_args       : ['--embed-dir=' + meson.current_build_dir()],
-)
-
-filament_plume_vert_spv = custom_target('filament_plume.vert.spv',
-  input   : 'shaders/filament_plume.vert',
-  output  : 'filament_plume.vert.spv',
-  command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
-)
-filament_plume_frag_spv = custom_target('filament_plume.frag.spv',
-  input   : 'shaders/filament_plume.frag',
-  output  : 'filament_plume.frag.spv',
-  command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
-)
-executable('filament_plume',
-  'filament_plume.c',
-  filament_plume_vert_spv,
-  filament_plume_frag_spv,
-  dependencies : [flux_dep, glfw_dep, m_dep],
-  c_args       : ['--embed-dir=' + meson.current_build_dir()],
+  c_args       : examples_embed_dir_arg,
 )
 
 executable('canvas_hello',
@@ -74,53 +73,7 @@ executable('image_animation',
   dependencies : [flux_dep, glfw_dep, m_dep],
 )
 
-# Liquid-glass backdrop-blur demo. Needs the effect module's Gaussian
-# blur (flux_effect_blur), so it is gated on -Deffect=true.
-if opt_effect
-  executable('liquid_glass',
-    'liquid_glass.c',
-    dependencies : [flux_dep, glfw_dep, m_dep],
-  )
-endif
-
 executable('scene_cube',
   'scene_cube.c',
   dependencies : [flux_dep, glfw_dep, m_dep],
-)
-
-# Windowed particle-terrain example — needs GLFW + glslang.
-terrain_vert_spv = custom_target('particles_terrain.vert.spv',
-  input   : 'shaders/particles_terrain.vert',
-  output  : 'particles_terrain.vert.spv',
-  command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
-)
-terrain_frag_spv = custom_target('particles_terrain.frag.spv',
-  input   : 'shaders/particles_terrain.frag',
-  output  : 'particles_terrain.frag.spv',
-  command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
-)
-executable('particles_terrain',
-  'particles_terrain.c',
-  terrain_vert_spv,
-  terrain_frag_spv,
-  dependencies : [flux_dep, glfw_dep, m_dep],
-  c_args       : ['--embed-dir=' + meson.current_build_dir()],
-)
-
-ripple_field_vert_spv = custom_target('ripple_field.vert.spv',
-  input   : 'shaders/ripple_field.vert',
-  output  : 'ripple_field.vert.spv',
-  command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
-)
-ripple_field_frag_spv = custom_target('ripple_field.frag.spv',
-  input   : 'shaders/ripple_field.frag',
-  output  : 'ripple_field.frag.spv',
-  command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
-)
-executable('ripple_field',
-  'ripple_field.c',
-  ripple_field_vert_spv,
-  ripple_field_frag_spv,
-  dependencies : [flux_dep, glfw_dep, m_dep],
-  c_args       : ['--embed-dir=' + meson.current_build_dir()],
 )

@@ -17,18 +17,20 @@ IRIS_API int iris_a11y_init(void) {
 IRIS_API const char *iris_a11y_unique_name(void) {
     return NULL;
 }
-IRIS_API int iris_a11y_fd(void) {
-    return -1;
-}
-IRIS_API short iris_a11y_poll_events(void) {
-    return 0;
-}
-IRIS_API void iris_a11y_pump(void) { /* no-op */ }
 IRIS_API int iris_a11y_update(lens *ui) {
     (void)ui;
     return -1;
 }
 IRIS_API void iris_a11y_shutdown(void) { /* no-op */ }
+
+/* Stub event-loop integration point: no bridge → nothing to poll/pump. */
+int iris_a11y__fd(void) {
+    return -1;
+}
+short iris_a11y__poll_events(void) {
+    return 0;
+}
+void iris_a11y__pump(void) { /* no-op */ }
 
 /* Stub: no bridge → no pending clicks. */
 bool iris_a11y__take_pending_click(flux_point *out) {

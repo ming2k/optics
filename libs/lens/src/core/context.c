@@ -117,6 +117,16 @@ static void lensi_theme_normalize(lens_theme *t) {
         t->slider_knob_size = 14.0f;
 }
 
+void lens_set_text_family(lens *ui, lens_text_family family) {
+    if (!ui)
+        return;
+    ui->text_family = (int)family;
+}
+
+lens_text_family lens_get_text_family(const lens *ui) {
+    return ui ? (lens_text_family)ui->text_family : LENS_TEXT_FAMILY_DEFAULT;
+}
+
 void lens_set_theme(lens *ui, lens_theme theme) {
     if (!ui)
         return;

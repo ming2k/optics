@@ -8,7 +8,9 @@
  */
 
 #include "a11y_internal.h"
+#include "platform_input.h"
 #include "platform_internal.h"
+#include "platform_wakeup.h"
 
 #include <iris/a11y.h>
 #include <iris/cursor.h>
@@ -28,13 +30,14 @@
 
 #include "cursor-shape-v1-client-protocol.h"
 #include "fractional-scale-v1-client-protocol.h"
-#include <linux/input-event-codes.h> /* BTN_LEFT / BTN_RIGHT / BTN_MIDDLE */
+#include <linux/input-event-codes.h> /* BTN_LEFT / BTN_RIGHT / BTN_MIDDLE — Linux-only, this file only */
 
 #include <ctype.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
@@ -154,14 +157,20 @@ typedef struct wp_platform {
     lens *ui;     /* so output/scale callbacks can update  */
 
     /* Live colour-scheme watching + AT-SPI bridge: optional, fail-soft. */
-    int theme_fd;
+    bool theme_watching;
     int a11y_fd;
+
+    /* Cross-thread wakeup seam (platform_wakeup.h): an eventfd in the
+     * pump_events poll set. The colour-scheme watcher's pump thread posts
+     * through it; the loop drains the queue on this thread. */
+    int wakeup_fd;
 
     wp_accum acc;
 } wp_platform;
 
-/* Theme watcher callback: invoked on the pump thread when the portal emits
- * a SettingChanged for org.freedesktop.appearance.color-scheme. */
+/* Theme watcher callback: invoked on the iris main thread (delivered
+ * through the wakeup seam) when the portal emits a SettingChanged for
+ * org.freedesktop.appearance.color-scheme. */
 static void wp_on_color_scheme_changed(iris_color_scheme scheme, void *user) {
     wp_platform *pl = user;
     if (!pl || !pl->ui)
@@ -197,17 +206,27 @@ static const struct xdg_wm_base_listener wm_base_listener = {.ping = wm_base_pin
 /*  Pointer                                                            */
 /* ------------------------------------------------------------------ */
 
+/* evdev button code (linux/input-event-codes.h) → lens mouse index, via
+ * the shared iris_pointer_button layer (platform_input.h) so the
+ * Linux-only header never leaks past this file. Unknown buttons (side /
+ * extra) return -1 and are ignored. */
 static int mouse_index(uint32_t button) {
+    iris_pointer_button b;
     switch (button) {
     case BTN_LEFT:
-        return LENS_MOUSE_LEFT;
+        b = IRIS_POINTER_BUTTON_LEFT;
+        break;
     case BTN_RIGHT:
-        return LENS_MOUSE_RIGHT;
+        b = IRIS_POINTER_BUTTON_RIGHT;
+        break;
     case BTN_MIDDLE:
-        return LENS_MOUSE_MIDDLE;
+        b = IRIS_POINTER_BUTTON_MIDDLE;
+        break;
     default:
-        return -1;
+        b = IRIS_POINTER_BUTTON_UNKNOWN;
+        break;
     }
+    return iris_pointer_button_to_lens(b);
 }
 
 /* Forward decl: cursor_apply is defined later (in the cursor section),
@@ -1467,17 +1486,28 @@ static void log_raw(const lens_input *in) {
 /*  Pump Wayland events without blocking the render loop               */
 /* ------------------------------------------------------------------ */
 
+/* Kick for the cross-thread wakeup seam (platform_wakeup.h): called from
+ * any thread; writes to the eventfd in pump_events' poll set so the loop
+ * wakes and drains the callback queue on this (the main) thread. Never
+ * blocks: the eventfd is non-blocking, and an EAGAIN just means a kick is
+ * already pending. */
+static void wp_wakeup_kick(void *user) {
+    wp_platform *pl = user;
+    uint64_t one = 1;
+    (void)!write(pl->wakeup_fd, &one, sizeof one);
+}
+
 static bool pump_events(wp_platform *pl, int timeout_ms) {
     struct wl_display *d = pl->display;
     while (wl_display_prepare_read(d) != 0)
         wl_display_dispatch_pending(d);
     wl_display_flush(d);
 
-    /* Poll the Wayland display fd and (if active) the theme watcher and
-     * AT-SPI bus fds together so we wake up on any. `timeout_ms` is the
+    /* Poll the Wayland display fd, the wakeup eventfd, and (if active) the
+     * AT-SPI bus fd together so we wake up on any. `timeout_ms` is the
      * frame-pacing budget: a non-blocking (vsync=false) present leaves the
      * render loop with no point that sleeps, so we block here for up to a
-     * frame's worth of time. poll() returns the instant input (or a theme /
+     * frame's worth of time. poll() returns the instant input (or a wakeup /
      * a11y event) arrives — keeping latency low — and otherwise wakes on the
      * deadline so time-based UI (caret blink, lens animations) keeps ticking
      * even with no input. Passing 0 keeps the old non-blocking behaviour.
@@ -1485,24 +1515,19 @@ static bool pump_events(wp_platform *pl, int timeout_ms) {
      * the frame loop can tell an event wake from a deadline expiry. */
     struct pollfd pfds[3];
     int n = 1;
-    int theme_idx = -1, a11y_idx = -1;
+    int wakeup_idx = -1, a11y_idx = -1;
     pfds[0] = (struct pollfd){.fd = wl_display_get_fd(d), .events = POLLIN};
-    if (pl->theme_fd >= 0) {
-        /* sd-bus sockets are level-triggered: poll the mask the connection
-         * actually wants (sd_bus_get_events), never a hard-coded POLLIN. A
-         * bare POLLIN spins the loop because the socket can read-ready with
-         * no sd-bus work pending, defeating the frame-pacing sleep below. */
-        short ev = iris_color_scheme_watcher_poll_events();
-        if (ev != 0) {
-            theme_idx = n;
-            pfds[n] = (struct pollfd){.fd = pl->theme_fd, .events = ev};
-            n++;
-        }
+    if (pl->wakeup_fd >= 0) {
+        wakeup_idx = n;
+        pfds[n] = (struct pollfd){.fd = pl->wakeup_fd, .events = POLLIN};
+        n++;
     }
     if (pl->a11y_fd >= 0) {
-        /* AT-SPI is also an sd-bus socket — poll its requested mask, not a
-         * bare POLLIN (see the theme fd above). */
-        short ev = iris_a11y_poll_events();
+        /* AT-SPI is an sd-bus socket — poll its requested mask, not a
+         * bare POLLIN: the socket is level-triggered and can read-ready at
+         * the kernel with no sd-bus work pending, which would spin the
+         * loop and defeat the frame-pacing sleep above. */
+        short ev = iris_a11y__poll_events();
         if (ev != 0) {
             a11y_idx = n;
             pfds[n] = (struct pollfd){.fd = pl->a11y_fd, .events = ev};
@@ -1515,12 +1540,19 @@ static bool pump_events(wp_platform *pl, int timeout_ms) {
             wl_display_read_events(d);
         else
             wl_display_cancel_read(d);
+        /* Cross-thread wakeup: a subsystem (colour-scheme watcher) posted
+         * a callback from its own thread. Drain the eventfd counter, then
+         * run the queued callbacks on this thread. */
+        if (wakeup_idx >= 0 && pfds[wakeup_idx].revents & POLLIN) {
+            uint64_t count;
+            while (read(pl->wakeup_fd, &count, sizeof count) == sizeof count) {
+            }
+            iris_platform_wakeup_drain();
+        }
         /* Any signalled event (POLLIN / POLLHUP / POLLERR) — let sd-bus
          * process it so an error/hangup is consumed rather than re-firing. */
-        if (theme_idx >= 0 && pfds[theme_idx].revents)
-            iris_pump_color_scheme_watcher();
         if (a11y_idx >= 0 && pfds[a11y_idx].revents)
-            iris_a11y_pump();
+            iris_a11y__pump();
     } else {
         wl_display_cancel_read(d);
     }
@@ -1607,9 +1639,9 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         .buffer_scale = 1,
         .pending_scale = 1,
         .current_cursor = IRIS_CURSOR_DEFAULT,
-        .theme_fd = -1, /* so the cleanup guards are correct even if
-                         * we fail before the watcher is started */
-        .a11y_fd = -1,
+        .a11y_fd = -1, /* so the cleanup guards are correct even if
+                        * we fail before the bridge is started */
+        .wakeup_fd = -1,
     };
 
     /* Publish `pl` as the active app instance so the context-free
@@ -1623,6 +1655,16 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         fprintf(stderr, "no Wayland display (is a compositor running?)\n");
         return 1;
     }
+
+    /* Cross-thread wakeup seam: an eventfd in pump_events' poll set, plus
+     * a kick that writes to it. Must exist before the theme watcher starts
+     * (its pump thread posts through this seam). Created only after the
+     * early return above so that path cannot leak the fd or leave a kick
+     * registered against stack memory. */
+    pl.wakeup_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (pl.wakeup_fd >= 0)
+        iris_platform_wakeup_set_kick(wp_wakeup_kick, &pl);
+
     pl.xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     if (!pl.xkb_ctx) {
         fprintf(stderr, "xkb_context_new failed\n");
@@ -1776,7 +1818,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
      * just built would change a single pixel, and if not we skip the whole
      * acquire/paint/present cycle; and when nothing time-driven is pending
      * (no animation, no focused caret) we stop scheduling frames entirely and
-     * sleep in poll() until the next input / theme / a11y event. A focused
+     * sleep in poll() until the next input / wakeup / a11y event. A focused
      * text field keeps a low-frequency deadline alive for the caret blink.
      *
      * Hosts with a paint callback (cfg->paint) opt out of all of this: their
@@ -1806,32 +1848,35 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     pl.ui = ui;
 
     /* Live colour-scheme watching: only when not forcing dark. The watcher
-     * callback updates the lens theme in place; the next frame renders with
-     * the new palette. -1 means the feature is unavailable (no libsystemd
-     * at build time, or portal unreachable) — silently degrade. */
-    pl.theme_fd = -1;
+     * pumps the portal on its own thread and posts through the wakeup seam;
+     * the callback runs on this thread (via iris_platform_wakeup_drain in
+     * pump_events) and updates the lens theme in place — the next frame
+     * renders with the new palette. -1 means the feature is unavailable
+     * (no libsystemd at build time, or portal unreachable) — silently
+     * degrade to the startup-only query. */
+    pl.theme_watching = false;
     pl.a11y_fd = -1;
-    if (!cfg->dark) {
-        if (iris_watch_system_color_scheme(wp_on_color_scheme_changed, &pl) == 0)
-            pl.theme_fd = iris_color_scheme_watcher_fd();
-    }
+    if (!cfg->dark)
+        pl.theme_watching = (iris_color_scheme_watch(wp_on_color_scheme_changed, &pl) == 0);
 
     /* AT-SPI bridge: register the app on the a11y session bus so screen
      * readers (orca, etc.) can read the widget tree. Fail-soft: if the
-     * bridge is unavailable we silently skip — the app still runs. */
-    if (iris_a11y_init() == 0) {
-        pl.a11y_fd = iris_a11y_fd();
-    }
+     * bridge is unavailable we silently skip — the app still runs. Its
+     * bus fd joins the pump_events poll set (internal integration point,
+     * src/a11y_internal.h), so AT-SPI method calls are answered on this
+     * thread. */
+    if (iris_a11y_init() == 0)
+        pl.a11y_fd = iris_a11y__fd();
 
     while (pl.running) {
         /* Sleep (inside poll) until the next frame is due, waking early on any
-         * Wayland / theme / a11y event. Gating the render on a deadline is what
+         * Wayland / wakeup / a11y event. Gating the render on a deadline is what
          * lets poll() actually block: presenting every iteration would make the
          * compositor flood us with frame-callback events so poll() never sleeps
          * and the loop spins at 100% CPU. With no frame scheduled (fully idle:
          * no animation, no focused caret) there is no deadline at all — poll
-         * blocks until an event; the 200ms cap only keeps the sd-bus fds'
-         * poll masks fresh. */
+         * blocks until an event; the 200ms cap only keeps the sd-bus fd's
+         * poll mask fresh. */
         long long t = now_ns();
         long long budget_ns = frame_scheduled ? next_deadline - t : 0;
         bool woke_on_event;
@@ -1857,9 +1902,10 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                 next_deadline = earliest;
             frame_scheduled = true;
         } else if (woke_on_event && !frame_scheduled) {
-            /* A non-input event (theme change, a11y, configure/scale) while
-             * fully idle: run one frame so lens sees the new state; whether
-             * it paints is decided by the repaint query below. */
+            /* A non-input event (wakeup-posted callback such as a theme
+             * change, a11y, configure/scale) while fully idle: run one
+             * frame so lens sees the new state; whether it paints is
+             * decided by the repaint query below. */
             next_deadline = now_ns();
             frame_scheduled = true;
         }
@@ -2063,10 +2109,21 @@ fail:
         flux_device_wait_idle(device);
     if (ui)
         lens_destroy(ui);
-    if (pl.theme_fd >= 0)
-        iris_stop_color_scheme_watcher();
+    if (pl.theme_watching)
+        iris_color_scheme_unwatch();
     if (pl.a11y_fd >= 0)
         iris_a11y_shutdown();
+    /* Wakeup seam teardown: the theme watcher's thread is already joined
+     * (unwatch above), so nothing posts past this point. Drain whatever is
+     * left queued — those deliveries are no-ops now that the watcher
+     * registration is cleared — then unregister the kick and close the
+     * eventfd. */
+    if (pl.wakeup_fd >= 0) {
+        iris_platform_wakeup_drain();
+        iris_platform_wakeup_set_kick(NULL, NULL);
+        close(pl.wakeup_fd);
+        pl.wakeup_fd = -1;
+    }
     if (canvas)
         flux_canvas_destroy(canvas);
     if (surface)

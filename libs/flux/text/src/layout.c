@@ -38,7 +38,7 @@ static void shape_run(flux_text *t, const text_run *run) {
  * typed space already provides the visual breath, and we must not double
  * it. Covers ASCII whitespace, NBSP, and the ideographic space (U+3000)
  * a CJK IME commonly emits. */
-static inline bool txt_boundary_is_separator(FcChar32 cp) {
+static inline bool txt_boundary_is_separator(uint32_t cp) {
     return cp == 0x20 || (cp >= 0x09 && cp <= 0x0d) /* \t \n \v \f \r */
            || cp == 0xa0                            /* NO-BREAK SPACE */
            || cp == 0x3000;                         /* IDEOGRAPHIC SPACE */
@@ -64,7 +64,7 @@ static float txt_run_autospace_em(const text_run *prev, const text_run *cur) {
         return 0.0f;
 
     /* Last codepoint of the previous run: back up to its lead byte. */
-    FcChar32 cp = 0;
+    uint32_t cp = 0;
     size_t off = prev->len;
     while (off > 0) {
         --off;
@@ -84,23 +84,25 @@ static float txt_run_autospace_em(const text_run *prev, const text_run *cur) {
 }
 
 /* CJK full-width bracket compression (≈ JLREQ "prefixed/postfixed" glyph
- * classes). A full-width opening bracket carries its ink in the leading
- * half of its em-box and an empty trailing half; a closing bracket the
- * reverse. Compression trims the empty ½-em half when a neighbour is
- * present, so brackets attach to their content instead of leaving a
- * half-em gap — the most visible piece of "pro" CJK typography.
+ * classes). An opening bracket carries its ink in the *trailing* half of
+ * its em-box (the leading half is empty); a closing bracket the reverse.
+ * The trimmable empty half therefore sits on the *outer* side of a
+ * bracket pair — ahead of an opening bracket, behind a closing one.
+ * Compression trims that empty ½-em half when a neighbour is present, so
+ * brackets attach to their content instead of leaving a half-em gap — the
+ * most visible piece of "pro" CJK typography.
  *
  * (Stop punctuation 。，、… is intentionally not compressed here: its ink
  * is corner-placed in a font-dependent way, so trimming a fixed half
  * requires a per-glyph policy that belongs in a later pass, not the
  * shape-time advance trim these helpers drive.) */
-static inline bool txt_is_opening_bracket(FcChar32 cp) {
+static inline bool txt_is_opening_bracket(uint32_t cp) {
     return cp == 0x3008 || cp == 0x300A || cp == 0x300C || cp == 0x300E || cp == 0x3010 ||
            cp == 0x3014 || cp == 0x3016 || cp == 0x301A || cp == 0x301D || cp == 0xFF08 ||
            cp == 0xFF3B || cp == 0xFF5B || cp == 0xFF5F;
 }
 
-static inline bool txt_is_closing_bracket(FcChar32 cp) {
+static inline bool txt_is_closing_bracket(uint32_t cp) {
     return cp == 0x3009 || cp == 0x300B || cp == 0x300D || cp == 0x300F || cp == 0x3011 ||
            cp == 0x3015 || cp == 0x3017 || cp == 0x301B || cp == 0x301E || cp == 0xFF09 ||
            cp == 0xFF3D || cp == 0xFF5D || cp == 0xFF60;
@@ -470,35 +472,34 @@ bool txt_text_layout_build(flux_text *t, const char *utf8, size_t len, float siz
         }
     }
 
-    /* Full-width CJK bracket compression: trim the empty ½-em half of an
-     * opening bracket's trailing edge (when followed) and a closing
-     * bracket's leading edge (when preceded), so brackets attach to their
-     * content. Applied as delta shifts so each glyph's HarfBuzz x_offset
-     * and the inter-script run gaps already baked into g->x are preserved.
-     *
-     * Closing bracket at k pulls itself left by ½ em (trimming its leading
-     * half) — modelled as a reduction of the previous glyph's advance plus
-     * a leftward shift of glyph k and everything after. Opening bracket at
-     * k trims its own trailing ½ em — a reduction of g->advance plus a
-     * leftward shift of everything after k. The two accumulate, so e.g.
-     * "（）" collapses to a single em (each bracket half-width). */
+    /* Full-width CJK bracket compression: an opening bracket's empty half
+     * leads it, so when something precedes it, pull the bracket and the
+     * rest of the line left by ½ em (book-kept as a reduction of the
+     * previous glyph's advance, clamped so a narrow neighbour like a space
+     * never goes negative); a closing bracket's empty half trails it, so
+     * when something follows, trim its own advance and let the rest of the
+     * line start ½ em earlier. Applied as delta shifts so each glyph's
+     * HarfBuzz x_offset and the inter-script run gaps already baked into
+     * g->x are preserved. Adjacent 【】 keep their mutual spacing — their
+     * empty halves face outward, not each other. */
     if (count > 1) {
         const float half = 0.5f * size_px;
         float shift = 0.0f;
         for (int k = 0; k < count; k++) {
             txt_placed_glyph *g = &t->layout_buf[k];
             g->x -= shift;
-            FcChar32 cp = 0;
+            uint32_t cp = 0;
             size_t off = (size_t)g->cluster;
             if (off < len)
                 txt_utf8_decode(utf8 + off, len - off, &cp);
-            if (k > 0 && txt_is_closing_bracket(cp)) {
-                t->layout_buf[k - 1].advance -= half;
+            if (k > 0 && txt_is_opening_bracket(cp)) {
+                float *pa = &t->layout_buf[k - 1].advance;
+                *pa = fmaxf(0.0f, *pa - half);
                 g->x -= half;
                 shift += half;
             }
-            if (k + 1 < count && txt_is_opening_bracket(cp)) {
-                g->advance -= half;
+            if (k + 1 < count && txt_is_closing_bracket(cp)) {
+                g->advance = fmaxf(0.0f, g->advance - half);
                 shift += half;
             }
         }

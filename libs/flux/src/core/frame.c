@@ -96,9 +96,9 @@ static void barrier_to_readback(VkCommandBuffer cmd, VkImage img) {
  * foreign ownership; plain offscreen surfaces remain TRANSFER_SRC. */
 static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen, bool exportable,
                              uint32_t graphics_family, VkImageLayout old_layout) {
-    VkImageLayout final_layout = exportable   ? VK_IMAGE_LAYOUT_GENERAL
-                                 : offscreen  ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-                                              : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    VkImageLayout final_layout = exportable  ? VK_IMAGE_LAYOUT_GENERAL
+                                 : offscreen ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                                             : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     if (old_layout == final_layout && !exportable)
         return;
     bool after_readback = old_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -106,11 +106,11 @@ static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen, b
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = after_readback ? VK_PIPELINE_STAGE_2_COPY_BIT
                                        : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = after_readback ? VK_ACCESS_2_TRANSFER_READ_BIT
-                                        : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = exportable   ? VK_PIPELINE_STAGE_2_NONE
-                        : offscreen  ? VK_PIPELINE_STAGE_2_COPY_BIT
-                                     : VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+        .srcAccessMask =
+            after_readback ? VK_ACCESS_2_TRANSFER_READ_BIT : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = exportable  ? VK_PIPELINE_STAGE_2_NONE
+                        : offscreen ? VK_PIPELINE_STAGE_2_COPY_BIT
+                                    : VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
         .dstAccessMask = exportable ? 0 : (offscreen ? VK_ACCESS_2_TRANSFER_READ_BIT : 0),
         .oldLayout = old_layout,
         .newLayout = final_layout,
@@ -168,9 +168,9 @@ static bool foreign_images_grow(flux_surface *s, flux_per_frame *pf) {
     size_t bytes = 0;
     size_t wait_bytes = 0;
     if (new_capacity < old_capacity ||
-        __builtin_mul_overflow((size_t)new_capacity, sizeof(*pf->foreign_images), &bytes) ||
-        __builtin_mul_overflow((size_t)new_capacity + 1u, sizeof(*pf->foreign_waits),
-                               &wait_bytes)) {
+        !flux_platform_mul_size((size_t)new_capacity, sizeof(*pf->foreign_images), &bytes) ||
+        !flux_platform_mul_size((size_t)new_capacity + 1u, sizeof(*pf->foreign_waits),
+                                &wait_bytes)) {
         FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "too many foreign images in one frame");
         return false;
     }
@@ -523,8 +523,7 @@ flux_result flux_frame_request_readback(flux_frame *f) {
     return flux_frame_request_readback_region(f, &full);
 }
 
-flux_result flux_frame_request_readback_region(flux_frame *f,
-                                               const flux_readback_region *region) {
+flux_result flux_frame_request_readback_region(flux_frame *f, const flux_readback_region *region) {
     if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
         return FLUX_ERROR_INVALID_STATE;
     if (!region || !region->width || !region->height)
@@ -547,8 +546,7 @@ flux_result flux_frame_request_readback_region(flux_frame *f,
                   "region capture is unsupported on require_readback surfaces");
         return FLUX_ERROR_UNSUPPORTED;
     }
-    flux_result r =
-        flux_surface_prepare_readback_region(s, region->width, region->height);
+    flux_result r = flux_surface_prepare_readback_region(s, region->width, region->height);
     if (r != FLUX_OK)
         return r;
     f->readback_requested = true;
@@ -621,8 +619,7 @@ void flux_frame_begin_pass(flux_frame *f, const flux_pass_desc *desc) {
 
     VkRenderingInfo ri = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = {.offset = {render_offset_x, render_offset_y},
-                       .extent = render_extent},
+        .renderArea = {.offset = {render_offset_x, render_offset_y}, .extent = render_extent},
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &color,
@@ -788,8 +785,8 @@ flux_result flux_frame_submit(flux_frame *f) {
         };
         vkCmdPipelineBarrier2(pf->cmd, &readback_dependency);
     }
-    barrier_to_final(pf->cmd, s->images[s->current_image], s->offscreen,
-                     s->offscreen_exportable, s->device->graphics_family,
+    barrier_to_final(pf->cmd, s->images[s->current_image], s->offscreen, s->offscreen_exportable,
+                     s->device->graphics_family,
                      copy_readback ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
                                    : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
@@ -846,11 +843,11 @@ flux_result flux_frame_submit(flux_frame *f) {
             .signalSemaphoreInfoCount = signal_sync ? 1u : 0u,
             .pSignalSemaphoreInfos = signal_sync ? &signal : nullptr,
         };
-        pthread_mutex_lock(&s->device->queue_lock);
+        flux_platform_mutex_lock(&s->device->queue_lock);
         vr = vkQueueSubmit2(s->device->graphics_queue, 1, &osi, pf->in_flight);
         if (vr == VK_SUCCESS)
             pf->submitted_serial = flux_vk_note_graphics_submission(s->device);
-        pthread_mutex_unlock(&s->device->queue_lock);
+        flux_platform_mutex_unlock(&s->device->queue_lock);
         if (vr != VK_SUCCESS)
             return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
         foreign_images_submit_succeeded(pf);
@@ -910,11 +907,11 @@ flux_result flux_frame_submit(flux_frame *f) {
         .signalSemaphoreInfoCount = 1,
         .pSignalSemaphoreInfos = &signal,
     };
-    pthread_mutex_lock(&s->device->queue_lock);
+    flux_platform_mutex_lock(&s->device->queue_lock);
     vr = vkQueueSubmit2(s->device->graphics_queue, 1, &si, pf->in_flight);
     if (vr == VK_SUCCESS)
         pf->submitted_serial = flux_vk_note_graphics_submission(s->device);
-    pthread_mutex_unlock(&s->device->queue_lock);
+    flux_platform_mutex_unlock(&s->device->queue_lock);
     if (vr != VK_SUCCESS)
         return frame_submit_failure(f, vr, "vkQueueSubmit2 failed");
     foreign_images_submit_succeeded(pf);
@@ -956,9 +953,9 @@ flux_result flux_frame_present(flux_frame *f) {
         .pSwapchains = &s->swapchain,
         .pImageIndices = &s->current_image,
     };
-    pthread_mutex_lock(&s->device->queue_lock);
+    flux_platform_mutex_lock(&s->device->queue_lock);
     VkResult vr = vkQueuePresentKHR(s->device->graphics_queue, &pi);
-    pthread_mutex_unlock(&s->device->queue_lock);
+    flux_platform_mutex_unlock(&s->device->queue_lock);
 
     s->current_frame = (s->current_frame + 1u) % s->frames_in_flight;
     s->frame_active = false;

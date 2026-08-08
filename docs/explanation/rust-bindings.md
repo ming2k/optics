@@ -49,6 +49,14 @@ The build scripts prepend `build/meson-uninstalled/` to `PKG_CONFIG_PATH` and
 read public headers from `libs/`. This keeps bindgen and native linking on the
 same checkout without running `meson install`.
 
+Linking is per-platform: Linux uses `-Wl,-rpath` into the build/install lib
+dir; macOS does the same (the C libraries carry `@rpath/` install names, so
+the rpath is recorded as `LC_RPATH`); Windows has no rpath, so the build
+scripts copy the dependent DLLs (`flux.dll`, `lens.dll`, …) next to the cargo
+profile output (`target/<profile>/`, `deps/`, `examples/`) where the loader
+finds them, and print a `cargo:warning` telling you to extend `PATH` if a DLL
+cannot be staged.
+
 For an installed stack, leave the source/build variables unset and make the
 installed `.pc` files visible through the normal pkg-config search path.
 

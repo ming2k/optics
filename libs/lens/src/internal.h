@@ -61,6 +61,7 @@ typedef struct lens_draw_cmd {
     const char *text; /* LENS_DRAW_TEXT: arena-copied utf8 */
     float text_size;
     float text_weight; /* 0 = use theme default */
+    int32_t text_family; /* lens_text_family captured at build; 0 = default */
     int32_t icon_id;   /* LENS_DRAW_ICON: enum lens_icon_id */
     uint32_t flags;    /* kind-specific flags */
     flux_image *image; /* LENS_DRAW_IMAGE: host-owned texture, borrowed
@@ -205,6 +206,8 @@ struct lens {
     flux_arena arena; /* per-frame; reset each lens_begin */
     flux_text *text;  /* shared text engine (flux-text); never NULL
                        * after create — degrades to mono internally */
+    int text_family;  /* lens_text_family for subsequently built widgets;
+                       * 0 (DEFAULT) keeps the engine's sans default */
 
     lens_store store;
     lens_node *root;

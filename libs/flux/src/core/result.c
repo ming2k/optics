@@ -1,6 +1,7 @@
 #include <flux/core.h>
 #include <string.h>
-#include <threads.h>
+
+/* thread_local is a C23 keyword; no <threads.h> needed (MinGW/MSVC lack it). */
 
 const char *flux_result_string(flux_result r) {
     switch (r) {

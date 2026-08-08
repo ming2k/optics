@@ -11,6 +11,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* VK_KHR_portability_subset (MoltenVK) is provisional in the Vulkan
+ * headers: its name macro hides behind VK_ENABLE_BETA_EXTENSIONS. The
+ * extension string itself is stable and shipped by MoltenVK, so provide
+ * the macro when the headers withhold it. */
+#ifndef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
+#define VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME "VK_KHR_portability_subset"
+#endif
+
 /* ------------------------------------------------------------------ */
 /*  Allocator + logger plumbing                                       */
 /* ------------------------------------------------------------------ */
@@ -80,6 +88,7 @@ static bool has_extension(const VkExtensionProperties *exts, uint32_t n, const c
     return false;
 }
 
+#ifdef FLUX_HAVE_DMABUF
 #define FLUX_DEVICE_FEATURE_KNOWN_MASK                                                             \
     (FLUX_DEVICE_FEATURE_DMABUF | FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE)
 
@@ -116,6 +125,19 @@ static bool feature_bundle_supported(const VkExtensionProperties *available, uin
     }
     return (features & ~FLUX_DEVICE_FEATURE_KNOWN_MASK) == 0;
 }
+#else
+/* dma-buf is a Linux-only feature set: on other hosts the semantic
+ * feature bits are unknown, so requesting them (required or optional)
+ * fails validation up front instead of silently degrading. */
+#define FLUX_DEVICE_FEATURE_KNOWN_MASK 0ULL
+
+static bool feature_bundle_supported(const VkExtensionProperties *available, uint32_t count,
+                                     flux_device_feature_flags features) {
+    (void)available;
+    (void)count;
+    return features == 0;
+}
+#endif /* FLUX_HAVE_DMABUF */
 
 typedef struct flux_device_config {
     const flux_device_drm_node_desc *drm_node;
@@ -208,11 +230,22 @@ static flux_result create_instance(flux_device *d, const flux_device_desc *desc)
     /* VK_EXT_debug_utils: enable whenever advertised, validation or not.
      * The messenger is validation-only, but object naming must also work
      * in release builds under RenderDoc (which injects the extension). */
-    if (inst_exts && ier == VK_SUCCESS &&
-        has_extension(inst_exts, inst_avail, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) &&
-        ext_count < MAX_EXT) {
-        exts[ext_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-        d->has_debug_utils = true;
+    bool enumerate_portability = false;
+    if (inst_exts && ier == VK_SUCCESS) {
+        if (has_extension(inst_exts, inst_avail, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) &&
+            ext_count < MAX_EXT) {
+            exts[ext_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+            d->has_debug_utils = true;
+        }
+        /* VK_KHR_portability_enumeration (MoltenVK): without it,
+         * portability-subset physical devices (Apple GPUs via MoltenVK)
+         * are hidden from vkEnumeratePhysicalDevices. Desktop drivers
+         * never advertise the extension, so this stays a no-op there. */
+        if (has_extension(inst_exts, inst_avail, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) &&
+            ext_count < MAX_EXT) {
+            exts[ext_count++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+            enumerate_portability = true;
+        }
     }
     free(inst_exts);
 
@@ -245,6 +278,7 @@ static flux_result create_instance(flux_device *d, const flux_device_desc *desc)
 
     VkInstanceCreateInfo ici = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .flags = enumerate_portability ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : 0,
         .pApplicationInfo = &ai,
         .enabledLayerCount = layer_count,
         .ppEnabledLayerNames = layers,
@@ -580,6 +614,7 @@ static flux_result append_device_extension(const char **extensions, uint32_t *co
     return FLUX_OK;
 }
 
+#ifdef FLUX_HAVE_DMABUF
 static flux_result append_feature_extensions(const char **extensions, uint32_t *count,
                                              flux_device_feature_flags features) {
     if ((features & (FLUX_DEVICE_FEATURE_DMABUF | FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE)) != 0) {
@@ -597,6 +632,16 @@ static flux_result append_feature_extensions(const char **extensions, uint32_t *
                                        VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
     return FLUX_OK;
 }
+#else
+static flux_result append_feature_extensions(const char **extensions, uint32_t *count,
+                                             flux_device_feature_flags features) {
+    /* No semantic feature maps to a device extension on this host. */
+    (void)extensions;
+    (void)count;
+    (void)features;
+    return FLUX_OK;
+}
+#endif /* FLUX_HAVE_DMABUF */
 
 static flux_result create_logical_device(flux_device *d, const flux_device_desc *desc,
                                          const flux_device_features_desc *features) {
@@ -672,9 +717,22 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
             return memory_budget_result;
         }
     }
+    /* VK_KHR_portability_subset must be enabled whenever the physical
+     * device advertises it (MoltenVK requires it; vkCreateDevice rejects
+     * the device otherwise). Desktop Vulkan drivers never advertise it,
+     * so this is a no-op outside macOS/iOS. */
+    if (available && has_extension(available, avail, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)) {
+        flux_result portability_result = append_device_extension(
+            device_exts, &device_ext_count, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+        if (portability_result != FLUX_OK) {
+            free(available);
+            return portability_result;
+        }
+    }
     free(available);
     (void)required_device_ext_baseline;
 
+#ifdef FLUX_HAVE_DMABUF
     for (uint32_t i = 0; i < device_ext_count; ++i) {
         if (strcmp(device_exts[i], VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME) == 0) {
             d->has_external_memory_fd = true;
@@ -688,13 +746,16 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
             d->has_queue_family_foreign = true;
         }
     }
+#endif
     d->enabled_features = enabled_semantic;
+#ifdef FLUX_HAVE_DMABUF
     if (d->has_external_memory_fd && d->has_external_memory_dma_buf &&
         d->has_image_drm_format_modifier && d->has_queue_family_foreign) {
         d->enabled_features |= FLUX_DEVICE_FEATURE_DMABUF;
         if (d->has_external_semaphore_fd)
             d->enabled_features |= FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
     }
+#endif
 
     /* Feature chain: enable Vulkan 1.3 features we rely on globally. */
     VkPhysicalDeviceVulkan13Features feat13 = {
@@ -945,49 +1006,49 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
     r = create_logical_device(d, desc, config.features);
     if (r != FLUX_OK)
         goto fail;
-    if (pthread_mutex_init(&d->queue_lock, nullptr) != 0) {
+    if (!flux_platform_mutex_init(&d->queue_lock)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "queue lock init failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
         goto fail;
     }
     d->queue_lock_initialized = true;
-    if (pthread_mutex_init(&d->dmabuf_acquire_pool_lock, nullptr) != 0) {
+    if (!flux_platform_mutex_init(&d->dmabuf_acquire_pool_lock)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "dma-buf acquire semaphore pool lock init failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
         goto fail;
     }
     d->dmabuf_acquire_pool_lock_initialized = true;
-    if (pthread_mutex_init(&d->pipeline_cache_lock, nullptr) != 0) {
+    if (!flux_platform_mutex_init(&d->pipeline_cache_lock)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "pipeline cache lock init failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
         goto fail;
     }
     d->pipeline_cache_lock_initialized = true;
-    if (pthread_mutex_init(&d->module_state_lock, nullptr) != 0) {
+    if (!flux_platform_mutex_init(&d->module_state_lock)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "module state lock init failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
         goto fail;
     }
     d->module_state_lock_initialized = true;
-    if (pthread_mutex_init(&d->retire_lock, nullptr) != 0) {
+    if (!flux_platform_mutex_init(&d->retire_lock)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "retire lock init failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
         goto fail;
     }
     d->retire_lock_initialized = true;
-    if (pthread_mutex_init(&d->staging_lock, nullptr) != 0) {
+    if (!flux_platform_mutex_init(&d->staging_lock)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "staging lock init failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
         goto fail;
     }
     d->staging_lock_initialized = true;
-    if (pthread_mutex_init(&d->upload_lock, nullptr) != 0) {
+    if (!flux_platform_mutex_init(&d->upload_lock)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "upload lock init failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
         goto fail;
     }
     d->upload_lock_initialized = true;
-    if (pthread_mutex_init(&d->upload_pending_lock, nullptr) != 0) {
+    if (!flux_platform_mutex_init(&d->upload_pending_lock)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "upload pending lock init failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
         goto fail;
@@ -1024,35 +1085,35 @@ fail:
     flux_bindless_heap_destroy(d);
     flux_vk_allocator_destroy(d);
     if (d->upload_pending_lock_initialized) {
-        pthread_mutex_destroy(&d->upload_pending_lock);
+        flux_platform_mutex_destroy(&d->upload_pending_lock);
         d->upload_pending_lock_initialized = false;
     }
     if (d->upload_lock_initialized) {
-        pthread_mutex_destroy(&d->upload_lock);
+        flux_platform_mutex_destroy(&d->upload_lock);
         d->upload_lock_initialized = false;
     }
     if (d->staging_lock_initialized) {
-        pthread_mutex_destroy(&d->staging_lock);
+        flux_platform_mutex_destroy(&d->staging_lock);
         d->staging_lock_initialized = false;
     }
     if (d->retire_lock_initialized) {
-        pthread_mutex_destroy(&d->retire_lock);
+        flux_platform_mutex_destroy(&d->retire_lock);
         d->retire_lock_initialized = false;
     }
     if (d->module_state_lock_initialized) {
-        pthread_mutex_destroy(&d->module_state_lock);
+        flux_platform_mutex_destroy(&d->module_state_lock);
         d->module_state_lock_initialized = false;
     }
     if (d->pipeline_cache_lock_initialized) {
-        pthread_mutex_destroy(&d->pipeline_cache_lock);
+        flux_platform_mutex_destroy(&d->pipeline_cache_lock);
         d->pipeline_cache_lock_initialized = false;
     }
     if (d->queue_lock_initialized) {
-        pthread_mutex_destroy(&d->queue_lock);
+        flux_platform_mutex_destroy(&d->queue_lock);
         d->queue_lock_initialized = false;
     }
     if (d->dmabuf_acquire_pool_lock_initialized) {
-        pthread_mutex_destroy(&d->dmabuf_acquire_pool_lock);
+        flux_platform_mutex_destroy(&d->dmabuf_acquire_pool_lock);
         d->dmabuf_acquire_pool_lock_initialized = false;
     }
     if (d->pipeline_cache)
@@ -1112,7 +1173,7 @@ void flux_device_release(flux_device *d) {
      * the staging pool and allocator teardown below. */
     flux_vk_upload_pending_drain(d);
     if (d->upload_pending_lock_initialized) {
-        pthread_mutex_destroy(&d->upload_pending_lock);
+        flux_platform_mutex_destroy(&d->upload_pending_lock);
         d->upload_pending_lock_initialized = false;
     }
     /* Per-module teardown before we destroy the VkDevice. The effect
@@ -1124,7 +1185,7 @@ void flux_device_release(flux_device *d) {
     if (d->canvas_state_destroy)
         d->canvas_state_destroy(d);
     if (d->module_state_lock_initialized) {
-        pthread_mutex_destroy(&d->module_state_lock);
+        flux_platform_mutex_destroy(&d->module_state_lock);
         d->module_state_lock_initialized = false;
     }
 
@@ -1136,7 +1197,7 @@ void flux_device_release(flux_device *d) {
      * teardown returns slots to the heap and memory to the allocator. */
     flux_device_drain_retire(d);
     if (d->retire_lock_initialized) {
-        pthread_mutex_destroy(&d->retire_lock);
+        flux_platform_mutex_destroy(&d->retire_lock);
         d->retire_lock_initialized = false;
     }
     /* Idle staging entries still hold allocator memory: return it before
@@ -1145,28 +1206,28 @@ void flux_device_release(flux_device *d) {
      * zero, so no lock is needed here. */
     flux_vk_staging_pool_destroy(d);
     if (d->staging_lock_initialized) {
-        pthread_mutex_destroy(&d->staging_lock);
+        flux_platform_mutex_destroy(&d->staging_lock);
         d->staging_lock_initialized = false;
     }
     /* flush above destroyed the batch's pool and returned its staging
      * buffers; only the lock remains. */
     if (d->upload_lock_initialized) {
-        pthread_mutex_destroy(&d->upload_lock);
+        flux_platform_mutex_destroy(&d->upload_lock);
         d->upload_lock_initialized = false;
     }
     flux_bindless_heap_destroy(d);
     flux_vk_allocator_destroy(d);
     flush_pipeline_cache(d);
     if (d->pipeline_cache_lock_initialized) {
-        pthread_mutex_destroy(&d->pipeline_cache_lock);
+        flux_platform_mutex_destroy(&d->pipeline_cache_lock);
         d->pipeline_cache_lock_initialized = false;
     }
     if (d->queue_lock_initialized) {
-        pthread_mutex_destroy(&d->queue_lock);
+        flux_platform_mutex_destroy(&d->queue_lock);
         d->queue_lock_initialized = false;
     }
     if (d->dmabuf_acquire_pool_lock_initialized) {
-        pthread_mutex_destroy(&d->dmabuf_acquire_pool_lock);
+        flux_platform_mutex_destroy(&d->dmabuf_acquire_pool_lock);
         d->dmabuf_acquire_pool_lock_initialized = false;
     }
     if (d->pipeline_cache)
@@ -1206,9 +1267,9 @@ void flux_vk_wait_idle(flux_device *d) {
      * faults inside the driver (observed as an ANV double-free in
      * anv_async_submit_fini). The lock is released before touching the
      * retire watermark so no queue_lock -> retire_lock ordering arises. */
-    pthread_mutex_lock(&d->queue_lock);
+    flux_platform_mutex_lock(&d->queue_lock);
     vkDeviceWaitIdle(d->device);
-    pthread_mutex_unlock(&d->queue_lock);
+    flux_platform_mutex_unlock(&d->queue_lock);
 }
 
 void flux_device_wait_idle(const flux_device *d) {
@@ -1231,8 +1292,7 @@ uint64_t flux_vk_note_graphics_submission(flux_device *d) {
 }
 
 void flux_vk_note_graphics_completed(flux_device *d, uint64_t serial) {
-    uint64_t completed =
-        atomic_load_explicit(&d->completed_serial, memory_order_acquire);
+    uint64_t completed = atomic_load_explicit(&d->completed_serial, memory_order_acquire);
     while (completed < serial &&
            !atomic_compare_exchange_weak_explicit(&d->completed_serial, &completed, serial,
                                                   memory_order_acq_rel, memory_order_acquire)) {
@@ -1250,11 +1310,11 @@ void flux_vk_note_graphics_completed(flux_device *d, uint64_t serial) {
  * no live reference remains to be recorded. */
 static void zombie_park(flux_device *d, flux_retire_zombie *z) {
     z->next = nullptr;
-    pthread_mutex_lock(&d->retire_lock);
+    flux_platform_mutex_lock(&d->retire_lock);
     z->retire_after = atomic_load_explicit(&d->submit_serial, memory_order_acquire) + 1u;
     *d->retire_tail = z;
     d->retire_tail = &z->next;
-    pthread_mutex_unlock(&d->retire_lock);
+    flux_platform_mutex_unlock(&d->retire_lock);
 }
 
 void flux_device_retire_image(flux_device *d, VkImageView view, VkImage image,
@@ -1339,7 +1399,7 @@ static void zombie_destroy(flux_device *d, flux_retire_zombie *z) {
 }
 
 static void sweep_retire_below(flux_device *d, uint64_t completed) {
-    pthread_mutex_lock(&d->retire_lock);
+    flux_platform_mutex_lock(&d->retire_lock);
     flux_retire_zombie *last_ready = nullptr;
     for (flux_retire_zombie *z = d->retire_head; z && z->retire_after <= completed; z = z->next) {
         last_ready = z;
@@ -1352,7 +1412,7 @@ static void sweep_retire_below(flux_device *d, uint64_t completed) {
         if (!d->retire_head)
             d->retire_tail = &d->retire_head;
     }
-    pthread_mutex_unlock(&d->retire_lock);
+    flux_platform_mutex_unlock(&d->retire_lock);
     while (ready) {
         flux_retire_zombie *next = ready->next;
         zombie_destroy(d, ready);
@@ -1443,11 +1503,11 @@ VkPipelineCache flux_device_vk_pipeline_cache(const flux_device *d) {
 }
 void flux_device_vk_pipeline_cache_lock(flux_device *d) {
     if (d && d->pipeline_cache_lock_initialized)
-        pthread_mutex_lock(&d->pipeline_cache_lock);
+        flux_platform_mutex_lock(&d->pipeline_cache_lock);
 }
 void flux_device_vk_pipeline_cache_unlock(flux_device *d) {
     if (d && d->pipeline_cache_lock_initialized)
-        pthread_mutex_unlock(&d->pipeline_cache_lock);
+        flux_platform_mutex_unlock(&d->pipeline_cache_lock);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1617,7 +1677,7 @@ flux_result flux_bindless_heap_init(flux_device *d) {
         if (r != FLUX_OK)
             return r;
     }
-    pthread_mutex_init(&h->lock, nullptr);
+    flux_platform_mutex_init(&h->lock);
     h->lock_initialized = true;
     return FLUX_OK;
 }
@@ -1627,7 +1687,7 @@ void flux_bindless_heap_destroy(flux_device *d) {
     if (!d->device)
         return;
     if (h->lock_initialized)
-        pthread_mutex_destroy(&h->lock);
+        flux_platform_mutex_destroy(&h->lock);
     if (h->pool)
         vkDestroyDescriptorPool(d->device, h->pool, nullptr);
     if (h->layout)
@@ -1651,12 +1711,12 @@ static flux_result write_image(flux_device *d, uint32_t binding, VkImageView vie
         *out = FLUX_BINDLESS_INVALID;
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
-    pthread_mutex_lock(&d->bindless.lock);
+    flux_platform_mutex_lock(&d->bindless.lock);
 
     flux_bindless_pool *p = &d->bindless.pools[binding];
     uint32_t slot = slot_alloc(p);
     if (slot == FLUX_BINDLESS_INVALID) {
-        pthread_mutex_unlock(&d->bindless.lock);
+        flux_platform_mutex_unlock(&d->bindless.lock);
         FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "bindless heap binding exhausted");
         *out = FLUX_BINDLESS_INVALID;
         return FLUX_ERROR_OUT_OF_MEMORY;
@@ -1680,7 +1740,7 @@ static flux_result write_image(flux_device *d, uint32_t binding, VkImageView vie
      * descriptor set; the same lock covers our slot allocator and
      * the descriptor write. */
     vkUpdateDescriptorSets(d->device, 1, &w, 0, nullptr);
-    pthread_mutex_unlock(&d->bindless.lock);
+    flux_platform_mutex_unlock(&d->bindless.lock);
     *out = pack_handle(binding, slot);
     return FLUX_OK;
 }
@@ -1708,9 +1768,9 @@ void flux_bindless_release(flux_device *d, flux_bindless_handle h) {
     uint32_t slot = handle_slot(h);
     if (binding >= FLUX_BINDLESS_BINDINGS)
         return;
-    pthread_mutex_lock(&d->bindless.lock);
+    flux_platform_mutex_lock(&d->bindless.lock);
     slot_free(&d->bindless.pools[binding], slot);
-    pthread_mutex_unlock(&d->bindless.lock);
+    flux_platform_mutex_unlock(&d->bindless.lock);
     /* Note: the descriptor write is not cleared. PARTIALLY_BOUND +
      * UPDATE_UNUSED_WHILE_PENDING means the stale descriptor is
      * harmless as long as nothing indexes the freed slot. Callers
@@ -1727,13 +1787,13 @@ VkDescriptorSetLayout flux_device_bindless_layout(flux_device *d) {
 flux_bindless_handle flux_device_default_sampler_handle(flux_device *d) {
     if (!d)
         return FLUX_BINDLESS_INVALID;
-    pthread_mutex_lock(&d->bindless.lock);
+    flux_platform_mutex_lock(&d->bindless.lock);
     if (d->default_sampler != VK_NULL_HANDLE) {
         flux_bindless_handle h = d->default_sampler_handle;
-        pthread_mutex_unlock(&d->bindless.lock);
+        flux_platform_mutex_unlock(&d->bindless.lock);
         return h;
     }
-    pthread_mutex_unlock(&d->bindless.lock);
+    flux_platform_mutex_unlock(&d->bindless.lock);
 
     /* Build outside the lock to avoid blocking other allocations. */
     VkSamplerCreateInfo sci = {
@@ -1756,19 +1816,19 @@ flux_bindless_handle flux_device_default_sampler_handle(flux_device *d) {
         return FLUX_BINDLESS_INVALID;
     }
 
-    pthread_mutex_lock(&d->bindless.lock);
+    flux_platform_mutex_lock(&d->bindless.lock);
     if (d->default_sampler != VK_NULL_HANDLE) {
         /* Lost the race; another thread already built one. */
-        pthread_mutex_unlock(&d->bindless.lock);
+        flux_platform_mutex_unlock(&d->bindless.lock);
         flux_bindless_release(d, h);
         vkDestroySampler(d->device, s, nullptr);
-        pthread_mutex_lock(&d->bindless.lock);
+        flux_platform_mutex_lock(&d->bindless.lock);
         h = d->default_sampler_handle;
-        pthread_mutex_unlock(&d->bindless.lock);
+        flux_platform_mutex_unlock(&d->bindless.lock);
         return h;
     }
     d->default_sampler = s;
     d->default_sampler_handle = h;
-    pthread_mutex_unlock(&d->bindless.lock);
+    flux_platform_mutex_unlock(&d->bindless.lock);
     return h;
 }

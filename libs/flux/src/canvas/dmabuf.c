@@ -130,7 +130,8 @@ static bool external_image_importable(flux_device *d, VkFormat format, uint64_t 
  * of falling back to DRM_FORMAT_MOD_LINEAR. Reuses the same two property
  * queries that validate a concrete import. */
 static flux_result dmabuf_enum_sampleable_importable_modifiers(flux_device *d, VkFormat vfmt,
-                                                               uint64_t *out, uint32_t *inout_count) {
+                                                               uint64_t *out,
+                                                               uint32_t *inout_count) {
     VkDrmFormatModifierPropertiesListEXT list = {
         .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
     };
@@ -216,10 +217,10 @@ VkSemaphore flux_dmabuf_acquire_semaphore_take(flux_device *d) {
 
     VkSemaphore semaphore = VK_NULL_HANDLE;
     if (d->dmabuf_acquire_pool_lock_initialized) {
-        pthread_mutex_lock(&d->dmabuf_acquire_pool_lock);
+        flux_platform_mutex_lock(&d->dmabuf_acquire_pool_lock);
         if (d->dmabuf_acquire_pool_count > 0)
             semaphore = d->dmabuf_acquire_pool[--d->dmabuf_acquire_pool_count];
-        pthread_mutex_unlock(&d->dmabuf_acquire_pool_lock);
+        flux_platform_mutex_unlock(&d->dmabuf_acquire_pool_lock);
     }
     return semaphore ? semaphore : create_sync_fd_semaphore(d);
 }
@@ -232,11 +233,10 @@ void flux_dmabuf_acquire_semaphore_recycle(flux_device *d, VkSemaphore semaphore
         return;
     }
 
-    pthread_mutex_lock(&d->dmabuf_acquire_pool_lock);
+    flux_platform_mutex_lock(&d->dmabuf_acquire_pool_lock);
     if (d->dmabuf_acquire_pool_count == d->dmabuf_acquire_pool_capacity) {
-        uint32_t next_capacity = d->dmabuf_acquire_pool_capacity
-                                     ? d->dmabuf_acquire_pool_capacity * 2u
-                                     : 8u;
+        uint32_t next_capacity =
+            d->dmabuf_acquire_pool_capacity ? d->dmabuf_acquire_pool_capacity * 2u : 8u;
         VkSemaphore *grown = flux_internal_alloc(d, (size_t)next_capacity * sizeof(*grown));
         if (grown) {
             if (d->dmabuf_acquire_pool_count > 0)
@@ -251,7 +251,7 @@ void flux_dmabuf_acquire_semaphore_recycle(flux_device *d, VkSemaphore semaphore
         d->dmabuf_acquire_pool[d->dmabuf_acquire_pool_count++] = semaphore;
         semaphore = VK_NULL_HANDLE;
     }
-    pthread_mutex_unlock(&d->dmabuf_acquire_pool_lock);
+    flux_platform_mutex_unlock(&d->dmabuf_acquire_pool_lock);
 
     if (semaphore)
         vkDestroySemaphore(d->device, semaphore, nullptr);
@@ -261,14 +261,14 @@ void flux_dmabuf_acquire_semaphore_pool_destroy(flux_device *d) {
     if (!d)
         return;
     if (d->dmabuf_acquire_pool_lock_initialized)
-        pthread_mutex_lock(&d->dmabuf_acquire_pool_lock);
+        flux_platform_mutex_lock(&d->dmabuf_acquire_pool_lock);
     VkSemaphore *pool = d->dmabuf_acquire_pool;
     uint32_t count = d->dmabuf_acquire_pool_count;
     d->dmabuf_acquire_pool = nullptr;
     d->dmabuf_acquire_pool_count = 0;
     d->dmabuf_acquire_pool_capacity = 0;
     if (d->dmabuf_acquire_pool_lock_initialized)
-        pthread_mutex_unlock(&d->dmabuf_acquire_pool_lock);
+        flux_platform_mutex_unlock(&d->dmabuf_acquire_pool_lock);
 
     if (d->device) {
         for (uint32_t i = 0; i < count; ++i)

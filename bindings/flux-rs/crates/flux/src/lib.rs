@@ -2479,6 +2479,9 @@ impl BlurFilter {
             region_count,
             ..Default::default()
         };
+        // Keep the struct update even though all current fields are set:
+        // it future-proofs against flux_effect_blur_desc growing fields.
+        #[allow(clippy::needless_update)]
         let desc = sys::flux_effect_blur_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_EFFECT_BLUR_DESC,
             next: if raw_regions.is_empty() {

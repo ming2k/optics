@@ -61,7 +61,7 @@ VkResult flux_vk_submit_and_wait(flux_device *d, VkQueue queue, VkCommandBuffer 
         .commandBufferInfoCount = 1,
         .pCommandBufferInfos = &cbsi,
     };
-    pthread_mutex_lock(&d->queue_lock);
+    flux_platform_mutex_lock(&d->queue_lock);
     VkResult vr = vkQueueSubmit2(queue, 1, &si, fence);
     /* Graphics-queue batches retire every earlier batch in FIFO order;
      * remember this one's serial so the fence wait below can raise the
@@ -70,16 +70,16 @@ VkResult flux_vk_submit_and_wait(flux_device *d, VkQueue queue, VkCommandBuffer 
     uint64_t graphics_serial = 0;
     if (vr == VK_SUCCESS && queue == d->graphics_queue)
         graphics_serial = flux_vk_note_graphics_submission(d);
-    pthread_mutex_unlock(&d->queue_lock);
+    flux_platform_mutex_unlock(&d->queue_lock);
     if (vr == VK_SUCCESS) {
         vr = vkWaitForFences(d->device, 1, &fence, VK_TRUE, FLUX_DEFAULT_FRAME_TIMEOUT_NS);
         if (vr == VK_SUCCESS && graphics_serial)
             flux_vk_note_graphics_completed(d, graphics_serial);
         if (vr != VK_SUCCESS && vr != VK_ERROR_DEVICE_LOST) {
             VkResult wait_result = vr;
-            pthread_mutex_lock(&d->queue_lock);
+            flux_platform_mutex_lock(&d->queue_lock);
             VkResult idle = vkQueueWaitIdle(queue);
-            pthread_mutex_unlock(&d->queue_lock);
+            flux_platform_mutex_unlock(&d->queue_lock);
             if (idle == VK_SUCCESS && graphics_serial)
                 flux_vk_note_graphics_completed(d, graphics_serial);
             /* Preserve timeout/error semantics once completion is proven. If
@@ -154,9 +154,9 @@ static void transient_pool_release(flux_device *d, VkCommandPool pool, uint32_t 
     }
     e->pool = pool;
     e->family = family;
-    pthread_mutex_lock(&d->staging_lock);
+    flux_platform_mutex_lock(&d->staging_lock);
     if (d->transient_pool_idle_count >= FLUX_VK_TRANSIENT_POOL_CACHE_CAP) {
-        pthread_mutex_unlock(&d->staging_lock);
+        flux_platform_mutex_unlock(&d->staging_lock);
         flux_internal_free(d, e);
         vkDestroyCommandPool(d->device, pool, nullptr);
         return;
@@ -164,25 +164,25 @@ static void transient_pool_release(flux_device *d, VkCommandPool pool, uint32_t 
     e->next = d->transient_pool_idle;
     d->transient_pool_idle = e;
     d->transient_pool_idle_count++;
-    pthread_mutex_unlock(&d->staging_lock);
+    flux_platform_mutex_unlock(&d->staging_lock);
 }
 
 /* Pop an idle pool created for `family`, VK_NULL_HANDLE when none is
  * parked. Returned pools are already reset. */
 static VkCommandPool transient_pool_acquire(flux_device *d, uint32_t family) {
-    pthread_mutex_lock(&d->staging_lock);
+    flux_platform_mutex_lock(&d->staging_lock);
     for (flux_transient_pool **pp = &d->transient_pool_idle; *pp; pp = &(*pp)->next) {
         if ((*pp)->family != family)
             continue;
         flux_transient_pool *e = *pp;
         *pp = e->next;
         d->transient_pool_idle_count--;
-        pthread_mutex_unlock(&d->staging_lock);
+        flux_platform_mutex_unlock(&d->staging_lock);
         VkCommandPool pool = e->pool;
         flux_internal_free(d, e);
         return pool;
     }
-    pthread_mutex_unlock(&d->staging_lock);
+    flux_platform_mutex_unlock(&d->staging_lock);
     return VK_NULL_HANDLE;
 }
 
@@ -270,7 +270,7 @@ flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferU
     *out = NULL;
 
     /* Smallest-fit idle entry with matching usage. */
-    pthread_mutex_lock(&d->staging_lock);
+    flux_platform_mutex_lock(&d->staging_lock);
     flux_staging_buf **best = NULL;
     for (flux_staging_buf **pp = &d->staging_idle; *pp; pp = &(*pp)->next) {
         if ((*pp)->usage != usage || (*pp)->capacity < size)
@@ -282,12 +282,12 @@ flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferU
         flux_staging_buf *sb = *best;
         *best = sb->next;
         d->staging_idle_bytes -= sb->capacity;
-        pthread_mutex_unlock(&d->staging_lock);
+        flux_platform_mutex_unlock(&d->staging_lock);
         sb->next = NULL;
         *out = sb;
         return FLUX_OK;
     }
-    pthread_mutex_unlock(&d->staging_lock);
+    flux_platform_mutex_unlock(&d->staging_lock);
 
     flux_staging_buf *sb = flux_internal_alloc(d, sizeof(*sb));
     if (!sb)
@@ -312,16 +312,16 @@ flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferU
 void flux_vk_staging_release(flux_device *d, flux_staging_buf *sb) {
     if (!sb)
         return;
-    pthread_mutex_lock(&d->staging_lock);
+    flux_platform_mutex_lock(&d->staging_lock);
     if (d->staging_idle_bytes + sb->capacity > FLUX_VK_STAGING_CACHE_CAP) {
-        pthread_mutex_unlock(&d->staging_lock);
+        flux_platform_mutex_unlock(&d->staging_lock);
         staging_destroy(d, sb);
         return;
     }
     sb->next = d->staging_idle;
     d->staging_idle = sb;
     d->staging_idle_bytes += sb->capacity;
-    pthread_mutex_unlock(&d->staging_lock);
+    flux_platform_mutex_unlock(&d->staging_lock);
 }
 
 void flux_vk_staging_pool_destroy(flux_device *d) {
@@ -355,9 +355,8 @@ void flux_vk_staging_pool_destroy(flux_device *d) {
  * with a known queue family return to the transient pool cache (the
  * fence proves their batches retired); the rest are destroyed. */
 static void upload_pending_recycle(flux_device *d, VkFence fence, VkCommandPool pool,
-                                   uint32_t pool_family, VkCommandPool pool2,
-                                   uint32_t pool2_family, VkSemaphore sem,
-                                   flux_staging_buf *stagings) {
+                                   uint32_t pool_family, VkCommandPool pool2, uint32_t pool2_family,
+                                   VkSemaphore sem, flux_staging_buf *stagings) {
     if (fence)
         vkDestroyFence(d->device, fence, nullptr);
     transient_pool_release(d, pool, pool_family);
@@ -380,7 +379,7 @@ static void upload_pending_recycle(flux_device *d, VkFence fence, VkCommandPool 
  * operation bounds the pending list to the uploads genuinely in
  * flight. */
 static void upload_pending_sweep(flux_device *d) {
-    pthread_mutex_lock(&d->upload_pending_lock);
+    flux_platform_mutex_lock(&d->upload_pending_lock);
     flux_upload_pending **pp = &d->upload_pending_head;
     while (*pp) {
         flux_upload_pending *p = *pp;
@@ -396,16 +395,16 @@ static void upload_pending_sweep(flux_device *d) {
             pp = &p->next;
         }
     }
-    pthread_mutex_unlock(&d->upload_pending_lock);
+    flux_platform_mutex_unlock(&d->upload_pending_lock);
 }
 
 void flux_vk_upload_pending_drain(flux_device *d) {
     for (;;) {
-        pthread_mutex_lock(&d->upload_pending_lock);
+        flux_platform_mutex_lock(&d->upload_pending_lock);
         flux_upload_pending *p = d->upload_pending_head;
         if (p)
             d->upload_pending_head = p->next;
-        pthread_mutex_unlock(&d->upload_pending_lock);
+        flux_platform_mutex_unlock(&d->upload_pending_lock);
         if (!p)
             break;
         p->next = NULL;
@@ -447,15 +446,15 @@ void flux_vk_upload_pending_park_families(flux_device *d, VkFence fence, VkComma
         .stagings = stagings,
         .serial = serial,
     };
-    pthread_mutex_lock(&d->upload_pending_lock);
+    flux_platform_mutex_lock(&d->upload_pending_lock);
     p->next = d->upload_pending_head;
     d->upload_pending_head = p;
-    pthread_mutex_unlock(&d->upload_pending_lock);
+    flux_platform_mutex_unlock(&d->upload_pending_lock);
 }
 
 void flux_vk_upload_pending_park(flux_device *d, VkFence fence, VkCommandPool pool,
-                                 VkCommandPool pool2, VkSemaphore sem,
-                                 flux_staging_buf *stagings, uint64_t serial) {
+                                 VkCommandPool pool2, VkSemaphore sem, flux_staging_buf *stagings,
+                                 uint64_t serial) {
     /* Callers of the plain API (dma-buf import) don't tag pool
      * families; their pools are destroyed on recycle, not cached. */
     flux_vk_upload_pending_park_families(d, fence, pool, UINT32_MAX, pool2, UINT32_MAX, sem,
@@ -471,9 +470,9 @@ void flux_vk_upload_pending_park(flux_device *d, VkFence fence, VkCommandPool po
  * order; parking it lets the sweep advance the completed watermark when
  * the fence signals. */
 VkResult flux_vk_submit_upload(flux_device *d, VkQueue queue, VkCommandBuffer cmd,
-                              VkSemaphore wait_sem, VkPipelineStageFlags2 wait_stage,
-                              VkSemaphore signal_sem, VkPipelineStageFlags2 signal_stage,
-                              VkFence *out_fence, uint64_t *out_serial) {
+                               VkSemaphore wait_sem, VkPipelineStageFlags2 wait_stage,
+                               VkSemaphore signal_sem, VkPipelineStageFlags2 signal_stage,
+                               VkFence *out_fence, uint64_t *out_serial) {
     if (out_fence)
         *out_fence = VK_NULL_HANDLE;
     if (out_serial)
@@ -508,12 +507,12 @@ VkResult flux_vk_submit_upload(flux_device *d, VkQueue queue, VkCommandBuffer cm
         .commandBufferInfoCount = 1,
         .pCommandBufferInfos = &cbsi,
     };
-    pthread_mutex_lock(&d->queue_lock);
+    flux_platform_mutex_lock(&d->queue_lock);
     VkResult vr = vkQueueSubmit2(queue, 1, &si, fence);
     uint64_t serial = 0;
     if (vr == VK_SUCCESS && queue == d->graphics_queue && out_serial)
         serial = flux_vk_note_graphics_submission(d);
-    pthread_mutex_unlock(&d->queue_lock);
+    flux_platform_mutex_unlock(&d->queue_lock);
     if (vr != VK_SUCCESS) {
         if (fence)
             vkDestroyFence(d->device, fence, nullptr);
@@ -539,9 +538,9 @@ flux_result flux_uploads_begin(flux_device *d) {
     if (!d)
         return FLUX_ERROR_INVALID_ARGUMENT;
     upload_pending_sweep(d);
-    pthread_mutex_lock(&d->upload_lock);
+    flux_platform_mutex_lock(&d->upload_lock);
     if (d->upload_batch_open) {
-        pthread_mutex_unlock(&d->upload_lock);
+        flux_platform_mutex_unlock(&d->upload_lock);
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "flux_uploads_begin: a batch is already open");
         return FLUX_ERROR_INVALID_STATE;
     }
@@ -551,12 +550,12 @@ flux_result flux_uploads_begin(flux_device *d) {
     VkResult vr = flux_vk_new_transient_cmd(d, d->graphics_family, &d->upload_batch_pool,
                                             &d->upload_batch_cmd);
     if (vr != VK_SUCCESS) {
-        pthread_mutex_unlock(&d->upload_lock);
+        flux_platform_mutex_unlock(&d->upload_lock);
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "upload batch cmd alloc failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
     d->upload_batch_open = true;
-    pthread_mutex_unlock(&d->upload_lock);
+    flux_platform_mutex_unlock(&d->upload_lock);
     return FLUX_OK;
 }
 
@@ -564,9 +563,9 @@ flux_result flux_uploads_flush(flux_device *d) {
     if (!d)
         return FLUX_ERROR_INVALID_ARGUMENT;
     upload_pending_sweep(d);
-    pthread_mutex_lock(&d->upload_lock);
+    flux_platform_mutex_lock(&d->upload_lock);
     if (!d->upload_batch_open) {
-        pthread_mutex_unlock(&d->upload_lock);
+        flux_platform_mutex_unlock(&d->upload_lock);
         return FLUX_OK;
     }
     /* Detach the batch state first: the submit below is device-global
@@ -579,7 +578,7 @@ flux_result flux_uploads_flush(flux_device *d) {
     d->upload_batch_cmd = VK_NULL_HANDLE;
     d->upload_batch_stagings = NULL;
     d->upload_batch_open = false;
-    pthread_mutex_unlock(&d->upload_lock);
+    flux_platform_mutex_unlock(&d->upload_lock);
 
     /* Deferred submit, no fence wait. Later same-queue work (the frame
      * that follows in begin_frame, readback) is ordered after the copies
@@ -589,7 +588,8 @@ flux_result flux_uploads_flush(flux_device *d) {
     VkFence fence = VK_NULL_HANDLE;
     uint64_t serial = 0;
     if (vr == VK_SUCCESS)
-        vr = flux_vk_submit_upload(d, d->graphics_queue, cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0, &fence, &serial);
+        vr = flux_vk_submit_upload(d, d->graphics_queue, cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0,
+                                   &fence, &serial);
     if (vr == VK_SUCCESS) {
         flux_vk_upload_pending_park_families(d, fence, pool, d->graphics_family, VK_NULL_HANDLE, 0,
                                              VK_NULL_HANDLE, stagings, serial);
@@ -642,15 +642,15 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
     /* Batch mode: record into the open batch and return. The staging
      * buffer stays checked out (chained on the batch) until the flush's
      * parked fence proves the GPU is done reading it. */
-    pthread_mutex_lock(&d->upload_lock);
+    flux_platform_mutex_lock(&d->upload_lock);
     if (d->upload_batch_open) {
         VkBufferCopy region = {.srcOffset = 0, .dstOffset = offset, .size = size};
         vkCmdCopyBuffer(d->upload_batch_cmd, staging->buffer, dst, 1, &region);
         flux_vk_upload_batch_attach_staging(d, staging);
-        pthread_mutex_unlock(&d->upload_lock);
+        flux_platform_mutex_unlock(&d->upload_lock);
         return FLUX_OK;
     }
-    pthread_mutex_unlock(&d->upload_lock);
+    flux_platform_mutex_unlock(&d->upload_lock);
 
     vr = flux_vk_new_transient_cmd(d, use_xfer ? d->transfer_family : d->graphics_family,
                                    &xfer_pool, &xfer_cmd);
@@ -728,7 +728,7 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
          * both batches: the graphics batch only starts after the handoff
          * semaphore (signalled by the transfer batch) fires. */
         vr = flux_vk_submit_upload(d, d->transfer_queue, xfer_cmd, VK_NULL_HANDLE, 0, handoff,
-                           VK_PIPELINE_STAGE_2_COPY_BIT, nullptr, nullptr);
+                                   VK_PIPELINE_STAGE_2_COPY_BIT, nullptr, nullptr);
         if (vr != VK_SUCCESS) {
             FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "transfer-queue submit failed", vr);
             goto fail;
@@ -736,7 +736,8 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
         VkFence gfence = VK_NULL_HANDLE;
         uint64_t gserial = 0;
         vr = flux_vk_submit_upload(d, d->graphics_queue, gfx_cmd, handoff,
-                           VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, &gfence, &gserial);
+                                   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, &gfence,
+                                   &gserial);
         if (vr == VK_SUCCESS) {
             flux_vk_upload_pending_park_families(d, gfence, xfer_pool, d->transfer_family, gfx_pool,
                                                  d->graphics_family, handoff, staging, gserial);
@@ -745,16 +746,16 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
         /* The transfer batch is in flight and references the staging
          * buffer and its command pool; drain the transfer queue before
          * the fail path recycles them. */
-        pthread_mutex_lock(&d->queue_lock);
+        flux_platform_mutex_lock(&d->queue_lock);
         vkQueueWaitIdle(d->transfer_queue);
-        pthread_mutex_unlock(&d->queue_lock);
+        flux_platform_mutex_unlock(&d->queue_lock);
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "graphics-queue acquire submit failed", vr);
         goto fail;
     } else {
         VkFence fence = VK_NULL_HANDLE;
         uint64_t serial = 0;
-        vr = flux_vk_submit_upload(d, d->graphics_queue, xfer_cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0,
-                           &fence, &serial);
+        vr = flux_vk_submit_upload(d, d->graphics_queue, xfer_cmd, VK_NULL_HANDLE, 0,
+                                   VK_NULL_HANDLE, 0, &fence, &serial);
         if (vr == VK_SUCCESS) {
             flux_vk_upload_pending_park_families(d, fence, xfer_pool, d->graphics_family,
                                                  VK_NULL_HANDLE, 0, VK_NULL_HANDLE, staging,
@@ -868,15 +869,15 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
 
     /* Batch mode: record the full single-queue sequence into the open
      * batch; the staging buffer stays checked out until flush. */
-    pthread_mutex_lock(&d->upload_lock);
+    flux_platform_mutex_lock(&d->upload_lock);
     if (d->upload_batch_open) {
         record_image_upload(d->upload_batch_cmd, staging->buffer, dst, offset_x, offset_y, width,
                             height, old_layout);
         flux_vk_upload_batch_attach_staging(d, staging);
-        pthread_mutex_unlock(&d->upload_lock);
+        flux_platform_mutex_unlock(&d->upload_lock);
         return FLUX_OK;
     }
-    pthread_mutex_unlock(&d->upload_lock);
+    flux_platform_mutex_unlock(&d->upload_lock);
 
     /* When the image is already SHADER_READ_ONLY_OPTIMAL we're updating
      * a resource that may still be sampled by an in-flight frame on the
@@ -1019,7 +1020,7 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
          * single fence parked on the graphics submit covers both batches
          * (the graphics batch waits on the transfer-signalled handoff). */
         vr = flux_vk_submit_upload(d, d->transfer_queue, xfer_cmd, VK_NULL_HANDLE, 0, handoff,
-                           VK_PIPELINE_STAGE_2_COPY_BIT, nullptr, nullptr);
+                                   VK_PIPELINE_STAGE_2_COPY_BIT, nullptr, nullptr);
         if (vr != VK_SUCCESS) {
             FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "transfer-queue image submit failed", vr);
             goto fail;
@@ -1027,7 +1028,8 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
         VkFence gfence = VK_NULL_HANDLE;
         uint64_t gserial = 0;
         vr = flux_vk_submit_upload(d, d->graphics_queue, gfx_cmd, handoff,
-                           VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, &gfence, &gserial);
+                                   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, &gfence,
+                                   &gserial);
         if (vr == VK_SUCCESS) {
             flux_vk_upload_pending_park_families(d, gfence, xfer_pool, d->transfer_family, gfx_pool,
                                                  d->graphics_family, handoff, staging, gserial);
@@ -1035,16 +1037,16 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
         }
         /* The transfer batch is in flight and still reads the staging
          * buffer and its command pool; drain it before recycling. */
-        pthread_mutex_lock(&d->queue_lock);
+        flux_platform_mutex_lock(&d->queue_lock);
         vkQueueWaitIdle(d->transfer_queue);
-        pthread_mutex_unlock(&d->queue_lock);
+        flux_platform_mutex_unlock(&d->queue_lock);
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "graphics-queue image acquire failed", vr);
         goto fail;
     } else {
         VkFence fence = VK_NULL_HANDLE;
         uint64_t serial = 0;
-        vr = flux_vk_submit_upload(d, d->graphics_queue, xfer_cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0,
-                           &fence, &serial);
+        vr = flux_vk_submit_upload(d, d->graphics_queue, xfer_cmd, VK_NULL_HANDLE, 0,
+                                   VK_NULL_HANDLE, 0, &fence, &serial);
         if (vr == VK_SUCCESS) {
             flux_vk_upload_pending_park_families(d, fence, xfer_pool, d->graphics_family,
                                                  VK_NULL_HANDLE, 0, VK_NULL_HANDLE, staging,
@@ -1107,13 +1109,13 @@ flux_result flux_vk_transition_image_layout(flux_device *d, VkImage img, VkImage
 
     upload_pending_sweep(d);
     /* Batch mode: record the barrier and return; flush submits it. */
-    pthread_mutex_lock(&d->upload_lock);
+    flux_platform_mutex_lock(&d->upload_lock);
     if (d->upload_batch_open) {
         record_layout_transition(d->upload_batch_cmd, img, old_layout, new_layout);
-        pthread_mutex_unlock(&d->upload_lock);
+        flux_platform_mutex_unlock(&d->upload_lock);
         return FLUX_OK;
     }
-    pthread_mutex_unlock(&d->upload_lock);
+    flux_platform_mutex_unlock(&d->upload_lock);
 
     vr = flux_vk_new_transient_cmd(d, d->graphics_family, &pool, &cmd);
     if (vr != VK_SUCCESS) {
@@ -1133,7 +1135,7 @@ flux_result flux_vk_transition_image_layout(flux_device *d, VkImage img, VkImage
         VkFence fence = VK_NULL_HANDLE;
         uint64_t serial = 0;
         vr = flux_vk_submit_upload(d, d->graphics_queue, cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0,
-                           &fence, &serial);
+                                   &fence, &serial);
         if (vr == VK_SUCCESS) {
             flux_vk_upload_pending_park_families(d, fence, pool, d->graphics_family, VK_NULL_HANDLE,
                                                  0, VK_NULL_HANDLE, NULL, serial);

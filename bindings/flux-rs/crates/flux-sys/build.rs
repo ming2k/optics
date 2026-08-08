@@ -11,8 +11,10 @@
 //!          `FLUX_SOURCE_DIR=<flux-source>` so bindgen reads headers
 //!          straight from the source checkout (overrides any stale -I
 //!          baked into the uninstalled .pc).
-//!   2. Bake an rpath for each link path (dev mode only) so test/example
-//!      binaries find the .so at runtime without `LD_LIBRARY_PATH`.
+//!   2. Make the runtime loader find the freshly-built shared library
+//!      (dev mode only): `-Wl,-rpath` on unix (incl. macOS, where meson
+//!      uses `@rpath/` install names), DLL staging next to the cargo
+//!      profile output on Windows — no `LD_LIBRARY_PATH` / PATH needed.
 //!   3. Run bindgen over `wrapper.h` using the probed include paths,
 //!      prefixed by `FLUX_SOURCE_DIR/include` when set so the generated
 //!      bindings always match the requested source checkout.
@@ -38,6 +40,10 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 
     let use_installed = env::var_os("FLUX_USE_INSTALLED").is_some();
+    // OS we are linking for (build scripts run on the host; the linkage —
+    // library file names, list separators, rpath vs DLL staging — must
+    // match the target).
+    let os = target_os();
     let checkout_root = discover_optics_checkout();
     let build_dir = env::var_os("FLUX_BUILD_DIR")
         .map(PathBuf::from)
@@ -62,16 +68,18 @@ fn main() {
             let pc = uninstalled.join("flux-uninstalled.pc");
             let exists = pc.exists();
             if exists {
-                // Sanity-check the build tree actually contains libflux.so.
+                // Sanity-check the build tree actually contains the flux
+                // shared library (libflux.so / libflux.dylib / flux.dll).
                 // A stale dir (repo moved/copied after `meson setup`) still
                 // has the .pc but no library; surface it early instead of
                 // letting pkg-config / bindgen emit confusing errors.
-                let probe_root = dir.join("libflux.so");
-                let probe_libs = dir.join("libs/flux/libflux.so");
+                let lib_name = shared_lib_file_name("flux", &os);
+                let probe_root = dir.join(&lib_name);
+                let probe_libs = dir.join("libs/flux").join(&lib_name);
                 if !probe_root.exists() && !probe_libs.exists() {
                     panic!(
                         "stale or incomplete meson build dir at {}\n\
-                         Its `flux-uninstalled.pc` exists but `libflux.so` is \
+                         Its `flux-uninstalled.pc` exists but `{lib_name}` is \
                          absent — either `meson compile` has not run yet, or the \
                          build tree no longer matches the source checkout.\n\
                          Reconfigure with:\n    \
@@ -93,15 +101,7 @@ fn main() {
 
     if dev_mode {
         let dir = build_dir.as_ref().unwrap();
-        let uninstalled = dir.join("meson-uninstalled");
-        let mut search = uninstalled.display().to_string();
-        if let Some(existing) = env::var_os("PKG_CONFIG_PATH") {
-            search.push(':');
-            search.push_str(&existing.to_string_lossy());
-        }
-        // SAFETY: this build script is single-threaded, and this runs before
-        // invoking pkg-config, bindgen, or any other code that may spawn threads.
-        unsafe { env::set_var("PKG_CONFIG_PATH", &search) };
+        set_pkg_config_path(&[dir.join("meson-uninstalled")], &os);
     } else if !use_installed {
         // Fall through to pkg-config; if `flux` is absent there, the probe
         // below will emit the actionable error.
@@ -123,10 +123,10 @@ fn main() {
             )
         });
 
-    // 3. rpath each link dir so binaries run from the build tree directly
-    //    (dev mode only — installed libraries resolve via the loader / ldconfig).
-    //    `rustc-link-arg` applies to this crate's own targets only; publish the
-    //    dirs as `links` metadata so dependents re-emit them (DEP_FLUX_RPATHS).
+    // 3. Runtime library discovery (dev mode only — installed libraries
+    //    resolve via the loader / ldconfig). `rustc-link-arg` applies to
+    //    this crate's own targets only; publish the dirs as `links`
+    //    metadata so dependents re-emit them (DEP_FLUX_RPATHS).
     let rpaths: Vec<String> = if dev_mode {
         lib.link_paths
             .iter()
@@ -135,8 +135,13 @@ fn main() {
     } else {
         Vec::new()
     };
-    for dir in &rpaths {
-        println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
+    if os == "windows" {
+        // Windows has no rpath: stage the DLLs next to the cargo profile
+        // output so test/example binaries find them. Runs in installed
+        // mode too — an installed prefix's bin/ is not on PATH by default.
+        stage_windows_dlls(&lib.link_paths, &["flux"]);
+    } else {
+        emit_rpath_link_args(&rpaths);
     }
     println!("cargo:rpaths={}", rpaths.join(";"));
 
@@ -217,4 +222,115 @@ fn discover_optics_checkout() -> Option<PathBuf> {
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Cross-platform plumbing, keyed off CARGO_CFG_TARGET_OS (the OS we link
+// for — build scripts themselves run on the host):
+//   windows          -> <stem>.dll,     ';' path lists, no rpath (stage DLLs)
+//   macos            -> lib<stem>.dylib, ':' path lists, -Wl,-rpath (LC_RPATH)
+//   linux/other unix -> lib<stem>.so,    ':' path lists, -Wl,-rpath (DT_RPATH)
+// ---------------------------------------------------------------------------
+
+/// OS we are linking for (`CARGO_CFG_TARGET_OS`); defaults to linux.
+fn target_os() -> String {
+    env::var("CARGO_CFG_TARGET_OS").unwrap_or_else(|_| "linux".to_string())
+}
+
+/// Meson's shared-library file name for `stem` on the target:
+/// `lib<stem>.so` on Linux/other unix, `lib<stem>.dylib` on macOS,
+/// `<stem>.dll` on Windows (meson drops the `lib` prefix there).
+fn shared_lib_file_name(stem: &str, target_os: &str) -> String {
+    match target_os {
+        "windows" => format!("{stem}.dll"),
+        "macos" => format!("lib{stem}.dylib"),
+        _ => format!("lib{stem}.so"),
+    }
+}
+
+/// Overwrite PKG_CONFIG_PATH with `dirs` followed by any pre-existing value,
+/// joined with the target's list separator: ';' on Windows (pkgconf
+/// convention), ':' on unix (freedesktop pkg-config).
+fn set_pkg_config_path(dirs: &[PathBuf], target_os: &str) {
+    let sep = if target_os == "windows" { ';' } else { ':' };
+    let mut search = dirs
+        .iter()
+        .map(|d| d.display().to_string())
+        .collect::<Vec<_>>()
+        .join(&sep.to_string());
+    if let Some(existing) = env::var_os("PKG_CONFIG_PATH") {
+        search.push(sep);
+        search.push_str(&existing.to_string_lossy());
+    }
+    // SAFETY: this build script is single-threaded, and this runs before
+    // invoking pkg-config, bindgen, or any other code that may spawn threads.
+    unsafe { env::set_var("PKG_CONFIG_PATH", search) };
+}
+
+/// Emit `-Wl,-rpath,<dir>` for each dir. On macOS the same spelling is
+/// accepted by ld64 and recorded as LC_RPATH; it resolves meson-built
+/// dylibs because their install name is `@rpath/<libname>`.
+fn emit_rpath_link_args(rpaths: &[String]) {
+    for dir in rpaths {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
+    }
+}
+
+/// Windows runtime discovery: no rpath exists, so the loader must find the
+/// DLLs in the executable's directory or on PATH. Copy the DLLs we link
+/// against into the cargo profile directory (target/<profile>/, derived from
+/// OUT_DIR = target/<profile>/build/<pkg>-<hash>/out) plus its `deps/` and
+/// `examples/` subdirs, where test and example binaries land. Copy failures
+/// downgrade to `cargo:warning` — adding the DLL dir to PATH still works.
+fn stage_windows_dlls(link_dirs: &[PathBuf], stems: &[&str]) {
+    let Ok(out_dir) = env::var("OUT_DIR") else {
+        return;
+    };
+    let Some(profile_dir) = PathBuf::from(&out_dir)
+        .ancestors()
+        .nth(3)
+        .map(PathBuf::from)
+    else {
+        println!(
+            "cargo:warning=cannot derive the cargo profile dir from OUT_DIR={out_dir}; \
+             DLLs not staged — add the meson library dir to PATH"
+        );
+        return;
+    };
+    let mut destinations = vec![profile_dir.clone()];
+    for sub in ["deps", "examples"] {
+        let dir = profile_dir.join(sub);
+        if dir.is_dir() || std::fs::create_dir_all(&dir).is_ok() {
+            destinations.push(dir);
+        }
+    }
+    for link_dir in link_dirs {
+        // An installed prefix keeps DLLs in bin/ next to the link dir lib/;
+        // a meson build tree has them right in the link dir.
+        let search_dirs = [link_dir.clone(), link_dir.join("../bin")];
+        for stem in stems {
+            // Meson names the DLL <stem>.dll on Windows; accept the
+            // MinGW-style lib<stem>.dll as a fallback.
+            let mut dll = search_dirs.iter().flat_map(|dir| {
+                [
+                    dir.join(format!("{stem}.dll")),
+                    dir.join(format!("lib{stem}.dll")),
+                ]
+            });
+            let Some(dll) = dll.find(|p| p.is_file()) else {
+                continue;
+            };
+            for dest in &destinations {
+                if let Err(e) = std::fs::copy(&dll, dest.join(dll.file_name().unwrap())) {
+                    println!(
+                        "cargo:warning=failed to copy {} to {}: {e}; \
+                         add {} to PATH so the loader finds it",
+                        dll.display(),
+                        dest.display(),
+                        link_dir.display()
+                    );
+                }
+            }
+        }
+    }
 }

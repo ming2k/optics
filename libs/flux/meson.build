@@ -22,6 +22,17 @@ endif
 
 flux_inc = include_directories('include')
 
+# dma-buf (fd-based external memory import/export + sync_file fences) is
+# Linux-only. When off, src/canvas/dmabuf_stub.c replaces dmabuf.c and
+# the FLUX_HAVE_DMABUF gates in device.c / surface.c compile the feature
+# out; the public API stays declared and answers FLUX_ERROR_UNSUPPORTED.
+have_dmabuf = host_machine.system() == 'linux'
+if have_dmabuf
+  flux_c_args_dma = ['-DFLUX_HAVE_DMABUF=1']
+else
+  flux_c_args_dma = []
+endif
+
 flux_sources = files(
   'src/core/device.c',
   'src/core/surface.c',
@@ -46,7 +57,21 @@ flux_sources = files(
 )
 flux_extra_inputs = []
 
-flux_c_args = ['-DFLUX_BUILDING=1']
+flux_c_args = ['-DFLUX_BUILDING=1'] + flux_c_args_dma
+
+# C23 #embed bakes each compiled .spv into the binary (renderer.c /
+# effect.c / scene.c). Compilers without #embed (MSVC cl, Apple Clang)
+# take a generated-header path instead — the headers are produced from
+# the same .spv files by tools/spv2h.py further below. --embed-dir is
+# probed because MSVC rejects unknown options outright.
+flux_embed_dir_arg = cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
+if opt_canvas or opt_scene or opt_effect
+  flux_c_args += flux_embed_dir_arg
+endif
+# Per-shader accumulators for the generated-header fallback; the
+# custom_target loop sits after the module blocks.
+flux_shader_spvs = []
+flux_shader_names = []
 if opt_canvas
   flux_sources += files(
     'src/canvas/canvas.c',
@@ -55,12 +80,16 @@ if opt_canvas
     'src/canvas/geometry_flatten.c',
     'src/canvas/geometry_tess.c',
     'src/canvas/geometry_stroke.c',
-    'src/canvas/dmabuf.c',
     'src/canvas/renderer.c',
     'src/canvas/record.c',
     'src/canvas/backend_vk.c',
     'src/canvas/backend_cpu.c',
   )
+  if have_dmabuf
+    flux_sources += files('src/canvas/dmabuf.c')
+  else
+    flux_sources += files('src/canvas/dmabuf_stub.c')
+  endif
   flux_c_args += '-DFLUX_HAVE_CANVAS=1'
 
   glslang = find_program('glslangValidator', required : true)
@@ -97,7 +126,12 @@ if opt_canvas
   flux_extra_inputs += [canvas_solid_vert_spv, canvas_solid_frag_spv,
                         canvas_gradient_frag_spv, canvas_image_frag_spv,
                         canvas_glyph_frag_spv, canvas_sdf_frag_spv]
-  flux_c_args += '--embed-dir=' + meson.current_build_dir()
+  flux_shader_spvs += [canvas_solid_vert_spv, canvas_solid_frag_spv,
+                       canvas_gradient_frag_spv, canvas_image_frag_spv,
+                       canvas_glyph_frag_spv, canvas_sdf_frag_spv]
+  flux_shader_names += ['canvas_solid_vert_spv', 'canvas_solid_frag_spv',
+                        'canvas_gradient_frag_spv', 'canvas_image_frag_spv',
+                        'canvas_glyph_frag_spv', 'canvas_sdf_frag_spv']
 endif
 if opt_scene
   flux_sources += files('src/scene/scene.c')
@@ -139,9 +173,12 @@ if opt_scene
   flux_extra_inputs += [scene_unlit_vert_spv, scene_unlit_frag_spv,
                         scene_phong_vert_spv, scene_phong_frag_spv,
                         scene_unlit_skin_vert_spv, scene_phong_skin_vert_spv]
-  if not flux_c_args.contains('--embed-dir=' + meson.current_build_dir())
-    flux_c_args += '--embed-dir=' + meson.current_build_dir()
-  endif
+  flux_shader_spvs += [scene_unlit_vert_spv, scene_unlit_frag_spv,
+                       scene_phong_vert_spv, scene_phong_frag_spv,
+                       scene_unlit_skin_vert_spv, scene_phong_skin_vert_spv]
+  flux_shader_names += ['scene_unlit_vert_spv', 'scene_unlit_frag_spv',
+                        'scene_phong_vert_spv', 'scene_phong_frag_spv',
+                        'scene_unlit_skin_vert_spv', 'scene_phong_skin_vert_spv']
 endif
 if opt_compute
   flux_sources += files('src/compute/compute.c')
@@ -176,9 +213,26 @@ if opt_effect
   )
   flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
                         effect_liquid_glass_comp_spv, effect_storage_clear_comp_spv]
-  if not flux_c_args.contains('--embed-dir=' + meson.current_build_dir())
-    flux_c_args += '--embed-dir=' + meson.current_build_dir()
-  endif
+  flux_shader_spvs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
+                       effect_liquid_glass_comp_spv, effect_storage_clear_comp_spv]
+  flux_shader_names += ['effect_blur_spv', 'effect_backdrop_spv',
+                        'effect_liquid_glass_spv', 'effect_storage_clear_spv']
+endif
+
+# Generated shader headers for the no-#embed fallback (MSVC cl / Apple
+# Clang). The C sources pick per translation unit via __has_embed, so the
+# headers must exist regardless of host compiler; each is one small
+# script run over the matching .spv.
+if flux_shader_spvs.length() > 0
+  spv2h_py = import('python').find_installation('python3')
+  spv2h = files('../../tools/spv2h.py')
+  foreach i : range(flux_shader_spvs.length())
+    flux_extra_inputs += custom_target(flux_shader_names[i] + '.h',
+      input   : flux_shader_spvs[i],
+      output  : flux_shader_names[i] + '.h',
+      command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', flux_shader_names[i]],
+    )
+  endforeach
 endif
 
 # Text shaping lives in the flux-text sibling (ADR-0016); libflux itself
@@ -227,6 +281,9 @@ endif
 # Public defines propagated to every consumer so the umbrella header
 # (<flux/flux.h>) knows which optional module headers to pull in.
 flux_public_defines = []
+if have_dmabuf
+  flux_public_defines += '-DFLUX_HAVE_DMABUF=1'
+endif
 if opt_canvas
   flux_public_defines += '-DFLUX_HAVE_CANVAS=1'
 endif

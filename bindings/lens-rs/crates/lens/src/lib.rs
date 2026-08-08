@@ -34,8 +34,9 @@ mod types;
 
 pub use input::{Input, MouseButton, key, mods};
 pub use types::{
-    Align, Color, CursorHint, ForegroundOutline, Icon, LayoutOpts, OverlayOpts, Rect, Response,
-    TabStyle, TableColumn, TableOpts, TableResult, TabsOpts, TextMetrics, Theme,
+    Align, Color, CursorHint, FontFamily, ForegroundOutline, Icon, LayoutOpts, ModalOpts,
+    OverlayOpts, Rect, Response, TabStyle, TableColumn, TableOpts, TableResult, TabsOpts,
+    TextMetrics, Theme,
 };
 
 /// The retained UI context. Owns the persistent tree, layout, and draw list.
@@ -259,6 +260,25 @@ impl Frame {
     pub fn set_theme(&mut self, theme: Theme) {
         // SAFETY: ui is live inside a frame; theme is a value type.
         unsafe { sys::lens_set_theme(self.ui, theme.0) };
+    }
+
+    /// Set the typeface family for subsequently built widgets in this frame.
+    /// Set it, build the widgets that need another voice, then set it back —
+    /// the same pattern as [`Frame::set_theme`].
+    pub fn set_text_family(&mut self, family: FontFamily) {
+        // SAFETY: ui is live inside a frame; family is a value type.
+        unsafe { sys::lens_set_text_family(self.ui, family.raw()) };
+    }
+
+    /// The typeface family currently applied to built widgets.
+    pub fn text_family(&self) -> FontFamily {
+        // SAFETY: ui is live inside a frame; the call only reads state.
+        match unsafe { sys::lens_get_text_family(self.ui as *const sys::lens) } {
+            sys::lens_text_family::LENS_TEXT_FAMILY_SANS => FontFamily::Sans,
+            sys::lens_text_family::LENS_TEXT_FAMILY_SERIF => FontFamily::Serif,
+            sys::lens_text_family::LENS_TEXT_FAMILY_MONO => FontFamily::Mono,
+            _ => FontFamily::Default,
+        }
     }
 
     /// Shape `text` with the active theme font and return its logical extent.
@@ -902,6 +922,53 @@ impl Frame {
         unsafe { sys::lens_layer_begin(self.ui, c.as_ptr(), rect.to_raw(), opts.to_raw()) };
         body(self);
         unsafe { sys::lens_layer_end(self.ui) };
+    }
+
+    // ---- modal dialogs (ADR-0039) ------------------------------------------
+
+    /// Open the modal dialog keyed by `id`. The body builds on subsequent
+    /// frames while the id stays open; pair with [`Frame::modal`] to declare
+    /// the body.
+    pub fn modal_open(&mut self, id: &str) {
+        let c = cstr(id);
+        // SAFETY: ui is live for the frame; c outlives the call.
+        unsafe { sys::lens_modal_open(self.ui, c.as_ptr()) };
+    }
+
+    /// Close the modal dialog keyed by `id`.
+    pub fn modal_close(&mut self, id: &str) {
+        let c = cstr(id);
+        // SAFETY: ui is live for the frame; c outlives the call.
+        unsafe { sys::lens_modal_close(self.ui, c.as_ptr()) };
+    }
+
+    /// Whether the modal dialog keyed by `id` is currently open.
+    pub fn modal_is_open(&self, id: &str) -> bool {
+        let c = cstr(id);
+        // SAFETY: ui is live for the frame; c outlives the call; read-only.
+        unsafe { sys::lens_modal_is_open(self.ui as *const sys::lens, c.as_ptr()) }
+    }
+
+    /// A centered modal dialog with a dim backdrop and a Tab focus trap.
+    /// `body` runs only while the dialog is open (see [`Frame::modal_open`]);
+    /// the focusable widgets built inside define the Tab cycle.
+    pub fn modal(&mut self, id: &str, opts: &ModalOpts, body: impl FnOnce(&mut Frame)) {
+        let c = cstr(id);
+        let title = opts.title.map(cstr);
+        let raw = sys::lens_modal_opts {
+            title: title.as_ref().map_or(ptr::null(), |t| t.as_ptr()),
+            backdrop: opts.backdrop.raw(),
+            min_width: opts.min_width.max(0.0),
+            dismissable: opts.dismissable,
+        };
+        // SAFETY: ui is live for the frame; c and title outlive the call; lens
+        // copies the title into its frame arena.
+        let open = unsafe { sys::lens_modal_begin(self.ui, c.as_ptr(), raw) };
+        if open {
+            body(self);
+            // SAFETY: only paired with a true return from lens_modal_begin.
+            unsafe { sys::lens_modal_end(self.ui) };
+        }
     }
 
     // ---- widgets ----------------------------------------------------------

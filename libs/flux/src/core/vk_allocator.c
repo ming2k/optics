@@ -242,7 +242,7 @@ static void block_destroy(flux_device *d, flux_vk_block *b) {
 flux_result flux_vk_allocator_init(flux_device *d) {
     flux_vk_allocator *a = &d->mem_allocator;
     memset(a, 0, sizeof(*a));
-    if (pthread_mutex_init(&a->lock, NULL) != 0) {
+    if (!flux_platform_mutex_init(&a->lock)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "allocator mutex init failed");
         return FLUX_ERROR_BACKEND_FAILURE;
     }
@@ -296,7 +296,7 @@ void flux_vk_allocator_destroy(flux_device *d) {
         b = next;
     }
     a->blocks = NULL;
-    pthread_mutex_destroy(&a->lock);
+    flux_platform_mutex_destroy(&a->lock);
     a->lock_initialized = false;
 }
 
@@ -430,7 +430,7 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
     VkDeviceSize size = align_up(mr.size, align);
 
     flux_vk_allocator *a = &d->mem_allocator;
-    pthread_mutex_lock(&a->lock);
+    flux_platform_mutex_lock(&a->lock);
 
     /* Dedicated path: oversize requests; any resource the driver marks
      * requiresDedicated (mandatory — pooling would be a spec violation);
@@ -438,8 +438,8 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
      * for big resources, but small ones stay pooled to protect the
      * vkAllocateMemory count). */
     bool force_dedicated =
-        dedication && (dedication->required ||
-                       (dedication->preferred && size >= FLUX_VK_PREFER_DEDICATED_MIN));
+        dedication &&
+        (dedication->required || (dedication->preferred && size >= FLUX_VK_PREFER_DEDICATED_MIN));
     if (force_dedicated || size >= FLUX_VK_DEDICATED_THRESH) {
         flux_result r =
             do_dedicated(d, size, mt, wants_device_address, host_visible, dedication, out);
@@ -454,7 +454,7 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
             a->bytes_reserved += size;
             a->live_allocations++;
         }
-        pthread_mutex_unlock(&a->lock);
+        flux_platform_mutex_unlock(&a->lock);
         return r;
     }
 
@@ -511,7 +511,7 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
                                   block_is_host_visible, &err);
         }
         if (!target) {
-            pthread_mutex_unlock(&a->lock);
+            flux_platform_mutex_unlock(&a->lock);
             return err;
         }
         target->next = a->blocks;
@@ -520,7 +520,7 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
         a->live_blocks++;
         if (!block_try_alloc(target, size, align, &chosen_offset)) {
             /* Shouldn't happen on a fresh block. */
-            pthread_mutex_unlock(&a->lock);
+            flux_platform_mutex_unlock(&a->lock);
             FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE,
                       "allocator: fresh block could not satisfy request");
             return FLUX_ERROR_BACKEND_FAILURE;
@@ -536,7 +536,7 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
     target->live_allocations++;
     a->bytes_in_use += size;
     a->live_allocations++;
-    pthread_mutex_unlock(&a->lock);
+    flux_platform_mutex_unlock(&a->lock);
     return FLUX_OK;
 }
 
@@ -552,7 +552,7 @@ void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc) {
     if (!d || !alloc || !alloc->memory)
         return;
     flux_vk_allocator *a = &d->mem_allocator;
-    pthread_mutex_lock(&a->lock);
+    flux_platform_mutex_lock(&a->lock);
 
     flux_vk_block *freed_block = NULL;
 
@@ -568,7 +568,7 @@ void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc) {
                        "allocation",
                        d->log_user);
             }
-            pthread_mutex_unlock(&a->lock);
+            flux_platform_mutex_unlock(&a->lock);
             return;
         }
         if (alloc->mapped)
@@ -596,7 +596,7 @@ void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc) {
                          b->live_allocations);
                 d->log(FLUX_LOG_ERROR, "flux", 0, "%s", buf, d->log_user);
             }
-            pthread_mutex_unlock(&a->lock);
+            flux_platform_mutex_unlock(&a->lock);
             return;
         }
 
@@ -652,7 +652,7 @@ void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc) {
         }
     }
 
-    pthread_mutex_unlock(&a->lock);
+    flux_platform_mutex_unlock(&a->lock);
 }
 
 static uint32_t reclaim_locked(flux_device *d) {
@@ -679,36 +679,36 @@ uint32_t flux_vk_allocator_reclaim(flux_device *d) {
     if (!d)
         return 0;
     flux_vk_allocator *a = &d->mem_allocator;
-    pthread_mutex_lock(&a->lock);
+    flux_platform_mutex_lock(&a->lock);
     uint32_t reclaimed = reclaim_locked(d);
-    pthread_mutex_unlock(&a->lock);
+    flux_platform_mutex_unlock(&a->lock);
     return reclaimed;
 }
 
 void flux_vk_allocator_note_external(flux_device *d, VkDeviceSize bytes) {
     flux_vk_allocator *a = &d->mem_allocator;
-    pthread_mutex_lock(&a->lock);
+    flux_platform_mutex_lock(&a->lock);
     a->bytes_in_use += bytes;
     a->bytes_reserved += bytes;
     a->live_allocations++;
-    pthread_mutex_unlock(&a->lock);
+    flux_platform_mutex_unlock(&a->lock);
 }
 
 void flux_vk_allocator_unnote_external(flux_device *d, VkDeviceSize bytes) {
     flux_vk_allocator *a = &d->mem_allocator;
-    pthread_mutex_lock(&a->lock);
+    flux_platform_mutex_lock(&a->lock);
     if (a->live_allocations == 0 || bytes > a->bytes_in_use) {
         if (d->log) {
             d->log(FLUX_LOG_ERROR, "flux", 0, "%s",
                    "flux_vk_allocator_unnote_external: rejected (would underflow)", d->log_user);
         }
-        pthread_mutex_unlock(&a->lock);
+        flux_platform_mutex_unlock(&a->lock);
         return;
     }
     a->bytes_in_use -= bytes;
     a->bytes_reserved -= bytes;
     a->live_allocations--;
-    pthread_mutex_unlock(&a->lock);
+    flux_platform_mutex_unlock(&a->lock);
 }
 
 void flux_device_memory_stats(flux_device *d, flux_memory_stats *out) {
@@ -724,11 +724,11 @@ void flux_device_memory_stats(flux_device *d, flux_memory_stats *out) {
      * a diagnostics path; the wait is off every hot loop. */
     flux_vk_upload_pending_drain(d);
     flux_vk_allocator *a = (flux_vk_allocator *)&d->mem_allocator;
-    pthread_mutex_lock(&a->lock);
+    flux_platform_mutex_lock(&a->lock);
     out->bytes_in_use = a->bytes_in_use;
     out->bytes_reserved = a->bytes_reserved;
     out->lost_ranges_bytes = a->lost_ranges_bytes;
     out->live_allocations = a->live_allocations;
     out->live_blocks = a->live_blocks;
-    pthread_mutex_unlock(&a->lock);
+    flux_platform_mutex_unlock(&a->lock);
 }

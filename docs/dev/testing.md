@@ -18,6 +18,15 @@ surface.
 | `iris` tests | `tests/iris/` | Headless API, theme, version, and accessibility helpers. |
 | Rust tests | `bindings/*-rs/` | A configured C build tree or installed C libraries. |
 | Interactive checks | `examples/` | Depends on the example; `iris` and most `flux` demos need Wayland/GLFW. |
+| Windows TU compile check | `tools/zig-win32-check.sh` | Cross-compiles Windows-only sources with zig cc + MinGW-w64 headers; no Windows host needed. |
+
+On Windows and macOS the same suites run; skip the GPU-less lanes with
+`--no-suite integration --no-suite bench --no-suite fuzz` where no Vulkan
+driver is present. `canvas_consistency` (integration) is the portability
+gate: it compares the GPU backend against the CPU software oracle
+pixel-by-pixel and is expected to pass on every platform's Vulkan driver
+(MoltenVK >= 1.3 on macOS). See
+[Cross-platform](cross-platform.md).
 
 ## Run Tests
 

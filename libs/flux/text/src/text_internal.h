@@ -1,5 +1,6 @@
-/* text_internal.h — shared state for the FreeType/HarfBuzz/Fontconfig text
- * backend, split across face.c (face discovery/loading + lifecycle), atlas.c
+/* text_internal.h — shared state for the FreeType/HarfBuzz text
+ * backend, split across face.c (face loading + lifecycle; discovery is
+ * delegated to the txt_platform_font.h platform layer), atlas.c
  * (packed R8 coverage atlas + rect allocation + subpixel rasterisation +
  * full-texture reclaim), glyph_cache.c (open-addressing glyph hash table
  * with bounded LRU eviction), itemize.c (BiDi + script + face run
@@ -22,13 +23,14 @@
 #include <hb-ft.h>
 #include <hb.h>
 
-#include <fontconfig/fontconfig.h>
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "glyph_cache.h"
+#include "txt_platform_font.h"
 
 /* ------------------------------------------------------------------ */
 /*  Diagnostics                                                        */
@@ -82,7 +84,7 @@ void txt_logf(flux_text *t, flux_log_level level, const char *fmt, ...)
 #define GLYPH_HASH_INIT 256
 #define TXT_STYLE_SLOTS 4
 #define FLUX_TEXT_NUM_FAMILIES 3 /* sans, serif, mono (DEFAULT resolves to one) */
-#define MAX_FACES_PER_SLOT 8     /* primary chain from FcFontSort family query */
+#define MAX_FACES_PER_SLOT 8     /* primary chain from the platform family query */
 #define MAX_TOTAL_FACES 24       /* hard cap: primary + lazy charset patches */
 /* Initial run scratch capacity (stack-free heap buffer in flux_text). The
  * run list grows on demand, so this only sets the high-water line before
@@ -104,12 +106,13 @@ typedef struct txt_face {
     FT_Face face;
     hb_font_t *hb_font;
     char *path;
-    FcCharSet *charset;
-    /* Fontconfig face index, passed straight to FT_New_Face. For variable
-     * fonts fontconfig encodes the chosen named instance in the high bits
-     * (e.g. Regular = 0x40000, Medium = 0x50000); passing 0 here would load
-     * the default instance regardless of the weight we asked fontconfig for,
-     * so weight changes never reached variable CJK faces. */
+    txtp_charset *charset; /* platform coverage set; NULL = unknown coverage */
+    /* Platform face index, passed straight to FT_New_Face. Selects the TTC
+     * member; under fontconfig it additionally encodes the chosen variable-
+     * font named instance in the high bits (e.g. Regular = 0x40000, Medium
+     * = 0x50000). Passing 0 here would load the default instance regardless
+     * of the weight we asked for, so weight changes never reached variable
+     * CJK faces. */
     FT_Long index;
     uint32_t face_px;
     float units_per_em;
@@ -119,9 +122,9 @@ typedef struct txt_face {
 } txt_face;
 
 typedef struct txt_face_slot {
-    /* Primary chain (FcFontSort family query, up to MAX_FACES_PER_SLOT)
-     * followed by lazily-loaded charset patch faces, capped at
-     * MAX_TOTAL_FACES total. Heap-grown because patch faces are
+    /* Primary chain (platform ranked family query, up to
+     * MAX_FACES_PER_SLOT) followed by lazily-loaded charset patch faces,
+     * capped at MAX_TOTAL_FACES total. Heap-grown because patch faces are
      * discovered at itemize time when a codepoint is not covered by
      * any primary face — e.g. CJK Extension-B, whose only installed
      * fonts rank outside the top-8 family sort and so would otherwise
@@ -130,8 +133,8 @@ typedef struct txt_face_slot {
     int count;
     int cap;
     flux_text_family family; /* slot's family, for charset patch queries */
-    int fc_weight;           /* slot's FC_WEIGHT, for charset patch queries */
-    int fc_slant;            /* slot's FC_SLANT, for charset patch queries */
+    float weight;            /* slot's CSS weight, for charset patch queries */
+    bool italic;             /* slot's italic flag, for charset patch queries */
 } txt_face_slot;
 
 /* One cached glyph image. Defined in glyph_cache.h — included above.
@@ -286,6 +289,17 @@ struct flux_text {
 /*  Small shared helpers                                               */
 /* ------------------------------------------------------------------ */
 
+/* strdup is POSIX, not ISO C, and MSVC does not provide it. */
+static inline char *txt_strdup(const char *s) {
+    if (!s)
+        return NULL;
+    size_t n = strlen(s) + 1;
+    char *p = malloc(n);
+    if (p)
+        memcpy(p, s, n);
+    return p;
+}
+
 /* CJK ideographic scripts. Their glyphs are stroke-dense, so at UI sizes a
  * horizontal subpixel shift is visually negligible — but it still costs a
  * distinct cache entry per phase (xTXT_SUBPIXEL_PHASES). Snapping these to
@@ -306,7 +320,7 @@ static inline int encode_face_id(int slot_idx, int face_idx) {
  * makes this safe for raw (ptr,len) callers whose final codepoint may be
  * truncated — without it the multibyte branches would read p[1..3] past the
  * end of the buffer and could segfault at a page boundary. */
-static inline int txt_utf8_decode(const char *p, size_t remaining, FcChar32 *out_cp) {
+static inline int txt_utf8_decode(const char *p, size_t remaining, uint32_t *out_cp) {
     unsigned char c = (unsigned char)*p;
     if ((c & 0x80) == 0) {
         *out_cp = c;
@@ -390,7 +404,7 @@ static inline bool txt_face_set_px(txt_face *f, uint32_t px) {
 bool txt_init_slot_faces(flux_text *t, int slot_idx, float weight, bool italic,
                          flux_text_family family);
 bool txt_ensure_face_loaded(flux_text *t, int slot_idx, int face_idx, uint32_t req_px);
-int txt_find_face_for_char(flux_text *t, int slot_idx, FcChar32 cp);
+int txt_find_face_for_char(flux_text *t, int slot_idx, uint32_t cp);
 
 /* atlas.c */
 bool txt_atlas_init(flux_text *t);

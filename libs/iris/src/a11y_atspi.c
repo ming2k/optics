@@ -1052,14 +1052,17 @@ IRIS_API int iris_a11y_init(void) {
     return 0;
 }
 
-IRIS_API int iris_a11y_fd(void) {
+/* Event-loop integration point (src/a11y_internal.h): the backend polls
+ * this fd and pumps on signal, so AT-SPI method calls are answered on the
+ * iris main thread, serialized with iris_a11y_update(). Not exported. */
+int iris_a11y__fd(void) {
     if (!g_a11y_bus)
         return -1;
     int fd = sd_bus_get_fd(g_a11y_bus);
     return fd < 0 ? -1 : fd;
 }
 
-IRIS_API short iris_a11y_poll_events(void) {
+short iris_a11y__poll_events(void) {
     if (!g_a11y_bus)
         return 0;
     int ev = sd_bus_get_events(g_a11y_bus);
@@ -1070,7 +1073,7 @@ IRIS_API const char *iris_a11y_unique_name(void) {
     return g_a11y_bus ? g_unique : NULL;
 }
 
-IRIS_API void iris_a11y_pump(void) {
+void iris_a11y__pump(void) {
     if (!g_a11y_bus)
         return;
     for (;;) {

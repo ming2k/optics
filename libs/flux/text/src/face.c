@@ -1,9 +1,13 @@
-/* face.c — font face discovery (Fontconfig), loading (FreeType + HarfBuzz)
- * and backend lifecycle for the FT/HB/FC text path.
+/* face.c — font face loading (FreeType + HarfBuzz), slot management and
+ * backend lifecycle for the text path. Font discovery itself (family →
+ * file path + face index, per-codepoint fallback) lives behind the
+ * platform layer in txt_platform_font.h (fontconfig on Linux, DirectWrite
+ * on Windows, CoreText on macOS).
  *
  * Two weight slots (regular <=500, bold >500); each holds up to
- * MAX_FACES_PER_SLOT faces from FcFontSort so missing glyphs fall back
- * through the chain. See font_internal.h for the shared state. */
+ * MAX_FACES_PER_SLOT faces from the platform's ranked family query so
+ * missing glyphs fall back through the chain. See text_internal.h for
+ * the shared state. */
 
 #include "text_internal.h"
 
@@ -32,39 +36,13 @@ void txt_logf(flux_text *t, flux_log_level level, const char *fmt, ...) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
-static int weight_to_fc(float weight) {
-    if (weight <= 0.0f)
-        weight = 400.0f;
-    if (weight < 150.0f)
-        return FC_WEIGHT_THIN;
-    if (weight < 250.0f)
-        return FC_WEIGHT_EXTRALIGHT;
-    if (weight < 350.0f)
-        return FC_WEIGHT_LIGHT;
-    if (weight < 450.0f)
-        return FC_WEIGHT_REGULAR;
-    if (weight < 550.0f)
-        return FC_WEIGHT_MEDIUM;
-    if (weight < 650.0f)
-        return FC_WEIGHT_SEMIBOLD;
-    if (weight < 750.0f)
-        return FC_WEIGHT_BOLD;
-    if (weight < 850.0f)
-        return FC_WEIGHT_EXTRABOLD;
-    return FC_WEIGHT_BLACK;
-}
-
-/* ------------------------------------------------------------------ */
 /*  Face loading                                                       */
 /* ------------------------------------------------------------------ */
 
 /* Forward decl: txt_load_patch_face (above) and txt_init_slot_faces
- * (below) both need the family→fontconfig string map. */
+ * (below) both need the family→generic-name map. */
 static const char *family_fc(flux_text_family fam);
-static int txt_load_patch_face(flux_text *t, int slot_idx, FcChar32 cp);
+static int txt_load_patch_face(flux_text *t, int slot_idx, uint32_t cp);
 
 static bool face_load(flux_text *t, int slot_idx, int face_idx, uint32_t req_px) {
     txt_face *f = &t->slots[slot_idx].faces[face_idx];
@@ -121,7 +99,7 @@ bool txt_ensure_face_loaded(flux_text *t, int slot_idx, int face_idx, uint32_t r
         free(f->path);
         f->path = NULL;
         if (f->charset) {
-            FcCharSetDestroy(f->charset);
+            txtp_charset_free(f->charset);
             f->charset = NULL;
         }
         return false;
@@ -129,18 +107,18 @@ bool txt_ensure_face_loaded(flux_text *t, int slot_idx, int face_idx, uint32_t r
     return true;
 }
 
-int txt_find_face_for_char(flux_text *t, int slot_idx, FcChar32 cp) {
+int txt_find_face_for_char(flux_text *t, int slot_idx, uint32_t cp) {
     txt_face_slot *slot = &t->slots[slot_idx];
     for (int i = 0; i < slot->count; i++) {
         const txt_face *f = &slot->faces[i];
-        if (f->charset && FcCharSetHasChar(f->charset, cp))
+        if (f->charset && txtp_charset_has_char(f->charset, cp))
             return i;
     }
     /* No loaded face (primary chain or existing patch) covers this
-     * codepoint. Query fontconfig by charset and lazily load the top
-     * font that covers it as a patch face. This is what makes rare
+     * codepoint. Ask the platform layer for a covering font and lazily
+     * load the top candidate as a patch face. This is what makes rare
      * coverage — CJK Extension-B/C/D/E, historic scripts, emoji —
-     * render even when their fonts rank outside the top-8 family sort
+     * render even when their fonts rank outside the top-8 family query
      * that fills the primary chain. Bounded by MAX_TOTAL_FACES; once
      * full, further uncovered codepoints fall through to face 0
      * (.notdef → tofu) rather than growing without limit. */
@@ -150,66 +128,24 @@ int txt_find_face_for_char(flux_text *t, int slot_idx, FcChar32 cp) {
     return 0;
 }
 
-/* Lazily load a charset-targeted patch face for cp. Queries fontconfig
- * with the slot's family/weight plus a charset containing cp, loads the
- * top-ranked font whose charset actually covers cp, and appends it to
- * slot->faces. Returns the new face index, or -1 on failure / cap hit /
- * no installed coverage. */
-static int txt_load_patch_face(flux_text *t, int slot_idx, FcChar32 cp) {
+/* Lazily load a charset-targeted patch face for cp. Asks the platform
+ * layer for the best installed font covering cp (biased towards the
+ * slot's family/weight/italic) and appends it to slot->faces. Returns
+ * the new face index, or -1 on failure / cap hit / no installed
+ * coverage. */
+static int txt_load_patch_face(flux_text *t, int slot_idx, uint32_t cp) {
     txt_face_slot *slot = &t->slots[slot_idx];
     if (slot->count >= MAX_TOTAL_FACES)
         return -1;
 
-    FcCharSet *req_cs = FcCharSetCreate();
-    if (!req_cs)
+    /* Deliberately the plain generic family name, NOT the FLUX_TEXT_FONT
+     * override the primary chain honoured — patch queries stay on the
+     * generic family so an env override cannot skew rare-codepoint
+     * fallback (same semantics as before the platform split). */
+    txtp_font_match m = {0};
+    if (!txt_platform_font_query_codepoint(family_fc(slot->family), slot->weight, slot->italic, cp,
+                                           &m))
         return -1;
-    if (!FcCharSetAddChar(req_cs, cp)) {
-        FcCharSetDestroy(req_cs);
-        return -1;
-    }
-
-    FcPattern *pat =
-        FcPatternBuild(NULL, FC_FAMILY, FcTypeString, (const FcChar8 *)family_fc(slot->family),
-                       FC_WEIGHT, FcTypeInteger, slot->fc_weight, FC_SLANT, FcTypeInteger,
-                       slot->fc_slant, FC_CHARSET, FcTypeCharSet, req_cs, (char *)NULL);
-    FcCharSetDestroy(req_cs);
-    if (!pat)
-        return -1;
-    FcConfigSubstitute(NULL, pat, FcMatchPattern);
-    FcDefaultSubstitute(pat);
-    FcResult res = FcResultNoMatch;
-    FcFontSet *fs = FcFontSort(NULL, pat, FcTrue, NULL, &res);
-    FcPatternDestroy(pat);
-    if (!fs)
-        return -1;
-
-    /* FcFontSort ranks by coverage, but with trim=FcTrue the result set
-     * may still include faces that do not actually cover cp; pick the
-     * first that does. */
-    int chosen = -1;
-    for (int i = 0; i < fs->nfont; i++) {
-        FcCharSet *cs = NULL;
-        if (FcPatternGetCharSet(fs->fonts[i], FC_CHARSET, 0, &cs) == FcResultMatch && cs &&
-            FcCharSetHasChar(cs, cp)) {
-            chosen = i;
-            break;
-        }
-    }
-    if (chosen < 0) {
-        FcFontSetDestroy(fs);
-        return -1; /* no installed font covers cp; caller renders .notdef */
-    }
-
-    FcPattern *p = fs->fonts[chosen];
-    FcChar8 *file = NULL;
-    if (FcPatternGetString(p, FC_FILE, 0, &file) != FcResultMatch) {
-        FcFontSetDestroy(fs);
-        return -1;
-    }
-    int idx = 0;
-    FcPatternGetInteger(p, FC_INDEX, 0, &idx);
-    FcCharSet *cs = NULL;
-    FcPatternGetCharSet(p, FC_CHARSET, 0, &cs);
 
     /* Grow the heap array (doubling). The primary chain pre-allocated
      * MAX_FACES_PER_SLOT entries at init; patch loading starts from
@@ -220,7 +156,7 @@ static int txt_load_patch_face(flux_text *t, int slot_idx, FcChar32 cp) {
             newcap = MAX_TOTAL_FACES;
         txt_face *nf = realloc(slot->faces, (size_t)newcap * sizeof *nf);
         if (!nf) {
-            FcFontSetDestroy(fs);
+            txtp_font_match_clear(&m);
             return -1;
         }
         memset(nf + slot->cap, 0, (size_t)(newcap - slot->cap) * sizeof *nf);
@@ -228,16 +164,18 @@ static int txt_load_patch_face(flux_text *t, int slot_idx, FcChar32 cp) {
         slot->cap = newcap;
     }
     if (slot->count >= slot->cap) { /* still at the hard cap */
-        FcFontSetDestroy(fs);
+        txtp_font_match_clear(&m);
         return -1;
     }
 
     txt_face *f = &slot->faces[slot->count];
     memset(f, 0, sizeof *f);
-    f->path = strdup((const char *)file);
-    f->index = idx;
-    f->charset = cs ? FcCharSetCopy(cs) : NULL;
+    f->path = txt_strdup(m.path);
+    f->index = m.index;
+    f->charset = m.charset; /* steal; the interface has no charset copy op */
+    m.charset = NULL;
     int new_idx = slot->count;
+    txtp_font_match_clear(&m);
 
     /* Eagerly load the patch at the same baseline pixel size as the
      * primary chain; per-use size changes are applied by
@@ -250,16 +188,14 @@ static int txt_load_patch_face(flux_text *t, int slot_idx, FcChar32 cp) {
         free(f->path);
         f->path = NULL;
         if (f->charset) {
-            FcCharSetDestroy(f->charset);
+            txtp_charset_free(f->charset);
             f->charset = NULL;
         }
         memset(f, 0, sizeof *f);
-        FcFontSetDestroy(fs);
         return -1;
     }
 
     slot->count++;
-    FcFontSetDestroy(fs);
 
     txt_logf(t, FLUX_LOG_INFO, "loaded charset patch face #%d (%s) for U+%04X; slot has %d face(s)",
              new_idx, f->path, (unsigned)cp, slot->count);
@@ -267,10 +203,13 @@ static int txt_load_patch_face(flux_text *t, int slot_idx, FcChar32 cp) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Slot initialisation via FcFontSort                                 */
+/*  Slot initialisation via the platform family query                  */
 /* ------------------------------------------------------------------ */
 
-/* Map a resolved family to the fontconfig family string to query. */
+/* Map a resolved family to the generic family name to query. The
+ * platform backends map these generic names to platform defaults
+ * (fontconfig: native generic aliases; DirectWrite / CoreText: explicit
+ * system fonts). */
 static const char *family_fc(flux_text_family fam) {
     switch (fam) {
     case FLUX_TEXT_FAMILY_SERIF:
@@ -283,38 +222,19 @@ static const char *family_fc(flux_text_family fam) {
     }
 }
 
-/* Run flux-text's standard family/weight/slant query and return the
- * sorted fontset (caller destroys it). NULL on failure. The FLUX_TEXT_FONT
- * env var overrides the default (sans-serif) family only, so a custom font
- * never silently replaces serif/mono. */
-static FcFontSet *fc_query(flux_text_family family, int fc_weight, bool italic) {
+bool txt_init_slot_faces(flux_text *t, int slot_idx, float weight, bool italic,
+                         flux_text_family family) {
+    /* The FLUX_TEXT_FONT env var overrides the default (sans-serif)
+     * family only, so a custom font never silently replaces serif/mono. */
     const char *fam = family_fc(family);
     if (family == FLUX_TEXT_FAMILY_SANS) {
         const char *env = getenv("FLUX_TEXT_FONT");
         if (env && *env)
             fam = env;
     }
-    int fc_slant = italic ? FC_SLANT_ITALIC : FC_SLANT_ROMAN;
-    FcPattern *pat =
-        FcPatternBuild(NULL, FC_FAMILY, FcTypeString, (const FcChar8 *)fam, FC_WEIGHT,
-                       FcTypeInteger, fc_weight, FC_SLANT, FcTypeInteger, fc_slant, (char *)NULL);
-    if (!pat)
-        return NULL;
-    FcConfigSubstitute(NULL, pat, FcMatchPattern);
-    FcDefaultSubstitute(pat);
-    FcResult res = FcResultNoMatch;
-    FcFontSet *fs = FcFontSort(NULL, pat, FcTrue, NULL, &res);
-    FcPatternDestroy(pat);
-    return fs;
-}
 
-bool txt_init_slot_faces(flux_text *t, int slot_idx, float weight, bool italic,
-                         flux_text_family family) {
-    if (!FcInit())
-        return false;
-
-    FcFontSet *fs = fc_query(family, weight_to_fc(weight), italic);
-    if (!fs)
+    txtp_font_list *list = txt_platform_font_query_family(fam, weight, italic, MAX_FACES_PER_SLOT);
+    if (!list)
         return false;
 
     txt_face_slot *slot = &t->slots[slot_idx];
@@ -324,60 +244,37 @@ bool txt_init_slot_faces(flux_text *t, int slot_idx, float weight, bool italic,
     free(slot->faces);
     slot->faces = calloc(MAX_FACES_PER_SLOT, sizeof *slot->faces);
     if (!slot->faces) {
-        FcFontSetDestroy(fs);
+        txtp_font_list_free(list);
         return false;
     }
     slot->cap = MAX_FACES_PER_SLOT;
     slot->count = 0;
     slot->family = family;
-    slot->fc_weight = weight_to_fc(weight);
-    slot->fc_slant = italic ? FC_SLANT_ITALIC : FC_SLANT_ROMAN;
+    slot->weight = weight;
+    slot->italic = italic;
 
-    for (int i = 0; i < fs->nfont && slot->count < MAX_FACES_PER_SLOT; i++) {
-        FcPattern *p = fs->fonts[i];
-        FcChar8 *file = NULL;
-        if (FcPatternGetString(p, FC_FILE, 0, &file) != FcResultMatch)
+    for (int i = 0; i < list->count && slot->count < MAX_FACES_PER_SLOT; i++) {
+        txtp_font_match *m = &list->matches[i];
+        if (!m->path)
             continue;
 
         txt_face *f = &slot->faces[slot->count];
-        f->path = strdup((const char *)file);
+        f->path = txt_strdup(m->path);
 
-        /* Fontconfig's face index carries the chosen weight: for variable
-         * fonts the requested named instance lives in the high bits (Regular
-         * = 0x40000, Bold = 0x70000). Passing 0 to FT_New_Face would load the
-         * default instance, so a bold run would render at regular — read and
-         * forward the index instead. */
-        int idx = 0;
-        if (FcPatternGetInteger(p, FC_INDEX, 0, &idx) == FcResultMatch)
-            f->index = idx;
+        /* The platform face index carries the chosen TTC member and, for
+         * variable fonts under fontconfig, the requested named instance in
+         * the high bits (Regular = 0x40000, Bold = 0x70000). Passing 0 to
+         * FT_New_Face would load the default instance, so a bold run would
+         * render at regular — forward the index instead. */
+        f->index = m->index;
 
-        FcCharSet *cs = NULL;
-        if (FcPatternGetCharSet(p, FC_CHARSET, 0, &cs) == FcResultMatch && cs)
-            f->charset = FcCharSetCopy(cs);
+        f->charset = m->charset; /* steal; the interface has no charset copy op */
+        m->charset = NULL;
 
         slot->count++;
     }
 
-    FcFontSetDestroy(fs);
-
-    if (slot->count == 0) {
-        static const char *hardcoded[] = {
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-            "/usr/share/fonts/TTF/DejaVuSans.ttf",
-            NULL,
-        };
-        for (int i = 0; hardcoded[i] && slot->count < MAX_FACES_PER_SLOT; i++) {
-            FILE *fp = fopen(hardcoded[i], "rb");
-            if (fp) {
-                fclose(fp);
-                txt_face *f = &slot->faces[slot->count++];
-                f->path = strdup(hardcoded[i]);
-                f->index = 0;
-            }
-        }
-    }
+    txtp_font_list_free(list);
 
     if (slot->count == 0)
         return false;
@@ -428,9 +325,9 @@ flux_text *txt_engine_init(flux_device *dev) {
         goto fail;
     }
 
-    /* Slot 0 is the "regular" sans-serif face. The weight argument is on the
-     * CSS 1–1000 scale that `weight_to_fc` interprets (400 = regular, 500 =
-     * medium, 700 = bold), NOT fontconfig's own FC_WEIGHT_* constants.
+    /* Slot 0 is the "regular" sans-serif face. The weight argument is on
+     * the CSS 1–1000 scale the platform backends interpret (400 = regular,
+     * 500 = medium, 700 = bold), NOT fontconfig's own FC_WEIGHT_* constants.
      * Passing FC_WEIGHT_REGULAR (= 80) here used to make fontconfig match
      * the THIN face (80 < 150), so every glyph looked starved — especially
      * CJK, which has more strokes to fill the same em box. */
@@ -520,7 +417,7 @@ void txt_engine_shutdown(flux_text *t) {
             if (f->face)
                 FT_Done_Face(f->face);
             if (f->charset)
-                FcCharSetDestroy(f->charset);
+                txtp_charset_free(f->charset);
             free(f->path);
         }
         free(slot->faces);

@@ -46,7 +46,14 @@ extern "C" {
 /* Initialise the accessibility bridge: connect to the AT-SPI bus, register
  * the application, expose the root accessible object. Call once at startup,
  * before iris_app_run. Returns 0 on success, -1 if the bridge is
- * unavailable (no libsystemd, or AT-SPI bus unreachable). */
+ * unavailable (no libsystemd, or AT-SPI bus unreachable).
+ *
+ * The bridge services assistive-technology method calls on the iris main
+ * thread: the platform backend wires the bridge's transport into its own
+ * event loop through an internal integration point (src/a11y_internal.h).
+ * No fd, poll mask, or pump call is part of this public surface, so a
+ * backend whose OS accessibility transport is not pollable (Win32 UI
+ * Automation, Cocoa NSAccessibility) can satisfy the same contract. */
 IRIS_API int iris_a11y_init(void);
 
 /* The unique D-Bus name our AT-SPI connection owns (e.g. ":1.50"), or NULL
@@ -54,24 +61,10 @@ IRIS_API int iris_a11y_init(void);
  * to address us directly. */
 IRIS_API const char *iris_a11y_unique_name(void);
 
-/* The fd to poll(2) for incoming AT-SPI method calls, or -1 when the bridge
- * is not running. When readable, call iris_a11y_pump to dispatch. */
-IRIS_API int iris_a11y_fd(void);
-
-/* The poll(2) event mask to wait on for the a11y fd (sd_bus_get_events). As
- * with the colour-scheme watcher, the underlying sd-bus socket is level-
- * triggered and must be polled with this mask rather than a hard-coded POLLIN,
- * or an idle bus spins the event loop. Returns 0 when the bridge isn't running
- * (caller should then skip the fd). */
-IRIS_API short iris_a11y_poll_events(void);
-
-/* Drain pending AT-SPI method calls (GetName / GetRole / ...) from
- * assistive technology clients and reply. Safe to call spuriously. */
-IRIS_API void iris_a11y_pump(void);
-
 /* Reconcile the AT-SPI object tree with lens's live semantic tree. Call
- * once per frame, AFTER lens_end (the walk is only valid then). Returns
- * 0 on success, -1 if the bridge is not running. */
+ * once per frame, AFTER lens_end (the walk is only valid then), on the
+ * iris main thread. Returns 0 on success, -1 if the bridge is not
+ * running. */
 IRIS_API int iris_a11y_update(lens *ui);
 
 /* Shutdown the bridge and release D-Bus resources. Safe to call when not

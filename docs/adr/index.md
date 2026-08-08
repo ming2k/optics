@@ -60,3 +60,8 @@ a decision, write a new ADR and update the old one's status to
 | 0049 | [Strict DRM identity for Vulkan device selection](0049-strict-drm-vulkan-device-selection.md) | Accepted |
 | 0050 | [Single-body liquid-glass focus field](0050-single-body-liquid-glass-focus-field.md) | Accepted |
 | 0051 | [Independent rounded image clip for composed previews](0051-independent-rounded-image-clip.md) | Accepted |
+| 0052 | [flux platform abstraction layer + Linux-only dma-buf gate](0052-flux-platform-layer-and-dmabuf-gate.md) | Accepted |
+| 0053 | [Shader embedding — C23 #embed with generated-header fallback](0053-shader-embed-fallback.md) | Accepted |
+| 0054 | [Font discovery as a platform layer (fontconfig / DirectWrite / CoreText)](0054-font-discovery-platform-layer.md) | Accepted |
+| 0055 | [Callback-driven watch APIs + the backend wakeup seam](0055-watch-apis-and-wakeup-seam.md) | Accepted |
+| 0056 | [Win32 + Cocoa backends and the MoltenVK baseline](0056-win32-cocoa-backends-and-moltenvk.md) | Accepted |

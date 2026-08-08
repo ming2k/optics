@@ -161,7 +161,9 @@ static bool icon_button_impl(lens *ui, icon_button_spec spec) {
                             .kind = LENS_DRAW_ICON,
                             .rel = {icon_x, icon_y, s, s},
                             .color = glyph,
-                            .width = 1.75f * (s / 24.0f),
+                            /* Same 2/24 stroke ratio as bare lens_icon, so
+                             * buttons and inline icons read as one set. */
+                            .width = 2.0f * (s / 24.0f),
                             .icon_id = id,
                         });
 

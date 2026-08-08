@@ -16,5 +16,5 @@ license; these files are third-party content, not flux project code.
 `Duck.glb` is an indexed mesh carrying `POSITION` and `NORMAL` attributes with no
 skinning, so it exercises the loader's supported v0.1 subset and shades cleanly
 under the built-in PHONG material (the loader does not decode textures). Its
-POSITION bounds are roughly X[-69, 96], Y[10, 164], Z[-61, 54], so the camera
-framing constants in `gltf_camera_tour.c` target roughly (13, 87, -4).
+POSITION bounds are roughly X[-69, 96], Y[10, 164], Z[-61, 54], so the `--orbit`
+auto-framing in `gltf_viewer.c` centres the camera near (13, 87, -4).

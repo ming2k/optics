@@ -324,6 +324,32 @@ impl CursorHint {
     }
 }
 
+/// Typeface family for subsequently built widgets ([`crate::Frame::set_text_family`]).
+///
+/// Like the theme setters, this is a context switch read at widget-build
+/// time: set it, build the widgets that need another voice (a serif display
+/// title, a monospace readout), then set it back. `Default` keeps the
+/// engine's sans-serif default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FontFamily {
+    #[default]
+    Default,
+    Sans,
+    Serif,
+    Mono,
+}
+
+impl FontFamily {
+    pub(crate) fn raw(self) -> sys::lens_text_family {
+        match self {
+            FontFamily::Default => sys::lens_text_family::LENS_TEXT_FAMILY_DEFAULT,
+            FontFamily::Sans => sys::lens_text_family::LENS_TEXT_FAMILY_SANS,
+            FontFamily::Serif => sys::lens_text_family::LENS_TEXT_FAMILY_SERIF,
+            FontFamily::Mono => sys::lens_text_family::LENS_TEXT_FAMILY_MONO,
+        }
+    }
+}
+
 /// A token set (colours, sizes, radii) that drives lens's appearance.
 /// Construct a built-in set, adjust tokens with the `with_*` methods, and pass
 /// it to [`crate::Ui::set_theme`].
@@ -695,6 +721,35 @@ impl Icon {
             Icon::ZoomIn => LENS_ICON_ZOOM_IN,
             Icon::ZoomOut => LENS_ICON_ZOOM_OUT,
             Icon::Save => LENS_ICON_SAVE,
+        }
+    }
+}
+
+/// Options for a modal dialog ([`crate::Frame::modal`], ADR-0039).
+///
+/// A modal is a centered overlay with a dim backdrop that eclipses the base
+/// tree, plus a Tab focus trap so keyboard cycling stays inside the dialog
+/// body.
+#[derive(Debug, Clone, Copy)]
+pub struct ModalOpts<'a> {
+    /// Optional heading drawn at the top of the dialog.
+    pub title: Option<&'a str>,
+    /// Dim colour over the base tree; [`Color::TRANSPARENT`] selects the
+    /// library default (50% black).
+    pub backdrop: Color,
+    /// Content minimum width in logical px; 0 selects the library default.
+    pub min_width: f32,
+    /// When true (the default), Escape and click-outside close the dialog.
+    pub dismissable: bool,
+}
+
+impl Default for ModalOpts<'_> {
+    fn default() -> Self {
+        ModalOpts {
+            title: None,
+            backdrop: Color::TRANSPARENT,
+            min_width: 0.0,
+            dismissable: true,
         }
     }
 }

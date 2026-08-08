@@ -43,6 +43,16 @@ static void with_env(const char *gtk_theme, iris_color_scheme *out) {
     *out = iris_query_system_color_scheme();
 }
 
+/* Watch callback for the lifecycle checks below: with no running
+ * iris_app_run loop, deliveries are dropped before reaching it, so any
+ * call here is a bug. */
+static int watch_calls;
+static void on_scheme_changed(iris_color_scheme scheme, void *user) {
+    (void)scheme;
+    (void)user;
+    watch_calls++;
+}
+
 int main(void) {
     /* 1. Build the failing-gsettings sandbox and prepend it to PATH so the
      *    popen("gsettings ...") in theme_linux.c hits our shim. */
@@ -83,7 +93,31 @@ int main(void) {
     CHECK(IRIS_COLOR_SCHEME_PREFER_DARK == 1);
     CHECK(IRIS_COLOR_SCHEME_PREFER_LIGHT == 2);
 
-    /* 7. Clean up the sandbox (best-effort). */
+    /* 7. Live watching is callback-based (no fd/poll surface). Headless we
+     *    cannot force a desktop change, so exercise the lifecycle contract:
+     *      - unwatch without watch is a safe no-op;
+     *      - watch(NULL) is rejected;
+     *      - watch either succeeds (libsystemd + a reachable session bus)
+     *        or cleanly reports -1; on success a second watch replaces the
+     *        registration and unwatch stops it;
+     *      - no callback fires spuriously while we sit idle. */
+    iris_color_scheme_unwatch(); /* safe no-op before any watch */
+    CHECK(iris_color_scheme_watch(NULL, NULL) != 0);
+
+    watch_calls = 0;
+    if (iris_color_scheme_watch(on_scheme_changed, NULL) == 0) {
+        /* Re-registration replaces cb/user and keeps watching. */
+        CHECK(iris_color_scheme_watch(on_scheme_changed, NULL) == 0);
+        iris_color_scheme_unwatch();
+        /* After unwatch returns the registration is dead: the callback
+         * must not fire, and a second unwatch is a safe no-op. */
+        iris_color_scheme_unwatch();
+        CHECK(watch_calls == 0);
+    }
+    /* -1 path (no libsystemd at build time / no session bus in CI): the
+     * startup-only query above already covered the fallback. */
+
+    /* 8. Clean up the sandbox (best-effort). */
     char shim[1024];
     snprintf(shim, sizeof shim, "%s/gsettings", dir);
     (void)unlink(shim);

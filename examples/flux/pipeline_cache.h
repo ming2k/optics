@@ -31,7 +31,16 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#if defined(_WIN32)
+#include <direct.h>  /* _mkdir */
+#include <io.h>      /* _unlink */
+#include <process.h> /* _getpid */
+#define mkdir(path, mode) _mkdir(path)
+#define unlink(path) _unlink(path)
+#define getpid() _getpid()
+#else
 #include <unistd.h>
+#endif
 
 #define FLUX_PIPELINE_CACHE_FILE_MAX_PATH 1024
 
@@ -47,8 +56,9 @@ static inline void flux_pipeline_cache_file_set_path(flux_pipeline_cache_file *c
 }
 
 /* Resolve a default path the way the example expects: an explicit
- * $FLUX_PIPELINE_CACHE override wins; otherwise the file lives under
- * $XDG_CACHE_HOME/flux or $HOME/.cache/flux. Returns false (empty
+ * $FLUX_PIPELINE_CACHE override wins; otherwise the file lives under the
+ * platform cache dir — $XDG_CACHE_HOME/flux or $HOME/.cache/flux on
+ * Linux/macOS, %LOCALAPPDATA%\flux on Windows. Returns false (empty
  * path) when nothing usable is set, leaving persistence disabled. */
 static inline bool flux_pipeline_cache_file_set_default_path(flux_pipeline_cache_file *c,
                                                              const char *name) {
@@ -57,6 +67,17 @@ static inline bool flux_pipeline_cache_file_set_default_path(flux_pipeline_cache
         snprintf(c->path, sizeof(c->path), "%s", override);
         return true;
     }
+#if defined(_WIN32)
+    const char *base = getenv("LOCALAPPDATA");
+    if (!base || !base[0])
+        base = getenv("USERPROFILE");
+    if (!base || !base[0]) {
+        c->path[0] = '\0';
+        return false;
+    }
+    snprintf(c->path, sizeof(c->path), "%s/flux/%s", base, name);
+    return true;
+#else
     const char *base = getenv("XDG_CACHE_HOME");
     if (!base || !base[0]) {
         base = getenv("HOME");
@@ -69,6 +90,7 @@ static inline bool flux_pipeline_cache_file_set_default_path(flux_pipeline_cache
         snprintf(c->path, sizeof(c->path), "%s/flux/%s", base, name);
     }
     return true;
+#endif
 }
 
 /* mkdir -p of the parent directory of `path`. Best-effort. */
@@ -76,14 +98,24 @@ static inline void flux_pipeline_cache_file_mkdir_parent(const char *path) {
     char buf[FLUX_PIPELINE_CACHE_FILE_MAX_PATH];
     snprintf(buf, sizeof(buf), "%s", path);
     char *slash = strrchr(buf, '/');
+#if defined(_WIN32)
+    char *backslash = strrchr(buf, '\\');
+    if (!slash || (backslash && backslash > slash))
+        slash = backslash;
+#endif
     if (!slash || slash == buf)
         return;
     *slash = '\0';
     for (char *p = buf + 1; *p; ++p) {
-        if (*p == '/') {
+        if (*p == '/'
+#if defined(_WIN32)
+            || *p == '\\'
+#endif
+        ) {
+            char saved = *p;
             *p = '\0';
             (void)mkdir(buf, 0700);
-            *p = '/';
+            *p = saved;
         }
     }
     (void)mkdir(buf, 0700);

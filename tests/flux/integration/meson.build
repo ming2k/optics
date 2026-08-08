@@ -27,7 +27,7 @@ test_buffer_retire = executable('test_buffer_retire',
   'test_buffer_retire.c',
   triangle_attr_vert_spv, triangle_frag_spv,
   dependencies : [test_helpers_dep],
-  c_args       : ['--embed-dir=' + core_tests_build_dir],
+  c_args       : tests_embed_dir_arg,
 )
 test('buffer_retire', test_buffer_retire, suite : 'integration')
 
@@ -65,7 +65,7 @@ test_graphics_pipeline = executable('test_graphics_pipeline',
   'test_graphics_pipeline.c',
   triangle_vert_spv, triangle_frag_spv,
   dependencies : [test_helpers_dep],
-  c_args       : ['--embed-dir=' + core_tests_build_dir],
+  c_args       : tests_embed_dir_arg,
 )
 test('graphics_pipeline', test_graphics_pipeline, suite : 'integration')
 
@@ -143,7 +143,7 @@ test_compute_golden = executable('test_compute_golden',
   'test_compute_golden.c',
   fill_pattern_spv,
   dependencies : [test_helpers_dep],
-  c_args       : ['--embed-dir=' + core_tests_build_dir],
+  c_args       : tests_embed_dir_arg,
 )
 test('compute_golden', test_compute_golden, suite : 'integration')
 
@@ -151,7 +151,7 @@ test_validation = executable('test_validation',
   'test_validation.c',
   fill_pattern_spv,
   dependencies : [test_helpers_dep],
-  c_args       : ['--embed-dir=' + core_tests_build_dir],
+  c_args       : tests_embed_dir_arg,
 )
 test('validation', test_validation, suite : 'integration', timeout : 30)
 
@@ -159,7 +159,7 @@ test_soak = executable('test_soak',
   'test_soak.c',
   triangle_vert_spv, triangle_frag_spv,
   dependencies : [test_helpers_dep],
-  c_args       : ['--embed-dir=' + core_tests_build_dir],
+  c_args       : tests_embed_dir_arg,
 )
 test('soak', test_soak, suite : 'integration', timeout : 60)
 
@@ -179,6 +179,15 @@ if opt_canvas
     dependencies : [test_helpers_dep, flux_text_dep],
   )
   test('canvas_render', test_canvas_render, suite : 'integration')
+
+  # Cross-platform consistency gate: one fixed scene rendered by the GPU
+  # backend and the CPU oracle (ADR-0019), compared pixel-by-pixel. This
+  # is the test that proves a Windows/macOS port renders identically.
+  test_canvas_consistency = executable('test_canvas_consistency',
+    'test_canvas_consistency.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('canvas_consistency', test_canvas_consistency, suite : 'integration')
 
   # Image retire queue: churn create -> draw -> release every frame so
   # inline destruction of in-flight images (GPU hang on i915) or a

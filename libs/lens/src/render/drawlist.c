@@ -19,6 +19,7 @@ static uint32_t hash_cmd(const lens_draw_cmd *c) {
     h = h * 31 + (uint32_t)(c->outline_width * 1000.0f);
     h = h * 31 + (uint32_t)(c->text_size * 1000.0f);
     h = h * 31 + (uint32_t)(c->text_weight * 1000.0f);
+    h = h * 31 + (uint32_t)c->text_family;
     if (c->text) {
         const char *p = c->text;
         while (*p)
@@ -42,6 +43,13 @@ void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd) {
      * phase returns — so a caller's stack buffer (snprintf'd labels,
      * loop-local strings) would dangle. Copy the run into the per-frame
      * arena so any caller lifetime is safe. */
+    /* Stamp the context's current text family onto text commands (0 in a
+     * widget literal means "inherit"), so replay shapes with the same voice
+     * the build-time measure used. */
+    if (cmd.kind == LENS_DRAW_TEXT && cmd.text_family == 0) {
+        cmd.text_family = ui ? ui->text_family : 0;
+    }
+
     if (cmd.kind == LENS_DRAW_TEXT && cmd.text) {
         size_t len = strlen(cmd.text) + 1;
         char *copy = flux_arena_alloc(&ui->arena, len);

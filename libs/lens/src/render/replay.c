@@ -286,7 +286,8 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
 
                     const flux_text_style style = {.size_px = c->text_size,
                                                    .weight = c->text_weight,
-                                                   .color = c->color};
+                                                   .color = c->color,
+                                                   .family = (flux_text_family)c->text_family};
                     if (c->outline_width > 0.0f && c->outline_color != 0) {
                         flux_text_draw_outlined(ui->text, canvas, &ui->arena, x, y, c->text, vlen,
                                                 &style, c->outline_color, c->outline_width);
