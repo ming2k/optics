@@ -8,6 +8,18 @@ use lens::{
 };
 
 #[test]
+fn register_svg_icon_accepts_valid_and_rejects_garbage() {
+    let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" \
+               stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"9\"/>\
+               <line x1=\"12\" y1=\"7\" x2=\"12\" y2=\"13\"/></svg>";
+    let id = lens::register_svg_icon(svg).expect("valid svg registers");
+    // Runtime ids continue where the built-in enum ends.
+    assert!(id.0 >= lens::sys::lens_icon_id::LENS_ICON_COUNT.0);
+    assert!(lens::register_svg_icon("this is not svg <<<").is_none());
+    assert!(lens::register_svg_icon("<svg viewBox=\"0 0 24 24\"></svg>").is_none());
+}
+
+#[test]
 fn version_links_and_runs() {
     let v = lens::version();
     assert!(!v.is_empty(), "version string should be non-empty");

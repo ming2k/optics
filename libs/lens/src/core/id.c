@@ -65,7 +65,7 @@ lens_id lensi_gen_container_id(lens *ui, const char *kind) {
 
 void lens_push_id(lens *ui, const char *seed) {
     if (ui->id_top >= LENSI_ID_STACK_MAX) {
-        ui->overflow = true;
+        lensi_set_overflow(ui);
         return;
     }
     const char *s = seed ? seed : "";
@@ -75,7 +75,7 @@ void lens_push_id(lens *ui, const char *seed) {
 
 void lens_push_id_int(lens *ui, int64_t seed) {
     if (ui->id_top >= LENSI_ID_STACK_MAX) {
-        ui->overflow = true;
+        lensi_set_overflow(ui);
         return;
     }
     lens_id id = lensi_hash(&seed, sizeof seed, lensi_id_top(ui));

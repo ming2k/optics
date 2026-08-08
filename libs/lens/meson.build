@@ -41,6 +41,8 @@ lens_sources = files(
   'src/widgets/table.c',
   'src/widgets/tree.c',
   'src/icon_data.c',
+  'src/icon_runtime.c',
+  'src/vendor/nanosvg.c',
   'src/a11y/semantics.c',
   'src/overlay/overlay.c',
   'src/theme/theme.c',

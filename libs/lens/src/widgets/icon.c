@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 static void icon_impl(lens *ui, lens_icon_id id, float size, lens_foreground_outline outline) {
-    if ((unsigned)id >= LENS_ICON_COUNT)
+    if (!lensi_icon_valid((int32_t)id))
         return;
     const lens_theme *t = &ui->theme;
     ui->next_disabled = false;
@@ -73,7 +73,7 @@ typedef struct icon_button_spec {
 
 static bool icon_button_impl(lens *ui, icon_button_spec spec) {
     lens_icon_id id = spec.icon;
-    if ((unsigned)id >= LENS_ICON_COUNT)
+    if (!lensi_icon_valid((int32_t)id))
         return false;
     const lens_theme *t = &ui->theme;
     bool disabled = ui->next_disabled;
@@ -232,7 +232,7 @@ LENS_API bool lens_icon_button_badged(lens *ui, lens_icon_id id, const char *bad
 
 LENS_API bool lens_icon_toggle_button(lens *ui, lens_icon_id unchecked_icon,
                                       lens_icon_id checked_icon, float glyph_size, bool checked) {
-    if ((unsigned)unchecked_icon >= LENS_ICON_COUNT || (unsigned)checked_icon >= LENS_ICON_COUNT)
+    if (!lensi_icon_valid((int32_t)unchecked_icon) || !lensi_icon_valid((int32_t)checked_icon))
         return false;
     char identity[48];
     snprintf(identity, sizeof(identity), "##toggle%d:%d", (int)unchecked_icon, (int)checked_icon);

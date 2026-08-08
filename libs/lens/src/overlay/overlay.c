@@ -136,7 +136,7 @@ static lens_node *register_floating_layer(lens *ui, lens_id id, flux_rect anchor
         uint32_t nc = ui->overlay_layer_cap ? ui->overlay_layer_cap * 2 : 4;
         lens_node **na = flux_arena_alloc(&ui->arena, nc * sizeof *na);
         if (!na) {
-            ui->overflow = true;
+            lensi_set_overflow(ui);
             return NULL;
         }
         if (ui->overlay_layers)

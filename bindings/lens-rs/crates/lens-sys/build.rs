@@ -159,6 +159,11 @@ fn main() {
         .default_enum_style(bindgen::EnumVariation::Rust {
             non_exhaustive: false,
         })
+        // lens_icon_id is extensible at runtime (lens_icon_register_svg
+        // hands out ids beyond LENS_ICON_COUNT), so it must not be a
+        // fieldless Rust enum — holding an unlisted discriminant would be
+        // immediate UB. The transparent newtype admits every u32.
+        .newtype_enum("lens_icon_id")
         .derive_default(true)
         .derive_debug(true)
         .layout_tests(true)

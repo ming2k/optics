@@ -24,7 +24,7 @@ static bool selectable_impl(lens *ui, lens_icon_id icon, const char *label, bool
     n->is_container = false;
 
     lens_text_metrics tm = lensi_text_measure_label(ui, label, t->font_size, 0.0f);
-    bool has_icon = (unsigned)icon < LENS_ICON_COUNT;
+    bool has_icon = lensi_icon_valid((int32_t)icon);
     float icon_size = has_icon ? t->font_size : 0.0f;
     float icon_gap = has_icon ? 8.0f : 0.0f;
     float content_w = icon_size + icon_gap + tm.width;
@@ -104,7 +104,9 @@ static bool selectable_impl(lens *ui, lens_icon_id icon, const char *label, bool
 }
 
 bool lens_selectable(lens *ui, const char *label, bool selected) {
-    return selectable_impl(ui, LENS_ICON_COUNT, label, selected);
+    /* LENS_ICON_INVALID is the no-icon sentinel: LENS_ICON_COUNT itself is a
+     * valid id once a runtime icon has been registered. */
+    return selectable_impl(ui, LENS_ICON_INVALID, label, selected);
 }
 
 bool lens_selectable_icon(lens *ui, lens_icon_id icon, const char *label, bool selected) {
@@ -116,7 +118,7 @@ lens_response lens_selectable_ex(lens *ui, lens_selectable_opts o) {
     bool scoped = o.box.id && o.box.id[0];
     if (scoped)
         lens_push_id(ui, o.box.id);
-    selectable_impl(ui, LENS_ICON_COUNT, o.label ? o.label : "", o.selected);
+    selectable_impl(ui, LENS_ICON_INVALID, o.label ? o.label : "", o.selected);
     if (scoped)
         lens_pop_id(ui);
     if (o.box.tooltip)

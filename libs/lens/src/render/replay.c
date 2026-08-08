@@ -319,7 +319,7 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
 
         case LENS_DRAW_CLIP_PUSH: {
             if (command_clip_depth >= 16) {
-                ui->overflow = true;
+                lensi_set_overflow(ui);
                 break;
             }
             command_clip_stack[command_clip_depth++] = command_clip;
@@ -336,10 +336,12 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
             break;
 
         case LENS_DRAW_ICON: {
-            if (c->icon_id < 0 || c->icon_id >= (int32_t)LENS_ICON_COUNT)
+            if (c->icon_id < 0)
                 break;
-            const lens_icon_desc *desc = &lens_icon_table[c->icon_id];
-            if (!desc->cmds || desc->count == 0)
+            /* Built-in or runtime-registered (lens_icon_register_svg) —
+             * both arrive normalized to the 24x24 icon box. */
+            const lens_icon_desc *desc = lensi_icon_desc(c->icon_id);
+            if (!desc || !desc->cmds || desc->count == 0)
                 break;
 
             float s = r.w / 24.0f;
@@ -383,7 +385,7 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
             }
 
             flux_paint paint = flux_paint_solid(c->color);
-            if (lens_icon_render_modes[c->icon_id] == LENSI_ICON_RENDER_FILL) {
+            if (lensi_icon_mode(c->icon_id) == LENSI_ICON_RENDER_FILL) {
                 if (c->outline_width > 0.0f && c->outline_color != 0) {
                     flux_paint outline = flux_paint_solid(c->outline_color);
                     outline.stroke_width = c->outline_width * 2.0f;

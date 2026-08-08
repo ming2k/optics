@@ -627,6 +627,11 @@ LENS_API void lens_scroll_end(lens *ui);
  * are ignored, so callers may issue the request while content is appearing. */
 LENS_API void lens_scroll_to(lens *ui, const char *id, float x, float y);
 
+/* Current offset of a scroll area in the current id scope; false when the
+ * id does not resolve to a scroll area (e.g. first frame). Either output
+ * pointer may be NULL. */
+LENS_API bool lens_scroll_offset(lens *ui, const char *id, float *x, float *y);
+
 typedef enum lens_tab_style {
     /* The compact Lens default: independent tabs with an active underline. */
     LENS_TAB_STYLE_STANDARD = 0,

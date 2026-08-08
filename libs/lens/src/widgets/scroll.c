@@ -125,3 +125,19 @@ void lens_scroll_to(lens *ui, const char *id, float x, float y) {
     n->scroll_x = ss->offset_x;
     n->scroll_y = ss->offset_y;
 }
+
+bool lens_scroll_offset(lens *ui, const char *id, float *x, float *y) {
+    if (!ui || !id)
+        return false;
+    lens_node *n = lensi_store_find(ui, lens_current_id(ui, id));
+    if (!n || !n->is_scroll)
+        return false;
+    lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
+    if (!ss)
+        return false;
+    if (x)
+        *x = ss->offset_x;
+    if (y)
+        *y = ss->offset_y;
+    return true;
+}

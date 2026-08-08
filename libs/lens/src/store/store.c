@@ -96,7 +96,7 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
     if (!n) {
         n = lensi_alloc(ui, sizeof *n);
         if (!n) {
-            ui->overflow = true;
+            lensi_set_overflow(ui);
             return NULL;
         }
         memset(n, 0, sizeof *n);

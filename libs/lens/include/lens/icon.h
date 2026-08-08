@@ -3,6 +3,27 @@
 
 #include <stdint.h>
 
+/* lens.h includes this header before defining its export macro, and the
+ * header is also included on its own — provide the same spelling when the
+ * macro has not been seen yet. */
+#ifndef LENS_API
+#if defined(_WIN32) && !defined(LENS_STATIC)
+#ifdef LENS_BUILDING
+#define LENS_API __declspec(dllexport)
+#else
+#define LENS_API __declspec(dllimport)
+#endif
+#elif defined(__GNUC__) || defined(__clang__)
+#define LENS_API __attribute__((visibility("default")))
+#else
+#define LENS_API
+#endif
+#endif /* LENS_API */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum lens_icon_id {
     LENS_ICON_ACTIVITY = 0,
     LENS_ICON_AIRPLAY = 1,
@@ -307,5 +328,21 @@ typedef struct lens_icon_desc {
 } lens_icon_desc;
 
 extern const lens_icon_desc lens_icon_table[LENS_ICON_COUNT];
+
+/* Failure sentinel of lens_icon_register_svg; also usable as a "no icon"
+ * value wherever a lens_icon_id is optional. */
+#define LENS_ICON_INVALID ((lens_icon_id)-1)
+
+/* Register an SVG string as a runtime icon. Returns its id (>= LENS_ICON_COUNT)
+ * or LENS_ICON_INVALID on parse failure. Ids are process-global, never reclaimed;
+ * call from the UI thread (registration is not thread-safe, like the rest of lens).
+ * The SVG's own paint colours are ignored — glyphs draw in the theme colour like
+ * built-ins. Stroke icons (no filled shapes) render with the same 2/24 stroke
+ * convention as the feather set; any filled shape switches the icon to fill mode. */
+LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

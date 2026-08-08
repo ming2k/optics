@@ -627,6 +627,17 @@ impl Frame {
         unsafe { sys::lens_scroll_to(self.ui, id.as_ptr(), x.max(0.0), y.max(0.0)) };
     }
 
+    /// Current offset of the scroll area `id` in the current id scope, or
+    /// `None` when no such scroll area exists yet (e.g. on the first frame).
+    /// Virtualized lists use this to bound their build to the visible window.
+    pub fn scroll_offset(&self, id: &str) -> Option<(f32, f32)> {
+        let id = cstr(id);
+        let (mut x, mut y) = (0.0f32, 0.0f32);
+        // SAFETY: ui is live and id outlives the call.
+        let found = unsafe { sys::lens_scroll_offset(self.ui, id.as_ptr(), &mut x, &mut y) };
+        found.then_some((x, y))
+    }
+
     /// A virtualized, scrollable table. Only the visible rows are requested
     /// through `cell`, so rendering cost stays bounded for large libraries.
     /// Use [`Frame::size_next`] or [`Frame::flex`] immediately before this
@@ -1306,6 +1317,22 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+/// Register an SVG string as a runtime lens icon (see `lens_icon_register_svg`).
+///
+/// The returned id continues where the built-in [`Icon`] enum ends
+/// (`>= LENS_ICON_COUNT`). Registration is process-global, never reclaimed,
+/// and — like the rest of lens — not thread-safe: call from the UI thread.
+/// The SVG's own paint colours are ignored; the glyph draws in the theme
+/// colour, stroke-only icons in the 2/24 weight of the built-in set.
+pub fn register_svg_icon(svg: &str) -> Option<sys::lens_icon_id> {
+    let svg = cstr(svg);
+    // SAFETY: svg outlives the call; lens keeps no pointer into it.
+    let id = unsafe { sys::lens_icon_register_svg(svg.as_ptr()) };
+    // LENS_ICON_INVALID is (lens_icon_id)-1; the newtype binding makes it
+    // plain data (u32::MAX), so this comparison is sound.
+    if id.0 == u32::MAX { None } else { Some(id) }
+}
 
 /// The lens version string reported by the linked C library.
 pub fn version() -> &'static str {

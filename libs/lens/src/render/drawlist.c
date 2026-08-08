@@ -5,6 +5,25 @@
  * arena (ADR-0032). */
 
 #include "../internal.h"
+#include <stdio.h>
+
+/* lensi_set_overflow lives here (not context.c) because drawlist.c is also
+ * compiled directly into test binaries (test_drawlist_hash): the single
+ * writer for ui->overflow must link wherever the drawlist does. */
+void lensi_set_overflow(lens *ui) {
+    ui->overflow = true;
+#ifndef NDEBUG
+    /* One shot per process: the flag is per frame, the warning is not — a
+     * flooded log would bury the signal as effectively as silence. */
+    static bool warned;
+    if (!warned) {
+        warned = true;
+        fprintf(stderr,
+                "lens: frame arena overflowed; draw calls dropped — virtualize large listings "
+                "(see docs/adr/0042)\n");
+    }
+#endif
+}
 
 static uint32_t hash_cmd(const lens_draw_cmd *c) {
     uint32_t h = (uint32_t)c->kind;
@@ -57,7 +76,7 @@ void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd) {
             memcpy(copy, cmd.text, len);
             cmd.text = copy;
         } else {
-            ui->overflow = true;
+            lensi_set_overflow(ui);
             cmd.text = "";
         }
     }
@@ -66,7 +85,7 @@ void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd) {
         uint32_t nc = n->cmd_cap ? n->cmd_cap * 2 : 8;
         lens_draw_cmd *na = flux_arena_alloc(&ui->arena, nc * sizeof *na);
         if (!na) {
-            ui->overflow = true;
+            lensi_set_overflow(ui);
             return;
         }
         if (n->cmds)

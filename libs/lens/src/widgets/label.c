@@ -116,7 +116,7 @@ static void push_text_slice(lens *ui, lens_node *n, const char *text, size_t len
         return;
     char *line = flux_arena_alloc(&ui->arena, len + 1);
     if (!line) {
-        ui->overflow = true;
+        lensi_set_overflow(ui);
         return;
     }
     memcpy(line, text, len);

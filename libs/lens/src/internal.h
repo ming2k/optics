@@ -76,6 +76,13 @@ enum {
 /* Generated beside lens_icon_table from the vendored SVG source style. */
 extern const uint8_t lens_icon_render_modes[LENS_ICON_COUNT];
 
+/* icon registry (icon_runtime.c) — resolve an icon id, built-in or
+ * runtime-registered (lens_icon_register_svg), to its command stream and
+ * render mode. lensi_icon_desc returns NULL for unknown ids. */
+bool lensi_icon_valid(int32_t id);
+const lens_icon_desc *lensi_icon_desc(int32_t id);
+uint8_t lensi_icon_mode(int32_t id);
+
 /* ------------------------------------------------------------------ */
 /*  Retained node slot (ADR-0027)                                     */
 /* ------------------------------------------------------------------ */
@@ -313,6 +320,11 @@ struct lens {
  * or libc malloc when headless. */
 void *lensi_alloc(lens *ui, size_t bytes);
 void lensi_free(lens *ui, void *ptr);
+
+/* overflow (drawlist.c) — the single writer for ui->overflow. Debug builds
+ * emit a one-shot stderr warning: overflow drops draw calls, and silent
+ * visual corruption must never be the only signal. */
+void lensi_set_overflow(lens *ui);
 
 /* identity (id.c) */
 uint64_t lensi_hash(const void *data, size_t len, uint64_t seed);

@@ -15,7 +15,7 @@ static const char *arena_strn(lens *ui, const char *s, size_t n) {
         return NULL;
     char *c = flux_arena_alloc(&ui->arena, n + 1);
     if (!c) {
-        ui->overflow = true;
+        lensi_set_overflow(ui);
         return "";
     }
     memcpy(c, s, n);

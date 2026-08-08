@@ -38,11 +38,11 @@ void lensi_open_container_push(lens *ui, lens_node *n) {
     if (ui->cont_top < LENSI_CONTAINER_STACK_MAX)
         ui->cont_stack[ui->cont_top++] = n;
     else
-        ui->overflow = true;
+        lensi_set_overflow(ui);
     if (ui->id_top < LENSI_ID_STACK_MAX)
         ui->id_stack[ui->id_top++] = n->id; /* children scope under it */
     else
-        ui->overflow = true;
+        lensi_set_overflow(ui);
 }
 
 void lensi_open_container_pop(lens *ui) {

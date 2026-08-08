@@ -8,7 +8,7 @@ static void tab_push(lens *ui, lens_id id) {
         uint32_t nc = ui->tab_cap ? ui->tab_cap * 2 : 16;
         lens_id *na = flux_arena_alloc(&ui->arena, nc * sizeof *na);
         if (!na) {
-            ui->overflow = true;
+            lensi_set_overflow(ui);
             return;
         }
         if (ui->tab_order)
