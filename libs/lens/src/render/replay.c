@@ -484,6 +484,11 @@ bool lensi_mark_subtree_changed(lens_node *n) {
         changed = true;
     if (n->cmd_hash != n->last_cmd_hash)
         changed = true;
+    /* Child-list churn (removal/reorder/replacement) is invisible to the
+     * per-node checks above: untouched children simply vanish from the
+     * sibling walk. Compare the linked-child sequence hash instead. */
+    if (n->child_hash != n->last_child_hash)
+        changed = true;
     n->last_hover_t = n->hover_t;
     n->last_active_t = n->active_t;
 

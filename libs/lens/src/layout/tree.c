@@ -21,6 +21,11 @@ void lensi_link_child(lens *ui, lens_node *n) {
         parent->first_child = n;
     parent->last_child = n;
     parent->child_count++;
+    /* Fold the child id sequence into a per-frame hash so the damage pass
+     * (lensi_mark_subtree_changed) notices removed/reordered children even
+     * when every remaining child is individually unchanged — otherwise a
+     * stale display-list record would replay ghost content. */
+    parent->child_hash = parent->child_hash * 31 + (uint32_t)(n->id ^ (n->id >> 32));
 
     /* apply any pending per-widget modifiers */
     if (ui->have_next_flex) {

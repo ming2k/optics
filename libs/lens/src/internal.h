@@ -104,6 +104,8 @@ struct lens_node {
     lens_node *next_sibling;
     uint32_t child_count;
     uint32_t child_seq; /* sibling-disambiguation counter */
+    uint32_t child_hash;      /* rolling hash of this frame's child id sequence */
+    uint32_t last_child_hash; /* previous frame's child_hash */
 
     /* layout inputs (per frame) */
     bool is_container;

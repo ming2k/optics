@@ -279,12 +279,86 @@ static void test_hidpi_scroll_clip_alignment(void) {
     lens_destroy(f.ui);
 }
 
+/* Child removal: when a node's children shrink or vanish between frames
+ * while every surviving child is individually unchanged (same ids, same
+ * geometry, same commands), only the child-sequence hash can flag the
+ * parent dirty — otherwise the parent's stale record replays ghost
+ * content of the removed children. */
+static void test_child_removal_invalidates_record(void) {
+    fixture f;
+    fixture_open(&f);
+    uint8_t full[W * H * 4], shrunk[W * H * 4], reference[W * H * 4], stable[W * H * 4];
+
+    for (int i = 0; i < 3; i++) {
+        build_two_blocks(f.ui, &IN0, 0.5f);
+        render_frame(&f);
+    }
+    snapshot(&f, full);
+
+    /* Drop the trailing child: the survivors keep their geometry, so the
+     * rect/cmd checks alone would call this frame unchanged. */
+    uint64_t created0 = flux_canvas_records_created(f.canvas);
+    lens_begin(f.ui, &IN0);
+    lens_label(f.ui, "header##hdr");
+    lens_progress(f.ui, "load", 0.5f);
+    lens_end(f.ui);
+    render_frame(&f);
+    snapshot(&f, shrunk);
+    CHECK(flux_canvas_records_created(f.canvas) > created0); /* removal noticed */
+    CHECK(memcmp(full, shrunk, sizeof full) != 0);
+
+    /* Golden reference: a UI that only ever had header+progress must
+     * produce identical pixels — no ghost of the removed footer. */
+    {
+        fixture g;
+        fixture_open(&g);
+        for (int i = 0; i < 3; i++) {
+            lens_begin(g.ui, &IN0);
+            lens_label(g.ui, "header##hdr");
+            lens_progress(g.ui, "load", 0.5f);
+            lens_end(g.ui);
+            render_frame(&g);
+        }
+        snapshot(&g, reference);
+        fixture_close(&g);
+    }
+    CHECK(memcmp(shrunk, reference, sizeof shrunk) == 0);
+
+    /* Removal to empty: the frame is exactly the clear colour (any
+     * non-black RGB byte is replayed ghost content). */
+    created0 = flux_canvas_records_created(f.canvas);
+    lens_begin(f.ui, &IN0);
+    lens_end(f.ui);
+    render_frame(&f);
+    snapshot(&f, stable);
+    CHECK(flux_canvas_records_created(f.canvas) > created0);
+    bool any_ink = false;
+    for (size_t i = 0; i + 2 < sizeof stable; i += 4) {
+        if (stable[i] || stable[i + 1] || stable[i + 2]) {
+            any_ink = true;
+            break;
+        }
+    }
+    CHECK(!any_ink);
+
+    /* And back: rebuilding the full UI re-records and matches the start. */
+    for (int i = 0; i < 3; i++) {
+        build_two_blocks(f.ui, &IN0, 0.5f);
+        render_frame(&f);
+    }
+    snapshot(&f, stable);
+    CHECK(memcmp(full, stable, sizeof full) == 0);
+
+    fixture_close(&f);
+}
+
 int main(void) {
     test_static_frame_replays();
     test_leaf_change_rerecords_sibling_replays();
     test_scale_switch_invalidates_all();
     test_scroll_clip_invalidates_container_records();
     test_hidpi_scroll_clip_alignment();
+    test_child_removal_invalidates_record();
     return TEST_REPORT();
 }
 

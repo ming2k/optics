@@ -10,6 +10,8 @@ void lensi_node_reset_frame(lens_node *n) {
     n->first_child = n->last_child = n->next_sibling = NULL;
     n->child_count = 0;
     n->child_seq = 0;
+    n->last_child_hash = n->child_hash;
+    n->child_hash = 0;
 
     n->is_container = false;
     n->is_scroll = false;
