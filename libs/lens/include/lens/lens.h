@@ -533,6 +533,10 @@ LENS_API bool lens_link(lens *ui, const char *label);
  * would read as bordered pills. */
 LENS_API bool lens_selectable(lens *ui, const char *label, bool selected);
 LENS_API bool lens_selectable_icon(lens *ui, lens_icon_id icon, const char *label, bool selected);
+/* A standalone padded label. The text is drawn centred vertically within
+ * the RESOLVED node box (the replay-time convention shared with
+ * lens_heading), so it stays centred even when a fixed-height parent row
+ * constrains the node below its intrinsic padded height. */
 LENS_API void lens_label(lens *ui, const char *text);
 LENS_API void lens_label_ex(lens *ui, const char *text, float size);
 /* A label constrained to max_width logical pixels. Text wraps at whitespace

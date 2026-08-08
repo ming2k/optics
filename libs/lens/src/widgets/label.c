@@ -190,7 +190,7 @@ void lens_label(lens *ui, const char *text) {
 
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding, t->padding, 0, 0},
+                                        .rel = {t->padding, 0, 0, -1.0f},
                                         .color = t->color_fg,
                                         .text = text,
                                         .text_size = t->font_size,
@@ -217,7 +217,7 @@ void lens_label_ex(lens *ui, const char *text, float size) {
 
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding, t->padding, 0, 0},
+                                        .rel = {t->padding, 0, 0, -1.0f},
                                         .color = t->color_fg,
                                         .text = text,
                                         .text_size = size,
