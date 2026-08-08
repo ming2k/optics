@@ -87,6 +87,15 @@ test_canvas_flatten = executable('test_canvas_flatten',
 )
 test('canvas_flatten', test_canvas_flatten, suite : 'unit')
 
+# Degenerate-cubic stroke regression, pixel-level through the CPU canvas:
+# a zero-length cubic once flooded the flattener scratch and dropped every
+# following contour. Links libflux normally (public CPU-canvas API).
+test_canvas_stroke_degenerate = executable('test_canvas_stroke_degenerate',
+  'test_canvas_stroke_degenerate.c',
+  dependencies : [test_helpers_dep],
+)
+test('canvas_stroke_degenerate', test_canvas_stroke_degenerate, suite : 'unit')
+
 test_scene_camera = executable('test_scene_camera',
   'test_scene_camera.c',
   dependencies : [test_helpers_dep],

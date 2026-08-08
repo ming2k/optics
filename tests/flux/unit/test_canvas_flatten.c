@@ -76,6 +76,38 @@ int main(void) {
     /* rotation preserves the operator norm (=1 for pure rotation). */
     EXPECT_NEAR(flux_canvas_mat3x2_pixel_scale(flux_mat3x2_rotate(0.7f)), 1.0f, 1e-5);
 
+    /* --- degenerate (all-coincident) cubic/quad emits nothing ---
+     * Before the guard, a zero-length cubic recursed to the depth cap
+     * and flooded the scratch buffer with 2^16 copies of one point,
+     * starving every following contour (an icon's trailing shapes
+     * vanished). The guard must emit nothing for the point curve and
+     * leave the rest of the path intact. */
+    flux_arena_reset(&arena);
+    {
+        flux_path *p = nullptr;
+        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        flux_path_move_to(p, 10.0f, 10.0f);
+        flux_path_line_to(p, 20.0f, 10.0f);
+        /* all four anchors coincident: a point, not a curve */
+        flux_path_cubic_to(p, 20.0f, 10.0f, 20.0f, 10.0f, 20.0f, 10.0f);
+        flux_path_line_to(p, 20.0f, 20.0f);
+        flux_path_quad_to(p, 20.0f, 20.0f, 20.0f, 20.0f); /* coincident quad */
+        flux_path_close(p);
+        /* a second subpath after the degenerate verbs must survive */
+        flux_path_move_to(p, 40.0f, 40.0f);
+        flux_path_line_to(p, 60.0f, 40.0f);
+
+        flux_canvas_contour cons[FLUX_CANVAS_MAX_CONTOURS];
+        flatten_multi r = flatten_path_to_contours(p, 1.0f, pts, FLUX_CANVAS_PATH_SCRATCH_CAP,
+                                                   cons, FLUX_CANVAS_MAX_CONTOURS);
+        EXPECT(r.contour_count == 2);
+        EXPECT(r.point_count < 16); /* 2^16-duplicate flood would hit the cap */
+        EXPECT(cons[1].count == 2); /* the trailing subpath kept both points */
+        flux_point tail = pts[cons[1].start + cons[1].count - 1];
+        EXPECT_NEAR(tail.x, 60.0f, 1e-4);
+        EXPECT_NEAR(tail.y, 40.0f, 1e-4);
+    }
+
     flux_arena_destroy(&arena);
     TEST_SUMMARY();
 }

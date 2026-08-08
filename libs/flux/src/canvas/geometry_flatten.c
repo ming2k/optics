@@ -52,6 +52,20 @@ static void flatten_cubic(flux_point *out, uint32_t *count, uint32_t cap, float 
             emit_point(out, count, cap, x3, y3);
             return;
         }
+    } else {
+        /* Degenerate chord (end ≈ start): the curve is flat when both
+         * control points sit within tol of the anchor. A curve that is
+         * a single point emits nothing — like the zero-length LINE skip,
+         * the stroker must not see duplicate vertices. Without this,
+         * subdividing an all-coincident cubic would recurse to the depth
+         * cap and flood the scratch buffer with 2^16 copies of one point,
+         * starving every contour that follows in the path. */
+        float d1x = x1 - x0, d1y = y1 - y0;
+        float d2x = x2 - x0, d2y = y2 - y0;
+        float d1sq = d1x * d1x + d1y * d1y;
+        float d2sq = d2x * d2x + d2y * d2y;
+        if ((d1sq > d2sq ? d1sq : d2sq) <= tol_sq)
+            return;
     }
     if (depth >= FLATTEN_MAX_DEPTH) {
         emit_point(out, count, cap, x3, y3);
@@ -79,6 +93,13 @@ static void flatten_quad(flux_point *out, uint32_t *count, uint32_t cap, float x
             emit_point(out, count, cap, x2, y2);
             return;
         }
+    } else {
+        /* Same degenerate-chord guard as flatten_cubic: a coincident
+         * control point makes the curve a single point — emit nothing
+         * rather than flooding the scratch buffer by subdivision. */
+        float d1x = x1 - x0, d1y = y1 - y0;
+        if (d1x * d1x + d1y * d1y <= tol_sq)
+            return;
     }
     if (depth >= FLATTEN_MAX_DEPTH) {
         emit_point(out, count, cap, x2, y2);

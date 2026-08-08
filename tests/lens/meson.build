@@ -31,6 +31,19 @@ test_drawlist_hash = executable('test_drawlist_hash',
 )
 test('drawlist_hash', test_drawlist_hash)
 
+# Content of registered runtime-icon streams. Compiles the registration
+# sources directly (same pattern as test_drawlist_hash): the registry
+# accessors are hidden symbols that do not link from liblens.so.
+test_icon_runtime_content = executable('test_icon_runtime_content',
+  'test_icon_runtime_content.c',
+  '../../libs/lens/src/icon_runtime.c',
+  '../../libs/lens/src/icon_data.c',
+  '../../libs/lens/src/vendor/nanosvg.c',
+  dependencies        : [lens_dep, m_dep],
+  include_directories : lens_inc,
+)
+test('icon_runtime_content', test_icon_runtime_content)
+
 if get_option('fuzz')
   subdir('fuzz')
 endif

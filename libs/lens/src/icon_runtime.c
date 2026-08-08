@@ -147,12 +147,29 @@ LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8) {
                 break;
             cmds[n++] = (lens_icon_cmd){
                 .type = 0, .params = {pts[0] * scale + ox, pts[1] * scale + oy}};
+            float cx = pts[0] * scale + ox;
+            float cy = pts[1] * scale + oy;
             for (int i = 1; i + 2 < p->npts; i += 3) {
                 const float *q = &pts[i * 2];
+                float ex = q[4] * scale + ox;
+                float ey = q[5] * scale + oy;
+                /* nanosvg's element conversions (circle, arcs) emit trailing
+                 * zero-length cubics. Skip them: they carry no ink, and the
+                 * flattener must never be handed an all-coincident cubic. */
+                float d1 = (q[0] * scale + ox - cx) * (q[0] * scale + ox - cx) +
+                           (q[1] * scale + oy - cy) * (q[1] * scale + oy - cy);
+                float d2 = (q[2] * scale + ox - cx) * (q[2] * scale + ox - cx) +
+                           (q[3] * scale + oy - cy) * (q[3] * scale + oy - cy);
+                float d3 = (ex - cx) * (ex - cx) + (ey - cy) * (ey - cy);
+                float farthest = fmaxf(d1, fmaxf(d2, d3));
+                if (farthest < 1e-8f)
+                    continue;
                 cmds[n++] = (lens_icon_cmd){.type = 2,
                                             .params = {q[0] * scale + ox, q[1] * scale + oy,
                                                        q[2] * scale + ox, q[3] * scale + oy,
-                                                       q[4] * scale + ox, q[5] * scale + oy}};
+                                                       ex, ey}};
+                cx = ex;
+                cy = ey;
             }
             if (p->closed)
                 cmds[n++] = (lens_icon_cmd){.type = 4};
