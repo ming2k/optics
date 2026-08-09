@@ -1039,6 +1039,20 @@ LENS_API void lens_request_paste(lens *ui);
  * for the focused text widget to consume on the next frame's build. */
 LENS_API void lens_paste(lens *ui, const char *utf8, size_t len);
 
+/* Drain a pending paste payload for an app-owned editing surface (one that
+ * renders text outside lens widgets and therefore has no focused widget to
+ * consume the queue). Copies up to `cap-1` payload bytes into `dst`,
+ * NUL-terminates, and returns the payload byte length excluding the NUL.
+ * Returns 0 when nothing is pending; a drained payload is consumed.
+ * Text widgets keep their own internal drain — app code should only call
+ * this while its own surface is the paste target. */
+LENS_API uint32_t lens_take_paste(lens *ui, char *dst, uint32_t cap);
+
+/* Report the caret rect of an app-owned editing surface, same consumer as
+ * the widget-reported rect: the platform layer forwards it to the IME so
+ * the candidate window follows the caret. UI-space logical pixels. */
+LENS_API void lens_set_caret_rect(lens *ui, flux_rect r);
+
 /* ================================================================== */
 /*  Escape hatch — retained nodes (ADR-0031)                          */
 /*                                                                    */

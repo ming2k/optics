@@ -24,7 +24,7 @@
 #define LENSI_LEAVE_GRACE_FRAMES 8u          /* reap delay (ADR-0027) */
 #define LENSI_ID_STACK_MAX 64u
 #define LENSI_CONTAINER_STACK_MAX 64u
-#define LENSI_PASTE_MAX 1024u /* clipboard staging (ADR-0036) */
+#define LENSI_PASTE_MAX (1024u * 1024u) /* clipboard staging (ADR-0036) */
 #define LENSI_OVERLAY_MAX 8u  /* max simultaneously-open overlays (ADR-0037) */
 
 /* ------------------------------------------------------------------ */

@@ -294,6 +294,51 @@ impl Frame {
         })
     }
 
+    // ---- clipboard & IME (app-owned editing surfaces) -----------------
+
+    /// Place text on the system clipboard (via the host clipboard
+    /// interface, if one was supplied). No-op otherwise.
+    pub fn copy(&mut self, text: &str) {
+        // SAFETY: ui is live inside a frame; text/len describe a valid range.
+        unsafe { sys::lens_copy(self.ui, text.as_ptr() as *const c_char, text.len()) };
+    }
+
+    /// Ask the host for clipboard text. The payload is delivered into
+    /// lens's paste queue (same frame or a later one, platform-dependent);
+    /// drain it with [`Frame::take_paste`].
+    pub fn request_paste(&mut self) {
+        // SAFETY: ui is live inside a frame.
+        unsafe { sys::lens_request_paste(self.ui) };
+    }
+
+    /// Drain a pending paste payload (one-shot). For app-owned editing
+    /// surfaces that render text outside lens widgets; lens text widgets
+    /// consume their own paste internally, so only call this while the
+    /// app's own surface is the paste target.
+    pub fn take_paste(&mut self) -> Option<String> {
+        // The C staging buffer caps payloads at 1 MiB (LENSI_PASTE_MAX).
+        let mut buf = vec![0u8; 1024 * 1024];
+        // SAFETY: ui is live; buf is writable for buf.len() bytes.
+        let n = unsafe {
+            sys::lens_take_paste(self.ui, buf.as_mut_ptr() as *mut c_char, buf.len() as u32)
+        };
+        if n == 0 {
+            return None;
+        }
+        buf.truncate(n as usize);
+        // The payload is host-supplied clipboard text; a non-UTF-8 payload
+        // is not a paste we can use.
+        String::from_utf8(buf).ok()
+    }
+
+    /// Report the caret rect of an app-owned editing surface so the
+    /// platform IME can position its candidate window at the caret.
+    /// UI-space logical pixels.
+    pub fn set_caret_rect(&mut self, rect: Rect) {
+        // SAFETY: ui is live inside a frame; rect is a value type.
+        unsafe { sys::lens_set_caret_rect(self.ui, rect.to_raw()) };
+    }
+
     // ---- containers -------------------------------------------------------
 
     /// Open a horizontal container, run `body`, then close it.

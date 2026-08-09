@@ -65,3 +65,4 @@ a decision, write a new ADR and update the old one's status to
 | 0054 | [Font discovery as a platform layer (fontconfig / DirectWrite / CoreText)](0054-font-discovery-platform-layer.md) | Accepted |
 | 0055 | [Callback-driven watch APIs + the backend wakeup seam](0055-watch-apis-and-wakeup-seam.md) | Accepted |
 | 0056 | [Win32 + Cocoa backends and the MoltenVK baseline](0056-win32-cocoa-backends-and-moltenvk.md) | Accepted |
+| 0057 | [Paste drain and caret rect for app-owned editing surfaces](0057-paste-drain-and-caret-rect-for-app-surfaces.md) | Accepted |

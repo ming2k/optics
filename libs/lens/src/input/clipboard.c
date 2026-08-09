@@ -62,3 +62,24 @@ const char *lensi_take_paste(lens *ui, uint32_t *out_len) {
     ui->paste_len = 0;    /* one-shot; consumed by this caller */
     return ui->paste_buf; /* buffer remains valid until next paste */
 }
+
+/* ---- app-owned editing surfaces (public wrappers) ---- */
+
+uint32_t lens_take_paste(lens *ui, char *dst, uint32_t cap) {
+    uint32_t len = 0;
+    const char *src;
+    if (!dst || !cap)
+        return 0;
+    src = lensi_take_paste(ui, &len);
+    if (!src)
+        return 0;
+    if (len > cap - 1)
+        len = cap - 1;
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+    return len;
+}
+
+void lens_set_caret_rect(lens *ui, flux_rect r) {
+    lensi_set_caret_rect(ui, r);
+}
