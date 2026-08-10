@@ -60,7 +60,7 @@ extern "C" {
 
 #define FLUX_VERSION_MAJOR 0
 #define FLUX_VERSION_MINOR 0
-#define FLUX_VERSION_PATCH 12
+#define FLUX_VERSION_PATCH 13
 
 /* Packed integer version, monotonic: bits 16..23 major, 8..15 minor,
  * 0..7 patch. 0.0.1 == 0x00000001; 1.2.3 == 0x00010203. */
