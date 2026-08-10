@@ -4,7 +4,11 @@
  * Each flux_sampler owns one VkSampler and one bindless slot. The
  * sampler is registered into the device's bindless heap at create
  * time so it can be referenced from any shader by handle. Release
- * frees the VkSampler and releases the bindless slot.
+ * defers both the slot release and the VkSampler destruction to the
+ * device retire queue: batches in flight may still carry the slot
+ * number in their push constants, so an inline release could recycle
+ * the slot mid-batch (silent mis-sampling) and violates
+ * VUID-vkDestroySampler-sampler-01070.
  */
 #include "internal.h"
 #include <flux/vulkan.h>
@@ -113,10 +117,14 @@ void flux_sampler_release(flux_sampler *s) {
     if (atomic_fetch_sub_explicit(&s->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
     flux_device *d = s->device;
-    if (s->bindless != FLUX_BINDLESS_INVALID)
-        flux_bindless_release(d, s->bindless);
-    if (s->sampler)
-        vkDestroySampler(d->device, s->sampler, nullptr);
+    /* The bindless slot may still be referenced by batches in flight on
+     * the graphics queue (push constants recorded before this release).
+     * Recycling the slot inline can reassign it to a new sampler while an
+     * in-flight batch still samples through it, and destroying the
+     * VkSampler mid-batch is a VUID-vkDestroySampler-sampler-01070
+     * violation. Park both on the device retire queue, same contract as
+     * flux_image_release / flux_buffer_release. */
+    flux_device_retire_sampler(d, s->sampler, s->bindless);
     flux_internal_free(d, s);
     flux_device_release(d);
 }

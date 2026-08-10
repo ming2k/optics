@@ -1,6 +1,10 @@
 # ADR-0029: Lens interaction model — prev-frame geometry, one-frame hit-test latency
 
-- Status: Accepted
+- Status: Accepted (amended 2026-08-10: keyboard activation — focused +
+  Return/Space clicking — is centralised in `lensi_interact`, and key
+  repeats are no longer filtered anywhere: the OS repeat rate applies,
+  matching text editing; per-frame key-consumption marks keep widget-eaten
+  keys invisible to the central transient-dismissal pass)
 - Date: 2026-07-21
 - Scope: lens (L2 toolkit). Defines how input is resolved against the
   widget tree.

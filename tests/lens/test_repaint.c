@@ -67,11 +67,19 @@ static void test_leaf_change_repaints(void) {
     lens_destroy(ui);
 }
 
-static void test_overlay_open_close_repaints(void) {
+static void test_place_open_close_repaints(void) {
     lens *ui = NULL;
     flux_canvas *canvas = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+
+    const lens_place_opts popup = {
+        .band = LENS_BAND_POPUP,
+        .mode = LENS_PLACE_ANCHORED,
+        .rect = {10, 10, 50, 20},
+        .transient = true,
+        .layout = {.pad = 4, .min_width = 80},
+    };
 
     build_frame(ui, 0.5f);
     render_frame(ui, canvas);
@@ -79,45 +87,42 @@ static void test_overlay_open_close_repaints(void) {
     CHECK(!lens_frame_needs_repaint(ui));
     render_frame(ui, canvas);
 
-    /* Open an overlay: the layer set changes even though the base tree
-     * is untouched. */
+    /* Open a transient popup: the tree's child set changes even though
+     * the base widgets are untouched. */
     lens_begin(ui, &IN0);
     lens_label(ui, "status");
     lens_progress(ui, "load", 0.5f);
-    lens_overlay_open(ui, "menu");
-    if (lens_overlay_begin(ui, "menu", (flux_rect){10, 10, 50, 20},
-                           (lens_overlay_opts){.pad = 4, .min_width = 80})) {
+    lens_place_open(ui, "menu");
+    if (lens_place_begin(ui, "menu", popup)) {
         lens_label(ui, "item");
-        lens_overlay_end(ui);
+        lens_place_end(ui);
     }
     lens_end(ui);
     CHECK(lens_frame_needs_repaint(ui));
     render_frame(ui, canvas);
 
-    /* Let the overlay settle: identical frames must stop reporting. */
+    /* Let the popup settle: identical frames must stop reporting. */
     for (int i = 0; i < 3; i++) {
         lens_begin(ui, &IN0);
         lens_label(ui, "status");
         lens_progress(ui, "load", 0.5f);
-        if (lens_overlay_begin(ui, "menu", (flux_rect){10, 10, 50, 20},
-                               (lens_overlay_opts){.pad = 4, .min_width = 80})) {
+        if (lens_place_begin(ui, "menu", popup)) {
             lens_label(ui, "item");
-            lens_overlay_end(ui);
+            lens_place_end(ui);
         }
         lens_end(ui);
         render_frame(ui, canvas);
     }
     CHECK(!lens_frame_needs_repaint(ui));
 
-    /* Close it: the overlay's pixels must be erased. */
+    /* Close it: the popup's pixels must be erased. */
     lens_begin(ui, &IN0);
     lens_label(ui, "status");
     lens_progress(ui, "load", 0.5f);
-    lens_overlay_close(ui, "menu");
-    if (lens_overlay_begin(ui, "menu", (flux_rect){10, 10, 50, 20},
-                           (lens_overlay_opts){.pad = 4, .min_width = 80})) {
+    lens_place_close(ui, "menu");
+    if (lens_place_begin(ui, "menu", popup)) {
         lens_label(ui, "item");
-        lens_overlay_end(ui);
+        lens_place_end(ui);
     }
     lens_end(ui);
     CHECK(lens_frame_needs_repaint(ui));
@@ -130,6 +135,6 @@ int main(void) {
     test_null_safety();
     test_first_frames_repaint_then_settle();
     test_leaf_change_repaints();
-    test_overlay_open_close_repaints();
+    test_place_open_close_repaints();
     return TEST_REPORT();
 }

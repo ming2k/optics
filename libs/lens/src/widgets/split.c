@@ -105,6 +105,8 @@ bool lens_split_pane(lens *ui) {
 
 void lens_split_end(lens *ui) {
     const lens_theme *t = &ui->theme;
+    lens_style eff = lensi_style_effective(ui);
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
 
     /* Close the second pane (the current open container). */
     lensi_open_container_pop(ui);
@@ -138,11 +140,19 @@ void lens_split_end(lens *ui) {
     float cross_hi = vertical ? split->prev_rect.y + split->prev_rect.h
                               : split->prev_rect.x + split->prev_rect.w;
     float cur_cross = vertical ? ui->input.cursor.y : ui->input.cursor.x;
-    bool over_handle = split->has_prev && cur_main >= div_pos - thick * 0.5f &&
+    /* The handle's hit region follows the same contract as every
+     * interactive path (internal.h): a higher-band node occludes it and a
+     * scroll ancestor's viewport clips it. */
+    bool occluded = split->has_prev && lensi_widget_occluded(ui, split);
+    bool clipped_out = lensi_point_clipped_by_scroll(split, ui->input.cursor);
+    bool over_handle = split->has_prev && !occluded && !clipped_out &&
+                       cur_main >= div_pos - thick * 0.5f &&
                        cur_main <= div_pos + thick * 0.5f && cur_cross >= cross_lo &&
                        cur_cross <= cross_hi;
 
-    /* Drag state machine (scroll-thumb model). */
+    /* Drag state machine (scroll-thumb model). The captured branch checks
+     * the press edge through the same occlusion/clip lens: a press that
+     * landed on a covered handle must not capture. */
     if (ui->active_id == split->id) {
         if (ui->input.mouse_down[L] && st->dragging) {
             float d = cur_main - st->drag_start_pos;
@@ -186,28 +196,27 @@ void lens_split_end(lens *ui) {
             pane2->fixed_h = second_len;
     }
 
-    /* Draw the handle strip, positioned at the divider (prev_rect space). */
+    /* emit — through the replaceable skin (ADR-0059); the strip draws in
+     * last-frame space (last_bounds), the same one-frame latency the
+     * hit-testing above uses. */
     bool hov = over_handle || st->dragging;
     if (hov)
         ui->cursor_hint = vertical ? LENS_CURSOR_RESIZE_EW : LENS_CURSOR_RESIZE_NS;
-    flux_color hc = hov ? t->color_active : t->color_border;
-    if (split->has_prev) {
-        if (vertical) {
-            float hx = first_len - thick * 0.5f;
-            lensi_drawlist_push(ui, split,
-                                (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                                .rel = {hx, 0, thick, split->prev_rect.h},
-                                                .color = hc,
-                                                .radius = thick * 0.5f});
-        } else {
-            float hy = first_len - thick * 0.5f;
-            lensi_drawlist_push(ui, split,
-                                (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                                .rel = {0, hy, split->prev_rect.w, thick},
-                                                .color = hc,
-                                                .radius = thick * 0.5f});
-        }
-    }
+    uint32_t split_state = (over_handle ? LENS_STATE_HOVERED : 0) |
+                           (st->dragging ? LENS_STATE_DRAGGED : 0);
+    lensi_skin_emit(ui, split,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_SPLIT,
+                        .state = split_state,
+                        .bounds = {0, 0, 0, 0},
+                        .last_bounds = split->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .content = {.ratio = st->ratio,
+                                    .vertical = vertical,
+                                    .split_pos = first_len,
+                                    .split_thickness = thick},
+                    });
 
     /* a11y: the split handle is an adjustable (slider). */
     char val[16];

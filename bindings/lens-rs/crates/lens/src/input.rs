@@ -30,6 +30,7 @@ impl MouseButton {
 /// valid for an idle frame. Build it up with the setters; the host is expected
 /// to compute edge events (`*_pressed` / `*_released`) from its own state.
 #[derive(Clone)]
+#[repr(transparent)]
 pub struct Input(sys::lens_input);
 
 impl Default for Input {

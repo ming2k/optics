@@ -106,8 +106,16 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
         store_insert(ui, n);
     }
     if (n->last_seen != ui->frame) {
+        /* A node re-entering from the LEAVING grace window must not be
+         * interactive from its stale prev_rect: align with the first-frame
+         * rule (no hit-testing until arranged this frame). */
+        bool was_leaving = n->phase == LENS_NODE_LEAVING;
         n->last_seen = ui->frame;
         n->leaving_frames = 0;
+        if (was_leaving) {
+            n->has_prev = false;
+            n->prev_rect = (flux_rect){0, 0, 0, 0};
+        }
         n->phase = n->has_prev ? LENS_NODE_STABLE : LENS_NODE_ENTERING;
         lensi_node_reset_frame(n);
     }
@@ -147,5 +155,18 @@ void lensi_store_reap(lens *ui) {
             store_insert(ui, moved.node);
             j = (j + 1) & (s->cap - 1);
         }
+    }
+
+    /* Liveness reconciliation for the interaction-owned ids: a node that
+     * was reaped (or never existed this run) must not stay captured,
+     * focused, or scroll-hot — a stale id would otherwise retarget the next
+     * widget that reuses the slot. O(1) probes against the store. */
+    if (ui->active_id && !lensi_store_find(ui, ui->active_id))
+        ui->active_id = 0;
+    if (ui->scroll_hot_id && !lensi_store_find(ui, ui->scroll_hot_id))
+        ui->scroll_hot_id = 0;
+    if (ui->focused_id && !lensi_store_find(ui, ui->focused_id)) {
+        ui->focused_id = 0;
+        ui->focus_visible = false;
     }
 }

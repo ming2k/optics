@@ -8,8 +8,9 @@
  *   <flux/core.h>     always available
  *   <flux/math.h>     always available
  *   <flux/vulkan.h>   raw Vulkan handle accessors
+ *   <flux/dmabuf.h>   iff built on Linux (FLUX_HAVE_DMABUF; core-level,
+ *                     independent of the canvas module)
  *   <flux/canvas.h>   iff built with -Dcanvas=true
- *   <flux/dmabuf.h>   iff built with -Dcanvas=true
  *   <flux/scene.h>    iff built with -Dscene=true
  *   <flux/compute.h>  iff built with -Dcompute=true
  *   <flux/effect.h>   iff built with -Deffect=true
@@ -24,9 +25,12 @@
 #include <flux/core.h>
 #include <flux/math.h>
 
+#if defined(FLUX_HAVE_DMABUF)
+#include <flux/dmabuf.h>
+#endif
+
 #if defined(FLUX_HAVE_CANVAS)
 #include <flux/canvas.h>
-#include <flux/dmabuf.h>
 #endif
 
 #if defined(FLUX_HAVE_SCENE)

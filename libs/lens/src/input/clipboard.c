@@ -33,6 +33,12 @@ void lens_copy(lens *ui, const char *utf8, size_t len) {
 void lens_request_paste(lens *ui) {
     if (!ui)
         return;
+    /* Bind the request to the currently focused widget: when the payload
+     * arrives (asynchronously, from the host), only that widget may drain
+     * it — focus drift between request and fulfilment must not deliver the
+     * text elsewhere. 0 = unbound (a host pushing lens_paste without a
+     * request keeps the legacy "whoever is focused drains it" path). */
+    ui->paste_target = ui->focused_id;
     if (ui->clipboard.request_text)
         ui->clipboard.request_text(ui->clipboard.user);
 }
@@ -49,12 +55,21 @@ void lens_paste(lens *ui, const char *utf8, size_t len) {
     memcpy(ui->paste_buf, utf8, len);
     ui->paste_buf[len] = '\0';
     ui->paste_len = (uint32_t)len;
+    ui->paste_frame = ui->frame; /* delivery window: this frame and the next */
 }
 
 const char *lensi_take_paste(lens *ui, uint32_t *out_len) {
-    if (!ui || !ui->paste_len) {
-        if (out_len)
-            *out_len = 0;
+    if (out_len)
+        *out_len = 0;
+    if (!ui || !ui->paste_len)
+        return NULL;
+    /* Drop the payload instead of delivering when the frame window passed
+     * (a paste is only fresh for the frame it arrived in and the build
+     * right after) or when focus moved away from the requesting widget. */
+    bool stale = ui->frame > ui->paste_frame + 1;
+    bool wrong_target = ui->paste_target != 0 && ui->paste_target != ui->focused_id;
+    if (stale || wrong_target) {
+        ui->paste_len = 0;
         return NULL;
     }
     if (out_len)

@@ -172,18 +172,52 @@ static void blit_glyph(flux_text *t, glyph_entry *e, FT_GlyphSlot g) {
  * ~470 ms total, watchdog kill.
  *
  * This O(1) clear simply resets the pack cursor and invalidates every
- * cache entry. The GPU texture keeps its stale pixels, but they are
- * never sampled again: cleared entries have no atlas positions, and
- * each new allocation is rasterised + blitted + flushed to the GPU
- * before the quad referencing it is drawn. The cost shifts from
- * "re-rasterise N cached glyphs now" to "re-rasterise ~40 visible
- * glyphs on the next frame" — a 100× reduction at typical cache sizes.
+ * cache entry. The cost shifts from "re-rasterise N cached glyphs now"
+ * to "re-rasterise ~40 visible glyphs on the next frame" — a 100×
+ * reduction at typical cache sizes.
  *
- * The GPU image is NOT recreated (no vkDestroy/vkCreate, no staging
- * upload of zeros). The atlas_pixels CPU buffer is not zeroed either;
- * new allocations overwrite the regions they use. */
+ * Invalidation channel: texels are rearranged freely from here on, so
+ * anything that baked old atlas UVs must keep sampling the OLD contents.
+ * That is two audiences:
+ *   - quads already emitted this frame (their draw batches sit in a
+ *     command buffer, or in a canvas display-list segment, carrying the
+ *     old image's bindless handle), and
+ *   - the CPU-side dirty box, which still names regions of the old image.
+ * The clear therefore (a) flushes any pending dirty box to the old image
+ * so every quad emitted so far sees complete texels, (b) swaps t->atlas
+ * for a fresh GPU image, and (c) releases the old one — flux_image_release
+ * parks it on the device retire queue (and recorded segments hold their
+ * own retain), so old UVs stay self-consistent with old contents until
+ * every referencing batch has retired. New allocations are rasterised +
+ * blitted + flushed to the NEW image before the quads referencing them
+ * are drawn; flux_text_draw detects the mid-run swap and switches images
+ * at a batch boundary. atlas_pixels is not zeroed; new allocations
+ * overwrite the regions they use. The CPU backend has no GPU image at
+ * all — its stale-segment hazard is covered by the host-atlas generation
+ * check (flux_glyph_run_host_atlas_desc). */
 static void atlas_clear(flux_text *t) {
     t->atlas_clears++;
+    if (t->atlas) {
+        /* Complete the old image's pending uploads before the swap so the
+         * quads already emitted against it sample finished texels. */
+        txt_atlas_flush(t);
+
+        flux_image *old = t->atlas;
+        flux_image_desc d = {
+            .type = FLUX_TYPE_IMAGE_DESC,
+            .width = ATLAS_W,
+            .height = ATLAS_H,
+            .format = FLUX_FORMAT_R8_UNORM,
+        };
+        if (flux_image_create(t->dev, &d, &t->atlas) != FLUX_OK) {
+            /* Allocation failure: keep the old image and accept the legacy
+             * rearrangement hazard rather than losing the atlas outright. */
+            t->atlas = old;
+            txt_logf(t, FLUX_LOG_ERROR, "atlas image recreate failed; reusing stale image");
+        } else {
+            flux_image_release(old);
+        }
+    }
     t->atlas_cursor_x = 0;
     t->atlas_cursor_y = 0;
     t->atlas_row_height = 0;

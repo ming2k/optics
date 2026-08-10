@@ -25,6 +25,7 @@ iris_sources = files(
   'src/version.c',
   'src/app.c',
   'src/a11y_util.c',
+  'src/platform_text.c',
 )
 
 iris_c_args = ['-DIRIS_BUILDING=1']
@@ -90,6 +91,7 @@ if host_system == 'linux'
     iris_proto_src = wl.scan_xml(
       wl.find_protocol('xdg-shell'),
       wl.find_protocol('xdg-decoration', state : 'unstable', version : 1),
+      wl.find_protocol('xdg-foreign', state : 'unstable', version : 2),
       wl.find_protocol('text-input', state : 'unstable', version : 3),
       wl.find_protocol('fractional-scale', state : 'staging', version : 1),
       'protocol/cursor-shape-v1.xml',

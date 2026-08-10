@@ -1,4 +1,4 @@
-/* dropdown.c — select widget with overlay item list (ADR-0037). */
+/* dropdown.c — select widget with a placed popup item list (ADR-0060). */
 
 #include "../internal.h"
 #include <stdio.h>
@@ -21,6 +21,9 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
     bool disabled = ui->next_disabled;
     ui->next_disabled = false;
     ui->next_error = false; /* drain so it never leaks to a later widget */
+    lens_style eff = lensi_style_effective(ui);
+    float font_size = lensi_style_font_size(&eff, t);
+    float padding = lensi_style_padding(&eff, t);
 
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
@@ -29,7 +32,7 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    /* Derive a separate id for the overlay so it doesn't share the same
+    /* Derive a separate id for the popup so it doesn't share the same
      * node as the trigger button (which would corrupt prev_rect). */
     char ov_label[64];
     int nwritten = snprintf(ov_label, sizeof(ov_label), "%s##ov", label);
@@ -41,7 +44,7 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
         memcpy(ov_label + l, "##ov", 5);
     }
 
-    bool open = lens_overlay_is_open(ui, ov_label);
+    bool open = lens_place_is_open(ui, ov_label);
     /* A popup is anchored to content coordinates. A wheel gesture away from
      * the popup scrolls the owner, so close the popup before its anchor can
      * leave the viewport; a wheel over the popup itself drives the popup's
@@ -54,18 +57,19 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
         bool over_popup =
             ov && ov->has_prev && lensi_point_in(ui->input.cursor, ov->prev_rect);
         if (!over_popup) {
-            lens_overlay_close(ui, ov_label);
+            lens_place_close(ui, ov_label);
             open = false;
         }
     }
     lens_response r = lensi_interact(ui, n, true, disabled);
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
     bool just_opened = false;
     if (r.clicked) {
         if (open) {
-            lens_overlay_close(ui, ov_label);
+            lens_place_close(ui, ov_label);
             open = false;
         } else {
-            lens_overlay_open(ui, ov_label);
+            lens_place_open(ui, ov_label);
             open = true;
             just_opened = true;
         }
@@ -74,17 +78,17 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
     const char *preview =
         (selected && *selected >= 0 && *selected < count) ? items[*selected] : label;
 
-    lens_text_metrics tm = lensi_text_measure_label(ui, preview, t->font_size, 0.0f);
-    float icon_size = t->font_size;
+    lens_text_metrics tm = lensi_text_measure_label(ui, preview, font_size, 0.0f);
+    float icon_size = font_size;
     float icon_gap = 8.0f;
     float content_w = tm.width + icon_gap + icon_size;
-    float natural_h = fmaxf(tm.height, icon_size) + 2.0f * t->padding;
+    float natural_h = fmaxf(tm.height, icon_size) + 2.0f * padding;
     /* A select trigger must not accept a box hint that clips its label or
      * disclosure icon. Width remains host-controlled; height has a semantic
      * minimum derived from the current theme and text metrics. */
     if (n->fixed_h > 0.0f && n->fixed_h < natural_h)
         n->fixed_h = natural_h;
-    float w = (n->fixed_w > 0) ? n->fixed_w : content_w + 2.0f * t->padding;
+    float w = (n->fixed_w > 0) ? n->fixed_w : content_w + 2.0f * padding;
     float h = (n->fixed_h > 0) ? fmaxf(n->fixed_h, natural_h) : natural_h;
     n->measured = (flux_point){w, h};
 
@@ -94,37 +98,25 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
         n->active_t = lensi_approach(ui, n->active_t, (ui->active_id == id) ? 1.f : 0.f, dt, 18.f);
     }
 
-    float emphasis = (open || r.focused) ? 0.72f : n->hover_t;
-    flux_color bg = disabled ? t->color_disabled
-                             : lensi_lerp_color(t->color_bg, t->color_hover, emphasis);
-
-    lensi_drawlist_push(
-        ui, n,
-        (lens_draw_cmd){
-            .kind = LENS_DRAW_RECT, .rel = {0, 0, 0, 0}, .color = bg, .radius = t->corner_radius});
-
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding, (h - tm.height) * 0.5f, 0, 0},
-                                        .color = t->color_fg,
-                                        .text = preview,
-                                        .text_size = t->font_size});
-
-    float icon_y = (h - icon_size) * 0.5f;
-    lensi_drawlist_push(
-        ui, n,
-        (lens_draw_cmd){.kind = LENS_DRAW_ICON,
-                        .rel = {-t->padding, icon_y, icon_size, icon_size},
-                        .color = (open || r.focused) ? t->color_accent : t->color_fg,
-                        .width = 1.8f * (icon_size / 24.0f),
-                        .icon_id = open ? LENS_ICON_CHEVRON_UP : LENS_ICON_CHEVRON_DOWN});
-
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
-                                        .rel = {0, 0, 0, 0},
-                                        .color = t->color_border,
-                                        .radius = t->corner_radius,
-                                        .width = t->border_width});
+    /* emit — through the replaceable skin (ADR-0059). The popup (placement,
+     * option list, dismissal) stays below in the widget: place machinery
+     * and cascade-styled containers, not chrome. */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_DROPDOWN,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = preview,
+                                    .text = tm,
+                                    .icon = open ? LENS_ICON_CHEVRON_UP
+                                                 : LENS_ICON_CHEVRON_DOWN,
+                                    .popup_open = open},
+                    });
 
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) |
                          (disabled ? LENS_A11Y_DISABLED : 0) |
@@ -134,11 +126,14 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
     bool changed = false;
 
     if (open) {
-        /* Keyboard navigation inside the open dropdown */
+        /* Keyboard navigation inside the open dropdown. Escape is NOT
+         * handled here: the central dismissal pass owns the open-set
+         * (ADR-0060/C1) — a widget-side close would double-close. Arrow
+         * keys a menu already consumed this frame are skipped. */
         bool kbd_nav = false;
         for (uint32_t i = 0; i < ui->input.key_count; i++) {
             const lens_key_event *k = &ui->input.keys[i];
-            if (!k->pressed)
+            if (!k->pressed || ui->key_consumed[i])
                 continue;
             if (k->key == LENS_KEY_DOWN) {
                 if (selected && *selected + 1 < count) {
@@ -152,8 +147,6 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
                     changed = true;
                     kbd_nav = true;
                 }
-            } else if (k->key == LENS_KEY_ESCAPE) {
-                lens_overlay_close(ui, ov_label);
             }
         }
 
@@ -166,7 +159,7 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
         flux_rect owner_bounds = {0, 0, 0, 0};
         bool has_owner_bounds = nearest_scroll_bounds(n, &owner_bounds);
 
-        /* The placement area lensi_overlay_layout will use: the owner's
+        /* The placement area the ANCHORED resolve will use: the owner's
          * scroll viewport clamped to the display, else the whole display. */
         float dw = ui->input.display_size.x;
         float dh = ui->input.display_size.y;
@@ -190,30 +183,41 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
         const float edge_margin = 4.0f;
         float room_below = area.y + area.h - (anchor.y + anchor.h) - edge_margin;
         float room_above = anchor.y - area.y - edge_margin;
-        float row_h = t->font_size + 2.0f * t->padding;
+        float row_h = font_size + 2.0f * padding;
         float list_gap = 2.0f;
         float peek = 7.0f * row_h + 6.0f * list_gap + 0.5f * row_h;
         float budget = fmaxf(room_below, room_above);
         if (budget > peek)
             budget = peek;
-        float list_max_h = budget - 2.0f * t->padding; /* overlay pad */
+        float list_max_h = budget - 2.0f * padding; /* popup pad */
         if (list_max_h < row_h)
             list_max_h = row_h; /* always show at least one row */
 
         /* Use the opaque theme background instead of color_hover. Hover can
          * legitimately be translucent, but a floating option surface must
-         * never reveal or visually merge with content behind it. */
-        if (lens_overlay_begin(ui, ov_label, anchor,
-                               (lens_overlay_opts){.pad = t->padding,
-                                                   .gap = list_gap,
-                                                   .bg = t->color_bg | 0xff000000u,
-                                                   .border = t->color_border,
-                                                   .border_width = t->border_width,
-                                                   .radius = t->corner_radius,
-                                                   .min_width = popup_w,
-                                                   .cross = LENS_STRETCH})) {
-            if (has_owner_bounds)
-                lensi_overlay_constrain_current(ui, owner_bounds);
+         * never reveal or visually merge with content behind it. The popup
+         * is constrained to the owner's scroll viewport so it escapes the
+         * ordinary layout flow without crossing the inspector that owns it. */
+        if (lens_place_begin(ui, ov_label,
+                             (lens_place_opts){
+                                 .band = LENS_BAND_POPUP,
+                                 .mode = LENS_PLACE_ANCHORED,
+                                 .rect = anchor,
+                                 .bounds = has_owner_bounds ? owner_bounds
+                                                            : (flux_rect){0, 0, 0, 0},
+                                 .transient = true,
+                                 .layout =
+                                     {
+                                         .pad = padding,
+                                         .gap = list_gap,
+                                         .bg = rs.bg | 0xff000000u,
+                                         .border = rs.border,
+                                         .border_width = rs.border_width,
+                                         .radius = rs.corner_radius,
+                                         .min_width = popup_w,
+                                         .cross = LENS_STRETCH,
+                                     },
+                             })) {
             /* Flat selectable rows, not filled accent buttons: a column of
              * lens_button reads as a stack of bordered pills, whereas a menu
              * wants one flat list with the current value highlighted. The
@@ -237,7 +241,7 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
                         *selected = i;
                         changed = true;
                     }
-                    lens_overlay_close(ui, ov_label);
+                    lens_place_close(ui, ov_label);
                 }
             }
             /* Keep the selected row in view: on open, and after keyboard
@@ -260,7 +264,7 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
                 }
             }
             lens_scroll_end(ui);
-            lens_overlay_end(ui);
+            lens_place_end(ui);
         }
     }
 

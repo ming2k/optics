@@ -639,6 +639,10 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
      * draw + push-constant update per glyph. */
     flux_glyph_quad quads[TEXT_RUN_BATCH];
     flux_glyph_run_desc run = FLUX_GLYPH_RUN_DESC_INIT;
+    /* Host path (device-less CPU canvas): tag the coverage buffer with its
+     * content generation so the canvas can refuse a recorded segment whose
+     * baked UVs predate a later atlas_clear (rearranged texels). */
+    flux_glyph_run_host_atlas_desc host_atlas_gen = FLUX_GLYPH_RUN_HOST_ATLAS_DESC_INIT;
     run.atlas = t->atlas;
     if (!t->atlas) {
         /* Device-less CPU canvas (ADR-0019): feed the host R8 coverage buffer
@@ -646,10 +650,13 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
         run.host_coverage = t->atlas_pixels;
         run.host_atlas_w = ATLAS_W;
         run.host_atlas_h = ATLAS_H;
+        host_atlas_gen.generation = t->atlas_clears;
+        run.next = &host_atlas_gen;
     }
     run.quads = quads;
 
     uint32_t n = 0;
+    uint64_t clears = t->atlas_clears;
     for (int i = 0; i < L->count; i++) {
         const txt_placed_glyph *g = &L->glyphs[i];
 
@@ -674,6 +681,30 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
         }
 
         glyph_entry *e = txt_glyph_get(t, g->face_id, g->gid, L->rpx, (uint8_t)phase);
+
+        /* txt_glyph_get may have triggered atlas_clear, which rearranges
+         * the atlas wholesale; the quads pending in this batch carry
+         * pre-clear UVs and must be flushed before post-clear blits spread
+         * further. GPU path: the clear swapped t->atlas after completing
+         * the old image's uploads, so flush against the retired image and
+         * follow the fresh one. Host path: texels are rearranged in place,
+         * so flush immediately — at most the single cell the triggering
+         * glyph just re-blitted can mis-sample for this frame. */
+        if (t->atlas_clears != clears) {
+            clears = t->atlas_clears;
+            if (n > 0) {
+                run.quad_count = n;
+                flux_canvas_draw_glyph_run(canvas, &run);
+                n = 0;
+            }
+            if (run.atlas)
+                run.atlas = t->atlas;
+            else
+                /* Post-clear quads carry new-era UVs: tag them with the new
+                 * generation so recorded segments validate against the
+                 * rearranged buffer, not its pre-clear contents. */
+                host_atlas_gen.generation = t->atlas_clears;
+        }
         if (!e || e->w <= 0 || e->h <= 0)
             continue;
 

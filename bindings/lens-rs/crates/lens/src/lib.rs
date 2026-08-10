@@ -34,9 +34,10 @@ mod types;
 
 pub use input::{Input, MouseButton, key, mods};
 pub use types::{
-    Align, Color, CursorHint, FontFamily, ForegroundOutline, Icon, LayoutOpts, ModalOpts,
-    OverlayOpts, Rect, Response, TabStyle, TableColumn, TableOpts, TableResult, TabsOpts,
-    TextMetrics, Theme,
+    Align, Band, Color, CursorHint, FontFamily, GridColumn, GridRow, Icon, LayoutOpts, ModalOpts,
+    PlaceMode, PlaceOpts, Rect, Response, SkinFn, Style, StyleResolved, TableColumn, TableOpts,
+    TableResult, TabsOpts, TextLine, TextMetrics, Theme, WidgetContent, WidgetKind, WidgetRecord,
+    WidgetState,
 };
 
 /// The retained UI context. Owns the persistent tree, layout, and draw list.
@@ -132,36 +133,38 @@ impl Ui {
         unsafe { sys::lens_set_theme(self.raw, theme.0) };
     }
 
-    // ---- overlays (host-side open/close, ADR-0014) -----------------------
+    // ---- transient placement (host-side open/close, ADR-0060) --------------
     //
-    // `Frame::overlay_open` / `Frame::overlay_close` / `Frame::overlay` cover
-    // the common case of driving an overlay from inside a frame. These mirror
-    // the same calls on `Ui` so a host can open or dismiss an overlay outside
-    // a frame — e.g. from a keyboard handler that runs between frames. The
-    // state is retained per id on the context, so a `close` here is visible
-    // to the next frame's `Frame::overlay` / `Frame::overlay_is_open`.
+    // `Frame::place_open` / `Frame::place_close` / `Frame::place` cover the
+    // common case of driving a transient popup from inside a frame. These
+    // mirror the same calls on `Ui` so a host can open or dismiss a popup
+    // outside a frame — e.g. from a keyboard handler that runs between
+    // frames. The state is retained per id on the context, so a `close` here
+    // is visible to the next frame's `Frame::place` / `Frame::place_is_open`.
 
-    /// Open the overlay keyed by `id` (retained until closed). Safe to call
-    /// outside a frame; the body renders on the next [`Ui::frame`].
-    pub fn overlay_open(&mut self, id: &str) {
+    /// Open the transient place node keyed by `id` (retained until closed).
+    /// Safe to call outside a frame; the body renders on the next
+    /// [`Ui::frame`].
+    pub fn place_open(&mut self, id: &str) {
         let c = cstr(id);
         // SAFETY: raw is live; c outlives the call.
-        unsafe { sys::lens_overlay_open(self.raw, c.as_ptr()) };
+        unsafe { sys::lens_place_open(self.raw, c.as_ptr()) };
     }
 
-    /// Close the overlay keyed by `id`. Safe to call outside a frame.
-    pub fn overlay_close(&mut self, id: &str) {
+    /// Close the transient place node keyed by `id`. Safe to call outside a
+    /// frame.
+    pub fn place_close(&mut self, id: &str) {
         let c = cstr(id);
         // SAFETY: raw is live; c outlives the call.
-        unsafe { sys::lens_overlay_close(self.raw, c.as_ptr()) };
+        unsafe { sys::lens_place_close(self.raw, c.as_ptr()) };
     }
 
-    /// Whether the overlay keyed by `id` is currently open. Safe to call
-    /// outside a frame.
-    pub fn overlay_is_open(&mut self, id: &str) -> bool {
+    /// Whether the transient place node keyed by `id` is currently open.
+    /// Safe to call outside a frame.
+    pub fn place_is_open(&mut self, id: &str) -> bool {
         let c = cstr(id);
         // SAFETY: raw is live; c outlives the call; read-only.
-        unsafe { sys::lens_overlay_is_open(self.raw as *const sys::lens, c.as_ptr()) }
+        unsafe { sys::lens_place_is_open(self.raw as *const sys::lens, c.as_ptr()) }
     }
 
     /// Whether an eased value (hover/active fade, …) was still in transit
@@ -498,17 +501,13 @@ impl Frame {
         unsafe { sys::lens_flex(self.ui, grow) };
     }
 
-    /// Draw an icon glyph at `size` logical pixels.
+    /// Draw an icon glyph at `size` logical pixels. A contour behind the
+    /// glyph is a style atom now (ADR-0061): wrap the call in
+    /// [`Frame::push_style`] with [`Style::with_outline_color`] /
+    /// [`Style::with_outline_width`].
     pub fn icon(&mut self, id: Icon, size: f32) {
         // SAFETY: ui is live for the frame.
         unsafe { sys::lens_icon(self.ui, id.raw(), size) };
-    }
-
-    /// Draw an icon glyph with a contour behind its shape. Its intrinsic
-    /// layout size is identical to [`Self::icon`].
-    pub fn icon_outlined(&mut self, id: Icon, size: f32, outline: ForegroundOutline) {
-        // SAFETY: ui is live for the frame; outline is a value descriptor.
-        unsafe { sys::lens_icon_outlined(self.ui, id.raw(), size, outline.raw()) };
     }
 
     /// Draw a host-owned raster image (e.g. a decoded application icon),
@@ -541,24 +540,6 @@ impl Frame {
         unsafe { sys::lens_image_tinted(self.ui, image, w, h, tint.raw()) };
     }
 
-    /// Draw a tinted host-owned raster image with an alpha-derived contour
-    /// underlay. Its intrinsic layout size matches [`Self::image_tinted`].
-    ///
-    /// # Safety
-    /// `image` follows the lifetime and ownership contract of
-    /// [`Frame::image`].
-    pub unsafe fn image_tinted_outlined(
-        &mut self,
-        image: *mut sys::flux_image,
-        w: f32,
-        h: f32,
-        tint: Color,
-        outline: ForegroundOutline,
-    ) {
-        // SAFETY: ui is live; image lifetime is the caller's contract.
-        unsafe { sys::lens_image_tinted_outlined(self.ui, image, w, h, tint.raw(), outline.raw()) };
-    }
-
     /// A flat icon-only button for navigation strips and toolbars: transparent
     /// at rest, with a subtle fill on hover. Returns `true` on the frame it is
     /// clicked.
@@ -567,13 +548,11 @@ impl Frame {
         unsafe { sys::lens_icon_button(self.ui, id.raw()) }
     }
 
-    /// As [`Frame::icon_button`], but `active` marks the currently-selected
-    /// view in a navigation strip. The visual treatment is theme-driven:
-    /// always a background tint, plus an opt-in left accent rail and
-    /// accent-tinted glyph when
-    /// [`Theme::with_active_indicator_width`](crate::Theme::with_active_indicator_width)
-    /// is > 0. The default is the tint-only active state. Returns `true` on
-    /// the frame it is clicked.
+    /// As [`Frame::icon_button`], but `active` shows a steady neutral tint
+    /// (the cascade-resolved bg_pressed; theme: color_active) for the
+    /// selected view — state as data, no flavor (ADR-0061). An accent glyph
+    /// or rail is a scope/style-atom or custom-skin decision, not a separate
+    /// API. Returns `true` on the frame it is clicked.
     pub fn icon_button_active(&mut self, id: Icon, active: bool) -> bool {
         // SAFETY: ui is live for the frame.
         unsafe { sys::lens_icon_button_active(self.ui, id.raw(), active) }
@@ -718,7 +697,13 @@ impl Frame {
             // synchronous duration of lens_table. The C widget copies each
             // returned string into its frame arena before invoking us again.
             let state = unsafe { &mut *user.cast::<CallbackState<F>>() };
-            let value = (state.cell)(row as usize, column as usize).replace('\0', "�");
+            // A panic must not unwind across the FFI boundary (abort); report
+            // an empty cell instead, matching iris-rs's trampoline policy.
+            let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                (state.cell)(row as usize, column as usize)
+            }))
+            .unwrap_or_default()
+            .replace('\0', "�");
             state.scratch = CString::new(value).unwrap_or_default();
             state.scratch.as_ptr()
         }
@@ -798,10 +783,11 @@ impl Frame {
         unsafe { sys::lens_tabs_end(self.ui) };
     }
 
-    /// A tab strip with an explicit presentation variant. `Connected` joins
-    /// the active surface to its neighbours; `Indicator` uses a compact,
-    /// elastic theme-coloured marker. The standard treatment remains the
-    /// default used by [`Frame::tabs`].
+    /// A tab strip with structural options (ADR-0061: the presentation
+    /// knobs retired — the default skin draws the neutral static indicator;
+    /// visual tuning goes through the style cascade, and a different
+    /// presentation is a caller-owned skin). `equal_width` gives every tab
+    /// the same share of the strip.
     pub fn tabs_ex(
         &mut self,
         id: &str,
@@ -855,14 +841,14 @@ impl Frame {
         }
     }
 
-    // ---- queries & overlays -----------------------------------------------
+    // ---- queries & placement ------------------------------------------------
 
-    /// Bounds of a widget or layer from a previous frame, resolved from its
-    /// id within the current id-stack context (typically the root at the top
-    /// of the build callback). Returns `None` when no such node exists yet
-    /// (e.g. on the first frame). Useful for hosts that layer custom pointer
-    /// handling under the chrome: read the chrome's bounds here and exclude
-    /// hits inside them.
+    /// Bounds of a widget or placed subtree from a previous frame, resolved
+    /// from its id within the current id-stack context (typically the root at
+    /// the top of the build callback). Returns `None` when no such node exists
+    /// yet (e.g. on the first frame). Useful for hosts that layer custom
+    /// pointer handling under the chrome: read the chrome's bounds here and
+    /// exclude hits inside them.
     pub fn node_bounds(&self, id: &str) -> Option<Rect> {
         let c = cstr(id);
         // SAFETY: ui is live; c outlives the calls.
@@ -885,8 +871,8 @@ impl Frame {
         unsafe { sys::lens_set_focus(self.ui, 0) };
     }
 
-    /// The interaction result of the most recently built widget — useful for an
-    /// overlay anchor (`f.response().rect`) or reading hover/click after the
+    /// The interaction result of the most recently built widget — useful for a
+    /// popup anchor (`f.response().rect`) or reading hover/click after the
     /// fact.
     pub fn response(&self) -> Response {
         // SAFETY: ui is live; the call only reads state.
@@ -908,76 +894,52 @@ impl Frame {
         CursorHint::from_raw(unsafe { sys::lens_get_cursor_hint(self.ui as *const sys::lens) })
     }
 
-    /// Open the overlay keyed by `id` (retained until closed).
-    pub fn overlay_open(&mut self, id: &str) {
+    /// Open the transient place node keyed by `id` (retained until closed).
+    pub fn place_open(&mut self, id: &str) {
         let c = cstr(id);
         // SAFETY: ui is live; c outlives the call.
-        unsafe { sys::lens_overlay_open(self.ui, c.as_ptr()) };
+        unsafe { sys::lens_place_open(self.ui, c.as_ptr()) };
     }
 
-    /// Close the overlay keyed by `id`.
-    pub fn overlay_close(&mut self, id: &str) {
+    /// Close the transient place node keyed by `id`.
+    pub fn place_close(&mut self, id: &str) {
         let c = cstr(id);
         // SAFETY: ui is live; c outlives the call.
-        unsafe { sys::lens_overlay_close(self.ui, c.as_ptr()) };
+        unsafe { sys::lens_place_close(self.ui, c.as_ptr()) };
     }
 
-    /// Whether the overlay keyed by `id` is currently open.
-    pub fn overlay_is_open(&self, id: &str) -> bool {
+    /// Whether the transient place node keyed by `id` is currently open.
+    pub fn place_is_open(&self, id: &str) -> bool {
         let c = cstr(id);
         // SAFETY: ui is live; c outlives the call; read-only.
-        unsafe { sys::lens_overlay_is_open(self.ui as *const sys::lens, c.as_ptr()) }
+        unsafe { sys::lens_place_is_open(self.ui as *const sys::lens, c.as_ptr()) }
     }
 
-    /// Whether the cursor is inside the open overlay's last-frame bounds.
-    /// Combine this with the owner widget's hover response to implement a
-    /// hover-to-open popup that remains usable while the cursor crosses over.
-    pub fn overlay_hovered(&self, id: &str) -> bool {
+    /// Whether the cursor is inside the open transient node's last-frame
+    /// bounds. Combine this with the owner widget's hover response to
+    /// implement a hover-to-open popup that remains usable while the cursor
+    /// crosses over.
+    pub fn place_hovered(&self, id: &str) -> bool {
         let c = cstr(id);
         // SAFETY: ui is live; c outlives the call; read-only.
-        unsafe { sys::lens_overlay_hovered(self.ui as *const sys::lens, c.as_ptr()) }
+        unsafe { sys::lens_place_hovered(self.ui as *const sys::lens, c.as_ptr()) }
     }
 
-    /// A floating overlay layer anchored to `anchor` (usually the owning
-    /// widget's `response().rect`). `body` runs only while the overlay is open;
-    /// the closure is skipped otherwise.
-    pub fn overlay(
-        &mut self,
-        id: &str,
-        anchor: Rect,
-        opts: &OverlayOpts,
-        body: impl FnOnce(&mut Frame),
-    ) {
+    /// An absolutely-placed container sub-root (ADR-0060): it keeps its
+    /// parent chain but escapes the parent's layout flow and clip, and is
+    /// emitted in `opts.band` z order. For a transient node the `body` runs
+    /// only while the id is open; non-transient bodies always run (the
+    /// persistent-chrome case). Pair the placement with
+    /// [`Frame::place_open`] / [`Frame::place_close`] for transients.
+    pub fn place(&mut self, id: &str, opts: &PlaceOpts, body: impl FnOnce(&mut Frame)) {
         let c = cstr(id);
         // SAFETY: ui is live; c outlives the call.
-        let open =
-            unsafe { sys::lens_overlay_begin(self.ui, c.as_ptr(), anchor.to_raw(), opts.to_raw()) };
+        let open = unsafe { sys::lens_place_begin(self.ui, c.as_ptr(), opts.to_raw()) };
         if open {
             body(self);
-            // SAFETY: only paired with a true return from lens_overlay_begin.
-            unsafe { sys::lens_overlay_end(self.ui) };
+            // SAFETY: only paired with a true return from lens_place_begin.
+            unsafe { sys::lens_place_end(self.ui) };
         }
-    }
-
-    /// A persistent floating layer placed exactly at `rect`. Unlike
-    /// [`Frame::overlay`], a layer is always entered (no open/close state) and
-    /// is never auto-dismissed: use it for chrome that stays on screen every
-    /// frame — a dock, a status bar, a notification stack, per-window title
-    /// bars. `rect.w`/`rect.h` are a minimum; the layer grows to fit its body.
-    pub fn layer(
-        &mut self,
-        id: &str,
-        rect: Rect,
-        opts: &OverlayOpts,
-        body: impl FnOnce(&mut Frame),
-    ) {
-        let c = cstr(id);
-        // SAFETY: ui is live; c outlives the call. lens_layer_begin always
-        // returns true, so the body always builds and lens_layer_end is always
-        // paired.
-        unsafe { sys::lens_layer_begin(self.ui, c.as_ptr(), rect.to_raw(), opts.to_raw()) };
-        body(self);
-        unsafe { sys::lens_layer_end(self.ui) };
     }
 
     // ---- modal dialogs (ADR-0039) ------------------------------------------
@@ -1015,7 +977,7 @@ impl Frame {
             title: title.as_ref().map_or(ptr::null(), |t| t.as_ptr()),
             backdrop: opts.backdrop.raw(),
             min_width: opts.min_width.max(0.0),
-            dismissable: opts.dismissable,
+            pinned: opts.pinned,
         };
         // SAFETY: ui is live for the frame; c and title outlive the call; lens
         // copies the title into its frame arena.
@@ -1047,10 +1009,8 @@ impl Frame {
 
     /// A plain, borderless, full-width list or navigation row. It is
     /// transparent at rest, uses a subtle fill on hover, and uses the theme's
-    /// active-surface colour when `selected`. Independently, themes can opt
-    /// into an accent rail and accent text through
-    /// [`Theme::with_active_indicator_width`](crate::Theme::with_active_indicator_width).
-    /// Returns `true` on the frame it is clicked.
+    /// active-surface colour when `selected`. Returns `true` on the frame it
+    /// is clicked.
     ///
     /// Unlike [`Frame::button`], it has no persistent filled surface or border
     /// at rest, so a `column` of selectables reads as one flat navigation list.
@@ -1068,6 +1028,35 @@ impl Frame {
         let c = cstr(label);
         // SAFETY: ui is live; c outlives the call.
         unsafe { sys::lens_selectable_icon(self.ui, icon.raw(), c.as_ptr(), selected) }
+    }
+
+    /// Push a partial style onto the scope stack (ADR-0061): every widget
+    /// declared until the matching [`Frame::pop_style`] — terse forms
+    /// included — resolves its unset atoms against the merged scope
+    /// (per-call box styles still win; the theme fills the rest). This is
+    /// the primitive for caller-built design-system scopes ("danger",
+    /// "sidebar"). The stack resets every frame, so a forgotten pop cannot
+    /// leak.
+    pub fn push_style(&mut self, style: Style) {
+        // SAFETY: ui is live for the frame; style is copied by value.
+        unsafe { sys::lens_push_style(self.ui, style.0) };
+    }
+
+    /// Pop the innermost style scope pushed with [`Frame::push_style`].
+    pub fn pop_style(&mut self) {
+        // SAFETY: ui is live for the frame.
+        unsafe { sys::lens_pop_style(self.ui) };
+    }
+
+    /// Replace the skin for a widget kind context-wide (ADR-0059). Every
+    /// migrated widget of that kind — however it is called — now draws
+    /// through `skin`. `None` restores the built-in default. The context is
+    /// the single override granularity (ADR-0061 retired the per-call forms):
+    /// for a one-off override, set the skin, build the widget, restore `None`.
+    pub fn set_skin(&mut self, kind: WidgetKind, skin: SkinFn) {
+        // SAFETY: ui is live for the frame; the fn pointer (or None) is
+        // stored on the context and called during later widget builds.
+        unsafe { sys::lens_set_skin(self.ui, kind, skin) };
     }
 
     /// A text label.
@@ -1104,19 +1093,6 @@ impl Frame {
         let c = cstr(text);
         // SAFETY: ui is live; c outlives the call.
         unsafe { sys::lens_label_compact_ex(self.ui, c.as_ptr(), size) };
-    }
-
-    /// A compact label with a contour behind the glyphs. Intrinsic metrics
-    /// remain identical to [`Self::label_compact_sized`].
-    pub fn label_compact_outlined_sized(
-        &mut self,
-        text: &str,
-        size: f32,
-        outline: ForegroundOutline,
-    ) {
-        let c = cstr(text);
-        // SAFETY: ui is live; c outlives the call; outline is a value descriptor.
-        unsafe { sys::lens_label_compact_outlined_ex(self.ui, c.as_ptr(), size, outline.raw()) };
     }
 
     /// A title (larger, emphasized label).
@@ -1169,6 +1145,7 @@ impl Frame {
                 disabled,
                 error: false,
                 tooltip: ptr::null(),
+                style: sys::lens_style::default(),
             },
             label: label.as_ptr(),
             description: description.as_ptr(),
@@ -1377,6 +1354,126 @@ pub fn register_svg_icon(svg: &str) -> Option<sys::lens_icon_id> {
     // LENS_ICON_INVALID is (lens_icon_id)-1; the newtype binding makes it
     // plain data (u32::MAX), so this comparison is sound.
     if id.0 == u32::MAX { None } else { Some(id) }
+}
+
+/// The built-in default skin for a widget kind (ADR-0059). Useful for
+/// wrapping: a custom skin can call the default to keep the stock chrome
+/// and then add its own. Returns `None` for kinds outside the enum.
+pub fn default_skin(kind: WidgetKind) -> SkinFn {
+    // SAFETY: pure table lookup.
+    unsafe { sys::lens_default_skin(kind) }
+}
+
+/// Push a filled rect from inside a skin (ADR-0059). `rel` is node-local;
+/// a zero w/h spans the full node box.
+///
+/// # Safety
+/// `ui` and `node` must be the values the skin was called with, during
+/// that call.
+/// Borrow a node's retained skin scratch (ADR-0061): four floats, zeroed on
+/// the node's first touch, living and dying with the node. Mechanism, not
+/// animation — a caller-owned skin stores its own state (a spring's
+/// position/velocity) here; the library never integrates anything.
+///
+/// # Safety
+/// `node` must be a live lens node obtained inside the current frame (e.g.
+/// the node passed to a skin callback); the returned pointer is valid until
+/// the node is reclaimed by the store GC.
+pub unsafe fn skin_scratch(ui: *mut sys::lens, node: *mut sys::lens_node) -> *mut f32 {
+    // SAFETY: forwarded contract — the caller guarantees a live node.
+    unsafe { sys::lens_skin_scratch(ui, node) }
+}
+
+pub unsafe fn skin_rect(
+    ui: *mut sys::lens,
+    node: *mut sys::lens_node,
+    rel: Rect,
+    color: Color,
+    radius: f32,
+) {
+    // SAFETY: forwarded contract from the caller.
+    unsafe { sys::lens_skin_rect(ui, node, rel.to_raw(), color.raw(), radius) };
+}
+
+/// Push a border stroke from inside a skin. Same contract as [`skin_rect`].
+///
+/// # Safety
+/// `ui` and `node` must be the values the skin was called with, during
+/// that call.
+pub unsafe fn skin_border(
+    ui: *mut sys::lens,
+    node: *mut sys::lens_node,
+    rel: Rect,
+    color: Color,
+    radius: f32,
+    width: f32,
+) {
+    // SAFETY: forwarded contract from the caller.
+    unsafe { sys::lens_skin_border(ui, node, rel.to_raw(), color.raw(), radius, width) };
+}
+
+/// Push text from inside a skin. A negative `rel.w`/`rel.h` centres the
+/// run in the resolved node rect at render time. Same contract as
+/// [`skin_rect`].
+///
+/// # Safety
+/// `ui` and `node` must be the values the skin was called with, during
+/// that call; lens copies the text into its frame arena.
+pub unsafe fn skin_text(
+    ui: *mut sys::lens,
+    node: *mut sys::lens_node,
+    rel: Rect,
+    color: Color,
+    text: &str,
+    size_px: f32,
+    weight: f32,
+) {
+    let c = cstr(text);
+    // SAFETY: forwarded contract from the caller; c outlives the call.
+    unsafe { sys::lens_skin_text(ui, node, rel.to_raw(), color.raw(), c.as_ptr(), size_px, weight) };
+}
+
+/// Push a vector icon glyph from inside a skin. `icon` is a raw
+/// `lens_icon_id`, so runtime-registered glyphs ([`register_svg_icon`])
+/// work alongside the built-in [`Icon`] set. Same contract as
+/// [`skin_rect`].
+///
+/// # Safety
+/// `ui` and `node` must be the values the skin was called with, during
+/// that call.
+pub unsafe fn skin_icon(
+    ui: *mut sys::lens,
+    node: *mut sys::lens_node,
+    rel: Rect,
+    color: Color,
+    stroke: f32,
+    icon: sys::lens_icon_id,
+) {
+    // SAFETY: forwarded contract from the caller.
+    unsafe { sys::lens_skin_icon(ui, node, rel.to_raw(), color.raw(), stroke, icon) };
+}
+
+/// Push a nested logical clip from inside a skin (e.g. per-cell clips in a
+/// table skin). Balanced with [`skin_clip_pop`]; the rect is intersected
+/// with the enclosing clip at render time. Same contract as [`skin_rect`].
+///
+/// # Safety
+/// `ui` and `node` must be the values the skin was called with, during
+/// that call.
+pub unsafe fn skin_clip_push(ui: *mut sys::lens, node: *mut sys::lens_node, rel: Rect) {
+    // SAFETY: forwarded contract from the caller.
+    unsafe { sys::lens_skin_clip_push(ui, node, rel.to_raw()) };
+}
+
+/// Pop a clip pushed with [`skin_clip_push`]. Same contract as
+/// [`skin_rect`].
+///
+/// # Safety
+/// `ui` and `node` must be the values the skin was called with, during
+/// that call, and every pop must balance an earlier push.
+pub unsafe fn skin_clip_pop(ui: *mut sys::lens, node: *mut sys::lens_node) {
+    // SAFETY: forwarded contract from the caller.
+    unsafe { sys::lens_skin_clip_pop(ui, node) };
 }
 
 /// The lens version string reported by the linked C library.

@@ -199,6 +199,11 @@ FLUX_NODISCARD FLUX_API flux_result flux_graphics_pipeline_create(
 
 FLUX_NODISCARD FLUX_API flux_graphics_pipeline *
 flux_graphics_pipeline_retain(flux_graphics_pipeline *p);
+/* Pipelines do NOT go through the device retire queue: release destroys
+ * the VkPipeline inline. Only release once all GPU work recorded with the
+ * pipeline has completed (its frame-slot fence has signalled, or after
+ * flux_device_wait_idle); destroying a pipeline a batch in flight still
+ * executes is a VUID-vkDestroyPipeline-pipeline-00765 violation. */
 FLUX_API void flux_graphics_pipeline_release(flux_graphics_pipeline *p);
 
 FLUX_API VkPipeline flux_graphics_pipeline_vk_pipeline(const flux_graphics_pipeline *p);
@@ -250,6 +255,10 @@ FLUX_NODISCARD FLUX_API flux_result flux_sampler_create(flux_device *d,
                                                         flux_sampler **out);
 
 FLUX_NODISCARD FLUX_API flux_sampler *flux_sampler_retain(flux_sampler *s);
+/* Release is deferred through the device retire queue: the bindless slot
+ * and VkSampler are destroyed only once every in-flight batch that could
+ * still carry the slot in its push constants has retired, so callers need
+ * no keep-alive window after a draw that sampled through it. */
 FLUX_API void flux_sampler_release(flux_sampler *s);
 
 FLUX_API VkSampler flux_sampler_vk_sampler(const flux_sampler *s);

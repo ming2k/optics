@@ -77,13 +77,48 @@ platform code must preserve them:
    supplies the deadline sleep.
 4. **Async paste.** `lens_clipboard.request_text` is always answered
    later via `lens_paste` — never synchronously — matching the strictest
-   platform (Wayland) so all three behave alike.
+   platform (Wayland) so all three behave alike. On Wayland the read runs
+   on a detached helper thread with a hard 5 s deadline (a stuck or
+   malicious selection owner cannot hang the UI) and completion is
+   delivered through `iris_post_to_main_thread`; Win32 posts
+   `WM_IRIS_PASTE_DELIVER`, Cocoa an ApplicationDefined event.
 5. **IME contract.** Composition state travels in
    `lens_input.preedit_utf8` + cursor/clause fields; the candidate window
    is positioned from `lens_caret_rect`; `ime_delete_before/after` covers
    `delete_surrounding_text`. Platform IMEs (text-input-v3, IMM/TSF,
-   NSTextInputClient) must reduce to exactly these fields.
+   NSTextInputClient) must reduce to exactly these fields. Strings clipped
+   into the fixed-size input buffers go through the shared boundary-aware
+   helpers (`src/platform_text.h`) — never a raw byte cap that could split
+   a multi-byte UTF-8 sequence.
 6. **Thread-to-main delivery.** Platform watchers (theme changes, a11y
    pumps) never touch lens/flux state directly; they post to the backend
-   event loop through the internal wakeup seam and run on the main
-   thread.
+   event loop through the wakeup seam and run on the main thread. Hosts
+   get the same capability through the public
+   `iris_post_to_main_thread(fn, user)` (`iris/app.h`): thread-safe,
+   callable from any thread, FIFO on the main thread, dropped when no loop
+   is running.
+7. **Keyboard contract.** Every backend reports both press and release
+   edges for each mappable key; letters/digits are normalised to the
+   unshifted ASCII code (`'a'`, never `'A'`) with shift travelling in
+   `lens_input.mods` only; `lens_key_event.repeat` is best-effort (Win32
+   and Cocoa report auto-repeat, Wayland leaves it false) and lens does
+   not depend on it. The authoritative statement lives in
+   `src/platform_internal.h`.
+
+## Current platform feature gaps
+
+Not defects — features that exist on one platform and are unscheduled
+elsewhere:
+
+- **Drag-and-drop** into the window is implemented on the Wayland backend
+  only (real MIME negotiation over `text/uri-list` / `text/plain`, a
+  bounded read, delivery through `lens_paste`). Win32 and Cocoa have no
+  drop target yet.
+- **Live theme watching** on Linux requires libsystemd at build time
+  (portal watcher thread); without it the startup query still works and
+  `iris_color_scheme_watch` reports unavailable.
+- **File dialogs** on Linux keep the app responsive while the modal
+  picker is open (the wait loop pumps the Wayland display fd and the
+  AT-SPI bus fd alongside the portal bus) and pass the window's
+  xdg-foreign handle as `parent_window` when the compositor exports one;
+  without xdg-foreign-unstable-v2 the picker opens unparented.

@@ -1,12 +1,13 @@
 #include "../internal.h"
 #include <stdio.h>
 
-static void icon_impl(lens *ui, lens_icon_id id, float size, lens_foreground_outline outline) {
+static void icon_impl(lens *ui, lens_icon_id id, float size) {
     if (!lensi_icon_valid((int32_t)id))
         return;
     const lens_theme *t = &ui->theme;
     ui->next_disabled = false;
     ui->next_error = false;
+    lens_style eff = lensi_style_effective(ui);
     /* Bare icons carry no label, so hash (scope, kind, sibling sequence)
      * like containers and spacers: two lens_icon calls in one scope must not
      * share a node — with a label-less widget id both glyphs' draw commands
@@ -22,44 +23,39 @@ static void icon_impl(lens *ui, lens_icon_id id, float size, lens_foreground_out
     /* `size` is the glyph size. A pending size_next only reserves the layout
      * box — it must not silently rescale the glyph; the glyph is centered
      * inside the box instead. */
-    float glyph = size > 0 ? size : t->font_size;
+    float glyph = size > 0 ? size : lensi_style_font_size(&eff, t);
     float bw = n->fixed_w > 0 ? n->fixed_w : glyph;
     float bh = n->fixed_h > 0 ? n->fixed_h : glyph;
     n->measured = (flux_point){bw, bh};
     float s = fminf(glyph, fminf(bw, bh));
 
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){
-                            .kind = LENS_DRAW_ICON,
-                            .rel = {(bw - s) * 0.5f, (bh - s) * 0.5f, s, s},
-                            .color = t->color_fg,
-                            .outline_color = outline.color,
-                            .outline_width = outline.width > 0.0f ? outline.width : 0.0f,
-                            .width = 2.0f * (s / 24.0f),
-                            .icon_id = id,
-                        });
+    /* Non-interactive: resolve with an empty state. The outline atoms make
+     * the old *_outlined variant reachable through any box.style or scope
+     * (ADR-0061 item 6). Emission is the skin's (ADR-0059). */
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
+    (void)s; /* glyph clamping to the box happens in the skin */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_ICON,
+                        .state = 0,
+                        .bounds = {0, 0, bw, bh},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .content = {.icon = id, .glyph_size = glyph},
+                    });
 }
 
 LENS_API void lens_icon(lens *ui, lens_icon_id id, float size) {
-    icon_impl(ui, id, size, (lens_foreground_outline){0});
-}
-
-LENS_API void lens_icon_outlined(lens *ui, lens_icon_id id, float size,
-                                 lens_foreground_outline outline) {
-    icon_impl(ui, id, size, outline);
+    icon_impl(ui, id, size);
 }
 
 /* Flat ("ghost") icon button for navigation strips and toolbars. Transparent
- * at rest, with a subtle fill on hover. The active state is layered:
- *   - a steady background tint (always, the universal "this is selected"
- *     signal), PLUS
- *   - an optional accent-coloured indicator treatment controlled by
- *     `theme.active_indicator_width`: when > 0 a left accent rail of that
- *     width is drawn and the glyph takes the accent colour. It is disabled by
- *     default; with width 0, the glyph stays foreground and the active state
- *     is tint-only.
- * There is no filled accent pill or rounded shape, so a column reads as a
- * single flat icon strip rather than a stack of buttons. */
+ * at rest, with a subtle fill on hover. The active state is a steady neutral
+ * tint (the cascade-resolved bg_pressed — theme: color_active) with a plain
+ * foreground glyph: state as data, no flavor (ADR-0061 item 7). An accent
+ * rail or accent glyph is a style-atom / custom-skin decision the caller
+ * owns, not a separate API. */
 typedef struct icon_button_spec {
     lens_icon_id icon;
     const char *identity;
@@ -79,6 +75,7 @@ static bool icon_button_impl(lens *ui, icon_button_spec spec) {
     bool disabled = ui->next_disabled;
     ui->next_disabled = false;
     ui->next_error = false;
+    lens_style eff = lensi_style_effective(ui);
 
     lens_id nid = lensi_gen_widget_id(ui, spec.identity);
     lens_node *n = lensi_store_touch(ui, nid);
@@ -87,31 +84,20 @@ static bool icon_button_impl(lens *ui, icon_button_spec spec) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float icon_size = t->font_size;
-    float pad = t->padding;
-    float w = icon_size + 2.0f * pad;
-    float h = icon_size + 2.0f * pad;
+    float font_size = lensi_style_font_size(&eff, t);
+    float padding = lensi_style_padding(&eff, t);
+    float icon_size = font_size;
+    float w = icon_size + 2.0f * padding;
+    float h = icon_size + 2.0f * padding;
     if (n->fixed_w > 0)
         w = n->fixed_w;
     if (n->fixed_h > 0)
         h = n->fixed_h;
     n->measured = (flux_point){w, h};
 
-    /* The glyph only steps aside for a few pixels of breathing room —
-     * subtracting the full theme padding would crush it on compact
-     * fixed-size targets (a 32 px button would render an 8 px glyph). */
-    float max_s = w < h ? w : h;
-    max_s -= 8.0f;
-    if (max_s < 1.0f)
-        max_s = 1.0f;
-    /* Keep glyph size independent from a larger square hit target. */
-    float s = spec.requested_size > 0.0f ? spec.requested_size : t->font_size * 1.55f;
-    if (s > max_s)
-        s = max_s;
-    if (s < 1.0f)
-        s = 1.0f;
-
     lens_response r = lensi_interact(ui, n, true, disabled);
+    if (spec.active_surface || spec.checked)
+        r.state |= LENS_STATE_ACTIVE; /* steady on-state (ADR-0058) */
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0) |
                          (spec.checked ? LENS_A11Y_CHECKED : 0);
     lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, spec.identity, NULL, sem_flags);
@@ -119,73 +105,25 @@ static bool icon_button_impl(lens *ui, icon_button_spec spec) {
     if (!disabled)
         n->hover_t = r.hovered ? 1.f : 0.f;
 
-    /* Background tint: transparent at rest, hover tint when hovered, and a
-     * steady slightly-stronger tint when active. This is always drawn the
-     * same way — it's the baseline active signal independent of the
-     * indicator treatment below. */
-    float fill = spec.active_surface ? 1.0f : n->hover_t * 0.6f;
-    if (fill > 0.001f) {
-        flux_color bg = spec.active_surface && spec.rounded
-                            ? t->color_active
-                            : lensi_lerp_color(t->color_bg, t->color_hover, fill);
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {0, 0, 0, 0},
-                                            .color = bg,
-                                            .radius = spec.rounded ? t->corner_radius : 0.0f});
-    }
-
-    /* Optional accent indicator (left bar + accent glyph) for the active
-     * item, theme-tunable via `active_indicator_width`. Width 0 suppresses
-     * both, leaving only the background tint. */
-    float indicator_w = spec.active_surface && !spec.rounded ? t->active_indicator_width : 0.0f;
-    if (indicator_w > 0.0f)
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {0, 0, indicator_w, 0},
-                                            .color = t->color_accent,
-                                            .radius = 0.0f});
-
-    float icon_x = (w - s) * 0.5f;
-    float icon_y = (h - s) * 0.5f;
-
-    /* Glyph: dimmed when disabled, accent only when the indicator treatment
-     * is active, plain foreground otherwise. */
-    flux_color glyph = disabled ? t->color_disabled
-                       : spec.rounded && (spec.active_surface || spec.accent_checked)
-                           ? t->color_accent
-                       : indicator_w > 0.0f ? t->color_accent
-                                            : t->color_fg;
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){
-                            .kind = LENS_DRAW_ICON,
-                            .rel = {icon_x, icon_y, s, s},
-                            .color = glyph,
-                            /* Same 2/24 stroke ratio as bare lens_icon, so
-                             * buttons and inline icons read as one set. */
-                            .width = 2.0f * (s / 24.0f),
-                            .icon_id = id,
-                        });
-
-    if (spec.badge && spec.badge[0]) {
-        float badge_size = s * 0.42f;
-        if (badge_size < 8.0f)
-            badge_size = 8.0f;
-        lens_text_metrics bm = lensi_text_measure_label(ui, spec.badge, badge_size, 650.0f);
-        float badge_x = icon_x + s - bm.width * 0.62f;
-        float badge_y = icon_y - bm.height * 0.30f;
-        if (badge_x + bm.width > w)
-            badge_x = w - bm.width;
-        if (badge_y < 0.0f)
-            badge_y = 0.0f;
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                            .rel = {badge_x, badge_y, 0, 0},
-                                            .color = glyph,
-                                            .text = spec.badge,
-                                            .text_size = badge_size,
-                                            .text_weight = 650.0f});
-    }
+    /* resolve + emit — through the replaceable skin (ADR-0059); the glyph
+     * sizing and badge geometry live in the skin now. */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_ICON_BUTTON,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = lensi_style_resolve(&eff, t, r.state),
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.icon = spec.icon,
+                                    .badge = spec.badge,
+                                    .glyph_size = spec.requested_size,
+                                    .rounded = spec.rounded,
+                                    .active_surface = spec.active_surface,
+                                    .accent_checked = spec.accent_checked},
+                    });
 
     ui->last_response = r;
     return r.clicked;
@@ -204,16 +142,6 @@ LENS_API bool lens_icon_button_active(lens *ui, lens_icon_id id, bool active) {
     return icon_button_impl(
         ui, (icon_button_spec){
                 .icon = id, .identity = identity, .active_surface = active, .checked = active});
-}
-
-LENS_API bool lens_icon_button_active_rounded(lens *ui, lens_icon_id id, bool active) {
-    char identity[32];
-    snprintf(identity, sizeof(identity), "##icon%d", (int)id);
-    return icon_button_impl(ui, (icon_button_spec){.icon = id,
-                                                   .identity = identity,
-                                                   .rounded = true,
-                                                   .active_surface = active,
-                                                   .checked = active});
 }
 
 LENS_API bool lens_icon_button_badged(lens *ui, lens_icon_id id, const char *badge,

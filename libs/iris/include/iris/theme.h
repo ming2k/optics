@@ -64,7 +64,12 @@ typedef void (*iris_color_scheme_changed_fn)(iris_color_scheme new_scheme, void 
  *
  * One watcher per process: calling this again while watching replaces the
  * callback and user pointer (and returns 0). Must be called from the iris
- * main thread. */
+ * main thread.
+ *
+ * This slot belongs to the HOST. The platform backend keeps its own
+ * internal registration (to re-apply the lens theme live) through a
+ * separate reserved slot, so a host watch/unwatch never disturbs the
+ * backend's, and backend teardown never cancels the host's. */
 IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb, void *user);
 
 /* Stop watching and release platform resources. Blocks until the

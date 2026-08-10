@@ -14,6 +14,17 @@ if opt_effect
   )
 endif
 
+# Lens skin recipe (ADR-0061): a caller-owned LENS_WIDGET_TABS skin that
+# reimplements the spring indicator the library core deliberately dropped.
+# It is source to copy and own, not a library feature — the file header
+# says so. Builds against iris like the examples/iris demos; independent
+# of the GLFW/shader pipeline below, so it lives before the GLFW gate.
+executable('tabs_spring_skin',
+  'tabs_spring_skin.c',
+  dependencies        : [iris_dep, m_dep],
+  include_directories : iris_inc,
+)
+
 # All remaining showcases are windowed (GLFW).
 if not glfw_dep.found()
   warning('GLFW not found; skipping windowed showcase examples.')

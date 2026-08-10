@@ -162,7 +162,7 @@ static void delete_range(char *buf, size_t *len, uint32_t lo, uint32_t hi) {
 /* ------------------------------------------------------------------ */
 
 static size_t mouse_to_cursor(lens *ui, const char *buf, size_t len, lens_node *n, float padding,
-                              float scroll_y, flux_point cursor, float line_h) {
+                              float scroll_y, flux_point cursor, float line_h, float size_px) {
     float local_x = cursor.x - n->prev_rect.x - padding;
     float local_y = cursor.y - n->prev_rect.y - padding + scroll_y;
 
@@ -182,41 +182,7 @@ static size_t mouse_to_cursor(lens *ui, const char *buf, size_t len, lens_node *
     const char *line = line_cstr(ui, buf, start, llen, stack);
     if (!line)
         return start;
-    return start + lensi_text_caret_byte(ui, line, local_x, ui->theme.font_size, 0.0f);
-}
-
-/* ------------------------------------------------------------------ */
-/*  Selection draw helpers                                             */
-/* ------------------------------------------------------------------ */
-
-/* Draw selection highlight for a single line segment. */
-static void draw_sel_highlight(lens *ui, lens_node *n, const lens_theme *t, const char *buf,
-                               size_t line_start, size_t line_len, uint32_t sel_lo, uint32_t sel_hi,
-                               float line_y, float line_h) {
-    size_t line_end = line_start + line_len;
-    if (sel_hi <= line_start || sel_lo >= line_end)
-        return;
-
-    size_t seg_start = sel_lo > line_start ? sel_lo - line_start : 0;
-    size_t seg_end = sel_hi < line_end ? sel_hi - line_start : line_len;
-
-    char stack[256];
-    const char *line = line_cstr(ui, buf, line_start, line_len, stack);
-    if (!line)
-        return;
-
-    /* One rect for LTR; several where the selection crosses a direction
-     * boundary within the line. */
-    lens_text_xrange rects[8];
-    int nr = lensi_text_sel_rects(ui, line, seg_start, seg_end, t->font_size, 0.0f, rects, 8);
-    for (int i = 0; i < nr; i++) {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {t->padding + rects[i].x0, line_y,
-                                                    rects[i].x1 - rects[i].x0, line_h},
-                                            .color = lensi_color_alpha(t->color_accent, 0x40),
-                                            .radius = 1.0f});
-    }
+    return start + lensi_text_caret_byte(ui, line, local_x, size_px, 0.0f);
 }
 
 /* ------------------------------------------------------------------ */
@@ -231,6 +197,9 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
     ui->next_disabled = false;
     ui->next_error = false;
     ui->next_placeholder = NULL;
+    lens_style eff = lensi_style_effective(ui);
+    float font_size = lensi_style_font_size(&eff, t);
+    float padding = lensi_style_padding(&eff, t);
 
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
@@ -249,17 +218,18 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
     if (ts->sel_anchor > len)
         ts->sel_anchor = (uint32_t)len;
 
-    float line_h = t->font_size * LENS_TEXTAREA_LINE_HEIGHT;
+    float line_h = font_size * LENS_TEXTAREA_LINE_HEIGHT;
     int lines = (buf && len) ? count_lines(buf) : 1;
     float text_h = lines * line_h;
 
     float w = (n->fixed_w > 0) ? n->fixed_w : 240.0f;
-    float h = (n->fixed_h > 0) ? n->fixed_h : text_h + 2.0f * t->padding;
+    float h = (n->fixed_h > 0) ? n->fixed_h : text_h + 2.0f * padding;
     if (h < min_h)
         h = min_h;
     n->measured = (flux_point){w, h};
 
     lens_response r = lensi_interact(ui, n, true, disabled);
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
     if (r.hovered)
         ui->cursor_hint = LENS_CURSOR_TEXT;
     bool changed = false;
@@ -338,7 +308,7 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
                 const char *line = line_cstr(ui, buf, start, llen, stack);
                 size_t col = ts->cursor - start;
                 size_t nv =
-                    line ? lensi_text_caret_visual(ui, line, col, false, t->font_size, 0.0f) : col;
+                    line ? lensi_text_caret_visual(ui, line, col, false, font_size, 0.0f) : col;
                 if (nv != col)
                     ts->cursor = (uint32_t)(start + nv);
                 else if (ts->cursor > 0)
@@ -356,7 +326,7 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
                 const char *line = line_cstr(ui, buf, start, llen, stack);
                 size_t col = ts->cursor - start;
                 size_t nv =
-                    line ? lensi_text_caret_visual(ui, line, col, true, t->font_size, 0.0f) : col;
+                    line ? lensi_text_caret_visual(ui, line, col, true, font_size, 0.0f) : col;
                 if (nv != col)
                     ts->cursor = (uint32_t)(start + nv);
                 else if (ts->cursor < len)
@@ -390,12 +360,12 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
                 int idx;
                 find_line(buf, ts->cursor, &start, &idx);
                 if (idx > 0) {
-                    float x = caret_line_x(ui, buf, ts->cursor, t->font_size);
+                    float x = caret_line_x(ui, buf, ts->cursor, font_size);
                     size_t prev_start = line_start_by_index(buf, idx - 1);
                     size_t prev_len = line_length(buf, prev_start);
                     char stack[256];
                     const char *pl = line_cstr(ui, buf, prev_start, prev_len, stack);
-                    size_t col = pl ? lensi_text_caret_byte(ui, pl, x, t->font_size, 0.0f) : 0;
+                    size_t col = pl ? lensi_text_caret_byte(ui, pl, x, font_size, 0.0f) : 0;
                     ts->cursor = (uint32_t)(prev_start + col);
                 }
                 if (!shift)
@@ -408,12 +378,12 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
                 find_line(buf, ts->cursor, &start, &idx);
                 int total = count_lines(buf);
                 if (idx < total - 1) {
-                    float x = caret_line_x(ui, buf, ts->cursor, t->font_size);
+                    float x = caret_line_x(ui, buf, ts->cursor, font_size);
                     size_t next_start = line_start_by_index(buf, idx + 1);
                     size_t next_len = line_length(buf, next_start);
                     char stack[256];
                     const char *nl = line_cstr(ui, buf, next_start, next_len, stack);
-                    size_t col = nl ? lensi_text_caret_byte(ui, nl, x, t->font_size, 0.0f) : 0;
+                    size_t col = nl ? lensi_text_caret_byte(ui, nl, x, font_size, 0.0f) : 0;
                     ts->cursor = (uint32_t)(next_start + col);
                 }
                 if (!shift)
@@ -514,13 +484,13 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
     /* Mouse drag selection */
     if (!disabled && buf) {
         if (ui->input.mouse_pressed[LENS_MOUSE_LEFT] && r.hovered) {
-            ts->cursor = (uint32_t)mouse_to_cursor(ui, buf, len, n, t->padding, ts->scroll_y,
-                                                   ui->input.cursor, line_h);
+            ts->cursor = (uint32_t)mouse_to_cursor(ui, buf, len, n, padding, ts->scroll_y,
+                                                   ui->input.cursor, line_h, font_size);
             sel_clear(ts);
         }
         if (ui->active_id == id && ui->input.mouse_down[LENS_MOUSE_LEFT]) {
-            ts->cursor = (uint32_t)mouse_to_cursor(ui, buf, len, n, t->padding, ts->scroll_y,
-                                                   ui->input.cursor, line_h);
+            ts->cursor = (uint32_t)mouse_to_cursor(ui, buf, len, n, padding, ts->scroll_y,
+                                                   ui->input.cursor, line_h, font_size);
         }
         if (ui->active_id == id && !ui->input.mouse_down[LENS_MOUSE_LEFT]) {
             ui->active_id = 0;
@@ -536,7 +506,7 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
     }
 
     /* ---- Scroll clamping ------------------------------------------ */
-    float max_scroll = text_h + 2.0f * t->padding - h;
+    float max_scroll = text_h + 2.0f * padding - h;
     if (max_scroll < 0)
         max_scroll = 0;
 
@@ -544,13 +514,13 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
         size_t start;
         int idx;
         find_line(buf, ts->cursor, &start, &idx);
-        float cursor_y = t->padding + idx * line_h;
+        float cursor_y = padding + idx * line_h;
         float cursor_bot = cursor_y + line_h;
 
-        if (cursor_y < ts->scroll_y + t->padding)
-            ts->scroll_y = cursor_y - t->padding;
-        if (cursor_bot > ts->scroll_y + h - t->padding)
-            ts->scroll_y = cursor_bot - h + t->padding;
+        if (cursor_y < ts->scroll_y + padding)
+            ts->scroll_y = cursor_y - padding;
+        if (cursor_bot > ts->scroll_y + h - padding)
+            ts->scroll_y = cursor_bot - h + padding;
     }
 
     if (ts->scroll_y < 0)
@@ -569,23 +539,51 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
 
     bool has_preedit = r.focused && buf && buf_cap > 1 && ui->input.preedit_utf8[0];
 
-    /* ---- Drawing -------------------------------------------------- */
-    uint32_t bg = (r.hovered && !disabled) ? t->color_hover : t->color_bg;
-    lensi_drawlist_push(
-        ui, n,
-        (lens_draw_cmd){
-            .kind = LENS_DRAW_RECT, .rel = {0, 0, 0, 0}, .color = bg, .radius = t->corner_radius});
+    /* ---------------------------------------------------------------- */
+    /*  Skin record precompute (all node-local; the skin never shapes)  */
+    /* ---------------------------------------------------------------- */
 
-    /* Selection highlight (behind text) */
+    flux_rect *sel_rects = NULL;
+    int sel_count = 0, sel_cap = 0;
     if (r.focused && sel_active(ts) && buf && len && !has_preedit) {
+        /* One quad per line segment; several where the selection crosses a
+         * BiDi direction boundary within a line. */
         const char *p = buf;
         int line_idx = 0;
         size_t pos = 0;
         while (p && *p) {
             const char *end = strchr(p, '\n');
             size_t llen = end ? (size_t)(end - p) : strlen(p);
-            float line_y = t->padding + line_idx * line_h - ts->scroll_y;
-            draw_sel_highlight(ui, n, t, buf, pos, llen, sel_lo(ts), sel_hi(ts), line_y, line_h);
+            float line_y = padding + line_idx * line_h - ts->scroll_y;
+
+            size_t line_end = pos + llen;
+            if (sel_hi(ts) > pos && sel_lo(ts) < line_end) {
+                size_t seg_start = sel_lo(ts) > pos ? sel_lo(ts) - pos : 0;
+                size_t seg_end = sel_hi(ts) < line_end ? sel_hi(ts) - pos : llen;
+                char stack[256];
+                const char *line = line_cstr(ui, buf, pos, llen, stack);
+                if (line) {
+                    lens_text_xrange xr[8];
+                    int nr = lensi_text_sel_rects(ui, line, seg_start, seg_end, font_size, 0.0f,
+                                                  xr, 8);
+                    for (int i = 0; i < nr; i++) {
+                        if (sel_count == sel_cap) {
+                            int nc = sel_cap ? sel_cap * 2 : 8;
+                            flux_rect *na = flux_arena_alloc(&ui->arena, (size_t)nc * sizeof *na);
+                            if (!na) {
+                                lensi_set_overflow(ui);
+                                break;
+                            }
+                            if (sel_rects)
+                                memcpy(na, sel_rects, (size_t)sel_count * sizeof *na);
+                            sel_rects = na;
+                            sel_cap = nc;
+                        }
+                        sel_rects[sel_count++] =
+                            (flux_rect){padding + xr[i].x0, line_y, xr[i].x1 - xr[i].x0, line_h};
+                    }
+                }
+            }
             if (!end)
                 break;
             p = end + 1;
@@ -594,11 +592,35 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
         }
     }
 
-    /* Text lines */
+    /* Visible line slices (the cursor line carries the pre-edit composition
+     * pre-composed; an empty buffer with a preedit shows the preedit alone;
+     * an empty unfocused buffer shows the placeholder). */
+    lens_text_line *line_items = NULL;
+    int line_count = 0, line_cap = 0;
+    bool show_placeholder = false;
+    flux_rect preedit_underline = {0, 0, 0, 0};
+
     size_t cursor_line_start = 0;
     int cursor_line_idx = 0;
     if (has_preedit)
         find_line(buf, ts->cursor, &cursor_line_start, &cursor_line_idx);
+
+#define TEXTAREA_PUSH_LINE(txt, yy)                                                              \
+    do {                                                                                         \
+        if (line_count == line_cap) {                                                            \
+            int nc = line_cap ? line_cap * 2 : 8;                                                \
+            lens_text_line *na = flux_arena_alloc(&ui->arena, (size_t)nc * sizeof *na);          \
+            if (!na) {                                                                           \
+                lensi_set_overflow(ui);                                                          \
+                break;                                                                           \
+            }                                                                                    \
+            if (line_items)                                                                      \
+                memcpy(na, line_items, (size_t)line_count * sizeof *na);                         \
+            line_items = na;                                                                     \
+            line_cap = nc;                                                                       \
+        }                                                                                        \
+        line_items[line_count++] = (lens_text_line){.text = (txt), .x = padding, .y = (yy)};          \
+    } while (0)
 
     if (buf) {
         const char *p = buf;
@@ -606,6 +628,7 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
         while (p && *p) {
             const char *end = strchr(p, '\n');
             size_t llen = end ? (size_t)(end - p) : strlen(p);
+            float line_y = padding + line_idx * line_h - ts->scroll_y;
 
             if (has_preedit && line_idx == cursor_line_idx) {
                 size_t prefix_len = ts->cursor - cursor_line_start;
@@ -624,39 +647,19 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
                     if (suffix_len)
                         memcpy(display + prefix_len + pe_len, p + prefix_len, suffix_len);
                     display[display_len] = '\0';
-                    lensi_drawlist_push(
-                        ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding,
-                                                t->padding + line_idx * line_h - ts->scroll_y, 0,
-                                                0},
-                                        .color = t->color_fg,
-                                        .text = display,
-                                        .text_size = t->font_size});
+                    TEXTAREA_PUSH_LINE(display, line_y);
                 }
 
-                float prefix_w = prefix_width(ui, p, prefix_len, t->font_size);
-                float pe_w = prefix_width(ui, pe, pe_len, t->font_size);
-                float line_y = t->padding + line_idx * line_h - ts->scroll_y;
-                lensi_drawlist_push(ui, n,
-                                    (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                                    .rel = {t->padding + prefix_w,
-                                                            line_y + line_h - 1.0f, pe_w, 1.0f},
-                                                    .color = t->color_accent});
+                float prefix_w = prefix_width(ui, p, prefix_len, font_size);
+                float pe_w = prefix_width(ui, pe, pe_len, font_size);
+                preedit_underline =
+                    (flux_rect){padding + prefix_w, line_y + line_h - 1.0f, pe_w, 1.0f};
             } else if (llen > 0) {
                 char *line = flux_arena_alloc(&ui->arena, llen + 1);
                 if (line) {
                     memcpy(line, p, llen);
                     line[llen] = '\0';
-                    lensi_drawlist_push(
-                        ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding,
-                                                t->padding + line_idx * line_h - ts->scroll_y, 0,
-                                                0},
-                                        .color = t->color_fg,
-                                        .text = line,
-                                        .text_size = t->font_size});
+                    TEXTAREA_PUSH_LINE(line, line_y);
                 }
             }
 
@@ -669,63 +672,58 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
 
     /* Preedit on empty buffer */
     if (has_preedit && (!buf || !buf[0])) {
-        float line_y = t->padding - ts->scroll_y;
+        float line_y = padding - ts->scroll_y;
         const char *pe = ui->input.preedit_utf8;
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                            .rel = {t->padding, line_y, 0, 0},
-                                            .color = t->color_fg,
-                                            .text = pe,
-                                            .text_size = t->font_size});
-        float pe_w = prefix_width(ui, pe, strlen(pe), t->font_size);
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {t->padding, line_y + line_h - 1.0f, pe_w, 1.0f},
-                                            .color = t->color_accent});
+        TEXTAREA_PUSH_LINE(pe, line_y);
+        float pe_w = prefix_width(ui, pe, strlen(pe), font_size);
+        preedit_underline = (flux_rect){padding, line_y + line_h - 1.0f, pe_w, 1.0f};
     }
 
     /* Placeholder */
     if ((!buf || !buf[0]) && !r.focused && placeholder) {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                            .rel = {t->padding, t->padding - ts->scroll_y, 0, 0},
-                                            .color = t->color_disabled,
-                                            .text = placeholder,
-                                            .text_size = t->font_size});
+        TEXTAREA_PUSH_LINE(placeholder, padding - ts->scroll_y);
+        show_placeholder = true;
     }
 
-    /* Caret */
-    if (!disabled && r.focused && buf) {
-        size_t start;
-        int idx;
-        find_line(buf, ts->cursor, &start, &idx);
-
-        float pw = caret_line_x(ui, buf, ts->cursor, t->font_size);
-        if (has_preedit) {
-            pw += prefix_width(ui, ui->input.preedit_utf8, ui->input.preedit_cursor, t->font_size);
-        }
-
-        float cx = t->padding + pw;
-        float cy = t->padding + idx * line_h - ts->scroll_y;
-
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {cx - 1.0f, cy, 2.0f, line_h},
-                                            .color = t->color_accent,
-                                            .radius = 1.0f});
+    /* Caret quad */
+    bool show_caret = !disabled && r.focused && buf;
+    flux_rect caret = {0, 0, 0, 0};
+    if (show_caret) {
+        size_t cstart;
+        int cidx;
+        find_line(buf, ts->cursor, &cstart, &cidx);
+        float pw = caret_line_x(ui, buf, ts->cursor, font_size);
+        if (has_preedit)
+            pw += prefix_width(ui, ui->input.preedit_utf8, ui->input.preedit_cursor, font_size);
+        caret = (flux_rect){padding + pw - 1.0f, padding + cidx * line_h - ts->scroll_y, 2.0f,
+                            line_h};
     }
 
-    /* Border */
-    uint32_t border_color =
-        error ? t->color_error : ((r.focused && !disabled) ? t->color_accent : t->color_border);
-    if (disabled)
-        border_color = t->color_disabled;
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
-                                        .rel = {0, 0, 0, 0},
-                                        .color = border_color,
-                                        .width = t->border_width,
-                                        .radius = t->corner_radius});
+    /* emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_TEXTAREA,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = label,
+                                    .error = error,
+                                    .lines = line_items,
+                                    .line_count = line_count,
+                                    .show_placeholder = show_placeholder,
+                                    .sel_rects = sel_rects,
+                                    .sel_rect_count = sel_count,
+                                    .caret = caret,
+                                    .show_caret = show_caret,
+                                    .preedit_underline = preedit_underline,
+                                    .has_preedit = has_preedit},
+                    });
+
+#undef TEXTAREA_PUSH_LINE
 
     /* IME caret rect */
     if (!disabled && r.focused && buf && buf_cap > 1) {
@@ -733,14 +731,14 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
         int idx;
         find_line(buf, ts->cursor, &start, &idx);
 
-        float pw = caret_line_x(ui, buf, ts->cursor, t->font_size);
+        float pw = caret_line_x(ui, buf, ts->cursor, font_size);
         if (has_preedit) {
-            pw += prefix_width(ui, ui->input.preedit_utf8, ui->input.preedit_cursor, t->font_size);
+            pw += prefix_width(ui, ui->input.preedit_utf8, ui->input.preedit_cursor, font_size);
         }
 
         lensi_set_caret_rect(ui, (flux_rect){
-                                     n->prev_rect.x + t->padding + pw,
-                                     n->prev_rect.y + t->padding + idx * line_h - ts->scroll_y,
+                                     n->prev_rect.x + padding + pw,
+                                     n->prev_rect.y + padding + idx * line_h - ts->scroll_y,
                                      2.0f,
                                      line_h,
                                  });

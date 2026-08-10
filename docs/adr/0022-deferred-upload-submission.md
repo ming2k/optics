@@ -111,6 +111,7 @@ Follow-up work:
 - ADR-0021 (batched uploads; item 1 amended here), ADR-0020 (retire
   watermark), ADR-0007 (slab allocator).
 - `libs/flux/src/core/oneshot.c` (deferred submit, pending list),
-  `libs/flux/src/canvas/dmabuf.c` (acquire-fence transition).
+  `libs/flux/src/core/dmabuf.c` (acquire-fence transition; moved out of
+  `src/canvas/` with the canvas-gate fix — see ADR-0052).
 - `tests/flux/integration/test_upload_batch.c` — auto-flush and
   steady-state accounting under deferred submission.

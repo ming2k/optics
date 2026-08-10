@@ -104,6 +104,14 @@ static lens_node *open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
                                             .color = opts.bg,
                                             .radius = opts.radius});
     }
+    if ((opts.border >> 24) != 0 && opts.border_width > 0.0f) {
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
+                                            .rel = {0, 0, 0, 0},
+                                            .color = opts.border,
+                                            .radius = opts.radius,
+                                            .width = opts.border_width});
+    }
 
     lensi_open_container_push(ui, n);
     return n;
@@ -213,6 +221,10 @@ void lensi_apply_box(lens *ui, lens_box box) {
         ui->next_disabled = true;
     if (box.error)
         ui->next_error = true;
+    /* Per-call style atoms (ADR-0061): staged unconditionally; a zero
+     * fields mask is a no-op in the cascade merge, so the box's zeroed
+     * default needs no guard flag. Drained by lensi_style_effective. */
+    ui->next_style = box.style;
 }
 
 void lensi_set_placeholder(lens *ui, const char *text) {

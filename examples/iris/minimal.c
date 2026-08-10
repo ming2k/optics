@@ -6,12 +6,17 @@
  */
 
 #include <iris/app.h>
+#include <iris/window.h>
 #include <lens/lens.h>
 
 #include <stdio.h>
 
 static void build(lens *ui, const lens_input *in, void *user) {
     (void)user;
+    /* Esc quits (the startup line says so). */
+    for (uint32_t k = 0; k < in->key_count; k++)
+        if (in->keys[k].pressed && in->keys[k].key == LENS_KEY_ESCAPE)
+            iris_window_close();
     lens_column_ex(ui, (lens_layout_opts){.pad = 24, .gap = 14, .cross = LENS_START});
     lens_label(ui, "Hello from iris");
     if (lens_button(ui, "Click me"))

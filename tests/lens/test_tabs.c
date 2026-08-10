@@ -1,4 +1,7 @@
-/* test_tabs.c — lens_tabs_begin / lens_tab / lens_tabs_end switching. */
+/* test_tabs.c — lens_tabs_begin / lens_tab / lens_tabs_end switching, and
+ * the ADR-0061 skin migration: the default skin draws a STATIC indicator
+ * (theme accent, fixed thickness, zero animation); the spring physics left
+ * the core (the recipe lives in examples/showcase/tabs_spring_skin.c). */
 
 #include "../../libs/lens/src/internal.h"
 #include "test_helpers.h"
@@ -39,12 +42,13 @@ static void test_tabs_switch(void) {
     lens_destroy(ui);
 }
 
-static void test_standard_tab_strip_contains_its_labels(void) {
+static void test_tab_strip_contains_its_labels(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     int active = 0;
 
-    /* Even an undersized host hint is raised to the themed content minimum. */
+    /* Even an undersized host hint is raised to the content minimum (tabs
+     * plus the indicator band below them). */
     lens_begin(ui, &IN0);
     lens_size(ui, 300.0f, 8.0f);
     lens_tabs_begin(ui, "contained-tabs", &active);
@@ -74,51 +78,6 @@ static void test_standard_tab_strip_contains_its_labels(void) {
     lens_destroy(ui);
 }
 
-static void test_connected_tabs_are_an_opt_in_inset_variant(void) {
-    lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    int active = 1;
-
-    lens_begin(ui, &IN0);
-    lens_size(ui, 300.0f, 8.0f);
-    lens_tabs_begin_ex(ui, "connected-tabs", &active,
-                       (lens_tabs_opts){.style = LENS_TAB_STYLE_CONNECTED});
-    lens_flex(ui, 1.0f);
-    lens_tab(ui, "Composition");
-    lens_flex(ui, 1.0f);
-    lens_tab(ui, "Atmosphere");
-    lens_tabs_end(ui);
-    lens_end(ui);
-
-    lens_node *strip = lens_node_first_child(lens_root(ui));
-    lens_node *first = lens_node_first_child(strip);
-    lens_node *second = lens_node_next_sibling(first);
-    CHECK(strip != NULL);
-    CHECK(first != NULL);
-    CHECK(second != NULL);
-
-    flux_rect rs = lens_node_bounds(strip);
-    flux_rect ra = lens_node_bounds(first);
-    flux_rect rb = lens_node_bounds(second);
-    CHECK(ra.y > rs.y);
-    CHECK(rb.y > rs.y);
-    CHECK(ra.y + ra.h < rs.y + rs.h);
-    CHECK(rb.y + rb.h < rs.y + rs.h);
-    CHECK(rs.h > 8.0f);
-
-    lens_destroy(ui);
-}
-
-static void build_indicator_tabs(lens *ui, int *active) {
-    lens_size(ui, 300.0f, 0.0f);
-    lens_tabs_begin_ex(ui, "indicator-tabs", active,
-                       (lens_tabs_opts){.style = LENS_TAB_STYLE_INDICATOR,
-                                        .equal_width = true});
-    lens_tab(ui, "Composition");
-    lens_tab(ui, "Atmosphere");
-    lens_tabs_end(ui);
-}
-
 static void test_equal_width_is_an_independent_layout_policy(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
@@ -127,8 +86,7 @@ static void test_equal_width_is_an_independent_layout_policy(void) {
     lens_begin(ui, &IN0);
     lens_size(ui, 300.0f, 0.0f);
     lens_tabs_begin_ex(ui, "equal-standard-tabs", &active,
-                       (lens_tabs_opts){.style = LENS_TAB_STYLE_STANDARD,
-                                        .equal_width = true});
+                       (lens_tabs_opts){.equal_width = true});
     lens_tab(ui, "A");
     lens_tab(ui, "A much longer label");
     lens_tabs_end(ui);
@@ -142,35 +100,120 @@ static void test_equal_width_is_an_independent_layout_policy(void) {
     lens_destroy(ui);
 }
 
-static void test_indicator_tabs_are_compact_and_animate_selection(void) {
+static const lens_draw_cmd *find_indicator(const lens_node *strip) {
+    for (uint32_t i = 0; i < strip->cmd_count; i++) {
+        if (strip->cmds[i].kind == LENS_DRAW_TAB_INDICATOR)
+            return &strip->cmds[i];
+    }
+    return NULL;
+}
+
+/* The default skin's indicator is static: it lands on the active tab the
+ * frame after geometry settles — no animation frames, no anim_pending,
+ * theme accent colour, fixed 3px thickness. */
+static void test_static_indicator_tracks_selection_without_animation(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     int active = 0;
+    flux_color accent = lens_get_theme(ui).color_accent;
 
-    lens_begin(ui, &IN0);
-    build_indicator_tabs(ui, &active);
+    /* Keep the cursor off the strip: a hover ease in transit would set
+     * anim_pending on its own and drown the tabs signal. */
+    const lens_input AWAY = {.display_size = {400, 200},
+                             .dt_seconds = 0.016f,
+                             .cursor = {390.0f, 195.0f}};
+
+    lens_begin(ui, &AWAY);
+    lens_size(ui, 300.0f, 0.0f);
+    lens_tabs_begin_ex(ui, "tabs", &active, (lens_tabs_opts){.equal_width = true});
+    lens_tab(ui, "Composition");
+    lens_tab(ui, "Atmosphere");
+    lens_tabs_end(ui);
+    lens_end(ui);
+
+    /* frame 2: geometry settled; the indicator sits under tab 0. */
+    lens_begin(ui, &AWAY);
+    lens_size(ui, 300.0f, 0.0f);
+    lens_tabs_begin_ex(ui, "tabs", &active, (lens_tabs_opts){.equal_width = true});
+    lens_tab(ui, "Composition");
+    lens_tab(ui, "Atmosphere");
+    lens_tabs_end(ui);
     lens_end(ui);
 
     lens_node *strip = lens_node_first_child(lens_root(ui));
     lens_node *first = lens_node_first_child(strip);
     lens_node *second = lens_node_next_sibling(first);
-    CHECK(strip != NULL);
-    CHECK(first != NULL);
-    CHECK(second != NULL);
-    CHECK(lens_node_bounds(strip).h > lens_node_bounds(first).h);
-    CHECK_NEAR(lens_node_bounds(first).w, lens_node_bounds(second).w, 0.5f);
+    CHECK(strip != NULL && first != NULL && second != NULL);
 
-    lens_input hover = IN0;
-    flux_rect second_bounds = lens_node_bounds(second);
-    hover.cursor = (flux_point){second_bounds.x + second_bounds.w * 0.5f,
-                                second_bounds.y + second_bounds.h * 0.5f};
-    lens_begin(ui, &hover);
-    build_indicator_tabs(ui, &active);
+    const lens_draw_cmd *indicator = find_indicator(strip);
+    CHECK(indicator != NULL);
+    if (indicator) {
+        CHECK(indicator->color == accent);
+        CHECK_NEAR(indicator->width, 3.0f, 0.0f); /* fixed thickness */
+        /* centred under the first tab (strip-local coordinates) */
+        float first_w = first->prev_rect.w;
+        CHECK(indicator->rel.x >= 0.0f);
+        CHECK(indicator->rel.x + indicator->rel.w <= first_w + 0.5f);
+    }
+    CHECK(!lens_anim_pending(ui)); /* zero animation by construction */
+
+    /* Switch: the very next frame has the indicator under tab 1 — it does
+     * not travel over multiple frames. */
+    active = 1;
+    lens_begin(ui, &AWAY);
+    lens_size(ui, 300.0f, 0.0f);
+    lens_tabs_begin_ex(ui, "tabs", &active, (lens_tabs_opts){.equal_width = true});
+    lens_tab(ui, "Composition");
+    lens_tab(ui, "Atmosphere");
+    lens_tabs_end(ui);
     lens_end(ui);
 
     strip = lens_node_first_child(lens_root(ui));
     first = lens_node_first_child(strip);
     second = lens_node_next_sibling(first);
+    indicator = find_indicator(strip);
+    CHECK(indicator != NULL);
+    if (indicator) {
+        float second_left = second->prev_rect.x - first->prev_rect.x;
+        float second_right = second_left + second->prev_rect.w;
+        CHECK(indicator->color == accent);
+        CHECK(indicator->rel.x >= second_left - 0.5f);
+        CHECK(indicator->rel.x + indicator->rel.w <= second_right + 0.5f);
+    }
+    CHECK(!lens_anim_pending(ui)); /* a selection change animates nothing */
+
+    lens_destroy(ui);
+}
+
+/* A hover fill still lands on the hovered tab (per-tab chrome through the
+ * strip's skin record). */
+static void test_hover_fill_via_skin(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    int active = 0;
+
+    lens_begin(ui, &IN0);
+    lens_tabs_begin(ui, "tabs", &active);
+    lens_tab(ui, "A");
+    lens_tab(ui, "B");
+    lens_tabs_end(ui);
+    lens_end(ui);
+
+    lens_node *strip = lens_node_first_child(lens_root(ui));
+    lens_node *second = lens_node_next_sibling(lens_node_first_child(strip));
+    flux_rect sb = lens_node_bounds(second);
+
+    lens_input hover = IN0;
+    hover.cursor = (flux_point){sb.x + sb.w * 0.5f, sb.y + sb.h * 0.5f};
+    lens_begin(ui, &hover);
+    lens_tabs_begin(ui, "tabs", &active);
+    lens_tab(ui, "A");
+    lens_tab(ui, "B");
+    lens_tabs_end(ui);
+    lens_end(ui);
+
+    strip = lens_node_first_child(lens_root(ui));
+    second = lens_node_next_sibling(lens_node_first_child(strip));
     bool drew_hover_surface = false;
     for (uint32_t i = 0; i < second->cmd_count; i++) {
         if (second->cmds[i].kind == LENS_DRAW_RECT && second->cmds[i].color != 0)
@@ -178,66 +221,14 @@ static void test_indicator_tabs_are_compact_and_animate_selection(void) {
     }
     CHECK(drew_hover_surface);
 
-    active = 1;
-    lens_begin(ui, &IN0);
-    build_indicator_tabs(ui, &active);
-    lens_end(ui);
-    CHECK(lens_anim_pending(ui));
-
-    for (int frame = 0; frame < 90; frame++) {
-        lens_begin(ui, &IN0);
-        build_indicator_tabs(ui, &active);
-        lens_end(ui);
-    }
-
-    active = 0;
-    lens_begin(ui, &IN0);
-    build_indicator_tabs(ui, &active);
-    lens_end(ui);
-
-    strip = lens_node_first_child(lens_root(ui));
-    first = lens_node_first_child(strip);
-    second = lens_node_next_sibling(first);
-    const lens_draw_cmd *indicator = NULL;
-    for (uint32_t i = 0; i < strip->cmd_count; i++) {
-        if (strip->cmds[i].kind == LENS_DRAW_TAB_INDICATOR)
-            indicator = &strip->cmds[i];
-    }
-    CHECK(indicator != NULL);
-    if (indicator) {
-        float second_right = second->prev_rect.x + second->prev_rect.w - first->prev_rect.x;
-        CHECK(indicator->rel.x >= 0.0f);
-        CHECK(indicator->rel.x < second_right - 1.0f);
-        CHECK(indicator->rel.x + indicator->rel.w <= strip->prev_rect.w + 0.5f);
-    }
-
-    bool stayed_inside_strip = true;
-    for (int frame = 0; frame < 90; frame++) {
-        lens_begin(ui, &IN0);
-        build_indicator_tabs(ui, &active);
-        lens_end(ui);
-
-        strip = lens_node_first_child(lens_root(ui));
-        indicator = NULL;
-        for (uint32_t i = 0; i < strip->cmd_count; i++) {
-            if (strip->cmds[i].kind == LENS_DRAW_TAB_INDICATOR)
-                indicator = &strip->cmds[i];
-        }
-        if (!indicator || indicator->rel.x < 0.0f ||
-            indicator->rel.x + indicator->rel.w > strip->prev_rect.w + 0.5f) {
-            stayed_inside_strip = false;
-        }
-    }
-    CHECK(stayed_inside_strip);
-
     lens_destroy(ui);
 }
 
 int main(void) {
     test_tabs_switch();
-    test_standard_tab_strip_contains_its_labels();
-    test_connected_tabs_are_an_opt_in_inset_variant();
+    test_tab_strip_contains_its_labels();
     test_equal_width_is_an_independent_layout_policy();
-    test_indicator_tabs_are_compact_and_animate_selection();
+    test_static_indicator_tracks_selection_without_animation();
+    test_hover_fill_via_skin();
     return TEST_REPORT();
 }

@@ -1,0 +1,7 @@
+# LeakSanitizer suppressions for the optics test suite.
+#
+# fontconfig keeps a global pattern cache alive for the process lifetime by
+# upstream design (FcPatternObjectInsertElt et al.); it is not our allocation
+# and cannot be released by library teardown. Without this suppression every
+# test that initialises font discovery aborts under LeakSanitizer.
+leak:libfontconfig

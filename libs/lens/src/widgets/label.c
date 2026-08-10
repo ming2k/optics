@@ -110,10 +110,25 @@ static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t st
     return start + cut;
 }
 
-static void push_text_slice(lens *ui, lens_node *n, const char *text, size_t len, float x,
-                            float y, float size) {
+/* Append one wrapped line to the frame's slice array (arena-grown). The
+ * string copy keeps any caller lifetime safe; the skin draws the slices
+ * verbatim (ADR-0059: wrapping is measure behaviour and stays here). */
+static void push_line_slice(lens *ui, lens_text_line **lines, int *count, int *cap,
+                            const char *text, size_t len, float x, float y) {
     if (len == 0)
         return;
+    if (*count == *cap) {
+        int nc = *cap ? *cap * 2 : 8;
+        lens_text_line *na = flux_arena_alloc(&ui->arena, (size_t)nc * sizeof *na);
+        if (!na) {
+            lensi_set_overflow(ui);
+            return;
+        }
+        if (*lines)
+            memcpy(na, *lines, (size_t)*count * sizeof *na);
+        *lines = na;
+        *cap = nc;
+    }
     char *line = flux_arena_alloc(&ui->arena, len + 1);
     if (!line) {
         lensi_set_overflow(ui);
@@ -121,17 +136,16 @@ static void push_text_slice(lens *ui, lens_node *n, const char *text, size_t len
     }
     memcpy(line, text, len);
     line[len] = '\0';
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {x, y, 0, 0},
-                                        .color = ui->theme.color_fg,
-                                        .text = line,
-                                        .text_size = size,
-                                        .text_weight = 0.0f});
+    (*lines)[*count] = (lens_text_line){.text = line, .x = x, .y = y};
+    (*count)++;
 }
 
 static void label_wrapped(lens *ui, const char *text, float size, float max_width) {
-    const lens_theme *t = &ui->theme;
+    lens_style eff = lensi_style_effective(ui);
+    float padding = lensi_style_padding(&eff, &ui->theme);
+    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    if (size <= 0.0f)
+        size = rs.font_size; /* cascade default for the terse form */
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -140,40 +154,62 @@ static void label_wrapped(lens *ui, const char *text, float size, float max_widt
     n->is_container = false;
 
     lens_text_metrics intrinsic = lensi_text_measure_label(ui, text, size, 0.0f);
-    float requested_width = max_width > 0.0f ? max_width : intrinsic.width + 2.0f * t->padding;
+    float requested_width = max_width > 0.0f ? max_width : intrinsic.width + 2.0f * padding;
     float w = n->fixed_w > 0.0f ? n->fixed_w
-                                : fminf(intrinsic.width + 2.0f * t->padding, requested_width);
-    float content_width = fmaxf(w - 2.0f * t->padding, 1.0f);
+                                : fminf(intrinsic.width + 2.0f * padding, requested_width);
+    float content_width = fmaxf(w - 2.0f * padding, 1.0f);
     flux_text_metrics line_metrics = measure_slice(ui, "Ag", 2, size);
     float line_height = line_metrics.height > 0.0f ? line_metrics.height : size;
     float line_gap = fmaxf(size * 0.25f, 2.0f);
 
+    lens_text_line *lines = NULL;
+    int line_count = 0, line_cap = 0;
+    int logical_lines = 0; /* advances even for empty slices (line spacing) */
     size_t len = strlen(text);
     size_t start = 0;
-    size_t line_count = 0;
     do {
         size_t next = start;
         size_t end = wrapped_line_end(ui, text, len, start, size, content_width, &next);
-        push_text_slice(ui, n, text + start, end - start, t->padding,
-                        t->padding + (float)line_count * (line_height + line_gap), size);
-        line_count++;
+        push_line_slice(ui, &lines, &line_count, &line_cap, text + start, end - start, padding,
+                        padding + (float)logical_lines * (line_height + line_gap));
+        logical_lines++;
         if (next <= start)
             break;
         start = next;
     } while (start < len);
 
-    float content_height = (float)line_count * line_height;
-    if (line_count > 1)
-        content_height += (float)(line_count - 1) * line_gap;
-    float h = n->fixed_h > 0.0f ? n->fixed_h : content_height + 2.0f * t->padding;
+    float content_height = (float)logical_lines * line_height;
+    if (logical_lines > 1)
+        content_height += (float)(logical_lines - 1) * line_gap;
+    float h = n->fixed_h > 0.0f ? n->fixed_h : content_height + 2.0f * padding;
     n->measured = (flux_point){w, h};
 
     lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
+
+    /* emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_LABEL,
+                        .state = 0,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .content = {.label = text,
+                                    .text = intrinsic,
+                                    .text_size = size,
+                                    .lines = lines,
+                                    .line_count = line_count},
+                    });
+
     ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
 }
 
 void lens_label(lens *ui, const char *text) {
-    const lens_theme *t = &ui->theme;
+    lens_style eff = lensi_style_effective(ui);
+    float font_size = lensi_style_font_size(&eff, &ui->theme);
+    float padding = lensi_style_padding(&eff, &ui->theme);
+    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -181,26 +217,32 @@ void lens_label(lens *ui, const char *text) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    lens_text_metrics tm = lensi_text_measure_label(ui, text, t->font_size, 0.0f);
-    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * t->padding;
-    float h = (n->fixed_h > 0) ? n->fixed_h : tm.height + 2.0f * t->padding;
+    lens_text_metrics tm = lensi_text_measure_label(ui, text, font_size, 0.0f);
+    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * padding;
+    float h = (n->fixed_h > 0) ? n->fixed_h : tm.height + 2.0f * padding;
     n->measured = (flux_point){w, h};
 
     lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
 
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding, 0, 0, -1.0f},
-                                        .color = t->color_fg,
-                                        .text = text,
-                                        .text_size = t->font_size,
-                                        .text_weight = 0.0f});
+    /* emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_LABEL,
+                        .state = 0,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .content = {.label = text, .text = tm},
+                    });
 
     ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
 }
 
 void lens_label_ex(lens *ui, const char *text, float size) {
-    const lens_theme *t = &ui->theme;
+    lens_style eff = lensi_style_effective(ui);
+    float padding = lensi_style_padding(&eff, &ui->theme);
+    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -209,33 +251,38 @@ void lens_label_ex(lens *ui, const char *text, float size) {
     n->is_container = false;
 
     lens_text_metrics tm = lensi_text_measure_label(ui, text, size, 0.0f);
-    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * t->padding;
-    float h = (n->fixed_h > 0) ? n->fixed_h : tm.height + 2.0f * t->padding;
+    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * padding;
+    float h = (n->fixed_h > 0) ? n->fixed_h : tm.height + 2.0f * padding;
     n->measured = (flux_point){w, h};
 
     lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
 
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding, 0, 0, -1.0f},
-                                        .color = t->color_fg,
-                                        .text = text,
-                                        .text_size = size,
-                                        .text_weight = 0.0f});
+    /* emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_LABEL,
+                        .state = 0,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .content = {.label = text, .text = tm, .text_size = size},
+                    });
 
     ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
 }
 
 void lens_label_wrapped(lens *ui, const char *text, float max_width) {
-    label_wrapped(ui, text, ui->theme.font_size, max_width);
+    label_wrapped(ui, text, 0.0f, max_width); /* 0 = cascade-resolved font size */
 }
 
 void lens_label_wrapped_ex(lens *ui, const char *text, float size, float max_width) {
     label_wrapped(ui, text, size, max_width);
 }
 
-static void label_compact_impl(lens *ui, const char *text, float size,
-                               lens_foreground_outline outline) {
+void lens_label_compact_ex(lens *ui, const char *text, float size) {
+    lens_style eff = lensi_style_effective(ui);
+    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -250,27 +297,23 @@ static void label_compact_impl(lens *ui, const char *text, float size,
 
     lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
 
-    float y = (h - tm.height) * 0.5f;
-    if (y < 0.0f)
-        y = 0.0f;
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {0, y, 0, 0},
-                                        .color = ui->theme.color_fg,
-                                        .outline_color = outline.color,
-                                        .outline_width = outline.width > 0.0f ? outline.width : 0.0f,
-                                        .text = text,
-                                        .text_size = size,
-                                        .text_weight = 0.0f});
+    /* The opt-in contour is a style atom (ADR-0061 item 6): set
+     * LENS_STYLE_OUTLINE_COLOR/WIDTH via box.style or a scope and the
+     * contour paints outside the glyph coverage; intrinsic layout is
+     * identical either way. Emission is the skin's (ADR-0059). */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_LABEL,
+                        .state = 0,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .content = {.label = text,
+                                    .text = tm,
+                                    .text_size = size,
+                                    .compact = true},
+                    });
 
     ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
-}
-
-void lens_label_compact_ex(lens *ui, const char *text, float size) {
-    label_compact_impl(ui, text, size, (lens_foreground_outline){0});
-}
-
-void lens_label_compact_outlined_ex(lens *ui, const char *text, float size,
-                                    lens_foreground_outline outline) {
-    label_compact_impl(ui, text, size, outline);
 }

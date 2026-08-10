@@ -129,6 +129,33 @@ typedef struct iris_app_config {
  * thread-affine to iris_app_run and is a no-op outside an active app. */
 IRIS_API void iris_request_animation_frame(void);
 
+/* ================================================================== */
+/*  Cross-thread delivery                                             */
+/* ================================================================== */
+
+/* Callback queued by iris_post_to_main_thread, run on the iris main
+ * thread (the thread executing iris_app_run). */
+typedef void (*iris_main_thread_fn)(void *user);
+
+/* Post fn(user) to the iris main thread.
+ *
+ * Thread-safe: callable from ANY thread (worker threads, OS callbacks,
+ * watcher pumps). The function runs on the main thread the next time the
+ * event loop wakes, outside any lens_begin/end pair — so posted callbacks
+ * may legally call main-thread-affine APIs such as lens_paste. Posts made
+ * while no iris_app_run loop is active are dropped and iris_app_run's
+ * teardown drains or rejects everything still queued, so fn never runs
+ * against torn-down host state.
+ *
+ * Ordering: callbacks posted from a single thread run in FIFO order within
+ * the frame that drains them (posts from different threads are serialized
+ * by arrival). Delivery is coalesced with the loop's normal wakeups: a post
+ * does not by itself schedule a paint, it only runs the callback.
+ *
+ * Returns 0 when queued, -1 when no loop is currently registered (fn is
+ * never run in that case — the caller retains ownership of user). */
+IRIS_API int iris_post_to_main_thread(iris_main_thread_fn fn, void *user);
+
 /* Run the application until the window is closed. Returns 0 on success,
  * non-zero on platform failure (no display, GPU init failure, etc.).
  *

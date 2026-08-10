@@ -45,7 +45,7 @@ a decision, write a new ADR and update the old one's status to
 | 0034 | [Lens text measurement — host port + monospace fallback](0034-lens-text-measurement.md) | Accepted |
 | 0035 | [Lens accessibility semantic tree — per-node records and post-end walk](0035-lens-accessibility-tree.md) | Accepted |
 | 0036 | [Lens input / clipboard / IME — host-supplied, size-guarded ABI](0036-lens-input-clipboard-ime.md) | Accepted |
-| 0037 | [Lens overlay layers — transient overlays + persistent floating panels](0037-lens-overlay-layers.md) | Accepted |
+| 0037 | [Lens overlay layers — transient overlays + persistent floating panels](0037-lens-overlay-layers.md) | Superseded by ADR-0060 |
 | 0038 | [Lens node state GC — 8-frame grace window for leaving nodes](0038-lens-node-state-gc.md) | Accepted |
 | 0039 | [Lens modal dialog — centered overlay + backdrop + Tab focus trap](0039-lens-modal-dialog.md) | Accepted |
 | 0040 | [Lens menus — menubar, context menu, submenu, items (hover-dwell)](0040-lens-menus.md) | Accepted |
@@ -66,3 +66,8 @@ a decision, write a new ADR and update the old one's status to
 | 0055 | [Callback-driven watch APIs + the backend wakeup seam](0055-watch-apis-and-wakeup-seam.md) | Accepted |
 | 0056 | [Win32 + Cocoa backends and the MoltenVK baseline](0056-win32-cocoa-backends-and-moltenvk.md) | Accepted |
 | 0057 | [Paste drain and caret rect for app-owned editing surfaces](0057-paste-drain-and-caret-rect-for-app-surfaces.md) | Accepted |
+| 0058 | [Lens widget state bitflags and per-instance styles](0058-lens-widget-state-and-instance-styles.md) | Accepted (amended by ADR-0061) |
+| 0059 | [Lens widget skins — emission as a replaceable function](0059-lens-widget-skins.md) | Accepted (extended by ADR-0061) |
+| 0060 | [Lens single-tree placement and z bands — place/band supersedes parallel overlay roots](0060-lens-single-tree-placement-and-z-bands.md) | Accepted |
+| 0061 | [Lens style cascade and the mechanism / neutral-default / flavor rule](0061-lens-style-cascade-mechanism-neutral-flavor.md) | Accepted |
+| 0062 | [Bidirectional accessibility — a11y action invocation and text-changed events](0062-lens-bidirectional-a11y-action-and-text-changed.md) | Accepted |

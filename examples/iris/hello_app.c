@@ -25,6 +25,7 @@
 #include "app_shell.h"
 #include "ui_events.h"
 #include <iris/app.h>
+#include <iris/window.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -252,6 +253,11 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
     lens_theme th = lens_get_theme(ui); /* tracks Dark toggles */
     shell_tones tn = shell_tones_from(&th);
 
+    /* Esc quits (the startup line says so). */
+    for (uint32_t k = 0; k < in->key_count; k++)
+        if (in->keys[k].pressed && in->keys[k].key == LENS_KEY_ESCAPE)
+            iris_window_close();
+
     /* ── Toolbar ────────────────────────────────────────────── */
     lens_row_ex(ui, (lens_layout_opts){
                         .gap = 8, .pad = 10, .cross = LENS_CENTER, .bg = tn.toolbar, .radius = 0});
@@ -260,15 +266,15 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
     lens_spacer(ui, 0);
     lens_size(ui, 28, 22);
     if (lens_button(ui, "##min"))
-        printf("  WIN      minimise\n");
+        iris_window_minimize();
     EVT("min");
     lens_size(ui, 28, 22);
     if (lens_button(ui, "##max"))
-        printf("  WIN      maximise\n");
+        iris_window_maximize();
     EVT("max");
     lens_size(ui, 28, 22);
     if (lens_button(ui, "##close"))
-        printf("  WIN      close\n");
+        iris_window_close();
     EVT("close");
     lens_close(ui);
 

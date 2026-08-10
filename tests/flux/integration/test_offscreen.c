@@ -13,8 +13,9 @@
  *   attachment uses a native BGRA format.
  *
  * Also covers: validation (windowed-only API misuse, short buffer,
- * read-before-submit), present-loop compatibility (begin → submit →
- * present runs unchanged), resize invalidation, multi-frame reuse.
+ * read-before-submit, cross-surface frame ownership), present-loop
+ * compatibility (begin → submit → present runs unchanged), resize
+ * invalidation, multi-frame reuse.
  */
 #include "test_helpers.h"
 #include <flux/flux.h>
@@ -182,6 +183,33 @@ int main(void) {
         EXPECT(flux_frame_submit(frame) == FLUX_ERROR_INVALID_STATE);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
+    }
+
+    /* --- cross-surface frame ownership: a canvas refuses a frame from a
+     * different surface (the command buffer belongs to that surface's
+     * per-slot pool) --- */
+    {
+        flux_surface *s2 = nullptr;
+        flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+        sd.width = W;
+        sd.height = H;
+        EXPECT(flux_surface_create(d, &sd, &s2) == FLUX_OK);
+
+        flux_frame *foreign = nullptr;
+        EXPECT(flux_surface_begin_frame(s2, nullptr, &foreign) == FLUX_OK);
+        EXPECT(flux_canvas_begin(canvas, foreign, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+        /* The canvas must be untouched by the refused begin: a same-surface
+         * frame works immediately after. */
+        flux_frame *own = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &own) == FLUX_OK);
+        EXPECT(flux_canvas_begin(canvas, own, nullptr) == FLUX_OK);
+        flux_canvas_end(canvas);
+        EXPECT(flux_frame_submit(own) == FLUX_OK);
+        EXPECT(flux_frame_present(own) == FLUX_OK);
+        /* Finish the foreign frame on its own surface. */
+        EXPECT(flux_frame_submit(foreign) == FLUX_OK);
+        EXPECT(flux_frame_present(foreign) == FLUX_OK);
+        flux_surface_release(s2);
     }
 
     /* --- first frame: clear + centre rect --- */

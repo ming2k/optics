@@ -41,14 +41,41 @@ static void a11y_visitor(const lens_semantics *s, flux_rect bounds, lens_id id, 
     case LENS_ROLE_SLIDER:
         role_name = "SLIDER";
         break;
+    case LENS_ROLE_DISCLOSURE:
+        role_name = "DISCLOSURE";
+        break;
+    case LENS_ROLE_SCROLLAREA:
+        role_name = "SCROLLAREA";
+        break;
     case LENS_ROLE_TEXTFIELD:
         role_name = "TEXTFIELD";
+        break;
+    case LENS_ROLE_TEXTAREA:
+        role_name = "TEXTAREA";
+        break;
+    case LENS_ROLE_MENU:
+        role_name = "MENU";
         break;
     case LENS_ROLE_RADIO:
         role_name = "RADIO";
         break;
     case LENS_ROLE_DIALOG:
         role_name = "DIALOG";
+        break;
+    case LENS_ROLE_PROGRESS:
+        role_name = "PROGRESS";
+        break;
+    case LENS_ROLE_TABLE:
+        role_name = "TABLE";
+        break;
+    case LENS_ROLE_ROW:
+        role_name = "ROW";
+        break;
+    case LENS_ROLE_MENUITEM:
+        role_name = "MENUITEM";
+        break;
+    case LENS_ROLE_LINK:
+        role_name = "LINK";
         break;
     default:
         break;
@@ -65,6 +92,12 @@ static void a11y_visitor(const lens_semantics *s, flux_rect bounds, lens_id id, 
         printf(" (focused)");
     if (s->flags & LENS_A11Y_CHECKED)
         printf(" (checked)");
+    if (s->flags & LENS_A11Y_EXPANDED)
+        printf(" (expanded)");
+    if (s->flags & LENS_A11Y_READONLY)
+        printf(" (readonly)");
+    if (s->flags & LENS_A11Y_SELECTED)
+        printf(" (selected)");
 
     printf("\n");
 }

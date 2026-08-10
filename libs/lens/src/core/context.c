@@ -97,8 +97,6 @@ static void lensi_theme_normalize(lens_theme *t) {
         t->font_weight = 400.0f;
     if (t->font_weight_bold <= 0.0f)
         t->font_weight_bold = 700.0f;
-    if (t->active_indicator_width < 0.0f)
-        t->active_indicator_width = 0.0f;
     if (t->scrollbar_width <= 0.0f)
         t->scrollbar_width = 8.0f;
     if (t->scrollbar_radius < 0.0f)
@@ -172,19 +170,15 @@ bool lens_frame_needs_repaint(const lens *ui) {
     if (ui->root && ui->root->subtree_changed)
         return true;
 
-    /* Floating layers (popups, menus, panels) are independent sub-roots:
-     * their damage is not part of the base tree, and an open/close or a
-     * z-order change alters the layer set itself. prev_overlay_layer_ids
-     * holds last frame's set (carried across the arena reset). */
-    if (ui->overlay_layer_count != ui->prev_overlay_layer_count)
-        return true;
-    for (uint32_t i = 0; i < ui->overlay_layer_count; i++) {
-        lens_node *n = ui->overlay_layers[i];
-        if (!n || n->subtree_changed)
-            return true;
-        if (n->id != ui->prev_overlay_layer_ids[i])
-            return true;
-    }
+    /* Placed subtrees (popups, menus, chrome, backdrops) carry their own
+     * subtree_changed (their damage deliberately does not roll up into the
+     * root's display-list record — replay.c), so the query consults the
+     * band buckets directly. An open/close alters the parent's child
+     * sequence, which the base-tree check above already catches. */
+    for (uint32_t b = 0; b < (uint32_t)LENS_BAND_COUNT; b++)
+        for (uint32_t i = 0; i < ui->band_counts[b]; i++)
+            if (ui->bands[b][i] && ui->bands[b][i]->subtree_changed)
+                return true;
 
     /* The tooltip is painted straight from lens_render (no draw list, no
      * node), so only its presence is observable here: active, or active
@@ -215,23 +209,38 @@ bool lens_reduced_motion(const lens *ui) {
     return ui && ui->reduced_motion;
 }
 
+/* ---- style scope stack (ADR-0061 item 4) --------------------------- */
+
+void lens_push_style(lens *ui, lens_style style) {
+    if (!ui)
+        return;
+    if (ui->style_top >= LENSI_STYLE_STACK_MAX) {
+        lensi_set_overflow(ui);
+        return;
+    }
+    ui->style_stack[ui->style_top++] = style;
+}
+
+void lens_pop_style(lens *ui) {
+    if (ui && ui->style_top > 0)
+        ui->style_top--;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Frame lifecycle                                                   */
 /* ------------------------------------------------------------------ */
 
 void lens_begin(lens *ui, const lens_input *input) {
-    /* Carry last frame's floating-layer ids across the arena reset so
-     * this frame's eclipse checks use the layers that are actually on
-     * screen (their prev_rect geometry), independent of build order. */
-    ui->prev_overlay_layer_count = 0;
-    for (uint32_t i = 0; i < ui->overlay_layer_count && i < LENSI_OVERLAY_MAX; ++i) {
-        if (ui->overlay_layers[i])
-            ui->prev_overlay_layer_ids[ui->prev_overlay_layer_count++] = ui->overlay_layers[i]->id;
-    }
-    flux_arena_reset(&ui->arena);
     ui->frame++;
     ui->overflow = false;
     ui->anim_pending = false; /* set true by any eased value still in transit */
+    /* Carry last frame's band buckets across the arena reset as per-band
+     * prev id lists, so this frame's occlusion checks use the placed nodes
+     * that are actually on screen (their prev_rect geometry), independent
+     * of build order (ADR-0060). Runs after the per-frame flag reset so a
+     * truncation it flags stays flagged. */
+    lensi_place_snapshot_prev(ui);
+    flux_arena_reset(&ui->arena);
 
     /* Size-aware copy (ADR-0036): zero = legacy/trust full struct; >0
      * clamps to min(caller, lib) so apps compiled against older or newer
@@ -243,7 +252,13 @@ void lens_begin(lens *ui, const lens_input *input) {
             want = sizeof(lens_input);
         memcpy(&ui->input, input, want);
         ui->input.size = sizeof(lens_input);
+        /* A hostile or buggy host key_count must never drive reads past the
+         * fixed keys[] array. */
+        if (ui->input.key_count > LENS_INPUT_MAX_KEYS)
+            ui->input.key_count = LENS_INPUT_MAX_KEYS;
     }
+    memset(ui->key_consumed, 0, sizeof ui->key_consumed);
+    ui->menu_nav = 0;
     ui->caret_rect = (flux_rect){0, 0, 0, 0}; /* refreshed by text widget */
 
     /* per-frame build state */
@@ -255,16 +270,22 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->next_disabled = false;
     ui->next_error = false;
     ui->next_placeholder = NULL;
+    ui->next_style = lens_style_init();
+    ui->style_top = 0; /* style scopes are frame-scoped (ADR-0061): a
+                        * forgotten lens_pop_style cannot leak across frames */
     ui->click_hit_focusable = false;
-    ui->hot_id = 0;
     ui->scroll_hot_id = 0;
     ui->cursor_hint = LENS_CURSOR_DEFAULT;
     ui->tab_order = NULL;
     ui->tab_count = ui->tab_cap = 0;
     ui->last_response = (lens_response){0};
     ui->last_node = NULL;
-    ui->overlay_layers = NULL; /* arena-backed; resets with the arena */
-    ui->overlay_layer_count = ui->overlay_layer_cap = 0;
+    /* Band buckets are arena-backed; they reset with the arena and are
+     * rebuilt by lensi_place_bucket at lens_end. */
+    for (uint32_t b = 0; b < (uint32_t)LENS_BAND_COUNT; b++) {
+        ui->bands[b] = NULL;
+        ui->band_counts[b] = ui->band_caps[b] = 0;
+    }
     ui->prev_tooltip_active = ui->tooltip.active;
     ui->tooltip.active = false;
 
@@ -289,28 +310,53 @@ void lens_end(lens *ui) {
     while (ui->cont_top > 1)
         lensi_open_container_pop(ui);
 
-    lensi_store_reap(ui);      /* phase transitions + GC (ADR-0027) */
-    lensi_layout_solve(ui);    /* two-pass measure/arrange (ADR-0028) */
-    lensi_overlay_layout(ui);  /* place open floating layers (ADR-0037) */
-    lensi_overlay_dismiss(ui); /* click-outside + Escape, post-build   */
-    lensi_focus_tab(ui);       /* Tab / Shift+Tab focus traversal     */
+    lensi_store_reap(ui);     /* phase transitions + GC (ADR-0027) */
+    lensi_layout_solve(ui);   /* two-pass measure/arrange, ABS-aware (ADR-0028/0060) */
+    lensi_place_bucket(ui);   /* bucket ABS nodes into z bands (ADR-0060)  */
+    lensi_place_dismiss(ui);  /* click-outside + Escape, post-build        */
+    lensi_focus_tab(ui);      /* Tab / Shift+Tab focus traversal     */
 
     /* Click outside any focusable widget clears focus. */
-    if (ui->input.mouse_pressed[LENS_MOUSE_LEFT] && !ui->click_hit_focusable)
+    if (ui->input.mouse_pressed[LENS_MOUSE_LEFT] && !ui->click_hit_focusable) {
         ui->focused_id = 0;
+        ui->focus_visible = false;
+    }
 
-    lensi_mark_dirty(ui);         /* compute subtree_changed for culling */
-    lensi_overlay_mark_dirty(ui); /* same for floating-layer sub-roots   */
+    /* Scrollbar chrome is emitted here — after the whole tree (base +
+     * placed subtrees) is solved and placed, before damage tracking —
+     * because layout itself must not author draw commands (ADR-0059). */
+    lensi_scrollbars_emit(ui);
+
+    lensi_mark_dirty(ui); /* compute subtree_changed for culling */
+
+    /* An AT activation that no widget consumed this frame (the node
+     * vanished, is not focusable, or is disabled) is dropped: requests
+     * are single-frame, never queued (ADR-0062). */
+    ui->a11y_activate_id = 0;
 
     /* Modal focus trap is per-frame; reset so a frame with no open modal
-     * falls back to whole-range Tab cycling (ADR-0039). */
+     * falls back to whole-range Tab cycling (ADR-0039). The nesting stack
+     * resets with it. */
     ui->modal_active = false;
     ui->modal_tab_lo = ui->modal_tab_hi = 0;
+    ui->modal_trap_depth = 0;
 }
 
 void lens_set_focus(lens *ui, lens_id id) {
-    if (ui)
+    if (ui) {
         ui->focused_id = id;
+        /* Programmatic focus is not keyboard navigation: no focus ring
+         * until the next Tab traversal (ADR-0058). */
+        ui->focus_visible = false;
+    }
+}
+
+void lens_a11y_activate(lens *ui, lens_id id) {
+    /* Record only; the next build's lensi_interact consumes it (ADR-0062).
+     * A second call before the frame replaces the first — AT-SPI actions
+     * are synchronous/sequential, so one pending slot is enough. */
+    if (ui)
+        ui->a11y_activate_id = id;
 }
 lens_id lens_active(const lens *ui) {
     return ui ? ui->active_id : 0;

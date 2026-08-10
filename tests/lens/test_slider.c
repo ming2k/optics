@@ -59,7 +59,9 @@ static void test_slider_disabled(void) {
     lens_destroy(ui);
 }
 
-static void test_slider_hover_schedules_knob_animation(void) {
+static void test_slider_hover_schedules_feedback_transition(void) {
+    /* ADR-0061: the knob is always visible; hover only eases a colour
+     * emphasis, which still marks animation pending until settled. */
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     float value = 0.5f;
@@ -182,7 +184,7 @@ static void test_hovered_trigger_adjusts_on_wheel(void) {
 int main(void) {
     test_slider_drag();
     test_slider_disabled();
-    test_slider_hover_schedules_knob_animation();
+    test_slider_hover_schedules_feedback_transition();
     test_slider_geometry_uses_theme_tokens();
     test_vertical_slider_drag_and_wheel();
     test_hovered_trigger_adjusts_on_wheel();

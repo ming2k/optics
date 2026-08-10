@@ -2,11 +2,15 @@
  *
  * A plain list / nav item: transparent at rest, with a subtle fill on hover
  * and a steady highlight when `selected`. By default the selected row is a
- * calm tint-only surface with foreground text. Themes can opt into an
- * accent rail with `active_indicator_width`; that treatment squares the
- * surface's left edge and preserves rounding only on the right. In a
- * stretched column the row spans the full cross width, so the whole row is
- * the hit target.
+ * calm tint-only surface with foreground text — the neutral affordance;
+ * decorative accent rails are flavor and belong to caller skins (ADR-0061).
+ * In a stretched column the row spans the full cross width, so the whole
+ * row is the hit target.
+ *
+ * Styling flows through the cascade (ADR-0061: per-call box.style > scope
+ * > theme); emission is the skin's job (ADR-0059). This file keeps
+ * identity, measuring, interaction, animation, and accessibility. The body
+ * runs in fixed phases: measure -> interact -> resolve -> emit (skin call).
  */
 
 #include "../internal.h"
@@ -16,6 +20,7 @@ static bool selectable_impl(lens *ui, lens_icon_id icon, const char *label, bool
     bool disabled = ui->next_disabled;
     ui->next_disabled = false;
     ui->next_error = false; /* drain so it never leaks to a later widget */
+    lens_style eff = lensi_style_effective(ui);
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -23,16 +28,22 @@ static bool selectable_impl(lens *ui, lens_icon_id icon, const char *label, bool
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    lens_text_metrics tm = lensi_text_measure_label(ui, label, t->font_size, 0.0f);
+    /* measure */
+    float font_size = lensi_style_font_size(&eff, t);
+    float padding = lensi_style_padding(&eff, t);
+    lens_text_metrics tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
     bool has_icon = lensi_icon_valid((int32_t)icon);
-    float icon_size = has_icon ? t->font_size : 0.0f;
+    float icon_size = has_icon ? font_size : 0.0f;
     float icon_gap = has_icon ? 8.0f : 0.0f;
     float content_w = icon_size + icon_gap + tm.width;
-    float w = (n->fixed_w > 0) ? n->fixed_w : content_w + 2.0f * t->padding;
-    float h = (n->fixed_h > 0) ? n->fixed_h : t->font_size + 2.0f * t->padding;
+    float w = (n->fixed_w > 0) ? n->fixed_w : content_w + 2.0f * padding;
+    float h = (n->fixed_h > 0) ? n->fixed_h : font_size + 2.0f * padding;
     n->measured = (flux_point){w, h};
 
+    /* interact */
     lens_response r = lensi_interact(ui, n, true, disabled);
+    if (selected)
+        r.state |= LENS_STATE_SELECTED;
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0) |
                          (selected ? LENS_A11Y_CHECKED : 0);
     lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, sem_flags);
@@ -40,64 +51,22 @@ static bool selectable_impl(lens *ui, lens_icon_id icon, const char *label, bool
     if (!disabled)
         n->hover_t = r.hovered ? 1.f : 0.f;
 
-    /* An optional accent rail marks the selected row when the theme asks for it. */
-    float indicator_w = selected ? t->active_indicator_width : 0.0f;
+    /* resolve */
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
 
-    /* Background: transparent at rest. A selected row always uses the
-     * theme's active-surface colour. This is independent from the optional
-     * accent rail, so applications can theme selection without adding
-     * decoration. */
-    float fill = n->hover_t * 0.6f;
-    if (selected || fill > 0.001f) {
-        flux_color bg =
-            selected ? t->color_active : lensi_lerp_color(t->color_bg, t->color_hover, fill);
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {0, 0, 0, 0},
-                                            .color = bg,
-                                            .radius = t->corner_radius});
-        /* An accent rail is flush with the container edge. Square the
-         * background behind it while leaving the two right corners rounded. */
-        if (indicator_w > 0.0f && t->corner_radius > 0.0f)
-            lensi_drawlist_push(ui, n,
-                                (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                                .rel = {0, 0, t->corner_radius, 0},
-                                                .color = bg,
-                                                .radius = 0.0f});
-    }
-
-    if (indicator_w > 0.0f)
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {0, 0, indicator_w, 0},
-                                            .color = t->color_accent,
-                                            .radius = 0.0f});
-
-    float text_y = (h - tm.height) * 0.5f;
-    if (text_y < 0.0f)
-        text_y = 0.0f;
-
-    float x = t->padding;
-    flux_color fg = disabled             ? t->color_disabled
-                    : indicator_w > 0.0f ? t->color_accent
-                                         : t->color_fg;
-    if (has_icon) {
-        float icon_y = (h - icon_size) * 0.5f;
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_ICON,
-                                            .rel = {x, icon_y, icon_size, icon_size},
-                                            .color = fg,
-                                            .width = 2.0f * (icon_size / 24.0f),
-                                            .icon_id = icon});
-        x += icon_size + icon_gap;
-    }
-
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {x, text_y, 0, 0}, /* left-aligned (rel.w 0) */
-                                        .color = fg,
-                                        .text = label,
-                                        .text_size = t->font_size});
+    /* emit — through the replaceable skin */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_SELECTABLE,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = label, .text = tm, .icon = icon},
+                    });
 
     ui->last_response = r;
     return r.clicked;

@@ -60,13 +60,10 @@ static void walk_node(const lens_node *n, lens_id sem_parent, lens_a11y_visit_fn
 void lens_accessibility_walk(const lens *ui, lens_a11y_visit_fn visit, void *user) {
     if (!ui || !visit)
         return;
+    /* One tree (ADR-0060): a single structural pre-order walk reaches
+     * placed subtrees through their real parent chain — assistive
+     * technology wants reading (tree) order, not z-order. The explicit
+     * overlay visit of ADR-0035 item 6 is removed. */
     if (ui->root)
         walk_node(ui->root, 0, visit, user);
-    /* Overlay sub-roots (ADR-0037) are not children of ui->root, so the
-     * walk visits each explicitly. Each layer reports under id 0 (root). */
-    uint32_t n = 0;
-    lens_node **layers = lensi_overlay_layers(ui, &n);
-    for (uint32_t i = 0; i < n; i++)
-        if (layers[i])
-            walk_node(layers[i], 0, visit, user);
 }

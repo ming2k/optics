@@ -6,6 +6,7 @@
 
 #include "app_shell.h"
 #include <iris/app.h>
+#include <iris/window.h>
 #include <lens/lens.h>
 
 #include <stdio.h>
@@ -42,6 +43,11 @@ static void build(lens *ui, const lens_input *in, void *user) {
     app *a = user;
     lens_theme th = lens_get_theme(ui);
     shell_tones tn = shell_tones_from(&th);
+
+    /* Esc quits (the startup line says so). */
+    for (uint32_t k = 0; k < in->key_count; k++)
+        if (in->keys[k].pressed && in->keys[k].key == LENS_KEY_ESCAPE)
+            iris_window_close();
 
     lens_column_ex(ui,
                    (lens_layout_opts){.pad = 24, .gap = 8, .cross = LENS_STRETCH, .bg = tn.card});

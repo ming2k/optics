@@ -43,6 +43,17 @@ test_canvas_cpu_text = executable('test_canvas_cpu_text',
 )
 test('canvas_cpu_text', test_canvas_cpu_text, suite : 'unit')
 
+# Atlas-clear invalidation: a segment recorded before an atlas_clear carries
+# pre-clear glyph UVs, so replay must be refused via the host-atlas
+# generation check (flux_glyph_run_host_atlas_desc) and a live re-draw must
+# reproduce the recorded pixels exactly. CPU backend; forces real clears
+# with oversized (512px) glyph cells.
+test_canvas_text_atlas = executable('test_canvas_text_atlas',
+  'test_canvas_text_atlas.c',
+  dependencies : [test_helpers_dep, flux_text_dep],
+)
+test('canvas_text_atlas', test_canvas_text_atlas, suite : 'unit')
+
 # Headless CPU-canvas display-list test: record/replay segments render
 # pixel-identically to live emission and refuse stale anchors (clip,
 # transform, released handle).

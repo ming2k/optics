@@ -21,8 +21,6 @@ lens_theme lens_theme_dark(void) {
     t.gap = 8.0f;
     t.corner_radius = 6.0f;
     t.border_width = 1.0f;
-    /* Accent rails are an opt-in navigation treatment, not a base style. */
-    t.active_indicator_width = 0.0f;
 
     t.font = NULL;
     t.font_size = 14.0f;
@@ -68,8 +66,6 @@ lens_theme lens_theme_default(void) {
     t.gap = 8.0f;
     t.corner_radius = 6.0f;
     t.border_width = 1.0f;
-    /* Accent rails are an opt-in navigation treatment, not a base style. */
-    t.active_indicator_width = 0.0f;
 
     t.font = NULL;
     t.font_size = 14.0f;

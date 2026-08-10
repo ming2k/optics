@@ -44,10 +44,15 @@ static pthread_t g_thread;
 static bool g_thread_running = false;
 static int g_stop_pipe[2] = {-1, -1}; /* written by unwatch, polled by g_thread */
 
-/* Touched on the iris main thread only (watch/unwatch/delivery shim), per
- * the public header's threading contract. */
+/* Two registrations share the one watcher thread: the host's public slot
+ * (iris_color_scheme_watch) and the platform backend's internal slot
+ * (iris_theme__watch_backend) — see theme_watch_internal.h for why they
+ * must not overwrite each other. Both are touched on the iris main thread
+ * only (watch/unwatch/delivery shim), per the public threading contract. */
 static iris_color_scheme_changed_fn g_cb = NULL;
 static void *g_user = NULL;
+static iris_color_scheme_changed_fn g_backend_cb = NULL;
+static void *g_backend_user = NULL;
 
 /* Posted through the wakeup seam, freed by the delivery shim. */
 typedef struct theme_change {
@@ -61,6 +66,8 @@ static void deliver_change(void *user) {
     free(change);
     if (g_cb)
         g_cb(scheme, g_user);
+    if (g_backend_cb)
+        g_backend_cb(scheme, g_backend_user);
 }
 
 /* SettingChanged signal signature:
@@ -141,15 +148,11 @@ static void *watch_thread_main(void *arg) {
     }
 }
 
-IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb, void *user) {
-    if (!cb)
-        return -1;
-    if (g_thread_running) {
-        /* Already watching — update the callback and keep going. */
-        g_cb = cb;
-        g_user = user;
+/* Start the watcher thread if it is not already running. Returns 0 on
+ * success. Main thread only. */
+static int watch_start(void) {
+    if (g_thread_running)
         return 0;
-    }
 
     int rc = sd_bus_open_user(&g_bus);
     if (rc < 0) {
@@ -181,12 +184,12 @@ IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb, void *user
     }
 
     g_thread_running = true;
-    g_cb = cb;
-    g_user = user;
     return 0;
 }
 
-IRIS_API void iris_color_scheme_unwatch(void) {
+/* Stop the watcher thread (if running) and release the bus. Returns after
+ * the thread has exited. Main thread only. */
+static void watch_stop(void) {
     if (!g_thread_running)
         return;
 
@@ -202,13 +205,45 @@ IRIS_API void iris_color_scheme_unwatch(void) {
 
     sd_bus_unref(g_bus);
     g_bus = NULL;
+}
 
-    /* Clear last so a change already sitting in the wakeup queue is
-     * dropped by deliver_change instead of calling a dead registration.
-     * (drain and unwatch both run on the main thread, so this is
-     * serialized with delivery.) */
+IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb, void *user) {
+    if (!cb)
+        return -1;
+    if (watch_start() != 0)
+        return -1;
+    g_cb = cb;
+    g_user = user;
+    return 0;
+}
+
+IRIS_API void iris_color_scheme_unwatch(void) {
+    /* Clear the registration first so a change already sitting in the
+     * wakeup queue is dropped by deliver_change instead of calling a dead
+     * registration (drain and unwatch both run on the main thread, so this
+     * is serialized with delivery). */
     g_cb = NULL;
     g_user = NULL;
+    /* The watcher thread keeps running while the backend slot is live. */
+    if (!g_backend_cb)
+        watch_stop();
+}
+
+int iris_theme__watch_backend(iris_color_scheme_changed_fn cb, void *user) {
+    if (!cb)
+        return -1;
+    if (watch_start() != 0)
+        return -1;
+    g_backend_cb = cb;
+    g_backend_user = user;
+    return 0;
+}
+
+void iris_theme__unwatch_backend(void) {
+    g_backend_cb = NULL;
+    g_backend_user = NULL;
+    if (!g_cb)
+        watch_stop();
 }
 
 #endif /* IRIS_HAVE_PORTAL_WATCH */

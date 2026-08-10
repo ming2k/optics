@@ -10,7 +10,9 @@
 #include "a11y_internal.h"
 #include "platform_input.h"
 #include "platform_internal.h"
+#include "platform_text.h"
 #include "platform_wakeup.h"
+#include "theme_watch_internal.h"
 
 #include <iris/a11y.h>
 #include <iris/cursor.h>
@@ -24,6 +26,7 @@
 
 #include "text-input-unstable-v3-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
+#include "xdg-foreign-unstable-v2-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
@@ -33,7 +36,9 @@
 #include <linux/input-event-codes.h> /* BTN_LEFT / BTN_RIGHT / BTN_MIDDLE — Linux-only, this file only */
 
 #include <ctype.h>
+#include <errno.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -94,6 +99,18 @@ typedef struct wp_platform {
     bool dnd_inside;      /* drag currently over our surface           */
     flux_point dnd_pos;   /* last reported drag position (surface px)  */
 
+    /* MIME types advertised by the offers above. Offers announce their
+     * types via offer events BEFORE the selection/enter event binds them,
+     * so types accumulate into `pending` first and move into the matching
+     * slot when the offer is bound. This is what real MIME negotiation
+     * (paste / drop) keys off. */
+    struct wp_offer_mimes {
+        struct wl_data_offer *offer;
+        bool uri_list;   /* text/uri-list              */
+        bool text_utf8;  /* text/plain;charset=utf-8   */
+        bool text_plain; /* text/plain                 */
+    } pending_offer_mimes, selection_offer_mimes, dnd_offer_mimes;
+
     /* Pointer + keyboard + touch (touch is optional). */
     struct wl_pointer *pointer;
     struct wl_keyboard *keyboard;
@@ -103,6 +120,13 @@ typedef struct wp_platform {
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *toplevel;
     struct zxdg_toplevel_decoration_v1 *deco;
+
+    /* xdg-foreign-unstable-v2: exports a stable handle naming this window,
+     * passed to portal dialogs (file_dialog_portal.c) as parent_window so
+     * the picker stays modal to us. */
+    struct zxdg_exporter_v2 *foreign_exporter;
+    struct zxdg_exported_v2 *foreign_exported;
+    char foreign_handle[80]; /* empty until the compositor answers */
 
     /* Cursor: cursor-shape-v1 (the modern wayland-protocols path). The
      * compositor renders the cursor with its own configured theme, so we
@@ -114,7 +138,8 @@ typedef struct wp_platform {
      * `cursor_shape_mgr` stays NULL and iris_set_cursor is a no-op. */
     struct wp_cursor_shape_manager_v1 *cursor_shape_mgr;
     struct wp_cursor_shape_device_v1 *cursor_shape_device;
-    iris_cursor current_cursor;
+    iris_cursor host_cursor;      /* last explicit iris_set_cursor (DEFAULT = none) */
+    iris_cursor effective_cursor; /* what the compositor is asked to show       */
     uint32_t cursor_serial; /* most recent enter/motion serial */
     bool cursor_inside;     /* pointer currently inside our surface */
     struct xkb_context *xkb_ctx;
@@ -392,7 +417,7 @@ static void cursor_ensure_device(wp_platform *pl) {
         wp_cursor_shape_manager_v1_get_pointer(pl->cursor_shape_mgr, pl->pointer);
 }
 
-/* Tell the compositor to render `pl->current_cursor` for the next pointer
+/* Tell the compositor to render `pl->effective_cursor` for the next pointer
  * frame. No-op if cursor-shape isn't supported (the compositor's default
  * arrow stays) or the pointer is outside our surface. The serial is from
  * the pointer enter; cursor-shape-v1 requires it to attribute the shape
@@ -404,22 +429,57 @@ static void cursor_apply(wp_platform *pl) {
     if (!pl->cursor_shape_device)
         return;
     wp_cursor_shape_device_v1_set_shape(pl->cursor_shape_device, pl->cursor_serial,
-                                        cursor_shape_for(pl->current_cursor));
+                                        cursor_shape_for(pl->effective_cursor));
 }
 
-/* Public API. Sets the active platform's current cursor and tells the
- * compositor at the next pointer frame. No-op when iris was built
- * without cursor-shape protocol support, or before iris_app_run starts. */
+/* Effective cursor: an explicit host iris_set_cursor wins; while it is
+ * DEFAULT, follow the semantic hint of the lens widget under the pointer
+ * (I-beam over text fields, hand over clickable elements, …). Same policy
+ * as the Win32/Cocoa backends, evaluated once per frame from the run loop
+ * and after every iris_set_cursor. Returns true when the effective cursor
+ * changed. */
+static bool cursor_follow_hint(wp_platform *pl) {
+    iris_cursor eff = pl->host_cursor;
+    if (eff == IRIS_CURSOR_DEFAULT && pl->ui) {
+        switch (lens_get_cursor_hint(pl->ui)) {
+        case LENS_CURSOR_POINTER:
+            eff = IRIS_CURSOR_POINTER;
+            break;
+        case LENS_CURSOR_TEXT:
+            eff = IRIS_CURSOR_TEXT;
+            break;
+        case LENS_CURSOR_RESIZE_EW:
+            eff = IRIS_CURSOR_RESIZE_EW;
+            break;
+        case LENS_CURSOR_RESIZE_NS:
+            eff = IRIS_CURSOR_RESIZE_NS;
+            break;
+        case LENS_CURSOR_DEFAULT:
+        default:
+            break;
+        }
+    }
+    if (eff == pl->effective_cursor)
+        return false;
+    pl->effective_cursor = eff;
+    return true;
+}
+
+/* Public API. Pins a host cursor until reset to IRIS_CURSOR_DEFAULT, which
+ * hands control back to the per-frame lens widget hint. No-op when iris was
+ * built without cursor-shape protocol support, or before iris_app_run
+ * starts. */
 IRIS_API void iris_set_cursor(iris_cursor cursor) {
     wp_platform *pl = g_active_pl;
     if (!pl)
         return;
     if (cursor < IRIS_CURSOR_DEFAULT)
         cursor = IRIS_CURSOR_DEFAULT;
-    if (cursor == pl->current_cursor)
+    if (cursor == pl->host_cursor)
         return;
-    pl->current_cursor = cursor;
-    cursor_apply(pl);
+    pl->host_cursor = cursor;
+    if (cursor_follow_hint(pl))
+        cursor_apply(pl);
 }
 
 /* ------------------------------------------------------------------ */
@@ -699,12 +759,9 @@ static void ti_preedit(void *data, struct zwp_text_input_v3 *ti, const char *tex
     wp_platform *pl = data;
     (void)ti;
     (void)cursor_end;
-    if (text) {
-        strncpy(pl->ime.preedit, text, sizeof pl->ime.preedit - 1);
-        pl->ime.preedit[sizeof pl->ime.preedit - 1] = '\0';
-    } else {
-        pl->ime.preedit[0] = '\0';
-    }
+    /* boundary-aware copy: a raw byte cap could split a multi-byte sequence
+     * at the buffer edge and hand lens invalid UTF-8. */
+    iris_utf8_copy(pl->ime.preedit, sizeof pl->ime.preedit, text);
     pl->ime.preedit_cursor_begin = cursor_begin;
     pl->ime.has_preedit = true;
 }
@@ -712,12 +769,7 @@ static void ti_preedit(void *data, struct zwp_text_input_v3 *ti, const char *tex
 static void ti_commit(void *data, struct zwp_text_input_v3 *ti, const char *text) {
     wp_platform *pl = data;
     (void)ti;
-    if (text) {
-        strncpy(pl->ime.commit, text, sizeof pl->ime.commit - 1);
-        pl->ime.commit[sizeof pl->ime.commit - 1] = '\0';
-    } else {
-        pl->ime.commit[0] = '\0';
-    }
+    iris_utf8_copy(pl->ime.commit, sizeof pl->ime.commit, text);
     pl->ime.has_commit = true;
 }
 
@@ -749,19 +801,22 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
     }
 
     if (pl->ime.has_commit && pl->ime.commit[0]) {
-        size_t used = strlen(pl->acc.text);
-        size_t n = strlen(pl->ime.commit);
-        if (used + n < sizeof pl->acc.text)
-            memcpy(pl->acc.text + used, pl->ime.commit, n + 1);
+        /* Boundary-aware append: an over-long commit is clipped on a
+         * code-point boundary instead of being dropped wholesale (old
+         * behaviour) or split mid-sequence. */
+        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, pl->ime.commit,
+                         strlen(pl->ime.commit));
         pl->ime.commit[0] = '\0';
     }
 
     if (pl->ime.has_preedit) {
         if (pl->ime.preedit[0]) {
-            strncpy(pl->acc.preedit, pl->ime.preedit, sizeof pl->acc.preedit - 1);
-            pl->acc.preedit[sizeof pl->acc.preedit - 1] = '\0';
+            iris_utf8_copy(pl->acc.preedit, sizeof pl->acc.preedit, pl->ime.preedit);
             pl->acc.preedit_cursor =
                 pl->ime.preedit_cursor_begin >= 0 ? (uint32_t)pl->ime.preedit_cursor_begin : 0;
+            uint32_t plen = (uint32_t)strlen(pl->acc.preedit);
+            if (pl->acc.preedit_cursor > plen)
+                pl->acc.preedit_cursor = plen;
         } else {
             pl->acc.preedit[0] = '\0';
             pl->acc.preedit_cursor = 0;
@@ -795,9 +850,21 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
     pl->last_serial = serial; /* needed for wl_data_device_set_selection */
     bool pressed = (state == WL_KEYBOARD_KEY_STATE_PRESSED);
     xkb_keycode_t code = key + 8; /* evdev -> xkb */
-    xkb_keysym_t sym = xkb_state_key_get_one_sym(pl->xkb_state, code);
 
-    if (pressed && pl->acc.key_count < LENS_INPUT_MAX_KEYS) {
+    /* Keyboard contract (platform_internal.h): both edges are reported, and
+     * letters/digits are normalised to the UNSHIFTED key ('a', not 'A';
+     * '1', not '!') so Ctrl/Shift chords line up across platforms — shift
+     * state travels in lens_input.mods only. Deriving the key id from the
+     * level-0 keysym of the key's active layout gives exactly that, and —
+     * just as important — press and release always agree on the id even if
+     * the modifier state changed in between. */
+    xkb_layout_index_t layout = xkb_state_key_get_layout(pl->xkb_state, code);
+    const xkb_keysym_t *level0 = NULL;
+    int n_level0 = xkb_keymap_key_get_syms_by_level(pl->xkb_keymap, code, layout, 0, &level0);
+    xkb_keysym_t sym = (n_level0 > 0) ? level0[0]
+                                      : xkb_state_key_get_one_sym(pl->xkb_state, code);
+
+    if (pl->acc.key_count < LENS_INPUT_MAX_KEYS) {
         int fk = 0;
         if (sym == XKB_KEY_Escape)
             fk = LENS_KEY_ESCAPE;
@@ -822,12 +889,16 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
         else if (sym == XKB_KEY_End)
             fk = LENS_KEY_END;
         /* ASCII letters (and digits) so widgets see Ctrl+C/V/X/A etc.
-         * xkb keysyms for these equal their ASCII codepoints. */
+         * xkb keysyms for these equal their ASCII codepoints; the level-0
+         * keysym is the unshifted one ('a', never 'A'). */
         else if (sym >= XKB_KEY_space && sym <= XKB_KEY_asciitilde)
             fk = (int)sym;
         if (fk) {
+            /* repeat is best-effort: Wayland delivers no auto-repeat flag
+             * (client-side repeat timers are a follow-on), so it stays
+             * false; the contract says lens must not depend on it. */
             pl->acc.keys[pl->acc.key_count++] =
-                (lens_key_event){.key = fk, .pressed = true, .repeat = false};
+                (lens_key_event){.key = fk, .pressed = pressed, .repeat = false};
         }
     }
 
@@ -835,9 +906,8 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
         char buf[8];
         int n = xkb_state_key_get_utf8(pl->xkb_state, code, buf, sizeof buf);
         if (n > 0 && (unsigned char)buf[0] >= 0x20) { /* skip control chars */
-            size_t used = strlen(pl->acc.text);
-            if (used + (size_t)n < sizeof pl->acc.text)
-                memcpy(pl->acc.text + used, buf, (size_t)n + 1);
+            /* boundary-aware append into the per-frame text accumulator */
+            iris_utf8_append(pl->acc.text, sizeof pl->acc.text, buf, (size_t)n);
         }
     }
 }
@@ -887,16 +957,30 @@ static const struct wl_keyboard_listener keyboard_listener = {
 /*  Clipboard (wl_data_device) — bridges lens_clipboard to the selection */
 /* ------------------------------------------------------------------ */
 
-/* A data offer we might read on paste or drop; remember the most recent
- * text/URI-list one. Both clipboard (selection) and DnD share this listener. */
+/* Offers announce their MIME types via offer events before the
+ * selection/enter event binds them; accumulate into the pending slot and
+ * move the record when the offer is bound (ddev_selection / ddev_enter). */
+static struct wp_offer_mimes *offer_mime_slot(wp_platform *pl, struct wl_data_offer *off) {
+    if (pl->pending_offer_mimes.offer == off)
+        return &pl->pending_offer_mimes;
+    if (pl->selection_offer_mimes.offer == off)
+        return &pl->selection_offer_mimes;
+    if (pl->dnd_offer_mimes.offer == off)
+        return &pl->dnd_offer_mimes;
+    return NULL;
+}
+
 static void doffer_offer(void *data, struct wl_data_offer *off, const char *mime) {
     wp_platform *pl = data;
-    (void)off;
-    /* Track only that *some* text type is on offer; receive negotiates below. */
-    if (strstr(mime, "text/") || strstr(mime, "uri-list")) {
-        /* remember the strongest text mime we've seen on this offer */
-    }
-    (void)pl;
+    struct wp_offer_mimes *slot = offer_mime_slot(pl, off);
+    if (!slot)
+        return;
+    if (strcmp(mime, "text/uri-list") == 0)
+        slot->uri_list = true;
+    else if (strcmp(mime, "text/plain;charset=utf-8") == 0)
+        slot->text_utf8 = true;
+    else if (strcmp(mime, "text/plain") == 0)
+        slot->text_plain = true;
 }
 static void doffer_source_actions(void *d, struct wl_data_offer *o, uint32_t a) {
     (void)d;
@@ -916,9 +1000,16 @@ static const struct wl_data_offer_listener data_offer_listener = {
 
 /* The compositor announces a new offer object before selection/enter. */
 static void ddev_data_offer(void *data, struct wl_data_device *dev, struct wl_data_offer *offer) {
-    (void)data;
+    wp_platform *pl = data;
     (void)dev;
-    wl_data_offer_add_listener(offer, &data_offer_listener, data);
+    /* A previous offer that was announced but never bound (no selection /
+     * enter referenced it) is ours to destroy, or it leaks. */
+    if (pl->pending_offer_mimes.offer && pl->pending_offer_mimes.offer != offer)
+        wl_data_offer_destroy(pl->pending_offer_mimes.offer);
+    pl->pending_offer_mimes =
+        (struct wp_offer_mimes){.offer = offer, .uri_list = false, .text_utf8 = false,
+                                .text_plain = false};
+    wl_data_offer_add_listener(offer, &data_offer_listener, pl);
 }
 static void ddev_selection(void *data, struct wl_data_device *dev, struct wl_data_offer *offer) {
     wp_platform *pl = data;
@@ -926,62 +1017,129 @@ static void ddev_selection(void *data, struct wl_data_device *dev, struct wl_dat
     if (pl->selection_offer && pl->selection_offer != offer)
         wl_data_offer_destroy(pl->selection_offer);
     pl->selection_offer = offer; /* may be NULL when selection is cleared */
+    pl->selection_offer_mimes = (struct wp_offer_mimes){.offer = offer};
+    if (offer && pl->pending_offer_mimes.offer == offer) {
+        pl->selection_offer_mimes = pl->pending_offer_mimes;
+        pl->pending_offer_mimes = (struct wp_offer_mimes){0};
+    }
 }
 
-/* DnD enter/motion/leave/drop: report only text/uri-list drops. A real drop
- * reads the offer via wl_data_offer_receive and writes the URIs into the
- * pending buffer; the next frame's lens_input carries the dropped text. */
-static const char *dnd_pick_mime(struct wl_data_offer *offer) {
-    /* The listener doesn't expose the mime list; assume text/uri-list is
-     * always offered (compositors universally provide it for file drags).
-     * For raw text drags we fall back to text/plain;charset=utf-8. */
-    (void)offer;
-    return "text/uri-list";
+/* Strongest readable text MIME on the offer, or NULL when it carries no
+ * text we can use (image-only drags, …). uri-list is preferred for file
+ * drags; utf-8 text beats legacy text/plain. */
+static const char *offer_pick_mime(const struct wp_offer_mimes *m) {
+    if (m->uri_list)
+        return "text/uri-list";
+    if (m->text_utf8)
+        return "text/plain;charset=utf-8";
+    if (m->text_plain)
+        return "text/plain";
+    return NULL;
+}
+
+/* Read a received offer fd with a hard overall deadline. Returns a malloc'd
+ * buffer (caller frees) and its length via *out_len; NULL on error/timeout.
+ * Used by the drop path; the paste path reads on a helper thread instead
+ * (cross-platform.md invariant 4: never synchronously on the UI thread). */
+#define WP_DND_READ_TIMEOUT_MS 2000
+#define WP_DROP_MAX (1u << 20) /* 1 MiB — matches lens's paste staging cap */
+static long long now_ns(void); /* defined with the frame-pacing helpers */
+
+static char *read_offer_fd(int fd, int timeout_ms, size_t *out_len) {
+    *out_len = 0;
+    char *out = NULL;
+    size_t total = 0;
+    long long deadline = now_ns() + (long long)timeout_ms * 1000000LL;
+    for (;;) {
+        long long remain_ms = (deadline - now_ns()) / 1000000LL;
+        if (remain_ms <= 0)
+            break; /* deadline: a hostile or stuck source cannot hang the UI */
+        struct pollfd pfd = {.fd = fd, .events = POLLIN};
+        int pr = poll(&pfd, 1, (int)(remain_ms > 100 ? 100 : remain_ms));
+        if (pr < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        if (pr == 0)
+            continue; /* re-check the deadline */
+        char chunk[16384];
+        ssize_t r = read(fd, chunk, sizeof chunk);
+        if (r == 0)
+            break; /* EOF */
+        if (r < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        if (total + (size_t)r > WP_DROP_MAX) {
+            fprintf(stderr, "iris: drop/paste payload exceeds %u bytes; truncated\n",
+                    (unsigned)WP_DROP_MAX);
+            size_t room = WP_DROP_MAX - total;
+            if (room) {
+                char *grown = realloc(out, WP_DROP_MAX);
+                if (!grown) {
+                    free(out);
+                    return NULL;
+                }
+                out = grown;
+                memcpy(out + total, chunk, room);
+                total = WP_DROP_MAX;
+            }
+            break;
+        }
+        char *grown = realloc(out, total + (size_t)r);
+        if (!grown) {
+            free(out);
+            return NULL;
+        }
+        out = grown;
+        memcpy(out + total, chunk, (size_t)r);
+        total += (size_t)r;
+    }
+    *out_len = total;
+    return out;
 }
 
 static void dnd_read_and_emit(wp_platform *pl, struct wl_data_offer *offer) {
+    const char *mime = offer_pick_mime(&pl->dnd_offer_mimes);
+    if (!mime || !pl->ui)
+        return;
+
     int fds[2];
     if (pipe(fds) != 0)
         return;
-    wl_data_offer_receive(offer, dnd_pick_mime(offer), fds[1]);
+    wl_data_offer_receive(offer, mime, fds[1]);
     close(fds[1]);
     wl_display_flush(pl->display);
 
-    /* Read everything; cap at sizeof pl->acc.text so we can land it in the
-     * pending IME commit slot, mirroring how paste delivers text to lens. */
-    char buf[1024];
+    /* Bounded read (WP_DND_READ_TIMEOUT_MS): the source is another client,
+     * so the transfer makes progress without our main thread; the deadline
+     * caps the damage a stuck source can do. */
     size_t total = 0;
-    while (total < sizeof buf - 1) {
-        ssize_t n = read(fds[0], buf + total, sizeof buf - 1 - total);
-        if (n <= 0)
-            break;
-        total += (size_t)n;
-    }
+    char *buf = read_offer_fd(fds[0], WP_DND_READ_TIMEOUT_MS, &total);
     close(fds[0]);
-    buf[total] = '\0';
-    /* Strip trailing newline from uri-list format. */
-    while (total && (buf[total - 1] == '\n' || buf[total - 1] == '\r'))
-        buf[--total] = '\0';
-
-    if (total == 0)
+    if (!buf || total == 0) {
+        free(buf);
         return;
+    }
 
-    /* Deliver as committed text — lens textfield/textarea will insert it
-     * the same way paste / IME commit text is inserted. For non-text-drop
-     * surfaces this is silently ignored, which is safe. */
-    size_t used = strlen(pl->acc.text);
-    size_t room = sizeof pl->acc.text - 1 - used;
-    if (total <= room)
-        memcpy(pl->acc.text + used, buf, total + 1);
-    else
-        memcpy(pl->acc.text + used, buf, room);
-    pl->acc.text[used + (total < room ? total : room)] = '\0';
+    /* Strip the trailing newline of the uri-list format. */
+    while (total && (buf[total - 1] == '\n' || buf[total - 1] == '\r'))
+        total--;
+
+    /* Deliver through the paste channel (lens_paste), not the 32-byte
+     * per-frame text slot: a URI list legitimately runs to hundreds of
+     * bytes, and text widgets drain the paste staging buffer the same way
+     * they drain a clipboard paste. We are in an event handler here, not
+     * inside lens_begin/end, so the call is legal. */
+    lens_paste(pl->ui, buf, total);
+    free(buf);
 }
 
 static void ddev_enter(void *d, struct wl_data_device *dev, uint32_t s, struct wl_surface *su,
                        wl_fixed_t x, wl_fixed_t y, struct wl_data_offer *o) {
     (void)dev;
-    (void)s;
     (void)su;
     wp_platform *pl = d;
     pl->dnd_inside = true;
@@ -990,9 +1148,22 @@ static void ddev_enter(void *d, struct wl_data_device *dev, uint32_t s, struct w
         if (pl->dnd_offer)
             wl_data_offer_destroy(pl->dnd_offer);
         pl->dnd_offer = o;
-    } else if (o) {
-        wl_data_offer_set_actions(o, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY,
-                                  WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+        pl->dnd_offer_mimes = (struct wp_offer_mimes){.offer = o};
+        if (o && pl->pending_offer_mimes.offer == o) {
+            pl->dnd_offer_mimes = pl->pending_offer_mimes;
+            pl->pending_offer_mimes = (struct wp_offer_mimes){0};
+        }
+    }
+    if (o) {
+        /* Real MIME negotiation: accept only when the drag carries a text
+         * type we can read; otherwise leave the offer un-accepted and the
+         * compositor shows the not-allowed cursor. */
+        const char *mime = offer_pick_mime(&pl->dnd_offer_mimes);
+        if (mime) {
+            wl_data_offer_accept(o, s, mime);
+            wl_data_offer_set_actions(o, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY,
+                                      WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+        }
     }
 }
 static void ddev_leave(void *d, struct wl_data_device *dev) {
@@ -1002,6 +1173,7 @@ static void ddev_leave(void *d, struct wl_data_device *dev) {
     if (pl->dnd_offer) {
         wl_data_offer_destroy(pl->dnd_offer);
         pl->dnd_offer = NULL;
+        pl->dnd_offer_mimes = (struct wp_offer_mimes){0};
     }
 }
 static void ddev_motion(void *d, struct wl_data_device *dev, uint32_t t, wl_fixed_t x,
@@ -1019,6 +1191,7 @@ static void ddev_drop(void *d, struct wl_data_device *dev) {
         wl_data_offer_finish(pl->dnd_offer);
         wl_data_offer_destroy(pl->dnd_offer);
         pl->dnd_offer = NULL;
+        pl->dnd_offer_mimes = (struct wp_offer_mimes){0};
     }
     pl->dnd_inside = false;
 }
@@ -1093,9 +1266,62 @@ static void clip_set_text(const char *utf8, size_t len, void *user) {
     wl_data_device_set_selection(pl->data_device, pl->copy_source, pl->last_serial);
 }
 
-/* lens_clipboard.request_text — read the current selection and hand it back.
- * Reading is synchronous here (an example); we pump the display so our own
- * data source can answer when we are the selection owner. */
+/* lens_clipboard.request_text — the lens contract is asynchronous
+ * (cross-platform.md invariant 4): the answer MUST arrive later via
+ * lens_paste, never synchronously inside the request. The old
+ * implementation pumped poll+roundtrip on the calling (UI) thread with no
+ * upper bound, which both violated the contract and let a malicious
+ * selection owner hang the UI forever. Now the pipe is drained on a
+ * detached helper thread with a hard deadline, and completion is posted
+ * through iris_post_to_main_thread — which also makes the self-paste case
+ * correct: the main thread keeps dispatching, so our own data source can
+ * answer. */
+#define WP_PASTE_TIMEOUT_MS 5000
+
+typedef struct wp_paste_job {
+    wp_platform *pl;
+    int fd;
+} wp_paste_job;
+
+typedef struct wp_paste_result {
+    wp_platform *pl;
+    char *text; /* NULL when the read failed or timed out */
+    size_t len;
+} wp_paste_result;
+
+/* Runs on the iris main thread via iris_post_to_main_thread. pl->ui is
+ * checked (not just pl): teardown clears it before draining the queue. */
+static void paste_deliver(void *user) {
+    wp_paste_result *res = user;
+    if (res->pl->ui && res->text && res->len)
+        lens_paste(res->pl->ui, res->text, res->len);
+    free(res->text);
+    free(res);
+}
+
+static void *paste_reader_main(void *arg) {
+    wp_paste_job *job = arg;
+    size_t len = 0;
+    char *text = read_offer_fd(job->fd, WP_PASTE_TIMEOUT_MS, &len);
+    close(job->fd);
+
+    wp_paste_result *res = malloc(sizeof *res);
+    if (res) {
+        res->pl = job->pl;
+        res->text = text;
+        res->len = len;
+        /* -1: the loop is gone (window closed mid-paste) — drop. */
+        if (iris_post_to_main_thread(paste_deliver, res) != 0) {
+            free(text);
+            free(res);
+        }
+    } else {
+        free(text);
+    }
+    free(job);
+    return NULL;
+}
+
 static void clip_request_text(void *user) {
     wp_platform *pl = user;
     if (!pl->selection_offer || !pl->ui)
@@ -1104,41 +1330,31 @@ static void clip_request_text(void *user) {
     int fds[2];
     if (pipe(fds) != 0)
         return;
-    wl_data_offer_receive(pl->selection_offer, "text/plain;charset=utf-8", fds[1]);
+    /* Negotiate against the offer's advertised types; fall back to the
+     * UTF-8 type when the offer predates our MIME tracking (harmless: the
+     * source simply refuses a type it does not have). */
+    const struct wp_offer_mimes *m = &pl->selection_offer_mimes;
+    const char *mime = (m->offer == pl->selection_offer && m->text_plain && !m->text_utf8)
+                           ? "text/plain"
+                           : "text/plain;charset=utf-8";
+    wl_data_offer_receive(pl->selection_offer, mime, fds[1]);
     close(fds[1]);
     wl_display_flush(pl->display);
 
-    char *out = NULL;
-    size_t total = 0;
-    for (;;) {
-        struct pollfd pfd = {.fd = fds[0], .events = POLLIN};
-        int pr = poll(&pfd, 1, 200);
-        if (pr <= 0) {
-            /* Nothing yet — let our own source (or the sender) make progress. */
-            if (pr == 0) {
-                wl_display_roundtrip(pl->display);
-                continue;
-            }
-            break;
-        }
-        char buf[4096];
-        ssize_t r = read(fds[0], buf, sizeof buf);
-        if (r > 0) {
-            char *grown = realloc(out, total + (size_t)r);
-            if (!grown)
-                break;
-            out = grown;
-            memcpy(out + total, buf, (size_t)r);
-            total += (size_t)r;
-        } else {
-            break; /* EOF or error */
-        }
+    wp_paste_job *job = malloc(sizeof *job);
+    if (!job) {
+        close(fds[0]);
+        return;
     }
-    close(fds[0]);
-
-    if (out)
-        lens_paste(pl->ui, out, total);
-    free(out);
+    job->pl = pl;
+    job->fd = fds[0];
+    pthread_t th;
+    if (pthread_create(&th, NULL, paste_reader_main, job) != 0) {
+        close(fds[0]);
+        free(job);
+        return;
+    }
+    pthread_detach(th);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1366,6 +1582,10 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
          * back to integer wl_surface.preferred_buffer_scale when absent. */
         pl->fractional_scale_mgr =
             wl_registry_bind(reg, name, &wp_fractional_scale_manager_v1_interface, 1);
+    } else if (strcmp(iface, zxdg_exporter_v2_interface.name) == 0) {
+        /* xdg-foreign-unstable-v2: exports a window handle for portal
+         * dialogs (file_dialog_portal.c passes it as parent_window). */
+        pl->foreign_exporter = wl_registry_bind(reg, name, &zxdg_exporter_v2_interface, 1);
     }
 }
 static void reg_remove(void *d, struct wl_registry *r, uint32_t name) {
@@ -1426,6 +1646,32 @@ static const struct xdg_toplevel_listener toplevel_listener = {
     .wm_capabilities = top_wm_caps,
 };
 
+/* xdg-foreign-unstable-v2: the compositor answers an export with a handle
+ * string ("<uuid>"), which portal dialogs use as parent_window so the
+ * picker stays modal to our window. */
+static void foreign_exported_handle(void *data, struct zxdg_exported_v2 *e, const char *handle) {
+    wp_platform *pl = data;
+    (void)e;
+    snprintf(pl->foreign_handle, sizeof pl->foreign_handle, "%s", handle);
+}
+static const struct zxdg_exported_v2_listener foreign_exported_listener = {
+    .handle = foreign_exported_handle,
+};
+
+/* Internal seam for file_dialog_portal.c (hidden visibility): while a
+ * modal portal dialog waits for its D-Bus answer, the wait loop must keep
+ * dispatching our display or xdg_wm_base pings go unanswered and the
+ * compositor marks the window unresponsive. NULL when no app is running. */
+struct wl_display *iris_wayland__display(void) {
+    return g_active_pl ? g_active_pl->display : NULL;
+}
+
+/* The exported xdg-foreign handle for the active window ("wayland:<handle>"
+ * is composed by the caller), or NULL when unavailable. */
+const char *iris_wayland__foreign_handle(void) {
+    return (g_active_pl && g_active_pl->foreign_handle[0]) ? g_active_pl->foreign_handle : NULL;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Build one lens_input from the accumulated state                      */
 /* ------------------------------------------------------------------ */
@@ -1479,7 +1725,8 @@ static void log_raw(const lens_input *in) {
     if (in->scroll_x != 0.0f || in->scroll_y != 0.0f)
         printf("[raw] scroll dx=%.2f dy=%.2f\n", in->scroll_x, in->scroll_y);
     for (uint32_t k = 0; k < in->key_count; k++)
-        printf("[raw] key %d down\n", in->keys[k].key);
+        printf("[raw] key %d %s%s\n", in->keys[k].key, in->keys[k].pressed ? "down" : "up  ",
+               in->keys[k].repeat ? " (repeat)" : "");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1638,7 +1885,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         .height = cfg->height > 0 ? cfg->height : 720,
         .buffer_scale = 1,
         .pending_scale = 1,
-        .current_cursor = IRIS_CURSOR_DEFAULT,
+        .host_cursor = IRIS_CURSOR_DEFAULT,
+        .effective_cursor = IRIS_CURSOR_DEFAULT,
         .a11y_fd = -1, /* so the cleanup guards are correct even if
                         * we fail before the bridge is started */
         .wakeup_fd = -1,
@@ -1737,6 +1985,14 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     } else {
         fprintf(stderr, "note: compositor offers no server-side decorations "
                         "(no title bar)\n");
+    }
+
+    /* Export a window handle for portal dialogs (parent_window). The handle
+     * event arrives on the initial roundtrips below. */
+    if (pl.foreign_exporter) {
+        pl.foreign_exported = zxdg_exporter_v2_export_toplevel(pl.foreign_exporter, pl.surface);
+        if (pl.foreign_exported)
+            zxdg_exported_v2_add_listener(pl.foreign_exported, &foreign_exported_listener, &pl);
     }
 
     wl_surface_commit(pl.surface);
@@ -1853,11 +2109,13 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
      * pump_events) and updates the lens theme in place — the next frame
      * renders with the new palette. -1 means the feature is unavailable
      * (no libsystemd at build time, or portal unreachable) — silently
-     * degrade to the startup-only query. */
+     * degrade to the startup-only query. The backend uses its reserved
+     * internal slot (theme_watch_internal.h), never the host's public
+     * iris_color_scheme_watch registration. */
     pl.theme_watching = false;
     pl.a11y_fd = -1;
     if (!cfg->dark)
-        pl.theme_watching = (iris_color_scheme_watch(wp_on_color_scheme_changed, &pl) == 0);
+        pl.theme_watching = (iris_theme__watch_backend(wp_on_color_scheme_changed, &pl) == 0);
 
     /* AT-SPI bridge: register the app on the a11y session bus so screen
      * readers (orca, etc.) can read the widget tree. Fail-soft: if the
@@ -1959,22 +2217,6 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
 
         lens_input in;
 
-        /* Drain a click requested by an AT-SPI Action.DoAction call (if the
-         * a11y bridge is running). lens is input-driven — there is no
-         * programmatic activate API — so we synthesize a press+release at
-         * the widget's centre this frame and lens reports a `clicked`
-         * response for it. Single in-flight click; safe to call every frame. */
-        if (pl.a11y_fd >= 0) {
-            flux_point pc;
-            if (iris_a11y__take_pending_click(&pc)) {
-                pl.acc.cx = pc.x;
-                pl.acc.cy = pc.y;
-                pl.acc.pressed[LENS_MOUSE_LEFT] = true;
-                pl.acc.released[LENS_MOUSE_LEFT] = true;
-                pl.acc.down[LENS_MOUSE_LEFT] = false;
-            }
-        }
-
         drain_input(&pl, &in, dt);
         if (cfg->log_raw)
             log_raw(&in);
@@ -1989,6 +2231,13 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * when the bridge isn't running. */
         if (pl.a11y_fd >= 0)
             iris_a11y_update(ui);
+
+        /* Cursor: an explicit host iris_set_cursor pins the cursor; while
+         * it is DEFAULT, follow the semantic hint of the lens widget under
+         * the pointer (I-beam over text fields, hand over clickable
+         * elements, …) — same policy as the Win32/Cocoa backends. */
+        if (cursor_follow_hint(&pl))
+            cursor_apply(&pl);
 
         /* Update IME cursor rectangle */
         if (pl.text_input && pl.text_input_surface) {
@@ -2109,18 +2358,19 @@ fail:
         flux_device_wait_idle(device);
     if (ui)
         lens_destroy(ui);
+    pl.ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
     if (pl.theme_watching)
-        iris_color_scheme_unwatch();
+        iris_theme__unwatch_backend();
     if (pl.a11y_fd >= 0)
         iris_a11y_shutdown();
-    /* Wakeup seam teardown: the theme watcher's thread is already joined
-     * (unwatch above), so nothing posts past this point. Drain whatever is
-     * left queued — those deliveries are no-ops now that the watcher
-     * registration is cleared — then unregister the kick and close the
-     * eventfd. */
+    /* Wakeup seam teardown: unregister the kick FIRST so a detached
+     * subsystem thread (async paste, theme watcher) posting late fails
+     * cleanly instead of queueing a job nothing would drain; then drain
+     * whatever was legitimately queued (deliveries see pl.ui == NULL and
+     * no-op), and close the eventfd. */
     if (pl.wakeup_fd >= 0) {
-        iris_platform_wakeup_drain();
         iris_platform_wakeup_set_kick(NULL, NULL);
+        iris_platform_wakeup_drain();
         close(pl.wakeup_fd);
         pl.wakeup_fd = -1;
     }
@@ -2149,6 +2399,14 @@ fail:
         wl_data_offer_destroy(pl.selection_offer);
     if (pl.dnd_offer && pl.dnd_offer != pl.selection_offer)
         wl_data_offer_destroy(pl.dnd_offer);
+    if (pl.pending_offer_mimes.offer && pl.pending_offer_mimes.offer != pl.selection_offer &&
+        pl.pending_offer_mimes.offer != pl.dnd_offer)
+        wl_data_offer_destroy(pl.pending_offer_mimes.offer);
+
+    if (pl.foreign_exported)
+        zxdg_exported_v2_destroy(pl.foreign_exported);
+    if (pl.foreign_exporter)
+        zxdg_exporter_v2_destroy(pl.foreign_exporter);
 
     if (pl.deco)
         zxdg_toplevel_decoration_v1_destroy(pl.deco);

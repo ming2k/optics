@@ -7,6 +7,7 @@ bool lens_checkbox(lens *ui, const char *label, bool *value) {
     bool disabled = ui->next_disabled;
     ui->next_disabled = false;
     ui->next_error = false; /* drain so it never leaks to a later widget */
+    lens_style eff = lensi_style_effective(ui);
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -14,13 +15,15 @@ bool lens_checkbox(lens *ui, const char *label, bool *value) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    lens_text_metrics tm = lensi_text_measure_label(ui, label, t->font_size, 0.0f);
+    float font_size = lensi_style_font_size(&eff, t);
+    float padding = lensi_style_padding(&eff, t);
+    lens_text_metrics tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
     /* Box is a font-size square so it stays visible even with no caption
      * (e.g. "##id" labels used for form layout). */
-    float box = t->font_size;
+    float box = font_size;
     float line_h = tm.height > box ? tm.height : box;
-    float h = line_h + 2.0f * t->padding;
-    float w = 2.0f * t->padding + box + (tm.width > 0 ? 6.0f + tm.width : 0.0f);
+    float h = line_h + 2.0f * padding;
+    float w = 2.0f * padding + box + (tm.width > 0 ? 6.0f + tm.width : 0.0f);
     if (n->fixed_w > 0)
         w = n->fixed_w;
     if (n->fixed_h > 0)
@@ -33,6 +36,8 @@ bool lens_checkbox(lens *ui, const char *label, bool *value) {
         r.changed = true;
     }
     bool on = value && *value;
+    if (on)
+        r.state |= LENS_STATE_ACTIVE; /* toggle on-state (ADR-0058) */
     uint32_t sem_flags = (on ? LENS_A11Y_CHECKED : 0) | (r.focused ? LENS_A11Y_FOCUSED : 0) |
                          (disabled ? LENS_A11Y_DISABLED : 0);
     lensi_node_semantics(ui, n, LENS_ROLE_CHECKBOX, label, NULL, sem_flags);
@@ -43,49 +48,19 @@ bool lens_checkbox(lens *ui, const char *label, bool *value) {
         n->active_t = lensi_approach(ui, n->active_t, (ui->active_id == id) ? 1.f : 0.f, dt, 18.f);
     }
 
-    float box_y = (n->measured.y - box) * 0.5f;
-
-    /* color_border is tuned for layout hairlines (separators, card outlines)
-     * and nearly vanishes on dark cards at this size, so lift the idle box
-     * border toward fg. Hover emphasizes with accent (same idiom as the
-     * focused border in textfield/textarea); the previous border->hover lerp
-     * went darker on the dark theme, making a hovered box less visible. */
-    flux_color idle_border = lensi_lerp_color(t->color_border, t->color_fg, 0.35f);
-    flux_color box_border =
-        disabled ? t->color_disabled
-                 : (on ? t->color_accent
-                       : lensi_lerp_color(idle_border, t->color_accent, n->hover_t));
-
-    /* box background — always fill so the border has something to contrast
-     * against, especially on dark cards in light mode. */
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                        .rel = {t->padding, box_y, box, box},
-                                        .color = t->color_bg,
-                                        .radius = 3.0f});
-
-    if (on)
-        lensi_drawlist_push(
-            ui, n,
-            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                            .rel = {t->padding + 3.0f, box_y + 3.0f, box - 6.0f, box - 6.0f},
-                            .color = disabled ? t->color_disabled : t->color_accent,
-                            .radius = 2.0f});
-
-    /* box border */
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
-                                        .rel = {t->padding, box_y, box, box},
-                                        .color = box_border,
-                                        .radius = 3.0f,
-                                        .width = t->border_width});
-
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {t->padding + box + 6.0f, t->padding, 0, 0},
-                                        .color = t->color_fg,
-                                        .text = label,
-                                        .text_size = t->font_size});
+    /* resolve + emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_CHECKBOX,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = lensi_style_resolve(&eff, t, r.state),
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = label, .text = tm},
+                    });
 
     ui->last_response = r;
     return r.changed;

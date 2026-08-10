@@ -29,6 +29,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include "platform_wakeup.h"
+#include "theme_watch_internal.h"
 
 #include <iris/theme.h>
 
@@ -65,13 +66,18 @@ IRIS_API bool iris_system_prefers_dark(void) {
 /*  Live watching (KVO on NSApp.effectiveAppearance)                   */
 /* ------------------------------------------------------------------ */
 
-/* One watcher per process (theme.h contract: re-watching replaces the
- * callback). The observer object owns the current cb/user pair; the
- * context pointer distinguishes our observation from any subclass's. */
+/* One watcher per process, carrying TWO independent registrations: the
+ * host's public slot (iris_color_scheme_watch) and the platform backend's
+ * internal slot (iris_theme__watch_backend, theme_watch_internal.h) — the
+ * backend's apply-to-lens registration must not consume or overwrite the
+ * host's. The observer object owns both cb/user pairs; the context pointer
+ * distinguishes our observation from any subclass's. */
 @interface IrisThemeWatcher : NSObject {
   @public
     iris_color_scheme_changed_fn cb;
     void *user;
+    iris_color_scheme_changed_fn backend_cb;
+    void *backend_user;
     bool observing;
 }
 @end
@@ -79,11 +85,13 @@ IRIS_API bool iris_system_prefers_dark(void) {
 static IrisThemeWatcher *g_theme_watcher = nil;
 
 /* Fallback delivery for the (unexpected) case the KVO callback fires off
- * the main thread: heap-carried triple drained by the wakeup seam on the
+ * the main thread: heap-carried record drained by the wakeup seam on the
  * loop thread. Dropped when no loop is registered (post returns -1). */
 typedef struct theme_delivery {
     iris_color_scheme_changed_fn cb;
     void *user;
+    iris_color_scheme_changed_fn backend_cb;
+    void *backend_user;
     iris_color_scheme scheme;
 } theme_delivery;
 
@@ -91,10 +99,35 @@ static void theme_deliver_on_main(void *p) {
     theme_delivery *d = p;
     if (d->cb)
         d->cb(d->scheme, d->user);
+    if (d->backend_cb)
+        d->backend_cb(d->scheme, d->backend_user);
     free(d);
 }
 
 @implementation IrisThemeWatcher
+
+/* Deliver one scheme change to both registered slots, on the main thread
+ * if we are already on it, else through the wakeup seam. */
+- (void)deliver {
+    iris_color_scheme scheme = current_scheme();
+    if ([NSThread isMainThread]) {
+        if (cb)
+            cb(scheme, user);
+        if (backend_cb)
+            backend_cb(scheme, backend_user);
+        return;
+    }
+    theme_delivery *d = malloc(sizeof *d);
+    if (!d)
+        return;
+    d->cb = cb;
+    d->user = user;
+    d->backend_cb = backend_cb;
+    d->backend_user = backend_user;
+    d->scheme = scheme;
+    if (iris_platform_wakeup_post(theme_deliver_on_main, d) != 0)
+        free(d);
+}
 
 - (void)observeValueForKeyPath:(NSString *)keyPath
                       ofObject:(id)object
@@ -104,32 +137,20 @@ static void theme_deliver_on_main(void *p) {
         [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
         return;
     }
-    iris_color_scheme_changed_fn f = cb;
-    if (!f)
+    if (!cb && !backend_cb)
         return;
-    if ([NSThread isMainThread]) {
-        f(current_scheme(), user);
-        return;
-    }
-    theme_delivery *d = malloc(sizeof *d);
-    if (!d)
-        return;
-    d->cb = f;
-    d->user = user;
-    d->scheme = current_scheme();
-    if (iris_platform_wakeup_post(theme_deliver_on_main, d) != 0)
-        free(d);
+    [self deliver];
 }
 
 @end
 
-IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb, void *user) {
+IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb_, void *user_) {
     if (@available(macOS 10.14, *)) {
         NSApplication *app = [NSApplication sharedApplication];
         if (!g_theme_watcher)
             g_theme_watcher = [IrisThemeWatcher new];
-        g_theme_watcher->cb = cb;
-        g_theme_watcher->user = user;
+        g_theme_watcher->cb = cb_;
+        g_theme_watcher->user = user_;
         if (!g_theme_watcher->observing) {
             [app addObserver:g_theme_watcher
                   forKeyPath:@"effectiveAppearance"
@@ -143,13 +164,53 @@ IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb, void *user
 }
 
 IRIS_API void iris_color_scheme_unwatch(void) {
-    if (g_theme_watcher && g_theme_watcher->observing) {
+    if (!g_theme_watcher)
+        return;
+    g_theme_watcher->cb = NULL;
+    g_theme_watcher->user = NULL;
+    /* The observer stays live while the backend slot is registered. */
+    if (g_theme_watcher->observing && !g_theme_watcher->backend_cb) {
         [[NSApplication sharedApplication] removeObserver:g_theme_watcher
                                                forKeyPath:@"effectiveAppearance"
                                                   context:&g_theme_watcher];
         g_theme_watcher->observing = false;
+        g_theme_watcher = nil;
     }
     /* removeObserver is synchronous and we are on the main thread: no
      * callback can fire after this returns (theme.h contract). */
-    g_theme_watcher = nil;
+}
+
+int iris_theme__watch_backend(iris_color_scheme_changed_fn cb_, void *user_) {
+    if (!cb_)
+        return -1;
+    if (@available(macOS 10.14, *)) {
+        NSApplication *app = [NSApplication sharedApplication];
+        if (!g_theme_watcher)
+            g_theme_watcher = [IrisThemeWatcher new];
+        g_theme_watcher->backend_cb = cb_;
+        g_theme_watcher->backend_user = user_;
+        if (!g_theme_watcher->observing) {
+            [app addObserver:g_theme_watcher
+                  forKeyPath:@"effectiveAppearance"
+                     options:NSKeyValueObservingOptionNew
+                     context:&g_theme_watcher];
+            g_theme_watcher->observing = true;
+        }
+        return 0;
+    }
+    return -1;
+}
+
+void iris_theme__unwatch_backend(void) {
+    if (!g_theme_watcher)
+        return;
+    g_theme_watcher->backend_cb = NULL;
+    g_theme_watcher->backend_user = NULL;
+    if (g_theme_watcher->observing && !g_theme_watcher->cb) {
+        [[NSApplication sharedApplication] removeObserver:g_theme_watcher
+                                               forKeyPath:@"effectiveAppearance"
+                                                  context:&g_theme_watcher];
+        g_theme_watcher->observing = false;
+        g_theme_watcher = nil;
+    }
 }

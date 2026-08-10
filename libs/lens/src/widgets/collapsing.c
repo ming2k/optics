@@ -7,13 +7,14 @@ bool lens_collapsing(lens *ui, const char *label) {
     bool disabled = ui->next_disabled;
     ui->next_disabled = false;
     ui->next_error = false; /* drain so it never leaks to a later widget */
+    lens_style eff = lensi_style_effective(ui);
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
         return false;
     lensi_link_child(ui, n);
 
-    float label_size = t->font_size * 0.86f;
+    float label_size = lensi_style_font_size(&eff, t) * 0.86f;
     lens_text_metrics tm = lensi_text_measure_label(ui, label, label_size, 400.0f);
     float arrow = tm.height * 0.82f;
     float icon_gap = 6.0f;
@@ -48,36 +49,30 @@ bool lens_collapsing(lens *ui, const char *label) {
         n->active_t = lensi_approach(ui, n->active_t, (ui->active_id == id) ? 1.f : 0.f, dt, 18.f);
     }
 
-    float glow = n->hover_t > 0.0f ? 0.72f : 0.42f;
-    flux_color fg = disabled ? t->color_disabled : lensi_lerp_color(t->color_disabled, t->color_fg, glow);
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
 
-    /* label */
-    float text_y = (h - tm.height) * 0.5f;
-    if (text_y < 0.0f)
-        text_y = 0.0f;
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {0, text_y, 0, 0},
-                                        .color = fg,
-                                        .text = label,
-                                        .text_size = label_size,
-                                        .text_weight = 400.0f});
-
-    /* SVG-derived chevron disclosure indicator, placed after the label. */
-    float arrow_x = tm.width + icon_gap;
-    float arrow_y = (h - arrow) * 0.5f;
-    lensi_drawlist_push(
-        ui, n,
-        (lens_draw_cmd){.kind = LENS_DRAW_ICON,
-                        .rel = {arrow_x, arrow_y, arrow, arrow},
-                        .color = fg,
-                        .width = 1.8f * (arrow / 24.0f),
-                        .icon_id = open ? LENS_ICON_CHEVRON_DOWN : LENS_ICON_CHEVRON_RIGHT});
+    /* emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_COLLAPSING,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = label,
+                                    .text = tm,
+                                    .icon = open ? LENS_ICON_CHEVRON_DOWN
+                                                 : LENS_ICON_CHEVRON_RIGHT,
+                                    .expanded = open},
+                    });
 
     if (open) {
         n->is_container = true;
         n->axis = LENS_COLUMN;
-        n->gap = t->gap * 0.5f;
+        n->gap = rs.gap * 0.5f;
         n->pad = 0.0f;
         lensi_open_container_push(ui, n);
 

@@ -15,10 +15,14 @@ void lensi_node_reset_frame(lens_node *n) {
 
     n->is_container = false;
     n->is_scroll = false;
-    n->is_overlay = false;
-    n->overlay_anchor = (flux_rect){0, 0, 0, 0};
-    n->overlay_bounds = (flux_rect){0, 0, 0, 0};
-    n->has_overlay_bounds = false;
+    n->place = LENS_PLACE_FLOW;
+    n->band = LENS_BAND_BASE;
+    n->mode = LENS_PLACE_EXACT;
+    n->place_rect = (flux_rect){0, 0, 0, 0};
+    n->place_bounds = (flux_rect){0, 0, 0, 0};
+    n->has_place_bounds = false;
+    n->transient = false;
+    n->interactive = false;
     n->axis = LENS_ROW;
     n->gap = n->pad = 0.0f;
     n->cross = LENS_STRETCH;

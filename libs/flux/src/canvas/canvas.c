@@ -198,6 +198,18 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "GPU canvas requires an open frame");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
+    /* Ownership: the frame must belong to the canvas's surface (its command
+     * buffer comes from that surface's per-slot pool) and a capture target
+     * must live on the canvas's device — same check family as the effect
+     * module's frame/filter/input device match. */
+    if (c->device && f->surface != c->surface) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "Canvas pass frame belongs to a different surface");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (c->device && target && target->device != c->device) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "Canvas target image belongs to a different device");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     c->frame = f;
     c->state_top = 0;
     c->states[0].transform = flux_mat3x2_scale(c->content_scale, c->content_scale);
@@ -786,6 +798,21 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
      *   - Host:  `host_coverage` (R8 buffer). Device-less CPU canvas. */
     const bool host = (desc->host_coverage != NULL && desc->host_atlas_w > 0 && desc->host_atlas_h > 0);
 
+    /* Optional producer generation for a host coverage buffer
+     * (flux_glyph_run_host_atlas_desc): recorded with each batch so replay
+     * of a segment captured before an in-place atlas rearrange is refused
+     * instead of sampling moved texels. Unknown extensions are ignored for
+     * forward compatibility, matching the pass-desc pNext parser. */
+    uint64_t host_atlas_gen = FLUX_HOST_ATLAS_UNVERSIONED;
+    const flux_glyph_run_host_atlas_desc *ext = desc->next;
+    while (ext) {
+        if (ext->type == FLUX_TYPE_GLYPH_RUN_HOST_ATLAS_DESC) {
+            host_atlas_gen = ext->generation;
+            break;
+        }
+        ext = ext->next;
+    }
+
     flux_bindless_handle sh = FLUX_BINDLESS_INVALID;
     uint32_t atlas_w = 0, atlas_h = 0;
 
@@ -800,10 +827,24 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
         c->pending_host_atlas = desc->host_coverage;
         c->pending_host_atlas_w = atlas_w;
         c->pending_host_atlas_h = atlas_h;
+        c->pending_host_atlas_gen = host_atlas_gen;
+        if (host_atlas_gen != FLUX_HOST_ATLAS_UNVERSIONED)
+            canvas_host_atlas_gen_track(c, desc->host_coverage, host_atlas_gen);
     } else {
         /* GPU path needs a device + a bindless atlas image. */
         if (!c->device || !desc->atlas)
             return;
+        /* Ownership: the atlas must live on the canvas's device, else the
+         * batch would carry a bindless handle from a foreign heap. Void
+         * entry point, so the failure surfaces through the pass's sticky
+         * error (first error wins) as well as flux_get_last_error. */
+        if (desc->atlas->device != c->device) {
+            if (c->pass_error == FLUX_OK)
+                c->pass_error = FLUX_ERROR_INVALID_ARGUMENT;
+            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                      "glyph run atlas belongs to a different device than the canvas");
+            return;
+        }
         sh = desc->sampler ? flux_sampler_bindless_handle(desc->sampler)
                            : flux_device_default_sampler_handle(c->device);
         if (sh == FLUX_BINDLESS_INVALID || desc->atlas->bindless == FLUX_BINDLESS_INVALID)
@@ -878,6 +919,7 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
         c->pending_host_atlas = NULL;
         c->pending_host_atlas_w = 0;
         c->pending_host_atlas_h = 0;
+        c->pending_host_atlas_gen = FLUX_HOST_ATLAS_UNVERSIONED;
     }
 }
 

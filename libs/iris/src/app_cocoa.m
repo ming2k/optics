@@ -65,7 +65,9 @@
 
 #include "platform_input.h"
 #include "platform_internal.h"
+#include "platform_text.h"
 #include "platform_wakeup.h"
+#include "theme_watch_internal.h"
 
 #include <iris/a11y.h>
 #include <iris/cursor.h>
@@ -445,14 +447,11 @@ static int key_sentinel(unsigned short keyCode) {
     }
 }
 
-/* Append NUL-terminated UTF-8 to a capped accumulator buffer. */
+/* Append NUL-terminated UTF-8 to a capped accumulator buffer, truncating
+ * on a code-point boundary (shared helper — the old byte-count cut could
+ * split a multi-byte sequence and emit invalid UTF-8). */
 static void acc_append_text(char *dst, size_t cap, const char *utf8) {
-    size_t used = strlen(dst);
-    size_t n = strlen(utf8);
-    if (used + n >= cap)
-        n = cap - 1 - used;
-    memcpy(dst + used, utf8, n);
-    dst[used + n] = '\0';
+    iris_utf8_append(dst, cap, utf8, strlen(utf8));
 }
 
 /* ------------------------------------------------------------------ */
@@ -685,10 +684,28 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
 }
 
 - (void)keyUp:(NSEvent *)event {
-    /* lens consumes down edges only (same as the Wayland backend); key
-     * releases carry no lens event. The input context still sees the
-     * release — some IMEs track key-up state. */
+    /* The input context sees the release first — some IMEs track key-up
+     * state. Then report the release edge to lens: the keyboard contract
+     * (platform_internal.h) requires both edges for every reported key,
+     * with letters as unshifted lowercase ASCII (charactersIgnoringModifiers
+     * is exactly that). Repeat is always false on release. */
     [[self inputContext] handleEvent:event];
+    IrisPlatform *pl = _platform;
+    if (!pl)
+        return;
+    int fk = key_sentinel([event keyCode]);
+    if (!fk) {
+        NSString *chars = [event charactersIgnoringModifiers];
+        if ([chars length] == 1) {
+            unichar c = [chars characterAtIndex:0];
+            if (c >= 0x20 && c <= 0x7e)
+                fk = (int)c;
+        }
+    }
+    if (fk && pl->acc.key_count < LENS_INPUT_MAX_KEYS) {
+        pl->acc.keys[pl->acc.key_count++] =
+            (lens_key_event){.key = fk, .pressed = false, .repeat = false};
+    }
 }
 
 - (void)flagsChanged:(NSEvent *)event {
@@ -763,8 +780,9 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 
     const char *utf8 = [_marked_text UTF8String];
     if (utf8) {
-        strncpy(pl->acc.preedit, utf8, sizeof pl->acc.preedit - 1);
-        pl->acc.preedit[sizeof pl->acc.preedit - 1] = '\0';
+        /* boundary-aware copy: a raw byte cap could split a multi-byte
+         * sequence at LENS_PREEDIT_MAX and hand lens invalid UTF-8. */
+        iris_utf8_copy(pl->acc.preedit, sizeof pl->acc.preedit, utf8);
     } else {
         pl->acc.preedit[0] = '\0';
     }
@@ -1036,7 +1054,8 @@ static void log_raw(const lens_input *in) {
     if (in->scroll_x != 0.0f || in->scroll_y != 0.0f)
         printf("[raw] scroll dx=%.2f dy=%.2f\n", in->scroll_x, in->scroll_y);
     for (uint32_t k = 0; k < in->key_count; k++)
-        printf("[raw] key %d down\n", in->keys[k].key);
+        printf("[raw] key %d %s%s\n", in->keys[k].key, in->keys[k].pressed ? "down" : "up  ",
+               in->keys[k].repeat ? " (repeat)" : "");
 }
 
 /* Monotonic nanoseconds, for frame pacing. */
@@ -1330,10 +1349,12 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         /* Live colour-scheme watching: only when not forcing dark. The KVO
          * callback fires on this thread and updates the lens theme in place
          * — the next frame renders with the new palette. -1 means
-         * unavailable (macOS < 10.14) — degrade to the startup-only query. */
+         * unavailable (macOS < 10.14) — degrade to the startup-only query.
+         * The backend registers on its reserved internal slot
+         * (theme_watch_internal.h), never the host's public watch slot. */
         pl->theme_watching = false;
         if (!cfg->dark)
-            pl->theme_watching = (iris_color_scheme_watch(on_color_scheme_changed, pl) == 0);
+            pl->theme_watching = (iris_theme__watch_backend(on_color_scheme_changed, pl) == 0);
 
         /* Accessibility bridge: the darwin build ships a11y_stub.c, so this
          * is inert today; the call sites stay so a future NSAccessibility
@@ -1563,16 +1584,18 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
             flux_device_wait_idle(device);
         if (ui)
             lens_destroy(ui);
+        pl->ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
         if (pl->theme_watching)
-            iris_color_scheme_unwatch();
+            iris_theme__unwatch_backend();
         if (pl->a11y_running)
             iris_a11y_shutdown();
         /* Wakeup seam teardown: unwatch above removed the KVO observer, so
-         * nothing posts past this point. Drain whatever is left queued,
-         * then unregister the kick. */
+         * nothing posts past this point — but a detached subsystem thread
+         * still could, so unregister the kick first (late posts then fail
+         * cleanly), then drain whatever was legitimately queued. */
         if (wakeup_registered) {
-            iris_platform_wakeup_drain();
             iris_platform_wakeup_set_kick(NULL, NULL);
+            iris_platform_wakeup_drain();
         }
         if (canvas)
             flux_canvas_destroy(canvas);

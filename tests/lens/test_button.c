@@ -121,8 +121,7 @@ static void test_badged_icon_button_respects_tile_size(void) {
 }
 
 static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_lit,
-                                                lens_foreground_outline outline,
-                                                size_t *outline_pixels) {
+                                                bool with_outline, size_t *outline_pixels) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_theme theme = lens_theme_dark();
@@ -131,7 +130,19 @@ static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_
 
     lens_input input = {.display_size = {24, 24}, .dt_seconds = 0.016f};
     lens_begin(ui, &input);
-    lens_icon_outlined(ui, icon, 24.0f, outline);
+    if (with_outline) {
+        /* The contour is a style atom now (ADR-0061): a scope reaches the
+         * bare lens_icon call. */
+        lens_style outline = lens_style_init();
+        outline.fields = LENS_STYLE_OUTLINE_COLOR | LENS_STYLE_OUTLINE_WIDTH;
+        outline.outline_color = flux_color_rgba_premul(255, 0, 0, 255);
+        outline.outline_width = 2.0f;
+        lens_push_style(ui, outline);
+        lens_icon(ui, icon, 24.0f);
+        lens_pop_style(ui);
+    } else {
+        lens_icon(ui, icon, 24.0f);
+    }
     lens_end(ui);
 
     flux_canvas *canvas = NULL;
@@ -166,7 +177,7 @@ static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_
 }
 
 static size_t rendered_icon_pixels(lens_icon_id icon, bool *center_lit) {
-    return rendered_icon_pixels_with_outline(icon, center_lit, (lens_foreground_outline){0}, NULL);
+    return rendered_icon_pixels_with_outline(icon, center_lit, false, NULL);
 }
 
 static void test_material_rounded_star_pair_uses_filled_svg_paths(void) {
@@ -183,15 +194,21 @@ static void test_material_rounded_star_pair_uses_filled_svg_paths(void) {
 static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    lens_style outline = lens_style_init();
+    outline.fields = LENS_STYLE_OUTLINE_COLOR | LENS_STYLE_OUTLINE_WIDTH;
+    outline.outline_color = flux_color_rgba_premul(255, 0, 0, 255);
+    outline.outline_width = 2.0f;
+
     lens_begin(ui, &IN0);
     lens_row(ui);
     lens_push_id(ui, "plain");
     lens_icon(ui, LENS_ICON_GLOBE, 24.0f);
     lens_pop_id(ui);
     lens_push_id(ui, "outlined");
-    lens_icon_outlined(ui, LENS_ICON_GLOBE, 24.0f,
-                       (lens_foreground_outline){
-                           .color = flux_color_rgba_premul(255, 0, 0, 255), .width = 2.0f});
+    lens_push_style(ui, outline);
+    lens_icon(ui, LENS_ICON_GLOBE, 24.0f);
+    lens_pop_style(ui);
     lens_pop_id(ui);
     lens_close(ui);
     lens_end(ui);
@@ -204,11 +221,8 @@ static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(voi
 
     bool center_lit = false;
     size_t contour = 0;
-    size_t lit = rendered_icon_pixels_with_outline(
-        LENS_ICON_GLOBE, &center_lit,
-        (lens_foreground_outline){
-            .color = flux_color_rgba_premul(255, 0, 0, 255), .width = 2.0f},
-        &contour);
+    size_t lit =
+        rendered_icon_pixels_with_outline(LENS_ICON_GLOBE, &center_lit, true, &contour);
     CHECK(lit > 0);
     CHECK(contour > 0);
 }

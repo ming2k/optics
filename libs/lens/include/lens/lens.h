@@ -171,8 +171,27 @@ typedef struct lens_clipboard {
 } lens_clipboard;
 
 /* ================================================================== */
-/*  Interaction result (ADR-0029)                                     */
+/*  Interaction result (ADR-0029; state bits ADR-0058)                */
 /* ================================================================== */
+
+/* Widget state bits, OR'd into lens_response.state. The interaction core
+ * (lensi_interact) produces HOVERED/PRESSED/FOCUSED/FOCUS_VISIBLE/DISABLED
+ * for every widget; each widget ORs in the bits only it can know —
+ * SELECTED from a selection argument, ACTIVE from a toggle value, DRAGGED
+ * while a captured pointer drives a value. FOCUS_VISIBLE is FOCUSED via
+ * keyboard navigation (Tab traversal); a pointer press focuses without it,
+ * so chrome can show a focus ring only for keyboard users. */
+typedef enum lens_widget_state : uint32_t {
+    LENS_STATE_NONE = 0,
+    LENS_STATE_HOVERED = 1u << 0,       /* cursor over the widget          */
+    LENS_STATE_PRESSED = 1u << 1,       /* held: captured by the pointer   */
+    LENS_STATE_FOCUSED = 1u << 2,       /* holds keyboard focus            */
+    LENS_STATE_FOCUS_VISIBLE = 1u << 3, /* focused via keyboard navigation */
+    LENS_STATE_DISABLED = 1u << 4,      /* non-interactive                 */
+    LENS_STATE_SELECTED = 1u << 5,      /* picked out of a set (selectable) */
+    LENS_STATE_ACTIVE = 1u << 6,        /* on-state of a toggle            */
+    LENS_STATE_DRAGGED = 1u << 7,       /* captured pointer drives a value */
+} lens_widget_state;
 
 typedef struct lens_response {
     lens_id id;
@@ -184,6 +203,7 @@ typedef struct lens_response {
     bool middle_clicked; /* middle press + release inside */
     bool changed;        /* value mutated this frame */
     bool focused;
+    uint32_t state;      /* lens_widget_state bits (ADR-0058) */
 } lens_response;
 
 /* Semantic cursor requested by the hovered Lens widget. Lens only reports
@@ -212,9 +232,14 @@ typedef enum lens_role {
     LENS_ROLE_SCROLLAREA,
     LENS_ROLE_TEXTFIELD, /* reserved: text input                      */
     LENS_ROLE_TEXTAREA,  /* multi-line text input                   */
-    LENS_ROLE_MENU,      /* reserved: overlay layer (ADR-0037)        */
+    LENS_ROLE_MENU,      /* popup menu (ADR-0040)                     */
     LENS_ROLE_RADIO,
     LENS_ROLE_DIALOG, /* modal dialog window (ADR-0039)            */
+    LENS_ROLE_PROGRESS, /* progress indicator; read-only value, NOT a slider */
+    LENS_ROLE_TABLE,    /* grid container; rows/cells nest beneath   */
+    LENS_ROLE_ROW,      /* a row inside a TABLE                      */
+    LENS_ROLE_MENUITEM, /* item inside a MENU (distinct from BUTTON) */
+    LENS_ROLE_LINK,     /* inline navigation action (distinct from BUTTON) */
 } lens_role;
 
 /* State bits for lens_semantics.flags. */
@@ -224,6 +249,7 @@ enum {
     LENS_A11Y_CHECKED = 1u << 2,
     LENS_A11Y_EXPANDED = 1u << 3,
     LENS_A11Y_READONLY = 1u << 4,
+    LENS_A11Y_SELECTED = 1u << 5, /* selected row/tab/item            */
 };
 
 typedef struct lens_semantics {
@@ -253,6 +279,24 @@ LENS_API void lens_a11y(lens *ui, const lens_a11y_desc *desc);
 typedef void (*lens_a11y_visit_fn)(const lens_semantics *s, flux_rect bounds, lens_id id,
                                    lens_id parent, void *user);
 LENS_API void lens_accessibility_walk(const lens *ui, lens_a11y_visit_fn visit, void *user);
+
+/* Request activation of a widget by id (ADR-0062) — the write direction of
+ * the a11y seam. The host's AT bridge (iris's AT-SPI Action.DoAction)
+ * calls this when an assistive client activates a control; lens records a
+ * single pending activation id and the next frame's build reports
+ * `clicked` for that node through the normal interaction path
+ * (lensi_interact), so every focusable widget is activatable without
+ * per-widget code.
+ *
+ * Semantics: the request fires once (single-shot). It is respected only
+ * for a node that is focusable and not disabled when built; pointer
+ * occlusion does not block it (AT users navigate the semantic tree, not
+ * pixels). An unconsumed request is dropped at frame end — a widget that
+ * vanished or is disabled simply never fires. Focus moves to the
+ * activated node. Threading is the same as lens_paste: the host's main
+ * thread, outside lens_begin/end is the intended window, though a call
+ * mid-build takes effect for widgets built after it. */
+LENS_API void lens_a11y_activate(lens *ui, lens_id id);
 
 /* ================================================================== */
 /*  Theme tokens (ADR / reference)                                    */
@@ -288,13 +332,6 @@ typedef struct lens_theme {
     float font_weight;
     float font_weight_bold;
 
-    /* Optional active-indicator treatment for selectable rows and ghost icon
-     * buttons (`lens_icon_button_active`). Width in logical pixels of the
-     * left accent rail drawn when active; when > 0 the glyph/text also takes
-     * `color_accent`. Set to 0 for the plain tint-only active state (the
-     * background fill is drawn regardless). Defaults to 0. */
-    float active_indicator_width;
-
     /* Scrollbar styling for scroll areas. The thumb is drawn flush against
      * the right edge of a scroll container; `scrollbar_width` is also
      * reserved on the content's cross axis so nothing paints underneath
@@ -329,6 +366,107 @@ LENS_API lens_theme lens_theme_default(void);
 LENS_API lens_theme lens_theme_dark(void);
 
 /* ================================================================== */
+/*  Style cascade (ADR-0058, amended by ADR-0061)                     */
+/*                                                                    */
+/*  A lens_style is a sparse set of style ATOMS. Every field is       */
+/*  optional: the `fields` mask names the fields that carry values.   */
+/*  The mask doubles as the forward-compat guard: a caller compiled   */
+/*  against an older header never sets bits it does not know, and the */
+/*  library never reads fields whose bit is clear.                    */
+/*                                                                    */
+/*  Resolution is one fixed per-field cascade (ADR-0061):             */
+/*      per-call style (lens_box.style)                               */
+/*        > nearest enclosing scope (lens_push_style)                 */
+/*        > theme                                                     */
+/*  Unset fields fall through each layer; the resolver's derivation   */
+/*  order (hover/pressed derivation, disabled dim) is unchanged and   */
+/*  remains the only adjustment site. With nothing set anywhere the   */
+/*  output is the verbatim theme, so default rendering is unchanged.  */
+/* ================================================================== */
+
+/* Field tags for lens_style.fields — one bit per optional field. */
+typedef enum lens_style_field : uint32_t {
+    LENS_STYLE_BG = 1u << 0,             /* resting surface           */
+    LENS_STYLE_BG_HOVER = 1u << 1,       /* hovered surface           */
+    LENS_STYLE_BG_PRESSED = 1u << 2,     /* pressed/selected surface  */
+    LENS_STYLE_FG = 1u << 3,             /* foreground (text, glyphs) */
+    LENS_STYLE_BORDER = 1u << 4,         /* border stroke             */
+    LENS_STYLE_ACCENT = 1u << 5,         /* accent (emphasis colour)    */
+    LENS_STYLE_CORNER_RADIUS = 1u << 6,
+    LENS_STYLE_BORDER_WIDTH = 1u << 7,
+    LENS_STYLE_PADDING = 1u << 8,
+    LENS_STYLE_GAP = 1u << 9,
+    LENS_STYLE_FONT_SIZE = 1u << 10,
+    LENS_STYLE_OUTLINE_COLOR = 1u << 12, /* foreground contour colour  */
+    LENS_STYLE_OUTLINE_WIDTH = 1u << 13, /* contour radius, logical px */
+} lens_style_field;
+
+typedef struct lens_style {
+    uint32_t fields; /* LENS_STYLE_* mask: which fields below are set */
+    flux_color bg;
+    flux_color bg_hover;
+    flux_color bg_pressed;
+    flux_color fg;
+    flux_color border;
+    flux_color accent;
+    float corner_radius;
+    float border_width;
+    float padding;
+    float gap;
+    float font_size;
+    /* Opt-in contour behind foreground content (text, glyphs, images)
+     * floating over imagery or translucent material. State-independent
+     * decoration atoms: the resolver neither derives nor dims them, and
+     * no theme token exists — unset means none. */
+    flux_color outline_color;
+    float outline_width;
+} lens_style;
+
+/* Empty style: nothing set, everything resolves to the theme. */
+#define LENS_STYLE_INIT {.fields = 0}
+
+static inline lens_style lens_style_init(void) {
+    return (lens_style)LENS_STYLE_INIT;
+}
+
+/* The output of style resolution (ADR-0058/0061): lens_style with every
+ * slot concrete — the per-call > scope > theme cascade, hover/pressed
+ * derivation, and the disabled dim have already been applied in the
+ * resolver's documented order, so a consumer reads slots directly.
+ * `disabled` is the designed disabled-surface colour; lens_style has no
+ * instance slot for it, so it is always the theme token. The outline slots
+ * resolve to transparent/0 when unset (no theme tokens exist for them).
+ * Skins (ADR-0059) receive this in the widget record. */
+typedef struct lens_style_resolved {
+    flux_color bg;
+    flux_color bg_hover;
+    flux_color bg_pressed;
+    flux_color fg;
+    flux_color border;
+    flux_color accent;
+    flux_color disabled;
+    float corner_radius;
+    float border_width;
+    float padding;
+    float gap;
+    float font_size;
+    flux_color outline_color;
+    float outline_width;
+} lens_style_resolved;
+
+/* Scoped style stack (ADR-0061 item 4): every widget declared between
+ * lens_push_style and lens_pop_style resolves its unset style atoms
+ * against the merged scope — the primitive from which callers build their
+ * own design-system scopes ("danger", "sidebar"). This is a strictly
+ * nested scope, NOT a floating "applies to the next widget" modifier (the
+ * ordering hazard lens_box's documentation rejects): it affects exactly
+ * the widgets declared between push and pop, including the terse forms,
+ * and lens_begin resets the stack every frame so a forgotten pop cannot
+ * leak across frames. Overflow of the scope stack flags lens_overflowed. */
+LENS_API void lens_push_style(lens *ui, lens_style style);
+LENS_API void lens_pop_style(lens *ui);
+
+/* ================================================================== */
 /*  Text seam (ADR-0033)                                              */
 /* ================================================================== */
 
@@ -359,6 +497,224 @@ LENS_API lens_text_metrics lens_text_measure(lens *ui, lens_font *font, const ch
                                              float size_px);
 LENS_API lens_text_metrics lens_text_measure_ex(lens *ui, lens_font *font, const char *utf8,
                                                 float size_px, float weight);
+
+/* ================================================================== */
+/*  Widget skins (ADR-0059)                                           */
+/*                                                                    */
+/*  A widget's last phase — emission of its draw commands — is a      */
+/*  replaceable skin function. The widget keeps identity, measuring,  */
+/*  interaction, animation, and accessibility; the skin receives a    */
+/*  plain-data record (kind + state + bounds + resolved style +       */
+/*  content) and is the only code that writes draw commands. Skins    */
+/*  are replaceable context-wide (lens_set_skin); NULL restores the   */
+/*  built-in default, so default rendering is unchanged.              */
+/* ================================================================== */
+
+typedef enum lens_widget_kind : uint32_t {
+    LENS_WIDGET_BUTTON = 0,
+    LENS_WIDGET_SELECTABLE = 1,
+    LENS_WIDGET_CHECKBOX = 2,
+    LENS_WIDGET_SWITCH = 3,
+    LENS_WIDGET_RADIO = 4,
+    LENS_WIDGET_SLIDER = 5,      /* horizontal and vertical share a kind */
+    LENS_WIDGET_ICON_BUTTON = 6, /* the lens_icon_button* family         */
+    LENS_WIDGET_TABS = 7,        /* one record per strip per frame       */
+    LENS_WIDGET_LABEL = 8,       /* label/title/heading, incl. wrapped   */
+    LENS_WIDGET_SEPARATOR = 9,
+    LENS_WIDGET_ICON = 10,       /* bare glyph (lens_icon)               */
+    LENS_WIDGET_IMAGE = 11,      /* static image and the image buttons   */
+    LENS_WIDGET_PROGRESS = 12,
+    LENS_WIDGET_TEXTFIELD = 13,
+    LENS_WIDGET_TEXTAREA = 14,
+    LENS_WIDGET_COLLAPSING = 15,
+    LENS_WIDGET_TREE = 16,
+    LENS_WIDGET_TABLE = 17,
+    LENS_WIDGET_SPLIT = 18,
+    LENS_WIDGET_MENU_ITEM = 19,  /* bar trigger, item, submenu, separator */
+    LENS_WIDGET_DROPDOWN = 20,   /* the trigger; the popup is place+cascade */
+    LENS_WIDGET_LINK = 21,
+    LENS_WIDGET_KIND_COUNT
+} lens_widget_kind;
+
+/* One wrapped line of text for a LENS_WIDGET_LABEL record (and the visible
+ * body lines of a LENS_WIDGET_TEXTAREA record): the widget owns wrapping /
+ * windowing (behaviour), the skin only draws. Strings are borrowed for the
+ * frame; coordinates are node-local. */
+typedef struct lens_text_line {
+    const char *text;
+    float x, y;
+} lens_text_line;
+
+/* Table grid payload for LENS_WIDGET_TABLE (the visible window only — the
+ * virtualization stays in the widget, ADR-0042). */
+typedef struct lens_grid_column {
+    const char *title; /* frame-borrowed; NULL = no title cell   */
+    float x, w;        /* node-local column band                */
+    lens_align align;  /* cell text alignment within the band   */
+} lens_grid_column;
+
+typedef struct lens_grid_row {
+    const char **cells;   /* column_count strings, frame-borrowed      */
+    const float *cell_x;  /* per-cell text x, node-local, precomputed
+                             (alignment resolved by the widget — a skin
+                             never measures text)                        */
+    float y;              /* node-local top edge                       */
+    int index;            /* absolute row index (zebra parity)         */
+    uint32_t state;       /* LENS_STATE_SELECTED when selected         */
+} lens_grid_row;
+
+/* Per-tab data for a LENS_WIDGET_TABS record (ADR-0061): the strip gets one
+ * skin call per frame, carrying every tab the skin needs to draw. Strings
+ * are borrowed for the frame. */
+typedef struct lens_tab_item {
+    const char *label;      /* tab text                                      */
+    lens_text_metrics text; /* measured label; a skin never re-measures      */
+    uint32_t state;         /* this tab's lens_widget_state bits (ADR-0058)  */
+    float hover_t;          /* eased hover [0,1], updated this frame         */
+    flux_rect last_bounds;  /* last frame's arranged rect, UI space          */
+} lens_tab_item;
+
+/* Per-kind content payload for lens_widget_record. A member is valid only
+ * for the kinds its comment lists; everything else is zero. Strings are
+ * borrowed for the frame (arena-backed); `text` metrics come from the
+ * widget's own measure pass, so a skin never re-measures the label. */
+typedef struct lens_widget_content {
+    const char *label;       /* BUTTON SELECTABLE CHECKBOX SWITCH RADIO SLIDER
+                                LABEL LINK COLLAPSING TREE MENU_ITEM DROPDOWN */
+    lens_text_metrics text;  /* measured label (same kinds + TEXTFIELD: the
+                                "Ag" line metrics the caret height reads)    */
+    float text_size;         /* LABEL: explicit point size; 0 = resolved style */
+    float text_weight;       /* LABEL: 0 = default weight                    */
+    bool compact;            /* LABEL: unpadded form (lens_label_compact_ex) */
+    const lens_text_line *lines; /* LABEL (wrapped) / TEXTAREA: line slices  */
+    int line_count;              /* LABEL (wrapped) / TEXTAREA               */
+    const char *description; /* SWITCH: supporting text; NULL = none           */
+    lens_text_metrics desc_text; /* SWITCH: measured description               */
+    lens_icon_id icon;       /* SELECTABLE / ICON_BUTTON: leading glyph;
+                                DROPDOWN: the chevron; LENS_ICON_INVALID = none */
+    float glyph_size;        /* ICON_BUTTON / ICON: glyph box, logical px    */
+    const char *badge;       /* ICON_BUTTON: corner badge; NULL/empty = none   */
+    bool rounded;            /* ICON_BUTTON: rounded-tile variant              */
+    bool active_surface;     /* ICON_BUTTON: steady active tint variant        */
+    bool accent_checked;     /* ICON_BUTTON: accent glyph while checked        */
+    float ratio;             /* SLIDER / PROGRESS / SPLIT: fraction in [0,1]   */
+    bool vertical;           /* SLIDER / SEPARATOR / SPLIT: orientation        */
+    bool error;              /* SLIDER / TEXTFIELD / TEXTAREA: error styling   */
+    const lens_tab_item *tabs; /* TABS: per-tab array, `tab_count` entries   */
+    int tab_count;             /* TABS                                        */
+    int active_index;          /* TABS: selected tab, clamped into range      */
+    bool expanded;             /* COLLAPSING / TREE: body open                */
+    bool leaf;                 /* TREE: leaf row (dot, no chevron)            */
+    const char *shortcut;        /* MENU_ITEM: trailing hint; NULL = none    */
+    lens_text_metrics shortcut_text; /* MENU_ITEM: measured shortcut         */
+    bool menu_check;             /* MENU_ITEM: draw a check glyph            */
+    bool menu_radio;             /* MENU_ITEM: the glyph is a radio dot      */
+    bool menu_separator;         /* MENU_ITEM: divider row; rest unused      */
+    bool menu_trigger;           /* MENU_ITEM: a menu-bar trigger            */
+    bool submenu;                /* MENU_ITEM: trailing submenu chevron      */
+    bool popup_open;             /* MENU_ITEM (trigger) / DROPDOWN: open     */
+    flux_image *image;           /* IMAGE: host texture, frame-borrowed      */
+    flux_color tint;             /* IMAGE: premultiplied modulation          */
+    bool image_button;           /* IMAGE: the interactive button variant    */
+    float split_pos;             /* SPLIT: divider main offset, node-local   */
+    float split_thickness;       /* SPLIT: handle strip thickness            */
+    const lens_grid_column *columns; /* TABLE: column bands                 */
+    int column_count;                /* TABLE                                */
+    const lens_grid_row *rows;       /* TABLE: the visible row window       */
+    int row_count;                   /* TABLE: visible rows                 */
+    float header_height;             /* TABLE: 0 = header hidden            */
+    float row_height;                /* TABLE                                */
+    float view_width;                /* TABLE: body width minus scrollbar   */
+    bool zebra;                      /* TABLE: alternate-row tint enabled   */
+    flux_rect scrollbar_track;       /* TABLE: valid when has_scrollbar     */
+    flux_rect scrollbar_thumb;       /* TABLE: valid when has_scrollbar     */
+    bool has_scrollbar;              /* TABLE                                */
+    uint32_t scrollbar_state;        /* TABLE: HOVERED/DRAGGED thumb bits   */
+    /* TEXTFIELD / TEXTAREA: the text-edit payload. Every geometry is
+     * node-local and precomputed by the widget — a skin never shapes text.
+     * The platform caret reporting (lensi_set_caret_rect, ADR-0036) stays
+     * in the widget; it is behaviour, not chrome. */
+    const char *edit_text;      /* TEXTFIELD: display string (buffer, or the
+                                   buffer with the IME preedit composed in);
+                                   TEXTAREA placeholder travels in lines[].
+                                   NULL = nothing to draw                    */
+    float edit_text_y;          /* TEXTFIELD: node-local y for edit_text     */
+    bool show_placeholder;      /* edit_text / lines hold the placeholder:
+                                   draw it in the disabled colour           */
+    const flux_rect *sel_rects; /* selection highlight quads                */
+    int sel_rect_count;
+    flux_rect caret;            /* caret quad; valid when show_caret         */
+    bool show_caret;
+    flux_rect preedit_underline; /* IME composition underline; valid when
+                                   has_preedit                               */
+    bool has_preedit;
+} lens_widget_content;
+
+/* Everything a skin needs to draw one widget for one frame.
+ *
+ * `bounds` is the widget's content box in NODE-LOCAL coordinates — the
+ * same space the skin's emission calls (and lens_draw_cmd.rel) use. Its
+ * origin is always (0,0) because the final position is solved by layout
+ * after the skin runs; w/h are this frame's measured size (fixed-size
+ * hints applied). `last_bounds` is last frame's arranged rect in UI
+ * space — what interaction hit-tested — zeroed on the widget's first
+ * frame (the documented one-frame latency, ADR-0029). Skins that scale
+ * chrome with the arranged size (the slider track) read last_bounds. */
+typedef struct lens_widget_record {
+    lens_widget_kind kind;
+    uint32_t state;            /* lens_widget_state bits (ADR-0058) */
+    flux_rect bounds;          /* node-local content box            */
+    flux_rect last_bounds;     /* last frame's arranged rect        */
+    lens_style_resolved style; /* resolved instance/theme style     */
+    uint32_t style_fields;     /* LENS_STYLE_* bits the instance set;
+                                  0 = everything came from the theme */
+    float hover_t;             /* eased hover, updated this frame   */
+    float active_t;            /* eased active, updated this frame  */
+    lens_widget_content content;
+} lens_widget_record;
+
+/* A skin draws one widget for one frame. It must not retain the record,
+ * the node, or content strings past the call. `node` is the widget's
+ * retained slot — skins push commands onto it and may read its public
+ * accessors (e.g. lens_node_bounds), nothing more. */
+typedef void (*lens_skin_fn)(lens *ui, lens_node *node, const lens_widget_record *rec);
+
+/* Replace the skin for a widget kind context-wide; NULL restores the
+ * built-in default. The context is the single override granularity
+ * (ADR-0061 retired the per-call *_skinned forms): for a one-off override,
+ * set the skin, build the widget, restore NULL. */
+LENS_API void lens_set_skin(lens *ui, lens_widget_kind kind, lens_skin_fn fn);
+/* The built-in default skin for a kind — for wrapping: call it from a
+ * custom skin to keep the stock chrome, then add your own. */
+LENS_API lens_skin_fn lens_default_skin(lens_widget_kind kind);
+
+/* Per-node scratch storage for skins (ADR-0061 item 9): four retained
+ * floats, zeroed on the node's first touch, living and dying with the
+ * node (ADR-0038's GC reclaims the node and the scratch goes with it).
+ * This is mechanism, not animation: the library provides storage so a
+ * caller-owned skin can carry its own state (a spring indicator's
+ * position/velocity) with no library-side allocation or lifetime hazard;
+ * the library never animates anything itself. */
+LENS_API float *lens_skin_scratch(lens *ui, lens_node *node);
+
+/* Skin emission seam — the skin's pen. Rects are node-local, same space
+ * as the record's `bounds`; a zero w/h rect spans the full node box. For
+ * text, a negative rel.w centres horizontally in the resolved node rect
+ * and a negative rel.h centres vertically (centring is resolved at render
+ * time, so it stays correct when a parent constrains the node). */
+LENS_API void lens_skin_rect(lens *ui, lens_node *node, flux_rect rel, flux_color color,
+                             float radius);
+LENS_API void lens_skin_border(lens *ui, lens_node *node, flux_rect rel, flux_color color,
+                               float radius, float width);
+LENS_API void lens_skin_text(lens *ui, lens_node *node, flux_rect rel, flux_color color,
+                             const char *utf8, float size_px, float weight);
+LENS_API void lens_skin_icon(lens *ui, lens_node *node, flux_rect rel, flux_color color,
+                             float stroke, lens_icon_id icon);
+/* Nested logical clip for skins that clip sub-regions (the table's cells).
+ * Balanced push/pop; the rect is intersected with the enclosing clip at
+ * render time. */
+LENS_API void lens_skin_clip_push(lens *ui, lens_node *node, flux_rect rel);
+LENS_API void lens_skin_clip_pop(lens *ui, lens_node *node);
 
 /* ================================================================== */
 /*  Context lifecycle (ADR-0032)                                      */
@@ -408,10 +764,10 @@ LENS_API bool lens_overflowed(const lens *ui);
 LENS_API bool lens_anim_pending(const lens *ui);
 
 /* True if the frame just built would paint anything different from what is
- * already on screen: base-tree or floating-layer damage (geometry, draw
- * lists, lifecycle), an appearing/disappearing overlay or tooltip, an eased
- * value still in transit, or a focused text caret that needs its blink
- * clock. A damage-driven host may skip the whole acquire/paint/present
+ * already on screen: base-tree or placed-subtree damage (geometry, draw
+ * lists, lifecycle), an appearing/disappearing transient node or tooltip,
+ * an eased value still in transit, or a focused text caret that needs its
+ * blink clock. A damage-driven host may skip the whole acquire/paint/present
  * cycle when this returns false. Read-only; valid between lens_end and the
  * next lens_begin. Resize/scale changes are host-visible, not lens state —
  * the host must still paint the first frame after those itself. */
@@ -455,6 +811,8 @@ typedef struct lens_box {
     bool disabled;       /* non-interactive + dimmed                     */
     bool error;          /* validation-error styling (input widgets)     */
     const char *tooltip; /* shown while this widget is hovered; NULL=none*/
+    lens_style style;    /* per-call style atoms (ADR-0061);
+                            fields == 0 = inherit scope/theme           */
 } lens_box;
 
 /* ================================================================== */
@@ -473,6 +831,8 @@ typedef struct lens_layout_opts {
     lens_align cross; /* cross-axis alignment; LENS_STRETCH fills */
     flux_color bg;    /* background fill; alpha 0 = no background */
     float radius;     /* corner radius for the background fill */
+    flux_color border;  /* border stroke; alpha 0 = no border */
+    float border_width; /* border stroke width when border alpha > 0 */
 } lens_layout_opts;
 
 LENS_API void lens_row(lens *ui);
@@ -506,19 +866,10 @@ LENS_API void lens_spacer(lens *ui, float size);     /* fixed empty main-axis ga
 /*  bool return means: button -> clicked; checkbox/slider/radio/text  */
 /*  field/textarea/dropdown -> value changed this frame; collapsing/  */
 /*  tab -> currently open/active. For an explicit id, fixed size,     */
-/*  flex, disabled/error state, a tooltip, or a placeholder — and for */
-/*  the full lens_response — use the matching `*_ex` form below.        */
+/*  flex, disabled/error state, a tooltip, a per-call style, or a     */
+/*  placeholder — and for the full lens_response — use the matching   */
+/*  `*_ex` form below.                                                */
 /* ================================================================== */
-
-/* Optional contour behind foreground content that floats over imagery or a
- * translucent material. The width is an outward visual radius in logical
- * pixels. Zero width or a transparent colour disables it. This remains an
- * explicit per-widget treatment so ordinary content does not accidentally
- * acquire a decorative outline. */
-typedef struct lens_foreground_outline {
-    flux_color color;
-    float width;
-} lens_foreground_outline;
 
 LENS_API bool lens_button(lens *ui, const char *label);
 /* Inline text action for breadcrumbs and secondary navigation. It has no
@@ -526,11 +877,12 @@ LENS_API bool lens_button(lens *ui, const char *label);
  * changing the text's size or weight. */
 LENS_API bool lens_link(lens *ui, const char *label);
 /* A borderless, full-width list / nav item. Transparent at rest, with a subtle
- * hover fill and a steady `color_active` surface when `selected`. Selection
- * colour is independent from decoration: themes may separately opt into a
- * left accent rail through active_indicator_width. Returns true on the frame
- * it is clicked. Use it for sidebar lists where a stack of filled lens_buttons
- * would read as bordered pills. */
+ * hover fill and a steady `color_active` surface when `selected` — that tint
+ * is the neutral selection affordance; decorative rails/indicators belong to
+ * caller skins (ADR-0061). Returns true on the frame it is clicked. Use it
+ * for sidebar lists where a stack of filled lens_buttons would read as
+ * bordered pills. Per-call restyling goes through the descriptor's box.style
+ * or an enclosing lens_push_style scope (ADR-0061). */
 LENS_API bool lens_selectable(lens *ui, const char *label, bool selected);
 LENS_API bool lens_selectable_icon(lens *ui, lens_icon_id icon, const char *label, bool selected);
 /* A standalone padded label. The text is drawn centred vertically within
@@ -544,10 +896,6 @@ LENS_API void lens_label_ex(lens *ui, const char *text, float size);
 LENS_API void lens_label_wrapped(lens *ui, const char *text, float max_width);
 LENS_API void lens_label_wrapped_ex(lens *ui, const char *text, float size, float max_width);
 LENS_API void lens_label_compact_ex(lens *ui, const char *text, float size);
-/* Compact label with an opt-in contour; intrinsic layout remains identical to
- * lens_label_compact_ex and the contour paints outside the glyph coverage. */
-LENS_API void lens_label_compact_outlined_ex(lens *ui, const char *text, float size,
-                                             lens_foreground_outline outline);
 LENS_API void lens_title(lens *ui, const char *text);
 LENS_API void lens_heading(lens *ui, const char *text, int level);
 LENS_API bool lens_checkbox(lens *ui, const char *label, bool *value);
@@ -636,35 +984,19 @@ LENS_API void lens_scroll_to(lens *ui, const char *id, float x, float y);
  * pointer may be NULL. */
 LENS_API bool lens_scroll_offset(lens *ui, const char *id, float *x, float *y);
 
-typedef enum lens_tab_style {
-    /* The compact Lens default: independent tabs with an active underline. */
-    LENS_TAB_STYLE_STANDARD = 0,
-    /* A shared rail whose active surface joins its neighbours through curved
-     * shoulders. Uses the theme's active/accent tokens and adds no close
-     * affordance. Intended for views that should read as connected surfaces. */
-    LENS_TAB_STYLE_CONNECTED = 1,
-    /* A compact strip with a theme-coloured indicator. Its independently
-     * sprung edges stretch and settle when selection changes. */
-    LENS_TAB_STYLE_INDICATOR = 2,
-} lens_tab_style;
-
 typedef struct lens_tabs_opts {
-    lens_tab_style style;
-    flux_color rail_color;      /* 0 = style default */
-    flux_color active_color;    /* 0 = theme color_active */
-    flux_color hover_color;     /* 0 = theme color_hover */
-    flux_color indicator_color; /* 0 = theme color_accent */
-    float radius;               /* <= 0 = theme corner_radius */
-    float connector_size;       /* <= 0 = derived from radius */
-    float indicator_thickness;  /* <= 0 = 3 logical px */
-    float indicator_gap;        /* <= 0 = 2 logical px */
-    float indicator_padding;    /* <= 0 = derived from theme padding */
-    bool equal_width;           /* divide available width into equal hit targets */
+    bool equal_width; /* divide available width into equal hit targets */
 } lens_tabs_opts;
 
-/* Horizontal selection strip. The terse form preserves the standard Lens
- * treatment; use lens_tabs_begin_ex to opt into a presentation variant. Both
- * forms raise an undersized host height to contain the tallest tab content. */
+/* Horizontal selection strip (ADR-0061: emission lives behind the
+ * LENS_WIDGET_TABS skin seam; the default skin is the neutral static
+ * indicator — theme accent, fixed thickness, zero animation). Visual
+ * tuning goes through the style cascade (box/scope/theme), not opts; a
+ * different presentation is a caller-owned skin (see
+ * examples/showcase/tabs_spring_skin.c for the spring recipe).
+ * lens_tabs_begin_ex exists for the structural knobs (equal_width). Both
+ * forms raise an undersized host height to contain the tallest tab
+ * content. */
 LENS_API bool lens_tabs_begin(lens *ui, const char *id, int *active_tab);
 LENS_API bool lens_tabs_begin_ex(lens *ui, const char *id, int *active_tab, lens_tabs_opts opts);
 LENS_API bool lens_tab(lens *ui, const char *label);
@@ -674,9 +1006,6 @@ LENS_API void lens_progress(lens *ui, const char *label, float value);
 LENS_API void lens_separator(lens *ui);
 
 LENS_API void lens_icon(lens *ui, lens_icon_id id, float size);
-/* Vector glyph with the same opt-in foreground contour as outlined text. */
-LENS_API void lens_icon_outlined(lens *ui, lens_icon_id id, float size,
-                                 lens_foreground_outline outline);
 /* A host-owned raster image drawn as a widget (e.g. an application icon).
  * `image` is borrowed for the frame — the caller owns it and it must remain
  * valid until `lens_render` returns. `w`/`h` are the desired logical size;
@@ -687,10 +1016,6 @@ LENS_API void lens_image(lens *ui, flux_image *image, float w, float h);
 /* As lens_image, with a premultiplied tint applied to the texture. Opaque
  * white preserves the source; white with a lower alpha fades it. */
 LENS_API void lens_image_tinted(lens *ui, flux_image *image, float w, float h, flux_color tint);
-/* Tinted image with an alpha-derived contour underlay. The underlay expands
- * around the requested box without changing its intrinsic layout size. */
-LENS_API void lens_image_tinted_outlined(lens *ui, flux_image *image, float w, float h,
-                                         flux_color tint, lens_foreground_outline outline);
 /* Texture-backed variants of lens_icon_button / lens_icon_button_active:
  * identical hover/active/click behaviour, but draw the host-owned raster
  * image where the glyph would be. NULL image draws the background only
@@ -701,14 +1026,11 @@ LENS_API bool lens_image_button_active(lens *ui, flux_image *image, bool active)
 /* Flat icon button for navigation strips and toolbars: transparent at rest,
  * with a subtle hover fill. Returns true on the frame it is clicked. */
 LENS_API bool lens_icon_button(lens *ui, lens_icon_id id);
-/* As lens_icon_button, but `active` shows a steady tint for the selected view.
- * An accent rail and accent glyph are added only when the theme explicitly
- * sets active_indicator_width above 0. */
+/* As lens_icon_button, but `active` shows a steady neutral tint
+ * (style-resolved bg_pressed; theme: color_active) for the selected view —
+ * state as data, no flavor (ADR-0061). Corner radius, colours, and rails
+ * are style atoms or caller-owned skins, not separate APIs. */
 LENS_API bool lens_icon_button_active(lens *ui, lens_icon_id id, bool active);
-/* As lens_icon_button_active, but the active state is a self-contained
- * rounded color_active tile with an accent glyph — suited to segmented view
- * toggles — and never uses an accent rail. */
-LENS_API bool lens_icon_button_active_rounded(lens *ui, lens_icon_id id, bool active);
 /* Rounded icon tile with an explicit logical glyph size and optional
  * top-right text badge (for example "1" on repeat-one). The tile stays flat
  * at rest, gains a rounded hover/active surface, and never uses an accent
@@ -805,87 +1127,84 @@ LENS_API lens_response lens_textarea_ex(lens *ui, lens_textarea_opts opts);
 LENS_API lens_response lens_dropdown_ex(lens *ui, lens_dropdown_opts opts);
 
 /* ================================================================== */
-/*  Overlay layer (ADR-0037)                                          */
+/*  Placement & z bands (ADR-0060)                                    */
 /*                                                                    */
-/*  Floating content that escapes the parent's clip and lays out above*/
-/*  the base tree: dropdown, menu, context menu, tooltip, modal.      */
+/*  One tree: an absolutely-placed container keeps its parent chain  */
+/*  and sibling position but escapes its parent's layout flow and    */
+/*  clip, and renders in a closed z band instead of in tree order.   */
+/*  There is no numeric z, ever: within a band, later registration   */
+/*  paints (and hit-tests) above earlier. FLOW nodes are always      */
+/*  LENS_BAND_BASE.                                                   */
 /*                                                                    */
-/*  Open state is retained per id; lens_overlay_begin only enters the   */
-/*  body when the id is currently open. Click-outside (with a fresh-  */
-/*  frame grace) and Escape close the top open overlay.               */
+/*  Transient lifetime is orthogonal to stacking: a transient place  */
+/*  node is gated by the retained open-set (lens_place_open/close),  */
+/*  Escape closes the top dismissable one, and a click outside its   */
+/*  last-frame rect closes it (same-frame-open grace applies).       */
 /* ================================================================== */
 
-typedef struct lens_overlay_opts {
-    float gap;
-    float pad;
-    lens_align cross;
-    flux_color bg;      /* alpha 0 = no background fill */
-    flux_color border;  /* alpha 0 = no border */
-    float border_width; /* border stroke width when border alpha > 0 */
-    float radius;
-    float min_width; /* sets fixed_w on the layer when > 0 */
-} lens_overlay_opts;
+typedef enum lens_band {
+    LENS_BAND_BACKDROP = 0, /* below the base tree; hit-transparent by default */
+    LENS_BAND_BASE = 1,     /* the base tree itself — FLOW nodes only; an ABS
+                               node requesting BASE is clamped to CHROME by
+                               lens_place_begin (render/hit-order invariant) */
+    LENS_BAND_CHROME = 2,   /* persistent chrome: docks, status bars         */
+    LENS_BAND_POPUP = 3,    /* transient popups: dropdowns, menus, modals    */
+    LENS_BAND_TOPMOST = 4,  /* above everything: drag ghosts, tooltips       */
+    LENS_BAND_COUNT = 5,
+} lens_band;
 
-LENS_API void lens_overlay_open(lens *ui, const char *id);
-LENS_API void lens_overlay_close(lens *ui, const char *id);
-LENS_API bool lens_overlay_is_open(const lens *ui, const char *id);
-/* Whether the last-frame bounds of an open overlay contain the cursor. This
- * complements an owner widget's hovered response for hover-to-open popups. */
-LENS_API bool lens_overlay_hovered(const lens *ui, const char *id);
+typedef enum lens_place_mode {
+    LENS_PLACE_EXACT = 0,    /* rect is the position (+ minimum extent); clamped */
+    LENS_PLACE_ANCHORED = 1, /* probe at rect (the owner anchor), drop below,
+                                flip above on overflow, clamp */
+    LENS_PLACE_CENTERED = 2, /* centred on the bounds (rect ignored) */
+} lens_place_mode;
 
-/* Open a floating layer anchored to `anchor` (usually the owner widget's
- * `lens_get_response().rect`). The anchor counts as part of the overlay for
- * click-outside dismissal, allowing an owner trigger to implement a clean
- * press/release toggle. Returns true when the overlay is currently open and
- * the body should build. Pair with lens_overlay_end on true returns. */
-LENS_API bool lens_overlay_begin(lens *ui, const char *id, flux_rect anchor,
-                                 lens_overlay_opts opts);
-LENS_API void lens_overlay_end(lens *ui);
+typedef struct lens_place_opts {
+    lens_band band;         /* z band for the subtree */
+    lens_place_mode mode;   /* how rect/bounds resolve to a position */
+    flux_rect rect;         /* EXACT: top-left + minimum extent; ANCHORED: owner
+                               anchor (counts as inside for click-outside) */
+    flux_rect bounds;       /* placement + render boundary; w/h <= 0 = display */
+    bool transient;         /* open-set managed: begin is gated by
+                               lens_place_open; Esc/click-outside dismiss */
+    bool interactive;       /* BACKDROP only: opt into hit-testing (default:
+                               a backdrop is hit-transparent) */
+    lens_layout_opts layout; /* the subtree's internal flexbox + surface
+                               (gap/pad/cross/bg/border/radius; min_width >
+                               0 fixes the node's width, as do box.width /
+                               EXACT rect.w) */
+} lens_place_opts;
 
-/* ================================================================== */
-/*  Floating layers — persistent chrome (companion to ADR-0037)       */
-/*                                                                    */
-/*  A floating layer is the non-dismissible sibling of an overlay: a  */
-/*  positional sub-root that escapes the parent's layout flow and     */
-/*  renders above the base tree every frame. Use it for chrome that   */
-/*  is always on screen and never auto-dismissed: a dock, a status    */
-/*  bar, a notification stack, per-window title bars.                 */
-/*                                                                    */
-/*  Differences from the overlay layer:                               */
-/*    - Always entered: no open/close state, no lens_overlay_open.    */
-/*    - Placed exactly at `rect.x`/`rect.y` (no below-anchor drop,    */
-/*      no flip); clamped to the display if it would overflow.        */
-/*    - Not dismissible: Escape and click-outside leave it alone.     */
-/*    - Eclipses base widgets underneath, just like an overlay.       */
-/*                                                                    */
-/*  `rect.w`/`rect.h` are a minimum: the layer grows to fit its body  */
-/*  if the measured content is larger. The same `lens_overlay_opts`   */
-/*  type configures background, border, padding, and cross alignment. */
-/* ================================================================== */
+LENS_API void lens_place_open(lens *ui, const char *id);
+LENS_API void lens_place_close(lens *ui, const char *id);
+LENS_API bool lens_place_is_open(const lens *ui, const char *id);
+/* Whether the last-frame bounds of an open transient place node contain the
+ * cursor. Complements an owner widget's hovered response for hover popups. */
+LENS_API bool lens_place_hovered(const lens *ui, const char *id);
 
-/* Open a persistent floating layer at `rect`. Always returns true (the
- * body always builds); pair with lens_layer_end. `rect` is the desired
- * placement in UI-space logical pixels; the layer's top-left is anchored
- * at (rect.x, rect.y) and clamped onto the display. */
-LENS_API bool lens_layer_begin(lens *ui, const char *id, flux_rect rect, lens_overlay_opts opts);
-LENS_API void lens_layer_end(lens *ui);
+/* Open an absolutely-placed container sub-root. Non-transient nodes are
+ * always entered; transient ones only while open (lens_place_open). Only
+ * container sub-roots may be placed; leaf widgets cannot. Returns true when
+ * the body should build. Pair with lens_place_end on true returns. */
+LENS_API bool lens_place_begin(lens *ui, const char *id, lens_place_opts opts);
+LENS_API void lens_place_end(lens *ui);
 
 /* ================================================================== */
 /*  Modal dialog (ADR-0039)                                           */
-/*                                                                    */
-/*  A centered overlay with a dim backdrop that eclipses the base    */
-/*  tree, plus a Tab focus trap so keyboard cycling stays inside the */
-/*  dialog body. Open with lens_modal_open; build the body between    */
-/*  lens_modal_begin (true) and lens_modal_end; close on a button or  */
-/*  via lens_modal_close. Escape and click-outside close only when    */
-/*  `dismissable` is true (default).                                  */
+/*  A centered popup with a dim backdrop that occludes the base tree,  */
+/*  plus a Tab focus trap so keyboard cycling stays inside the dialog  */
+/*  body. Open with lens_modal_open; build the body between            */
+/*  lens_modal_begin (true) and lens_modal_end; close on a button or   */
+/*  via lens_modal_close. Escape and click-outside close it unless     */
+/*  `pinned` is set.                                                   */
 /* ================================================================== */
 
 typedef struct lens_modal_opts {
     const char *title;   /* optional heading drawn at the top; NULL = none */
     flux_color backdrop; /* dim colour over the base tree; 0 = default 0x80000000 */
     float min_width;     /* content minimum width, logical px; 0 = 240       */
-    bool dismissable;    /* Escape / click-outside close it; default true    */
+    bool pinned;         /* Escape / click-outside leave it; default false   */
 } lens_modal_opts;
 
 LENS_API void lens_modal_open(lens *ui, const char *id);
@@ -901,11 +1220,11 @@ LENS_API void lens_modal_end(lens *ui);
 /* ================================================================== */
 /*  Menus — menu bar, context menu, submenu (ADR-0040)                */
 /*                                                                    */
-/*  Built on the overlay layer. A menu bar is a horizontal row of     */
-/*  triggers with click-then-drag switching; a context menu opens at  */
-/*  the cursor on right-click; a submenu nests to the side of its     */
-/*  parent item. Items carry an optional shortcut, check/radio mark,  */
-/*  and disabled state.                                               */
+/*  Built on placement (ADR-0060). A menu bar is a horizontal row of    */
+/*  triggers with click-then-drag switching; a context menu opens at    */
+/*  the cursor on right-click; a submenu nests to the side of its       */
+/*  parent item. Items carry an optional shortcut, check/radio mark,    */
+/*  and disabled state.                                                 */
 /* ================================================================== */
 
 /* Flags for lens_menu_item_flags (OR'd). */
@@ -918,7 +1237,7 @@ enum {
 LENS_API bool lens_menubar_begin(lens *ui, const char *id);
 LENS_API void lens_menubar_end(lens *ui);
 
-/* A menu trigger in a bar: opens its overlay on click, switches on hover
+/* A menu trigger in a bar: opens its popup on click, switches on hover
  * while a sibling is open. Returns true when the menu body should build;
  * pair with lens_menu_end. Inside the body call lens_menu_item[_*]. */
 LENS_API bool lens_menu_begin(lens *ui, const char *label);

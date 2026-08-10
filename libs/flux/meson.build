@@ -19,13 +19,20 @@ endif
 if opt_effect and not opt_compute
   error('effect module requires compute (flux_compute_pipeline) — pass -Dcompute=true with -Deffect=true')
 endif
+if get_option('text') and not opt_canvas
+  error('text sibling requires canvas (flux_canvas_draw_glyph_run) — pass -Dcanvas=true with -Dtext=true')
+endif
 
 flux_inc = include_directories('include')
 
 # dma-buf (fd-based external memory import/export + sync_file fences) is
-# Linux-only. When off, src/canvas/dmabuf_stub.c replaces dmabuf.c and
-# the FLUX_HAVE_DMABUF gates in device.c / surface.c compile the feature
-# out; the public API stays declared and answers FLUX_ERROR_UNSUPPORTED.
+# Linux-only. When off, src/core/dmabuf_stub.c replaces dmabuf.c and
+# answers every public entry point FLUX_ERROR_UNSUPPORTED. The sources are
+# core-level, NOT part of the canvas module gate: device.c / surface.c /
+# frame.c call the acquire-semaphore pool helpers and flux_dmabuf_supported
+# unconditionally (ADR-0052: no #ifdef at call sites), so a -Dcanvas=false
+# build must still link them. The one canvas-internal entry point lives in
+# src/canvas/dmabuf_acquire.c inside the canvas gate.
 have_dmabuf = host_machine.system() == 'linux'
 if have_dmabuf
   flux_c_args_dma = ['-DFLUX_HAVE_DMABUF=1']
@@ -55,6 +62,11 @@ flux_sources = files(
   'src/math/color.c',
   'src/math/arena.c',
 )
+if have_dmabuf
+  flux_sources += files('src/core/dmabuf.c')
+else
+  flux_sources += files('src/core/dmabuf_stub.c')
+endif
 flux_extra_inputs = []
 
 flux_c_args = ['-DFLUX_BUILDING=1'] + flux_c_args_dma
@@ -84,12 +96,8 @@ if opt_canvas
     'src/canvas/record.c',
     'src/canvas/backend_vk.c',
     'src/canvas/backend_cpu.c',
+    'src/canvas/dmabuf_acquire.c',
   )
-  if have_dmabuf
-    flux_sources += files('src/canvas/dmabuf.c')
-  else
-    flux_sources += files('src/canvas/dmabuf_stub.c')
-  endif
   flux_c_args += '-DFLUX_HAVE_CANVAS=1'
 
   glslang = find_program('glslangValidator', required : true)
@@ -260,12 +268,12 @@ install_headers(
   'include/flux/core.h',
   'include/flux/math.h',
   'include/flux/vulkan.h',
+  'include/flux/dmabuf.h',
   subdir : 'flux',
 )
 if opt_canvas
   install_headers('include/flux/canvas.h', subdir : 'flux')
   install_headers('include/flux/canvas_cpu.h', subdir : 'flux')
-  install_headers('include/flux/dmabuf.h', subdir : 'flux')
 endif
 if opt_scene
   install_headers('include/flux/scene.h', subdir : 'flux')

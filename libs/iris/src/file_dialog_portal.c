@@ -7,18 +7,48 @@
  * request remains alive, and pump that connection until the user accepts or
  * cancels. No command shell is involved, so arbitrary UTF-8 titles are safe.
  *
+ * While the modal picker is open the wait loop ALSO pumps the platform event
+ * sources — the Wayland display fd (so xdg_wm_base pings keep being answered
+ * and the compositor does not mark the window unresponsive) and the AT-SPI
+ * bus fd (so screen readers keep being served). Without that, opening a
+ * picker froze the whole app until the user dismissed it. The picker's
+ * parent_window is passed as the xdg-foreign handle when the compositor
+ * exported one, so the dialog stays modal to our window.
+ *
  * Supports open / open-multiple / open-folder / save modes, plus filters
  * (name + glob), an initial URI, and a default save name (SaveFile mode).
  */
 
 #include <iris/file_dialog.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
+/* mode: 0 = OpenFile (single), 1 = OpenFile (multiple), 2 = OpenFile (folder), 3 = SaveFile
+ * Defined outside the IRIS_HAVE_PORTAL_WATCH gate: the stub pick_uri below
+ * uses the same type. */
+typedef enum {
+    PICK_OPEN,
+    PICK_OPEN_MULTI,
+    PICK_FOLDER,
+    PICK_SAVE,
+} pick_mode;
+
 #ifdef IRIS_HAVE_PORTAL_WATCH
+#include "a11y_internal.h"
+
+#include <poll.h>
 #include <systemd/sd-bus.h>
+
+#ifdef IRIS_BACKEND_WAYLAND
+#include <wayland-client.h>
+
+/* Implemented by app_wayland.c (hidden visibility within libiris). */
+struct wl_display *iris_wayland__display(void);
+const char *iris_wayland__foreign_handle(void);
+#endif
 
 typedef struct iris_picker_response {
     char *out;       /* single-URI buffer or NUL-separated multi-URI buffer */
@@ -174,14 +204,6 @@ static int on_picker_response(sd_bus_message *message, void *userdata, sd_bus_er
     return 0;
 }
 
-/* mode: 0 = OpenFile (single), 1 = OpenFile (multiple), 2 = OpenFile (folder), 3 = SaveFile */
-typedef enum {
-    PICK_OPEN,
-    PICK_OPEN_MULTI,
-    PICK_FOLDER,
-    PICK_SAVE,
-} pick_mode;
-
 static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const char *default_name,
                     char *out_path, size_t out_cap, size_t *out_used, int *out_count) {
     if (!out_path || out_cap == 0)
@@ -225,7 +247,16 @@ static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const cha
                                         "org.freedesktop.portal.FileChooser", method);
     if (rc < 0)
         goto cleanup;
-    rc = sd_bus_message_append(call, "ss", "", title);
+    /* parent_window: "wayland:<xdg-foreign handle>" when the compositor
+     * exported one (app_wayland.c); empty means "no parent" — the picker is
+     * then not modal to us, which some portals render as a free window. */
+    char parent[128] = "";
+#ifdef IRIS_BACKEND_WAYLAND
+    const char *foreign = iris_wayland__foreign_handle();
+    if (foreign)
+        (void)snprintf(parent, sizeof parent, "wayland:%s", foreign);
+#endif
+    rc = sd_bus_message_append(call, "ss", parent, title);
     if (rc < 0)
         goto cleanup;
     rc = sd_bus_message_open_container(call, SD_BUS_TYPE_ARRAY, "{sv}");
@@ -282,14 +313,71 @@ static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const cha
     if (rc < 0 || !request_path)
         goto cleanup;
 
+    /* Wait for the Response signal. The wait pumps THREE event sources so
+     * the app stays alive while the modal picker is open:
+     *   - the portal bus fd (the answer we are waiting for),
+     *   - the Wayland display fd — the compositor pings xdg_wm_base while a
+     *     modal dialog is up; not answering marks the window unresponsive
+     *     (the audit's "file dialog freezes the app" defect),
+     *   - the AT-SPI bus fd — screen readers keep being served.
+     * The 250 ms cap only keeps the sd-bus poll masks fresh. */
     while (!response.done) {
         do {
             rc = sd_bus_process(bus, NULL);
         } while (rc > 0 && !response.done);
         if (rc < 0)
             goto cleanup;
-        if (!response.done && sd_bus_wait(bus, UINT64_MAX) < 0)
+        if (response.done)
+            break;
+
+        struct pollfd pfds[3];
+        int n = 0;
+        int wl_idx = -1, a11y_idx = -1;
+        int bus_fd = sd_bus_get_fd(bus);
+        if (bus_fd < 0)
             goto cleanup;
+        pfds[n++] = (struct pollfd){.fd = bus_fd, .events = (short)sd_bus_get_events(bus)};
+
+#ifdef IRIS_BACKEND_WAYLAND
+        struct wl_display *wl = iris_wayland__display();
+        if (wl) {
+            /* Flush + drain anything already queued, then watch for more. */
+            wl_display_flush(wl);
+            while (wl_display_dispatch_pending(wl) > 0) {
+            }
+            wl_idx = n;
+            pfds[n++] = (struct pollfd){.fd = wl_display_get_fd(wl), .events = POLLIN};
+        }
+#endif
+        int afd = iris_a11y__fd();
+        short aev = iris_a11y__poll_events();
+        if (afd >= 0 && aev != 0) {
+            a11y_idx = n;
+            pfds[n++] = (struct pollfd){.fd = afd, .events = aev};
+        }
+
+        if (poll(pfds, n, 250) < 0) {
+            if (errno == EINTR)
+                continue;
+            goto cleanup;
+        }
+
+#ifdef IRIS_BACKEND_WAYLAND
+        if (wl_idx >= 0 && (pfds[wl_idx].revents & POLLIN)) {
+            /* Read + dispatch so compositor pings get their pong. Single-
+             * threaded here (the dialog runs on the event-loop thread), so
+             * the prepare_read dance is safe. */
+            while (wl_display_prepare_read(wl) != 0)
+                wl_display_dispatch_pending(wl);
+            wl_display_flush(wl);
+            if (wl_display_read_events(wl) == 0)
+                wl_display_dispatch_pending(wl);
+            else
+                wl_display_cancel_read(wl);
+        }
+#endif
+        if (a11y_idx >= 0 && pfds[a11y_idx].revents)
+            iris_a11y__pump();
     }
     result = response.result;
     if (out_used)

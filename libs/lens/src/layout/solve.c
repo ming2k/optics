@@ -56,6 +56,11 @@ static flux_point measure(lens_node *n) {
     uint32_t n_children = 0;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         flux_point cm = measure(c);
+        /* ABS children are measured (their subtree needs its intrinsic
+         * size for placement) but are NOT accumulated into the parent's
+         * main/cross extent (ADR-0060). */
+        if (c->place == LENS_PLACE_ABS)
+            continue;
         main += pt_main(cm, n->axis);
         float cc = pt_cross(cm, n->axis);
         if (cc > cross)
@@ -80,6 +85,71 @@ static flux_point measure(lens_node *n) {
 
 /* ---- pass 2: arrange (top-down) ---- */
 
+/* Placement area for an ABS node: its place_bounds intersected with the
+ * display, else the whole display (ADR-0060 item 3/5). */
+static flux_rect resolve_place_area(const lens *ui, const lens_node *n) {
+    float dw = ui->input.display_size.x;
+    float dh = ui->input.display_size.y;
+    flux_rect area = {0.0f, 0.0f, dw, dh};
+    if (n->has_place_bounds) {
+        float right = n->place_bounds.x + n->place_bounds.w;
+        float bottom = n->place_bounds.y + n->place_bounds.h;
+        area.x = fmaxf(0.0f, n->place_bounds.x);
+        area.y = fmaxf(0.0f, n->place_bounds.y);
+        right = dw > 0.0f ? fminf(dw, right) : right;
+        bottom = dh > 0.0f ? fminf(dh, bottom) : bottom;
+        area.w = fmaxf(0.0f, right - area.x);
+        area.h = fmaxf(0.0f, bottom - area.y);
+    }
+    return area;
+}
+
+/* Resolve an ABS node's rect from its placement mode against the measured
+ * size (ADR-0060): EXACT takes place_rect's top-left, ANCHORED drops below
+ * the anchor and flips above on overflow, CENTERED centres on the area;
+ * every mode clamps onto the placement area. */
+static flux_rect resolve_abs_rect(const lens *ui, const lens_node *n) {
+    flux_rect area = resolve_place_area(ui, n);
+    float w = n->measured.x;
+    float h = n->measured.y;
+    float x, y;
+    switch (n->mode) {
+    case LENS_PLACE_CENTERED:
+        x = area.x + ((area.w > w) ? (area.w - w) * 0.5f : 0.0f);
+        y = area.y + ((area.h > h) ? (area.h - h) * 0.5f : 0.0f);
+        break;
+    case LENS_PLACE_ANCHORED: {
+        x = n->place_rect.x;
+        y = n->place_rect.y + n->place_rect.h; /* below the anchor */
+        float area_bottom = area.y + area.h;
+        if (area.h > 0.0f && y + h > area_bottom) {
+            float up = n->place_rect.y - h; /* flip above */
+            if (up >= area.y)
+                y = up;
+            else
+                y = (area.h > h) ? area_bottom - h : area.y;
+        }
+        break;
+    }
+    case LENS_PLACE_EXACT:
+    default:
+        x = n->place_rect.x;
+        y = n->place_rect.y;
+        break;
+    }
+    float area_right = area.x + area.w;
+    float area_bottom = area.y + area.h;
+    if (area.w > 0.0f && x + w > area_right)
+        x = area_right - w;
+    if (x < area.x)
+        x = area.x;
+    if (area.h > 0.0f && y + h > area_bottom)
+        y = area_bottom - h;
+    if (y < area.y)
+        y = area.y;
+    return (flux_rect){x, y, w, h};
+}
+
 static float align_offset(lens_align a, float free) {
     switch (a) {
     case LENS_CENTER:
@@ -103,7 +173,7 @@ static float flex_level(const lens_node *parent, lens_axis axis, float space, bo
 
     float total_weight = 0.0f;
     for (const lens_node *c = parent->first_child; c; c = c->next_sibling) {
-        if (c->flex_grow <= 0.0f)
+        if (c->place == LENS_PLACE_ABS || c->flex_grow <= 0.0f)
             continue;
         float base = pt_main(c->measured, axis);
         total_weight += grow ? c->flex_grow : base;
@@ -116,7 +186,7 @@ static float flex_level(const lens_node *parent, lens_axis axis, float space, bo
         float capped_space = 0.0f;
         float active_weight = 0.0f;
         for (const lens_node *c = parent->first_child; c; c = c->next_sibling) {
-            if (c->flex_grow <= 0.0f)
+            if (c->place == LENS_PLACE_ABS || c->flex_grow <= 0.0f)
                 continue;
             float base = pt_main(c->measured, axis);
             float weight = grow ? c->flex_grow : base;
@@ -192,10 +262,13 @@ static void arrange(lens_node *n, flux_rect rect) {
      * Flexible children also form the shrink pool when their intrinsic sizes
      * do not fit. Fixed siblings keep their requested size while the flexible
      * content yields the deficit, matching the common sidebar | content |
-     * inspector layout. */
+     * inspector layout. ABS children take no part in the flow accounting
+     * (ADR-0060): they are resolved by placement mode afterwards. */
     float base = 0;
     uint32_t cnt = 0;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place == LENS_PLACE_ABS)
+            continue;
         base += pt_main(c->measured, ax);
         cnt++;
     }
@@ -218,6 +291,8 @@ static void arrange(lens_node *n, flux_rect rect) {
 
     float cursor = (ax == LENS_ROW) ? inner.x : inner.y;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place == LENS_PLACE_ABS)
+            continue; /* resolved after the flow children (ADR-0060) */
         float main_sz = pt_main(c->measured, ax);
         main_sz += flex_adjustment(c, ax, grow_level, true);
         main_sz -= flex_adjustment(c, ax, shrink_level, false);
@@ -242,6 +317,16 @@ static void arrange(lens_node *n, flux_rect rect) {
         arrange(c, cr);
         cursor += main_sz + n->gap;
     }
+
+    /* ABS children: measured but excluded from the flow above, each is now
+     * resolved by its placement mode and its subtree arranged recursively
+     * (ADR-0060). Sibling order = registration order; the recursion keeps
+     * single-measure/single-arrange determinism for nested ABS nodes. */
+    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place != LENS_PLACE_ABS)
+            continue;
+        arrange(c, resolve_abs_rect(n->ui, c));
+    }
 }
 
 /* ---- scroll clamping (post-arrange) ---- */
@@ -252,35 +337,51 @@ static void shift_subtree(lens_node *n, float dx, float dy) {
     n->prev_rect.x += dx;
     n->prev_rect.y += dy;
     for (lens_node *c = n->first_child; c; c = c->next_sibling)
-        shift_subtree(c, dx, dy);
+        if (c->place != LENS_PLACE_ABS)
+            shift_subtree(c, dx, dy); /* ABS subtrees are placed, not scrolled (ADR-0060) */
 }
 
 static void scroll_clamp_node(lens_node *n) {
     if (n->is_scroll && n->first_child) {
-        /* Content extent is the union of the CHILD rects, seeded from the
-         * first child — not from the viewport corner. Seeding from the
-         * viewport inflates the union whenever a large single-frame delta
+        /* Content extent is the union of the FLOW child rects, seeded from
+         * the first flow child — not from the viewport corner. Seeding from
+         * the viewport inflates the union whenever a large single-frame delta
          * flings every child past the viewport edge (an 800px wheel flick
-         * reads as 800px of content) and the clamp then allows overshoot. */
-        float min_x = n->first_child->final_rect.x;
-        float min_y = n->first_child->final_rect.y;
-        float max_x = min_x + n->first_child->final_rect.w;
-        float max_y = min_y + n->first_child->final_rect.h;
+         * reads as 800px of content) and the clamp then allows overshoot.
+         * ABS children are placed outside the flow (ADR-0060) and never
+         * count toward the scrollable content. */
+        lens_node *seed = NULL;
         for (lens_node *c = n->first_child; c; c = c->next_sibling) {
-            flux_rect r = c->final_rect;
-            if (r.x < min_x)
-                min_x = r.x;
-            if (r.y < min_y)
-                min_y = r.y;
-            if (r.x + r.w > max_x)
-                max_x = r.x + r.w;
-            if (r.y + r.h > max_y)
-                max_y = r.y + r.h;
+            if (c->place != LENS_PLACE_ABS) {
+                seed = c;
+                break;
+            }
         }
-        float content_w = max_x - min_x;
-        float content_h = max_y - min_y;
         float viewport_w = n->final_rect.w - 2.0f * n->pad;
         float viewport_h = n->final_rect.h - 2.0f * n->pad;
+        float content_w = viewport_w;
+        float content_h = viewport_h;
+        if (seed) {
+            float min_x = seed->final_rect.x;
+            float min_y = seed->final_rect.y;
+            float max_x = min_x + seed->final_rect.w;
+            float max_y = min_y + seed->final_rect.h;
+            for (lens_node *c = seed->next_sibling; c; c = c->next_sibling) {
+                if (c->place == LENS_PLACE_ABS)
+                    continue;
+                flux_rect r = c->final_rect;
+                if (r.x < min_x)
+                    min_x = r.x;
+                if (r.y < min_y)
+                    min_y = r.y;
+                if (r.x + r.w > max_x)
+                    max_x = r.x + r.w;
+                if (r.y + r.h > max_y)
+                    max_y = r.y + r.h;
+            }
+            content_w = max_x - min_x;
+            content_h = max_y - min_y;
+        }
 
         float max_scroll_x = content_w > viewport_w ? content_w - viewport_w : 0.0f;
         float max_scroll_y = content_h > viewport_h ? content_h - viewport_h : 0.0f;
@@ -300,61 +401,19 @@ static void scroll_clamp_node(lens_node *n) {
         float dy = old_y - n->scroll_y;
         if (dx != 0.0f || dy != 0.0f) {
             for (lens_node *c = n->first_child; c; c = c->next_sibling)
-                shift_subtree(c, dx, dy);
+                if (c->place != LENS_PLACE_ABS)
+                    shift_subtree(c, dx, dy);
         }
 
-        /* Scrollbar geometry (used for both drawing and thumb hit-testing).
-         * Every dimension and colour comes from the theme so a consumer can
-         * tune the bar to its chrome without touching widget internals. */
-        float thumb_h = 0.0f, track_len = 0.0f, scroll_range = 0.0f, thumb_pos = 0.0f;
+        /* Layout does not emit (ADR-0059): scrollbar chrome moved to the
+         * post-layout finalize walk (skin/scrollbar.c), which reads these
+         * solved rects and also persists the thumb geometry for next
+         * frame's hit-testing. Only the clamped offsets — layout state —
+         * are persisted here. */
         lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
-        bool hovering = ss ? ss->hovering : false;
-        bool dragging = ss ? ss->dragging : false;
-        if (content_h > viewport_h && viewport_h > 4.0f) {
-            lens *ui = n->ui;
-            const lens_theme *t = &ui->theme;
-            float sb_w = t->scrollbar_width;
-            float min_thumb = t->scrollbar_min_thumb_h;
-            thumb_h = viewport_h * viewport_h / content_h;
-            if (thumb_h < min_thumb)
-                thumb_h = min_thumb;
-            if (thumb_h > viewport_h)
-                thumb_h = viewport_h;
-            track_len = viewport_h - thumb_h;
-            scroll_range = content_h - viewport_h;
-            thumb_pos = (scroll_range > 0.0f ? n->scroll_y / scroll_range : 0.0f) * track_len;
-            float sb_x = n->final_rect.w - sb_w;
-            float sb_y = thumb_pos;
-            float radius = t->scrollbar_radius;
-
-            /* track: drawn only when its colour is non-transparent, so a
-             * consumer can opt out of the range hint entirely. */
-            if (t->color_scrollbar_track & 0xff000000u) {
-                lensi_drawlist_push(ui, n,
-                                    (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                                    .rel = {sb_x, 0.0f, sb_w, viewport_h},
-                                                    .color = t->color_scrollbar_track,
-                                                    .radius = radius});
-            }
-            /* thumb: rest / hover / drag colour picked by interaction state */
-            flux_color thumb_color = dragging   ? t->color_scrollbar_thumb_active
-                                     : hovering ? t->color_scrollbar_thumb_hover
-                                                : t->color_scrollbar_thumb;
-            lensi_drawlist_push(ui, n,
-                                (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                                .rel = {sb_x, sb_y, sb_w, thumb_h},
-                                                .color = thumb_color,
-                                                .radius = radius});
-        }
-
-        /* persist clamped offset + thumb geometry for next frame */
         if (ss) {
             ss->offset_x = n->scroll_x;
             ss->offset_y = n->scroll_y;
-            ss->thumb_y = thumb_pos;
-            ss->thumb_h = thumb_h;
-            ss->track_len = track_len;
-            ss->scroll_range = scroll_range;
         }
     }
     for (lens_node *c = n->first_child; c; c = c->next_sibling)
@@ -364,26 +423,6 @@ static void scroll_clamp_node(lens_node *n) {
 void lensi_scroll_clamp(lens *ui) {
     if (ui->root)
         scroll_clamp_node(ui->root);
-}
-
-/* Overlay and panel sub-roots are laid out through lensi_layout_subtree and
- * never see lensi_layout_solve; their scrolls (a dropdown's option list)
- * clamp here, right after the final placement pass. */
-void lensi_scroll_clamp_subtree(lens_node *n) {
-    if (n)
-        scroll_clamp_node(n);
-}
-
-/* Used by the overlay layer (ADR-0037) to lay out a sub-root: a measure
- * pass followed by arrange against the supplied rect. Identical to the
- * root pass but does not touch ui->root and does not run scroll clamping
- * — the overlay layout pass clamps scrolls itself once the final
- * placement is known (lensi_scroll_clamp_subtree). */
-void lensi_layout_subtree(lens_node *n, flux_rect rect) {
-    if (!n)
-        return;
-    measure(n);
-    arrange(n, rect);
 }
 
 void lensi_layout_solve(lens *ui) {

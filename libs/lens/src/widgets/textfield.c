@@ -104,6 +104,9 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
     ui->next_disabled = false;
     ui->next_error = false;
     ui->next_placeholder = NULL;
+    lens_style eff = lensi_style_effective(ui);
+    float font_size = lensi_style_font_size(&eff, t);
+    float padding = lensi_style_padding(&eff, t);
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -122,11 +125,11 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
         ts->sel_anchor = (uint32_t)len;
 
     /* ---- Measure --------------------------------------------------- */
-    lens_text_metrics tm = lensi_text_measure_label(ui, buf ? buf : "", t->font_size, 0.0f);
-    lens_text_metrics fm = lensi_text_measure_label(ui, "Ag", t->font_size, 0.0f);
+    lens_text_metrics tm = lensi_text_measure_label(ui, buf ? buf : "", font_size, 0.0f);
+    lens_text_metrics fm = lensi_text_measure_label(ui, "Ag", font_size, 0.0f);
     float min_w = 160.0f;
-    float w = (n->fixed_w > 0) ? n->fixed_w : fmaxf(tm.width + 2.0f * t->padding, min_w);
-    float h = (n->fixed_h > 0) ? n->fixed_h : fm.height + 2.0f * t->padding;
+    float w = (n->fixed_w > 0) ? n->fixed_w : fmaxf(tm.width + 2.0f * padding, min_w);
+    float h = (n->fixed_h > 0) ? n->fixed_h : fm.height + 2.0f * padding;
     n->measured = (flux_point){w, h};
 
     float text_y = (h - fm.height) * 0.5f;
@@ -135,6 +138,7 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
 
     /* ---- Interaction ----------------------------------------------- */
     lens_response r = lensi_interact(ui, n, true, disabled);
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
     if (r.hovered)
         ui->cursor_hint = LENS_CURSOR_TEXT;
     bool changed = false;
@@ -204,7 +208,7 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
             case LENS_KEY_LEFT: {
                 /* Move by visual position (BiDi-aware); for LTR this is the
                  * previous character. */
-                size_t nv = lensi_text_caret_visual(ui, buf, ts->cursor, false, t->font_size, 0.0f);
+                size_t nv = lensi_text_caret_visual(ui, buf, ts->cursor, false, font_size, 0.0f);
                 if (nv != ts->cursor) {
                     ts->cursor = (uint32_t)nv;
                     if (!shift)
@@ -215,7 +219,7 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
                 break;
             }
             case LENS_KEY_RIGHT: {
-                size_t nv = lensi_text_caret_visual(ui, buf, ts->cursor, true, t->font_size, 0.0f);
+                size_t nv = lensi_text_caret_visual(ui, buf, ts->cursor, true, font_size, 0.0f);
                 if (nv != ts->cursor) {
                     ts->cursor = (uint32_t)nv;
                     if (!shift)
@@ -273,14 +277,14 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
         /* Mouse: a press places the caret (and clears any selection); a
          * drag with the button held extends the selection from that anchor. */
         if (ui->input.mouse_pressed[LENS_MOUSE_LEFT] && r.hovered) {
-            ts->cursor = (uint32_t)mouse_x_to_cursor(ui, buf, len, n, t->padding, ts->scroll_x,
-                                                     t->font_size);
+            ts->cursor = (uint32_t)mouse_x_to_cursor(ui, buf, len, n, padding, ts->scroll_x,
+                                                     font_size);
             sel_clear(ts);
         }
         if (ui->active_id == id && ui->input.mouse_down[LENS_MOUSE_LEFT] &&
             !ui->input.mouse_pressed[LENS_MOUSE_LEFT]) {
-            ts->cursor = (uint32_t)mouse_x_to_cursor(ui, buf, len, n, t->padding, ts->scroll_x,
-                                                     t->font_size);
+            ts->cursor = (uint32_t)mouse_x_to_cursor(ui, buf, len, n, padding, ts->scroll_x,
+                                                     font_size);
         }
         if (ui->active_id == id && !ui->input.mouse_down[LENS_MOUSE_LEFT]) {
             ui->active_id = 0;
@@ -335,54 +339,31 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
         len = (buf && buf_cap) ? strlen(buf) : 0;
 
     /* ---------------------------------------------------------------- */
-    /*  Draw commands                                                   */
+    /*  Skin record precompute (all node-local; the skin never shapes)  */
     /* ---------------------------------------------------------------- */
-
-    /* Background */
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                        .rel = {0, 0, 0, 0},
-                                        .color = t->color_bg,
-                                        .radius = t->corner_radius});
 
     bool has_preedit = r.focused && buf && buf_cap > 1 && ui->input.preedit_utf8[0];
 
-    /* Selection highlight (behind text) */
+    /* Selection highlight quads (one for LTR; several where the selection
+     * crosses a BiDi direction boundary). */
+    flux_rect sel_rects[8];
+    int sel_count = 0;
     bool has_sel = r.focused && sel_active(ts) && !has_preedit && buf && len;
     if (has_sel) {
-        /* One rect for LTR; several where the selection crosses a direction
-         * boundary (BiDi). */
-        lens_text_xrange rects[8];
-        int nr =
-            lensi_text_sel_rects(ui, buf, sel_lo(ts), sel_hi(ts), t->font_size, 0.0f, rects, 8);
-        for (int i = 0; i < nr; i++) {
-            lensi_drawlist_push(ui, n,
-                                (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                                .rel = {t->padding + rects[i].x0, text_y,
-                                                        rects[i].x1 - rects[i].x0, fm.height},
-                                                .color = lensi_color_alpha(t->color_accent, 0x40),
-                                                .radius = 1.0f});
-        }
+        lens_text_xrange xr[8];
+        int nr = lensi_text_sel_rects(ui, buf, sel_lo(ts), sel_hi(ts), font_size, 0.0f, xr, 8);
+        for (int i = 0; i < nr; i++)
+            sel_rects[sel_count++] = (flux_rect){padding + xr[i].x0, text_y,
+                                                 xr[i].x1 - xr[i].x0, fm.height};
     }
 
-    /* Border */
-    flux_color border_color = t->color_border;
-    if (disabled)
-        border_color = t->color_disabled;
-    else if (error)
-        border_color = t->color_error;
-    else if (r.focused)
-        border_color = t->color_accent;
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
-                                        .rel = {0, 0, 0, 0},
-                                        .color = border_color,
-                                        .width = t->border_width,
-                                        .radius = t->corner_radius});
-
     /* Caret X inside the widget (relative to text origin) */
-    float base_caret_x = prefix_width(ui, buf, ts->cursor, t->font_size);
+    float base_caret_x = prefix_width(ui, buf, ts->cursor, font_size);
     float caret_x = base_caret_x;
+
+    const char *display_text = NULL;
+    bool show_placeholder = false;
+    flux_rect preedit_underline = {0, 0, 0, 0};
 
     if (has_preedit) {
         const char *pe = ui->input.preedit_utf8;
@@ -399,55 +380,65 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
             if (len > ts->cursor)
                 memcpy(display + ts->cursor + pe_len, buf + ts->cursor, len - ts->cursor);
             display[display_len] = '\0';
-
-            lensi_drawlist_push(ui, n,
-                                (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                                .rel = {t->padding, text_y, 0, 0},
-                                                .color = t->color_fg,
-                                                .text = display,
-                                                .text_size = t->font_size});
+            display_text = display;
         }
 
         /* Underline beneath the preedit region */
-        float pe_width = prefix_width(ui, pe, pe_len, t->font_size);
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {t->padding + base_caret_x,
-                                                    text_y + fm.height - 1.0f, pe_width, 1.0f},
-                                            .color = t->color_accent});
+        float pe_width = prefix_width(ui, pe, pe_len, font_size);
+        preedit_underline =
+            (flux_rect){padding + base_caret_x, text_y + fm.height - 1.0f, pe_width, 1.0f};
 
         /* Cursor is inside the preedit string */
-        caret_x = base_caret_x + prefix_width(ui, pe, ui->input.preedit_cursor, t->font_size);
+        caret_x = base_caret_x + prefix_width(ui, pe, ui->input.preedit_cursor, font_size);
     } else if (buf && len) {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                            .rel = {t->padding, text_y, 0, 0},
-                                            .color = t->color_fg,
-                                            .text = buf,
-                                            .text_size = t->font_size});
+        display_text = buf;
     } else if (!r.focused && placeholder) {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                            .rel = {t->padding, text_y, 0, 0},
-                                            .color = t->color_disabled,
-                                            .text = placeholder,
-                                            .text_size = t->font_size});
+        display_text = placeholder;
+        show_placeholder = true;
     }
 
-    /* Cursor */
-    if (!disabled && r.focused) {
-        lensi_drawlist_push(
-            ui, n,
-            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                            .rel = {t->padding + caret_x - 1.0f, text_y, 2.0f, fm.height},
-                            .color = t->color_accent,
-                            .radius = 1.0f});
-    }
+    bool show_caret = !disabled && r.focused;
+    flux_rect caret = {padding + caret_x - 1.0f, text_y, 2.0f, fm.height};
 
-    /* Caret rectangle for the platform IME */
+    /* emit — through the replaceable skin (ADR-0059). The arena array is
+     * copied into the per-frame arena by the record walk below, so the
+     * stack staging buffer stays local. */
+    flux_rect *sel_out = NULL;
+    if (sel_count > 0) {
+        sel_out = flux_arena_alloc(&ui->arena, (size_t)sel_count * sizeof *sel_out);
+        if (sel_out)
+            memcpy(sel_out, sel_rects, (size_t)sel_count * sizeof *sel_out);
+        else
+            lensi_set_overflow(ui);
+    }
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_TEXTFIELD,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = label,
+                                    .text = fm,
+                                    .error = error,
+                                    .edit_text = display_text,
+                                    .edit_text_y = text_y,
+                                    .show_placeholder = show_placeholder,
+                                    .sel_rects = sel_out,
+                                    .sel_rect_count = sel_out ? sel_count : 0,
+                                    .caret = caret,
+                                    .show_caret = show_caret,
+                                    .preedit_underline = preedit_underline,
+                                    .has_preedit = has_preedit},
+                    });
+
+    /* Caret rectangle for the platform IME (behaviour, not chrome — stays) */
     if (!disabled && r.focused && buf && buf_cap > 1) {
         lensi_set_caret_rect(ui, (flux_rect){
-                                     n->prev_rect.x + t->padding + caret_x,
+                                     n->prev_rect.x + padding + caret_x,
                                      n->prev_rect.y + text_y,
                                      2.0f,
                                      fm.height,

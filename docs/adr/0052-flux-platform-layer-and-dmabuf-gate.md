@@ -30,13 +30,25 @@ behind a seam without changing Linux behaviour.
 2. **dma-buf is compile-time gated**: `FLUX_HAVE_DMABUF` is defined (in
    both private and public compile args) only when
    `host_machine.system() == 'linux'`. Other platforms compile
-   `src/canvas/dmabuf_stub.c`, which implements every public
+   `src/core/dmabuf_stub.c`, which implements every public
    `flux/dmabuf.h` entry point returning `FLUX_ERROR_UNSUPPORTED` — the
    stub replicates the real implementation's argument-validation order so
    `test_dmabuf` behaves identically on dmabuf-less systems. The stub
    also provides empty internal acquire-semaphore pool functions so
    `device.c`/`frame.c` carry no `#ifdef` at call sites. Public headers
    and the installed header set are identical on all platforms.
+
+   Amendment (2026-08-10 audit fix): the dmabuf sources moved from
+   `src/canvas/` to `src/core/` and compile unconditionally — the
+   core call sites (`device.c` / `surface.c` / `frame.c`) reference the
+   pool helpers and `flux_dmabuf_supported` whether or not the canvas
+   module is enabled, so gating the sources on `-Dcanvas` broke the
+   `-Dcanvas=false` link. The one entry point that genuinely needs
+   canvas internals, `flux_canvas_wait_dmabuf_acquire`, lives in
+   `src/canvas/dmabuf_acquire.c` inside the canvas gate; its platform
+   fork goes through `flux_dmabuf_import_acquire_semaphore` /
+   `flux_dmabuf_close_fd` in the core pair, so it carries no `#ifdef`
+   either.
 3. **`-D_GNU_SOURCE` is Linux-only** in the root `meson.build`; the
    `-Wno-*` project arguments are probed via `cc.get_supported_arguments`
    (MSVC cl errors on unknown options).
@@ -74,4 +86,4 @@ behind a seam without changing Linux behaviour.
   this ADR changes OS shims, not the RHI.
 - [ADR-0049](0049-strict-drm-vulkan-device-selection.md) — the DRM
   device-selection extension stays Linux-only and optional.
-- `libs/flux/src/core/platform.h`, `libs/flux/src/canvas/dmabuf_stub.c`.
+- `libs/flux/src/core/platform.h`, `libs/flux/src/core/dmabuf_stub.c`.

@@ -10,23 +10,31 @@
  */
 
 #include <iris/app.h>
+#include <iris/window.h>
 #include <lens/lens.h>
 
 #include <stdio.h>
 
-/* lens_label uses the theme font size, so we re-theme per line to show a
- * size ramp. (A per-call size parameter is future API; for now the
- * theme carries it.) */
+/* Per-line font size comes from a scoped style (ADR-0061): the pushed
+ * scope restyles exactly the widgets declared before the matching pop —
+ * no theme mutation per line. */
 static void line(lens *ui, float size, const char *text) {
-    lens_theme th = lens_get_theme(ui);
-    th.font_size = size;
-    lens_set_theme(ui, th);
+    lens_style s = lens_style_init();
+    s.fields = LENS_STYLE_FONT_SIZE;
+    s.font_size = size;
+    lens_push_style(ui, s);
     lens_size(ui, 0, size * 1.6f);
     lens_label(ui, text);
+    lens_pop_style(ui);
 }
 
 static void build(lens *ui, const lens_input *in, void *user) {
     (void)user;
+
+    /* Esc quits (the startup line says so). */
+    for (uint32_t k = 0; k < in->key_count; k++)
+        if (in->keys[k].pressed && in->keys[k].key == LENS_KEY_ESCAPE)
+            iris_window_close();
     lens_column_ex(ui, (lens_layout_opts){.pad = 28,
                                           .gap = 6,
                                           .cross = LENS_START,

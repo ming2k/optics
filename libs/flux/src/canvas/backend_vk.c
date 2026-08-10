@@ -77,14 +77,19 @@ static inline flux_vk_canvas *vkc(flux_canvas *c) {
 /*  Owned attachments (stencil + MSAA colour)                         */
 /* ------------------------------------------------------------------ */
 
+/* Release an owned attachment through the device retire queue. A previous
+ * extent's image may still be referenced by batches in flight on the
+ * graphics queue (a resize during recording swaps the attachment while an
+ * earlier frame reads it), and flux_canvas_destroy runs while the surface's
+ * frames are in flight; destroying the VkImage inline can fault the engine
+ * mid-batch. Retiring defers destruction until the queue provably passed
+ * every referencing batch — no wait, no stall. */
 static void owned_image_destroy(flux_canvas *c, canvas_owned_image *owned) {
     flux_device *d = c->device;
-    if (owned->view)
-        vkDestroyImageView(d->device, owned->view, nullptr);
-    if (owned->image)
-        vkDestroyImage(d->device, owned->image, nullptr);
-    if (owned->alloc.memory)
-        flux_vk_deallocate(d, &owned->alloc);
+    if (owned->view || owned->image || owned->alloc.memory) {
+        flux_device_retire_image(d, owned->view, owned->image, &owned->alloc, VK_NULL_HANDLE, 0,
+                                 FLUX_BINDLESS_INVALID, FLUX_BINDLESS_INVALID);
+    }
     *owned = (canvas_owned_image){0};
 }
 
@@ -267,8 +272,10 @@ static void vk_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) {
     flux_vk_canvas *v = vkc(c);
     if (!v)
         return;
-    /* Owned attachments may still be referenced by in-flight frames. */
-    flux_device_wait_idle(c->device);
+    /* Owned attachments may still be referenced by in-flight frames, so
+     * they go through the device retire queue (deferred destruction) —
+     * never a device-wide wait here: stalling the whole GPU at canvas
+     * teardown is exactly the pause class ADR-0021/0022 removed. */
     for (uint32_t i = 0; i < FLUX_MAX_FRAMES_IN_FLIGHT; ++i) {
         attachments_destroy(c, &v->surface_attachments[i]);
         attachments_destroy(c, &v->target_attachments[i]);

@@ -1,6 +1,11 @@
 # ADR-0035: Lens accessibility semantic tree — per-node records and post-end walk
 
-- Status: Accepted
+- Status: Accepted (amended by [ADR-0060](0060-lens-single-tree-placement-and-z-bands.md):
+  item 6 is removed — placed sub-roots live in the single tree, so the
+  pre-order walk visits them in structural position with no special case;
+  amended 2026-08-10: role set widened — LENS_ROLE_PROGRESS/TABLE/ROW/
+  MENUITEM/LINK plus the LENS_A11Y_SELECTED flag; tables map their visible
+  rows to ROLE_ROW child nodes, the selected row carries SELECTED)
 - Date: 2026-07-21
 - Scope: lens (L2 toolkit). Defines the accessibility data model and
   export.

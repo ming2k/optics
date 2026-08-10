@@ -18,4 +18,12 @@ IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb, void *user
 
 IRIS_API void iris_color_scheme_unwatch(void) { /* no-op */ }
 
+int iris_theme__watch_backend(iris_color_scheme_changed_fn cb, void *user) {
+    (void)cb;
+    (void)user;
+    return -1;
+}
+
+void iris_theme__unwatch_backend(void) { /* no-op */ }
+
 #endif /* !IRIS_HAVE_PORTAL_WATCH */

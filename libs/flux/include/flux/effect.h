@@ -68,7 +68,9 @@ typedef struct flux_effect_region {
 typedef struct flux_effect_blur_desc {
     flux_struct_type type; /* FLUX_TYPE_EFFECT_BLUR_DESC */
     const void *next;
-    flux_image *input; /* retained for the dispatch */
+    flux_image *input; /* borrowed, not retained; safe to release right
+                        * after the call — destruction defers through the
+                        * device retire queue past the recorded dispatch */
     float sigma;       /* Gaussian sigma in pixels */
 } flux_effect_blur_desc;
 

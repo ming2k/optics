@@ -9,6 +9,7 @@
 
 #include "app_shell.h"
 #include <iris/app.h>
+#include <iris/window.h>
 #include <lens/lens.h>
 
 #include <stdio.h>
@@ -18,7 +19,7 @@
 typedef struct app {
     bool enable, wrap, dark;
     float volume, zoom, progress;
-    int counter, theme_sel, tab_active;
+    int counter, theme_sel, tab_active, nav_sel;
     char username[64];
     char bio[256];
     const char *theme_items[3];
@@ -42,6 +43,11 @@ static void build(lens *ui, const lens_input *in, void *user) {
     app *a = user;
     lens_theme th = lens_get_theme(ui);
     shell_tones tn = shell_tones_from(&th);
+
+    /* Esc quits (the startup line says so). */
+    for (uint32_t k = 0; k < in->key_count; k++)
+        if (in->keys[k].pressed && in->keys[k].key == LENS_KEY_ESCAPE)
+            iris_window_close();
 
     lens_flex(ui, 1.0f);
     lens_scroll_begin(ui, "root_scroll");
@@ -130,6 +136,10 @@ static void build(lens *ui, const lens_input *in, void *user) {
     if (a->progress > 1.0f)
         a->progress = 0.0f;
     lens_progress(ui, "##prog", a->progress);
+    /* The bar animates on its own: without a per-frame request the backend
+     * drops to the idle cadence (or stops scheduling frames entirely) and
+     * the bar only advances when the user wiggles something. */
+    iris_request_animation_frame();
     lens_close(ui);
 
     /* ── Tabs ────────────────────────────────────────────── */
@@ -146,6 +156,44 @@ static void build(lens *ui, const lens_input *in, void *user) {
         lens_label(ui, "Advanced settings panel.");
     else
         lens_label(ui, "About this application.");
+
+    /* ── Style cascade (ADR-0061) ────────────────────────── */
+    section(ui, "Style cascade (scope + box.style)");
+    lens_label(ui, "A lens_push_style scope restyles everything declared inside it:");
+    row(ui, "Scoped row");
+    lens_style danger = lens_style_init();
+    danger.fields = LENS_STYLE_BG | LENS_STYLE_CORNER_RADIUS;
+    danger.bg = flux_color_rgba(0xC0, 0x30, 0x28, 0xFF);
+    danger.corner_radius = 2.0f;
+    lens_push_style(ui, danger);
+    if (lens_button(ui, "Delete"))
+        printf("delete\n");
+    if (lens_button(ui, "Also danger"))
+        printf("also danger\n");
+    lens_pop_style(ui);
+    if (lens_button(ui, "Back to theme"))
+        printf("themed\n");
+    lens_close(ui);
+
+    /* The icon-button active state is a neutral tint by default. The old
+     * accent treatment is reachable as data — a scope supplies the atoms
+     * (accent glyph + stronger active tile), the widget family stays free
+     * of per-variant APIs (ADR-0061 item 7). */
+    lens_label(ui, "Active icon button, accent treatment via scope atoms:");
+    row(ui, "Nav strip");
+    lens_style nav = lens_style_init();
+    nav.fields = LENS_STYLE_FG | LENS_STYLE_BG_PRESSED;
+    nav.fg = th.color_accent; /* glyph colour at rest and active */
+    nav.bg_pressed = flux_color_rgba(0x3A, 0x6A, 0xC0, 0x30); /* active tile tint */
+    lens_push_style(ui, nav);
+    if (lens_icon_button_active(ui, LENS_ICON_HOME, a->nav_sel == 0))
+        a->nav_sel = 0;
+    if (lens_icon_button_active(ui, LENS_ICON_GLOBE, a->nav_sel == 1))
+        a->nav_sel = 1;
+    if (lens_icon_button_active(ui, LENS_ICON_SETTINGS, a->nav_sel == 2))
+        a->nav_sel = 2;
+    lens_pop_style(ui);
+    lens_close(ui);
 
     /* ── Textarea ────────────────────────────────────────── */
     section(ui, "Textarea");

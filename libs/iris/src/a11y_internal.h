@@ -33,11 +33,4 @@ int iris_a11y__fd(void);
 short iris_a11y__poll_events(void);
 void iris_a11y__pump(void);
 
-/* Drained once per frame by the platform backend (app_wayland.c). If an
- * AT-SPI Action.DoAction call queued a click, fills *out with the widget's
- * centre in UI-space pixels and returns true; the backend synthesizes a
- * press+release there next frame (lens is input-driven). Returns false when
- * nothing is pending. Not part of the public <iris/a11y.h> surface. */
-bool iris_a11y__take_pending_click(flux_point *out);
-
 #endif /* IRIS_A11Y_INTERNAL_H */

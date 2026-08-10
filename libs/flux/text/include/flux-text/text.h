@@ -1,12 +1,15 @@
 /*
- * flux/text.h — text shaping, layout, and glyph-run rendering.
+ * flux-text/text.h — text shaping, layout, and glyph-run rendering.
  *
- * In-tree module of libflux (formerly a separate libflux-text). Shapes
- * UTF-8 plus a style (size, weight, colour) into positioned glyph quads
- * against a device-uploaded coverage atlas, then batches them through
- * flux_canvas_draw_glyph_run. The core canvas does no shaping, kerning,
- * or atlas management — that all lives here, on FreeType + HarfBuzz +
- * Fontconfig + FriBidi (gated by the meson -Dshaping option).
+ * Sibling library of libflux (ADR-0016), built as libflux-text under the
+ * meson -Dtext option and included as <flux-text/text.h>; it links libflux
+ * and feeds its draw primitives. Shapes UTF-8 plus a style (size, weight,
+ * colour) into positioned glyph quads against a device-uploaded coverage
+ * atlas, then batches them through flux_canvas_draw_glyph_run. The core
+ * canvas does no shaping, kerning, or atlas management — that all lives
+ * here, on FreeType + HarfBuzz + Fontconfig + FriBidi (the shaping
+ * backend is probed at configure time; without it the context degrades to
+ * measure-only monospace metrics).
  *
  * API layers
  * ----------
@@ -121,12 +124,25 @@ typedef struct flux_text_desc {
  * measure even when no shaping backend is compiled in (it degrades to
  * monospace metrics internally), so callers never branch on backend
  * availability. Returns an error only on real failure (e.g. allocation).
- * Destroy with flux_text_destroy. */
+ * Destroy with flux_text_destroy.
+ * A non-NULL `desc->device` is retained by the context (released at
+ * flux_text_destroy), so the caller may drop its own reference right after
+ * creation. */
 FLUX_NODISCARD FLUX_API flux_result flux_text_create(const flux_text_desc *desc, flux_text **out);
 FLUX_API void flux_text_destroy(flux_text *t);
 
-/* Set the device-pixel scale used to rasterise glyphs (default 1.0).
- * Constant across a frame; set it once when the surface scale changes. */
+/* Scale contract (single source of truth):
+ *   - flux_text_draw rasterises at the *canvas's* effective scale
+ *     (flux_canvas_get_scale — content scale composed with any stacked
+ *     flux_canvas_scale), so drawn glyphs always match the target surface.
+ *   - flux_text_set_scale drives only the *measure* and caret/selection
+ *     paths, which have no canvas to read.
+ * Hinting makes advances non-linear in scale, so the two must agree for
+ * measured extents to match drawn extents: set this once from the same
+ * value given to flux_canvas_set_scale when the surface scale changes.
+ * The shared layout cache is keyed by the resolved scale, so a matched
+ * pair also means each visible string is shaped once per frame, not
+ * twice. */
 FLUX_API void flux_text_set_scale(flux_text *t, float scale);
 FLUX_API float flux_text_scale(const flux_text *t);
 

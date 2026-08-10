@@ -1,36 +1,21 @@
-/* button.c — filled button (ADR-0031). */
+/* button.c — filled button (ADR-0031). Style cascade: ADR-0058/0061.
+ * Emission lives in the skin (ADR-0059): this file keeps identity,
+ * measuring, interaction, animation, and accessibility, then packs a
+ * record and calls the skin. */
 
 #include "../internal.h"
 
-/* sRGB channel to linear luminance contribution (WCAG 2.x). */
-static float lensi_channel_luminance(float c) {
-    return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
-}
-
-/* Relative luminance of an opaque flux_color, WCAG 2.x coefficients. */
-static float lensi_relative_luminance(uint32_t rgba) {
-    float r = lensi_channel_luminance(((rgba >> 24) & 0xff) / 255.0f);
-    float g = lensi_channel_luminance(((rgba >> 16) & 0xff) / 255.0f);
-    float b = lensi_channel_luminance(((rgba >> 8) & 0xff) / 255.0f);
-    return 0.2126f * r + 0.7152f * g + 0.0722f * b;
-}
-
-/* Button label colour for a filled surface: white reads on dark fills but
- * washes out on light accent fills (e.g. a bright positive green), so pick
- * the side with WCAG contrast — white only when it reaches 4.5:1. */
-static flux_color lensi_button_text_color(uint32_t bg) {
-    float l = lensi_relative_luminance(bg);
-    float white_contrast = 1.05f / (l + 0.05f);
-    if (white_contrast >= 4.5f)
-        return flux_color_rgba(0xff, 0xff, 0xff, 0xff);
-    return flux_color_rgba(0x0d, 0x12, 0x10, 0xff);
-}
-
-bool lens_button(lens *ui, const char *label) {
+/* The widget body runs in fixed phases (ADR-0058): measure through the
+ * text seam -> interact (state bits) -> resolve the style (pure) -> emit.
+ * The style is the cascade-effective one (ADR-0061: per-call box.style >
+ * scope > theme); with nothing set anywhere the built-in default skin
+ * renders the themed default, pixel-identical. */
+static bool button_impl(lens *ui, const char *label) {
     const lens_theme *t = &ui->theme;
     bool disabled = ui->next_disabled;
     ui->next_disabled = false;
     ui->next_error = false; /* drain so it never leaks to a later widget */
+    lens_style eff = lensi_style_effective(ui);
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -38,11 +23,16 @@ bool lens_button(lens *ui, const char *label) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    lens_text_metrics tm = lensi_text_measure_label(ui, label, t->font_size, 0.0f);
-    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * t->padding;
-    float h = (n->fixed_h > 0) ? n->fixed_h : t->font_size + 2.0f * t->padding;
+    /* measure — geometry slots are state-independent, so they come straight
+     * from the shared fallback (cascade wins, else theme). */
+    float font_size = lensi_style_font_size(&eff, t);
+    float padding = lensi_style_padding(&eff, t);
+    lens_text_metrics tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
+    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * padding;
+    float h = (n->fixed_h > 0) ? n->fixed_h : font_size + 2.0f * padding;
     n->measured = (flux_point){w, h};
 
+    /* interact */
     lens_response r = lensi_interact(ui, n, true, disabled);
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0);
     lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, sem_flags);
@@ -53,39 +43,29 @@ bool lens_button(lens *ui, const char *label) {
         n->active_t = lensi_approach(ui, n->active_t, (ui->active_id == id) ? 1.f : 0.f, dt, 18.f);
     }
 
-    flux_color bg =
-        disabled
-            ? t->color_disabled
-            : lensi_lerp_color(t->color_accent, t->color_active,
-                               n->active_t > n->hover_t * 0.4f ? n->active_t : n->hover_t * 0.4f);
+    /* resolve */
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
 
-    float text_y = (h - tm.height) * 0.5f;
-    if (text_y < 0.0f)
-        text_y = 0.0f;
-
-    lensi_drawlist_push(
-        ui, n,
-        (lens_draw_cmd){
-            .kind = LENS_DRAW_RECT, .rel = {0, 0, 0, 0}, .color = bg, .radius = t->corner_radius});
-
-    lensi_drawlist_push(
-        ui, n,
-        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                        .rel = {t->padding, text_y, -1.0f, 0},
-                        .color = disabled ? t->color_fg : lensi_button_text_color(bg),
-                        .text = label,
-                        .text_size = t->font_size});
-
-    if (r.focused)
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
-                                            .rel = {0, 0, 0, 0},
-                                            .color = t->color_fg,
-                                            .radius = t->corner_radius,
-                                            .width = t->border_width});
+    /* emit — through the replaceable skin */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_BUTTON,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = label, .text = tm},
+                    });
 
     ui->last_response = r;
     return r.clicked;
+}
+
+bool lens_button(lens *ui, const char *label) {
+    return button_impl(ui, label);
 }
 
 bool lens_link(lens *ui, const char *label) {
@@ -93,6 +73,7 @@ bool lens_link(lens *ui, const char *label) {
     bool disabled = ui->next_disabled;
     ui->next_disabled = false;
     ui->next_error = false;
+    lens_style eff = lensi_style_effective(ui);
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -100,39 +81,35 @@ bool lens_link(lens *ui, const char *label) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    lens_text_metrics tm = lensi_text_measure_label(ui, label, t->font_size, 0.0f);
+    float font_size = lensi_style_font_size(&eff, t);
+    lens_text_metrics tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
     float w = n->fixed_w > 0.0f ? n->fixed_w : tm.width;
     float h = n->fixed_h > 0.0f ? n->fixed_h : tm.height + 6.0f;
     n->measured = (flux_point){w, h};
 
     lens_response r = lensi_interact(ui, n, true, disabled);
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0);
-    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, sem_flags);
+    lensi_node_semantics(ui, n, LENS_ROLE_LINK, label, NULL, sem_flags);
 
     if (!disabled)
         n->hover_t = lensi_approach(ui, n->hover_t, (r.hovered || r.focused) ? 1.0f : 0.0f,
                                     ui->input.dt_seconds, 18.0f);
 
-    float text_y = fmaxf((h - tm.height) * 0.5f - 1.0f, 0.0f);
-    flux_color fg = disabled ? t->color_disabled
-                             : lensi_lerp_color(t->color_fg, t->color_accent, n->hover_t * 0.35f);
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {0.0f, text_y, 0.0f, 0.0f},
-                                        .color = fg,
-                                        .text = label,
-                                        .text_size = t->font_size,
-                                        .text_weight = 0.0f});
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
 
-    if (n->hover_t > 0.001f) {
-        float underline_w = tm.width * n->hover_t;
-        float underline_y = fminf(text_y + tm.height + 2.0f, h - 1.5f);
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {0.0f, underline_y, underline_w, 1.5f},
-                                            .color = t->color_accent,
-                                            .radius = 0.75f});
-    }
+    /* emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_LINK,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = label, .text = tm},
+                    });
 
     ui->last_response = r;
     return r.clicked;

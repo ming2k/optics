@@ -10,8 +10,7 @@ void lensi_focus_tab(lens *ui) {
 
     bool tab = false;
     for (uint32_t i = 0; i < ui->input.key_count; i++) {
-        if (ui->input.keys[i].key == LENS_KEY_TAB && ui->input.keys[i].pressed &&
-            !ui->input.keys[i].repeat) {
+        if (ui->input.keys[i].key == LENS_KEY_TAB && ui->input.keys[i].pressed) {
             tab = true;
             break;
         }
@@ -50,4 +49,8 @@ void lensi_focus_tab(lens *ui) {
             next = (int)lo;
     }
     ui->focused_id = ui->tab_order[next];
+    /* Tab traversal is keyboard navigation: the newly focused widget shows
+     * a focus ring (LENS_STATE_FOCUS_VISIBLE, ADR-0058) until a pointer
+     * press or a programmatic lens_set_focus revokes the modality. */
+    ui->focus_visible = true;
 }

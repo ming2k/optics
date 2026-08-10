@@ -19,6 +19,7 @@
 #include "app_shell.h"
 #include "ui_events.h"
 #include <iris/app.h>
+#include <iris/window.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -131,6 +132,12 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
     lens_theme th = lens_get_theme(ui);
     shell_tones tn = shell_tones_from(&th);
 
+    /* Esc quits (the startup line says so); an open modal also dismisses
+     * on the same key inside lens. */
+    for (uint32_t k = 0; k < in->key_count; k++)
+        if (in->keys[k].pressed && in->keys[k].key == LENS_KEY_ESCAPE)
+            iris_window_close();
+
     /* ── Menu bar ───────────────────────────────────────────── */
     lens_row_ex(ui, (lens_layout_opts){.gap = 0, .pad = 4, .cross = LENS_CENTER, .bg = tn.toolbar});
     build_menubar(ui, a);
@@ -234,7 +241,7 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
                          (lens_modal_opts){.title = "About this demo",
                                            .backdrop = 0x90000000,
                                            .min_width = 340,
-                                           .dismissable = true})) {
+                                           .pinned = false})) {
         lens_label(ui, "This window composes every ADR-0016..0019 widget:");
         lens_label(ui, "menu bar · submenu · context menu ·");
         lens_label(ui, "resizable split · virtualized table · modal.");

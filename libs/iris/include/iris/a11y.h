@@ -7,32 +7,48 @@
  * The lens side exposes a semantic tree via lens_accessibility_walk
  * (ADR-0035 in docs/adr/). iris_a11y_init connects to the
  * AT-SPI bus and registers the application; iris_a11y_update, called
- * once per frame after lens_end, walks the semantic tree and reconciles
- * the AT-SPI object tree with the live widgets — emitting ChildrenChanged
- * and StateChanged signals so orca (or any other AT-SPI client) sees the
- * current widget names, roles, and focus.
+ * once per frame after lens_end, walks the semantic tree (deep-copying
+ * names/values into bridge-owned storage — the lens pointers are per-frame
+ * arena memory) and reconciles the AT-SPI object tree with the live
+ * widgets, emitting org.a11y.atspi.Event.Object signals so orca (or any
+ * other AT-SPI client) sees the current widget names, roles, and focus.
+ *
+ * Event wire contract (mirrors at-spi2-atk): every event is a signal on
+ * the org.a11y.atspi.Event.Object interface with the "siiva{sv}" shape —
+ * detail name, detail1, detail2, variant payload, properties dict:
+ *   - ChildrenChanged("add"/"remove", index, 0, (so) child-ref) on the
+ *     parent when widgets appear/disappear
+ *   - PropertyChange("accessible-name", 0, 0, s new-name) on renames,
+ *     PropertyChange("accessible-role", 0, 0, u new-role) on role changes,
+ *     PropertyChange("accessible-value", 0, 0, i 0) when a slider /
+ *     progress readout moves (clients re-query the Value interface)
+ *   - StateChanged("focused"/"checked"/"expanded"/"selected", on, 0, i 0)
  *
  * What's covered today:
  *   - Application registration on the AT-SPI bus
  *   - org.a11y.atspi.Accessible: Name, Description, Role, RoleName,
- *     ChildCount, ChildAtIndex, Parent, State
+ *     ChildCount, ChildAtIndex, Parent, State (checked/expanded/selected/
+ *     focused/disabled mapped onto the AT-SPI state bits)
  *   - org.a11y.atspi.Action: GetNActions/GetName/GetDescription/GetActions/
- *     GetKeyBinding + DoAction (synthesize a click at the widget centre —
- *     lens is input-driven, so actions route back through the input queue)
+ *     GetKeyBinding + DoAction — activates through lens_a11y_activate
+ *     (ADR-0062): the widget reports `clicked` through lens's normal
+ *     interaction path next frame; disabled widgets do not fire, pointer
+ *     occlusion does not block. One advertised action: "click".
  *   - org.a11y.atspi.Text: GetCharacterCount/GetText/GetTextAll + caret/
  *     selection queries (read-only; lens exposes no set-caret/selection API,
  *     and its caret is a rect not an offset, so GetCaretOffset reports the
  *     end of the text)
- *   - org.a11y.atspi.Value: CurrentValue (parsed from the slider readout),
- *     MinimumValue/MaximumValue/MinimumIncrement (lens exposes no ranges,
- *     reported as 0)
- *   - ChildrenChanged signals when widgets are added/removed
- *   - StateChanged signals when focus changes
+ *   - org.a11y.atspi.Value: CurrentValue (parsed from the slider/progress
+ *     readout), MinimumValue/MaximumValue/MinimumIncrement (lens exposes no
+ *     ranges, reported as 0)
+ *   - The Event.Object signals listed above, plus TextChanged("insert" /
+ *     "delete", offset, length, s text) computed as the common
+ *     prefix/suffix delta of TEXTFIELD/TEXTAREA values (ADR-0062)
  *
  * What's NOT covered yet:
  *   - Setting slider values / text selection programmatically from the AT
- *     (lens has no set-by-value seam; widgets are input-driven).
- *   - Live region announcements.
+ *     (SetCurrentValue needs per-widget write paths; ADR-0062 defers it).
+ *   - Live region announcements, bounds-changed events.
  */
 #ifndef IRIS_A11Y_H
 #define IRIS_A11Y_H

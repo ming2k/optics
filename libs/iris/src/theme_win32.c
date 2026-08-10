@@ -40,11 +40,17 @@
 
 #include <iris/theme.h>
 
-/* Registered watcher: at most one per process, touched on the iris main
- * thread only (watch/unwatch are documented main-thread-only, and the notify
- * hook runs inside the WndProc on the same thread). */
+#include "theme_watch_internal.h"
+
+/* Registered watchers, touched on the iris main thread only (watch/unwatch
+ * are documented main-thread-only, and the notify hook runs inside the
+ * WndProc on the same thread). Two independent slots: the host's public one
+ * and the platform backend's internal one (theme_watch_internal.h) — the
+ * backend must not consume or overwrite the host's registration. */
 static iris_color_scheme_changed_fn g_cb = NULL;
 static void *g_user = NULL;
+static iris_color_scheme_changed_fn g_backend_cb = NULL;
+static void *g_backend_user = NULL;
 static iris_color_scheme g_last = IRIS_COLOR_SCHEME_PREFER_DARK;
 
 IRIS_API iris_color_scheme iris_query_system_color_scheme(void) {
@@ -85,14 +91,30 @@ IRIS_API void iris_color_scheme_unwatch(void) {
     g_user = NULL;
 }
 
+int iris_theme__watch_backend(iris_color_scheme_changed_fn cb, void *user) {
+    if (!cb)
+        return -1;
+    g_backend_cb = cb;
+    g_backend_user = user;
+    g_last = iris_query_system_color_scheme();
+    return 0;
+}
+
+void iris_theme__unwatch_backend(void) {
+    g_backend_cb = NULL;
+    g_backend_user = NULL;
+}
+
 /* Internal seam (not in any public header): called by app_win32.c's WndProc
  * on WM_SETTINGCHANGE. Runs on the iris main thread; fires the registered
- * callback synchronously when the scheme actually changed. */
+ * callbacks synchronously when the scheme actually changed. */
 void iris_theme_win32__notify_setting_change(void) {
     iris_color_scheme now = iris_query_system_color_scheme();
     if (now != g_last) {
         g_last = now;
         if (g_cb)
             g_cb(now, g_user);
+        if (g_backend_cb)
+            g_backend_cb(now, g_backend_user);
     }
 }

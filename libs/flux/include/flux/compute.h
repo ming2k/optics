@@ -41,6 +41,11 @@ FLUX_NODISCARD FLUX_API flux_result flux_compute_pipeline_create(
 
 FLUX_NODISCARD FLUX_API flux_compute_pipeline *
 flux_compute_pipeline_retain(flux_compute_pipeline *p);
+/* Pipelines do NOT go through the device retire queue: release destroys
+ * the VkPipeline inline. Only release once all GPU work recorded with the
+ * pipeline has completed (its frame-slot fence has signalled, or after
+ * flux_device_wait_idle); destroying a pipeline a batch in flight still
+ * executes is a VUID-vkDestroyPipeline-pipeline-00765 violation. */
 FLUX_API void flux_compute_pipeline_release(flux_compute_pipeline *p);
 
 FLUX_API VkPipeline flux_compute_pipeline_vk_pipeline(flux_compute_pipeline *p);

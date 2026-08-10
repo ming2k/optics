@@ -364,16 +364,22 @@ static void test_compact_outlined_label_preserves_intrinsic_metrics(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 80}, .dt_seconds = 0.016f};
 
+    /* The contour is a style atom now (ADR-0061): the same visual through a
+     * scope, with intrinsic metrics unchanged. */
+    lens_style outline = lens_style_init();
+    outline.fields = LENS_STYLE_OUTLINE_COLOR | LENS_STYLE_OUTLINE_WIDTH;
+    outline.outline_color = flux_color_rgba_premul(0, 0, 0, 180);
+    outline.outline_width = 0.75f;
+
     lens_begin(ui, &in);
     lens_row(ui);
     lens_push_id(ui, "plain");
     lens_label_compact_ex(ui, "12:34", 14.0f);
     lens_pop_id(ui);
     lens_push_id(ui, "outlined");
-    lens_label_compact_outlined_ex(
-        ui, "12:34", 14.0f,
-        (lens_foreground_outline){
-            .color = flux_color_rgba_premul(0, 0, 0, 180), .width = 0.75f});
+    lens_push_style(ui, outline);
+    lens_label_compact_ex(ui, "12:34", 14.0f);
+    lens_pop_style(ui);
     lens_pop_id(ui);
     lens_close(ui);
     lens_end(ui);

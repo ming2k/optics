@@ -85,6 +85,18 @@ typedef struct flux_path_segment {
 #define FLUX_CANVAS_RECORD_IMG_CAP 32u                /* retained images    */
 #define FLUX_CANVAS_RECORD_SAMPLER_CAP 16u            /* retained samplers  */
 
+/* Host-atlas generation registry size (one entry per live producer) and
+ * the sentinel recorded when a glyph run carried no generation
+ * extension — such ops replay unchecked, matching producers that never
+ * rearrange their buffer in place. */
+#define FLUX_CANVAS_HOST_ATLAS_GEN_CAP 8u
+#define FLUX_HOST_ATLAS_UNVERSIONED UINT64_MAX
+
+typedef struct flux_host_atlas_gen {
+    const uint8_t *ptr;
+    uint64_t gen;
+} flux_host_atlas_gen;
+
 enum flux_record_slot_state {
     FLUX_RECORD_SLOT_FREE = 0,
     FLUX_RECORD_SLOT_RECORDING,
@@ -225,6 +237,18 @@ struct flux_canvas {
     const uint8_t *pending_host_atlas;
     uint32_t pending_host_atlas_w;
     uint32_t pending_host_atlas_h;
+    /* Producer content generation for pending_host_atlas, from the
+     * flux_glyph_run_host_atlas_desc extension; FLUX_HOST_ATLAS_UNVERSIONED
+     * when the run carried none. Captured into record ops so replay can
+     * refuse segments whose baked UVs predate an in-place rearrange. */
+    uint64_t pending_host_atlas_gen;
+
+    /* Newest content generation seen per host atlas buffer (see
+     * flux_glyph_run_host_atlas_desc). draw_glyph_run refreshes an entry,
+     * flux_canvas_replay refuses a segment whose recorded generation is
+     * older. Fixed-size, round-robin: one entry per live producer. */
+    flux_host_atlas_gen host_atlas_gens[FLUX_CANVAS_HOST_ATLAS_GEN_CAP];
+    uint32_t host_atlas_gen_next; /* round-robin insert slot */
 
     /* Active blend mode for the next submit, set by submit_triangles*
      * from the paint (ADR: canvas blend modes). The GPU backend uses
@@ -340,10 +364,15 @@ struct flux_record_op {
     uint32_t vert_offset;  /* into the segment's vertex buffer                  */
     uint32_t vert_count;
     /* Host R8 glyph atlas borrowed by the CPU backend (ADR-0019); NULL for
-     * non-glyph ops. Points into flux_text's persistent atlas buffer. */
+     * non-glyph ops. Points into flux_text's persistent atlas buffer.
+     * host_atlas_gen is the producer generation at capture time
+     * (FLUX_HOST_ATLAS_UNVERSIONED when the run carried no extension):
+     * replay refuses the segment when the canvas has since seen a newer
+     * generation for this buffer (texels rearranged, baked UVs stale). */
     const uint8_t *host_atlas;
     uint32_t host_atlas_w;
     uint32_t host_atlas_h;
+    uint64_t host_atlas_gen;
 };
 
 struct flux_canvas_record_slot {
@@ -473,6 +502,11 @@ void canvas_emit(flux_canvas *c, canvas_pipe_id id, const flux_canvas_push *push
 void canvas_record_retain_image(flux_canvas *c, flux_image *img);
 void canvas_record_retain_sampler(flux_canvas *c, flux_sampler *sampler);
 bool canvas_track_foreign_image(flux_canvas *c, flux_image *img);
+
+/* Record the newest producer generation seen for a host coverage buffer
+ * (flux_glyph_run_host_atlas_desc); replay consults it to refuse segments
+ * captured before an in-place atlas rearrange. */
+void canvas_host_atlas_gen_track(flux_canvas *c, const uint8_t *ptr, uint64_t gen);
 
 /* Release every slot's buffers + retained images and free the pool.
  * Called from flux_canvas_destroy. */

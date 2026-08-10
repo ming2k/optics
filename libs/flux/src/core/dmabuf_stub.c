@@ -51,14 +51,17 @@ flux_result flux_dmabuf_format_modifiers(flux_device *d, flux_format format,
     return FLUX_ERROR_UNSUPPORTED;
 }
 
-flux_result flux_canvas_wait_dmabuf_acquire(flux_canvas *canvas, flux_image *image,
-                                            int acquire_sync_fd) {
-    (void)image;
+flux_result flux_dmabuf_import_acquire_semaphore(flux_device *d, int acquire_sync_fd,
+                                                 VkSemaphore *out) {
+    (void)d;
     (void)acquire_sync_fd;
-    if (!canvas)
-        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = VK_NULL_HANDLE;
     FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "dma-buf is only available on Linux");
     return FLUX_ERROR_UNSUPPORTED;
+}
+
+void flux_dmabuf_close_fd(int fd) {
+    (void)fd;
 }
 
 flux_result flux_image_import_dmabuf(flux_device *d, const flux_dmabuf_image_desc *desc,

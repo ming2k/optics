@@ -1,5 +1,5 @@
 //! Small value types shared across the safe surface: geometry, colour, the
-//! interaction response, and overlay options.
+//! interaction response, and placement options.
 
 use lens_sys as sys;
 
@@ -55,7 +55,7 @@ impl TextMetrics {
 pub struct Color(pub sys::flux_color);
 
 impl Color {
-    /// Fully transparent (alpha 0). In overlay options this means "no fill".
+    /// Fully transparent (alpha 0). In place options this means "no fill".
     pub const TRANSPARENT: Color = Color(0);
 
     /// A colour from straight-alpha 8-bit components, stored in flux's
@@ -100,43 +100,43 @@ impl Color {
     }
 }
 
-/// A restrained contour drawn behind text, vector icons, or alpha-backed
-/// images that float over variable imagery or translucent material.
-///
-/// The contour is deliberately opt-in. Use it to preserve foreground
-/// separation where the background cannot be predicted, not as a global
-/// decoration for ordinary content.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ForegroundOutline {
-    pub color: Color,
-    /// Outward visual radius in logical pixels.
-    pub width: f32,
-}
+/// Widget-kind tags for skin replacement ([`crate::Frame::set_skin`],
+/// ADR-0059). Re-exported from the raw bindings: it is a plain fieldless
+/// `u32` enum with no invalid states the C side would reject.
+pub use sys::lens_widget_kind as WidgetKind;
 
-impl ForegroundOutline {
-    pub fn new(color: Color, width: f32) -> Self {
-        Self {
-            color,
-            width: width.max(0.0),
-        }
-    }
+/// Everything a skin needs to draw one widget for one frame (ADR-0059):
+/// kind, state bits, node-local bounds, the resolved style, eased floats,
+/// and the per-kind content payload. Raw bindgen layout mirroring
+/// `lens_widget_record`; strings inside are borrowed for the frame.
+pub use sys::lens_widget_record as WidgetRecord;
 
-    pub(crate) fn raw(self) -> sys::lens_foreground_outline {
-        sys::lens_foreground_outline {
-            color: self.color.raw(),
-            width: self.width.max(0.0),
-        }
-    }
-}
+/// The per-kind content payload of a [`WidgetRecord`]. Raw bindgen layout
+/// mirroring `lens_widget_content`; a member is meaningful only for the
+/// kinds its C comment lists.
+pub use sys::lens_widget_content as WidgetContent;
 
-impl Default for ForegroundOutline {
-    fn default() -> Self {
-        Self {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-        }
-    }
-}
+/// One wrapped/visible text line in a LABEL or TEXTAREA record payload.
+/// Raw bindgen layout mirroring `lens_text_line`.
+pub use sys::lens_text_line as TextLine;
+
+/// One column band in a TABLE record payload. Raw bindgen layout mirroring
+/// `lens_grid_column`.
+pub use sys::lens_grid_column as GridColumn;
+
+/// One visible row in a TABLE record payload. Raw bindgen layout mirroring
+/// `lens_grid_row`.
+pub use sys::lens_grid_row as GridRow;
+
+/// A fully-resolved style (ADR-0058) as handed to skins in the record.
+/// Raw bindgen layout mirroring `lens_style_resolved`.
+pub use sys::lens_style_resolved as StyleResolved;
+
+/// A skin function (ADR-0059): draws one widget for one frame from its
+/// record. Raw `extern "C"` pointers for now — closure trampolines that
+/// would let safe Rust closures act as skins are future work (noted in
+/// the ADR). `None` restores/falls through to the default skin.
+pub type SkinFn = sys::lens_skin_fn;
 
 /// Cross-axis alignment, mirroring `lens_align`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,74 +165,18 @@ pub struct TableOpts {
     pub zebra: bool,
 }
 
-/// Visual relationship between tabs in a [`crate::Frame::tabs_ex`] strip.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TabStyle {
-    /// Compact independent tabs with the standard Lens active indicator.
-    #[default]
-    Standard,
-    /// Tabs share a rail; the active surface joins adjacent tabs with curved
-    /// connectors and follows the theme's active/accent colours.
-    Connected,
-    /// Compact tabs with a theme-coloured indicator whose independently
-    /// sprung edges stretch and settle when selection changes.
-    Indicator,
-}
-
-/// Presentation options for a tab strip. Zero/transparent values inherit the
-/// current theme, so selecting a style does not require duplicating tokens.
-#[derive(Debug, Clone, Copy)]
+/// Structural options for a tab strip (ADR-0061: the presentation knobs
+/// retired into the style cascade and caller-owned skins; the default skin
+/// draws the neutral static indicator).
+#[derive(Debug, Clone, Copy, Default)]
 pub struct TabsOpts {
-    pub style: TabStyle,
-    pub rail_color: Color,
-    pub active_color: Color,
-    pub hover_color: Color,
-    pub indicator_color: Color,
-    pub radius: f32,
-    pub connector_size: f32,
-    pub indicator_thickness: f32,
-    pub indicator_gap: f32,
-    pub indicator_padding: f32,
     /// Give every tab the same share of the strip's available width.
-    /// This layout policy is independent of [`TabStyle`].
     pub equal_width: bool,
-}
-
-impl Default for TabsOpts {
-    fn default() -> Self {
-        Self {
-            style: TabStyle::Standard,
-            rail_color: Color::TRANSPARENT,
-            active_color: Color::TRANSPARENT,
-            hover_color: Color::TRANSPARENT,
-            indicator_color: Color::TRANSPARENT,
-            radius: 0.0,
-            connector_size: 0.0,
-            indicator_thickness: 0.0,
-            indicator_gap: 0.0,
-            indicator_padding: 0.0,
-            equal_width: false,
-        }
-    }
 }
 
 impl TabsOpts {
     pub(crate) fn to_raw(self) -> sys::lens_tabs_opts {
         sys::lens_tabs_opts {
-            style: match self.style {
-                TabStyle::Standard => sys::lens_tab_style::LENS_TAB_STYLE_STANDARD,
-                TabStyle::Connected => sys::lens_tab_style::LENS_TAB_STYLE_CONNECTED,
-                TabStyle::Indicator => sys::lens_tab_style::LENS_TAB_STYLE_INDICATOR,
-            },
-            rail_color: self.rail_color.raw(),
-            active_color: self.active_color.raw(),
-            hover_color: self.hover_color.raw(),
-            indicator_color: self.indicator_color.raw(),
-            radius: self.radius.max(0.0),
-            connector_size: self.connector_size.max(0.0),
-            indicator_thickness: self.indicator_thickness.max(0.0),
-            indicator_gap: self.indicator_gap.max(0.0),
-            indicator_padding: self.indicator_padding.max(0.0),
             equal_width: self.equal_width,
         }
     }
@@ -273,7 +217,7 @@ impl Align {
 #[derive(Debug, Clone, Copy)]
 pub struct Response {
     /// Last frame's final rect (what was hit-tested) — the natural anchor for
-    /// an [`crate::OverlayOpts`] popup.
+    /// a [`crate::PlaceOpts`] popup.
     pub rect: Rect,
     pub hovered: bool,
     pub pressed: bool,
@@ -282,6 +226,10 @@ pub struct Response {
     pub middle_clicked: bool,
     pub changed: bool,
     pub focused: bool,
+    /// Explicit widget-state bits (ADR-0058): a bitflag superset of the
+    /// boolean fields above, plus widget-owned bits like
+    /// [`WidgetState::SELECTED`] and [`WidgetState::ACTIVE`].
+    pub state: WidgetState,
 }
 
 impl Response {
@@ -295,7 +243,63 @@ impl Response {
             middle_clicked: r.middle_clicked,
             changed: r.changed,
             focused: r.focused,
+            state: WidgetState(r.state),
         }
+    }
+}
+
+/// Widget state bits, mirroring the C `lens_widget_state` flags (ADR-0058).
+/// The interaction core reports hover/press/focus/disabled; widgets add the
+/// bits only they know — selection, toggle on-state, dragging.
+/// [`WidgetState::FOCUS_VISIBLE`] means focused via keyboard navigation
+/// (Tab traversal); a pointer click focuses without it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WidgetState(pub u32);
+
+impl WidgetState {
+    pub const EMPTY: Self = Self(0);
+    pub const HOVERED: Self = Self(sys::lens_widget_state::LENS_STATE_HOVERED as u32);
+    pub const PRESSED: Self = Self(sys::lens_widget_state::LENS_STATE_PRESSED as u32);
+    pub const FOCUSED: Self = Self(sys::lens_widget_state::LENS_STATE_FOCUSED as u32);
+    pub const FOCUS_VISIBLE: Self = Self(sys::lens_widget_state::LENS_STATE_FOCUS_VISIBLE as u32);
+    pub const DISABLED: Self = Self(sys::lens_widget_state::LENS_STATE_DISABLED as u32);
+    pub const SELECTED: Self = Self(sys::lens_widget_state::LENS_STATE_SELECTED as u32);
+    pub const ACTIVE: Self = Self(sys::lens_widget_state::LENS_STATE_ACTIVE as u32);
+    pub const DRAGGED: Self = Self(sys::lens_widget_state::LENS_STATE_DRAGGED as u32);
+
+    /// True when every bit in `other` is set.
+    pub fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// True when any bit in `other` is set.
+    pub fn intersects(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+
+    /// True when no bits are set.
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl std::ops::BitOr for WidgetState {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for WidgetState {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl std::ops::BitAnd for WidgetState {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
     }
 }
 
@@ -378,16 +382,6 @@ impl Theme {
     /// Set the shared border stroke width used by bordered controls.
     pub fn with_border_width(mut self, width: f32) -> Theme {
         self.0.border_width = width.max(0.0);
-        self
-    }
-
-    /// Set the optional active-indicator width used by selectable rows and
-    /// ghost icon buttons ([`crate::Frame::icon_button_active`]). When > 0,
-    /// the active state draws a flush left accent rail of this width and tints
-    /// the glyph or text with the accent colour. The default is 0: no rail,
-    /// with the background tint as the plain active treatment.
-    pub fn with_active_indicator_width(mut self, width: f32) -> Theme {
-        self.0.active_indicator_width = width.max(0.0);
         self
     }
 
@@ -591,6 +585,128 @@ impl Default for Theme {
     }
 }
 
+/// A per-instance style override for a single widget call (ADR-0058),
+/// wrapping `lens_style`. Every field is optional: only the fields set
+/// through the `with_*` methods are marked in the C side's `fields` mask,
+/// and unset fields fall back to the active theme inside the style
+/// resolver — so `Style::default()` renders exactly the themed default.
+/// State feedback comes along for free: setting [`Style::with_bg`] derives
+/// the hover/pressed surfaces, and a disabled widget dims instance colours.
+///
+/// ```no_run
+/// # let mut ui = lens::Ui::headless().unwrap();
+/// # let input = lens::Input::default();
+/// ui.frame(&input, |f| {
+///     let danger = lens::Style::default().with_bg(lens::Color::rgba(0xc0, 0x20, 0x20, 0xff));
+///     f.push_style(danger); // every widget declared inside the scope
+///     if f.button("Delete") { /* ... */ }
+///     f.pop_style();
+/// });
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Style(pub(crate) sys::lens_style);
+
+impl Style {
+    /// An empty style: nothing set, everything resolves to the theme.
+    pub fn new() -> Style {
+        Style::default()
+    }
+
+    /// Resting surface colour. For a button this replaces the accent body.
+    pub fn with_bg(mut self, color: Color) -> Style {
+        self.0.bg = color.raw();
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_BG as u32;
+        self
+    }
+
+    /// Hovered surface colour. Derived from `bg` when only `bg` is set.
+    pub fn with_bg_hover(mut self, color: Color) -> Style {
+        self.0.bg_hover = color.raw();
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_BG_HOVER as u32;
+        self
+    }
+
+    /// Pressed/selected surface colour (theme: `color_active`). A selected
+    /// selectable row paints this; derived from `bg` when only `bg` is set.
+    pub fn with_bg_pressed(mut self, color: Color) -> Style {
+        self.0.bg_pressed = color.raw();
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_BG_PRESSED as u32;
+        self
+    }
+
+    /// Foreground colour for text and glyphs.
+    pub fn with_fg(mut self, color: Color) -> Style {
+        self.0.fg = color.raw();
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_FG as u32;
+        self
+    }
+
+    /// Border stroke colour.
+    pub fn with_border(mut self, color: Color) -> Style {
+        self.0.border = color.raw();
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_BORDER as u32;
+        self
+    }
+
+    /// Accent colour (rails, emphasis).
+    pub fn with_accent(mut self, color: Color) -> Style {
+        self.0.accent = color.raw();
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_ACCENT as u32;
+        self
+    }
+
+    /// Corner radius in logical pixels.
+    pub fn with_corner_radius(mut self, radius: f32) -> Style {
+        self.0.corner_radius = radius.max(0.0);
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_CORNER_RADIUS as u32;
+        self
+    }
+
+    /// Border stroke width in logical pixels.
+    pub fn with_border_width(mut self, width: f32) -> Style {
+        self.0.border_width = width.max(0.0);
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_BORDER_WIDTH as u32;
+        self
+    }
+
+    /// Internal padding in logical pixels.
+    pub fn with_padding(mut self, padding: f32) -> Style {
+        self.0.padding = padding.max(0.0);
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_PADDING as u32;
+        self
+    }
+
+    /// Inter-child gap in logical pixels.
+    pub fn with_gap(mut self, gap: f32) -> Style {
+        self.0.gap = gap.max(0.0);
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_GAP as u32;
+        self
+    }
+
+    /// Font size in logical pixels.
+    pub fn with_font_size(mut self, size: f32) -> Style {
+        self.0.font_size = size.max(1.0);
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_FONT_SIZE as u32;
+        self
+    }
+
+    /// Contour colour behind foreground content (text, glyphs, images)
+    /// floating over imagery or translucent material (ADR-0061: the retired
+    /// `*_outlined` variants' effect as a style atom).
+    pub fn with_outline_color(mut self, color: Color) -> Style {
+        self.0.outline_color = color.raw();
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_OUTLINE_COLOR as u32;
+        self
+    }
+
+    /// Contour radius in logical pixels; see [`Style::with_outline_color`].
+    pub fn with_outline_width(mut self, width: f32) -> Style {
+        self.0.outline_width = width.max(0.0);
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_OUTLINE_WIDTH as u32;
+        self
+    }
+}
+
 /// A built-in vector icon glyph, for [`crate::Frame::icon`] and
 /// [`crate::Frame::icon_button`]. Mirrors a subset of `lens_icon_id`; reach for
 /// `sys::lens_icon_id` directly for ids not listed here.
@@ -728,9 +844,9 @@ impl Icon {
 
 /// Options for a modal dialog ([`crate::Frame::modal`], ADR-0039).
 ///
-/// A modal is a centered overlay with a dim backdrop that eclipses the base
-/// tree, plus a Tab focus trap so keyboard cycling stays inside the dialog
-/// body.
+/// A modal is a centered transient popup with a dim backdrop that occludes
+/// the base tree, plus a Tab focus trap so keyboard cycling stays inside
+/// the dialog body.
 #[derive(Debug, Clone, Copy)]
 pub struct ModalOpts<'a> {
     /// Optional heading drawn at the top of the dialog.
@@ -740,8 +856,9 @@ pub struct ModalOpts<'a> {
     pub backdrop: Color,
     /// Content minimum width in logical px; 0 selects the library default.
     pub min_width: f32,
-    /// When true (the default), Escape and click-outside close the dialog.
-    pub dismissable: bool,
+    /// When true, the dialog is pinned: Escape and click-outside do NOT
+    /// close it. The default is false (dismissable).
+    pub pinned: bool,
 }
 
 impl Default for ModalOpts<'_> {
@@ -750,39 +867,134 @@ impl Default for ModalOpts<'_> {
             title: None,
             backdrop: Color::TRANSPARENT,
             min_width: 0.0,
-            dismissable: true,
+            pinned: false,
         }
     }
 }
 
-/// Appearance of a floating overlay layer ([`crate::Frame::overlay`]).
-/// `Default` is a borderless, fill-less layer with small padding.
-#[derive(Debug, Clone, Copy)]
-pub struct OverlayOpts {
-    pub gap: f32,
-    pub pad: f32,
-    pub cross: Align,
-    /// Background fill; [`Color::TRANSPARENT`] means none.
-    pub bg: Color,
-    /// Border stroke; [`Color::TRANSPARENT`] means none.
-    pub border: Color,
-    pub border_width: f32,
-    pub radius: f32,
-    /// Sets a fixed minimum width on the layer when > 0.
-    pub min_width: f32,
+/// A closed z band for an absolutely-placed subtree ([`crate::Frame::place`],
+/// ADR-0060). There is no numeric z, ever: within a band, later registration
+/// paints (and hit-tests) above earlier. Flow content is always
+/// [`Band::Base`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Band {
+    /// Below the base tree; hit-transparent by default (see
+    /// [`PlaceOpts::interactive`]).
+    Backdrop,
+    /// The base tree itself (flow nodes live here).
+    Base,
+    /// Persistent chrome: docks, status bars.
+    Chrome,
+    /// Transient popups: dropdowns, menus, modals.
+    #[default]
+    Popup,
+    /// Above everything: drag ghosts, tooltips.
+    Topmost,
 }
 
-impl Default for OverlayOpts {
-    fn default() -> OverlayOpts {
-        OverlayOpts {
-            gap: 4.0,
-            pad: 6.0,
-            cross: Align::Stretch,
-            bg: Color::TRANSPARENT,
-            border: Color::TRANSPARENT,
-            border_width: 0.0,
-            radius: 0.0,
-            min_width: 0.0,
+impl Band {
+    pub(crate) fn raw(self) -> sys::lens_band {
+        match self {
+            Band::Backdrop => sys::lens_band::LENS_BAND_BACKDROP,
+            Band::Base => sys::lens_band::LENS_BAND_BASE,
+            Band::Chrome => sys::lens_band::LENS_BAND_CHROME,
+            Band::Popup => sys::lens_band::LENS_BAND_POPUP,
+            Band::Topmost => sys::lens_band::LENS_BAND_TOPMOST,
+        }
+    }
+}
+
+/// How a placed subtree's `rect`/`bounds` resolve to a position
+/// ([`crate::Frame::place`], ADR-0060).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlaceMode {
+    /// `rect` is the top-left position plus a minimum extent (persistent
+    /// chrome, scrims); clamped to the bounds.
+    Exact,
+    /// `rect` is the owner anchor: probe at it, drop below, flip above on
+    /// overflow, clamp (dropdowns, menus).
+    #[default]
+    Anchored,
+    /// Centred on the bounds; `rect` ignored (modal dialogs).
+    Centered,
+}
+
+impl PlaceMode {
+    pub(crate) fn raw(self) -> sys::lens_place_mode {
+        match self {
+            PlaceMode::Exact => sys::lens_place_mode::LENS_PLACE_EXACT,
+            PlaceMode::Anchored => sys::lens_place_mode::LENS_PLACE_ANCHORED,
+            PlaceMode::Centered => sys::lens_place_mode::LENS_PLACE_CENTERED,
+        }
+    }
+}
+
+/// Placement of an absolutely-positioned container sub-root
+/// ([`crate::Frame::place`], ADR-0060). `Default` is an anchored, transient
+/// POPUP with small padding — the dropdown/menu case.
+#[derive(Debug, Clone, Copy)]
+pub struct PlaceOpts {
+    /// Z band for the subtree.
+    pub band: Band,
+    /// How `rect`/`bounds` resolve to a position.
+    pub mode: PlaceMode,
+    /// [`PlaceMode::Exact`]: top-left + minimum extent;
+    /// [`PlaceMode::Anchored`]: owner anchor (counts as inside for
+    /// click-outside dismissal); [`PlaceMode::Centered`]: ignored.
+    pub rect: Rect,
+    /// Placement + render boundary; zero-sized means the display.
+    pub bounds: Rect,
+    /// Open-set managed: the body builds only while the id is open
+    /// ([`crate::Frame::place_open`]); Escape and click-outside dismiss it.
+    pub transient: bool,
+    /// [`Band::Backdrop`] only: opt into hit-testing. All other bands
+    /// always occlude/hit normally.
+    pub interactive: bool,
+    /// The subtree's internal flexbox + surface (gap/pad/cross, bg, border,
+    /// radius; `min_width` > 0 fixes the node's width, as do `width` /
+    /// an EXACT `rect.w`).
+    pub layout: LayoutOpts,
+}
+
+impl Default for PlaceOpts {
+    fn default() -> PlaceOpts {
+        PlaceOpts {
+            band: Band::Popup,
+            mode: PlaceMode::Anchored,
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            transient: true,
+            interactive: false,
+            layout: LayoutOpts {
+                gap: 4.0,
+                pad: 6.0,
+                cross: Align::Stretch,
+                ..LayoutOpts::default()
+            },
+        }
+    }
+}
+
+impl PlaceOpts {
+    pub(crate) fn to_raw(self) -> sys::lens_place_opts {
+        sys::lens_place_opts {
+            band: self.band.raw(),
+            mode: self.mode.raw(),
+            rect: self.rect.to_raw(),
+            bounds: self.bounds.to_raw(),
+            transient: self.transient,
+            interactive: self.interactive,
+            layout: self.layout.to_raw(),
         }
     }
 }
@@ -822,6 +1034,10 @@ pub struct LayoutOpts {
     pub bg: Color,
     /// Corner radius of the background fill.
     pub radius: f32,
+    /// Border stroke; [`Color::TRANSPARENT`] means none.
+    pub border: Color,
+    /// Border stroke width when `border` is visible.
+    pub border_width: f32,
 }
 
 impl Default for LayoutOpts {
@@ -839,6 +1055,8 @@ impl Default for LayoutOpts {
             cross: Align::Stretch,
             bg: Color::TRANSPARENT,
             radius: 0.0,
+            border: Color::TRANSPARENT,
+            border_width: 0.0,
         }
     }
 }
@@ -854,6 +1072,7 @@ impl LayoutOpts {
                 disabled: false,
                 error: false,
                 tooltip: std::ptr::null(),
+                style: sys::lens_style::default(),
             },
             min_width: self.min_width,
             max_width: self.max_width,
@@ -864,21 +1083,8 @@ impl LayoutOpts {
             cross: self.cross.raw(),
             bg: self.bg.raw(),
             radius: self.radius,
-        }
-    }
-}
-
-impl OverlayOpts {
-    pub(crate) fn to_raw(self) -> sys::lens_overlay_opts {
-        sys::lens_overlay_opts {
-            gap: self.gap,
-            pad: self.pad,
-            cross: self.cross.raw(),
-            bg: self.bg.raw(),
             border: self.border.raw(),
             border_width: self.border_width,
-            radius: self.radius,
-            min_width: self.min_width,
         }
     }
 }

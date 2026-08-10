@@ -152,6 +152,7 @@ static void slot_capture(flux_canvas *c, flux_canvas_record_slot *s, canvas_pipe
     op->host_atlas = c->pending_host_atlas;
     op->host_atlas_w = c->pending_host_atlas_w;
     op->host_atlas_h = c->pending_host_atlas_h;
+    op->host_atlas_gen = c->pending_host_atlas_gen;
     memcpy(s->verts + s->vert_count, verts, (size_t)vertex_count * sizeof(*verts));
     s->vert_count += vertex_count;
 }
@@ -194,6 +195,40 @@ void canvas_record_retain_sampler(flux_canvas *c, flux_sampler *sampler) {
         }
         s->samplers[s->sampler_count++] = flux_sampler_retain(sampler);
     }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Host-atlas generation registry                                    */
+/*                                                                    */
+/*  A host coverage buffer (ADR-0019 CPU glyph path) is borrowed by    */
+/*  pointer, never copied, so a recorded segment's baked UVs are only  */
+/*  faithful while the producer has not rearranged the buffer's        */
+/*  texels. Producers tag runs with a content generation               */
+/*  (flux_glyph_run_host_atlas_desc); the canvas remembers the newest  */
+/*  generation seen per buffer and replay refuses older segments.      */
+/* ------------------------------------------------------------------ */
+
+void canvas_host_atlas_gen_track(flux_canvas *c, const uint8_t *ptr, uint64_t gen) {
+    for (uint32_t i = 0; i < FLUX_CANVAS_HOST_ATLAS_GEN_CAP; ++i) {
+        if (c->host_atlas_gens[i].ptr == ptr) {
+            c->host_atlas_gens[i].gen = gen;
+            return;
+        }
+    }
+    uint32_t slot = c->host_atlas_gen_next;
+    c->host_atlas_gens[slot] = (flux_host_atlas_gen){.ptr = ptr, .gen = gen};
+    c->host_atlas_gen_next = (slot + 1u) % FLUX_CANVAS_HOST_ATLAS_GEN_CAP;
+}
+
+/* True while the canvas has never seen a newer generation for `ptr` than
+ * the one recorded. An unknown pointer means no generation-tagged run for
+ * the buffer was ever drawn on this canvas — nothing to contradict the
+ * recorded generation. */
+static bool host_atlas_gen_current(const flux_canvas *c, const uint8_t *ptr, uint64_t gen) {
+    for (uint32_t i = 0; i < FLUX_CANVAS_HOST_ATLAS_GEN_CAP; ++i)
+        if (c->host_atlas_gens[i].ptr == ptr)
+            return c->host_atlas_gens[i].gen == gen;
+    return true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -291,6 +326,16 @@ bool flux_canvas_replay(flux_canvas *c, flux_canvas_record rec) {
         return false;
     if (memcmp(&s->anchor_scissor, &cur->scissor, sizeof(flux_recti)) != 0)
         return false;
+    /* Host-atlas check: a glyph batch's baked UVs only stay faithful while
+     * the producer has not rearranged the buffer since the segment was
+     * captured (flux_glyph_run_host_atlas_desc). Refuse up front so a stale
+     * segment draws nothing rather than mis-sampling moved texels. */
+    for (uint32_t i = 0; i < s->op_count; ++i) {
+        const flux_record_op *op = &s->ops[i];
+        if (op->host_atlas && op->host_atlas_gen != FLUX_HOST_ATLAS_UNVERSIONED &&
+            !host_atlas_gen_current(c, op->host_atlas, op->host_atlas_gen))
+            return false;
+    }
     for (uint32_t i = 0; i < s->image_count; ++i) {
         if (!canvas_track_foreign_image(c, s->images[i]))
             return false;
@@ -301,6 +346,7 @@ bool flux_canvas_replay(flux_canvas *c, flux_canvas_record rec) {
     const uint8_t *saved_atlas = c->pending_host_atlas;
     const uint32_t saved_atlas_w = c->pending_host_atlas_w;
     const uint32_t saved_atlas_h = c->pending_host_atlas_h;
+    const uint64_t saved_atlas_gen = c->pending_host_atlas_gen;
 
     for (uint32_t i = 0; i < s->op_count; ++i) {
         const flux_record_op *op = &s->ops[i];
@@ -313,6 +359,7 @@ bool flux_canvas_replay(flux_canvas *c, flux_canvas_record rec) {
         c->pending_host_atlas = op->host_atlas;
         c->pending_host_atlas_w = op->host_atlas_w;
         c->pending_host_atlas_h = op->host_atlas_h;
+        c->pending_host_atlas_gen = op->host_atlas_gen;
         /* A replay inside an active recording is captured too, so a
          * re-recording ancestor ends up with a complete segment even
          * when an unchanged child took the replay path. */
@@ -326,6 +373,7 @@ bool flux_canvas_replay(flux_canvas *c, flux_canvas_record rec) {
     c->pending_host_atlas = saved_atlas;
     c->pending_host_atlas_w = saved_atlas_w;
     c->pending_host_atlas_h = saved_atlas_h;
+    c->pending_host_atlas_gen = saved_atlas_gen;
 
     s->last_used = ++c->record_tick;
     c->records_replayed++;

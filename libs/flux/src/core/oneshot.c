@@ -608,6 +608,37 @@ flux_result flux_uploads_flush(flux_device *d) {
 /*  One-shot buffer upload                                            */
 /* ------------------------------------------------------------------ */
 
+/* Make a vkCmdCopyBuffer's transfer write visible to every later read
+ * consumer of a flux buffer (vertex/index fetches, uniform/storage reads,
+ * buffer-reference loads). Same-queue submission order alone orders
+ * execution but carries no memory visibility, so the copy needs an explicit
+ * transfer-write -> shader-read dependency — the buffer counterpart of
+ * record_image_upload's post barrier. Shared by the direct graphics-queue
+ * path and by upload batches (which record graphics-side too). */
+static void record_buffer_copy_barrier(VkCommandBuffer cmd, VkBuffer dst, VkDeviceSize offset,
+                                       VkDeviceSize size) {
+    VkBufferMemoryBarrier2 post = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT |
+                        VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT |
+                         VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+        .buffer = dst,
+        .offset = offset,
+        .size = size,
+    };
+    VkDependencyInfo di = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .bufferMemoryBarrierCount = 1,
+        .pBufferMemoryBarriers = &post,
+    };
+    vkCmdPipelineBarrier2(cmd, &di);
+}
+
 flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize offset,
                                      const void *data, VkDeviceSize size) {
     if (size == 0)
@@ -646,6 +677,7 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
     if (d->upload_batch_open) {
         VkBufferCopy region = {.srcOffset = 0, .dstOffset = offset, .size = size};
         vkCmdCopyBuffer(d->upload_batch_cmd, staging->buffer, dst, 1, &region);
+        record_buffer_copy_barrier(d->upload_batch_cmd, dst, offset, size);
         flux_vk_upload_batch_attach_staging(d, staging);
         flux_platform_mutex_unlock(&d->upload_lock);
         return FLUX_OK;
@@ -680,6 +712,11 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
                                .bufferMemoryBarrierCount = 1,
                                .pBufferMemoryBarriers = &rel};
         vkCmdPipelineBarrier2(xfer_cmd, &di);
+    } else {
+        /* Same-queue direct upload: execution order with later batches is
+         * implicit, visibility is not — make the transfer write readable by
+         * the frame work that follows on the graphics queue. */
+        record_buffer_copy_barrier(xfer_cmd, dst, offset, size);
     }
 
     vr = vkEndCommandBuffer(xfer_cmd);

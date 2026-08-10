@@ -1,6 +1,8 @@
 # ADR-0028: Lens two-phase flexbox layout (measure / arrange)
 
-- Status: Accepted
+- Status: Accepted (amended by [ADR-0060](0060-lens-single-tree-placement-and-z-bands.md):
+  measure/arrange became ABS-aware, and overlay placement moved from the
+  parallel `lensi_overlay_layout` pass into arrange's ABS segment)
 - Date: 2026-07-21
 - Scope: lens (L2 toolkit). Defines the layout algorithm.
 

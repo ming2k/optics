@@ -45,6 +45,16 @@ if get_option('examples')
   subdir('examples/iris')
 endif
 
+# LeakSanitizer suppressions (fontconfig's process-lifetime pattern cache
+# is upstream-owned and never freed). Default test setup when ASan is on.
+if 'address' in get_option('b_sanitize')
+  add_test_setup(
+    'asan',
+    env: {'LSAN_OPTIONS': 'suppressions=' + meson.project_source_root() / 'tools' / 'lsan.supp'},
+    is_default: true,
+  )
+endif
+
 if get_option('tests')
   subdir('tests/flux')
   subdir('tests/lens')

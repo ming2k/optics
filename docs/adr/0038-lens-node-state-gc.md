@@ -1,6 +1,11 @@
 # ADR-0038: Lens node state GC — 8-frame grace window for leaving nodes
 
-- Status: Accepted
+- Status: Accepted (note 2026-08-10: the LEAVING grace window currently
+  has NO render path — leaving nodes are not painted, so there is no
+  leave-animation surface; this is an explicit deferral, to be revisited
+  against a real use case. Related audit fix: a node re-entering from the
+  grace window now clears has_prev, so stale prev_rect is never
+  hit-testable)
 - Date: 2026-07-21
 - Scope: lens (L2 toolkit). Defines the leaving-node garbage-collection
   policy.

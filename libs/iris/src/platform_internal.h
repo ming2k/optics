@@ -42,14 +42,45 @@
  *   The backend registers a kick via iris_platform_wakeup_set_kick()
  *   before entering its loop, unregisters after, and calls
  *   iris_platform_wakeup_drain() whenever the kick fired. This is how
- *   cross-thread subsystems (the colour-scheme watcher) reach the main
- *   thread. See platform_wakeup.h for the per-platform recipe.
+ *   cross-thread subsystems (the colour-scheme watcher, async clipboard
+ *   reads) reach the main thread — and, through the public
+ *   iris_post_to_main_thread() (iris/app.h, implemented in app.c on top of
+ *   the same seam), how hosts deliver work from arbitrary threads. See
+ *   platform_wakeup.h for the per-platform recipe. Teardown order matters:
+ *   unregister the kick BEFORE the final drain, so detached threads that
+ *   post late fail cleanly instead of queueing jobs nothing would drain.
  *
  * Input mapping (platform_input.h):
  *   Native pointer button codes are translated to iris_pointer_button and
  *   then to LENS_MOUSE_* indices via iris_pointer_button_to_lens(). Never
  *   include another platform's headers (linux/input-event-codes.h is
  *   Linux-only, windows.h Win32-only, …).
+ *
+ * Keyboard contract (all three backends MUST hold these; lens relies on
+ * them):
+ *   (a) Both edges are reported: every mappable key produces a
+ *       lens_key_event with pressed=true on key-down and pressed=false on
+ *       key-up. (Win32: WM_KEYDOWN/UP; Cocoa: keyDown:/keyUp:; Wayland:
+ *       wl_keyboard.key state.)
+ *   (b) Letters and digits are normalised to their UNSHIFTED ASCII code
+ *       ('a', never 'A'; '1', never '!') — shift state travels in
+ *       lens_input.mods only, so Ctrl/Shift chords compare equal across
+ *       platforms. Wayland derives the id from the level-0 keysym of the
+ *       key's active layout (xkb_keymap_key_get_syms_by_level), Win32 from
+ *       the virtual-key code, Cocoa from charactersIgnoringModifiers.
+ *       Deriving press and release from the same unshifted source also
+ *       guarantees the two edges always carry the same key id.
+ *   (c) lens_key_event.repeat is best-effort: Win32 (lParam bit 30) and
+ *       Cocoa (isARepeat) report auto-repeat, Wayland leaves it false
+ *       (client-side repeat timers are a follow-on). lens does NOT depend
+ *       on the flag.
+ *   (d) Committed text still carries the SHIFTED characters (the xkb UTF-8
+ *       string / WM_CHAR / insertText:) — only the key id is normalised.
+ *
+ * IME truncation contract: every string funneled into lens_input's
+ * fixed-size buffers (text_utf8 / preedit_utf8) is clipped with the shared
+ * boundary-aware helpers in platform_text.h — never a raw byte cap, which
+ * can split a multi-byte sequence and hand lens invalid UTF-8.
  *
  * lens contract (unchanged, platform-neutral): fold native input into one
  * lens_input per frame; wire lens_clipboard{set_text,request_text,user} to

@@ -199,6 +199,7 @@ typedef struct flux_retire_zombie {
     VkImageView view;
     VkImage image;
     VkBuffer buffer;
+    VkSampler sampler;
     flux_vk_alloc alloc;
     VkDeviceMemory imported_memory;
     VkDeviceSize imported_size; /* bytes to uncount from allocator stats
@@ -583,6 +584,13 @@ void flux_device_retire_image(flux_device *d, VkImageView view, VkImage image,
  * ownership of buffer/alloc. Thread-safe. */
 void flux_device_retire_buffer(flux_device *d, VkBuffer buffer, const flux_vk_alloc *alloc);
 
+/* Park a released sampler for deferred destruction. The bindless slot and
+ * the VkSampler are freed only once the queue provably passed every batch
+ * whose push constants could still carry the slot number — an inline
+ * release would let the slot be recycled mid-flight (silent mis-sampling)
+ * and violates VUID-vkDestroySampler-sampler-01070. Thread-safe. */
+void flux_device_retire_sampler(flux_device *d, VkSampler sampler, uint32_t bindless);
+
 /* vkDeviceWaitIdle serialised against concurrent queue submissions via
  * queue_lock. Every wait-idle in the library must go through this helper
  * (see the queue_lock comment in flux_device). */
@@ -737,6 +745,16 @@ VkSemaphore flux_dmabuf_acquire_semaphore_take(flux_device *device);
 void flux_dmabuf_acquire_semaphore_recycle(flux_device *device, VkSemaphore semaphore);
 void flux_dmabuf_acquire_semaphore_pool_destroy(flux_device *device);
 void flux_frame_foreign_images_destroy(flux_surface *surface, flux_per_frame *per_frame);
+
+/* Cross-TU bodies shared between the canvas-level
+ * flux_canvas_wait_dmabuf_acquire (src/canvas/dmabuf_acquire.c) and the
+ * platform pair src/core/dmabuf.c / dmabuf_stub.c. import_acquire_semaphore
+ * imports `fd` as a temporary SYNC_FD payload on a pooled semaphore
+ * (FLUX_ERROR_UNSUPPORTED from the stub); close_fd releases the caller's
+ * sync_file fd after a successful import (no-op off Linux). Keeping the
+ * platform fork here leaves the canvas call site free of #ifdef. */
+flux_result flux_dmabuf_import_acquire_semaphore(flux_device *d, int fd, VkSemaphore *out);
+void flux_dmabuf_close_fd(int fd);
 
 struct flux_surface {
     atomic_uint ref_count;

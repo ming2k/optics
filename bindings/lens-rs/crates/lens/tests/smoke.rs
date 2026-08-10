@@ -3,8 +3,8 @@
 //! frame drives the widget set through the safe wrapper. No GPU required.
 
 use lens::{
-    Align, Color, ForegroundOutline, Input, LayoutOpts, MouseButton, TabStyle, TableColumn,
-    TableOpts, TabsOpts, TextBuf, Theme, Ui,
+    Align, Color, Input, LayoutOpts, MouseButton, TableColumn, TableOpts, TabsOpts, TextBuf, Theme,
+    Ui,
 };
 
 #[test]
@@ -41,9 +41,14 @@ fn headless_frame_drives_widgets() {
         f.column(|f| {
             f.title("Settings");
             f.label("A label");
-            let outline = ForegroundOutline::new(Color::rgba(0, 0, 0, 160), 0.75);
-            f.label_compact_outlined_sized("12:34", 14.0, outline);
-            f.icon_outlined(lens::Icon::Globe, 16.0, outline);
+            // The contour is a style atom now (ADR-0061): scope + plain calls.
+            let outline = lens::Style::default()
+                .with_outline_color(Color::rgba(0, 0, 0, 160))
+                .with_outline_width(0.75);
+            f.push_style(outline);
+            f.label_compact_sized("12:34", 14.0);
+            f.icon(lens::Icon::Globe, 16.0);
+            f.pop_style();
             f.separator();
             f.checkbox("Wrap", &mut wrap);
             f.switch("Compact mode", &mut wrap);
@@ -94,30 +99,16 @@ fn headless_frame_drives_containers() {
                 f.tab("About");
             });
             f.tabs_ex(
-                "connected-settings",
+                "wide-settings",
                 &mut active,
                 &TabsOpts {
-                    style: TabStyle::Connected,
+                    equal_width: true,
                     ..TabsOpts::default()
                 },
                 |f| {
                     f.tab("Primary");
                     f.tab("Secondary");
                     f.tab("Tertiary");
-                },
-            );
-            f.tabs_ex(
-                "indicator-settings",
-                &mut active,
-                &TabsOpts {
-                    style: TabStyle::Indicator,
-                    equal_width: true,
-                    ..TabsOpts::default()
-                },
-                |f| {
-                    f.tab("Recent");
-                    f.tab("Pending");
-                    f.tab("Completed");
                 },
             );
             match active {
@@ -137,11 +128,15 @@ fn headless_frame_drives_containers() {
                 });
             });
 
-            // Anchor an overlay to the last widget; opens only after a click,
-            // so here it simply must not crash.
+            // Anchor a transient popup to the last widget; opens only after a
+            // click, so here it simply must not crash.
             let anchor = f.response().rect;
-            if f.overlay_is_open("menu") {
-                f.overlay("menu", anchor, &lens::OverlayOpts::default(), |f| {
+            if f.place_is_open("menu") {
+                let opts = lens::PlaceOpts {
+                    rect: anchor,
+                    ..lens::PlaceOpts::default()
+                };
+                f.place("menu", &opts, |f| {
                     f.button("Item");
                 });
             }

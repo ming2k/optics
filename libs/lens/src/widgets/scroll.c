@@ -20,10 +20,10 @@ void lens_scroll_begin(lens *ui, const char *id) {
     n->cross = LENS_STRETCH;
 
     /* Wheel scroll is deferred to lens_scroll_end so the innermost hovered
-       scroll container gets priority over outer ones. A floating layer
-       above the area eclipses it (same rule as lensi_interact). */
-    bool eclipsed = n->has_prev && lensi_widget_eclipsed(ui, n);
-    if (n->has_prev && !eclipsed && lensi_point_in(ui->input.cursor, n->prev_rect)) {
+       scroll container gets priority over outer ones. A placed node in a
+       higher band above the area occludes it (same rule as lensi_interact). */
+    bool occluded = n->has_prev && lensi_widget_occluded(ui, n);
+    if (n->has_prev && !occluded && lensi_point_in(ui->input.cursor, n->prev_rect)) {
         ui->scroll_hot_id = n->id;
     }
 
@@ -55,14 +55,14 @@ void lens_scroll_begin(lens *ui, const char *id) {
                     ui->active_id = 0;
                     ss->dragging = false;
                 }
-            } else if (!eclipsed && lensi_point_in(ui->input.cursor, thumb_rect) &&
+            } else if (!occluded && lensi_point_in(ui->input.cursor, thumb_rect) &&
                        ui->input.mouse_pressed[L]) {
                 ui->active_id = n->id;
                 ss->dragging = true;
                 ss->drag_start_offset = ss->offset_y;
                 ss->drag_start_y = ui->input.cursor.y;
                 ui->input.mouse_pressed[L] = false;
-            } else if (!eclipsed && lensi_point_in(ui->input.cursor, track_rect) &&
+            } else if (!occluded && lensi_point_in(ui->input.cursor, track_rect) &&
                        ui->input.mouse_pressed[L]) {
                 float page = track_h * 0.9f;
                 if (ui->input.cursor.y < sb_y)
@@ -77,7 +77,7 @@ void lens_scroll_begin(lens *ui, const char *id) {
          * Persisted into ss so the post-layout draw pass (solve.c) can pick
          * the hovered thumb colour without recomputing hit geometry. */
         ss->hovering =
-            ss->dragging || (have_bar && !eclipsed && lensi_point_in(ui->input.cursor, track_rect));
+            ss->dragging || (have_bar && !occluded && lensi_point_in(ui->input.cursor, track_rect));
 
         n->scroll_x = ss->offset_x;
         n->scroll_y = ss->offset_y;

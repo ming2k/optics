@@ -1,15 +1,16 @@
 tests = ['test_id', 'test_store', 'test_layout', 'test_input',
          'test_reconcile', 'test_widgets', 'test_render_null',
-         'test_a11y', 'test_clipboard', 'test_overlay', 'test_layer',
+         'test_a11y', 'test_clipboard', 'test_place', 'test_place_bands',
          'test_input_extended', 'test_textfield', 'test_stress',
          'test_font_fallback', 'test_disabled', 'test_validation',
          'test_tooltip', 'test_dropdown', 'test_radio', 'test_tabs',
          'test_textarea', 'test_button', 'test_checkbox', 'test_slider',
          'test_progress', 'test_scroll', 'test_selectable', 'test_modal',
          'test_menu', 'test_split', 'test_table', 'test_pressable',
-         'test_overlay_eclipse', 'test_scroll_hit_clip',
+         'test_place_occlusion', 'test_scroll_hit_clip',
          'test_reduced_motion', 'test_tree', 'test_repaint',
-         'test_record_replay', 'test_icon_runtime', 'test_label_centering']
+         'test_record_replay', 'test_icon_runtime', 'test_label_centering',
+         'test_skin', 'test_audit_fixes', 'test_a11y_activate']
 
 foreach t : tests
   exe = executable(t, t + '.c',
@@ -30,6 +31,27 @@ test_drawlist_hash = executable('test_drawlist_hash',
   include_directories : lens_inc,
 )
 test('drawlist_hash', test_drawlist_hash)
+
+# style.c is compiled into the test binary directly (same pattern as
+# test_drawlist_hash): lensi_style_resolve is a hidden symbol, so the
+# resolver unit tests link their own copy.
+test_state_style = executable('test_state_style',
+  'test_state_style.c',
+  '../../libs/lens/src/style/style.c',
+  dependencies        : [lens_dep, m_dep],
+  include_directories : lens_inc,
+)
+test('state_style', test_state_style)
+
+# Same pattern as test_state_style: the cascade helpers (merge/effective)
+# are hidden symbols, so the test links its own copy of style.c.
+test_style_cascade = executable('test_style_cascade',
+  'test_style_cascade.c',
+  '../../libs/lens/src/style/style.c',
+  dependencies        : [lens_dep, m_dep],
+  include_directories : lens_inc,
+)
+test('style_cascade', test_style_cascade)
 
 # Content of registered runtime-icon streams. Compiles the registration
 # sources directly (same pattern as test_drawlist_hash): the registry

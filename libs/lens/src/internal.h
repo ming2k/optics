@@ -25,7 +25,18 @@
 #define LENSI_ID_STACK_MAX 64u
 #define LENSI_CONTAINER_STACK_MAX 64u
 #define LENSI_PASTE_MAX (1024u * 1024u) /* clipboard staging (ADR-0036) */
-#define LENSI_OVERLAY_MAX 8u  /* max simultaneously-open overlays (ADR-0037) */
+#define LENSI_TRANSIENT_MAX 8u   /* max simultaneously-open transients (ADR-0060) */
+#define LENSI_BAND_PREV_MAX 16u  /* per-band prev-frame ids carried for hit-testing */
+#define LENSI_STYLE_STACK_MAX 16u /* style scope stack depth (ADR-0061) */
+#define LENSI_MODAL_STACK_MAX 4u  /* nested modal focus traps (ADR-0039) */
+
+/* Node placement (ADR-0060): FLOW participates in its parent's flexbox;
+ * ABS escapes the flow and the ancestor clips and is emitted in its z
+ * band. Only container sub-roots may be ABS (lens_place_begin). */
+typedef enum lens_place {
+    LENS_PLACE_FLOW = 0,
+    LENS_PLACE_ABS = 1,
+} lens_place;
 
 /* ------------------------------------------------------------------ */
 /*  Draw command (ADR-0030) — coordinates relative to the node box    */
@@ -110,14 +121,22 @@ struct lens_node {
     /* layout inputs (per frame) */
     bool is_container;
     bool is_scroll;
-    bool is_overlay;     /* a floating layer (ADR-0037)       */
-    bool is_panel_layer; /* persistent panel (no flip/dismiss) */
-    bool is_centered;    /* center on display instead of anchor (modal, ADR-0039) */
-    bool dismissable; /* overlay may be closed by Esc/click-outside; false = modal-pinned (ADR-0039)
-                       */
-    flux_rect overlay_anchor; /* set by lens_overlay_begin/lens_layer_begin */
-    flux_rect overlay_bounds; /* optional placement/render boundary inherited from an owner */
-    bool has_overlay_bounds;
+    /* placement metadata (ADR-0060). FLOW nodes are ordinary flex items and
+     * live in LENS_BAND_BASE. An ABS node keeps its parent chain and sibling
+     * sequence position but consumes no flow space: it is measured, then
+     * resolved by `mode` against `place_rect`/`place_bounds` after the flow
+     * children are arranged, escapes every ancestor clip (render + hit), and
+     * is emitted in `band` order. `transient` gates the node on the open-set
+     * (Esc / click-outside dismissal); `interactive` opts a BACKDROP node
+     * into hit-testing (all other bands always occlude/hit normally). */
+    lens_place place;
+    lens_band band;
+    lens_place_mode mode;
+    flux_rect place_rect;   /* EXACT: position+min extent; ANCHORED: owner anchor */
+    flux_rect place_bounds; /* placement/render boundary; default = display */
+    bool has_place_bounds;
+    bool transient;
+    bool interactive;
     lens_axis axis;
     float gap, pad;
     lens_align cross;
@@ -171,6 +190,14 @@ struct lens_node {
     /* persistent per-node user state (lens_node_state) */
     void *state;
     size_t state_bytes;
+
+    /* skin scratch (ADR-0061 item 9): four retained floats for caller-owned
+     * skins (a spring's position/velocity), exposed via lens_skin_scratch.
+     * Persistent like `state`: zeroed by the store_touch memset at creation,
+     * deliberately NOT cleared by lensi_node_reset_frame, and freed with the
+     * node by the ADR-0038 GC. Mechanism, not animation — the library stores
+     * but never integrates. */
+    float skin_scratch[4];
 };
 
 /* ------------------------------------------------------------------ */
@@ -247,17 +274,45 @@ struct lens {
     bool next_disabled;
     bool next_error;
     const char *next_placeholder;
+    lens_style next_style; /* staged per-call style atoms (lens_box.style) */
+
+    /* style scope stack (ADR-0061): strictly nested, folded bottom-up so
+     * the nearest enclosing scope wins per field; reset every lens_begin. */
+    lens_style style_stack[LENSI_STYLE_STACK_MAX];
+    uint32_t style_top;
 
     bool click_hit_focusable; /* mouse pressed inside a focusable widget */
 
-    /* interaction state (ADR-0029) */
-    lens_id hot_id;    /* hovered this frame */
+    /* interaction state (ADR-0029). There is deliberately no `hot_id`:
+     * hover is reported per-widget through lens_response.hovered, and a
+     * context-global hovered id had no reader (dead state). */
     lens_id active_id; /* captured (e.g. dragging) */
     lens_id focused_id;
+    bool focus_visible; /* keyboard modality (ADR-0058): true when the last
+                         * focus move came from Tab traversal; cleared by a
+                         * pointer press or programmatic lens_set_focus.
+                         * Drives LENS_STATE_FOCUS_VISIBLE. */
     lens_id scroll_hot_id; /* deepest scroll container under cursor */
     lens_cursor_hint cursor_hint; /* semantic cursor for the top hovered control */
     lens_response last_response;
     lens_node *last_node; /* most recently linked node (for lens_a11y) */
+
+    /* Pending assistive-technology activation (ADR-0062): set by
+     * lens_a11y_activate, consumed single-shot by lensi_interact when the
+     * matching node is built (focusable + not disabled), cleared at
+     * lens_end if unconsumed. Bypasses pointer occlusion by design. */
+    lens_id a11y_activate_id;
+
+    /* Per-frame key-consumption marks (ADR-0029): a widget that eats a key
+     * (activation, menu arrow navigation) marks its index so a later
+     * central consumer — the transient dismissal pass reading Escape — does
+     * not see it. Indexed parallel to ui->input.keys; reset in lens_begin. */
+    uint8_t key_consumed[LENS_INPUT_MAX_KEYS];
+    /* Menu arrow-nav request (ADR-0040): a focused menu row records the
+     * desired direction here (the key is consumed at the same time); the
+     * menu's end applies the move once every sibling row of the popup has
+     * been built — mid-build the sibling links are only partial. */
+    int8_t menu_nav;
 
     /* tab focus order, collected during build (arena) */
     lens_id *tab_order;
@@ -267,34 +322,48 @@ struct lens {
     lens_clipboard clipboard;
     flux_rect caret_rect; /* set by the focused text widget */
     char paste_buf[LENSI_PASTE_MAX];
-    uint32_t paste_len; /* 0 = nothing pending */
+    uint32_t paste_len;     /* 0 = nothing pending */
+    lens_id paste_target;   /* focused widget at lens_request_paste time;
+                               0 = unbound (host pushed lens_paste directly) */
+    uint64_t paste_frame;   /* ui->frame when the paste payload arrived */
 
-    /* overlay layer (ADR-0037) */
-    struct lens_overlay_slot {
+    /* transient open-set (ADR-0060): retained per id; only transient place
+     * nodes enter this table. Drives begin gating, is_open queries, and
+     * Esc/click-outside dismissal. */
+    struct lens_transient_slot {
         lens_id id;
         uint64_t opened_frame; /* dismiss grace: same-frame open ignored */
         bool dismissable;      /* false = Escape/click-outside leave it (modal, ADR-0039) */
-    } open_overlays[LENSI_OVERLAY_MAX];
-    uint32_t open_overlay_count;
-    lens_node **overlay_layers; /* per-frame, arena-backed */
-    uint32_t overlay_layer_count;
-    uint32_t overlay_layer_cap;
-    /* Floating layers as of the END of the previous frame, kept across
-     * the arena reset as plain ids so eclipse hit-testing covers base
-     * widgets built BEFORE the layer re-registers this frame (the common
-     * case: popups are declared after the content they cover). Without
-     * this the eclipse only applied to widgets declared after the layer
-     * in build order, and clicks fell through every popup to tables and
-     * scroll areas beneath. */
-    lens_id prev_overlay_layer_ids[LENSI_OVERLAY_MAX];
-    uint32_t prev_overlay_layer_count;
+    } open_transients[LENSI_TRANSIENT_MAX];
+    uint32_t open_transient_count;
+
+    /* Z-band buckets (ADR-0060): this frame's ABS nodes, collected by one
+     * post-arrange tree walk (lensi_place_bucket); tree pre-order within
+     * each band = registration order. Arena-backed; rebuilt each frame. */
+    lens_node **bands[LENS_BAND_COUNT];
+    uint32_t band_counts[LENS_BAND_COUNT];
+    uint32_t band_caps[LENS_BAND_COUNT];
+    /* Band membership as of the END of the previous frame, kept across the
+     * arena reset as plain ids so band-ordered hit-testing covers base
+     * widgets built BEFORE a placed node re-registers this frame (the
+     * common case: popups are declared after the content they cover).
+     * Without this, occlusion only applied to widgets declared after the
+     * placed node in build order, and clicks fell through every popup to
+     * tables and scroll areas beneath. */
+    lens_id prev_band_ids[LENS_BAND_COUNT][LENSI_BAND_PREV_MAX];
+    uint32_t prev_band_counts[LENS_BAND_COUNT];
 
     /* modal focus trap (ADR-0039). When modal_active, Tab cycling is
      * clamped to [modal_tab_lo, modal_tab_hi) — the tab_order slice
-     * recorded during the modal body build. */
+     * recorded during the modal body build. Nested modals stack: opening an
+     * inner modal suspends the outer range on the trap stack; the inner
+     * modal's end restores it, so only the innermost trap is active. */
     bool modal_active;
     uint32_t modal_tab_lo;
     uint32_t modal_tab_hi;
+    uint32_t modal_trap_lo[LENSI_MODAL_STACK_MAX];
+    uint32_t modal_trap_hi[LENSI_MODAL_STACK_MAX];
+    uint32_t modal_trap_depth;
 
     /* tooltip (frame-scoped) */
     struct {
@@ -305,6 +374,10 @@ struct lens {
     bool prev_tooltip_active; /* tooltip.active at the end of last frame;
                                * a disappearing tooltip is damage too */
 
+    /* skin overrides (ADR-0059): per-kind replacement emission functions;
+     * NULL entries use the built-in default. */
+    lens_skin_fn skins[LENS_WIDGET_KIND_COUNT];
+
     /* display-list records (render/replay.c). record_canvas owns the
      * per-node segments (borrowed; refreshed every lensi_render_tree —
      * a canvas switch drops every handle without releasing, as the old
@@ -313,6 +386,36 @@ struct lens {
     flux_canvas *record_canvas;
     uint64_t record_text_gen;
 };
+
+/* ------------------------------------------------------------------ */
+/*  Style resolution (ADR-0058)                                       */
+/*                                                                    */
+/*  lens_style_resolved is public (lens.h): skins receive it in the   */
+/*  widget record (ADR-0059). The resolver (style/style.c) applies    */
+/*  its documented order — theme fallback, hover/pressed derivation,  */
+/*  disabled dim — so a consumer reads slots directly.                */
+/* ------------------------------------------------------------------ */
+
+/* Derivation strengths used by the resolver, exposed so tests state the
+ * contract in the same numbers the implementation uses. Hover mixes a
+ * little of the foreground in (a "lift": fg contrasts with any surface by
+ * definition, so the direction is right in light and dark themes alike);
+ * pressed doubles it; disabled blends most of the way toward the theme's
+ * disabled colour. */
+#define LENSI_STYLE_HOVER_LIFT 0.08f
+#define LENSI_STYLE_PRESSED_DEPTH 0.16f
+#define LENSI_STYLE_DISABLED_DIM 0.60f
+
+/* Pre-measure geometry access. Geometry slots are state-independent, so
+ * the measure phase reads them through the same fallback rule the
+ * resolver applies — instance wins, else theme — without waiting for the
+ * interaction state bits. */
+static inline float lensi_style_font_size(const lens_style *inst, const lens_theme *theme) {
+    return (inst && (inst->fields & LENS_STYLE_FONT_SIZE)) ? inst->font_size : theme->font_size;
+}
+static inline float lensi_style_padding(const lens_style *inst, const lens_theme *theme) {
+    return (inst && (inst->fields & LENS_STYLE_PADDING)) ? inst->padding : theme->padding;
+}
 
 /* ================================================================== */
 /*  Internal API                                                      */
@@ -364,13 +467,58 @@ void lensi_tooltip(lens *ui, const char *text); /* anchored to last widget */
 
 /* layout (solve.c) */
 void lensi_layout_solve(lens *ui);
-void lensi_layout_subtree(lens_node *n, flux_rect rect); /* used by overlay */
 void lensi_scroll_clamp(lens *ui);
-void lensi_scroll_clamp_subtree(lens_node *n); /* overlay sub-roots, post-placement */
 
 /* input / interaction (input.c, focus.c) */
 lens_response lensi_interact(lens *ui, lens_node *n, bool focusable, bool disabled);
 void lensi_focus_tab(lens *ui);
+
+/* style resolution + cascade (style/style.c, ADR-0058/0061) — see the file
+ * header for the resolution order contract. lensi_style_resolve consumes
+ * the *effective* style (post-cascade); merge/effective are the per-field
+ * cascade itself: per-call (lens_box.style, staged as ui->next_style) over
+ * the folded scope stack. Pure: no globals, no side effects beyond draining
+ * next_style. */
+lens_style_resolved lensi_style_resolve(const lens_style *eff, const lens_theme *theme,
+                                        uint32_t state);
+lens_style lensi_style_merge(const lens_style *base, const lens_style *over);
+lens_style lensi_style_scope_merged(const lens *ui);
+lens_style lensi_style_effective(lens *ui); /* drains ui->next_style */
+
+/* skins (skin/, ADR-0059) — the emission phase of migrated widgets.
+ * lensi_skin_emit runs the context override (lens_set_skin), else the
+ * built-in default. The lensi_skin_* set is the built-in default table
+ * behind lens_default_skin. */
+void lensi_skin_emit(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_button(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_selectable(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_checkbox(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_switch(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_radio(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_slider(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_icon_button(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_tabs(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_label(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_separator(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_icon(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_image(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_progress(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_textfield(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_textarea(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_collapsing(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_tree(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_table(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_split(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_menu_item(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_dropdown(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_link(lens *ui, lens_node *n, const lens_widget_record *rec);
+
+/* scrollbar chrome (skin/scrollbar.c, ADR-0059) — the drawlist-finalize
+ * walk that emits scrollbars for solved scroll containers (placed
+ * subtrees included: they live in the one tree now, ADR-0060). Runs in
+ * lens_end after layout and placement, before damage tracking; also
+ * persists the thumb geometry next frame's thumb hit-testing reads. */
+void lensi_scrollbars_emit(lens *ui);
 
 /* clipboard + IME (clipboard.c, ADR-0036) — internal helpers for text
  * widgets (the consumer that will land with lens_text_input). */
@@ -379,45 +527,49 @@ void lensi_set_caret_rect(lens *ui, flux_rect r);
  * is valid for the rest of the frame. */
 const char *lensi_take_paste(lens *ui, uint32_t *out_len);
 
-/* overlay layer (overlay.c, ADR-0037) — shared with persistent panels
- * (lens_layer_begin). Both register positional sub-roots in the same
- * per-frame layer array; only overlays track open state and dismissal. */
-bool lensi_overlay_is_open_id(const lens *ui, lens_id id);
-void lensi_overlay_open_id_pub(lens *ui, lens_id id, bool dismissable); /* ADR-0040 menu internal */
-void lensi_overlay_constrain_current(lens *ui, flux_rect bounds);
-void lensi_overlay_layout(lens *ui);                                    /* post-arrange placement */
-void lensi_overlay_render(lens *ui, flux_canvas *canvas);
-void lensi_overlay_dismiss(lens *ui); /* click-outside + Esc (overlays only) */
-/* Run subtree change detection on this frame's floating-layer sub-roots
- * (they are outside ui->root, so lensi_mark_dirty never reaches them). */
-void lensi_overlay_mark_dirty(lens *ui);
-/* Cursor sits inside any rendered floating layer (overlay or panel),
- * using last-frame geometry. Used by lensi_interact to eclipse base
- * widgets under a popup or chrome panel. */
-bool lensi_point_in_floating_layer(const lens *ui, flux_point p);
-/* True when a floating layer covers the cursor for a widget that does
- * NOT belong to that layer. Widgets with their own hit-testing
- * (table rows, scrollbars, wheel routing) must check this in addition
- * to lensi_interact so popups eclipse them too. */
-bool lensi_widget_eclipsed(const lens *ui, const lens_node *n);
+/* placement (place/place.c, ADR-0060) — the open-set, band bucketing, and
+ * dismissal behind the public lens_place_* API. Transient and persistent
+ * placed nodes share the same placement + band machinery; only transients
+ * track open state. */
+bool lensi_place_is_open_id(const lens *ui, lens_id id);
+void lensi_place_open_id_pub(lens *ui, lens_id id, bool dismissable); /* ADR-0040 menu internal */
+/* Carry this frame's band buckets across the arena reset as per-band prev
+ * id lists (lens_begin), so next frame's occlusion checks hit-test against
+ * the nodes that are actually on screen. */
+void lensi_place_snapshot_prev(lens *ui);
+/* One post-arrange tree walk that buckets ABS nodes into ui->bands[] — the
+ * single choke point that defines the global emission order (ADR-0060). */
+void lensi_place_bucket(lens *ui);
+void lensi_place_dismiss(lens *ui); /* click-outside + Esc (transients only) */
+/* True when a node emitted ABOVE the widget — a strictly-higher band, or
+ * the same band with a strictly greater registration index — covers the
+ * cursor: occlusion *is* the reversed global emission order (ADR-0060; the
+ * old eclipse mechanism is deleted). Also true for widgets inside a
+ * hit-transparent BACKDROP node. Widgets with their own hit-testing (table
+ * rows, scrollbars, wheel routing) must check this in addition to
+ * lensi_interact so placed nodes above them swallow the interaction too. */
+bool lensi_widget_occluded(const lens *ui, const lens_node *n);
 /* True when point `p` falls outside the viewport of any scroll ancestor
  * of `n`. Scroll containers clip their children's RENDERING to the
  * viewport; hit-testing must apply the same clip, otherwise children
  * scrolled out of view stay hoverable/clickable through whatever is
  * painted over them (a queue item folded below the viewport edge
- * reacting under the player bar). Every interactive hit-test must
- * consult this in addition to the widget's own rect. */
+ * reacting under the player bar). ABS ancestors escape ancestor clips
+ * (ADR-0060), so the walk stops at the nearest ABS node. Every
+ * interactive hit-test must consult this in addition to the widget's
+ * own rect. */
 bool lensi_point_clipped_by_scroll(const lens_node *n, flux_point p);
-/* Walk an overlay/panel subtree for accessibility (called by the a11y walk). */
-lens_node **lensi_overlay_layers(const lens *ui, uint32_t *out_count);
 
 /* render (drawlist.c, replay.c) */
 void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd);
 flux_result lensi_render_tree(lens *ui, flux_canvas *canvas);
 void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect clip);
 void lensi_mark_dirty(lens *ui); /* per-frame subtree change detection */
-/* Bottom-up change detection rooted at `n` (replay.c). Exposed so the
- * overlay layer can mark its sub-roots, which live outside ui->root. */
+/* Bottom-up change detection rooted at `n` (replay.c). ABS descendants are
+ * marked too (single tree, ADR-0060) but do NOT roll up into the parent's
+ * subtree_changed: the parent's display-list record contains flow children
+ * only, so a placed subtree's damage must not invalidate it — the repaint
+ * query consults the band buckets directly (context.c). */
 bool lensi_mark_subtree_changed(lens_node *n);
 /* Drop a node's display-list record handle WITHOUT releasing the
  * segment (replay.c). Used from store teardown, where the owning canvas

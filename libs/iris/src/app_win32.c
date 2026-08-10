@@ -47,8 +47,11 @@
 
 #include "platform_input.h"
 #include "platform_internal.h"
+#include "platform_text.h"
 #include "platform_wakeup.h"
+#include "theme_watch_internal.h"
 
+#include <iris/a11y.h>
 #include <iris/cursor.h>
 #include <iris/theme.h>
 
@@ -130,7 +133,8 @@ typedef struct w32_platform {
     bool minimized; /* SIZE_MINIMIZED: no valid render target    */
     bool force_paint;                       /* WM_PAINT asked for a real frame      */
     bool animation_frame_requested;         /* host asked for active-rate follow-up */
-    bool theme_watching;                    /* iris_color_scheme_watch succeeded    */
+    bool theme_watching;                    /* backend theme watch registered       */
+    bool a11y_running;                      /* a11y bridge initialised (inert stub) */
     lens *ui;                               /* for caret/hint/paste on the loop thread */
 
     iris_cursor host_cursor;      /* last iris_set_cursor value (explicit) */
@@ -211,26 +215,11 @@ static int utf8_encode(uint32_t cp, char out[4]) {
     return 4;
 }
 
-/* Clamp a UTF-8 string to at most `cap` bytes without cutting a multi-byte
- * sequence in half. Returns the new length (<= cap). */
-static size_t utf8_floor_boundary(const char *s, size_t len, size_t cap) {
-    if (len <= cap)
-        return len;
-    size_t n = cap;
-    while (n > 0 && (s[n] & 0xC0) == 0x80)
-        n--; /* s[n] is a continuation byte: back off to the sequence start */
-    return n;
-}
-
 /* Append UTF-8 text to the per-frame commit accumulator (cap 31 + NUL),
- * truncating on a code-point boundary. Same cap as app_wayland.c. */
+ * truncating on a code-point boundary (shared helper, platform_text.h).
+ * Same cap as app_wayland.c. */
 static void accum_text_append(w32_platform *pl, const char *utf8, size_t n) {
-    size_t used = strlen(pl->acc.text);
-    size_t room = sizeof pl->acc.text - 1 - used;
-    if (n > room)
-        n = utf8_floor_boundary(utf8, n, room);
-    memcpy(pl->acc.text + used, utf8, n);
-    pl->acc.text[used + n] = '\0';
+    iris_utf8_append(pl->acc.text, sizeof pl->acc.text, utf8, n);
 }
 
 static void accum_text_cp(w32_platform *pl, uint32_t cp) {
@@ -500,7 +489,7 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
         int n = wlen > 0 ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)wlen, u8, (int)sizeof u8,
                                                NULL, NULL)
                          : 0;
-        size_t kept = utf8_floor_boundary(u8, (size_t)n, sizeof pl->acc.preedit - 1);
+        size_t kept = iris_utf8_floor_boundary(u8, (size_t)n, sizeof pl->acc.preedit - 1);
         memcpy(pl->acc.preedit, u8, kept);
         pl->acc.preedit[kept] = '\0';
 
@@ -1031,7 +1020,8 @@ static void log_raw(const lens_input *in) {
     if (in->scroll_pixels_x != 0.0f || in->scroll_pixels_y != 0.0f)
         printf("[raw] scroll pixels dx=%.2f dy=%.2f\n", in->scroll_pixels_x, in->scroll_pixels_y);
     for (uint32_t k = 0; k < in->key_count; k++)
-        printf("[raw] key %d down\n", in->keys[k].key);
+        printf("[raw] key %d %s%s\n", in->keys[k].key, in->keys[k].pressed ? "down" : "up  ",
+               in->keys[k].repeat ? " (repeat)" : "");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1336,16 +1326,19 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     /* Live colour-scheme watching: only when not forcing dark. On Win32 the
      * change signal (WM_SETTINGCHANGE) already arrives on this thread, so
      * the watcher is registration-only (theme_win32.c); the callback flips
-     * the lens theme in place and the next frame renders the new palette. */
+     * the lens theme in place and the next frame renders the new palette.
+     * The backend registers on its reserved internal slot
+     * (theme_watch_internal.h), never the host's public watch slot. */
     pl.theme_watching = false;
     if (!cfg->dark)
-        pl.theme_watching = (iris_color_scheme_watch(w32_on_color_scheme_changed, &pl) == 0);
+        pl.theme_watching = (iris_theme__watch_backend(w32_on_color_scheme_changed, &pl) == 0);
 
-    /* Accessibility: the Win32 build links a11y_stub.c (iris_a11y_init
-     * reports the bridge as unavailable), so there is no per-frame
-     * iris_a11y_update integration here — the per-frame update call is a
-     * Wayland/AT-SPI-specific point. A UI Automation bridge is future work
-     * and will plug in behind the same public seam. */
+    /* Accessibility: the Win32 build links a11y_stub.c today, so all three
+     * calls are inert no-ops (iris_a11y_init reports the bridge unavailable
+     * and a11y_running stays false). The call sites deliberately mirror
+     * app_cocoa.m so a future UI Automation bridge plugs in behind the same
+     * public seam without backend changes. */
+    pl.a11y_running = (iris_a11y_init() == 0);
 
     while (pl.running) {
         /* While minimised there is no valid render target (a zero-size
@@ -1443,6 +1436,11 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         if (cfg->build)
             cfg->build(ui, &in, cfg->user);
         lens_end(ui);
+
+        /* Inert with a11y_stub.c; kept for a future UI Automation bridge
+         * (same seam app_cocoa.m uses). */
+        if (pl.a11y_running)
+            iris_a11y_update(ui);
 
         /* Keep the IME composition/candidate windows glued to the caret
          * while a composition is active (the caret moves as text commits). */
@@ -1587,14 +1585,21 @@ fail:
         flux_device_wait_idle(device);
     if (ui)
         lens_destroy(ui);
+    pl.ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
     /* The Win32 theme watcher holds no thread or handle; unwatch just drops
-     * the registration. */
+     * the backend's internal registration (the host's public watch, if any,
+     * is untouched). */
     if (pl.theme_watching)
-        iris_color_scheme_unwatch();
-    /* Wakeup seam teardown: nothing can post after unwatch (Win32 has no
-     * watcher thread), so drain what is left and unregister the kick. */
-    iris_platform_wakeup_drain();
+        iris_theme__unwatch_backend();
+    /* Inert with a11y_stub.c; mirrors app_cocoa.m. */
+    if (pl.a11y_running)
+        iris_a11y_shutdown();
+    /* Wakeup seam teardown: nothing can post after the unregistrations
+     * above (Win32 has no watcher thread), except detached subsystem
+     * threads — unregister the kick first so late posts fail cleanly, then
+     * drain whatever was legitimately queued. */
     iris_platform_wakeup_set_kick(NULL, NULL);
+    iris_platform_wakeup_drain();
     if (canvas)
         flux_canvas_destroy(canvas);
     if (surface)

@@ -29,6 +29,7 @@ bool lens_tree_node(lens *ui, const char *label, bool leaf) {
     bool disabled = ui->next_disabled;
     ui->next_disabled = false;
     ui->next_error = false;
+    lens_style eff = lensi_style_effective(ui);
 
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
@@ -37,12 +38,13 @@ bool lens_tree_node(lens *ui, const char *label, bool leaf) {
     lensi_link_child(ui, n);
 
     /* Header measure: label height plus a little vertical breathing room.
-     * The chevron / dot leads the label by t->padding. */
-    float label_size = t->font_size;
+     * The chevron / dot leads the label by the resolved padding. */
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
+    float label_size = rs.font_size;
     lens_text_metrics tm = lensi_text_measure_label(ui, label, label_size, 400.0f);
     float icon = tm.height * 0.7f;
     float h = tm.height + 4.0f;
-    float w = tm.width + icon + t->padding + LENS_TREE_INDENT;
+    float w = tm.width + icon + rs.padding + LENS_TREE_INDENT;
     if (n->fixed_w > 0)
         w = n->fixed_w;
     if (n->fixed_h > 0)
@@ -71,49 +73,24 @@ bool lens_tree_node(lens *ui, const char *label, bool leaf) {
     if (!disabled)
         n->hover_t = lensi_approach(ui, n->hover_t, r.hovered ? 1.f : 0.f, dt, 18.f);
 
-    /* Row background tint on hover / focus (matches the menu item style). */
-    if (n->hover_t > 0.01f && !disabled) {
-        flux_color bg = lensi_lerp_color(t->color_hover, t->color_active, n->hover_t * 0.5f);
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {0, 0, 0, 0},
-                                            .color = bg,
-                                            .radius = t->corner_radius * 0.5f});
-    }
-
-    /* Disclosure glyph: chevron for branches, dot for leaves. The icon
-     * source is the same feather set lens_menu / lens_collapsing share. */
-    float icon_y = (h - icon) * 0.5f;
-    flux_color fg = disabled ? t->color_disabled : t->color_fg;
-    if (leaf) {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_ICON,
-                                            .rel = {0, icon_y, icon, icon},
-                                            .color = t->color_disabled,
-                                            .width = 1.6f * (icon / 24.0f),
-                                            .icon_id = LENS_ICON_CIRCLE});
-    } else {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_ICON,
-                                            .rel = {0, icon_y, icon, icon},
-                                            .color = fg,
-                                            .width = 1.8f * (icon / 24.0f),
-                                            .icon_id = open ? LENS_ICON_CHEVRON_DOWN
-                                            : LENS_ICON_CHEVRON_RIGHT});
-    }
-
-    /* Label, indented past the glyph. */
-    float label_x = icon + t->padding * 0.5f;
-    float text_y = (h - tm.height) * 0.5f;
-    if (text_y < 0.0f)
-        text_y = 0.0f;
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {label_x, text_y, 0, 0},
-                                        .color = fg,
-                                        .text = label,
-                                        .text_size = label_size,
-                                        .text_weight = 400.0f});
+    /* emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_TREE,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = label,
+                                    .text = tm,
+                                    .icon = open ? LENS_ICON_CHEVRON_DOWN
+                                                 : LENS_ICON_CHEVRON_RIGHT,
+                                    .expanded = open,
+                                    .leaf = leaf},
+                    });
 
     ui->last_response = r;
 

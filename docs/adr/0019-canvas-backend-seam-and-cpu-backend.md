@@ -126,3 +126,20 @@ If a CPU **text** path is needed, add a host-side glyph atlas so the CPU
 backend can service `draw_glyph_run`/`draw_image`. If a second **GPU** API is
 ever funded, ADR-0006's parallel-build model — not this vtable — is still the
 route.
+
+## Amendment (2026-08-10): host-atlas lifetime + generation check
+
+The host coverage buffer the CPU backend samples is borrowed by pointer,
+never copied, and display-list segments bake glyph UVs against it. Two
+rules now keep that borrow sound:
+
+- The buffer must outlive every segment that recorded a run against it
+  (release the segments, or destroy the canvas, before the producer frees
+  or reallocates the buffer).
+- A producer that rearranges texels in place (flux_text's `atlas_clear`)
+  tags each run with a content generation via
+  `flux_glyph_run_host_atlas_desc`; the canvas remembers the newest
+  generation seen per buffer and `flux_canvas_replay` refuses a segment
+  recorded against an older one (false → the caller re-emits and
+  re-records) instead of silently sampling moved texels. Covered by
+  `tests/flux/unit/test_canvas_text_atlas.c`.

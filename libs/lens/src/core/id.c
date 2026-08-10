@@ -89,7 +89,16 @@ void lens_pop_id(lens *ui) {
 
 lens_id lens_current_id(const lens *ui, const char *label) {
     uint64_t scope = lensi_id_top(ui);
+    /* Same empty-label sentinel as lensi_gen_widget_id (ADR-0026): an empty
+     * label hashes to the sentinel under the current scope, never to the
+     * raw scope (which is the container's own id). */
+    static const char empty_seed[] = "##__flux_empty__";
     const char *seed = label ? label : "";
-    lens_id id = lensi_hash(seed, strlen(seed), scope);
+    size_t len = strlen(seed);
+    if (len == 0) {
+        seed = empty_seed;
+        len = sizeof(empty_seed) - 1;
+    }
+    lens_id id = lensi_hash(seed, len, scope);
     return id ? id : 1;
 }

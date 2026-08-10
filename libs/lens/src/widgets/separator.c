@@ -3,7 +3,8 @@
 #include "../internal.h"
 
 void lens_separator(lens *ui) {
-    const lens_theme *t = &ui->theme;
+    lens_style eff = lensi_style_effective(ui);
+    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, "##sep");
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -22,24 +23,15 @@ void lens_separator(lens *ui) {
         h = n->fixed_h;
     n->measured = (flux_point){w, h};
 
-    if (row) {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {0, t->padding, 1.0f,
-                                                    n->measured.y > 2.0f * t->padding
-                                                        ? n->measured.y - 2.0f * t->padding
-                                                        : 1.0f},
-                                            .color = t->color_border,
-                                            .radius = 0.5f});
-    } else {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {t->padding, 0,
-                                                    n->measured.x > 2.0f * t->padding
-                                                        ? n->measured.x - 2.0f * t->padding
-                                                        : 1.0f,
-                                                    1.0f},
-                                            .color = t->color_border,
-                                            .radius = 0.5f});
-    }
+    /* emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_SEPARATOR,
+                        .state = 0,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .content = {.vertical = row},
+                    });
 }

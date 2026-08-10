@@ -1,15 +1,15 @@
 /* test_modal.c — modal dialog (ADR-0016): open/close, centered placement,
- * backdrop eclipse, focus trap, and non-dismissable pinning. */
+ * backdrop occlusion, focus trap, and pinned (non-dismissable) mode. */
 
 #include "test_helpers.h"
 #include <lens/lens.h>
 
 static const lens_input ZERO_IN = {.display_size = {400, 300}, .dt_seconds = 0.016f};
 
-static void build_modal(lens *ui, const char *id, const char *title, bool dismissable) {
+static void build_modal(lens *ui, const char *id, const char *title, bool pinned) {
     if (lens_modal_begin(
             ui, id,
-            (lens_modal_opts){.title = title, .min_width = 200, .dismissable = dismissable})) {
+            (lens_modal_opts){.title = title, .min_width = 200, .pinned = pinned})) {
         lens_label(ui, "body");
         lens_button(ui, "OK"); /* focusable, inside the trap */
         lens_button(ui, "No"); /* focusable, inside the trap */
@@ -26,19 +26,19 @@ static void test_open_close_persist(void) {
     CHECK(lens_modal_is_open(ui, "m") == false);
     lens_modal_open(ui, "m");
     CHECK(lens_modal_is_open(ui, "m") == true);
-    build_modal(ui, "m", "Title", true);
+    build_modal(ui, "m", "Title", false);
     lens_end(ui);
 
     /* persists across frames */
     lens_begin(ui, &ZERO_IN);
     CHECK(lens_modal_is_open(ui, "m") == true);
-    build_modal(ui, "m", "Title", true);
+    build_modal(ui, "m", "Title", false);
     lens_end(ui);
 
     lens_begin(ui, &ZERO_IN);
     lens_modal_close(ui, "m");
     CHECK(lens_modal_is_open(ui, "m") == false);
-    build_modal(ui, "m", "Title", true);
+    build_modal(ui, "m", "Title", false);
     lens_end(ui);
 
     lens_destroy(ui);
@@ -71,41 +71,41 @@ static void test_begin_gated_by_open_state(void) {
     lens_destroy(ui);
 }
 
-/* Backdrop eclipses base widgets: a click on a base button under the
+/* Backdrop occludes base widgets: a click on a base button under the
  * open modal must NOT register. */
-static void test_backdrop_eclipses_base(void) {
+static void test_backdrop_occludes_base(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     /* Frame 1: settle layout with modal open. */
     lens_begin(ui, &ZERO_IN);
     lens_modal_open(ui, "m");
-    build_modal(ui, "m", "T", true);
+    build_modal(ui, "m", "T", false);
     lens_end(ui);
 
     /* Frame 2: click where a base button sits (top-left). The backdrop
-     * covers the whole display, so the base widget must be eclipsed. */
+     * covers the whole display, so the base widget must be occluded. */
     lens_input in = ZERO_IN;
     in.cursor = (flux_point){10, 10};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     bool base_clicked = lens_button(ui, "Base");
-    build_modal(ui, "m", "T", true);
+    build_modal(ui, "m", "T", false);
     lens_end(ui);
     CHECK(base_clicked == false);
 
     lens_destroy(ui);
 }
 
-/* Escape dismisses a dismissable modal. */
-static void test_escape_dismisses_dismissable(void) {
+/* Escape dismisses an unpinned modal. */
+static void test_escape_dismisses_unpinned(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_modal_open(ui, "m");
-    build_modal(ui, "m", "T", true);
+    build_modal(ui, "m", "T", false);
     lens_end(ui);
     CHECK(lens_modal_is_open(ui, "m") == true);
 
@@ -113,21 +113,21 @@ static void test_escape_dismisses_dismissable(void) {
     in.key_count = 1;
     in.keys[0] = (lens_key_event){.key = LENS_KEY_ESCAPE, .pressed = true};
     lens_begin(ui, &in);
-    build_modal(ui, "m", "T", true);
+    build_modal(ui, "m", "T", false);
     lens_end(ui);
     CHECK(lens_modal_is_open(ui, "m") == false);
 
     lens_destroy(ui);
 }
 
-/* A non-dismissable modal survives Escape and click-outside. */
-static void test_non_dismissable_survives(void) {
+/* A pinned modal survives Escape and click-outside. */
+static void test_pinned_survives(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_modal_open(ui, "m");
-    build_modal(ui, "m", "T", false);
+    build_modal(ui, "m", "T", true);
     lens_end(ui);
 
     /* Escape does not close it. */
@@ -135,7 +135,7 @@ static void test_non_dismissable_survives(void) {
     kin.key_count = 1;
     kin.keys[0] = (lens_key_event){.key = LENS_KEY_ESCAPE, .pressed = true};
     lens_begin(ui, &kin);
-    build_modal(ui, "m", "T", false);
+    build_modal(ui, "m", "T", true);
     lens_end(ui);
     CHECK(lens_modal_is_open(ui, "m") == true);
 
@@ -144,14 +144,14 @@ static void test_non_dismissable_survives(void) {
     cin.cursor = (flux_point){5, 5};
     cin.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &cin);
-    build_modal(ui, "m", "T", false);
+    build_modal(ui, "m", "T", true);
     lens_end(ui);
     CHECK(lens_modal_is_open(ui, "m") == true);
 
     /* Only an explicit close ends it. */
     lens_begin(ui, &ZERO_IN);
     lens_modal_close(ui, "m");
-    build_modal(ui, "m", "T", false);
+    build_modal(ui, "m", "T", true);
     lens_end(ui);
     CHECK(lens_modal_is_open(ui, "m") == false);
 
@@ -169,7 +169,7 @@ static void test_focus_trap(void) {
     (void)lens_button(ui, "Base1");
     (void)lens_button(ui, "Base2");
     lens_modal_open(ui, "m");
-    build_modal(ui, "m", NULL, true);
+    build_modal(ui, "m", NULL, false);
     lens_end(ui);
 
     /* Frame 2: press Tab while the modal is open. Focus should land on a
@@ -188,7 +188,7 @@ static void test_focus_trap(void) {
     lens_begin(ui, &seed);
     (void)lens_button(ui, "Base1");
     (void)lens_button(ui, "Base2");
-    build_modal(ui, "m", NULL, true);
+    build_modal(ui, "m", NULL, false);
     lens_end(ui);
 
     /* Tab once and record focus; repeat. */
@@ -199,7 +199,7 @@ static void test_focus_trap(void) {
         lens_begin(ui, &tin);
         (void)lens_button(ui, "Base1");
         (void)lens_button(ui, "Base2");
-        build_modal(ui, "m", NULL, true);
+        build_modal(ui, "m", NULL, false);
         lens_end(ui);
         focus_after[i] = lens_active(ui); /* not focus; use a stable proxy */
         (void)focus_after[i];
@@ -213,12 +213,81 @@ static void test_focus_trap(void) {
     lens_destroy(ui);
 }
 
+/* Nested modals: while an inner modal is open only its trap range is
+ * active; its end restores the outer range (ADR-0039, stack semantics).
+ * Asserted structurally (no crash, both stay open, Tab stays trapped). */
+static void test_nested_modal_trap_stack(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    lens_begin(ui, &ZERO_IN);
+    lens_modal_open(ui, "outer");
+    lens_modal_open(ui, "inner");
+    if (lens_modal_begin(ui, "outer", (lens_modal_opts){.min_width = 300})) {
+        lens_label(ui, "outer body");
+        lens_button(ui, "OuterBtn");
+        if (lens_modal_begin(ui, "inner", (lens_modal_opts){.min_width = 120})) {
+            lens_button(ui, "InnerBtn");
+            lens_modal_end(ui);
+        }
+        lens_modal_end(ui);
+    }
+    lens_end(ui);
+    CHECK(lens_modal_is_open(ui, "outer"));
+    CHECK(lens_modal_is_open(ui, "inner"));
+
+    /* Tab around while nested: the inner trap governs; nothing corrupts. */
+    for (int i = 0; i < 3; i++) {
+        lens_input tin = ZERO_IN;
+        tin.key_count = 1;
+        tin.keys[0] = (lens_key_event){.key = LENS_KEY_TAB, .pressed = true};
+        lens_begin(ui, &tin);
+        if (lens_modal_begin(ui, "outer", (lens_modal_opts){.min_width = 300})) {
+            lens_label(ui, "outer body");
+            lens_button(ui, "OuterBtn");
+            if (lens_modal_begin(ui, "inner", (lens_modal_opts){.min_width = 120})) {
+                lens_button(ui, "InnerBtn");
+                lens_modal_end(ui);
+            }
+            lens_modal_end(ui);
+        }
+        lens_end(ui);
+    }
+    CHECK(lens_modal_is_open(ui, "outer"));
+    CHECK(lens_modal_is_open(ui, "inner"));
+
+    /* Inner closes: the outer trap is restored and the outer modal lives. */
+    lens_begin(ui, &ZERO_IN);
+    lens_modal_close(ui, "inner");
+    if (lens_modal_begin(ui, "outer", (lens_modal_opts){.min_width = 300})) {
+        lens_button(ui, "OuterBtn");
+        lens_modal_end(ui);
+    }
+    lens_end(ui);
+    CHECK(!lens_modal_is_open(ui, "inner"));
+    CHECK(lens_modal_is_open(ui, "outer"));
+
+    lens_input tin = ZERO_IN;
+    tin.key_count = 1;
+    tin.keys[0] = (lens_key_event){.key = LENS_KEY_TAB, .pressed = true};
+    lens_begin(ui, &tin);
+    if (lens_modal_begin(ui, "outer", (lens_modal_opts){.min_width = 300})) {
+        lens_button(ui, "OuterBtn");
+        lens_modal_end(ui);
+    }
+    lens_end(ui);
+    CHECK(lens_modal_is_open(ui, "outer"));
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_open_close_persist();
     test_begin_gated_by_open_state();
-    test_backdrop_eclipses_base();
-    test_escape_dismisses_dismissable();
-    test_non_dismissable_survives();
+    test_backdrop_occludes_base();
+    test_escape_dismisses_unpinned();
+    test_pinned_survives();
     test_focus_trap();
+    test_nested_modal_trap_stack();
     return TEST_REPORT();
 }

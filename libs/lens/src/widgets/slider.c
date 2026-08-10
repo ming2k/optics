@@ -79,6 +79,8 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
     bool error = ui->next_error;
     ui->next_disabled = false;
     ui->next_error = false;
+    lens_style eff = lensi_style_effective(ui);
+    float padding = lensi_style_padding(&eff, t);
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -86,7 +88,7 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float h = t->font_size + 2.0f * t->padding;
+    float h = lensi_style_font_size(&eff, t) + 2.0f * padding;
     float w = (n->fixed_w > 0) ? n->fixed_w : LENS_SLIDER_DEFAULT_W;
     if (n->fixed_h > 0)
         h = n->fixed_h;
@@ -99,13 +101,12 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
     n->hover_t =
         lensi_approach(ui, n->hover_t, reveal_knob ? 1.f : 0.f, dt, reveal_knob ? 18.f : 14.f);
 
-    /* track geometry from last frame's width (one-frame latency, ADR-0029) */
+    /* track geometry from last frame's width (one-frame latency, ADR-0029);
+     * the same math runs in the skin for drawing */
     flux_rect rect = n->has_prev ? n->prev_rect : (flux_rect){0, 0, w, h};
-    float track_thickness = t->slider_track_thickness;
     float knob_extent = t->slider_knob_size;
-    float track_radius = track_thickness * 0.5f;
-    float track_x0 = t->padding + knob_extent * 0.5f;
-    float track_w = rect.w - 2.0f * t->padding - knob_extent;
+    float track_x0 = padding + knob_extent * 0.5f;
+    float track_w = rect.w - 2.0f * padding - knob_extent;
     if (track_w < 1.0f)
         track_w = 1.0f;
 
@@ -118,6 +119,9 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
             r.changed = true;
         }
     }
+    /* A captured slider is being dragged: the knob tracks the pointer. */
+    if (r.pressed)
+        r.state |= LENS_STATE_DRAGGED;
     if (!disabled && adjust_from_keys(ui, &r, value, min, max, span / 20.0f))
         r.changed = true;
 
@@ -130,50 +134,19 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
     float frac = value ? (*value - min) / span : 0.0f;
     frac = frac < 0 ? 0 : (frac > 1 ? 1 : frac);
 
-    flux_color track_color =
-        disabled ? t->color_disabled : (error ? t->color_error : t->color_slider_track);
-    flux_color fill_color =
-        disabled ? t->color_disabled : (error ? t->color_error : t->color_slider_fill);
-    /* track */
-    lensi_drawlist_push(
-        ui, n,
-        (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                        .rel = {track_x0, h * 0.5f - track_radius, track_w, track_thickness},
-                        .color = track_color,
-                        .radius = track_radius});
-
-    /* Filled portion ends at the exact value. The knob is an interaction
-     * affordance, not part of the value geometry, so hiding it must not move
-     * or lengthen the fill. */
-    float fill_w = frac * track_w;
-    if (fill_w > 0.001f)
-        lensi_drawlist_push(
-            ui, n,
-            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                            .rel = {track_x0, h * 0.5f - track_radius, fill_w, track_thickness},
-                            .color = fill_color,
-                            .radius = track_radius});
-
-    /* Resting sliders are visually quiet. Hover, keyboard focus, and drag
-     * reveal a knob with a short fade + scale transition. lensi_approach
-     * marks animation pending, so input-driven hosts continue rendering until
-     * the transition settles. */
-    float knob_t = n->hover_t * n->hover_t * (3.0f - 2.0f * n->hover_t);
-    if (knob_t > 0.001f) {
-        float knob_size = knob_extent * (0.72f + 0.28f * knob_t);
-        float knob_x = track_x0 + frac * track_w - knob_size * 0.5f;
-        float knob_y = h * 0.5f - knob_size * 0.5f;
-        flux_color knob_color = lensi_lerp_color(flux_color_rgba(0, 0, 0, 0),
-                                                 disabled ? t->color_disabled
-                                                 : error  ? t->color_error
-                                                          : t->color_slider_knob,
-                                                 knob_t);
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {knob_x, knob_y, knob_size, knob_size},
-                                            .color = knob_color,
-                                            .radius = knob_size * 0.5f});
-    }
+    /* resolve + emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_SLIDER,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = lensi_style_resolve(&eff, t, r.state),
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = label, .ratio = frac, .error = error},
+                    });
 
     ui->last_response = r;
     return r.changed;
@@ -186,6 +159,8 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
     bool error = ui->next_error;
     ui->next_disabled = false;
     ui->next_error = false;
+    lens_style eff = lensi_style_effective(ui);
+    float padding = lensi_style_padding(&eff, t);
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -193,7 +168,7 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float w = t->font_size + 2.0f * t->padding;
+    float w = lensi_style_font_size(&eff, t) + 2.0f * padding;
     float h = LENS_SLIDER_DEFAULT_H;
     if (n->fixed_w > 0.0f)
         w = n->fixed_w;
@@ -210,10 +185,9 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
         lensi_approach(ui, n->hover_t, disabled ? 0.0f : 1.0f, dt, disabled ? 14.0f : 18.0f);
 
     flux_rect rect = n->has_prev ? n->prev_rect : (flux_rect){0, 0, w, h};
-    float track_thickness = t->slider_track_thickness;
     float knob_extent = t->slider_knob_size;
-    float track_y0 = t->padding + knob_extent * 0.5f;
-    float track_h = rect.h - 2.0f * t->padding - knob_extent;
+    float track_y0 = padding + knob_extent * 0.5f;
+    float track_h = rect.h - 2.0f * padding - knob_extent;
     if (track_h < 1.0f)
         track_h = 1.0f;
     float span = slider_span(min, max);
@@ -225,6 +199,9 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
         if (set_slider_value(value, min + frac * span, min, max))
             r.changed = true;
     }
+    /* A captured slider is being dragged: the knob tracks the pointer. */
+    if (r.pressed)
+        r.state |= LENS_STATE_DRAGGED;
     if (!disabled && adjust_from_scroll(ui, r.hovered, value, min, max, step))
         r.changed = true;
     if (!disabled && adjust_from_keys(ui, &r, value, min, max, slider_step(min, max, step)))
@@ -238,40 +215,20 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
 
     float frac = value ? (*value - min) / span : 0.0f;
     frac = frac < 0.0f ? 0.0f : (frac > 1.0f ? 1.0f : frac);
-    float track_x = w * 0.5f - track_thickness * 0.5f;
-    flux_color track_color =
-        disabled ? t->color_disabled : (error ? t->color_error : t->color_slider_track);
-    flux_color fill_color =
-        disabled ? t->color_disabled : (error ? t->color_error : t->color_slider_fill);
 
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                        .rel = {track_x, track_y0, track_thickness, track_h},
-                                        .color = track_color,
-                                        .radius = track_thickness * 0.5f});
-    float fill_h = frac * track_h;
-    if (fill_h > 0.001f)
-        lensi_drawlist_push(
-            ui, n,
-            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                            .rel = {track_x, track_y0 + track_h - fill_h, track_thickness, fill_h},
-                            .color = fill_color,
-                            .radius = track_thickness * 0.5f});
-
-    float knob_t = n->hover_t * n->hover_t * (3.0f - 2.0f * n->hover_t);
-    if (knob_t > 0.001f) {
-        float knob_size = knob_extent * (0.72f + 0.28f * knob_t);
-        float knob_x = w * 0.5f - knob_size * 0.5f;
-        float knob_y = track_y0 + (1.0f - frac) * track_h - knob_size * 0.5f;
-        flux_color knob_color = lensi_lerp_color(
-            flux_color_rgba(0, 0, 0, 0),
-            disabled ? t->color_disabled : (error ? t->color_error : t->color_slider_knob), knob_t);
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {knob_x, knob_y, knob_size, knob_size},
-                                            .color = knob_color,
-                                            .radius = knob_size * 0.5f});
-    }
+    /* resolve + emit — through the replaceable skin (ADR-0059) */
+    lensi_skin_emit(ui, n,
+                    &(lens_widget_record){
+                        .kind = LENS_WIDGET_SLIDER,
+                        .state = r.state,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = lensi_style_resolve(&eff, t, r.state),
+                        .style_fields = eff.fields,
+                        .hover_t = n->hover_t,
+                        .active_t = n->active_t,
+                        .content = {.label = label, .ratio = frac, .vertical = true, .error = error},
+                    });
 
     ui->last_response = r;
     return r.changed;

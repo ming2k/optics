@@ -183,6 +183,7 @@ typedef enum flux_struct_type {
     FLUX_TYPE_CANVAS_NO_STENCIL_DESC = 24,
     FLUX_TYPE_DEVICE_DRM_NODE_DESC = 25,
     FLUX_TYPE_DEVICE_FEATURES_DESC = 26,
+    FLUX_TYPE_GLYPH_RUN_HOST_ATLAS_DESC = 27,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -262,7 +263,10 @@ FLUX_NODISCARD FLUX_API flux_result flux_frame_finish_image_target(flux_frame *f
                                                                    flux_image *target);
 
 /* Upload tightly packed pixels into an in-bounds sub-region. The image view
- * and bindless handle remain valid across the update. */
+ * and bindless handle remain valid across the update. Requires the image to
+ * be in its steady sampled state (SHADER_READ_ONLY_OPTIMAL — true after
+ * flux_image_create and after flux_frame_finish_image_target); anything
+ * else returns FLUX_ERROR_INVALID_STATE. */
 FLUX_NODISCARD FLUX_API flux_result flux_image_update_region(flux_image *image, uint32_t x,
                                                              uint32_t y, uint32_t width,
                                                              uint32_t height, const void *data,
@@ -661,10 +665,14 @@ FLUX_NODISCARD FLUX_API flux_result flux_surface_create(flux_device *device,
 FLUX_NODISCARD FLUX_API flux_surface *flux_surface_retain(flux_surface *s);
 FLUX_API void flux_surface_release(flux_surface *s);
 
-/* Recreate the swapchain at the new extent. Stalls the device, drops
- * and rebuilds swapchain images and per-image views; in-flight
- * flux_frame handles obtained from this surface become invalid and
- * the next flux_surface_begin_frame returns the first frame of the
+/* Recreate the swapchain at the new extent. Waits for this surface's
+ * in-flight frames to retire (per-slot fences for offscreen surfaces,
+ * graphics-queue idle for windowed ones, where the presentation engine
+ * can outlive a frame fence) — a queue/slot-scoped quiesce, not a
+ * device-wide stall; the transfer queue and unrelated work keep running
+ * (ADR-0021). Drops and rebuilds swapchain images and per-image views;
+ * in-flight flux_frame handles obtained from this surface become invalid
+ * and the next flux_surface_begin_frame returns the first frame of the
  * new chain. Safe to call from the window resize callback. Returns
  * FLUX_ERROR_INVALID_ARGUMENT if w or h is 0. */
 FLUX_API flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h);

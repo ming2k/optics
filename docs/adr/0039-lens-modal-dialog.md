@@ -1,6 +1,10 @@
 # ADR-0039: Lens modal dialog — centered overlay + backdrop + Tab focus trap
 
-- Status: Accepted
+- Status: Accepted (amended 2026-08-10: `lens_modal_opts.dismissable`
+  renamed to `pinned` — the zero value now means dismissable, matching the
+  documented default; nested modals keep a stack of focus-trap ranges:
+  while an inner modal is open only its range traps, and its end restores
+  the outer range)
 - Date: 2026-07-21
 - Scope: lens (L2 toolkit). Defines the modal-dialog primitive.
 

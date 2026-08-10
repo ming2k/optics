@@ -53,7 +53,7 @@ static inline bool rect_equal(flux_rect a, flux_rect b) {
 /*  recording. Validity layers:                                       */
 /*    - subtree_changed: content + node rect (hash covers hover etc.) */
 /*    - record_clip: the lens clip argument (culling decisions were   */
-/*      baked against it; catches overlay bounds / viewport changes   */
+/*      baked against it; catches place-bounds / viewport changes     */
 /*      that never reach the canvas scissor)                          */
 /*    - record_text_gen: flux-text atlas clear count (a clear re-     */
 /*      packs glyph texels; recorded UVs would freeze stale)          */
@@ -96,9 +96,9 @@ static inline flux_rect rect_intersect(flux_rect a, flux_rect b) {
     return (flux_rect){x1, y1, x2 - x1, y2 - y1};
 }
 
-/* Walk a node and replay its draw list. Exposed (non-static) so the
- * overlay layer (ADR-0037) can reuse the same emission for its sub-roots
- * — otherwise overlays would have to duplicate this logic. */
+/* Walk a node and replay its draw list. ABS children are skipped: they are
+ * emitted separately in band order by lensi_render_tree (ADR-0060), clipped
+ * by their own place_bounds rather than by any ancestor clip. */
 void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect clip) {
     flux_rect box = n->final_rect;
     float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
@@ -151,7 +151,7 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
          * canvas immediately and never referenced again, so rewind the arena
          * after each command — otherwise render scratch accumulates across
          * the whole tree and a busy frame exhausts the arena, silently
-         * dropping later draws (notably overlays, which render last). */
+         * dropping later draws (notably placed nodes, which render last). */
         size_t arena_mark = ui->arena.used;
 
         /* snap_rect keeps far edges fixed so adjacent widgets don't drift,
@@ -261,11 +261,20 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
                 if (vlen) {
                     float x = r.x;
                     float y = r.y;
-                    lens_text_metrics tm = {0};
+                    /* Centring re-measures with the family stamped onto the
+                     * command at build time (c->text_family), NOT the
+                     * render-moment ui->text_family — a family switch between
+                     * build and render would otherwise centre against
+                     * different metrics than it paints. */
+                    const flux_text_style style = {.size_px = c->text_size,
+                                                   .weight = c->text_weight,
+                                                   .color = c->color,
+                                                   .family = (flux_text_family)c->text_family};
+                    flux_text_metrics tm = {0};
                     bool measured_text = false;
                     if (c->rel.w < 0.0f) {
                         /* Negative rel.w means "center in the resolved rect". */
-                        tm = lensi_text_measure_label(ui, c->text, c->text_size, c->text_weight);
+                        tm = flux_text_measure(ui->text, c->text, vlen, &style);
                         measured_text = true;
                         x = r.x + (r.w - tm.width) * 0.5f;
                         if (x < r.x)
@@ -277,17 +286,11 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
                          * correct when the parent constrains the node below
                          * its intrinsic padded height. */
                         if (!measured_text)
-                            tm =
-                                lensi_text_measure_label(ui, c->text, c->text_size, c->text_weight);
+                            tm = flux_text_measure(ui->text, c->text, vlen, &style);
                         y = r.y + (r.h - tm.height) * 0.5f;
                         if (y < r.y)
                             y = r.y;
                     }
-
-                    const flux_text_style style = {.size_px = c->text_size,
-                                                   .weight = c->text_weight,
-                                                   .color = c->color,
-                                                   .family = (flux_text_family)c->text_family};
                     if (c->outline_width > 0.0f && c->outline_color != 0) {
                         flux_text_draw_outlined(ui->text, canvas, &ui->arena, x, y, c->text, vlen,
                                                 &style, c->outline_color, c->outline_width);
@@ -446,6 +449,8 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
     }
 
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place == LENS_PLACE_ABS)
+            continue; /* emitted in band order (ADR-0060), not in tree order */
         lensi_render_node(ui, canvas, c, clip);
     }
 
@@ -464,9 +469,14 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
 /*  Damage tracking — mark nodes whose geometry or appearance changed  */
 /* ------------------------------------------------------------------ */
 
-/* Non-static (lensi_ prefix) so the overlay layer can run the same
- * bottom-up pass on its sub-roots — overlays live outside ui->root, so
- * lensi_mark_dirty alone never reaches them. */
+/* Bottom-up change detection rooted at `n`. ABS descendants are marked as
+ * usual — they live in the one tree now (ADR-0060) — but their changes do
+ * NOT roll up into this node's subtree_changed: this node's display-list
+ * record contains flow children only (render skips ABS nodes in the tree
+ * walk), so placed-subtree damage must not invalidate it. The repaint query
+ * consults the band buckets directly (context.c). Child-list churn still
+ * propagates via child_hash: a placed child appearing or vanishing changes
+ * the parent's child sequence, which is genuine parent damage. */
 bool lensi_mark_subtree_changed(lens_node *n) {
     bool changed = false;
     if (n->phase != LENS_NODE_STABLE)
@@ -493,7 +503,8 @@ bool lensi_mark_subtree_changed(lens_node *n) {
     n->last_active_t = n->active_t;
 
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
-        if (lensi_mark_subtree_changed(c))
+        bool child_changed = lensi_mark_subtree_changed(c);
+        if (c->place != LENS_PLACE_ABS && child_changed)
             changed = true;
     }
     n->subtree_changed = changed;
@@ -550,13 +561,29 @@ flux_result lensi_render_tree(lens *ui, flux_canvas *canvas) {
         flux_canvas_scale(canvas, ui->scale, ui->scale);
     }
     flux_rect no_clip = {-1e6f, -1e6f, 2e6f, 2e6f};
+
+    /* Global emission order (ADR-0060): BACKDROP below the base tree, then
+     * the base tree itself (skipping ABS nodes in-tree), then CHROME,
+     * POPUP and TOPMOST in band order (the BASE bucket is always empty:
+     * lens_place_begin clamps ABS+BASE to CHROME). An ABS node escapes
+     * every ancestor clip — including scroll viewports — and is clipped
+     * only by its place_bounds (default: the display). */
+    for (uint32_t i = 0; i < ui->band_counts[LENS_BAND_BACKDROP]; ++i) {
+        lens_node *n = ui->bands[LENS_BAND_BACKDROP][i];
+        lensi_render_node(ui, canvas, n, n->has_place_bounds ? n->place_bounds : no_clip);
+    }
     lensi_render_node(ui, canvas, ui->root, no_clip);
-    lensi_overlay_render(ui, canvas); /* floating layers above the base */
+    for (lens_band b = LENS_BAND_CHROME; b < LENS_BAND_COUNT; b++) {
+        for (uint32_t i = 0; i < ui->band_counts[b]; ++i) {
+            lens_node *n = ui->bands[b][i];
+            lensi_render_node(ui, canvas, n, n->has_place_bounds ? n->place_bounds : no_clip);
+        }
+    }
     if (scaled)
         flux_canvas_restore(canvas);
+    /* One tree now: the commit walk reaches placed subtrees through their
+     * parent chain, so a single pass baselines every node. */
     commit_render_rects(ui->root);
-    for (uint32_t i = 0; i < ui->overlay_layer_count; ++i)
-        commit_render_rects(ui->overlay_layers[i]);
     return FLUX_OK;
 }
 

@@ -377,8 +377,10 @@ FLUX_API void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image *imag
  * default. Pass FLUX_FILTER_NEAREST samplers for pixel-aligned blits
  * (e.g. glyph atlases) where the default bilinear filter blurs
  * sub-pixel positions. `sampler` is borrowed for the call; the caller
- * retains ownership and must keep it alive until the frame is
- * submitted. */
+ * keeps ownership and may release it at any time — destruction of the
+ * VkSampler and its bindless slot is deferred by the library
+ * (flux_sampler_release parks them on the device retire queue) until
+ * every in-flight frame that could reference the slot has retired. */
 FLUX_API void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *image,
                                              flux_sampler *sampler, flux_rect dst,
                                              const flux_paint *optional_paint);
@@ -428,7 +430,15 @@ typedef struct flux_glyph_run_desc {
      * coverage straight from this buffer with no GPU image, so a
      * device-less canvas (flux_canvas_create_cpu) can render glyph runs.
      * Ignored when a device/atlas is present. `host_atlas_w/h` are the
-     * buffer's texel extent (0 when unused). */
+     * buffer's texel extent (0 when unused).
+     *
+     * Lifetime + invalidation: the buffer is borrowed, never copied. It
+     * must outlive every display-list segment that recorded the run —
+     * release such segments (or destroy the canvas) before the producer
+     * frees or reallocates the buffer. A producer that rearranges texels
+     * in place (e.g. a full-atlas reclaim) should attach
+     * flux_glyph_run_host_atlas_desc so replay of pre-rearrangement
+     * segments is refused instead of sampling moved texels. */
     const uint8_t *host_coverage;
     uint32_t host_atlas_w;
     uint32_t host_atlas_h;
@@ -439,6 +449,23 @@ typedef struct flux_glyph_run_desc {
 } flux_glyph_run_desc;
 
 #define FLUX_GLYPH_RUN_DESC_INIT {.type = FLUX_TYPE_GLYPH_RUN_DESC}
+
+/* Optional flux_glyph_run_desc.next payload: the producer's content
+ * generation for a host coverage buffer. The canvas records the pair
+ * (host_coverage pointer, generation) with each captured glyph batch and
+ * remembers the newest generation it has seen per buffer; flux_canvas_replay
+ * then refuses a segment whose recorded generation is stale (the buffer's
+ * texels were rearranged since, so the baked UVs would sample the wrong
+ * cells), letting the caller re-emit and re-record. Producers that never
+ * rearrange in place may omit the extension; their segments replay
+ * unchecked. flux_text attaches its atlas generation automatically. */
+typedef struct flux_glyph_run_host_atlas_desc {
+    flux_struct_type type; /* FLUX_TYPE_GLYPH_RUN_HOST_ATLAS_DESC */
+    const void *next;
+    uint64_t generation;
+} flux_glyph_run_host_atlas_desc;
+
+#define FLUX_GLYPH_RUN_HOST_ATLAS_DESC_INIT {.type = FLUX_TYPE_GLYPH_RUN_HOST_ATLAS_DESC}
 
 /* Draw a pre-shaped glyph run as a single batched draw call. The
  * library does no shaping, kerning, or atlas management (ADR-0010):
@@ -509,7 +536,10 @@ FLUX_API flux_canvas_record flux_canvas_end_record(flux_canvas *c);
  * replay inside an active recording is itself captured, so a
  * re-recording ancestor stays complete when an unchanged child replays.
  * Images and custom samplers referenced by the segment are retained by
- * the canvas for the segment's lifetime. */
+ * the canvas for the segment's lifetime. A recorded host-coverage glyph
+ * batch additionally refuses to replay once its producer reports a newer
+ * atlas generation (flux_glyph_run_host_atlas_desc): the baked UVs would
+ * sample rearranged texels. */
 FLUX_API bool flux_canvas_replay(flux_canvas *c, flux_canvas_record rec);
 
 /* Release a segment early (e.g. its subtree changed or died). Safe on a

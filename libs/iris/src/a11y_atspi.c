@@ -7,18 +7,30 @@
  * lens_accessibility_walk reports.
  *
  * Reconciliation (iris_a11y_update):
- *   - Walk lens semantics, build a snapshot for this frame.
- *   - Diff against last frame: emit ChildrenChanged for added/removed IDs.
- *   - Track the focused id; emit StateChanged:focused when it changes.
+ *   - Walk lens semantics, deep-copying names/values into bridge-owned
+ *     storage (the lens pointers are per-frame arena memory).
+ *   - Diff against last frame (iris_a11y__diff, a11y_util.c): emit
+ *     ChildrenChanged for added/removed ids, PropertyChange for
+ *     name/role/value changes, StateChanged for checked/expanded/selected
+ *     flips; focus is pointer-tracked and emits StateChanged:focused.
+ *
+ * Event wire contract (mirrors at-spi2-atk's atk-adaptor/event.c): all
+ * object events are signals on the org.a11y.atspi.Event.Object interface
+ * with signature "siiva{sv}" — detail name (e.g. "add"/"remove"/
+ * "focused"/"accessible-name"), detail1, detail2, a variant payload
+ * (child reference "(so)" for ChildrenChanged; new name "s" for
+ * accessible-name; int 0 otherwise), and an (empty) properties dict.
+ * This is what orca / pyatspi actually subscribe to through the registry.
  *
  * What AT-SPI clients get today (e.g. orca):
  *   - A read-only widget tree with Name, Role, RoleName, State, Parent,
- *     ChildCount, ChildAtIndex. Enough for orca to read the UI aloud and
- *     announce focus changes.
+ *     ChildCount, ChildAtIndex, plus Action (DoAction activates through
+ *     lens_a11y_activate — ADR-0062), Text, and Value. Enough for orca to
+ *     read the UI aloud, announce focus/tree/name/value changes, echo
+ *     typed text (TextChanged deltas), and operate controls.
  *
- * What they can't do yet: invoke actions (button clicks), read text-field
- * contents via the Text interface, or query slider values via Value.
- * Those land in subsequent revisions.
+ * What they can't do yet: set values/selections programmatically, or hear
+ * live-region announcements. Those land in subsequent revisions.
  *
  * Build gate: IRIS_HAVE_ATSPI (defined when libsystemd is available).
  */
@@ -37,107 +49,12 @@
 #include <systemd/sd-bus.h>
 
 /* ------------------------------------------------------------------ */
-/*  AT-SPI role constants (subset of atspi/atspi-constants.h)         */
+/*  AT-SPI role/state constants and the lens→AT-SPI mapping live in    */
+/*  a11y_util.c (pure, unit-tested against at-spi2-core's              */
+/*  atspi-constants.h): iris_a11y__map_role / iris_a11y__role_name /   */
+/*  iris_a11y__state_bits and the IRIS_ATSPI_ROLE_* /                  */
+/*  IRIS_ATSPI_STATE_* enums come from there.                          */
 /* ------------------------------------------------------------------ */
-
-enum atspi_role {
-    ATSPI_ROLE_UNKNOWN = 0,
-    ATSPI_ROLE_PUSH_BUTTON = 41,
-    ATSPI_ROLE_CHECK_BOX = 5,
-    ATSPI_ROLE_RADIO_BUTTON = 42,
-    ATSPI_ROLE_SLIDER = 76,
-    ATSPI_ROLE_LABEL = 29,
-    ATSPI_ROLE_PANEL = 28,
-    ATSPI_ROLE_SCROLL_PANE = 64,
-    ATSPI_ROLE_ENTRY = 16,
-    ATSPI_ROLE_TEXT = 89,
-    ATSPI_ROLE_TOGGLE_BUTTON = 86,
-    ATSPI_ROLE_MENU = 24,
-    ATSPI_ROLE_FRAME = 73, /* the application root         */
-};
-
-/* AT-SPI State enum bit positions (subset of atspi/atspi-constants.h).
- * State is two uint32 bitfields (64 bits); bits 0-31 live in `lo`,
- * bits 32-63 in `hi`. */
-enum atspi_state {
-    ATSPI_STATE_CHECKED = 3,
-    ATSPI_STATE_FOCUSABLE = 5,
-    ATSPI_STATE_FOCUSED = 8,
-    ATSPI_STATE_ENABLED = 9,
-    ATSPI_STATE_SENSITIVE = 23,
-    ATSPI_STATE_EXPANDED = 41, /* -> hi bit 9  */
-    ATSPI_STATE_SHOWING = 48,  /* -> hi bit 16 */
-};
-
-/* Pack a state bit into the (lo, hi) pair. */
-static inline void state_set(uint32_t *lo, uint32_t *hi, int bit) {
-    if (bit < 32)
-        *lo |= (1u << bit);
-    else
-        *hi |= (1u << (bit - 32));
-}
-
-/* Map lens role → AT-SPI role. */
-static enum atspi_role map_role(lens_role r) {
-    switch (r) {
-    case LENS_ROLE_LABEL:
-        return ATSPI_ROLE_LABEL;
-    case LENS_ROLE_BUTTON:
-        return ATSPI_ROLE_PUSH_BUTTON;
-    case LENS_ROLE_CHECKBOX:
-        return ATSPI_ROLE_CHECK_BOX;
-    case LENS_ROLE_SLIDER:
-        return ATSPI_ROLE_SLIDER;
-    case LENS_ROLE_DISCLOSURE:
-        return ATSPI_ROLE_TOGGLE_BUTTON;
-    case LENS_ROLE_SCROLLAREA:
-        return ATSPI_ROLE_SCROLL_PANE;
-    case LENS_ROLE_TEXTFIELD:
-        return ATSPI_ROLE_ENTRY;
-    case LENS_ROLE_TEXTAREA:
-        return ATSPI_ROLE_TEXT;
-    case LENS_ROLE_MENU:
-        return ATSPI_ROLE_MENU;
-    case LENS_ROLE_RADIO:
-        return ATSPI_ROLE_RADIO_BUTTON;
-    case LENS_ROLE_GROUP:
-        return ATSPI_ROLE_PANEL;
-    case LENS_ROLE_NONE:
-    default:
-        return ATSPI_ROLE_UNKNOWN;
-    }
-}
-
-static const char *role_name(enum atspi_role r) {
-    switch (r) {
-    case ATSPI_ROLE_PUSH_BUTTON:
-        return "push button";
-    case ATSPI_ROLE_CHECK_BOX:
-        return "check box";
-    case ATSPI_ROLE_RADIO_BUTTON:
-        return "radio button";
-    case ATSPI_ROLE_SLIDER:
-        return "slider";
-    case ATSPI_ROLE_LABEL:
-        return "label";
-    case ATSPI_ROLE_PANEL:
-        return "panel";
-    case ATSPI_ROLE_SCROLL_PANE:
-        return "scroll pane";
-    case ATSPI_ROLE_ENTRY:
-        return "entry";
-    case ATSPI_ROLE_TEXT:
-        return "text";
-    case ATSPI_ROLE_TOGGLE_BUTTON:
-        return "toggle button";
-    case ATSPI_ROLE_MENU:
-        return "menu";
-    case ATSPI_ROLE_FRAME:
-        return "frame";
-    default:
-        return "unknown";
-    }
-}
 
 /* ------------------------------------------------------------------ */
 /*  Per-frame snapshot of the semantic tree                            */
@@ -146,44 +63,30 @@ static const char *role_name(enum atspi_role r) {
 #define IRIS_A11Y_MAX_NODES 256
 
 typedef struct {
-    lens_id id;
-    lens_id parent;
-    lens_role role;
-    const char *name;
-    const char *value;
-    uint32_t flags;
-    flux_rect bounds; /* last frame's solved rect — used for DoAction */
-} a11y_node;
-
-typedef struct {
-    a11y_node nodes[IRIS_A11Y_MAX_NODES];
+    iris_a11y__node nodes[IRIS_A11Y_MAX_NODES];
     size_t n;
 
-    /* Index from lens_id → position in `nodes`. Built per update. */
-    struct {
-        lens_id id;
-        size_t idx;
-    } lookup[IRIS_A11Y_MAX_NODES];
-    size_t n_lookup;
-
-    /* Tracks the previous frame's ids so we can diff. */
-    lens_id prev_ids[IRIS_A11Y_MAX_NODES];
+    /* Previous frame's snapshot, for the diff. */
+    iris_a11y__node prev[IRIS_A11Y_MAX_NODES];
     size_t n_prev;
 
-    /* Tracks the currently focused id (0 = none). */
+    /* Tracks the currently focused id (0 = none). Focus is pointer-tracked
+     * rather than diffed so a focused node that vanishes still produces a
+     * focused-off event. */
     lens_id focused;
+
+    /* Set by the walk when the tree exceeds IRIS_A11Y_MAX_NODES. */
+    bool truncated;
 } a11y_state;
 
 static a11y_state g_state;
 
-static const char *node_string(a11y_node *n) {
-    if (!n)
-        return "";
-    return n->name ? n->name : "";
+static const char *node_string(const iris_a11y__node *n) {
+    return n ? n->name : "";
 }
 
 /* find_node: returns ptr into g_state.nodes or NULL */
-static a11y_node *find_node(lens_id id) {
+static iris_a11y__node *find_node(lens_id id) {
     if (id == 0)
         return NULL; /* root */
     for (size_t i = 0; i < g_state.n; i++) {
@@ -228,39 +131,14 @@ static int parse_path(const char *path, lens_id *out) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Action.DoAction click-synthesis seam                              */
+/*  Action.DoAction → lens_a11y_activate (ADR-0062)                    */
 /* ------------------------------------------------------------------ */
 
-/* A pending click requested by org.a11y.atspi.Action.DoAction. Single slot:
- * AT-SPI actions are synchronous/sequential, so one outstanding click is
- * enough. The app loop drains it via iris_a11y__take_pending_click() and
- * synthesizes a lens_input press+release at the widget's centre next frame.
- * (lens is input-driven — it has no programmatic "activate" API, so we must
- * route the action back through the input queue.) */
-static flux_point g_pending_click_pt;
-static bool g_pending_click_active;
-
-/* Internal seam consumed by the platform backend (app_wayland.c). Not part
- * of the public <iris/a11y.h> surface. */
-bool iris_a11y__take_pending_click(flux_point *out) {
-    if (!g_pending_click_active)
-        return false;
-    g_pending_click_active = false;
-    if (out)
-        *out = g_pending_click_pt;
-    return true;
-}
-
-/* Queue a click at widget `id`'s centre. Called from the Action vtable's
- * DoAction handler. */
-static void queue_click(lens_id id) {
-    a11y_node *n = find_node(id);
-    if (!n || n->bounds.w <= 0.0f || n->bounds.h <= 0.0f)
-        return;
-    g_pending_click_pt.x = n->bounds.x + n->bounds.w * 0.5f;
-    g_pending_click_pt.y = n->bounds.y + n->bounds.h * 0.5f;
-    g_pending_click_active = true;
-}
+/* The live lens context, captured each iris_a11y_update. DoAction handlers
+ * run on the main thread inside the bus pump, so calling straight into
+ * lens is safe; the activation lands next frame like any input. Cleared on
+ * shutdown. */
+static lens *g_lens_ui = NULL;
 
 /* ------------------------------------------------------------------ */
 /*  org.a11y.atspi.Accessible method handlers                          */
@@ -278,7 +156,7 @@ static int m_get_name(sd_bus_message *m, void *u, sd_bus_error *e) {
         return sd_bus_reply_method_return(m, "s", "");
     if (id == 0)
         return sd_bus_reply_method_return(m, "s", "iris application");
-    a11y_node *n = find_node(id);
+    iris_a11y__node *n = find_node(id);
     return sd_bus_reply_method_return(m, "s", n ? node_string(n) : "");
 }
 
@@ -288,13 +166,13 @@ static int m_get_role(sd_bus_message *m, void *u, sd_bus_error *e) {
     const char *path = sd_bus_message_get_path(m);
     lens_id id = 0;
     if (parse_path(path, &id) != 0)
-        return sd_bus_reply_method_return(m, "u", (uint32_t)ATSPI_ROLE_UNKNOWN);
-    enum atspi_role r;
+        return sd_bus_reply_method_return(m, "u", (uint32_t)IRIS_ATSPI_ROLE_UNKNOWN);
+    iris_atspi_role r;
     if (id == 0) {
-        r = ATSPI_ROLE_FRAME;
+        r = IRIS_ATSPI_ROLE_FRAME;
     } else {
-        a11y_node *n = find_node(id);
-        r = n ? map_role(n->role) : ATSPI_ROLE_UNKNOWN;
+        iris_a11y__node *n = find_node(id);
+        r = n ? iris_a11y__map_role(n->role) : IRIS_ATSPI_ROLE_UNKNOWN;
     }
     return sd_bus_reply_method_return(m, "u", (uint32_t)r);
 }
@@ -304,17 +182,17 @@ static int m_get_role_name(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)e;
     const char *path = sd_bus_message_get_path(m);
     lens_id id = 0;
-    enum atspi_role r = ATSPI_ROLE_UNKNOWN;
+    iris_atspi_role r = IRIS_ATSPI_ROLE_UNKNOWN;
     if (parse_path(path, &id) == 0) {
         if (id == 0)
-            r = ATSPI_ROLE_FRAME;
+            r = IRIS_ATSPI_ROLE_FRAME;
         else {
-            a11y_node *n = find_node(id);
+            iris_a11y__node *n = find_node(id);
             if (n)
-                r = map_role(n->role);
+                r = iris_a11y__map_role(n->role);
         }
     }
-    return sd_bus_reply_method_return(m, "s", role_name(r));
+    return sd_bus_reply_method_return(m, "s", iris_a11y__role_name(r));
 }
 
 static int m_get_description(sd_bus_message *m, void *u, sd_bus_error *e) {
@@ -333,7 +211,7 @@ static int m_get_parent(sd_bus_message *m, void *u, sd_bus_error *e) {
         /* Root's parent is the registry (we return a null reference). */
         return sd_bus_reply_method_return(m, "so", "", "/org/a11y/atspi/null");
     }
-    a11y_node *n = find_node(id);
+    iris_a11y__node *n = find_node(id);
     lens_id pid = n ? n->parent : 0;
     char ppath[64];
     format_path(ppath, sizeof ppath, pid);
@@ -386,34 +264,37 @@ static int m_get_child_at_index(sd_bus_message *m, void *u, sd_bus_error *e) {
 static int m_get_state(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
     (void)e;
-    /* AT-SPI state is two uint32 bitfields (64 bits). Build it from
-     * lens's lens_a11y flags + focus tracking. */
+    /* AT-SPI state is two uint32 bitfields returned as an ARRAY of two
+     * uint32 ("au" — the vtable declares it and sd-bus validates outgoing
+     * replies against the declaration; a "uu" reply is rejected). Built
+     * from lens's LENS_A11Y_* flags by the shared mapper (a11y_util.c). */
     uint32_t lo = 0, hi = 0;
     const char *path = sd_bus_message_get_path(m);
     lens_id id = 0;
     if (parse_path(path, &id) == 0 && id != 0) {
-        a11y_node *n = find_node(id);
-        if (n) {
-            /* Every widget is focusable+enabled+sensitive+showing unless
-             * the lens DISABLED flag is set. */
-            if (!(n->flags & LENS_A11Y_DISABLED)) {
-                state_set(&lo, &hi, ATSPI_STATE_FOCUSABLE);
-                state_set(&lo, &hi, ATSPI_STATE_ENABLED);
-                state_set(&lo, &hi, ATSPI_STATE_SENSITIVE);
-            }
-            state_set(&lo, &hi, ATSPI_STATE_SHOWING);
-            if (n->flags & LENS_A11Y_FOCUSED)
-                state_set(&lo, &hi, ATSPI_STATE_FOCUSED);
-            if (n->flags & LENS_A11Y_CHECKED)
-                state_set(&lo, &hi, ATSPI_STATE_CHECKED);
-            if (n->flags & LENS_A11Y_EXPANDED)
-                state_set(&lo, &hi, ATSPI_STATE_EXPANDED);
-        }
+        iris_a11y__node *n = find_node(id);
+        if (n)
+            iris_a11y__state_bits(n->flags, &lo, &hi);
     } else if (id == 0) {
-        state_set(&lo, &hi, ATSPI_STATE_SHOWING);
-        state_set(&lo, &hi, ATSPI_STATE_ENABLED);
+        /* Root: the not-DISABLED default set (enabled/sensitive/showing/
+         * focusable) with no per-widget bits. */
+        iris_a11y__state_bits(0, &lo, &hi);
     }
-    return sd_bus_reply_method_return(m, "uu", lo, hi);
+
+    sd_bus_message *reply = NULL;
+    int rc = sd_bus_message_new_method_return(m, &reply);
+    if (rc < 0)
+        return rc;
+    rc = sd_bus_message_open_container(reply, 'a', "u");
+    if (rc >= 0)
+        rc = sd_bus_message_append(reply, "uu", lo, hi);
+    if (rc >= 0)
+        rc = sd_bus_message_close_container(reply);
+    if (rc < 0) {
+        sd_bus_message_unref(reply);
+        return rc;
+    }
+    return sd_bus_send(NULL, reply, NULL);
 }
 
 static int m_get_application(sd_bus_message *m, void *u, sd_bus_error *e) {
@@ -429,7 +310,7 @@ static int m_get_index_in_parent(sd_bus_message *m, void *u, sd_bus_error *e) {
     lens_id id = 0;
     if (parse_path(path, &id) != 0 || id == 0)
         return sd_bus_reply_method_return(m, "i", (int32_t)0);
-    a11y_node *n = find_node(id);
+    iris_a11y__node *n = find_node(id);
     if (!n)
         return sd_bus_reply_method_return(m, "i", (int32_t)-1);
     int32_t idx = 0;
@@ -474,7 +355,7 @@ static int m_get_interfaces(sd_bus_message *m, void *u, sd_bus_error *e) {
     lens_id id = 0;
     const char *path = sd_bus_message_get_path(m);
     if (parse_path(path, &id) == 0 && id != 0) {
-        a11y_node *n = find_node(id);
+        iris_a11y__node *n = find_node(id);
         if (n)
             role = n->role;
     }
@@ -590,8 +471,21 @@ static const sd_bus_vtable g_accessible_vtable[] = {
                   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetInterfaces", NULL, "as", HANDLER(m_get_interfaces),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_SIGNAL("ChildrenChanged", "si", 0),
-    SD_BUS_SIGNAL("StateChanged", "siu", 0),
+    SD_BUS_VTABLE_END,
+};
+
+/* org.a11y.atspi.Event.Object — the interface AT clients actually
+ * subscribe to (orca/pyatspi register "object:<signal>[:<detail>]" with
+ * the registry, which forwards signals from this interface). One fixed
+ * "siiva{sv}" shape for every member: detail name, detail1, detail2,
+ * variant payload, properties dict. Declared here so introspection shows
+ * the events each object can emit; emission is in iris_a11y_update. */
+static const sd_bus_vtable g_event_object_vtable[] = {
+    SD_BUS_VTABLE_START(0),
+    SD_BUS_SIGNAL("ChildrenChanged", "siiva{sv}", 0),
+    SD_BUS_SIGNAL("PropertyChange", "siiva{sv}", 0),
+    SD_BUS_SIGNAL("StateChanged", "siiva{sv}", 0),
+    SD_BUS_SIGNAL("TextChanged", "siiva{sv}", 0),
     SD_BUS_VTABLE_END,
 };
 
@@ -603,7 +497,7 @@ static int action_get_n(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
     (void)e;
     lens_id id = 0;
-    a11y_node *n =
+    iris_a11y__node *n =
         (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : NULL;
     int32_t count = (n && iris_a11y__supports_action(n->role)) ? 1 : 0;
     return sd_bus_reply_method_return(m, "i", count);
@@ -615,7 +509,7 @@ static int action_named(sd_bus_message *m, void *u, sd_bus_error *e) {
     int32_t idx = 0;
     (void)sd_bus_message_read(m, "i", &idx);
     lens_id id = 0;
-    a11y_node *n =
+    iris_a11y__node *n =
         (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : NULL;
     const char *nm = (n && idx == 0) ? iris_a11y__action_name(n->role) : NULL;
     return sd_bus_reply_method_return(m, "s", nm ? nm : "");
@@ -627,7 +521,7 @@ static int action_description(sd_bus_message *m, void *u, sd_bus_error *e) {
     int32_t idx = 0;
     (void)sd_bus_message_read(m, "i", &idx);
     lens_id id = 0;
-    a11y_node *n =
+    iris_a11y__node *n =
         (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : NULL;
     const char *desc =
         (n && idx == 0 && iris_a11y__supports_action(n->role)) ? "activate the control" : "";
@@ -647,7 +541,7 @@ static int action_get_actions(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
     (void)e;
     lens_id id = 0;
-    a11y_node *n =
+    iris_a11y__node *n =
         (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : NULL;
     sd_bus_message *reply = NULL;
     int rc = sd_bus_message_new_method_return(m, &reply);
@@ -686,11 +580,14 @@ static int action_do(sd_bus_message *m, void *u, sd_bus_error *e) {
     if (rc < 0)
         return rc;
     lens_id id = 0;
-    a11y_node *n =
+    iris_a11y__node *n =
         (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : NULL;
     int ok = 0;
-    if (n && idx == 0 && iris_a11y__supports_action(n->role)) {
-        queue_click(id); /* drained by the platform loop next frame */
+    if (n && idx == 0 && iris_a11y__supports_action(n->role) && g_lens_ui) {
+        /* ADR-0062: hand the activation to lens's interaction path; it
+         * reports clicked for the node next frame (disabled is respected,
+         * pointer occlusion is not). No pointer synthesis. */
+        lens_a11y_activate(g_lens_ui, id);
         ok = 1;
     }
     return sd_bus_reply_method_return(m, "b", ok);
@@ -743,14 +640,14 @@ static const char *text_slice(const char *value, int32_t start, int32_t end) {
     return buf;
 }
 
-static a11y_node *node_on_path(sd_bus_message *m) {
+static iris_a11y__node *node_on_path(sd_bus_message *m) {
     lens_id id = 0;
     if (parse_path(sd_bus_message_get_path(m), &id) != 0 || id == 0)
         return NULL;
     return find_node(id);
 }
 
-static const char *text_value_of(a11y_node *n) {
+static const char *text_value_of(iris_a11y__node *n) {
     return (n && iris_a11y__supports_text(n->role) && n->value) ? n->value : "";
 }
 
@@ -841,7 +738,7 @@ static const sd_bus_vtable g_text_vtable[] = {
 /* ------------------------------------------------------------------ */
 
 static double value_of(lens_id id) {
-    a11y_node *n = find_node(id);
+    iris_a11y__node *n = find_node(id);
     if (!n || !iris_a11y__supports_value(n->role))
         return 0.0;
     return iris_a11y__parse_value(n->value);
@@ -987,21 +884,22 @@ IRIS_API int iris_a11y_init(void) {
     sd_bus_error_free(&err);
     sd_bus_unref(session);
 
-    /* 2. Open a fresh connection directly to the AT-SPI bus. The most robust
-     *    way across sd-bus versions is to swap DBUS_SESSION_BUS_ADDRESS
-     *    temporarily and let sd_bus_open_user do the full handshake. */
-    const char *old_env = getenv("DBUS_SESSION_BUS_ADDRESS");
-    char *old_env_copy = old_env ? strdup(old_env) : NULL;
-    setenv("DBUS_SESSION_BUS_ADDRESS", addr_buf, 1);
-    rc = sd_bus_open_user(&g_a11y_bus);
-    if (old_env_copy) {
-        setenv("DBUS_SESSION_BUS_ADDRESS", old_env_copy, 1);
-        free(old_env_copy);
-    } else {
-        unsetenv("DBUS_SESSION_BUS_ADDRESS");
-    }
+    /* 2. Open a fresh connection directly to the AT-SPI bus: set the
+     *    discovered address on a private connection and start it. This
+     *    never touches DBUS_SESSION_BUS_ADDRESS (the old setenv dance
+     *    raced every other thread reading the environment).
+     *    sd_bus_set_bus_client(true) is required: without it the
+     *    connection is a raw (non-bus) one and sd_bus_start never sends
+     *    the Hello that assigns our unique name. */
+    rc = sd_bus_new(&g_a11y_bus);
+    if (rc >= 0)
+        rc = sd_bus_set_address(g_a11y_bus, addr_buf);
+    if (rc >= 0)
+        rc = sd_bus_set_bus_client(g_a11y_bus, true);
+    if (rc >= 0)
+        rc = sd_bus_start(g_a11y_bus);
     if (rc < 0) {
-        g_a11y_bus = NULL;
+        g_a11y_bus = sd_bus_unref(g_a11y_bus);
         return -1;
     }
 
@@ -1037,14 +935,23 @@ IRIS_API int iris_a11y_init(void) {
     (void)sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
                                      "org.a11y.atspi.Value", g_value_vtable, NULL, NULL);
 
-    /* 6. Register with the AT-SPI registry (links our root into the
+    /* 7. Event.Object on the root and the fallback prefix: declares the
+     *    signals iris_a11y_update emits (ChildrenChanged / PropertyChange /
+     *    StateChanged, "siiva{sv}") so introspection advertises them. */
+    (void)sd_bus_add_object_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible/root",
+                                   "org.a11y.atspi.Event.Object", g_event_object_vtable, NULL);
+    (void)sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
+                                     "org.a11y.atspi.Event.Object", g_event_object_vtable, NULL,
+                                     NULL);
+
+    /* 8. Register with the AT-SPI registry (links our root into the
      *    desktop-wide accessibility tree). Ignore failures — at-spi2-core
      *    may not be running and we still want object exposure. */
     (void)sd_bus_call_method(g_a11y_bus, "org.a11y.atspi.Registry",
                              "/org/a11y/atspi/accessible/root", "org.a11y.atspi.Socket", "Embed",
                              NULL, NULL, "o", "/org/a11y/atspi/accessible/root");
 
-    /* 7. Some sd_bus builds filter incoming method_calls unless we add an
+    /* 9. Some sd_bus builds filter incoming method_calls unless we add an
      *    explicit match. Match every message to us; the vtable dispatch
      *    is the actual filter. */
     (void)sd_bus_match_signal_async(g_a11y_bus, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
@@ -1092,62 +999,138 @@ IRIS_API void iris_a11y_shutdown(void) {
     g_state.n = 0;
     g_state.n_prev = 0;
     g_state.focused = 0;
-    g_pending_click_active = false;
+    g_state.truncated = false;
+    g_lens_ui = NULL;
 }
 
 /* ------------------------------------------------------------------ */
 /*  Per-frame walk + diff                                              */
 /* ------------------------------------------------------------------ */
-
 static void visit_fn(const lens_semantics *s, flux_rect bounds, lens_id id, lens_id parent,
                      void *user) {
     (void)user;
-    if (g_state.n >= IRIS_A11Y_MAX_NODES)
+    (void)bounds; /* no consumer yet (a future Component interface will) */
+    if (g_state.n >= IRIS_A11Y_MAX_NODES) {
+        g_state.truncated = true;
         return;
-    a11y_node *n = &g_state.nodes[g_state.n++];
-    n->id = id;
-    n->parent = parent;
-    n->role = s->role;
-    n->name = s->name;
-    n->value = s->value;
-    n->flags = s->flags;
-    n->bounds = bounds;
+    }
+    /* Deep copy: s->name / s->value point into lens's per-frame arena and
+     * dangle past the next lens_begin; the snapshot must own its strings
+     * so AT-SPI method handlers (which run whenever the bus is pumped)
+     * never read reclaimed arena memory. */
+    iris_a11y__node_fill(&g_state.nodes[g_state.n], s, id, parent, g_state.nodes, g_state.n);
+    g_state.n++;
 }
 
-static int was_present_last_frame(lens_id id) {
-    for (size_t i = 0; i < g_state.n_prev; i++)
-        if (g_state.prev_ids[i] == id)
-            return 1;
-    return 0;
-}
-
-static void emit_children_changed(lens_id parent_id, lens_id child_id, int add_remove,
-                                  int index_in_parent) {
-    if (!g_a11y_bus)
-        return;
-    char child_path[64];
-    format_path(child_path, sizeof child_path, child_id);
-    char parent_path[64];
-    format_path(parent_path, sizeof parent_path, parent_id);
-
-    /* Signal shape: "si" — string (the AT-SPI reference as "bus:path"),
-     * int (add=1/remove=-1, followed by index encoded in the same int). */
-    char ref[256];
-    snprintf(ref, sizeof ref, "%s:%s", g_unique, child_path);
-    int detail = add_remove * 1000 + index_in_parent;
-
-    (void)sd_bus_emit_signal(g_a11y_bus, parent_path, "org.a11y.atspi.Accessible",
-                             "ChildrenChanged", "si", ref, detail);
-}
-
-static void emit_state_changed(lens_id id, const char *state_name, int enabled) {
+/* Emit one org.a11y.atspi.Event.Object signal — the "siiva{sv}" shape
+ * AT clients subscribe to (see the file header). `any_type` selects the
+ * variant payload: "(so)" (child reference: any_s = bus name, any_o =
+ * object path), "s" (string), "u" (uint32), or "i" (int32 any_i). The
+ * trailing properties dict is always empty. */
+static void emit_object_event(lens_id path_id, const char *member, const char *detail,
+                              int32_t detail1, int32_t detail2, const char *any_type,
+                              const char *any_s, const char *any_o, int32_t any_i) {
     if (!g_a11y_bus)
         return;
     char path[64];
-    format_path(path, sizeof path, id);
-    /* Signal shape: "siu" — string (state name), int (enabled), uint (detail). */
-    (void)sd_bus_emit_signal(g_a11y_bus, path, "org.a11y.atspi.Accessible", "StateChanged", "siu",
-                             state_name, enabled, 0u);
+    format_path(path, sizeof path, path_id);
+
+    sd_bus_message *sig = NULL;
+    int rc = sd_bus_message_new_signal(g_a11y_bus, &sig, path, "org.a11y.atspi.Event.Object",
+                                       member);
+    if (rc < 0)
+        return;
+    rc = sd_bus_message_append(sig, "sii", detail, detail1, detail2);
+    if (rc >= 0)
+        rc = sd_bus_message_open_container(sig, 'v', any_type);
+    if (rc >= 0) {
+        if (strcmp(any_type, "(so)") == 0)
+            rc = sd_bus_message_append(sig, "(so)", any_s, any_o);
+        else if (strcmp(any_type, "s") == 0)
+            rc = sd_bus_message_append(sig, "s", any_s ? any_s : "");
+        else if (strcmp(any_type, "u") == 0)
+            rc = sd_bus_message_append(sig, "u", (uint32_t)any_i);
+        else
+            rc = sd_bus_message_append(sig, "i", any_i);
+    }
+    if (rc >= 0)
+        rc = sd_bus_message_close_container(sig); /* v  */
+    if (rc >= 0)
+        rc = sd_bus_message_open_container(sig, 'a', "{sv}");
+    if (rc >= 0)
+        rc = sd_bus_message_close_container(sig); /* a{sv} */
+    if (rc >= 0)
+        (void)sd_bus_send(NULL, sig, NULL); /* sig carries the bus ref */
+    sd_bus_message_unref(sig);
+}
+
+/* StateChanged:focused — detail1 is 1/0, payload an int 0 (the shape
+ * at-spi2-atk emits; clients re-read the object). */
+static void emit_state_changed(lens_id id, const char *state_name, int enabled) {
+    emit_object_event(id, "StateChanged", state_name, enabled, 0, "i", NULL, NULL, 0);
+}
+
+/* Translate one diff event (a11y_util.c) into its Event.Object signal. */
+static void emit_diff_event(const iris_a11y__event *ev) {
+    switch (ev->kind) {
+    case IRIS_A11Y__EV_ADD:
+    case IRIS_A11Y__EV_REMOVE: {
+        /* Emitted on the parent; the payload is the child reference. For a
+         * removal the child path no longer resolves — clients drop their
+         * cached copy, which is the point. */
+        const iris_a11y__node *child = ev->node ? ev->node : ev->prev_node;
+        char child_path[64];
+        format_path(child_path, sizeof child_path, child->id);
+        emit_object_event(ev->parent, "ChildrenChanged",
+                          ev->kind == IRIS_A11Y__EV_ADD ? "add" : "remove", ev->index, 0, "(so)",
+                          g_unique, child_path, 0);
+        break;
+    }
+    case IRIS_A11Y__EV_NAME:
+        emit_object_event(ev->id, "PropertyChange", "accessible-name", 0, 0, "s",
+                          ev->node->name, NULL, 0);
+        break;
+    case IRIS_A11Y__EV_VALUE:
+        /* at-spi2-atk sends an int-0 payload here too; clients re-query
+         * the Value interface for the new CurrentValue. */
+        emit_object_event(ev->id, "PropertyChange", "accessible-value", 0, 0, "i", NULL, NULL, 0);
+        break;
+    case IRIS_A11Y__EV_ROLE:
+        emit_object_event(ev->id, "PropertyChange", "accessible-role", 0, 0, "u", NULL, NULL,
+                          (int32_t)iris_a11y__map_role(ev->role));
+        break;
+    case IRIS_A11Y__EV_STATE_ON:
+    case IRIS_A11Y__EV_STATE_OFF: {
+        const char *name = ev->state == IRIS_ATSPI_STATE_CHECKED     ? "checked"
+                           : ev->state == IRIS_ATSPI_STATE_EXPANDED  ? "expanded"
+                           : ev->state == IRIS_ATSPI_STATE_SELECTED  ? "selected"
+                                                                     : "unknown";
+        emit_state_changed(ev->id, name, ev->kind == IRIS_A11Y__EV_STATE_ON ? 1 : 0);
+        break;
+    }
+    case IRIS_A11Y__EV_TEXT: {
+        /* at-spi2-atk shape: detail1 = code-point offset of the edit,
+         * detail2 = run length in code points, payload = the run itself.
+         * A replace (both runs non-empty) is delete-then-insert. */
+        const iris_a11y__text_delta *d = &ev->text;
+        char buf[IRIS_A11Y__NODE_VALUE_MAX + 1];
+        if (d->removed > 0) {
+            size_t nb = d->removed_bytes < sizeof buf - 1 ? d->removed_bytes : sizeof buf - 1;
+            memcpy(buf, d->removed_text, nb);
+            buf[nb] = '\0';
+            emit_object_event(ev->id, "TextChanged", "delete", d->offset, d->removed, "s", buf,
+                              NULL, 0);
+        }
+        if (d->inserted > 0) {
+            size_t nb = d->inserted_bytes < sizeof buf - 1 ? d->inserted_bytes : sizeof buf - 1;
+            memcpy(buf, d->inserted_text, nb);
+            buf[nb] = '\0';
+            emit_object_event(ev->id, "TextChanged", "insert", d->offset, d->inserted, "s", buf,
+                              NULL, 0);
+        }
+        break;
+    }
+    }
 }
 
 IRIS_API int iris_a11y_update(lens *ui) {
@@ -1155,25 +1138,41 @@ IRIS_API int iris_a11y_update(lens *ui) {
         return -1;
     if (!ui)
         return -1;
+    g_lens_ui = ui; /* for Action.DoAction → lens_a11y_activate (ADR-0062) */
 
-    /* Snapshot last frame before rebuilding. */
+    /* Retire the current frame into `prev`, then walk the new one. */
     g_state.n_prev = g_state.n;
-    for (size_t i = 0; i < g_state.n; i++)
-        g_state.prev_ids[i] = g_state.nodes[i].id;
-
-    /* Walk the current frame. */
+    memcpy(g_state.prev, g_state.nodes, g_state.n * sizeof g_state.prev[0]);
     g_state.n = 0;
+    g_state.truncated = false;
     lens_accessibility_walk(ui, visit_fn, NULL);
-
-    /* Diff: emit ChildrenChanged for added ids. */
-    for (size_t i = 0; i < g_state.n; i++) {
-        a11y_node *n = &g_state.nodes[i];
-        if (!was_present_last_frame(n->id)) {
-            emit_children_changed(n->parent, n->id, 1, (int)i);
+    if (g_state.truncated) {
+        /* Once per process: a tree this big is a real defect, but a warning
+         * per frame would drown the log. */
+        static bool warned = false;
+        if (!warned) {
+            fprintf(stderr,
+                    "iris a11y: semantic tree exceeds %d nodes; the accessibility "
+                    "view is silently truncated past that (fix the host UI or raise "
+                    "IRIS_A11Y_MAX_NODES)\n",
+                    IRIS_A11Y_MAX_NODES);
+            warned = true;
         }
     }
 
-    /* Track focus changes and emit StateChanged:focused. */
+    /* Diff prev vs cur and emit the corresponding Event.Object signals.
+     * Worst case is every node removed + re-added plus a property change
+     * each; the event buffer is sized for that. */
+    static iris_a11y__event events[IRIS_A11Y_MAX_NODES * 2 + 64];
+    size_t n_events = iris_a11y__diff(g_state.prev, g_state.n_prev, g_state.nodes, g_state.n,
+                                      events, sizeof events / sizeof events[0]);
+    if (n_events > sizeof events / sizeof events[0])
+        n_events = sizeof events / sizeof events[0];
+    for (size_t i = 0; i < n_events; i++)
+        emit_diff_event(&events[i]);
+
+    /* Track focus changes and emit StateChanged:focused. Pointer-tracked
+     * (not diffed) so a focused node that vanishes still unfocuses. */
     lens_id now_focused = 0;
     for (size_t i = 0; i < g_state.n; i++) {
         if (g_state.nodes[i].flags & LENS_A11Y_FOCUSED) {

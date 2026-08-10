@@ -62,7 +62,7 @@ static void test_dropdown_click_select(void) {
     lens_dropdown(ui, "color", &sel, items, 3);
     lens_end(ui);
 
-    /* frame 2: click the dropdown button to open overlay */
+    /* frame 2: click the dropdown button to open the popup */
     lens_input in = IN0;
     in.cursor = (flux_point){50, 15};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
@@ -70,15 +70,15 @@ static void test_dropdown_click_select(void) {
     lens_dropdown(ui, "color", &sel, items, 3);
     lens_end(ui);
 
-    /* overlay is now open; frame 3: click the second item */
+    /* popup is now open; frame 3: click the second item */
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = false;
     lens_begin(ui, &in);
     lens_dropdown(ui, "color", &sel, items, 3);
     lens_end(ui);
 
-    /* We can't easily simulate clicking an overlay item in a CPU test
-     * because overlay items are laid out in a separate layer. Verify
+    /* We can't easily simulate clicking a popup item in a CPU test
+     * because popup items are placed in the POPUP band. Verify
      * the dropdown builds without crashing and the initial state is intact. */
     CHECK(sel == 0);
 
@@ -97,7 +97,7 @@ static void test_dropdown_keyboard_nav(void) {
     lens_dropdown(ui, "letters", &sel, items, 3);
     lens_end(ui);
 
-    /* frame 2: click to open overlay (prev_rect now valid) */
+    /* frame 2: click to open the popup (prev_rect now valid) */
     lens_input in = IN0;
     in.cursor = (flux_point){50, 15};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
@@ -106,7 +106,7 @@ static void test_dropdown_keyboard_nav(void) {
     lens_dropdown(ui, "letters", &sel, items, 3);
     lens_end(ui);
 
-    /* frame 3: press Down twice while overlay is open */
+    /* frame 3: press Down twice while the popup is open */
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.key_count = 2;
     in.keys[0] = (lens_key_event){.key = LENS_KEY_DOWN, .pressed = true};
@@ -167,9 +167,9 @@ static void test_open_trigger_click_closes_once(void) {
     lens_begin(ui, &in);
     lens_dropdown(ui, "toggle", &sel, items, 2);
     lens_end(ui);
-    CHECK(lens_overlay_is_open(ui, "toggle##ov"));
+    CHECK(lens_place_is_open(ui, "toggle##ov"));
 
-    /* Pressing the owner is not an outside click: the overlay must remain
+    /* Pressing the owner is not an outside click: the popup must remain
      * open until this same click is released back on the trigger. */
     in.mouse_released[LENS_MOUSE_LEFT] = false;
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
@@ -177,7 +177,7 @@ static void test_open_trigger_click_closes_once(void) {
     lens_begin(ui, &in);
     lens_dropdown(ui, "toggle", &sel, items, 2);
     lens_end(ui);
-    CHECK(lens_overlay_is_open(ui, "toggle##ov"));
+    CHECK(lens_place_is_open(ui, "toggle##ov"));
 
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_down[LENS_MOUSE_LEFT] = false;
@@ -185,7 +185,7 @@ static void test_open_trigger_click_closes_once(void) {
     lens_begin(ui, &in);
     lens_dropdown(ui, "toggle", &sel, items, 2);
     lens_end(ui);
-    CHECK(!lens_overlay_is_open(ui, "toggle##ov"));
+    CHECK(!lens_place_is_open(ui, "toggle##ov"));
 
     lens_destroy(ui);
 }
@@ -348,7 +348,7 @@ static void test_dropdown_caps_long_list_and_scrolls(void) {
     float peek = 7.5f * row_h + 6.0f * 2.0f;
 
     open_root_dropdown(ui, &sel);
-    CHECK(lens_overlay_is_open(ui, "long##ov"));
+    CHECK(lens_place_is_open(ui, "long##ov"));
 
     /* Plenty of room below the trigger here: the list opens below it, gets
      * its own scroll area capped at the ~7-row peek, and the full item
@@ -440,9 +440,9 @@ static void test_dropdown_flips_above_without_covering_trigger(void) {
     lens_end(ui);
 
     /* The capped list flips above the trigger instead of covering it, and
-     * stays inside the owner viewport. (The overlay id is scoped to the
+     * stays inside the owner viewport. (The popup id is scoped to the
      * owner scroll, so openness is probed via the a11y walk rather than
-     * lens_overlay_is_open from the root scope.) */
+     * lens_place_is_open from the root scope.) */
     popup_probe2 probe = {0};
     lens_accessibility_walk(ui, collect_popup_probe2, &probe);
     CHECK(probe.scroll_areas == 2);
@@ -501,8 +501,8 @@ static void test_dropdown_wheel_over_popup_scrolls_and_stays_open(void) {
     lens_node *owner = lens_node_first_child(lens_root(ui));
     CHECK(owner != NULL);
     flux_rect owner_bounds = lens_node_bounds(owner);
-    /* Openness is probed via the a11y walk: the overlay id is scoped to the
-     * owner scroll, so lens_overlay_is_open cannot resolve it from here. */
+    /* Openness is probed via the a11y walk: the popup id is scoped to the
+     * owner scroll, so lens_place_is_open cannot resolve it from here. */
     popup_probe2 areas = {0};
     lens_accessibility_walk(ui, collect_popup_probe2, &areas);
     CHECK(areas.scroll_areas == 2);

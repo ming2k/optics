@@ -1377,6 +1377,24 @@ void flux_device_retire_buffer(flux_device *d, VkBuffer buffer, const flux_vk_al
     zombie_park(d, z);
 }
 
+void flux_device_retire_sampler(flux_device *d, VkSampler sampler, uint32_t bindless) {
+    flux_retire_zombie *z = flux_internal_alloc(d, sizeof(*z));
+    if (!z) {
+        /* Same OOM trade-off as flux_device_retire_image: block until
+         * the queue is idle rather than leak the GPU objects. */
+        flux_vk_wait_idle(d);
+        if (bindless != FLUX_BINDLESS_INVALID)
+            flux_bindless_release(d, bindless);
+        if (sampler)
+            vkDestroySampler(d->device, sampler, nullptr);
+        return;
+    }
+    z->sampler = sampler;
+    z->bindless = bindless;
+    z->bindless_storage = FLUX_BINDLESS_INVALID;
+    zombie_park(d, z);
+}
+
 static void zombie_destroy(flux_device *d, flux_retire_zombie *z) {
     if (z->bindless != FLUX_BINDLESS_INVALID)
         flux_bindless_release(d, z->bindless);
@@ -1388,6 +1406,8 @@ static void zombie_destroy(flux_device *d, flux_retire_zombie *z) {
         vkDestroyImage(d->device, z->image, nullptr);
     if (z->buffer)
         vkDestroyBuffer(d->device, z->buffer, nullptr);
+    if (z->sampler)
+        vkDestroySampler(d->device, z->sampler, nullptr);
     if (z->alloc.memory)
         flux_vk_deallocate(d, &z->alloc);
     if (z->imported_memory) {

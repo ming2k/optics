@@ -1,10 +1,11 @@
 # Headless C tests for libiris.
 #
 # Every test here runs without a Wayland compositor or GPU surface:
-#   - test_version    iris_version_string / version macros
-#   - test_app_api    iris_app_run / iris_pick_file argument validation
-#   - test_theme      colour-scheme query (GTK_THEME branch; gsettings shadowed)
-#   - test_a11y_util  AT-SPI role/value/char-count helpers (a11y_util.c)
+#   - test_version       iris_version_string / version macros
+#   - test_app_api       iris_app_run / iris_pick_file argument validation
+#   - test_theme         colour-scheme query (GTK_THEME branch; gsettings shadowed)
+#   - test_a11y_util     AT-SPI role/state maps, value parser, tree diff
+#   - test_platform_text UTF-8 boundary-aware truncation helpers
 #
 # The windowed path (iris_app_run with a real build callback) is exercised
 # by the examples, not here — it owns an event loop and needs a live session.
@@ -21,11 +22,19 @@ foreach t : tests
   test(t, exe)
 endforeach
 
-# test_a11y_util compiles a11y_util.c directly (the helpers are internal /
-# hidden-visibility, so they are not exported from libiris.so).
+# test_a11y_util compiles a11y_util.c (+ its platform_text.c dependency)
+# directly (the helpers are internal / hidden-visibility, so they are not
+# exported from libiris.so).
 exe_a11y = executable('test_a11y_util',
-  ['test_a11y_util.c', '../../libs/iris/src/a11y_util.c'],
+  ['test_a11y_util.c', '../../libs/iris/src/a11y_util.c', '../../libs/iris/src/platform_text.c'],
   include_directories : [iris_inc, src_inc],
   dependencies        : [lens_dep, m_dep],
 )
 test('test_a11y_util', exe_a11y)
+
+exe_ptext = executable('test_platform_text',
+  ['test_platform_text.c', '../../libs/iris/src/platform_text.c'],
+  include_directories : [iris_inc, src_inc],
+  dependencies        : [m_dep],
+)
+test('test_platform_text', exe_ptext)

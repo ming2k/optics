@@ -1,6 +1,6 @@
 # ADR-0037: Lens overlay layers — transient overlays + persistent floating panels
 
-- Status: Accepted
+- Status: Superseded by [ADR-0060](0060-lens-single-tree-placement-and-z-bands.md)
 - Date: 2026-07-21
 - Scope: lens (L2 toolkit). Defines the floating-layer primitives.
 

@@ -34,7 +34,6 @@
 
 #![deny(rust_2018_idioms)]
 
-use std::cell::Cell;
 use std::ffi::CString;
 use std::os::raw::c_int;
 
@@ -43,13 +42,9 @@ pub use iris_sys as sys;
 pub use lens::key;
 pub use lens::mods;
 pub use lens::{
-    Align, Color, CursorHint, Frame, Icon, Input, LayoutOpts, MouseButton, OverlayOpts, Rect,
-    Response, TabStyle, TableColumn, TableOpts, TableResult, TabsOpts, TextBuf, Theme, Ui,
+    Align, Band, Color, CursorHint, Frame, Icon, Input, LayoutOpts, MouseButton, PlaceMode,
+    PlaceOpts, Rect, Response, TableColumn, TableOpts, TableResult, TabsOpts, TextBuf, Theme, Ui,
 };
-
-thread_local! {
-    static CURSOR_OVERRIDDEN_IN_BUILD: Cell<bool> = const { Cell::new(false) };
-}
 
 /// A thin wrapper over the raw pointers iris hands to the paint
 /// callback: the canvas (live inside an open `flux_canvas_begin/end`
@@ -124,6 +119,13 @@ impl StartHost {
         self.device
     }
 }
+
+/// The handle iris hands to the optional `stop` callback: the same borrows
+/// as [`StartHost`], live one last time after the frame loop and before
+/// iris tears down lens, flux, and the device (ADR-0045). This is where
+/// hosts release every device-backed resource created from
+/// [`StartHost::device`] / [`PaintHost::device`].
+pub type StopHost = StartHost;
 
 /// Errors returned by [`Application::run`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,7 +228,13 @@ impl Application {
         B: FnMut(&mut Frame, &Input),
         P: FnMut(PaintHost) + 'static,
     {
-        Self::run_impl(config, None::<fn(StartHost) -> bool>, build, paint)
+        Self::run_impl(
+            config,
+            None::<fn(StartHost) -> bool>,
+            None::<fn(StopHost)>,
+            build,
+            paint,
+        )
     }
 
     /// Like [`Application::run`], plus a one-shot `start` callback that iris
@@ -243,12 +251,18 @@ impl Application {
         P: FnMut(PaintHost) + 'static,
         S: FnMut(StartHost) -> bool,
     {
-        Self::run_impl(config, Some(start), build, paint)
+        Self::run_impl(config, Some(start), None::<fn(StopHost)>, build, paint)
     }
 
-    fn run_impl<B, P, S>(
+    /// The full lifecycle form (ADR-0045): `start` runs after iris's
+    /// device/canvas/lens setup and before the first frame (returning
+    /// `false` aborts the run); `stop` runs after the frame loop and before
+    /// iris destroys the device, giving hosts a deterministic point to
+    /// release device-backed resources. Either may be `None`.
+    pub fn run_with_lifecycle<B, P, S, T>(
         config: Config,
         start: Option<S>,
+        stop: Option<T>,
         build: B,
         paint: Option<P>,
     ) -> Result<(), RunError>
@@ -256,6 +270,23 @@ impl Application {
         B: FnMut(&mut Frame, &Input),
         P: FnMut(PaintHost) + 'static,
         S: FnMut(StartHost) -> bool,
+        T: FnMut(StopHost),
+    {
+        Self::run_impl(config, start, stop, build, paint)
+    }
+
+    fn run_impl<B, P, S, T>(
+        config: Config,
+        start: Option<S>,
+        stop: Option<T>,
+        build: B,
+        paint: Option<P>,
+    ) -> Result<(), RunError>
+    where
+        B: FnMut(&mut Frame, &Input),
+        P: FnMut(PaintHost) + 'static,
+        S: FnMut(StartHost) -> bool,
+        T: FnMut(StopHost),
     {
         // Box the closures so they have a stable address to pass through the
         // C trampoline. Each gets its own box; both share the `user` pointer
@@ -263,6 +294,7 @@ impl Application {
         let build_box: Box<B> = Box::new(build);
         let paint_box: Option<Box<P>> = paint.map(Box::new);
         let start_box: Option<Box<S>> = start.map(Box::new);
+        let stop_box: Option<Box<T>> = stop.map(Box::new);
 
         // SAFETY: the trampolines cast `user` back to the right box type and
         // call it. The boxes outlive `iris_app_run` (held by `run_state`
@@ -271,9 +303,10 @@ impl Application {
             build: build_box,
             paint: paint_box,
             start: start_box,
+            stop: stop_box,
         };
 
-        extern "C" fn build_trampoline<B, P, S>(
+        extern "C" fn build_trampoline<B, P, S, T>(
             ui: *mut sys::lens,
             in_: *const sys::lens_input,
             user: *mut std::os::raw::c_void,
@@ -281,9 +314,10 @@ impl Application {
             B: FnMut(&mut Frame, &Input),
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
+            T: FnMut(StopHost),
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
                 // Cast the iris_sys view of `lens` / `lens_input` to lens's
                 // own bindgen view. Both come from the same C declaration, so
                 // the layouts are identical; the types are just nominally
@@ -292,17 +326,13 @@ impl Application {
                 let mut frame = unsafe { Frame::from_raw(lens_ui) };
                 let input_ptr = in_ as *const lens::sys::lens_input;
                 let input = unsafe { Input::from_raw_ref(input_ptr) };
-                CURSOR_OVERRIDDEN_IN_BUILD.with(|overridden| overridden.set(false));
                 (run.build)(&mut frame, input);
-                let overridden =
-                    CURSOR_OVERRIDDEN_IN_BUILD.with(|overridden| overridden.replace(false));
-                if !overridden {
-                    set_cursor_raw(Cursor::from(frame.cursor_hint()));
-                }
+                // The backend follows the hovered widget's cursor hint
+                // natively once per frame — nothing to do here.
             }));
         }
 
-        extern "C" fn paint_trampoline<B, P, S>(
+        extern "C" fn paint_trampoline<B, P, S, T>(
             canvas: *mut sys::flux_canvas,
             device: *mut sys::flux_device,
             scale: f32,
@@ -311,9 +341,10 @@ impl Application {
             B: FnMut(&mut Frame, &Input),
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
+            T: FnMut(StopHost),
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
                 if let Some(p) = run.paint.as_mut() {
                     p(PaintHost {
                         canvas: canvas as *mut std::ffi::c_void,
@@ -324,7 +355,7 @@ impl Application {
             }));
         }
 
-        extern "C" fn start_trampoline<B, P, S>(
+        extern "C" fn start_trampoline<B, P, S, T>(
             ui: *mut sys::lens,
             device: *mut sys::flux_device,
             user: *mut std::os::raw::c_void,
@@ -333,9 +364,10 @@ impl Application {
             B: FnMut(&mut Frame, &Input),
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
+            T: FnMut(StopHost),
         {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
                 match run.start.as_mut() {
                     Some(s) => s(StartHost {
                         ui: ui as *mut std::ffi::c_void,
@@ -347,19 +379,46 @@ impl Application {
             .unwrap_or(false)
         }
 
-        // Monomorphise the trampolines for the actual (B, P, S) triple. When
-        // `paint`/`start` are `None` we still need *a* fn pointer of each
-        // type to satisfy the C signature; passing NULL lets the C side skip
-        // the call entirely, so those branches are pure no-ops — and a NULL
-        // paint keeps the backend's idle frame-skip engaged.
+        extern "C" fn stop_trampoline<B, P, S, T>(
+            ui: *mut sys::lens,
+            device: *mut sys::flux_device,
+            user: *mut std::os::raw::c_void,
+        ) where
+            B: FnMut(&mut Frame, &Input),
+            P: FnMut(PaintHost),
+            S: FnMut(StartHost) -> bool,
+            T: FnMut(StopHost),
+        {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
+                if let Some(t) = run.stop.as_mut() {
+                    t(StartHost {
+                        ui: ui as *mut std::ffi::c_void,
+                        device: device as *mut std::ffi::c_void,
+                    });
+                }
+            }));
+        }
+
+        // Monomorphise the trampolines for the actual (B, P, S, T) tuple.
+        // When `paint`/`start`/`stop` are `None` we still need *a* fn
+        // pointer of each type to satisfy the C signature; passing NULL lets
+        // the C side skip the call entirely, so those branches are pure
+        // no-ops — and a NULL paint keeps the backend's idle frame-skip
+        // engaged.
         let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
         let paint_fn: sys::iris_paint_fn = if run_state.paint.is_some() {
-            Some(paint_trampoline::<B, P, S>)
+            Some(paint_trampoline::<B, P, S, T>)
         } else {
             None
         };
         let start_fn: sys::iris_start_fn = if run_state.start.is_some() {
-            Some(start_trampoline::<B, P, S>)
+            Some(start_trampoline::<B, P, S, T>)
+        } else {
+            None
+        };
+        let stop_fn: sys::iris_stop_fn = if run_state.stop.is_some() {
+            Some(stop_trampoline::<B, P, S, T>)
         } else {
             None
         };
@@ -372,8 +431,8 @@ impl Application {
             dark: config.dark,
             log_raw: config.log_raw,
             start: start_fn,
-            stop: None,
-            build: Some(build_trampoline::<B, P, S>),
+            stop: stop_fn,
+            build: Some(build_trampoline::<B, P, S, T>),
             paint: paint_fn,
             user: user_ptr,
         };
@@ -386,14 +445,21 @@ impl Application {
     }
 }
 
-/// Holds the closures through the C trampolines. Generic over `B`, `P` and
-/// `S` so each trampoline can cast the opaque `user` pointer back to a type
-/// that knows the concrete closure shapes. When `P`/`S` are absent the
-/// slots are `None` and the matching trampolines are never installed.
-struct RunState<B: FnMut(&mut Frame, &Input), P: FnMut(PaintHost), S: FnMut(StartHost) -> bool> {
+/// Holds the closures through the C trampolines. Generic over `B`, `P`, `S`
+/// and `T` so each trampoline can cast the opaque `user` pointer back to a
+/// type that knows the concrete closure shapes. When a slot is `None` the
+/// matching trampoline is never installed.
+struct RunState<B, P, S, T>
+where
+    B: FnMut(&mut Frame, &Input),
+    P: FnMut(PaintHost),
+    S: FnMut(StartHost) -> bool,
+    T: FnMut(StopHost),
+{
     build: Box<B>,
     paint: Option<Box<P>>,
     start: Option<Box<S>>,
+    stop: Option<Box<T>>,
 }
 
 /// System colour-scheme preference (queried at startup).
@@ -539,19 +605,18 @@ impl From<CursorHint> for Cursor {
 }
 
 /// Set the cursor the next pointer motion will show. Idempotent; passing the
-/// same value twice does no work. Inside an [`Application::run`] build
-/// closure this overrides Lens's automatic cursor hint for the current frame;
-/// call it each frame while the custom cursor should remain active.
+/// same value twice does no work.
 ///
-/// No-op when iris was built without `wayland-cursor` (the compositor's
+/// An explicit choice stays pinned until you call `set_cursor(Cursor::Default)`,
+/// which hands cursor control back to the backend's per-frame follow of the
+/// hovered Lens widget's [`CursorHint`] (the backend does that natively on all
+/// platforms — Wayland included — so hosts do not need to re-assert a custom
+/// cursor every frame, only to keep it pinned).
+///
+/// No-op when iris was built without cursor-shape support (the compositor's
 /// default arrow stays) or before [`Application::run`] starts. Thread-
 /// affine: call from the same thread that drives the run loop.
 pub fn set_cursor(cursor: Cursor) {
-    CURSOR_OVERRIDDEN_IN_BUILD.with(|overridden| overridden.set(true));
-    set_cursor_raw(cursor);
-}
-
-fn set_cursor_raw(cursor: Cursor) {
     unsafe { sys::iris_set_cursor(cursor.raw()) }
 }
 
@@ -741,6 +806,21 @@ mod tests {
         assert_eq!(
             dark,
             matches!(scheme, ColorScheme::PreferDark | ColorScheme::NoPreference)
+        );
+    }
+
+    /// Compile-only check that the full-lifecycle entry point keeps its
+    /// signature (start/stop trampolines wired, ADR-0045). Never called:
+    /// it would open a window.
+    #[allow(dead_code)]
+    fn run_with_lifecycle_signature() {
+        let cfg = Config::new("sig").unwrap();
+        let _ = Application::run_with_lifecycle(
+            cfg,
+            None::<fn(StartHost) -> bool>,
+            None::<fn(StopHost)>,
+            |_f: &mut Frame, _i: &Input| {},
+            None::<fn(PaintHost)>,
         );
     }
 }

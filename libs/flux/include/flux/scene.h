@@ -148,6 +148,11 @@ FLUX_NODISCARD FLUX_API flux_result flux_material_create(flux_device *d,
                                                          const flux_material_desc *desc,
                                                          flux_material **out);
 FLUX_NODISCARD FLUX_API flux_material *flux_material_retain(flux_material *m);
+/* Release destroys the material's pipelines inline — they do NOT go
+ * through the device retire queue (the retained texture/sampler do).
+ * Only release once every frame recorded against the material has
+ * completed (its frame-slot fence has signalled, or after
+ * flux_device_wait_idle). */
 FLUX_API void flux_material_release(flux_material *m);
 FLUX_API flux_material_alpha_mode flux_material_get_alpha_mode(const flux_material *m);
 

@@ -75,5 +75,9 @@ the ear-clip path's hole semantics (CW holes in CCW outers cancel).
 - The cover quad covers the fill's bounding box, so gradient paints
   evaluate identically to the tessellated path (gradients are
   computed in pixel space from push constants, not per-vertex).
-- `flux_canvas_destroy` now waits for device idle when a stencil
-  image exists, since in-flight frames may still reference it.
+- ~~`flux_canvas_destroy` now waits for device idle when a stencil
+  image exists, since in-flight frames may still reference it.~~
+  Superseded (2026-08-10): the canvas's owned stencil/MSAA attachments
+  go through the device retire queue like every other released image,
+  so teardown no longer waits at all (same stall class ADR-0021/0022
+  removed from surface paths).

@@ -318,7 +318,10 @@ flux_text *txt_engine_init(flux_device *dev) {
         txt_logf(t, FLUX_LOG_ERROR, "out of memory");
         return NULL;
     }
-    t->dev = dev;
+    /* Retained, matching the canvas discipline: the atlas image and the
+     * nearest sampler are released at shutdown and must never see a dead
+     * device. flux_device_retain is NULL-safe. */
+    t->dev = flux_device_retain(dev);
 
     if (FT_Init_FreeType(&t->ft) != 0) {
         txt_logf(t, FLUX_LOG_ERROR, "FT_Init_FreeType failed");
@@ -426,6 +429,9 @@ void txt_engine_shutdown(flux_text *t) {
     }
     if (t->ft)
         FT_Done_FreeType(t->ft);
+    /* Released last: the atlas image and sampler releases above dereference
+     * the device (retire queue / bindless heap), so it must outlive them. */
+    flux_device_release(t->dev);
     free(t);
 }
 
@@ -450,7 +456,7 @@ flux_result flux_text_create(const flux_text_desc *desc, flux_text **out) {
         t = calloc(1, sizeof *t);
         if (!t)
             return FLUX_ERROR_OUT_OF_MEMORY;
-        t->dev = dev;
+        t->dev = flux_device_retain(dev);
         t->has_backend = false;
     }
     t->scale = scale;

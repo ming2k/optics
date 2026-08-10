@@ -161,6 +161,16 @@ flux_result flux_image_update_region(flux_image *im, uint32_t x, uint32_t y, uin
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "update data too small for w*h*bpp");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
+    /* The upload is recorded with old_layout = SHADER_READ_ONLY_OPTIMAL
+     * (and transitions back to it). Anything else — a compute-writable
+     * image in GENERAL, a render target mid-capture in
+     * COLOR_ATTACHMENT_OPTIMAL — would record a barrier with the wrong
+     * oldLayout (undefined contents), so refuse it loudly. */
+    if (im->current_layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "image update requires SHADER_READ_ONLY_OPTIMAL current layout");
+        return FLUX_ERROR_INVALID_STATE;
+    }
 
     return flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, data, needed);

@@ -13,6 +13,7 @@
 #include <iris/app.h>
 
 #include "platform_internal.h"
+#include "platform_wakeup.h"
 
 IRIS_API void iris_request_animation_frame(void) {
 #if defined(IRIS_BACKEND_WAYLAND)
@@ -21,6 +22,21 @@ IRIS_API void iris_request_animation_frame(void) {
     iris_request_animation_frame_win32();
 #elif defined(IRIS_BACKEND_COCOA)
     iris_request_animation_frame_cocoa();
+#endif
+}
+
+IRIS_API int iris_post_to_main_thread(iris_main_thread_fn fn, void *user) {
+#if defined(IRIS_BACKEND_WAYLAND) || defined(IRIS_BACKEND_WIN32) || \
+    defined(IRIS_BACKEND_COCOA)
+    /* The backend wakeup seam (platform_wakeup.h) IS the delivery
+     * mechanism: each backend registers a thread-safe kick that makes its
+     * event-loop wait return, and drains the shared FIFO on the loop
+     * thread. See iris/app.h for the public contract. */
+    return iris_platform_wakeup_post(fn, user);
+#else
+    (void)fn;
+    (void)user;
+    return -1; /* no backend: no loop to post to */
 #endif
 }
 
