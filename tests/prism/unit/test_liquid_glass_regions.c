@@ -1,5 +1,5 @@
 /* Pure policy tests for persistent liquid-glass output clearing. */
-#include "../../../libs/flux/src/effect/liquid_glass_regions.h"
+#include "../../../libs/prism/src/regions.h"
 #include "test_helpers.h"
 
 #include <string.h>
@@ -19,12 +19,12 @@ static bool contains_region(const liquid_glass_region *regions, uint32_t count,
 
 int main(void) {
     /* Focus is an interior field of one body, not a second outline/body. */
-    flux_liquid_glass_group focused = FLUX_LIQUID_GLASS_GROUP_INIT;
-    focused.shapes[0] = (flux_liquid_glass_shape){
+    prism_liquid_glass_group focused = PRISM_LIQUID_GLASS_GROUP_INIT;
+    focused.shapes[0] = (prism_liquid_glass_shape){
         .bounds = {10.0f, 20.0f, 100.0f, 60.0f},
         .corner_radius = 18.0f,
     };
-    focused.focus = (flux_liquid_glass_shape){
+    focused.focus = (prism_liquid_glass_shape){
         .bounds = {20.0f, 28.0f, 40.0f, 44.0f},
         .corner_radius = 12.0f,
     };
@@ -39,8 +39,8 @@ int main(void) {
     EXPECT(!liquid_glass_group_is_valid(&focused));
 
     /* Bounds include smooth-union/shadow padding, round outward, and clamp. */
-    flux_liquid_glass_group group = FLUX_LIQUID_GLASS_GROUP_INIT;
-    group.shapes[0] = (flux_liquid_glass_shape){
+    prism_liquid_glass_group group = PRISM_LIQUID_GLASS_GROUP_INIT;
+    group.shapes[0] = (prism_liquid_glass_shape){
         .bounds = {10.25f, 20.5f, 30.0f, 10.0f},
         .corner_radius = 5.0f,
     };

@@ -30,6 +30,18 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
   `flux_canvas_begin_frame`/`end_frame`/`read_pixels` functions and the
   `flux_canvas_backend_kind` enum).
 - Integration test `tests/cpu_canvas.rs` renders headless and checks pixels.
+- `BlurredImage::as_raw` exposes the borrowed blur output pointer so sibling
+  binding crates (prism) can consume it.
+
+### Removed
+
+- **Liquid glass moved to prism-rs.** The liquid-glass material left flux's C
+  API (`flux_liquid_glass_*` is now `prism_liquid_glass_*` in libprism), so
+  `LiquidGlassShape`, `LiquidGlassFocus`, `LiquidGlassGroup`,
+  `LiquidGlassParams`, `LiquidGlassFilter`, and `LiquidGlassImage` are gone
+  from this crate. The same safe API now lives in the `prism` crate
+  (`bindings/prism-rs`), with `LiquidGlassParams::glare` renamed to
+  `rim_light` to match the C rename.
 
 ## [0.1.1] - 2026-06-25
 

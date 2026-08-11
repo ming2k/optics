@@ -1,0 +1,23 @@
+[package]
+name = "prism-sys"
+description = "Raw FFI bindings to prism (libprism), generated from <prism/prism.h>"
+links = "prism"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# flux (Rust bindings) is published from a separate repo (../flux-rs). The
+# path works when both repos are siblings under a common parent directory;
+# for other layouts set up a Cargo [patch.crates-io] in your workspace, or
+# replace this with a git URL / registry version once `flux` is published.
+# prism's C API speaks flux types (flux_image, flux_result, ...); they are
+# re-exported from flux-sys instead of being bindgen-duplicated, so the two
+# sys crates share one definition of each flux type.
+flux-sys = { path = "../../../flux-rs/crates/flux-sys", version = "0.1.1" }
+
+[build-dependencies]
+bindgen = "0.72"
+pkg-config = "0.3"

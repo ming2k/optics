@@ -10,12 +10,13 @@
  *
  *   ffmpeg -y -i glass_study.ppm glass_study.png
  *
- * Usage: liquid_glass_study [out.ppm] [refraction edge_width glare
+ * Usage: liquid_glass_study [out.ppm] [refraction edge_width rim_light
  *          saturation brightness chromatic]  — trailing floats override the
  *        study defaults when present.
  */
 #include <flux/effect.h>
 #include <flux/flux.h>
+#include <prism/prism.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -105,7 +106,7 @@ static void draw_study_scene(flux_canvas *c) {
 
 int main(int argc, char **argv) {
     const char *out_path = argc > 1 ? argv[1] : "glass_study.ppm";
-    /* r, ew, glare, sat, bri, ca, size_ref */
+    /* r, ew, rim_light, sat, bri, ca, size_ref */
     float opt[7] = {12.0f, 20.0f, 0.55f, 1.08f, 1.0f, 1.5f, 72.0f};
     for (int i = 2; i < argc && i - 2 < 7; ++i)
         opt[i - 2] = (float)atof(argv[i]);
@@ -148,9 +149,9 @@ int main(int argc, char **argv) {
         return 1;
     }
     flux_blur_filter *blur = nullptr;
-    flux_liquid_glass_filter *glass = nullptr;
+    prism_liquid_glass_filter *glass = nullptr;
     if (flux_blur_filter_create(device, &blur) != FLUX_OK ||
-        flux_liquid_glass_filter_create(device, &glass) != FLUX_OK)
+        prism_liquid_glass_filter_create(device, &glass) != FLUX_OK)
         return 1;
 
     flux_frame *frame = nullptr;
@@ -174,7 +175,7 @@ int main(int argc, char **argv) {
 
     const flux_rect pill = {60.0f, 560.0f, 1160.0f, 90.0f};
     const flux_rect panel = {430.0f, 140.0f, 420.0f, 260.0f};
-    flux_liquid_glass_group groups[5] = {
+    prism_liquid_glass_group groups[5] = {
         {.shapes = {{.bounds = pill, .corner_radius = 45.0f}},
          .shape_count = 1,
          .opacity = 1.0f,
@@ -223,20 +224,20 @@ int main(int argc, char **argv) {
          .shadow_offset_y = 2.1f,
          .tint_color = 0xFFFFFFu},
     };
-    flux_liquid_glass_desc gd = FLUX_LIQUID_GLASS_DESC_INIT;
+    prism_liquid_glass_desc gd = PRISM_LIQUID_GLASS_DESC_INIT;
     gd.input = capture;
     gd.blurred_input = blurred;
     gd.groups = groups;
     gd.group_count = 5;
     gd.refraction = opt[0];
     gd.edge_width = opt[1];
-    gd.glare = opt[2];
+    gd.rim_light = opt[2];
     gd.saturation = opt[3];
     gd.brightness = opt[4];
     gd.chromatic_aberration = opt[5];
     gd.size_reference = opt[6];
     flux_image *glass_out = nullptr;
-    if (flux_liquid_glass_filter_apply(glass, frame, &gd, &glass_out) != FLUX_OK)
+    if (prism_liquid_glass_filter_apply(glass, frame, &gd, &glass_out) != FLUX_OK)
         return 1;
 
     /* 3. composite */
@@ -276,12 +277,12 @@ int main(int argc, char **argv) {
     for (uint32_t i = 0; i < W * H; ++i)
         fwrite(px + i * 4, 1, 3, f); /* drop alpha */
     fclose(f);
-    printf("wrote %s (refraction=%.2f edge_width=%.2f glare=%.2f saturation=%.3f "
+    printf("wrote %s (refraction=%.2f edge_width=%.2f rim_light=%.2f saturation=%.3f "
            "brightness=%.3f chromatic=%.2f)\n",
            out_path, opt[0], opt[1], opt[2], opt[3], opt[4], opt[5]);
 
     flux_device_wait_idle(device);
-    flux_liquid_glass_filter_release(glass);
+    prism_liquid_glass_filter_release(glass);
     flux_blur_filter_release(blur);
     flux_image_release(capture);
     flux_arena_destroy(&arena);

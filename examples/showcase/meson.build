@@ -6,11 +6,12 @@
 glslang = find_program('glslangValidator', required : true)
 
 # Headless liquid-glass A/B harness — offscreen surface + PPM readback,
-# no GLFW. Gated on -Deffect=true like the windowed demo.
-if opt_effect
+# no GLFW. Needs the prism material library plus flux's reusable blur, so
+# it is gated on -Dprism=true -Deffect=true like the windowed demo.
+if opt_effect and get_option('prism')
   executable('liquid_glass_study',
     'liquid_glass_study.c',
-    dependencies : [flux_dep, m_dep],
+    dependencies : [flux_dep, prism_dep, m_dep],
   )
 endif
 
@@ -75,12 +76,12 @@ executable('filament_plume',
   c_args              : showcase_embed_dir_arg,
 )
 
-# Liquid-glass backdrop-blur demo. Needs the effect module's Gaussian
-# blur (flux_effect_blur), so it is gated on -Deffect=true.
-if opt_effect
+# Liquid-glass backdrop-blur demo. Needs the prism material library plus
+# the effect module's reusable blur, so it is gated on -Dprism=true -Deffect=true.
+if opt_effect and get_option('prism')
   executable('liquid_glass',
     'liquid_glass.c',
-    dependencies        : [flux_dep, glfw_dep, m_dep],
+    dependencies        : [flux_dep, prism_dep, glfw_dep, m_dep],
     include_directories : flux_examples_inc,
   )
 endif

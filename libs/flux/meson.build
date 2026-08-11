@@ -209,22 +209,9 @@ if opt_effect
     output  : 'effect_backdrop.comp.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
   )
-  effect_liquid_glass_comp_spv = custom_target('effect_liquid_glass.comp.spv',
-    input   : 'src/effect/shaders/effect_liquid_glass.comp',
-    output  : 'effect_liquid_glass.comp.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
-  )
-  effect_storage_clear_comp_spv = custom_target('effect_storage_clear.comp.spv',
-    input   : 'src/effect/shaders/effect_storage_clear.comp',
-    output  : 'effect_storage_clear.comp.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
-  )
-  flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
-                        effect_liquid_glass_comp_spv, effect_storage_clear_comp_spv]
-  flux_shader_spvs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
-                       effect_liquid_glass_comp_spv, effect_storage_clear_comp_spv]
-  flux_shader_names += ['effect_blur_spv', 'effect_backdrop_spv',
-                        'effect_liquid_glass_spv', 'effect_storage_clear_spv']
+  flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv]
+  flux_shader_spvs += [effect_blur_comp_spv, effect_backdrop_comp_spv]
+  flux_shader_names += ['effect_blur_spv', 'effect_backdrop_spv']
 endif
 
 # Generated shader headers for the no-#embed fallback (MSVC cl / Apple

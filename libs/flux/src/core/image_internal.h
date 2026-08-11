@@ -1,7 +1,6 @@
 /*
- * Internal flux_image layout and storage-writable image constructor.
- * Images are core GPU resources shared by canvas, scene, and effect.
- * Never installed.
+ * Internal flux_image layout. Images are core GPU resources shared by
+ * canvas, scene, and effect. Never installed.
  */
 #ifndef FLUX_IMAGE_INTERNAL_H
 #define FLUX_IMAGE_INTERNAL_H
@@ -27,8 +26,5 @@ struct flux_image {
     VkImageLayout current_layout;
     bool render_target;
 };
-
-flux_result flux_image_create_compute_writable(flux_device *d, uint32_t width, uint32_t height,
-                                               flux_format fmt, flux_image **out);
 
 #endif /* FLUX_IMAGE_INTERNAL_H */

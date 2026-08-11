@@ -105,10 +105,20 @@ FLUX_API void flux_bindless_release(flux_device *d, flux_bindless_handle h);
 FLUX_API VkDescriptorSet flux_device_bindless_set(flux_device *d);
 FLUX_API VkDescriptorSetLayout flux_device_bindless_layout(flux_device *d);
 
+/* Lazily creates and returns the bindless handle of the device-owned
+ * default sampler (linear filtering, clamp-to-edge). Idempotent and
+ * thread-safe. Compute effects use it to sample their inputs. */
+FLUX_API flux_bindless_handle flux_device_default_sampler_handle(flux_device *d);
+
 /* The sampled bindless handle the image was registered into at
  * create time. FLUX_BINDLESS_INVALID if the image was created
  * without bindless registration (currently always set). */
 FLUX_API flux_bindless_handle flux_image_bindless_handle(const flux_image *im);
+
+/* The storage bindless handle of the image, valid only for images created
+ * with flux_image_create_compute_writable (FLUX_BINDLESS_INVALID otherwise).
+ * Pass it to a compute shader that writes the image via a storage binding. */
+FLUX_API flux_bindless_handle flux_image_bindless_storage_handle(const flux_image *im);
 
 /* ================================================================== */
 /*  Graphics pipeline                                                 */

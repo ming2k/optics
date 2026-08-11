@@ -892,6 +892,9 @@ impl<'surface> Frame<'surface> {
         })
     }
 
+    /// The underlying raw `flux_frame` pointer. Borrowed; the `Frame`
+    /// retains ownership. Sibling binding crates (e.g. prism) use it to
+    /// record material effects into this frame through the C API.
     pub fn as_raw(&self) -> *mut sys::flux_frame {
         self.raw
     }
@@ -1882,6 +1885,8 @@ impl Canvas {
         unsafe { sys::flux_canvas_draw_image_opaque_sub(self.raw, image.raw, dst, src) };
     }
 
+    /// The underlying raw `flux_canvas` pointer. Borrowed; the `Canvas`
+    /// retains ownership.
     pub fn as_raw(&self) -> *mut sys::flux_canvas {
         self.raw
     }
@@ -2525,218 +2530,13 @@ impl BlurredImage<'_> {
         };
         unsafe { sys::flux_canvas_draw_image(canvas.raw, self.raw, destination, std::ptr::null()) };
     }
-}
 
-/// One rounded-rectangle volume in backdrop-capture pixel coordinates.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LiquidGlassShape {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub corner_radius: f32,
-}
-
-/// One soft optical emphasis field inside an existing glass body.
-///
-/// The field changes local clarity and directional light; it does not create
-/// another SDF body. Its shape must remain inside the primary body's bounds,
-/// and it is mutually exclusive with a merged secondary shape.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LiquidGlassFocus {
-    pub shape: LiquidGlassShape,
-    pub strength: f32,
-}
-
-/// One independently composited glass body. `merged` is smoothly unioned
-/// with `primary`, which is useful for spring-driven droplets and controls.
-///
-/// Per-body optical character is caller policy, used verbatim: the drop
-/// shadow (alpha 0 disables it), `tint_color`, an RGB multiplier on the
-/// adaptive body tint for accent-tinted glass (`[255, 255, 255]` = neutral),
-/// and an optional single-body optical `focus` field. Focus and `merged` are
-/// mutually exclusive.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LiquidGlassGroup {
-    pub primary: LiquidGlassShape,
-    pub merged: Option<LiquidGlassShape>,
-    pub blend_radius: f32,
-    pub opacity: f32,
-    pub shadow_alpha: f32,
-    pub shadow_blur: f32,
-    pub shadow_offset_y: f32,
-    pub tint_color: [u8; 3],
-    pub focus: Option<LiquidGlassFocus>,
-}
-
-/// Optical properties shared by all bodies in one liquid-glass dispatch.
-/// Drop shadows are per body — see [`LiquidGlassGroup`].
-///
-/// Every policy knob lives here or on the group; only the curve shapes
-/// (lens profile, falloff curves) are the material's identity and stay in
-/// the shader.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LiquidGlassParams {
-    pub refraction: f32,
-    pub chromatic_aberration: f32,
-    pub saturation: f32,
-    pub brightness: f32,
-    pub edge_width: f32,
-    pub glare: f32,
-    pub light_direction: (f32, f32),
-    pub opacity: f32,
-    /// Body small-side size (px) at which rim and lensing render at full
-    /// strength; smaller bodies scale them down. 0 disables scaling.
-    pub size_reference: f32,
-    /// Floor of the size-scaling factor.
-    pub size_scale_min: f32,
-    /// Multiplier on the adaptive body tint (1.0 = reference recipe).
-    pub tint_strength: f32,
-    /// Multiplier on the scattering layer (1.0 = reference recipe).
-    pub frost_strength: f32,
-}
-
-impl Default for LiquidGlassParams {
-    fn default() -> Self {
-        Self {
-            refraction: 8.0,
-            chromatic_aberration: 1.25,
-            saturation: 1.08,
-            brightness: 1.02,
-            edge_width: 18.0,
-            glare: 0.55,
-            light_direction: (-0.45, -0.89),
-            opacity: 1.0,
-            size_reference: 72.0,
-            size_scale_min: 0.15,
-            tint_strength: 1.0,
-            frost_strength: 1.0,
-        }
-    }
-}
-
-/// Reusable analytic liquid-glass compositor with one output per frame slot.
-pub struct LiquidGlassFilter {
-    raw: *mut sys::flux_liquid_glass_filter,
-}
-
-impl LiquidGlassFilter {
-    pub fn new(device: &Device) -> Result<Self, Error> {
-        let mut raw = std::ptr::null_mut();
-        Error::check(unsafe { sys::flux_liquid_glass_filter_create(device.raw, &mut raw) })?;
-        Ok(Self { raw })
-    }
-
-    /// Refract `input` through analytic rounded SDFs, mixing in the matching
-    /// realtime `blurred` capture for local frost. The returned image is
-    /// transparent outside the SDF and its drop-shadow falloff, and borrows
-    /// this filter's frame slot. An empty `groups` slice clears footprints
-    /// retained by that slot after all glass bodies disappear.
-    pub fn apply<'filter>(
-        &'filter mut self,
-        frame: &Frame<'_>,
-        input: &Image,
-        blurred: &BlurredImage<'_>,
-        groups: &[LiquidGlassGroup],
-        params: LiquidGlassParams,
-    ) -> Result<LiquidGlassImage<'filter>, Error> {
-        let raw_shape = |shape: LiquidGlassShape| sys::flux_liquid_glass_shape {
-            bounds: sys::flux_rect {
-                x: shape.x,
-                y: shape.y,
-                w: shape.width,
-                h: shape.height,
-            },
-            corner_radius: shape.corner_radius,
-        };
-        let raw_groups: Vec<sys::flux_liquid_glass_group> = groups
-            .iter()
-            .map(|group| {
-                let mut shapes = [raw_shape(group.primary), raw_shape(group.primary)];
-                let shape_count = if let Some(merged) = group.merged {
-                    shapes[1] = raw_shape(merged);
-                    2
-                } else {
-                    1
-                };
-                sys::flux_liquid_glass_group {
-                    shapes,
-                    shape_count,
-                    blend_radius: group.blend_radius,
-                    opacity: group.opacity,
-                    shadow_alpha: group.shadow_alpha,
-                    shadow_blur: group.shadow_blur,
-                    shadow_offset_y: group.shadow_offset_y,
-                    tint_color: (u32::from(group.tint_color[0]) << 16)
-                        | (u32::from(group.tint_color[1]) << 8)
-                        | u32::from(group.tint_color[2]),
-                    focus: group
-                        .focus
-                        .map(|focus| raw_shape(focus.shape))
-                        .unwrap_or_else(|| raw_shape(group.primary)),
-                    focus_strength: group.focus.map_or(0.0, |focus| focus.strength),
-                }
-            })
-            .collect();
-        let desc = sys::flux_liquid_glass_desc {
-            type_: sys::flux_struct_type::FLUX_TYPE_LIQUID_GLASS_DESC,
-            input: input.raw,
-            blurred_input: blurred.raw,
-            groups: if raw_groups.is_empty() {
-                std::ptr::null()
-            } else {
-                raw_groups.as_ptr()
-            },
-            group_count: u32::try_from(raw_groups.len()).unwrap_or(u32::MAX),
-            refraction: params.refraction,
-            chromatic_aberration: params.chromatic_aberration,
-            saturation: params.saturation,
-            brightness: params.brightness,
-            edge_width: params.edge_width,
-            glare: params.glare,
-            light_direction: sys::flux_point {
-                x: params.light_direction.0,
-                y: params.light_direction.1,
-            },
-            opacity: params.opacity,
-            size_reference: params.size_reference,
-            size_scale_min: params.size_scale_min,
-            tint_strength: params.tint_strength,
-            frost_strength: params.frost_strength,
-            ..Default::default()
-        };
-        let mut raw = std::ptr::null_mut();
-        Error::check(unsafe {
-            sys::flux_liquid_glass_filter_apply(self.raw, frame.raw, &desc, &mut raw)
-        })?;
-        Ok(LiquidGlassImage {
-            raw,
-            _filter: PhantomData,
-        })
-    }
-}
-
-impl Drop for LiquidGlassFilter {
-    fn drop(&mut self) {
-        unsafe { sys::flux_liquid_glass_filter_release(self.raw) };
-    }
-}
-
-/// Borrowed full-capture liquid-glass composite.
-pub struct LiquidGlassImage<'filter> {
-    raw: *mut sys::flux_image,
-    _filter: PhantomData<&'filter mut LiquidGlassFilter>,
-}
-
-impl LiquidGlassImage<'_> {
-    pub fn draw(&self, canvas: &Canvas, x: f32, y: f32, width: f32, height: f32) {
-        let destination = sys::flux_rect {
-            x,
-            y,
-            w: width,
-            h: height,
-        };
-        unsafe { sys::flux_canvas_draw_image(canvas.raw, self.raw, destination, std::ptr::null()) };
+    /// Raw `flux_image` pointer of the borrowed blur output. Borrowed: it
+    /// stays valid only while this `BlurredImage` (its filter's frame slot)
+    /// is alive. For consumers in a sibling binding crate — prism's
+    /// liquid-glass filter takes it as the frosted backdrop input.
+    pub fn as_raw(&self) -> *mut sys::flux_image {
+        self.raw
     }
 }
 

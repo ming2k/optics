@@ -7,21 +7,24 @@
  *
  *   1. CAPTURE  — render the chaotic scene into a flux_image via
  *      flux_canvas_begin_target / end_target.
- *   2. EFFECT   — create fixed-cost frost, then feed sharp + frosted images
- *      to flux_liquid_glass_filter_apply. Its analytic SDF drives refraction,
- *      chromatic dispersion, Fresnel/glare and exact rounded alpha.
+ *   2. MATERIAL — create fixed-cost frost, then feed sharp + frosted images
+ *      to prism_liquid_glass_filter_apply (the prism material library). Its
+ *      analytic SDF drives refraction, chromatic dispersion, rim lighting
+ *      and exact rounded alpha.
  *   3. COMPOSITE — draw the sharp capture and the transparent glass output.
  *
  * Key flux APIs:  flux_image_create_render_target, flux_canvas_begin_target,
  *                 flux_canvas_end_target, flux_blur_filter_apply,
- *                 flux_liquid_glass_filter_apply, flux_canvas_draw_image
+ *                 flux_canvas_draw_image
+ * Key prism APIs: prism_liquid_glass_filter_apply
  *
  * Plumbing (raw Vulkan, not flux): GLFW window + VkSurfaceKHR creation.
- * Requires -Deffect=true.
+ * Requires -Deffect=true -Dprism=true.
  */
 #include <flux/effect.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
+#include <prism/prism.h>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -214,9 +217,9 @@ int main(void) {
         return 1;
     }
     flux_blur_filter *blur_filter = nullptr;
-    flux_liquid_glass_filter *glass_filter = nullptr;
+    prism_liquid_glass_filter *glass_filter = nullptr;
     if (flux_blur_filter_create(device, &blur_filter) != FLUX_OK ||
-        flux_liquid_glass_filter_create(device, &glass_filter) != FLUX_OK) {
+        prism_liquid_glass_filter_create(device, &glass_filter) != FLUX_OK) {
         fprintf(stderr, "liquid-glass filters create failed\n");
         return 1;
     }
@@ -314,7 +317,7 @@ int main(void) {
             fprintf(stderr, "blur: %s\n", flux_result_string(r));
             break;
         }
-        flux_liquid_glass_group body = {
+        prism_liquid_glass_group body = {
             .shapes =
                 {
                     {.bounds = {gx, gy, gw, gh}, .corner_radius = gr},
@@ -330,7 +333,7 @@ int main(void) {
             .shadow_offset_y = 6.0f,
             .tint_color = 0xFFFFFFu,
         };
-        flux_liquid_glass_desc gd = FLUX_LIQUID_GLASS_DESC_INIT;
+        prism_liquid_glass_desc gd = PRISM_LIQUID_GLASS_DESC_INIT;
         gd.input = capture;
         gd.blurred_input = blurred;
         gd.groups = &body;
@@ -339,7 +342,7 @@ int main(void) {
         gd.chromatic_aberration = 1.6f;
         gd.edge_width = 22.0f;
         flux_image *glass_output = nullptr;
-        r = flux_liquid_glass_filter_apply(glass_filter, frame, &gd, &glass_output);
+        r = prism_liquid_glass_filter_apply(glass_filter, frame, &gd, &glass_output);
         if (r != FLUX_OK) {
             fprintf(stderr, "liquid glass: %s\n", flux_result_string(r));
             break;
@@ -458,7 +461,7 @@ int main(void) {
     }
 
     flux_device_wait_idle(device);
-    flux_liquid_glass_filter_release(glass_filter);
+    prism_liquid_glass_filter_release(glass_filter);
     flux_blur_filter_release(blur_filter);
     if (noise_img)
         flux_image_release(noise_img);

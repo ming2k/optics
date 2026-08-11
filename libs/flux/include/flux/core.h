@@ -176,7 +176,8 @@ typedef enum flux_struct_type {
     FLUX_TYPE_SURFACE_DMABUF_DESC = 17,
     FLUX_TYPE_SURFACE_READBACK_DESC = 18,
     FLUX_TYPE_CANVAS_PASS_DESC = 19,
-    FLUX_TYPE_LIQUID_GLASS_DESC = 20,
+    /* 20 was the liquid-glass material's descriptor tag — retired when the
+     * material moved to the prism library (ADR-0063). Never reuse. */
     FLUX_TYPE_MESH_SKIN_DESC = 21,
     FLUX_TYPE_MATERIAL_SURFACE_DESC = 22,
     FLUX_TYPE_EFFECT_BLUR_REGIONS_DESC = 23,
@@ -248,6 +249,10 @@ FLUX_API void flux_image_release(flux_image *image);
 FLUX_API uint32_t flux_image_width(const flux_image *image);
 FLUX_API uint32_t flux_image_height(const flux_image *image);
 FLUX_API flux_format flux_image_format(const flux_image *image);
+/* Owning device, borrowed (not retained). Compute-writable images hold a
+ * weak device reference, so the returned pointer is only as long-lived as
+ * the caller's own device reference. */
+FLUX_API flux_device *flux_image_device(const flux_image *image);
 
 /* Create a COLOR_ATTACHMENT | SAMPLED image with undefined initial contents.
  * Prepare it immediately before flux_frame_begin_pass and finish it after
@@ -261,6 +266,24 @@ FLUX_NODISCARD FLUX_API flux_result flux_frame_prepare_image_target(flux_frame *
                                                                     flux_image *target);
 FLUX_NODISCARD FLUX_API flux_result flux_frame_finish_image_target(flux_frame *frame,
                                                                    flux_image *target);
+
+/* Create a STORAGE | SAMPLED image with undefined initial contents, in
+ * VK_IMAGE_LAYOUT_GENERAL, registered into both the sampled and the storage
+ * bindless slots (read them via flux_image_bindless_handle and
+ * flux_image_bindless_storage_handle in <flux/vulkan.h>). Only RGBA8_UNORM
+ * and BGRA8_UNORM are supported — the two formats Vulkan guarantees for
+ * storage access without optional features. This is the output and
+ * intermediate currency of compute effects; the effect module's own
+ * operators are built on it.
+ *
+ * The image holds only a weak device reference: the caller must keep the
+ * device alive for the image's whole lifetime (a filter or pool that
+ * retains the device satisfies this). Release with flux_image_release. */
+FLUX_NODISCARD FLUX_API flux_result flux_image_create_compute_writable(flux_device *d,
+                                                                       uint32_t width,
+                                                                       uint32_t height,
+                                                                       flux_format format,
+                                                                       flux_image **out);
 
 /* Upload tightly packed pixels into an in-bounds sub-region. The image view
  * and bindless handle remain valid across the update. Requires the image to
@@ -795,6 +818,29 @@ typedef struct flux_frame_begin_desc {
 FLUX_NODISCARD FLUX_API flux_result flux_surface_begin_frame(flux_surface *s,
                                                              const flux_frame_begin_desc *desc,
                                                              flux_frame **out_frame);
+
+/* Upper bound on frames in flight per surface. Frame-slot consumers
+ * (filters keyed by flux_frame_index) size their per-slot storage with
+ * this. */
+#define FLUX_MAX_FRAMES_IN_FLIGHT 3
+
+/* Frame lifecycle state. Frames follow a strict single-use machine:
+ * INVALID -> RECORDING (begin_frame) -> SUBMITTED -> PRESENTED. */
+typedef enum flux_frame_state {
+    FLUX_FRAME_STATE_INVALID = 0,
+    FLUX_FRAME_STATE_RECORDING,
+    FLUX_FRAME_STATE_SUBMITTED,
+    FLUX_FRAME_STATE_PRESENTED,
+} flux_frame_state;
+
+FLUX_API flux_frame_state flux_frame_get_state(const flux_frame *f);
+/* True between flux_frame_begin_pass and flux_frame_end_pass. Compute
+ * effects must be recorded outside a pass — a recording frame with no
+ * active pass is the "frame pass boundary" effect APIs require. */
+FLUX_API bool flux_frame_has_active_pass(const flux_frame *f);
+/* The device of the surface this frame was begun on, borrowed (not
+ * retained); NULL for a frame that has not begun. */
+FLUX_API flux_device *flux_frame_device(const flux_frame *f);
 
 /* Capture the exact color attachment produced by this recording frame.
  * flux_frame_submit inserts an image-to-buffer copy before the final present

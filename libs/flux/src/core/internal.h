@@ -446,10 +446,6 @@ struct flux_device {
     void (*effect_state_destroy)(flux_device *d);
 };
 
-/* Lazy initialisation of the device-owned default sampler. Returns
- * the bindless handle to use in shaders. Idempotent / thread-safe. */
-flux_bindless_handle flux_device_default_sampler_handle(flux_device *d);
-
 flux_result flux_bindless_heap_init(flux_device *d);
 void flux_bindless_heap_destroy(flux_device *d);
 
@@ -618,7 +614,6 @@ void flux_internal_free(flux_device *d, void *ptr);
 /*  Surface + per-frame state                                         */
 /* ------------------------------------------------------------------ */
 
-#define FLUX_MAX_FRAMES_IN_FLIGHT 3
 #define FLUX_MAX_TIMESTAMPS_PER_FRAME 64
 
 typedef struct flux_timestamp_scope {
@@ -689,13 +684,6 @@ typedef struct flux_transient_ring {
     /* Per-frame cursor (bytes used in slot, 0 at frame start). */
     VkDeviceSize cursor[FLUX_MAX_FRAMES_IN_FLIGHT];
 } flux_transient_ring;
-
-typedef enum flux_frame_state {
-    FLUX_FRAME_STATE_INVALID = 0,
-    FLUX_FRAME_STATE_RECORDING,
-    FLUX_FRAME_STATE_SUBMITTED,
-    FLUX_FRAME_STATE_PRESENTED,
-} flux_frame_state;
 
 struct flux_frame {
     flux_surface *surface; /* not retained — surface owns the frame slot */

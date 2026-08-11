@@ -1,6 +1,6 @@
 # ADR-0047: Caller-owned policy boundary for flux effects
 
-- Status: Accepted
+- Status: Superseded by ADR-0063
 - Date: 2026-08-01
 
 ## Context

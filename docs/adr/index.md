@@ -55,7 +55,7 @@ a decision, write a new ADR and update the old one's status to
 | 0044 | [Iris backend compile-time selection](0044-iris-backend-selection.md) | Accepted |
 | 0045 | [Iris host resource lifecycle callbacks](0045-iris-host-resource-lifecycle.md) | Accepted |
 | 0046 | [Liquid glass as a convex-lens material](0046-liquid-glass-convex-lens-model.md) | Accepted |
-| 0047 | [Caller-owned policy boundary for flux effects](0047-caller-owned-policy-boundary-for-flux-effects.md) | Accepted |
+| 0047 | [Caller-owned policy boundary for flux effects](0047-caller-owned-policy-boundary-for-flux-effects.md) | Superseded by ADR-0063 |
 | 0048 | [Textured surface materials and core images](0048-textured-surface-materials-and-core-images.md) | Accepted |
 | 0049 | [Strict DRM identity for Vulkan device selection](0049-strict-drm-vulkan-device-selection.md) | Accepted |
 | 0050 | [Single-body liquid-glass focus field](0050-single-body-liquid-glass-focus-field.md) | Accepted |
@@ -71,3 +71,4 @@ a decision, write a new ADR and update the old one's status to
 | 0060 | [Lens single-tree placement and z bands — place/band supersedes parallel overlay roots](0060-lens-single-tree-placement-and-z-bands.md) | Accepted |
 | 0061 | [Lens style cascade and the mechanism / neutral-default / flavor rule](0061-lens-style-cascade-mechanism-neutral-flavor.md) | Accepted |
 | 0062 | [Bidirectional accessibility — a11y action invocation and text-changed events](0062-lens-bidirectional-a11y-action-and-text-changed.md) | Accepted |
+| 0063 | [Liquid glass moves to the prism material library](0063-liquid-glass-material-library.md) | Accepted |

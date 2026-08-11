@@ -49,7 +49,7 @@ layout(push_constant) uniform PC {
     float saturation;
     float brightness;
     float edge_width;
-    float glare;
+    float rim_light;
     float light_x;
     float light_y;
     uint group_width;
@@ -249,18 +249,18 @@ void main()
     /* 1) Key line: a ~2 px gaussian hugging the silhouette on the
      * light-facing side. This — not a broad rim wash — is the highlight. */
     float line = exp(-(d + 0.75) * (d + 0.75) / 2.88);
-    colour += vec3(1.0) * (pc.glare * 1.05 * pow(facing, 1.6) * line);
+    colour += vec3(1.0) * (pc.rim_light * 1.05 * pow(facing, 1.6) * line);
 
     /* 2) Soft sheen across the rim band, keyed to the light. */
-    colour += vec3(1.0) * (pc.glare * 0.10 * facing * facing * u * u);
+    colour += vec3(1.0) * (pc.rim_light * 0.10 * facing * facing * u * u);
 
     /* 3) Fresnel env sheen: direction-modulated, so it brightens the top
      * and dies at the bottom instead of ringing the whole silhouette. */
     float fresnel = u * u * u * u;
-    colour += vec3(1.0) * (pc.glare * 0.12 * fresnel * (0.15 + 0.85 * facing * facing));
+    colour += vec3(1.0) * (pc.rim_light * 0.12 * fresnel * (0.15 + 0.85 * facing * facing));
 
     /* 4) Shadow side: a thin dark line opposite the key light. */
-    colour *= 1.0 - 0.22 * pc.glare * pow(away, 1.8) * line;
+    colour *= 1.0 - 0.22 * pc.rim_light * pow(away, 1.8) * line;
 
     /* 4b) Edge absorption: grazing light dies at the silhouette in every
      * direction. Stronger over bright content, where the body would
@@ -271,7 +271,7 @@ void main()
     /* 5) Transmitted-light trough: faint concentration just inside the
      * bottom rim, where light through the lens pools. */
     float trough = away * away * smoothstep(0.25, 0.75, u) * (1.0 - smoothstep(0.85, 1.0, u));
-    colour += vec3(1.0) * (0.05 * pc.glare * trough);
+    colour += vec3(1.0) * (0.05 * pc.rim_light * trough);
 
     /* Sub-LSB dither: smooth studio gradients band visibly in rgba8. */
     float dither = fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;

@@ -195,6 +195,14 @@ flux_bindless_handle flux_image_bindless_handle(const flux_image *im) {
     return im ? im->bindless : FLUX_BINDLESS_INVALID;
 }
 
+flux_bindless_handle flux_image_bindless_storage_handle(const flux_image *im) {
+    return im ? im->bindless_storage : FLUX_BINDLESS_INVALID;
+}
+
+flux_device *flux_image_device(const flux_image *im) {
+    return im ? im->device : nullptr;
+}
+
 void flux_image_release(flux_image *im) {
     if (!im)
         return;

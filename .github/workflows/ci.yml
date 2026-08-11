@@ -23,6 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Material boundary (ADR-0063): flux owns rendering mechanism and must
+      # not reference any named material; materials live in prism.
+      - name: Material boundary check
+        run: tools/check-material-boundary.sh
+
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
@@ -97,7 +102,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        workspace: [flux-rs, lens-rs, iris-rs]
+        workspace: [flux-rs, lens-rs, iris-rs, prism-rs]
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
@@ -164,4 +169,6 @@ jobs:
           cargo +1.85.0 check --manifest-path bindings/lens-rs/Cargo.toml \
             --workspace --all-targets --locked
           cargo +1.85.0 check --manifest-path bindings/iris-rs/Cargo.toml \
+            --workspace --all-targets --locked
+          cargo +1.85.0 check --manifest-path bindings/prism-rs/Cargo.toml \
             --workspace --all-targets --locked

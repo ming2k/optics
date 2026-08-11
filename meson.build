@@ -28,6 +28,13 @@ add_project_arguments(
 
 subdir('libs/flux')
 
+if get_option('prism')
+  subdir('libs/prism')
+else
+  # Always defined so tests/examples can reference it unconditionally; empty
+  # when the library is off.
+  prism_dep = declare_dependency()
+endif
 
 subdir('libs/lens')
 subdir('libs/iris')
@@ -57,6 +64,7 @@ endif
 
 if get_option('tests')
   subdir('tests/flux')
+  subdir('tests/prism')
   subdir('tests/lens')
   subdir('tests/iris')
 endif

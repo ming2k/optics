@@ -1,0 +1,21 @@
+[package]
+name = "prism"
+description = "Safe Rust bindings to prism: liquid-glass materials on the flux effect runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+prism-sys = { path = "../prism-sys", version = "0.1.0" }
+# flux (Rust bindings) is published from a separate repo (../flux-rs).
+# The path works when both repos are siblings under a common parent
+# directory; for other layouts set up a Cargo [patch.crates-io] in your
+# workspace, or replace this with a git URL / registry version once
+# `flux` is published.
+flux = { path = "../../../flux-rs/crates/flux", version = "0.1.1" }
+# Direct dependency so this crate's build.rs receives DEP_FLUX_RPATHS
+# (links metadata reaches direct dependents only) and so the raw calls it
+# makes itself (flux_canvas_draw_image) name the same types `flux` uses.
+flux-sys = { path = "../../../flux-rs/crates/flux-sys", version = "0.1.1" }

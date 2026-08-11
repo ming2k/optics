@@ -1017,6 +1017,18 @@ uint32_t flux_frame_index(const flux_frame *f) {
     return f ? f->slot : 0;
 }
 
+flux_frame_state flux_frame_get_state(const flux_frame *f) {
+    return f ? f->state : FLUX_FRAME_STATE_INVALID;
+}
+
+bool flux_frame_has_active_pass(const flux_frame *f) {
+    return f ? f->pass_active : false;
+}
+
+flux_device *flux_frame_device(const flux_frame *f) {
+    return (f && f->surface) ? f->surface->device : nullptr;
+}
+
 void flux_frame_timestamp_begin(flux_frame *f, const char *label) {
     if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
         return;

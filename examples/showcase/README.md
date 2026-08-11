@@ -15,17 +15,18 @@ meson compile -C build
 | Demo | Kind | Effect |
 |------|------|--------|
 | [`filament_plume`](#filament_plume) | visual | a flowing plume from 10,000 procedural points, one draw call |
-| [`liquid_glass`](#liquid_glass) | visual | real-time backdrop blur + liquid-glass refraction |
+| [`liquid_glass`](#liquid_glass) | visual | real-time backdrop blur + liquid-glass refraction (prism material) |
 | [`particles_terrain`](#particles_terrain) | visual | heightfield point cloud with additive glowing ridges |
 | [`ripple_field`](#ripple_field) | visual, interactive | cursor-driven ripples over a 3D point field |
 | [`julia_morph`](#julia_morph) | mathematical | a Julia set morphed per frame by a compute shader |
-| [`liquid_glass_study`](#liquid_glass_study) | headless tool | A/B parameter harness for the liquid-glass material |
+| [`liquid_glass_study`](#liquid_glass_study) | headless tool | A/B parameter harness for the prism liquid-glass material |
 
 The windowed demos need a Vulkan-capable desktop and [GLFW][glfw], and
 share the bootstrap + `pipeline_cache.h` helper documented in
 [`../flux/README.md`](../flux/README.md). `liquid_glass` and
-`liquid_glass_study` build only with `-Deffect=true`; `julia_morph` needs
-`-Dcompute=true` (all default on).
+`liquid_glass_study` build only with `-Deffect=true` and `-Dprism=true`
+(they link the prism material library in addition to flux); `julia_morph`
+needs `-Dcompute=true` (all default on).
 
 [glfw]: https://www.glfw.org/
 
@@ -44,13 +45,14 @@ framebuffer extent, and DPI-aware point size.
 ## liquid_glass
 
 The flagship showcase, and the reference consumer of the effect module's
-capture seam (ADR-0017):
+capture seam (ADR-0017). The glass material comes from the prism library
+(`<prism/liquid_glass.h>`), linked in addition to flux:
 
 1. **CAPTURE** — render a chaotic animated canvas scene into a `flux_image`
    via `flux_canvas_begin_target` / `end_target`;
 2. **EFFECT** — `flux_blur_filter_apply` produces a fixed-cost frost, then
-   `flux_liquid_glass_filter_apply` adds the glass: analytic SDF bodies,
-   refraction, chromatic dispersion, Fresnel/glare, a spring-animated
+   `prism_liquid_glass_filter_apply` adds the glass: analytic SDF bodies,
+   refraction, chromatic dispersion, Fresnel rim lighting, a spring-animated
    droplet;
 3. **COMPOSITE** — the sharp capture and the transparent glass output are
    drawn back over the frame.
@@ -64,10 +66,14 @@ The **headless** companion to `liquid_glass` — no window, no GLFW. It renders
 a deliberately hostile backdrop (stripes, fake text rows, bright/dark zones),
 composites several glass groups with argv-overridable parameters, reads the
 frame back (`flux_frame_request_readback` / `flux_surface_read_pixels`), and
-writes a PPM for eyeballing.
+writes a PPM for eyeballing. Trailing positional floats override the study
+defaults — `refraction edge_width rim_light saturation brightness chromatic`
+— and are echoed in the summary line it prints (`rim_light` is the third
+positional argument; it was `glare` before the material moved to prism).
 
 This is the designated pixel-review gate for liquid-glass shader changes
-(ADR-0046, ADR-0050): run it after every edit of `effect_liquid_glass.comp`.
+(ADR-0046, ADR-0050): run it after every edit of
+`libs/prism/src/shaders/liquid_glass.comp`.
 It also doubles as the reference for offscreen rendering + host readback.
 
 ## particles_terrain

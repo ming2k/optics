@@ -112,76 +112,10 @@ released. Positive `sigma` values control bounded sample offsets; they never
 increase the four-dispatch sample count. Sigma 0 records a copy. Release the
 filter only after GPU work that references it has completed.
 
-## Reusable liquid glass
-
-`flux_liquid_glass_filter` composites analytic rounded-rectangle glass bodies
-over a sharp capture and its matching blurred image. It owns one transparent
-output per frame-in-flight slot. Apply it at a frame pass boundary, then draw
-the borrowed output over the sharp scene:
-
-```c
-flux_liquid_glass_filter *filter = NULL;
-flux_liquid_glass_filter_create(device, &filter);
-
-flux_liquid_glass_group group = FLUX_LIQUID_GLASS_GROUP_INIT;
-group.shapes[0] = (flux_liquid_glass_shape){
-    .bounds = {40.0f, 30.0f, 320.0f, 96.0f},
-    .corner_radius = 18.0f,
-};
-group.focus = (flux_liquid_glass_shape){
-    .bounds = {56.0f, 42.0f, 104.0f, 72.0f},
-    .corner_radius = 12.0f,
-};
-group.focus_strength = 1.0f;
-
-flux_liquid_glass_desc glass = FLUX_LIQUID_GLASS_DESC_INIT;
-glass.input = sharp_capture;
-glass.blurred_input = blurred_capture;
-glass.groups = &group;
-glass.group_count = 1;
-
-flux_image *output = NULL; /* borrowed; do not release */
-flux_liquid_glass_filter_apply(filter, frame, &glass, &output);
-```
-
-All distances use capture-image pixels. `input`, `blurred_input`, and the
-output have identical extents; the sharp input may be RGBA8 or BGRA8, while
-the blurred input and output are RGBA8. The output is transparent outside the
-body SDF and its shadow. An empty group list clears footprints retained by the
-current frame slot after all bodies disappear.
-
-### `flux_liquid_glass_group`
-
-| Field | Meaning |
-|-------|---------|
-| `shapes[0]` | Primary rounded-rectangle body; positive width and height are required |
-| `shapes[1]`, `shape_count` | Optional second body smoothly unioned with the primary when `shape_count == 2` |
-| `blend_radius` | Smooth-union reach in pixels |
-| `opacity` | Per-body opacity multiplied by descriptor opacity |
-| `shadow_alpha`, `shadow_blur`, `shadow_offset_y` | Per-body drop-shadow policy |
-| `tint_color` | `0xRRGGBB` adaptive-tint multiplier; `0xFFFFFF` is neutral |
-| `focus`, `focus_strength` | Optional soft optical emphasis inside the primary body; changes clarity and directional light without adding coverage, an outline, or another body |
-
-A positive `focus_strength` requires `shape_count == 1`, finite positive focus
-bounds contained by `shapes[0].bounds`, and a finite corner radius. Focus and
-smooth union intentionally share the secondary-shape push-constant slot and
-are therefore mutually exclusive. Strength is clamped to `[0, 1]`. A zero or
-negative strength disables focus and ignores its geometry.
-
-### Descriptor policy
-
-`refraction`, `chromatic_aberration`, `edge_width`, `glare`,
-`light_direction`, saturation, brightness, total opacity, size scaling, tint,
-and frost are dispatch-wide caller policy. `FLUX_LIQUID_GLASS_DESC_INIT`
-provides the reference neutral recipe. Flux owns the effect mechanism and
-material curves; it does not infer component policy. See
-[ADR-0047](../adr/0047-caller-owned-policy-boundary-for-flux-effects.md) and
-[ADR-0050](../adr/0050-single-body-liquid-glass-focus-field.md).
-
-The filter, frame, and both inputs must belong to one device. Apply requires a
-recording frame with no active canvas pass. Invalid focus/merge combinations
-return `FLUX_ERROR_INVALID_ARGUMENT`; mismatched input extents or formats
-return `FLUX_ERROR_UNSUPPORTED`.
+Named materials do not live in flux: the liquid-glass material moved to the
+prism library with a 1:1 `prism_`-prefixed API, and the descriptor knob
+`glare` is now `rim_light`. See the [prism reference](prism.md) and
+[ADR-0063](../adr/0063-liquid-glass-material-library.md).
 
 ## `flux_effect_promote`
 
@@ -242,5 +176,6 @@ different devices are independent.
 ## See also
 
 - [ADR-0008 — Image-effect pipeline](../adr/0008-image-effect-pipeline.md) — design rationale.
+- [prism reference](prism.md) — named materials (liquid glass) built on the effect runtime.
 - [`<flux/compute.h>` reference](api.md#headers) — the primitive effects build on.
 - [`<flux/canvas.h>` reference](api.md#headers) — `flux_image` lifecycle.

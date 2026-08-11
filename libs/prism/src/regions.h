@@ -1,7 +1,7 @@
-#ifndef FLUX_EFFECT_LIQUID_GLASS_REGIONS_H
-#define FLUX_EFFECT_LIQUID_GLASS_REGIONS_H
+#ifndef PRISM_LIQUID_GLASS_REGIONS_H
+#define PRISM_LIQUID_GLASS_REGIONS_H
 
-#include <flux/effect.h>
+#include <prism/liquid_glass.h>
 
 #include <math.h>
 #include <stdbool.h>
@@ -34,7 +34,7 @@ static inline bool liquid_glass_rect_contains(flux_rect outer, flux_rect inner) 
 /* Validate one body's geometry and optical policy. A positive focus is an
  * interior field of a single body, never a second body or a smooth-union
  * participant, so its bounds must remain inside the primary shape. */
-static inline bool liquid_glass_group_is_valid(const flux_liquid_glass_group *group) {
+static inline bool liquid_glass_group_is_valid(const prism_liquid_glass_group *group) {
     if (!group || group->shape_count < 1u || group->shape_count > 2u ||
         !isfinite(group->blend_radius) || !isfinite(group->opacity) ||
         !isfinite(group->shadow_alpha) || !isfinite(group->shadow_blur) ||
@@ -56,7 +56,7 @@ static inline bool liquid_glass_group_is_valid(const flux_liquid_glass_group *gr
 /* Conservative physical-pixel footprint of one analytic body, including the
  * smooth-union bow, antialiasing, and drop-shadow falloff. The result is
  * clipped to the storage image and is therefore directly dispatchable. */
-static inline bool liquid_glass_group_dispatch_bounds(const flux_liquid_glass_group *group,
+static inline bool liquid_glass_group_dispatch_bounds(const prism_liquid_glass_group *group,
                                                       float shadow_reach, uint32_t image_width,
                                                       uint32_t image_height,
                                                       liquid_glass_region *out) {
@@ -185,4 +185,4 @@ liquid_glass_build_clear_regions(bool initialized, uint32_t image_width, uint32_
     return true;
 }
 
-#endif /* FLUX_EFFECT_LIQUID_GLASS_REGIONS_H */
+#endif /* PRISM_LIQUID_GLASS_REGIONS_H */
