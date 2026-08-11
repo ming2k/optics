@@ -101,10 +101,7 @@ fn headless_frame_drives_containers() {
             f.tabs_ex(
                 "wide-settings",
                 &mut active,
-                &TabsOpts {
-                    equal_width: true,
-                    ..TabsOpts::default()
-                },
+                &TabsOpts { equal_width: true },
                 |f| {
                     f.tab("Primary");
                     f.tab("Secondary");
