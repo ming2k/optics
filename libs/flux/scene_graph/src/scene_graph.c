@@ -14,7 +14,7 @@
 
 #include <stdlib.h>
 
-#define FLUX_SG_VERSION_STRING "0.0.13"
+#define FLUX_SG_VERSION_STRING "0.0.14"
 
 FLUX_SG_API const char *flux_sg_version_string(void) {
     return FLUX_SG_VERSION_STRING;
