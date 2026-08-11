@@ -1,5 +1,6 @@
 /* test_clipboard.c — host clipboard interface, paste delivery, caret
- * default, and the size-aware lens_input copy guard (ADR-0013). */
+ * default, the focused-widget text context (ADR-0036), and the
+ * size-aware lens_input copy guard (ADR-0013). */
 
 #include "test_helpers.h"
 #include <lens/lens.h>
@@ -106,10 +107,100 @@ static void test_input_size_guard(void) {
     lens_destroy(ui);
 }
 
+/* ---- focused-widget text context (lens_text_context_get, ADR-0036) ---- */
+
+static void test_text_context_default_null(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
+    lens_begin(ui, &in);
+    lens_end(ui);
+    lens_text_context tc = lens_text_context_get(ui);
+    CHECK(tc.utf8 == NULL);
+    CHECK(tc.len == 0 && tc.cursor == 0 && tc.multiline == false);
+    lens_destroy(ui);
+}
+
+/* A focused textfield reports its buffer, caret offset, and
+ * multiline=false; the context clears again once no text widget is
+ * built. (Focus pattern mirrors test_textfield.c's setup_textfield.) */
+static void test_text_context_textfield(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
+
+    char buf[64] = "hello";
+    /* frame 1: enter; frame 2: focus explicitly */
+    lens_begin(ui, &in);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    lens_begin(ui, &in);
+    lens_set_focus(ui, lens_current_id(ui, "tf"));
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+
+    /* frame 3: caret to end (EOL = 5) */
+    lens_input end = in;
+    end.key_count = 1;
+    end.keys[0] = (lens_key_event){.key = LENS_KEY_END, .pressed = true};
+    lens_begin(ui, &end);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+
+    lens_text_context tc = lens_text_context_get(ui);
+    CHECK(tc.utf8 == buf);
+    CHECK(tc.len == 5);
+    CHECK(tc.cursor == 5);
+    CHECK(tc.multiline == false);
+
+    /* frame 4: no text widget built — the context is cleared again */
+    lens_begin(ui, &in);
+    lens_end(ui);
+    tc = lens_text_context_get(ui);
+    CHECK(tc.utf8 == NULL);
+    CHECK(tc.len == 0 && tc.cursor == 0 && tc.multiline == false);
+
+    lens_destroy(ui);
+}
+
+/* A focused textarea reports multiline=true (focus pattern from
+ * test_textarea.c's focus_textarea). */
+static void test_text_context_textarea(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
+
+    char buf[64] = "ab\ncd";
+    lens_begin(ui, &in);
+    lens_textarea(ui, "ta", buf, sizeof buf, 80.0f);
+    lens_end(ui);
+    lens_begin(ui, &in);
+    lens_set_focus(ui, lens_current_id(ui, "ta"));
+    lens_textarea(ui, "ta", buf, sizeof buf, 80.0f);
+    lens_end(ui);
+
+    lens_text_context tc = lens_text_context_get(ui);
+    CHECK(tc.utf8 == buf);
+    CHECK(tc.len == 5);
+    CHECK(tc.cursor == 0);
+    CHECK(tc.multiline == true);
+
+    /* no text widget built — cleared again */
+    lens_begin(ui, &in);
+    lens_end(ui);
+    tc = lens_text_context_get(ui);
+    CHECK(tc.utf8 == NULL);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_copy_and_request();
     test_copy_without_clipboard_is_noop();
     test_caret_rect_default_zero();
     test_input_size_guard();
+    test_text_context_default_null();
+    test_text_context_textfield();
+    test_text_context_textarea();
     return TEST_REPORT();
 }

@@ -2,6 +2,7 @@
 
 #include "platform_text.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 size_t iris_utf8_floor_boundary(const char *s, size_t len, size_t cap) {
@@ -29,4 +30,29 @@ void iris_utf8_copy(char *dst, size_t cap, const char *src) {
     dst[0] = '\0';
     if (src)
         iris_utf8_append(dst, cap, src, strlen(src));
+}
+
+bool iris_text_memento_update(char **saved, size_t *saved_len, uint32_t *saved_cursor,
+                              const char *text, size_t len, uint32_t cursor) {
+    /* A NULL memento means "nothing reported yet" (fresh session, or
+     * cleared on session end): the report is always due, empty or not. */
+    if (*saved && *saved_len == len && *saved_cursor == cursor &&
+        (len == 0 || memcmp(*saved, text, len) == 0))
+        return false; /* identical to the last report: nothing to send */
+    char *copy = realloc(*saved, len ? len : 1);
+    if (!copy)
+        return true; /* report anyway; retry the copy on the next change */
+    if (len)
+        memcpy(copy, text, len);
+    *saved = copy;
+    *saved_len = len;
+    *saved_cursor = cursor;
+    return true;
+}
+
+void iris_text_memento_clear(char **saved, size_t *saved_len, uint32_t *saved_cursor) {
+    free(*saved);
+    *saved = NULL;
+    *saved_len = 0;
+    *saved_cursor = 0;
 }

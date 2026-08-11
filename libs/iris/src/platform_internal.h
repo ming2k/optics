@@ -70,17 +70,23 @@
  *       the virtual-key code, Cocoa from charactersIgnoringModifiers.
  *       Deriving press and release from the same unshifted source also
  *       guarantees the two edges always carry the same key id.
- *   (c) lens_key_event.repeat is best-effort: Win32 (lParam bit 30) and
- *       Cocoa (isARepeat) report auto-repeat, Wayland leaves it false
- *       (client-side repeat timers are a follow-on). lens does NOT depend
- *       on the flag.
+ *   (c) lens_key_event.repeat marks synthesised auto-repeat presses:
+ *       Wayland implements client-side repeat from the compositor's
+ *       wl_keyboard.repeat_info (a timerfd in the event loop re-emits the
+ *       held key, with its text, until key-up / focus loss / modifier
+ *       change), Win32 reads lParam bit 30, Cocoa reads isARepeat. lens
+ *       treats a repeat exactly like a press (no widget filters on the
+ *       flag), so a backend without repeat support may leave it false.
  *   (d) Committed text still carries the SHIFTED characters (the xkb UTF-8
  *       string / WM_CHAR / insertText:) — only the key id is normalised.
  *
  * IME truncation contract: every string funneled into lens_input's
- * fixed-size buffers (text_utf8 / preedit_utf8) is clipped with the shared
- * boundary-aware helpers in platform_text.h — never a raw byte cap, which
- * can split a multi-byte sequence and hand lens invalid UTF-8.
+ * fixed-size buffers (text_utf8[256] / preedit_utf8[LENS_PREEDIT_MAX=256])
+ * is clipped with the shared boundary-aware helpers in platform_text.h —
+ * never a raw byte cap, which can split a multi-byte sequence and hand
+ * lens invalid UTF-8. Backend staging buffers (the Wayland accumulator's
+ * text/preedit, the IME commit slot) are sized to match and pinned by
+ * static_assert against the lens_input members.
  *
  * lens contract (unchanged, platform-neutral): fold native input into one
  * lens_input per frame; wire lens_clipboard{set_text,request_text,user} to

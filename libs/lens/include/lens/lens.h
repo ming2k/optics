@@ -116,7 +116,7 @@ typedef struct lens_key_event {
     bool repeat;
 } lens_key_event;
 
-#define LENS_PREEDIT_MAX 64
+#define LENS_PREEDIT_MAX 256
 
 typedef struct lens_input {
     uint32_t size; /* sizeof(lens_input); 0 = trust
@@ -129,8 +129,10 @@ typedef struct lens_input {
     bool mouse_released[LENS_MOUSE_COUNT];
     float scroll_x, scroll_y; /* wheel-step deltas */
 
-    uint32_t mods;      /* modifier bitmask */
-    char text_utf8[32]; /* committed text this frame */
+    uint32_t mods;       /* modifier bitmask */
+    char text_utf8[256]; /* committed text this frame; sized for
+                            full-sentence IME conversion, not just
+                            key-at-a-time input */
 
     lens_key_event keys[LENS_INPUT_MAX_KEYS];
     uint32_t key_count;
@@ -655,6 +657,10 @@ typedef struct lens_widget_content {
     flux_rect preedit_underline; /* IME composition underline; valid when
                                    has_preedit                               */
     bool has_preedit;
+    flux_rect preedit_clause;    /* active clause of the composition (the IME's
+                                    preedit_sel byte range), node-local; valid
+                                    when its w > 0. Skins emphasise it over the
+                                    flat underline. */
 } lens_widget_content;
 
 /* Everything a skin needs to draw one widget for one frame.
@@ -1419,6 +1425,21 @@ LENS_API lens_id lens_active(const lens *ui);
  * The platform layer forwards this to the IME (e.g. zwp_text_input) so
  * the candidate window can position itself. */
 LENS_API flux_rect lens_caret_rect(const lens *ui);
+
+/* Surrounding-text and content-hint context of the focused text widget,
+ * for the host's IME integration (text-input-v3 set_surrounding_text /
+ * set_content_type). Refreshed every frame by the focused text widget
+ * alongside the caret rect; `utf8 == NULL` when no text widget is focused.
+ * The buffer is BORROWED from the widget — valid until the next
+ * lens_begin. `cursor` is the caret byte offset in `utf8`. */
+typedef struct lens_text_context {
+    const char *utf8;
+    uint32_t len;
+    uint32_t cursor;
+    bool multiline; /* textarea vs single-line textfield */
+} lens_text_context;
+
+LENS_API lens_text_context lens_text_context_get(const lens *ui);
 
 /* Place text on the system clipboard (calls the host lens_clipboard.set_text
  * if any). No-op when no clipboard interface was supplied. */

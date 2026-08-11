@@ -80,16 +80,19 @@ platform code must preserve them:
    platform (Wayland) so all three behave alike. On Wayland the read runs
    on a detached helper thread with a hard 5 s deadline (a stuck or
    malicious selection owner cannot hang the UI) and completion is
-   delivered through `iris_post_to_main_thread`; Win32 posts
+   delivered through `iris_post_to_main_thread`; the DND drop read and
+   the middle-click primary-selection read use the same helper thread +
+   deadline pattern (2 s for drops). Win32 posts
    `WM_IRIS_PASTE_DELIVER`, Cocoa an ApplicationDefined event.
 5. **IME contract.** Composition state travels in
    `lens_input.preedit_utf8` + cursor/clause fields; the candidate window
    is positioned from `lens_caret_rect`; `ime_delete_before/after` covers
    `delete_surrounding_text`. Platform IMEs (text-input-v3, IMM/TSF,
    NSTextInputClient) must reduce to exactly these fields. Strings clipped
-   into the fixed-size input buffers go through the shared boundary-aware
-   helpers (`src/platform_text.h`) — never a raw byte cap that could split
-   a multi-byte UTF-8 sequence.
+   into the fixed-size input buffers (`text_utf8[256]`,
+   `preedit_utf8[LENS_PREEDIT_MAX=256]`) go through the shared
+   boundary-aware helpers (`src/platform_text.h`) — never a raw byte cap
+   that could split a multi-byte UTF-8 sequence.
 6. **Thread-to-main delivery.** Platform watchers (theme changes, a11y
    pumps) never touch lens/flux state directly; they post to the backend
    event loop through the wakeup seam and run on the main thread. Hosts
@@ -100,9 +103,10 @@ platform code must preserve them:
 7. **Keyboard contract.** Every backend reports both press and release
    edges for each mappable key; letters/digits are normalised to the
    unshifted ASCII code (`'a'`, never `'A'`) with shift travelling in
-   `lens_input.mods` only; `lens_key_event.repeat` is best-effort (Win32
-   and Cocoa report auto-repeat, Wayland leaves it false) and lens does
-   not depend on it. The authoritative statement lives in
+   `lens_input.mods` only; `lens_key_event.repeat` marks synthesised
+   auto-repeat presses (Wayland repeats client-side from the compositor's
+   `repeat_info`, Win32 and Cocoa report OS auto-repeat) and lens treats a
+   repeat exactly like a press. The authoritative statement lives in
    `src/platform_internal.h`.
 
 ## Current platform feature gaps
@@ -112,8 +116,12 @@ elsewhere:
 
 - **Drag-and-drop** into the window is implemented on the Wayland backend
   only (real MIME negotiation over `text/uri-list` / `text/plain`, a
-  bounded read, delivery through `lens_paste`). Win32 and Cocoa have no
-  drop target yet.
+  bounded read on a detached helper thread, delivery through `lens_paste`).
+  Win32 and Cocoa have no drop target yet.
+- **Primary selection** (middle-click paste) is Wayland-only: copies are
+  mirrored onto `zwp_primary_selection_unstable_v1` and a middle-button
+  press pastes it (async, same channel as clipboard paste). Win32 and
+  Cocoa have no native equivalent.
 - **Live theme watching** on Linux requires libsystemd at build time
   (portal watcher thread); without it the startup query still works and
   `iris_color_scheme_watch` reports unavailable.

@@ -1,10 +1,10 @@
 /* skin/textfield.c — default single-line text-edit skin (ADR-0059): field
  * surface, selection highlight, border state chain, display string (with
- * the IME preedit pre-composed by the widget), preedit underline, and the
- * caret — moved verbatim from widgets/textfield.c. Editing, selection,
- * caret geometry, and the platform caret reporting (ADR-0036) are
- * behaviour and stay in the widget; every rect here is precomputed and
- * node-local. */
+ * the IME preedit pre-composed by the widget), preedit underline and
+ * active-clause emphasis, and the caret — moved verbatim from
+ * widgets/textfield.c. Editing, selection, caret geometry, and the
+ * platform caret/text-context reporting (ADR-0036) are behaviour and stay
+ * in the widget; every rect here is precomputed and node-local. */
 
 #include "../internal.h"
 
@@ -63,6 +63,14 @@ void lensi_skin_textfield(lens *ui, lens_node *n, const lens_widget_record *rec)
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_RECT,
                                             .rel = c->preedit_underline,
+                                            .color = rs->accent});
+    }
+
+    /* Active clause of the composition, emphasised over the underline */
+    if (c->preedit_clause.w > 0) {
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                            .rel = c->preedit_clause,
                                             .color = rs->accent});
     }
 

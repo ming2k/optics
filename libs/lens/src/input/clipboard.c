@@ -21,6 +21,18 @@ flux_rect lens_caret_rect(const lens *ui) {
     return ui ? ui->caret_rect : (flux_rect){0, 0, 0, 0};
 }
 
+void lensi_set_text_context(lens *ui, const char *utf8, uint32_t len, uint32_t cursor,
+                            bool multiline) {
+    if (!ui)
+        return;
+    ui->text_context =
+        (lens_text_context){.utf8 = utf8, .len = len, .cursor = cursor, .multiline = multiline};
+}
+
+lens_text_context lens_text_context_get(const lens *ui) {
+    return ui ? ui->text_context : (lens_text_context){0};
+}
+
 /* ---- copy / request-paste / paste (host channel) ---- */
 
 void lens_copy(lens *ui, const char *utf8, size_t len) {

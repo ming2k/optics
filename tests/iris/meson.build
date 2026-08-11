@@ -32,9 +32,11 @@ exe_a11y = executable('test_a11y_util',
 )
 test('test_a11y_util', exe_a11y)
 
+# test_platform_text also pins the lens_input buffer sizes the backends
+# stage into (text_utf8/preedit_utf8), so it needs the lens headers.
 exe_ptext = executable('test_platform_text',
   ['test_platform_text.c', '../../libs/iris/src/platform_text.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [m_dep],
+  dependencies        : [lens_dep, m_dep],
 )
 test('test_platform_text', exe_ptext)

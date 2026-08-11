@@ -94,6 +94,7 @@ if host_system == 'linux'
       wl.find_protocol('xdg-foreign', state : 'unstable', version : 2),
       wl.find_protocol('text-input', state : 'unstable', version : 3),
       wl.find_protocol('fractional-scale', state : 'staging', version : 1),
+      wl.find_protocol('primary-selection', state : 'unstable', version : 1),
       'protocol/cursor-shape-v1.xml',
     )
     iris_sources += iris_proto_src

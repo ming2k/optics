@@ -75,3 +75,4 @@ a decision, write a new ADR and update the old one's status to
 | 0064 | [Host-controlled caret and selection for lens_textfield](0064-lens-textfield-host-caret-selection.md) | Accepted |
 | 0065 | [Per-group material overrides and backdrop statistics](0065-per-group-overrides-and-backdrop-stats.md) | Accepted |
 | 0066 | [Keyboard cursor, icons, and host-owned selection for lens_table](0066-lens-table-keyboard-icons-host-selection.md) | Accepted |
+| 0067 | [Wayland text-input depth — key repeat, compose, per-widget IME sessions](0067-wayland-text-input-depth.md) | Accepted |

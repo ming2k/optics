@@ -260,6 +260,7 @@ void lens_begin(lens *ui, const lens_input *input) {
     memset(ui->key_consumed, 0, sizeof ui->key_consumed);
     ui->menu_nav = 0;
     ui->caret_rect = (flux_rect){0, 0, 0, 0}; /* refreshed by text widget */
+    ui->text_context = (lens_text_context){0}; /* refreshed alongside it */
 
     /* per-frame build state */
     ui->id_top = 0;

@@ -321,6 +321,8 @@ struct lens {
     /* clipboard + IME (ADR-0036) */
     lens_clipboard clipboard;
     flux_rect caret_rect; /* set by the focused text widget */
+    lens_text_context text_context; /* set alongside caret_rect (surrounding
+                                     * text + content hints for the host IME) */
     char paste_buf[LENSI_PASTE_MAX];
     uint32_t paste_len;     /* 0 = nothing pending */
     lens_id paste_target;   /* focused widget at lens_request_paste time;
@@ -523,6 +525,10 @@ void lensi_scrollbars_emit(lens *ui);
 /* clipboard + IME (clipboard.c, ADR-0036) — internal helpers for text
  * widgets (the consumer that will land with lens_text_input). */
 void lensi_set_caret_rect(lens *ui, flux_rect r);
+/* The focused text widget pushes its surrounding-text context every frame
+ * (borrowed buffer; see lens_text_context in lens.h). */
+void lensi_set_text_context(lens *ui, const char *utf8, uint32_t len, uint32_t cursor,
+                            bool multiline);
 /* Borrow + clear any pending paste. Returns NULL when none. The buffer
  * is valid for the rest of the frame. */
 const char *lensi_take_paste(lens *ui, uint32_t *out_len);

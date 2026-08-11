@@ -24,11 +24,13 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_wayland.h>
 
+#include "primary-selection-unstable-v1-client-protocol.h"
 #include "text-input-unstable-v3-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-foreign-unstable-v2-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 #include <wayland-client.h>
+#include <xkbcommon/xkbcommon-compose.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "cursor-shape-v1-client-protocol.h"
@@ -37,6 +39,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <locale.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -44,6 +47,7 @@
 #include <string.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/timerfd.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -61,12 +65,23 @@ typedef struct wp_accum {
     bool released[LENS_MOUSE_COUNT];
     double scroll_x, scroll_y;      /* wheel this frame               */
     uint32_t mods;                  /* level state (persists)         */
-    char text[32];                  /* committed text this frame      */
+    char text[256];                 /* committed text this frame; sized
+                                       like lens_input.text_utf8       */
     char preedit[LENS_PREEDIT_MAX]; /* IME preedit string             */
     uint32_t preedit_cursor;        /* caret byte offset in preedit   */
+    uint32_t preedit_sel_lo;        /* active clause, byte range      */
+    uint32_t preedit_sel_hi;
     lens_key_event keys[LENS_INPUT_MAX_KEYS];
     uint32_t key_count;
 } wp_accum;
+
+/* The staging buffers feed lens_input by whole-buffer memcpy in
+ * drain_input; pin the sizes so a lens-side change fails at compile time
+ * instead of over-reading the accumulator. */
+static_assert(sizeof ((wp_accum *)0)->text == sizeof ((lens_input *)0)->text_utf8,
+              "wp_accum.text must match lens_input.text_utf8");
+static_assert(sizeof ((wp_accum *)0)->preedit == sizeof ((lens_input *)0)->preedit_utf8,
+              "wp_accum.preedit must match lens_input.preedit_utf8");
 
 /* ------------------------------------------------------------------ */
 /*  Platform state                                                     */
@@ -76,9 +91,24 @@ typedef struct wp_accum {
 #define WP_MAX_OUTPUTS 8
 typedef struct wp_output {
     struct wl_output *wl;
-    int scale;    /* output integer scale (1, 2, 3 …) */
-    bool entered; /* surface currently on this output */
+    uint32_t name; /* registry global name (for global_remove) */
+    int scale;     /* output integer scale (1, 2, 3 …) */
+    bool entered;  /* surface currently on this output */
 } wp_output;
+
+/* MIME types advertised by a data/primary-selection offer. Offers announce
+ * their types via offer events BEFORE the selection/enter event binds them,
+ * so types accumulate into a `pending` slot first and move into the matching
+ * bound slot when the offer is bound. This is what real MIME negotiation
+ * (paste / drop) keys off. The `offer` member is an identity cookie only —
+ * it holds a wl_data_offer or a zwp_primary_selection_offer_v1 and is only
+ * ever compared, never dereferenced through this struct. */
+struct wp_offer_mimes {
+    struct wl_data_offer *offer;
+    bool uri_list;   /* text/uri-list              */
+    bool text_utf8;  /* text/plain;charset=utf-8   */
+    bool text_plain; /* text/plain                 */
+};
 
 typedef struct wp_platform {
     struct wl_display *display;
@@ -86,12 +116,17 @@ typedef struct wp_platform {
     struct wl_compositor *compositor;
     struct xdg_wm_base *wm_base;
     struct wl_seat *seat;
+    uint32_t seat_name; /* registry global name (for global_remove) */
     struct zxdg_decoration_manager_v1 *deco_mgr;
 
     struct wl_data_device_manager *data_device_mgr;
     struct wl_data_device *data_device;
     struct wl_data_offer *selection_offer; /* current clipboard offer */
     struct wl_data_offer *dnd_offer;       /* current drag offer         */
+    struct wl_data_offer *dnd_job_offer;   /* offer owned by an in-flight
+                                              async drop read (item: the
+                                              read runs on a helper thread;
+                                              finish+destroy on delivery)  */
     struct wl_data_source *copy_source;    /* our outgoing selection  */
     char *copy_buf;                        /* text we currently advertise for copy     */
     size_t copy_len;
@@ -99,17 +134,17 @@ typedef struct wp_platform {
     bool dnd_inside;      /* drag currently over our surface           */
     flux_point dnd_pos;   /* last reported drag position (surface px)  */
 
-    /* MIME types advertised by the offers above. Offers announce their
-     * types via offer events BEFORE the selection/enter event binds them,
-     * so types accumulate into `pending` first and move into the matching
-     * slot when the offer is bound. This is what real MIME negotiation
-     * (paste / drop) keys off. */
-    struct wp_offer_mimes {
-        struct wl_data_offer *offer;
-        bool uri_list;   /* text/uri-list              */
-        bool text_utf8;  /* text/plain;charset=utf-8   */
-        bool text_plain; /* text/plain                 */
-    } pending_offer_mimes, selection_offer_mimes, dnd_offer_mimes;
+    /* Primary selection (zwp_primary_selection_unstable_v1): the X11-style
+     * middle-click clipboard. clip_set_text mirrors the copy onto it; a
+     * middle-button press requests its text and pastes it (async, like the
+     * clipboard paste path). */
+    struct zwp_primary_selection_device_manager_v1 *primsel_mgr;
+    struct zwp_primary_selection_device_v1 *primsel_device;
+    struct zwp_primary_selection_offer_v1 *primsel_offer;
+    struct zwp_primary_selection_source_v1 *primsel_source;
+    struct wp_offer_mimes primsel_pending_mimes, primsel_offer_mimes;
+
+    struct wp_offer_mimes pending_offer_mimes, selection_offer_mimes, dnd_offer_mimes;
 
     /* Pointer + keyboard + touch (touch is optional). */
     struct wl_pointer *pointer;
@@ -146,13 +181,47 @@ typedef struct wp_platform {
     struct xkb_keymap *xkb_keymap;
     struct xkb_state *xkb_state;
 
+    /* Dead-key composition (xkbcommon-compose): fed each non-repeat key
+     * press; a completed sequence replaces the key's own UTF-8 text. NULL
+     * when no compose table exists for the locale (dead keys then fall
+     * through as ordinary keysyms). */
+    struct xkb_compose_table *compose_table;
+    struct xkb_compose_state *compose_state;
+
+    /* Client-side key repeat, driven by the compositor's repeat_info: a
+     * timerfd in pump_events' poll set fires after `repeat_delay` ms and
+     * then every 1000/`repeat_rate` ms while `rep_key` is held. rate 0 (or
+     * no repeat_info ever received, e.g. wl_keyboard < v4) disables repeat.
+     * Cancelled on key release, kb_leave, a new key press, or a modifier
+     * change. */
+    int repeat_fd;
+    int32_t repeat_rate;  /* chars/sec, 0 = disabled */
+    int32_t repeat_delay; /* ms before the first repeat */
+    uint32_t rep_key;     /* evdev keycode being repeated */
+    int rep_lens_key;     /* its resolved lens key id (0 = unmappable) */
+    bool rep_active;      /* timer armed */
+
     struct zwp_text_input_manager_v3 *text_input_mgr;
     struct zwp_text_input_v3 *text_input;
     struct wl_surface *text_input_surface;
 
-    /* Pending IME state (double-buffered by text-input-v3 done event) */
+    /* Per-widget IM ownership: the text input is enabled exactly while the
+     * window has keyboard focus AND a lens text widget is focused
+     * (re-evaluated once per frame after lens_end — see im_frame_update).
+     * `im_surr` is the last surrounding text reported to the compositor, so
+     * set_surrounding_text goes out only on content/cursor changes. */
+    bool kb_focused;
+    bool im_active;
+    char *im_surr;
+    size_t im_surr_len;
+    uint32_t im_surr_cursor;
+
+    /* Pending IME state (double-buffered by text-input-v3 done event).
+     * commit is sized like lens_input.text_utf8: a full-sentence IME
+     * conversion must survive staging before the boundary-aware append
+     * clips it into the per-frame accumulator. */
     struct {
-        char commit[64];
+        char commit[256];
         char preedit[LENS_PREEDIT_MAX];
         int32_t preedit_cursor_begin;
         int32_t preedit_cursor_end;
@@ -165,9 +234,8 @@ typedef struct wp_platform {
 
     wp_output outputs[WP_MAX_OUTPUTS];
     int n_outputs;
-    int buffer_scale;       /* max scale of entered outputs; ≥1     */
-    int pending_scale;      /* recomputed from enter/leave + globals */
-    float fractional_scale; /* last reported fractional scale, 0 = none */
+    int buffer_scale;  /* max scale of entered outputs; ≥1     */
+    int pending_scale; /* recomputed from enter/leave + globals */
 
     struct wp_fractional_scale_manager_v1 *fractional_scale_mgr;
     struct wp_fractional_scale_v1 *fractional_scale_obj;
@@ -285,21 +353,29 @@ static void ptr_motion(void *data, struct wl_pointer *p, uint32_t t, wl_fixed_t 
     pl->acc.cx = wl_fixed_to_double(x);
     pl->acc.cy = wl_fixed_to_double(y);
 }
+/* Forward decl: defined in the primary-selection section, but ptr_button
+ * needs it for middle-click paste. */
+static void primsel_paste(wp_platform *pl);
+
 static void ptr_button(void *data, struct wl_pointer *p, uint32_t serial, uint32_t t,
                        uint32_t button, uint32_t state) {
     (void)p;
-    (void)serial;
     (void)t;
     wp_platform *pl = data;
     int i = mouse_index(button);
     if (i < 0)
         return;
+    /* Keep the serial fresh for pointer-initiated selection operations
+     * (middle-click paste below, clipboard ops driven by mouse chords). */
+    pl->last_serial = serial;
     bool down = (state == WL_POINTER_BUTTON_STATE_PRESSED);
     if (down && !pl->acc.down[i])
         pl->acc.pressed[i] = true;
     if (!down && pl->acc.down[i])
         pl->acc.released[i] = true;
     pl->acc.down[i] = down;
+    if (down && button == BTN_MIDDLE)
+        primsel_paste(pl);
 }
 static void ptr_axis(void *data, struct wl_pointer *p, uint32_t t, uint32_t axis,
                      wl_fixed_t value) {
@@ -681,6 +757,115 @@ static const struct wl_touch_listener touch_listener = {
 /*  Keyboard (xkbcommon)                                               */
 /* ------------------------------------------------------------------ */
 
+/* -- Client-side key repeat ----------------------------------------
+ * Wayland delivers no auto-repeat events; the compositor only tells us
+ * the user's preference (wl_keyboard.repeat_info: rate in chars/sec, delay
+ * in ms). We implement repeat ourselves: while a key is held, a timerfd in
+ * pump_events' poll set fires after `delay` ms and then every 1000/rate ms,
+ * and each expiry re-emits the key as lens_key_event{pressed=true,
+ * repeat=true} plus its UTF-8 text (composed sequences are a per-press
+ * affair, so repeats bypass compose and emit the key's own utf8). The
+ * repeat follows the newest pressed key and is cancelled by its release,
+ * by kb_leave (focus loss), by any other key press, or by a modifier
+ * change — matching the X11/desktop behaviour users expect. */
+
+static void wp_repeat_cancel(wp_platform *pl) {
+    if (!pl->rep_active)
+        return;
+    pl->rep_active = false;
+    if (pl->repeat_fd >= 0) {
+        const struct itimerspec disarm = {0};
+        (void)timerfd_settime(pl->repeat_fd, 0, &disarm, NULL);
+    }
+}
+
+/* (Re)arm the repeat timer for pl->rep_key from the compositor's
+ * rate/delay. No-op when repeat is disabled (rate 0, or no repeat_info
+ * ever received). */
+static void wp_repeat_arm(wp_platform *pl) {
+    if (pl->repeat_fd < 0 || pl->repeat_rate <= 0) {
+        pl->rep_active = false;
+        return;
+    }
+    long long interval_ns = 1000000000LL / pl->repeat_rate;
+    long long delay_ns = (long long)(pl->repeat_delay > 0 ? pl->repeat_delay : 0) * 1000000LL;
+    if (delay_ns <= 0)
+        delay_ns = interval_ns; /* delay 0: first repeat after one interval */
+    struct itimerspec its = {
+        .it_value = {.tv_sec = delay_ns / 1000000000LL, .tv_nsec = delay_ns % 1000000000LL},
+        .it_interval = {.tv_sec = interval_ns / 1000000000LL,
+                        .tv_nsec = interval_ns % 1000000000LL},
+    };
+    pl->rep_active = timerfd_settime(pl->repeat_fd, 0, &its, NULL) == 0;
+}
+
+/* The plain-text emission of a key press: boundary-aware append of the
+ * key's xkb UTF-8 string into the per-frame accumulator, skipping control
+ * characters. Shared by the compose fallback in kb_key and by repeats. */
+static void kb_emit_text(wp_platform *pl, xkb_keycode_t code) {
+    char buf[8];
+    int n = xkb_state_key_get_utf8(pl->xkb_state, code, buf, sizeof buf);
+    if (n > 0 && (unsigned char)buf[0] >= 0x20)
+        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, buf, (size_t)n);
+}
+
+/* One repeat tick: the key event (repeat=true) plus its text. Repeats
+ * deliberately bypass the compose state — a composed sequence completes on
+ * the original press; the held key repeats its own character. */
+static void repeat_emit_one(wp_platform *pl) {
+    if (pl->rep_lens_key && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
+        pl->acc.keys[pl->acc.key_count++] =
+            (lens_key_event){.key = pl->rep_lens_key, .pressed = true, .repeat = true};
+    kb_emit_text(pl, pl->rep_key + 8); /* evdev -> xkb */
+}
+
+/* -- IM session state ----------------------------------------------
+ * The text-input-v3 object is enabled exactly while the window has
+ * keyboard focus AND a lens text widget is focused, re-evaluated once per
+ * frame after lens_end (im_frame_update). kb_enter/kb_leave only track the
+ * window-level focus; the per-frame evaluation owns enable/disable. */
+
+/* Drop every piece of pending composition state: the double-buffered IME
+ * batch and the accumulator's preedit. Called when the IM session ends
+ * (kb_leave, ti_leave, per-widget blur) so an abandoned composition never
+ * renders after focus loss. */
+static void im_clear_pending(wp_platform *pl) {
+    memset(&pl->ime, 0, sizeof pl->ime);
+    pl->acc.preedit[0] = '\0';
+    pl->acc.preedit_cursor = 0;
+    pl->acc.preedit_sel_lo = pl->acc.preedit_sel_hi = 0;
+}
+
+/* End the IM session: disable + commit, drop pending composition state,
+ * and reset the surrounding-text memento (the compositor forgets it on
+ * disable, so the next enable must re-report even for identical text). */
+static void im_deactivate(wp_platform *pl) {
+    if (pl->text_input) {
+        zwp_text_input_v3_disable(pl->text_input);
+        zwp_text_input_v3_commit(pl->text_input);
+    }
+    pl->im_active = false;
+    im_clear_pending(pl);
+    free(pl->im_surr);
+    pl->im_surr = NULL;
+    pl->im_surr_len = 0;
+    pl->im_surr_cursor = 0;
+}
+
+/* Report the widget's text + caret as the IME surrounding text, but only
+ * when it changed since the last report (the memento compare is the shared
+ * platform_text helper). Returns true when set_surrounding_text was sent;
+ * the caller then folds the commit into its own (enable transition or
+ * steady-state update). */
+static bool im_report_surrounding(wp_platform *pl, const lens_text_context *ctx) {
+    if (!iris_text_memento_update(&pl->im_surr, &pl->im_surr_len, &pl->im_surr_cursor, ctx->utf8,
+                                  ctx->len, ctx->cursor))
+        return false;
+    zwp_text_input_v3_set_surrounding_text(pl->text_input, ctx->utf8, (int32_t)ctx->cursor,
+                                           (int32_t)ctx->cursor);
+    return true;
+}
+
 static void kb_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_t fd,
                       uint32_t size) {
     (void)k;
@@ -711,30 +896,36 @@ static void kb_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_
         xkb_keymap_unref(pl->xkb_keymap);
     pl->xkb_keymap = km;
     pl->xkb_state = st;
+    /* The held key's meaning may have changed under it. */
+    wp_repeat_cancel(pl);
 }
+/* Window-level keyboard focus. kb_enter deliberately does NOT enable the
+ * text input: the wl_keyboard enter arrives before any frame has rendered,
+ * so which lens text widget (if any) holds focus is unknowable here —
+ * im_frame_update's per-frame evaluation is the single owner of
+ * enable/disable and picks the state up on the next frame. kb_leave ends
+ * the IM session immediately (and cancels key repeat) rather than waiting
+ * for a frame, so an abandoned composition can never linger. */
 static void kb_enter(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *surf,
                      struct wl_array *keys) {
     (void)k;
     (void)s;
     (void)keys;
-    wp_platform *pl = d;
-    if (pl->text_input) {
-        zwp_text_input_v3_enable(pl->text_input);
-        zwp_text_input_v3_set_content_type(pl->text_input, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
-                                           ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
-        zwp_text_input_v3_commit(pl->text_input);
-    }
     (void)surf;
+    wp_platform *pl = d;
+    pl->kb_focused = true;
 }
 static void kb_leave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *surf) {
     (void)k;
     (void)s;
     (void)surf;
     wp_platform *pl = d;
-    if (pl->text_input) {
-        zwp_text_input_v3_disable(pl->text_input);
-        zwp_text_input_v3_commit(pl->text_input);
-    }
+    pl->kb_focused = false;
+    wp_repeat_cancel(pl);
+    if (pl->im_active)
+        im_deactivate(pl);
+    else
+        im_clear_pending(pl);
 }
 
 /* ------------------------------------------------------------------ */
@@ -752,17 +943,27 @@ static void ti_leave(void *data, struct zwp_text_input_v3 *ti, struct wl_surface
     (void)ti;
     (void)surface;
     pl->text_input_surface = NULL;
+    /* The compositor's text-input focus left our surface: drop any pending
+     * composition so an abandoned preedit never renders afterwards. */
+    im_clear_pending(pl);
+}
+
+/* Clamp a text-input-v3 byte offset (-1 = none) into [0, len]. */
+static uint32_t clamp_preedit_off(int32_t off, uint32_t len) {
+    if (off < 0)
+        return 0;
+    return (uint32_t)off > len ? len : (uint32_t)off;
 }
 
 static void ti_preedit(void *data, struct zwp_text_input_v3 *ti, const char *text,
                        int32_t cursor_begin, int32_t cursor_end) {
     wp_platform *pl = data;
     (void)ti;
-    (void)cursor_end;
     /* boundary-aware copy: a raw byte cap could split a multi-byte sequence
      * at the buffer edge and hand lens invalid UTF-8. */
     iris_utf8_copy(pl->ime.preedit, sizeof pl->ime.preedit, text);
     pl->ime.preedit_cursor_begin = cursor_begin;
+    pl->ime.preedit_cursor_end = cursor_end; /* active clause (lens underline) */
     pl->ime.has_preedit = true;
 }
 
@@ -812,14 +1013,25 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
     if (pl->ime.has_preedit) {
         if (pl->ime.preedit[0]) {
             iris_utf8_copy(pl->acc.preedit, sizeof pl->acc.preedit, pl->ime.preedit);
-            pl->acc.preedit_cursor =
-                pl->ime.preedit_cursor_begin >= 0 ? (uint32_t)pl->ime.preedit_cursor_begin : 0;
             uint32_t plen = (uint32_t)strlen(pl->acc.preedit);
-            if (pl->acc.preedit_cursor > plen)
-                pl->acc.preedit_cursor = plen;
+            /* Caret + active clause are byte offsets into the ORIGINAL
+             * preedit; clamp both to the truncated copy (a negative offset
+             * means "no caret"/"no clause" and collapses to the caret).
+             * IMs signal "no active clause" with begin == end == caret,
+             * which yields lo == hi and lens renders no clause underline. */
+            uint32_t lo = clamp_preedit_off(pl->ime.preedit_cursor_begin, plen);
+            uint32_t hi = pl->ime.preedit_cursor_end >= 0
+                              ? clamp_preedit_off(pl->ime.preedit_cursor_end, plen)
+                              : lo;
+            if (hi < lo)
+                hi = lo;
+            pl->acc.preedit_cursor = lo;
+            pl->acc.preedit_sel_lo = lo;
+            pl->acc.preedit_sel_hi = hi;
         } else {
             pl->acc.preedit[0] = '\0';
             pl->acc.preedit_cursor = 0;
+            pl->acc.preedit_sel_lo = pl->acc.preedit_sel_hi = 0;
         }
     }
 
@@ -864,8 +1076,8 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
     xkb_keysym_t sym = (n_level0 > 0) ? level0[0]
                                       : xkb_state_key_get_one_sym(pl->xkb_state, code);
 
+    int fk = 0;
     if (pl->acc.key_count < LENS_INPUT_MAX_KEYS) {
-        int fk = 0;
         if (sym == XKB_KEY_Escape)
             fk = LENS_KEY_ESCAPE;
         else if (sym == XKB_KEY_Tab)
@@ -894,21 +1106,57 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
         else if (sym >= XKB_KEY_space && sym <= XKB_KEY_asciitilde)
             fk = (int)sym;
         if (fk) {
-            /* repeat is best-effort: Wayland delivers no auto-repeat flag
-             * (client-side repeat timers are a follow-on), so it stays
-             * false; the contract says lens must not depend on it. */
+            /* Physical press/release edges carry repeat=false; repeats are
+             * synthesised by the timerfd path (repeat_emit_one) and carry
+             * repeat=true. Lens treats a repeat like any other press. */
             pl->acc.keys[pl->acc.key_count++] =
                 (lens_key_event){.key = fk, .pressed = pressed, .repeat = false};
         }
     }
 
+    /* Key repeat follows the newest press and dies on its release. The
+     * timer arms even for unmappable keys (fk == 0): they can still repeat
+     * their text (e.g. a non-ASCII printable). */
     if (pressed) {
-        char buf[8];
-        int n = xkb_state_key_get_utf8(pl->xkb_state, code, buf, sizeof buf);
-        if (n > 0 && (unsigned char)buf[0] >= 0x20) { /* skip control chars */
-            /* boundary-aware append into the per-frame text accumulator */
-            iris_utf8_append(pl->acc.text, sizeof pl->acc.text, buf, (size_t)n);
+        pl->rep_key = key;
+        pl->rep_lens_key = fk;
+        wp_repeat_arm(pl);
+    } else if (pl->rep_active && pl->rep_key == key) {
+        wp_repeat_cancel(pl);
+    }
+
+    if (pressed) {
+        /* Dead-key composition: feed the press's own keysym (shift-aware,
+         * unlike the level-0 id above) to the compose state. While a
+         * sequence is composing the press produces no text; a completed
+         * sequence emits the composed UTF-8 (possibly several characters);
+         * a cancelled or non-sequence key falls back to the plain xkb
+         * text. Repeats never reach here — repeat_emit_one bypasses
+         * compose on purpose. */
+        if (pl->compose_state) {
+            xkb_keysym_t csym = xkb_state_key_get_one_sym(pl->xkb_state, code);
+            if (xkb_compose_state_feed(pl->compose_state, csym) == XKB_COMPOSE_FEED_ACCEPTED) {
+                switch (xkb_compose_state_get_status(pl->compose_state)) {
+                case XKB_COMPOSE_COMPOSING:
+                    return; /* mid-sequence: swallow this press's text */
+                case XKB_COMPOSE_COMPOSED: {
+                    char buf[64];
+                    int n = xkb_compose_state_get_utf8(pl->compose_state, buf, sizeof buf);
+                    xkb_compose_state_reset(pl->compose_state);
+                    if (n > 0)
+                        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, buf, (size_t)n);
+                    return;
+                }
+                case XKB_COMPOSE_CANCELLED:
+                    xkb_compose_state_reset(pl->compose_state);
+                    break; /* fall through to the plain text */
+                case XKB_COMPOSE_NOTHING:
+                default:
+                    break;
+                }
+            }
         }
+        kb_emit_text(pl, code);
     }
 }
 static void kb_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t dep,
@@ -918,6 +1166,9 @@ static void kb_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uin
     wp_platform *pl = data;
     if (!pl->xkb_state)
         return;
+    /* A modifier change ends any in-flight repeat: the held key's meaning
+     * (and text) just changed under it. */
+    wp_repeat_cancel(pl);
     xkb_state_update_mask(pl->xkb_state, dep, latched, locked, 0, 0, group);
     struct {
         const char *name;
@@ -937,11 +1188,20 @@ static void kb_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uin
             pl->acc.mods &= ~m[i].bit;
     }
 }
+/* The compositor's repeat preference (wl_keyboard ≥ v4). rate 0 disables
+ * repeat entirely; a change re-arms an in-flight repeat with the new
+ * timing. Negative values are protocol-hostile; clamp them. */
 static void kb_repeat(void *d, struct wl_keyboard *k, int32_t rate, int32_t delay) {
-    (void)d;
     (void)k;
-    (void)rate;
-    (void)delay;
+    wp_platform *pl = d;
+    pl->repeat_rate = rate > 0 ? rate : 0;
+    pl->repeat_delay = delay > 0 ? delay : 0;
+    if (!pl->rep_active)
+        return;
+    if (pl->repeat_rate == 0)
+        wp_repeat_cancel(pl);
+    else
+        wp_repeat_arm(pl);
 }
 
 static const struct wl_keyboard_listener keyboard_listener = {
@@ -1039,8 +1299,8 @@ static const char *offer_pick_mime(const struct wp_offer_mimes *m) {
 
 /* Read a received offer fd with a hard overall deadline. Returns a malloc'd
  * buffer (caller frees) and its length via *out_len; NULL on error/timeout.
- * Used by the drop path; the paste path reads on a helper thread instead
- * (cross-platform.md invariant 4: never synchronously on the UI thread). */
+ * Runs on the async reader thread for every path (paste, primary paste,
+ * drop) — never on the UI thread (cross-platform.md invariant 4). */
 #define WP_DND_READ_TIMEOUT_MS 2000
 #define WP_DROP_MAX (1u << 20) /* 1 MiB — matches lens's paste staging cap */
 static long long now_ns(void); /* defined with the frame-pacing helpers */
@@ -1101,40 +1361,103 @@ static char *read_offer_fd(int fd, int timeout_ms, size_t *out_len) {
     return out;
 }
 
-static void dnd_read_and_emit(wp_platform *pl, struct wl_data_offer *offer) {
-    const char *mime = offer_pick_mime(&pl->dnd_offer_mimes);
-    if (!mime || !pl->ui)
-        return;
+/* ------------------------------------------------------------------ */
+/*  Async offer reads (clipboard paste / primary paste / DND drop)       */
+/* ------------------------------------------------------------------ */
 
-    int fds[2];
-    if (pipe(fds) != 0)
-        return;
-    wl_data_offer_receive(offer, mime, fds[1]);
-    close(fds[1]);
-    wl_display_flush(pl->display);
+/* cross-platform.md invariant 4: the UI thread never blocks reading a
+ * selection or drop payload — a stuck or malicious source must not hang
+ * the app. Every read (clipboard paste, middle-click primary paste, DND
+ * drop) runs on a detached helper thread with a hard deadline, and
+ * completion is posted through iris_post_to_main_thread — which also makes
+ * the self-paste case correct: the main thread keeps dispatching, so our
+ * own data source can answer. */
+#define WP_PASTE_TIMEOUT_MS 5000
 
-    /* Bounded read (WP_DND_READ_TIMEOUT_MS): the source is another client,
-     * so the transfer makes progress without our main thread; the deadline
-     * caps the damage a stuck source can do. */
-    size_t total = 0;
-    char *buf = read_offer_fd(fds[0], WP_DND_READ_TIMEOUT_MS, &total);
-    close(fds[0]);
-    if (!buf || total == 0) {
-        free(buf);
-        return;
+typedef struct wp_paste_job {
+    wp_platform *pl;
+    int fd;
+    struct wl_data_offer *offer; /* DND drop only: finish+destroy on delivery */
+    uint32_t timeout_ms;
+    bool strip_crlf; /* strip trailing \\r\\n (uri-list drops) */
+} wp_paste_job;
+
+typedef struct wp_paste_result {
+    wp_platform *pl;
+    char *text; /* NULL when the read failed or timed out */
+    size_t len;
+    struct wl_data_offer *offer;
+} wp_paste_result;
+
+/* Runs on the iris main thread via iris_post_to_main_thread. pl->ui is
+ * checked (not just pl): teardown clears it before draining the queue. */
+static void paste_deliver(void *user) {
+    wp_paste_result *res = user;
+    /* A drop's offer stays alive until the read completes so we can tell
+     * the source the transfer finished (protocol: finish before destroy).
+     * The slot check guards against teardown having destroyed it already. */
+    if (res->offer && res->pl->dnd_job_offer == res->offer) {
+        wl_data_offer_finish(res->offer);
+        wl_data_offer_destroy(res->offer);
+        res->pl->dnd_job_offer = NULL;
+    }
+    if (res->pl->ui && res->text && res->len)
+        lens_paste(res->pl->ui, res->text, res->len);
+    free(res->text);
+    free(res);
+}
+
+static void *paste_reader_main(void *arg) {
+    wp_paste_job *job = arg;
+    size_t len = 0;
+    char *text = read_offer_fd(job->fd, (int)job->timeout_ms, &len);
+    close(job->fd);
+    if (text && job->strip_crlf) {
+        /* uri-list payloads are CRLF-terminated; the terminator is not
+         * part of the dropped text. */
+        while (len && (text[len - 1] == '\n' || text[len - 1] == '\r'))
+            text[--len] = '\0';
     }
 
-    /* Strip the trailing newline of the uri-list format. */
-    while (total && (buf[total - 1] == '\n' || buf[total - 1] == '\r'))
-        total--;
+    wp_paste_result *res = malloc(sizeof *res);
+    if (res) {
+        res->pl = job->pl;
+        res->text = text;
+        res->len = len;
+        res->offer = job->offer;
+        /* -1: the loop is gone (window closed mid-read) — drop. A DND
+         * offer in flight is then finished/destroyed by teardown (it owns
+         * the dnd_job_offer slot). */
+        if (iris_post_to_main_thread(paste_deliver, res) != 0) {
+            free(text);
+            free(res);
+        }
+    } else {
+        free(text);
+    }
+    free(job);
+    return NULL;
+}
 
-    /* Deliver through the paste channel (lens_paste), not the 32-byte
-     * per-frame text slot: a URI list legitimately runs to hundreds of
-     * bytes, and text widgets drain the paste staging buffer the same way
-     * they drain a clipboard paste. We are in an event handler here, not
-     * inside lens_begin/end, so the call is legal. */
-    lens_paste(pl->ui, buf, total);
-    free(buf);
+/* Spawn the detached reader for an offer pipe's read end. Returns false on
+ * failure (fd closed by caller path). */
+static bool start_offer_read(wp_platform *pl, int fd, struct wl_data_offer *offer,
+                             uint32_t timeout_ms, bool strip_crlf) {
+    wp_paste_job *job = malloc(sizeof *job);
+    if (!job)
+        return false;
+    job->pl = pl;
+    job->fd = fd;
+    job->offer = offer;
+    job->timeout_ms = timeout_ms;
+    job->strip_crlf = strip_crlf;
+    pthread_t th;
+    if (pthread_create(&th, NULL, paste_reader_main, job) != 0) {
+        free(job);
+        return false;
+    }
+    pthread_detach(th);
+    return true;
 }
 
 static void ddev_enter(void *d, struct wl_data_device *dev, uint32_t s, struct wl_surface *su,
@@ -1187,9 +1510,30 @@ static void ddev_drop(void *d, struct wl_data_device *dev) {
     (void)dev;
     wp_platform *pl = d;
     if (pl->dnd_offer) {
-        dnd_read_and_emit(pl, pl->dnd_offer);
-        wl_data_offer_finish(pl->dnd_offer);
-        wl_data_offer_destroy(pl->dnd_offer);
+        /* The read runs off the UI thread (invariant 4): hand the offer to
+         * the async job slot; delivery (paste + finish + destroy) happens
+         * in paste_deliver on the main thread when the read completes. */
+        const char *mime = offer_pick_mime(&pl->dnd_offer_mimes);
+        bool started = false;
+        if (mime && pl->ui && !pl->dnd_job_offer) {
+            int fds[2];
+            if (pipe(fds) == 0) {
+                wl_data_offer_receive(pl->dnd_offer, mime, fds[1]);
+                close(fds[1]);
+                wl_display_flush(pl->display);
+                started = start_offer_read(pl, fds[0], pl->dnd_offer, WP_DND_READ_TIMEOUT_MS,
+                                           true /* uri-list CRLF strip */);
+                if (!started)
+                    close(fds[0]);
+                else
+                    pl->dnd_job_offer = pl->dnd_offer;
+            }
+        }
+        if (!started) {
+            /* No usable payload or no reader: close the DND session now. */
+            wl_data_offer_finish(pl->dnd_offer);
+            wl_data_offer_destroy(pl->dnd_offer);
+        }
         pl->dnd_offer = NULL;
         pl->dnd_offer_mimes = (struct wp_offer_mimes){0};
     }
@@ -1244,7 +1588,140 @@ static void wp_maybe_create_data_device(wp_platform *pl) {
     wl_data_device_add_listener(pl->data_device, &data_device_listener, pl);
 }
 
-/* lens_clipboard.set_text — advertise `utf8` as the system selection. */
+/* ------------------------------------------------------------------ */
+/*  Primary selection (zwp_primary_selection_unstable_v1)                */
+/* ------------------------------------------------------------------ */
+
+/* The X11-style middle-click clipboard, mirrored from clip_set_text and
+ * read on middle-button press (primsel_paste, called from ptr_button).
+ * Same offer/MIME machinery as the clipboard, with its own pending/bound
+ * slots (primary offers are a different object type, tracked through the
+ * shared wp_offer_mimes identity cookie). */
+
+static struct wp_offer_mimes *primsel_mime_slot(wp_platform *pl,
+                                                struct zwp_primary_selection_offer_v1 *off) {
+    if ((struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer == off)
+        return &pl->primsel_pending_mimes;
+    if ((struct zwp_primary_selection_offer_v1 *)pl->primsel_offer_mimes.offer == off)
+        return &pl->primsel_offer_mimes;
+    return NULL;
+}
+
+static void poffer_offer(void *data, struct zwp_primary_selection_offer_v1 *off,
+                         const char *mime) {
+    wp_platform *pl = data;
+    struct wp_offer_mimes *slot = primsel_mime_slot(pl, off);
+    if (!slot)
+        return;
+    if (strcmp(mime, "text/plain;charset=utf-8") == 0)
+        slot->text_utf8 = true;
+    else if (strcmp(mime, "text/plain") == 0)
+        slot->text_plain = true;
+}
+static const struct zwp_primary_selection_offer_v1_listener primary_offer_listener = {
+    .offer = poffer_offer,
+};
+
+static void pdev_data_offer(void *data, struct zwp_primary_selection_device_v1 *dev,
+                            struct zwp_primary_selection_offer_v1 *offer) {
+    wp_platform *pl = data;
+    (void)dev;
+    /* A previous offer that was announced but never bound is ours to
+     * destroy, or it leaks. */
+    if (pl->primsel_pending_mimes.offer &&
+        (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer != offer)
+        zwp_primary_selection_offer_v1_destroy(
+            (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer);
+    pl->primsel_pending_mimes = (struct wp_offer_mimes){
+        .offer = (struct wl_data_offer *)offer};
+    zwp_primary_selection_offer_v1_add_listener(offer, &primary_offer_listener, pl);
+}
+static void pdev_selection(void *data, struct zwp_primary_selection_device_v1 *dev,
+                           struct zwp_primary_selection_offer_v1 *offer) {
+    wp_platform *pl = data;
+    (void)dev;
+    if (pl->primsel_offer && pl->primsel_offer != offer)
+        zwp_primary_selection_offer_v1_destroy(pl->primsel_offer);
+    pl->primsel_offer = offer; /* may be NULL when the selection is cleared */
+    pl->primsel_offer_mimes = (struct wp_offer_mimes){.offer = (struct wl_data_offer *)offer};
+    if (offer && (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer ==
+                     offer) {
+        pl->primsel_offer_mimes = pl->primsel_pending_mimes;
+        pl->primsel_pending_mimes = (struct wp_offer_mimes){0};
+    }
+}
+static const struct zwp_primary_selection_device_v1_listener primary_device_listener = {
+    .data_offer = pdev_data_offer,
+    .selection = pdev_selection,
+};
+
+/* Our outgoing primary selection: serves the same buffer as the clipboard
+ * source (clip_set_text mirrors every copy onto both). */
+static void psource_send(void *data, struct zwp_primary_selection_source_v1 *src,
+                         const char *mime, int32_t fd) {
+    wp_platform *pl = data;
+    (void)src;
+    (void)mime;
+    const char *p = pl->copy_buf;
+    size_t left = pl->copy_len;
+    while (left) {
+        ssize_t w = write(fd, p, left);
+        if (w <= 0)
+            break;
+        p += w;
+        left -= (size_t)w;
+    }
+    close(fd);
+}
+static void psource_cancelled(void *data, struct zwp_primary_selection_source_v1 *src) {
+    wp_platform *pl = data;
+    zwp_primary_selection_source_v1_destroy(src);
+    if (pl->primsel_source == src)
+        pl->primsel_source = NULL;
+}
+static const struct zwp_primary_selection_source_v1_listener primary_source_listener = {
+    .send = psource_send,
+    .cancelled = psource_cancelled,
+};
+
+static void wp_maybe_create_primsel_device(wp_platform *pl) {
+    if (pl->primsel_device || !pl->primsel_mgr || !pl->seat)
+        return;
+    pl->primsel_device =
+        zwp_primary_selection_device_manager_v1_get_device(pl->primsel_mgr, pl->seat);
+    zwp_primary_selection_device_v1_add_listener(pl->primsel_device, &primary_device_listener,
+                                                 pl);
+}
+
+/* Middle-click paste: request the primary selection's text and deliver it
+ * through the same async paste channel as the clipboard (lens_paste routes
+ * it to the focused text widget, so a middle click anywhere pastes into
+ * whatever holds focus — the standard desktop behaviour). */
+static void primsel_paste(wp_platform *pl) {
+    if (!pl->primsel_offer || !pl->ui)
+        return;
+
+    int fds[2];
+    if (pipe(fds) != 0)
+        return;
+    /* Text family only (no uri-list): utf-8 beats legacy text/plain; fall
+     * back to utf-8 when the offer predates our MIME tracking. */
+    const struct wp_offer_mimes *m = &pl->primsel_offer_mimes;
+    const char *mime = ((struct zwp_primary_selection_offer_v1 *)m->offer == pl->primsel_offer &&
+                        m->text_plain && !m->text_utf8)
+                           ? "text/plain"
+                           : "text/plain;charset=utf-8";
+    zwp_primary_selection_offer_v1_receive(pl->primsel_offer, mime, fds[1]);
+    close(fds[1]);
+    wl_display_flush(pl->display);
+
+    if (!start_offer_read(pl, fds[0], NULL, WP_PASTE_TIMEOUT_MS, false))
+        close(fds[0]);
+}
+
+/* lens_clipboard.set_text — advertise `utf8` as the system selection, and
+ * mirror it onto the primary selection (the X11-style middle-click
+ * clipboard) so explicit copies are also middle-pasteable. */
 static void clip_set_text(const char *utf8, size_t len, void *user) {
     wp_platform *pl = user;
     if (!pl->data_device_mgr || !pl->data_device)
@@ -1264,64 +1741,26 @@ static void clip_set_text(const char *utf8, size_t len, void *user) {
     wl_data_source_offer(pl->copy_source, "text/plain");
     wl_data_source_offer(pl->copy_source, "UTF8_STRING");
     wl_data_device_set_selection(pl->data_device, pl->copy_source, pl->last_serial);
+
+    if (pl->primsel_mgr && pl->primsel_device) {
+        pl->primsel_source =
+            zwp_primary_selection_device_manager_v1_create_source(pl->primsel_mgr);
+        zwp_primary_selection_source_v1_add_listener(pl->primsel_source,
+                                                     &primary_source_listener, pl);
+        zwp_primary_selection_source_v1_offer(pl->primsel_source, "text/plain;charset=utf-8");
+        zwp_primary_selection_source_v1_offer(pl->primsel_source, "text/plain");
+        zwp_primary_selection_device_v1_set_selection(pl->primsel_device, pl->primsel_source,
+                                                      pl->last_serial);
+    }
 }
 
 /* lens_clipboard.request_text — the lens contract is asynchronous
  * (cross-platform.md invariant 4): the answer MUST arrive later via
- * lens_paste, never synchronously inside the request. The old
- * implementation pumped poll+roundtrip on the calling (UI) thread with no
- * upper bound, which both violated the contract and let a malicious
- * selection owner hang the UI forever. Now the pipe is drained on a
- * detached helper thread with a hard deadline, and completion is posted
- * through iris_post_to_main_thread — which also makes the self-paste case
- * correct: the main thread keeps dispatching, so our own data source can
- * answer. */
-#define WP_PASTE_TIMEOUT_MS 5000
-
-typedef struct wp_paste_job {
-    wp_platform *pl;
-    int fd;
-} wp_paste_job;
-
-typedef struct wp_paste_result {
-    wp_platform *pl;
-    char *text; /* NULL when the read failed or timed out */
-    size_t len;
-} wp_paste_result;
-
-/* Runs on the iris main thread via iris_post_to_main_thread. pl->ui is
- * checked (not just pl): teardown clears it before draining the queue. */
-static void paste_deliver(void *user) {
-    wp_paste_result *res = user;
-    if (res->pl->ui && res->text && res->len)
-        lens_paste(res->pl->ui, res->text, res->len);
-    free(res->text);
-    free(res);
-}
-
-static void *paste_reader_main(void *arg) {
-    wp_paste_job *job = arg;
-    size_t len = 0;
-    char *text = read_offer_fd(job->fd, WP_PASTE_TIMEOUT_MS, &len);
-    close(job->fd);
-
-    wp_paste_result *res = malloc(sizeof *res);
-    if (res) {
-        res->pl = job->pl;
-        res->text = text;
-        res->len = len;
-        /* -1: the loop is gone (window closed mid-paste) — drop. */
-        if (iris_post_to_main_thread(paste_deliver, res) != 0) {
-            free(text);
-            free(res);
-        }
-    } else {
-        free(text);
-    }
-    free(job);
-    return NULL;
-}
-
+ * lens_paste, never synchronously inside the request. The pipe is drained
+ * on a detached helper thread with a hard deadline (start_offer_read), and
+ * completion is posted through iris_post_to_main_thread — which also makes
+ * the self-paste case correct: the main thread keeps dispatching, so our
+ * own data source can answer. */
 static void clip_request_text(void *user) {
     wp_platform *pl = user;
     if (!pl->selection_offer || !pl->ui)
@@ -1341,25 +1780,58 @@ static void clip_request_text(void *user) {
     close(fds[1]);
     wl_display_flush(pl->display);
 
-    wp_paste_job *job = malloc(sizeof *job);
-    if (!job) {
+    if (!start_offer_read(pl, fds[0], NULL, WP_PASTE_TIMEOUT_MS, false))
         close(fds[0]);
-        return;
-    }
-    job->pl = pl;
-    job->fd = fds[0];
-    pthread_t th;
-    if (pthread_create(&th, NULL, paste_reader_main, job) != 0) {
-        close(fds[0]);
-        free(job);
-        return;
-    }
-    pthread_detach(th);
 }
 
 /* ------------------------------------------------------------------ */
 /*  Seat                                                               */
 /* ------------------------------------------------------------------ */
+
+/* seat/pointer/keyboard/touch gained a _release request in version 3 (the
+ * destructor for objects created from a seat); data_device in version 2.
+ * Use _release when the bound version supports it — plain _destroy races
+ * the compositor's own cleanup on capability loss / hot-unplug. */
+static void wp_pointer_release(struct wl_pointer *p) {
+    if (wl_pointer_get_version(p) >= WL_POINTER_RELEASE_SINCE_VERSION)
+        wl_pointer_release(p);
+    else
+        wl_pointer_destroy(p);
+}
+static void wp_keyboard_release(struct wl_keyboard *k) {
+    if (wl_keyboard_get_version(k) >= WL_KEYBOARD_RELEASE_SINCE_VERSION)
+        wl_keyboard_release(k);
+    else
+        wl_keyboard_destroy(k);
+}
+static void wp_touch_release(struct wl_touch *t) {
+    if (wl_touch_get_version(t) >= WL_TOUCH_RELEASE_SINCE_VERSION)
+        wl_touch_release(t);
+    else
+        wl_touch_destroy(t);
+}
+static void wp_seat_release(struct wl_seat *s) {
+    if (wl_seat_get_version(s) >= WL_SEAT_RELEASE_SINCE_VERSION)
+        wl_seat_release(s);
+    else
+        wl_seat_destroy(s);
+}
+static void wp_data_device_release(struct wl_data_device *d) {
+    if (wl_data_device_get_version(d) >= WL_DATA_DEVICE_RELEASE_SINCE_VERSION)
+        wl_data_device_release(d);
+    else
+        wl_data_device_destroy(d);
+}
+
+/* The text input is per-seat; create it lazily so a seat arriving after
+ * startup (or returning after a hot-unplug) gets one too. */
+static void wp_maybe_create_text_input(wp_platform *pl) {
+    if (pl->text_input || !pl->text_input_mgr || !pl->seat)
+        return;
+    pl->text_input = zwp_text_input_manager_v3_get_text_input(pl->text_input_mgr, pl->seat);
+    if (pl->text_input)
+        zwp_text_input_v3_add_listener(pl->text_input, &text_input_listener, pl);
+}
 
 static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
     wp_platform *pl = data;
@@ -1371,14 +1843,28 @@ static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
         pl->pointer = wl_seat_get_pointer(seat);
         wl_pointer_add_listener(pl->pointer, &pointer_listener, pl);
     } else if (!has_ptr && pl->pointer) {
-        wl_pointer_destroy(pl->pointer);
+        /* The cursor-shape device is per-pointer: it dies with it. */
+        if (pl->cursor_shape_device) {
+            wp_cursor_shape_device_v1_destroy(pl->cursor_shape_device);
+            pl->cursor_shape_device = NULL;
+        }
+        pl->cursor_inside = false;
+        wp_pointer_release(pl->pointer);
         pl->pointer = NULL;
     }
     if (has_kb && !pl->keyboard) {
         pl->keyboard = wl_seat_get_keyboard(seat);
         wl_keyboard_add_listener(pl->keyboard, &keyboard_listener, pl);
     } else if (!has_kb && pl->keyboard) {
-        wl_keyboard_destroy(pl->keyboard);
+        /* Keyboard gone: end the IM session and any key repeat first, so
+         * no composition or held key outlives the device. */
+        wp_repeat_cancel(pl);
+        if (pl->im_active)
+            im_deactivate(pl);
+        else
+            im_clear_pending(pl);
+        pl->kb_focused = false;
+        wp_keyboard_release(pl->keyboard);
         pl->keyboard = NULL;
     }
     if (has_touch && !pl->touch) {
@@ -1386,12 +1872,97 @@ static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
         if (pl->touch)
             wl_touch_add_listener(pl->touch, &touch_listener, pl);
     } else if (!has_touch && pl->touch) {
-        wl_touch_destroy(pl->touch);
+        wp_touch_release(pl->touch);
         pl->touch = NULL;
         g_touch_active_id = -1;
     }
 
     wp_maybe_create_data_device(pl);
+    wp_maybe_create_primsel_device(pl);
+    wp_maybe_create_text_input(pl);
+}
+
+/* Destroy every object created from pl->seat (capability objects, the data
+ * and primary-selection devices, the text input) and then the seat itself.
+ * Used when the seat's registry global goes away (hot-unplug). In-flight
+ * async drop reads keep their offer via the dnd_job_offer slot, finished
+ * on delivery or at app teardown. */
+static void seat_teardown(wp_platform *pl) {
+    wp_repeat_cancel(pl);
+    if (pl->im_active)
+        im_deactivate(pl);
+    else
+        im_clear_pending(pl);
+    pl->kb_focused = false;
+
+    if (pl->cursor_shape_device) {
+        wp_cursor_shape_device_v1_destroy(pl->cursor_shape_device);
+        pl->cursor_shape_device = NULL;
+    }
+    pl->cursor_inside = false;
+    if (pl->pointer) {
+        wp_pointer_release(pl->pointer);
+        pl->pointer = NULL;
+    }
+    if (pl->keyboard) {
+        wp_keyboard_release(pl->keyboard);
+        pl->keyboard = NULL;
+    }
+    if (pl->touch) {
+        wp_touch_release(pl->touch);
+        pl->touch = NULL;
+        g_touch_active_id = -1;
+    }
+    if (pl->text_input) {
+        zwp_text_input_v3_destroy(pl->text_input);
+        pl->text_input = NULL;
+        pl->text_input_surface = NULL;
+    }
+    if (pl->selection_offer) {
+        wl_data_offer_destroy(pl->selection_offer);
+        pl->selection_offer = NULL;
+        pl->selection_offer_mimes = (struct wp_offer_mimes){0};
+    }
+    if (pl->dnd_offer) {
+        wl_data_offer_destroy(pl->dnd_offer);
+        pl->dnd_offer = NULL;
+        pl->dnd_offer_mimes = (struct wp_offer_mimes){0};
+    }
+    if (pl->pending_offer_mimes.offer) {
+        wl_data_offer_destroy(pl->pending_offer_mimes.offer);
+        pl->pending_offer_mimes = (struct wp_offer_mimes){0};
+    }
+    if (pl->copy_source) {
+        wl_data_source_destroy(pl->copy_source);
+        pl->copy_source = NULL;
+    }
+    if (pl->data_device) {
+        wp_data_device_release(pl->data_device);
+        pl->data_device = NULL;
+    }
+    if (pl->primsel_offer) {
+        zwp_primary_selection_offer_v1_destroy(pl->primsel_offer);
+        pl->primsel_offer = NULL;
+        pl->primsel_offer_mimes = (struct wp_offer_mimes){0};
+    }
+    if (pl->primsel_pending_mimes.offer) {
+        zwp_primary_selection_offer_v1_destroy(
+            (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer);
+        pl->primsel_pending_mimes = (struct wp_offer_mimes){0};
+    }
+    if (pl->primsel_source) {
+        zwp_primary_selection_source_v1_destroy(pl->primsel_source);
+        pl->primsel_source = NULL;
+    }
+    if (pl->primsel_device) {
+        zwp_primary_selection_device_v1_destroy(pl->primsel_device);
+        pl->primsel_device = NULL;
+    }
+    if (pl->seat) {
+        wp_seat_release(pl->seat);
+        pl->seat = NULL;
+    }
+    pl->seat_name = 0;
 }
 static void seat_name(void *d, struct wl_seat *s, const char *n) {
     (void)d;
@@ -1505,21 +2076,19 @@ static void surf_preferred_buffer_transform(void *d, struct wl_surface *s, uint3
  * that expose this global prefer it over wl_surface.preferred_buffer_scale
  * because it carries a 1/120 fractional scale (e.g. 1.25x, 1.5x) instead
  * of an integer. We bind the global and the per-surface object at registry
- * time; the listener records the fractional scale so the lens side can be
- * told the true float content scale. */
+ * time; the listener folds the fraction into the integer buffer scale. */
 static void frac_scale_preferred(void *data, struct wp_fractional_scale_v1 *frac, uint32_t scale) {
     (void)frac;
     wp_platform *pl = data;
-    /* scale is in 1/120 steps (so 120 = 1.0, 180 = 1.5, …). Convert to a
-     * float first, then a usable integer buffer scale (rounding to nearest
-     * so the existing integer-scale pipeline keeps working; the fractional
-     * part is preserved on the lens content_scale too). */
+    /* scale is in 1/120 steps (so 120 = 1.0, 180 = 1.5, …). Round to the
+     * nearest integer buffer scale so the existing integer-scale pipeline
+     * keeps working — lens is told the integer buffer scale only, and true
+     * fractional content scaling (1.25x etc. into lens) is a follow-on. */
     float f = (float)scale / 120.0f;
     int b = (int)(f + 0.5f);
     if (b < 1)
         b = 1;
     pl->pending_scale = b;
-    pl->fractional_scale = f;
 }
 
 static const struct wp_fractional_scale_v1_listener fractional_scale_listener = {
@@ -1549,6 +2118,7 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
         xdg_wm_base_add_listener(pl->wm_base, &wm_base_listener, pl);
     } else if (strcmp(iface, wl_seat_interface.name) == 0) {
         pl->seat = wl_registry_bind(reg, name, &wl_seat_interface, version < 5 ? version : 5);
+        pl->seat_name = name;
         wl_seat_add_listener(pl->seat, &seat_listener, pl);
     } else if (strcmp(iface, wl_output_interface.name) == 0) {
         if (pl->n_outputs < WP_MAX_OUTPUTS) {
@@ -1556,6 +2126,7 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
             uint32_t v = version < 2 ? version : 2;
             wp_output *out = &pl->outputs[pl->n_outputs++];
             out->wl = wl_registry_bind(reg, name, &wl_output_interface, v);
+            out->name = name;
             out->scale = 1;
             out->entered = false;
             wl_output_add_listener(out->wl, &output_listener, pl);
@@ -1564,6 +2135,12 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
         pl->data_device_mgr = wl_registry_bind(reg, name, &wl_data_device_manager_interface,
                                                version < 3 ? version : 3);
         wp_maybe_create_data_device(pl);
+    } else if (strcmp(iface, zwp_primary_selection_device_manager_v1_interface.name) == 0) {
+        /* primary-selection-unstable-v1: the X11-style middle-click
+         * clipboard (mirror of clip_set_text; read on middle press). */
+        pl->primsel_mgr =
+            wl_registry_bind(reg, name, &zwp_primary_selection_device_manager_v1_interface, 1);
+        wp_maybe_create_primsel_device(pl);
     } else if (strcmp(iface, zxdg_decoration_manager_v1_interface.name) == 0) {
         pl->deco_mgr = wl_registry_bind(reg, name, &zxdg_decoration_manager_v1_interface, 1);
     } else if (strcmp(iface, zwp_text_input_manager_v3_interface.name) == 0) {
@@ -1588,10 +2165,26 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
         pl->foreign_exporter = wl_registry_bind(reg, name, &zxdg_exporter_v2_interface, 1);
     }
 }
+
+/* Global removal: destroy the proxies we bound for the departing global.
+ * Outputs are hot-pluggable, so the slot is recycled (swap with the last)
+ * for the array to keep accepting new outputs past WP_MAX_OUTPUTS
+ * bind/unbind cycles; the seat tears down every object created from it. */
 static void reg_remove(void *d, struct wl_registry *r, uint32_t name) {
-    (void)d;
     (void)r;
-    (void)name;
+    wp_platform *pl = d;
+    for (int i = 0; i < pl->n_outputs; i++) {
+        if (pl->outputs[i].name == name) {
+            bool was_entered = pl->outputs[i].entered;
+            wl_output_destroy(pl->outputs[i].wl);
+            pl->outputs[i] = pl->outputs[--pl->n_outputs];
+            if (was_entered)
+                wp_recompute_scale(pl);
+            return;
+        }
+    }
+    if (pl->seat && name == pl->seat_name)
+        seat_teardown(pl);
 }
 static const struct wl_registry_listener registry_listener = {
     .global = reg_global,
@@ -1692,6 +2285,8 @@ static void drain_input(wp_platform *pl, lens_input *in, float dt) {
     memcpy(in->text_utf8, pl->acc.text, sizeof in->text_utf8);
     memcpy(in->preedit_utf8, pl->acc.preedit, sizeof in->preedit_utf8);
     in->preedit_cursor = pl->acc.preedit_cursor;
+    in->preedit_sel_lo = pl->acc.preedit_sel_lo;
+    in->preedit_sel_hi = pl->acc.preedit_sel_hi;
     in->key_count = pl->acc.key_count;
     for (uint32_t i = 0; i < pl->acc.key_count; i++)
         in->keys[i] = pl->acc.keys[i];
@@ -1750,23 +2345,29 @@ static bool pump_events(wp_platform *pl, int timeout_ms) {
         wl_display_dispatch_pending(d);
     wl_display_flush(d);
 
-    /* Poll the Wayland display fd, the wakeup eventfd, and (if active) the
-     * AT-SPI bus fd together so we wake up on any. `timeout_ms` is the
-     * frame-pacing budget: a non-blocking (vsync=false) present leaves the
-     * render loop with no point that sleeps, so we block here for up to a
-     * frame's worth of time. poll() returns the instant input (or a wakeup /
-     * a11y event) arrives — keeping latency low — and otherwise wakes on the
-     * deadline so time-based UI (caret blink, lens animations) keeps ticking
-     * even with no input. Passing 0 keeps the old non-blocking behaviour.
-     * Returns true when any fd was signalled (as opposed to a timeout), so
-     * the frame loop can tell an event wake from a deadline expiry. */
-    struct pollfd pfds[3];
+    /* Poll the Wayland display fd, the wakeup eventfd, the key-repeat
+     * timerfd, and (if active) the AT-SPI bus fd together so we wake up on
+     * any. `timeout_ms` is the frame-pacing budget: a non-blocking
+     * (vsync=false) present leaves the render loop with no point that
+     * sleeps, so we block here for up to a frame's worth of time. poll()
+     * returns the instant input (or a wakeup / a11y event) arrives —
+     * keeping latency low — and otherwise wakes on the deadline so
+     * time-based UI (caret blink, lens animations) keeps ticking even with
+     * no input. Passing 0 keeps the old non-blocking behaviour. Returns
+     * true when any fd was signalled (as opposed to a timeout), so the
+     * frame loop can tell an event wake from a deadline expiry. */
+    struct pollfd pfds[4];
     int n = 1;
-    int wakeup_idx = -1, a11y_idx = -1;
+    int wakeup_idx = -1, a11y_idx = -1, repeat_idx = -1;
     pfds[0] = (struct pollfd){.fd = wl_display_get_fd(d), .events = POLLIN};
     if (pl->wakeup_fd >= 0) {
         wakeup_idx = n;
         pfds[n] = (struct pollfd){.fd = pl->wakeup_fd, .events = POLLIN};
+        n++;
+    }
+    if (pl->repeat_fd >= 0) {
+        repeat_idx = n;
+        pfds[n] = (struct pollfd){.fd = pl->repeat_fd, .events = POLLIN};
         n++;
     }
     if (pl->a11y_fd >= 0) {
@@ -1795,6 +2396,20 @@ static bool pump_events(wp_platform *pl, int timeout_ms) {
             while (read(pl->wakeup_fd, &count, sizeof count) == sizeof count) {
             }
             iris_platform_wakeup_drain();
+        }
+        /* Key repeat tick. Each expiry is one repeated key, capped so a
+         * long scheduling stall can't flood the frame with a huge backlog
+         * (the coalescing bound desktop toolkits apply too). */
+        if (repeat_idx >= 0 && pfds[repeat_idx].revents & POLLIN) {
+            uint64_t expirations = 0;
+            if (read(pl->repeat_fd, &expirations, sizeof expirations) ==
+                    (ssize_t)sizeof expirations &&
+                pl->rep_active && pl->xkb_state) {
+                if (expirations > 8)
+                    expirations = 8;
+                for (uint64_t i = 0; i < expirations; i++)
+                    repeat_emit_one(pl);
+            }
         }
         /* Any signalled event (POLLIN / POLLHUP / POLLERR) — let sd-bus
          * process it so an error/hangup is consumed rather than re-firing. */
@@ -1864,6 +2479,62 @@ static void wp_destroy_vk_surface(const flux_device *device, VkSurfaceKHR vk_sur
 }
 
 /* ------------------------------------------------------------------ */
+/*  Per-frame IM evaluation (text-input-v3)                              */
+/* ------------------------------------------------------------------ */
+
+/* Once per frame after lens_end: keep the text input enabled exactly while
+ * the window has keyboard focus AND a lens text widget is focused, report
+ * the widget's surrounding text when it changes, and position the IME
+ * candidate window at the caret.
+ *
+ * Why per-frame: the wl_keyboard enter arrives before any frame has
+ * rendered, so at enter time we cannot know whether a text widget holds
+ * lens focus; and lens-side focus changes (Tab traversal, click) never
+ * produce Wayland events at all. lens_text_context_get() is the one
+ * authoritative signal, refreshed by the focused text widget every frame,
+ * so this evaluation owns enable/disable outright — kb_enter/kb_leave only
+ * track the window-level focus that gates it. Transitions alone issue
+ * protocol requests; steady state sends nothing (surrounding text goes out
+ * only on content/cursor change, via the memento compare). */
+static void im_frame_update(wp_platform *pl) {
+    if (!pl->text_input || !pl->ui)
+        return;
+
+    lens_text_context ctx = lens_text_context_get(pl->ui);
+    bool want = pl->kb_focused && ctx.utf8 != NULL;
+    if (want != pl->im_active) {
+        if (want) {
+            zwp_text_input_v3_enable(pl->text_input);
+            zwp_text_input_v3_set_content_type(
+                pl->text_input,
+                ctx.multiline ? ZWP_TEXT_INPUT_V3_CONTENT_HINT_MULTILINE
+                              : ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
+                ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
+            im_report_surrounding(pl, &ctx); /* fresh session: always reports */
+            zwp_text_input_v3_commit(pl->text_input);
+            pl->im_active = true;
+        } else {
+            im_deactivate(pl);
+        }
+    } else if (want) {
+        /* Steady state: report surrounding text only when it changed. */
+        if (im_report_surrounding(pl, &ctx))
+            zwp_text_input_v3_commit(pl->text_input);
+    }
+
+    /* Candidate window follows the caret. */
+    if (pl->im_active && pl->text_input_surface) {
+        flux_rect caret = lens_caret_rect(pl->ui);
+        if (caret.w > 0.0f) {
+            zwp_text_input_v3_set_cursor_rectangle(pl->text_input, (int32_t)caret.x,
+                                                   (int32_t)caret.y, (int32_t)caret.w,
+                                                   (int32_t)caret.h);
+            zwp_text_input_v3_commit(pl->text_input);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Run                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -1890,6 +2561,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         .a11y_fd = -1, /* so the cleanup guards are correct even if
                         * we fail before the bridge is started */
         .wakeup_fd = -1,
+        .repeat_fd = -1,
     };
 
     /* Publish `pl` as the active app instance so the context-free
@@ -1919,16 +2591,33 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         goto fail;
     }
 
+    /* Dead-key compose table for the session locale. xkbcommon idiom: the
+     * process locale comes from setlocale(LC_CTYPE, ""); XKB_DEFAULT_LOCALE
+     * overrides it (test harnesses and tools set it to force a table). No
+     * table for the locale → compose stays NULL and dead keys fall through
+     * as ordinary keysyms. */
+    setlocale(LC_CTYPE, "");
+    const char *locale = getenv("XKB_DEFAULT_LOCALE");
+    if (!locale || !locale[0])
+        locale = setlocale(LC_CTYPE, NULL);
+    if (locale && locale[0]) {
+        pl.compose_table = xkb_compose_table_new_from_locale(pl.xkb_ctx, locale,
+                                                             XKB_COMPOSE_COMPILE_NO_FLAGS);
+        if (pl.compose_table)
+            pl.compose_state =
+                xkb_compose_state_new(pl.compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
+    }
+
+    /* Key-repeat timer: armed per held key from the compositor's
+     * repeat_info; pump_events polls it alongside the display fd. */
+    pl.repeat_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+
     pl.registry = wl_display_get_registry(pl.display);
     wl_registry_add_listener(pl.registry, &registry_listener, &pl);
     wl_display_roundtrip(pl.display); /* bind globals */
     wl_display_roundtrip(pl.display); /* seat caps -> pointer/keyboard */
 
-    if (pl.text_input_mgr && pl.seat) {
-        pl.text_input = zwp_text_input_manager_v3_get_text_input(pl.text_input_mgr, pl.seat);
-        if (pl.text_input)
-            zwp_text_input_v3_add_listener(pl.text_input, &text_input_listener, &pl);
-    }
+    wp_maybe_create_text_input(&pl);
 
     if (!pl.compositor || !pl.wm_base) {
         fprintf(stderr, "compositor missing wl_compositor / xdg_wm_base\n");
@@ -2239,16 +2928,10 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         if (cursor_follow_hint(&pl))
             cursor_apply(&pl);
 
-        /* Update IME cursor rectangle */
-        if (pl.text_input && pl.text_input_surface) {
-            flux_rect caret = lens_caret_rect(ui);
-            if (caret.w > 0.0f) {
-                zwp_text_input_v3_set_cursor_rectangle(pl.text_input, (int32_t)caret.x,
-                                                       (int32_t)caret.y, (int32_t)caret.w,
-                                                       (int32_t)caret.h);
-                zwp_text_input_v3_commit(pl.text_input);
-            }
-        }
+        /* IM: per-widget enable/disable, surrounding-text reports, and the
+         * IME candidate-window rectangle (owns every text-input-v3 request;
+         * see im_frame_update). */
+        im_frame_update(&pl);
 
         /* Static-frame skip: when lens reports no damage, the host has no
          * paint callback, no host animation is in flight, and no resize /
@@ -2374,6 +3057,12 @@ fail:
         close(pl.wakeup_fd);
         pl.wakeup_fd = -1;
     }
+    /* Key-repeat timer: disarmed by the loop exit already (no key events
+     * arrive anymore); just close the fd. */
+    if (pl.repeat_fd >= 0) {
+        close(pl.repeat_fd);
+        pl.repeat_fd = -1;
+    }
     if (canvas)
         flux_canvas_destroy(canvas);
     if (surface)
@@ -2391,8 +3080,17 @@ fail:
 
     /* Clipboard buffers we own (clip_set_text mallocs copy_buf; the data
      * offer / source are normally released by the compositor, but free the
-     * heap buffer and any still-live offer so teardown doesn't leak). */
+     * heap buffer and any still-live offer so teardown doesn't leak). A
+     * drop read still in flight owns its offer via dnd_job_offer (the
+     * helper thread only reads the pipe fd; finishing here is safe — the
+     * late delivery will find the slot NULL and skip the offer). */
     free(pl.copy_buf);
+    free(pl.im_surr);
+    if (pl.dnd_job_offer) {
+        wl_data_offer_finish(pl.dnd_job_offer);
+        wl_data_offer_destroy(pl.dnd_job_offer);
+        pl.dnd_job_offer = NULL;
+    }
     if (pl.copy_source)
         wl_data_source_destroy(pl.copy_source);
     if (pl.selection_offer)
@@ -2402,6 +3100,20 @@ fail:
     if (pl.pending_offer_mimes.offer && pl.pending_offer_mimes.offer != pl.selection_offer &&
         pl.pending_offer_mimes.offer != pl.dnd_offer)
         wl_data_offer_destroy(pl.pending_offer_mimes.offer);
+
+    /* Primary selection: our source (if still live), the current offer,
+     * any unbound pending offer, the per-seat device, and the manager. */
+    if (pl.primsel_source)
+        zwp_primary_selection_source_v1_destroy(pl.primsel_source);
+    if (pl.primsel_offer)
+        zwp_primary_selection_offer_v1_destroy(pl.primsel_offer);
+    if (pl.primsel_pending_mimes.offer)
+        zwp_primary_selection_offer_v1_destroy(
+            (struct zwp_primary_selection_offer_v1 *)pl.primsel_pending_mimes.offer);
+    if (pl.primsel_device)
+        zwp_primary_selection_device_v1_destroy(pl.primsel_device);
+    if (pl.primsel_mgr)
+        zwp_primary_selection_device_manager_v1_destroy(pl.primsel_mgr);
 
     if (pl.foreign_exported)
         zxdg_exported_v2_destroy(pl.foreign_exported);
@@ -2425,18 +3137,22 @@ fail:
         xkb_state_unref(pl.xkb_state);
     if (pl.xkb_keymap)
         xkb_keymap_unref(pl.xkb_keymap);
+    if (pl.compose_state)
+        xkb_compose_state_unref(pl.compose_state);
+    if (pl.compose_table)
+        xkb_compose_table_unref(pl.compose_table);
     if (pl.xkb_ctx)
         xkb_context_unref(pl.xkb_ctx);
     if (pl.pointer)
-        wl_pointer_destroy(pl.pointer);
+        wp_pointer_release(pl.pointer);
     if (pl.keyboard)
-        wl_keyboard_destroy(pl.keyboard);
+        wp_keyboard_release(pl.keyboard);
     if (pl.touch)
-        wl_touch_destroy(pl.touch);
+        wp_touch_release(pl.touch);
     if (pl.text_input)
         zwp_text_input_v3_destroy(pl.text_input);
     if (pl.data_device)
-        wl_data_device_release(pl.data_device);
+        wp_data_device_release(pl.data_device);
     if (pl.text_input_mgr)
         zwp_text_input_manager_v3_destroy(pl.text_input_mgr);
     if (pl.fractional_scale_mgr)
@@ -2446,7 +3162,7 @@ fail:
     if (pl.data_device_mgr)
         wl_data_device_manager_destroy(pl.data_device_mgr);
     if (pl.seat)
-        wl_seat_destroy(pl.seat);
+        wp_seat_release(pl.seat);
     if (pl.wm_base)
         xdg_wm_base_destroy(pl.wm_base);
     if (pl.compositor)

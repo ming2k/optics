@@ -1,10 +1,11 @@
 /* skin/textarea.c — default multi-line text-edit skin (ADR-0059): hover
  * surface, per-line selection highlight, the visible line slices (IME
- * preedit pre-composed by the widget), preedit underline, caret, and the
- * border state chain — moved verbatim from widgets/textarea.c. Editing,
- * line windowing, scroll clamping, and the platform caret reporting
- * (ADR-0036) are behaviour and stay in the widget; every rect and slice
- * here is precomputed and node-local. */
+ * preedit pre-composed by the widget), preedit underline and
+ * active-clause emphasis, caret, and the border state chain — moved
+ * verbatim from widgets/textarea.c. Editing, line windowing, scroll
+ * clamping, and the platform caret/text-context reporting (ADR-0036) are
+ * behaviour and stay in the widget; every rect and slice here is
+ * precomputed and node-local. */
 
 #include "../internal.h"
 
@@ -47,6 +48,14 @@ void lensi_skin_textarea(lens *ui, lens_node *n, const lens_widget_record *rec) 
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_RECT,
                                             .rel = c->preedit_underline,
+                                            .color = rs->accent});
+    }
+
+    /* Active clause of the composition, emphasised over the underline */
+    if (c->preedit_clause.w > 0) {
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                            .rel = c->preedit_clause,
                                             .color = rs->accent});
     }
 

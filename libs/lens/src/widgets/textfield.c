@@ -379,6 +379,7 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
     const char *display_text = NULL;
     bool show_placeholder = false;
     flux_rect preedit_underline = {0, 0, 0, 0};
+    flux_rect preedit_clause = {0, 0, 0, 0};
 
     if (has_preedit) {
         const char *pe = ui->input.preedit_utf8;
@@ -402,6 +403,16 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
         float pe_width = prefix_width(ui, pe, pe_len, font_size);
         preedit_underline =
             (flux_rect){padding + base_caret_x, text_y + fm.height - 1.0f, pe_width, 1.0f};
+
+        /* Active clause of the composition (the IME's preedit_sel range) */
+        uint32_t clause_lo = ui->input.preedit_sel_lo;
+        uint32_t clause_hi = ui->input.preedit_sel_hi;
+        if (clause_hi > clause_lo && clause_hi <= pe_len) {
+            float clause_x = prefix_width(ui, pe, clause_lo, font_size);
+            preedit_clause =
+                (flux_rect){padding + base_caret_x + clause_x, text_y + fm.height - 1.0f,
+                            prefix_width(ui, pe, clause_hi, font_size) - clause_x, 2.0f};
+        }
 
         /* Cursor is inside the preedit string */
         caret_x = base_caret_x + prefix_width(ui, pe, ui->input.preedit_cursor, font_size);
@@ -447,10 +458,12 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
                                     .caret = caret,
                                     .show_caret = show_caret,
                                     .preedit_underline = preedit_underline,
-                                    .has_preedit = has_preedit},
+                                    .has_preedit = has_preedit,
+                                    .preedit_clause = preedit_clause},
                     });
 
-    /* Caret rectangle for the platform IME (behaviour, not chrome — stays) */
+    /* Caret rect and surrounding-text context for the platform IME
+     * (behaviour, not chrome — stays) */
     if (!disabled && r.focused && buf && buf_cap > 1) {
         lensi_set_caret_rect(ui, (flux_rect){
                                      n->prev_rect.x + padding + caret_x,
@@ -458,6 +471,7 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
                                      2.0f,
                                      fm.height,
                                  });
+        lensi_set_text_context(ui, buf, (uint32_t)len, ts->cursor, false);
     }
 
     /* Semantics */

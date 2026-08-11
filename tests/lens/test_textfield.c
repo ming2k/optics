@@ -133,6 +133,39 @@ static void test_textfield_backspace(void) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Key repeats act as presses (OS/backend auto-repeat contract)        */
+/* ------------------------------------------------------------------ */
+/* No widget filters on lens_key_event.repeat: a synthesised repeat press
+ * (Wayland client-side timer, Win32 lParam bit 30, Cocoa isARepeat) must
+ * behave exactly like a physical press, at the OS repeat rate. Pin that
+ * contract here — the backends rely on it. */
+static void test_textfield_key_repeat(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    char buf[64] = "abc";
+    setup_textfield(ui, "tf", buf, sizeof buf);
+
+    lens_input in = IN0;
+    in.key_count = 1;
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_BACKSPACE, .pressed = true, .repeat = true};
+    lens_begin(ui, &in);
+    bool changed = lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(changed == true);
+    CHECK(strcmp(buf, "ab") == 0);
+
+    /* repeats keep arriving while the key is held: another one deletes */
+    lens_begin(ui, &in);
+    changed = lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(changed == true);
+    CHECK(strcmp(buf, "a") == 0);
+
+    lens_destroy(ui);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Delete removes character after cursor                             */
 /* ------------------------------------------------------------------ */
 static void test_textfield_delete(void) {
@@ -582,11 +615,55 @@ static void test_textfield_set_caret_utf8_snap(void) {
     lens_destroy(ui);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Preedit active clause: the record carries the emphasised rect       */
+/* ------------------------------------------------------------------ */
+static void test_textfield_preedit_clause(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    char buf[64] = "";
+    setup_textfield(ui, "tf", buf, sizeof buf);
+
+    lens_set_skin(ui, LENS_WIDGET_TEXTFIELD, probe_tf_skin);
+
+    /* preedit "abc" with the active clause spanning "ab" */
+    lens_input in = IN0;
+    strcpy(in.preedit_utf8, "abc");
+    in.preedit_cursor = 3;
+    in.preedit_sel_lo = 0;
+    in.preedit_sel_hi = 2;
+    lens_begin(ui, &in);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+
+    CHECK(g_tf_seen.content.has_preedit);
+    CHECK(g_tf_seen.content.preedit_underline.w > 0.0f);
+    CHECK(g_tf_seen.content.preedit_clause.w > 0.0f);
+    /* the clause covers "ab"; the flat underline spans all of "abc" */
+    CHECK(g_tf_seen.content.preedit_clause.w < g_tf_seen.content.preedit_underline.w);
+    CHECK(g_tf_seen.content.preedit_clause.h == 2.0f);
+    CHECK(g_tf_seen.content.preedit_clause.y == g_tf_seen.content.preedit_underline.y);
+
+    /* an empty range (sel_hi == sel_lo) emits no clause emphasis */
+    in.preedit_sel_hi = 0;
+    lens_begin(ui, &in);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(g_tf_seen.content.has_preedit);
+    CHECK(g_tf_seen.content.preedit_clause.w == 0.0f);
+
+    lens_set_skin(ui, LENS_WIDGET_TEXTFIELD, NULL); /* restore default */
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_textfield_paste();
     test_textfield_committed_text();
     test_textfield_preedit_sets_caret();
+    test_textfield_preedit_clause();
     test_textfield_backspace();
+    test_textfield_key_repeat();
     test_textfield_delete();
     test_textfield_home_end();
     test_textfield_buffer_cap();

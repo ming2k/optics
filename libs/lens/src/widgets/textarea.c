@@ -599,6 +599,7 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
     int line_count = 0, line_cap = 0;
     bool show_placeholder = false;
     flux_rect preedit_underline = {0, 0, 0, 0};
+    flux_rect preedit_clause = {0, 0, 0, 0};
 
     size_t cursor_line_start = 0;
     int cursor_line_idx = 0;
@@ -654,6 +655,16 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
                 float pe_w = prefix_width(ui, pe, pe_len, font_size);
                 preedit_underline =
                     (flux_rect){padding + prefix_w, line_y + line_h - 1.0f, pe_w, 1.0f};
+
+                /* Active clause of the composition (the IME's preedit_sel) */
+                uint32_t clause_lo = ui->input.preedit_sel_lo;
+                uint32_t clause_hi = ui->input.preedit_sel_hi;
+                if (clause_hi > clause_lo && clause_hi <= pe_len) {
+                    float clause_x = prefix_width(ui, pe, clause_lo, font_size);
+                    preedit_clause =
+                        (flux_rect){padding + prefix_w + clause_x, line_y + line_h - 1.0f,
+                                    prefix_width(ui, pe, clause_hi, font_size) - clause_x, 2.0f};
+                }
             } else if (llen > 0) {
                 char *line = flux_arena_alloc(&ui->arena, llen + 1);
                 if (line) {
@@ -675,8 +686,19 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
         float line_y = padding - ts->scroll_y;
         const char *pe = ui->input.preedit_utf8;
         TEXTAREA_PUSH_LINE(pe, line_y);
-        float pe_w = prefix_width(ui, pe, strlen(pe), font_size);
+        size_t pe_len = strlen(pe);
+        float pe_w = prefix_width(ui, pe, pe_len, font_size);
         preedit_underline = (flux_rect){padding, line_y + line_h - 1.0f, pe_w, 1.0f};
+
+        /* Active clause of the composition (the IME's preedit_sel) */
+        uint32_t clause_lo = ui->input.preedit_sel_lo;
+        uint32_t clause_hi = ui->input.preedit_sel_hi;
+        if (clause_hi > clause_lo && clause_hi <= pe_len) {
+            float clause_x = prefix_width(ui, pe, clause_lo, font_size);
+            preedit_clause = (flux_rect){padding + clause_x, line_y + line_h - 1.0f,
+                                         prefix_width(ui, pe, clause_hi, font_size) - clause_x,
+                                         2.0f};
+        }
     }
 
     /* Placeholder */
@@ -720,12 +742,13 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
                                     .caret = caret,
                                     .show_caret = show_caret,
                                     .preedit_underline = preedit_underline,
-                                    .has_preedit = has_preedit},
+                                    .has_preedit = has_preedit,
+                                    .preedit_clause = preedit_clause},
                     });
 
 #undef TEXTAREA_PUSH_LINE
 
-    /* IME caret rect */
+    /* IME caret rect and surrounding-text context */
     if (!disabled && r.focused && buf && buf_cap > 1) {
         size_t start;
         int idx;
@@ -742,6 +765,7 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
                                      2.0f,
                                      line_h,
                                  });
+        lensi_set_text_context(ui, buf, (uint32_t)len, ts->cursor, true);
     }
 
     /* Semantics */
