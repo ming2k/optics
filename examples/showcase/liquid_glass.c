@@ -317,22 +317,19 @@ int main(void) {
             fprintf(stderr, "blur: %s\n", flux_result_string(r));
             break;
         }
-        prism_liquid_glass_group body = {
-            .shapes =
-                {
-                    {.bounds = {gx, gy, gw, gh}, .corner_radius = gr},
-                    {.bounds = {gx + gw - 22.0f + droplet_position * 84.0f, gy + 11.0f, 78.0f,
-                                78.0f},
-                     .corner_radius = 39.0f},
-                },
-            .shape_count = 2,
-            .blend_radius = 24.0f,
-            .opacity = 1.0f,
-            .shadow_alpha = 0.20f,
-            .shadow_blur = 12.0f,
-            .shadow_offset_y = 6.0f,
-            .tint_color = 0xFFFFFFu,
+        prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
+        body.shapes[0] = (prism_liquid_glass_shape){.bounds = {gx, gy, gw, gh}, .corner_radius = gr};
+        body.shapes[1] = (prism_liquid_glass_shape){
+            .bounds = {gx + gw - 22.0f + droplet_position * 84.0f, gy + 11.0f, 78.0f, 78.0f},
+            .corner_radius = 39.0f,
         };
+        body.shape_count = 2;
+        body.blend_radius = 24.0f;
+        body.opacity = 1.0f;
+        body.shadow_alpha = 0.20f;
+        body.shadow_blur = 12.0f;
+        body.shadow_offset_y = 6.0f;
+        body.tint_color = 0xFFFFFFu;
         prism_liquid_glass_desc gd = PRISM_LIQUID_GLASS_DESC_INIT;
         gd.input = capture;
         gd.blurred_input = blurred;

@@ -1,10 +1,10 @@
 /* skin/table.c — default table skin (ADR-0059): header band, the visible
- * row window (selected / zebra surfaces, per-cell clipped text), and the
- * scrollbar chrome — moved verbatim from widgets/table.c. The
- * virtualization (row window), wheel routing, selection, and the thumb
- * drag state machine are behaviour and stay in the widget. Scrollbar
- * colours are theme tokens with no style slot (the ADR-0059 carve-out),
- * read from the theme like before. */
+ * row window (selected / zebra surfaces, the ADR-0066 cursor-row border,
+ * per-cell clipped text and icons), and the scrollbar chrome — moved
+ * verbatim from widgets/table.c. The virtualization (row window), wheel
+ * routing, selection, and the thumb drag state machine are behaviour and
+ * stay in the widget. Scrollbar colours are theme tokens with no style
+ * slot (the ADR-0059 carve-out), read from the theme like before. */
 
 #include "../internal.h"
 
@@ -69,9 +69,24 @@ void lensi_skin_table(lens *ui, lens_node *n, const lens_widget_record *rec) {
                                                 .color = lensi_color_alpha(rs->bg_hover, 40),
                                                 .radius = 0.0f});
         }
+        /* Cursor row (ADR-0066): the same border a focused button gets,
+         * drawn over the row band. */
+        if (row->state & LENS_STATE_FOCUSED) {
+            lensi_drawlist_push(ui, n,
+                                (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
+                                                .rel = {0, row->y, c->view_width, c->row_height},
+                                                .color = rs->fg,
+                                                .radius = 0.0f,
+                                                .width = rs->border_width});
+        }
         for (int i = 0; i < column_count; i++) {
             const char *txt = row->cells[i];
-            if (!txt || !txt[0])
+            bool has_txt = txt && txt[0];
+            /* Icons ride only on LENS_START columns (the widget shifted
+             * the text x right by icon_size + gap for exactly those). */
+            bool has_icon = row->icons && c->columns[i].align == LENS_START &&
+                            lensi_icon_valid((int32_t)row->icons[i]);
+            if (!has_txt && !has_icon)
                 continue;
             /* Clip each cell independently. Without this, a long title can
              * paint through artist/album/duration columns even though the
@@ -80,14 +95,28 @@ void lensi_skin_table(lens *ui, lens_node *n, const lens_widget_record *rec) {
                                 (lens_draw_cmd){.kind = LENS_DRAW_CLIP_PUSH,
                                                 .rel = {c->columns[i].x, row->y, c->columns[i].w,
                                                         c->row_height}});
-            lensi_drawlist_push(
-                ui, n,
-                (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                .rel = {row->cell_x[i],
-                                        row->y + (c->row_height - font_size) * 0.5f, 0, 0},
-                                .color = sel ? rs->accent : rs->fg,
-                                .text = txt,
-                                .text_size = font_size});
+            if (has_icon) {
+                float icon_size = font_size;
+                lensi_drawlist_push(ui, n,
+                                    (lens_draw_cmd){
+                                        .kind = LENS_DRAW_ICON,
+                                        .rel = {row->cell_x[i] - icon_size - 8.0f,
+                                                row->y + (c->row_height - icon_size) * 0.5f,
+                                                icon_size, icon_size},
+                                        .color = sel ? rs->accent : rs->fg,
+                                        .width = 2.0f * (icon_size / 24.0f),
+                                        .icon_id = row->icons[i]});
+            }
+            if (has_txt) {
+                lensi_drawlist_push(
+                    ui, n,
+                    (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
+                                    .rel = {row->cell_x[i],
+                                            row->y + (c->row_height - font_size) * 0.5f, 0, 0},
+                                    .color = sel ? rs->accent : rs->fg,
+                                    .text = txt,
+                                    .text_size = font_size});
+            }
             lensi_drawlist_push(ui, n,
                                 (lens_draw_cmd){.kind = LENS_DRAW_CLIP_POP,
                                                 .rel = {c->columns[i].x, row->y, c->columns[i].w,

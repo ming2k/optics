@@ -421,6 +421,167 @@ static void test_textfield_requests_text_cursor(void) {
     lens_destroy(ui);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Host caret / selection control (ADR-0064)                           */
+/* ------------------------------------------------------------------ */
+
+/* Probe skin capturing the textfield's widget record (same channel as
+ * test_skin.c) so tests can inspect sel_rects. */
+static lens_widget_record g_tf_seen;
+static void probe_tf_skin(lens *ui, lens_node *node, const lens_widget_record *rec) {
+    g_tf_seen = *rec;
+    lens_skin_border(ui, node, (flux_rect){0, 0, 0, 0}, rec->style.accent, 0.0f, 1.0f);
+}
+
+/* ------------------------------------------------------------------ */
+/*  set_caret before the field's first-ever build (touch path)          */
+/* ------------------------------------------------------------------ */
+static void test_textfield_set_caret_before_first_build(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    char buf[64] = "ac";
+
+    /* frame 1: the caret is set before the field has ever been built; the
+     * find-or-create touch must remember it until the field appears. */
+    lens_begin(ui, &IN0);
+    lens_textfield_set_caret(ui, "tf", 1);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+
+    /* frame 2: focus */
+    lens_begin(ui, &IN0);
+    lens_set_focus(ui, lens_current_id(ui, "tf"));
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+
+    /* frame 3: typed text must land at the pre-seeded offset 1 */
+    lens_input in = IN0;
+    strcpy(in.text_utf8, "b");
+    lens_begin(ui, &in);
+    bool changed = lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(changed == true);
+    CHECK(strcmp(buf, "abc") == 0);
+
+    lens_destroy(ui);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tab-completion shape: rewrite the buffer, then caret to end         */
+/* ------------------------------------------------------------------ */
+static void test_textfield_set_caret_after_rewrite(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    char buf[64] = "git ch";
+    setup_textfield(ui, "tf", buf, sizeof buf); /* cursor at EOL (6) */
+
+    /* the host rewrites the buffer (completion), then moves the caret */
+    strcpy(buf, "git checkout");
+    lens_begin(ui, &IN0);
+    lens_textfield_set_caret(ui, "tf", UINT32_MAX); /* clamps to len */
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+
+    /* the next typed char lands at the end, not at the stale offset 6 */
+    lens_input in = IN0;
+    strcpy(in.text_utf8, "!");
+    lens_begin(ui, &in);
+    bool changed = lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(changed == true);
+    CHECK(strcmp(buf, "git checkout!") == 0);
+
+    lens_destroy(ui);
+}
+
+/* ------------------------------------------------------------------ */
+/*  set_selection(0, UINT32_MAX) selects the whole buffer               */
+/* ------------------------------------------------------------------ */
+static void test_textfield_set_selection_select_all(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    char buf[64] = "select me";
+    setup_textfield(ui, "tf", buf, sizeof buf);
+
+    lens_set_skin(ui, LENS_WIDGET_TEXTFIELD, probe_tf_skin);
+
+    /* select all: anchor 0, caret UINT32_MAX (clamps to len at build) */
+    lens_begin(ui, &IN0);
+    lens_textfield_set_selection(ui, "tf", 0, UINT32_MAX);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(g_tf_seen.content.sel_rect_count > 0);
+
+    lens_set_skin(ui, LENS_WIDGET_TEXTFIELD, NULL); /* restore default */
+
+    /* typing replaces the whole buffer */
+    lens_input in = IN0;
+    strcpy(in.text_utf8, "x");
+    lens_begin(ui, &in);
+    bool changed = lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(changed == true);
+    CHECK(strcmp(buf, "x") == 0);
+
+    lens_destroy(ui);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Clamp-on-shrink still repairs a caret the host left stale           */
+/* ------------------------------------------------------------------ */
+static void test_textfield_set_caret_clamp_on_shrink(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    char buf[64] = "abcdef";
+    setup_textfield(ui, "tf", buf, sizeof buf); /* cursor at EOL (6) */
+
+    /* host shrinks the buffer without touching the caret; the next build
+     * clamps 6 -> 2 and typed text lands at the new end */
+    strcpy(buf, "ab");
+    lens_input in = IN0;
+    strcpy(in.text_utf8, "z");
+    lens_begin(ui, &in);
+    bool changed = lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(changed == true);
+    CHECK(strcmp(buf, "abz") == 0);
+
+    lens_destroy(ui);
+}
+
+/* ------------------------------------------------------------------ */
+/*  A mid-character host offset snaps back to a UTF-8 boundary          */
+/* ------------------------------------------------------------------ */
+static void test_textfield_set_caret_utf8_snap(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    /* "aé中": a(1 byte) + é(2 bytes) + 中(3 bytes) = 6 bytes */
+    char buf[64] = "a\xc3\xa9\xe4\xb8\xad";
+    setup_textfield(ui, "tf", buf, sizeof buf); /* cursor at EOL (6) */
+
+    /* offset 2 lands mid-'é' (bytes 1..2); the build snaps back to 1 */
+    lens_begin(ui, &IN0);
+    lens_textfield_set_caret(ui, "tf", 2);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+
+    /* typed text inserts at the snapped boundary: "axé中" */
+    lens_input in = IN0;
+    strcpy(in.text_utf8, "x");
+    lens_begin(ui, &in);
+    bool changed = lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(changed == true);
+    CHECK(strcmp(buf, "ax\xc3\xa9\xe4\xb8\xad") == 0);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_textfield_paste();
     test_textfield_committed_text();
@@ -434,5 +595,10 @@ int main(void) {
     test_textfield_copy_cut();
     test_textfield_paste_replaces_selection();
     test_textfield_requests_text_cursor();
+    test_textfield_set_caret_before_first_build();
+    test_textfield_set_caret_after_rewrite();
+    test_textfield_set_selection_select_all();
+    test_textfield_set_caret_clamp_on_shrink();
+    test_textfield_set_caret_utf8_snap();
     return TEST_REPORT();
 }

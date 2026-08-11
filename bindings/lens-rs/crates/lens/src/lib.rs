@@ -740,6 +740,10 @@ impl Frame {
                     show_header: opts.show_header,
                     selectable: opts.selectable,
                     zebra: opts.zebra,
+                    keyboard: opts.keyboard,
+                    cursor: ptr::null_mut(),
+                    icon_fn: None,
+                    selected_fn: None,
                 },
             )
         };
@@ -747,6 +751,182 @@ impl Frame {
             selected: usize::try_from(raw.selected).ok(),
             selection_changed: raw.selection_changed,
             clicked: raw.clicked,
+            cursor: usize::try_from(raw.cursor).ok(),
+            cursor_changed: raw.cursor_changed,
+            activated: raw.activated,
+            clicked_row: usize::try_from(raw.clicked_row).ok(),
+        }
+    }
+
+    /// A virtualized, scrollable table with the ADR-0066 extensions: a
+    /// keyboard cursor, per-cell icons, and a host-owned selection set.
+    ///
+    /// - With `opts.keyboard` the focused table moves a cursor row on
+    ///   Up/Down/Home/End and activates it on Return (Space stays with the
+    ///   host for typeahead/toggles); the cursor row scrolls into view. The cursor is a row INDEX carried in `cursor`
+    ///   (-1 = none): the table reads it at build start and writes it back
+    ///   whenever the effective cursor moves, so hosts re-seed it on model
+    ///   resets by owning the variable.
+    /// - `icon` yields the glyph for a cell, `None` for none. It returns
+    ///   the raw `sys::lens_icon_id` — not the safe [`Icon`] enum — because
+    ///   the enum surfaces only a subset of the built-in glyphs and hosts
+    ///   use runtime-registered SVG ids. Only [`Align::Start`] columns draw
+    ///   an icon; other alignments ignore it.
+    /// - `selected` reports row membership in the host's selection set;
+    ///   clicks then only report `clicked_row` and `result.selected` stays
+    ///   `None`.
+    #[allow(clippy::too_many_arguments)] // mirrors the C call's arity
+    pub fn table_ex<F, I, S>(
+        &mut self,
+        id: &str,
+        columns: &[TableColumn<'_>],
+        row_count: usize,
+        opts: TableOpts,
+        cell: F,
+        icon: I,
+        selected: S,
+        cursor: &mut i32,
+    ) -> TableResult
+    where
+        F: FnMut(usize, usize) -> String,
+        I: FnMut(usize, usize) -> Option<sys::lens_icon_id>,
+        S: FnMut(usize) -> bool,
+    {
+        struct CallbackState<F, I, S> {
+            cell: F,
+            scratch: CString,
+            icon: I,
+            selected: S,
+        }
+
+        unsafe extern "C" fn cell_trampoline<F, I, S>(
+            user: *mut std::ffi::c_void,
+            row: i32,
+            column: i32,
+        ) -> *const c_char
+        where
+            F: FnMut(usize, usize) -> String,
+            I: FnMut(usize, usize) -> Option<sys::lens_icon_id>,
+            S: FnMut(usize) -> bool,
+        {
+            if user.is_null() || row < 0 || column < 0 {
+                return c"".as_ptr();
+            }
+            // SAFETY: `user` points to the stack-local CallbackState for the
+            // synchronous duration of lens_table. The C widget copies each
+            // returned string into its frame arena before invoking us again.
+            let state = unsafe { &mut *user.cast::<CallbackState<F, I, S>>() };
+            // A panic must not unwind across the FFI boundary (abort); report
+            // an empty cell instead, matching iris-rs's trampoline policy.
+            let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                (state.cell)(row as usize, column as usize)
+            }))
+            .unwrap_or_default()
+            .replace('\0', "");
+            state.scratch = CString::new(value).unwrap_or_default();
+            state.scratch.as_ptr()
+        }
+
+        unsafe extern "C" fn icon_trampoline<F, I, S>(
+            user: *mut std::ffi::c_void,
+            row: i32,
+            column: i32,
+        ) -> sys::lens_icon_id
+        where
+            F: FnMut(usize, usize) -> String,
+            I: FnMut(usize, usize) -> Option<sys::lens_icon_id>,
+            S: FnMut(usize) -> bool,
+        {
+            /// `LENS_ICON_INVALID` — `(lens_icon_id)-1` in C; the bindgen
+            /// newtype wraps the unsigned bit pattern.
+            const INVALID: sys::lens_icon_id = sys::lens_icon_id(u32::MAX);
+            if user.is_null() || row < 0 || column < 0 {
+                return INVALID;
+            }
+            // SAFETY: `user` points to the stack-local CallbackState for the
+            // synchronous duration of lens_table.
+            let state = unsafe { &mut *user.cast::<CallbackState<F, I, S>>() };
+            // A panic must not unwind across the FFI boundary (abort);
+            // report no icon instead.
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                (state.icon)(row as usize, column as usize)
+            }))
+            .unwrap_or_default()
+            .unwrap_or(INVALID)
+        }
+
+        unsafe extern "C" fn selected_trampoline<F, I, S>(
+            user: *mut std::ffi::c_void,
+            row: i32,
+        ) -> bool
+        where
+            F: FnMut(usize, usize) -> String,
+            I: FnMut(usize, usize) -> Option<sys::lens_icon_id>,
+            S: FnMut(usize) -> bool,
+        {
+            if user.is_null() || row < 0 {
+                return false;
+            }
+            // SAFETY: `user` points to the stack-local CallbackState for the
+            // synchronous duration of lens_table.
+            let state = unsafe { &mut *user.cast::<CallbackState<F, I, S>>() };
+            // A panic must not unwind across the FFI boundary (abort);
+            // report unselected instead.
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                (state.selected)(row as usize)
+            }))
+            .unwrap_or_default()
+        }
+
+        let id = cstr(id);
+        let titles = columns
+            .iter()
+            .map(|column| cstr(column.title))
+            .collect::<Vec<_>>();
+        let raw_columns = columns
+            .iter()
+            .zip(&titles)
+            .map(|(column, title)| sys::lens_table_column {
+                title: title.as_ptr(),
+                width: column.width.max(0.0),
+                align: column.align.raw(),
+            })
+            .collect::<Vec<_>>();
+        let mut state = CallbackState {
+            cell,
+            scratch: CString::default(),
+            icon,
+            selected,
+        };
+        let raw = unsafe {
+            sys::lens_table(
+                self.ui,
+                id.as_ptr(),
+                raw_columns.as_ptr(),
+                i32::try_from(raw_columns.len()).unwrap_or(i32::MAX),
+                i32::try_from(row_count).unwrap_or(i32::MAX),
+                Some(cell_trampoline::<F, I, S>),
+                (&mut state as *mut CallbackState<F, I, S>).cast(),
+                sys::lens_table_opts {
+                    row_height: opts.row_height.max(0.0),
+                    show_header: opts.show_header,
+                    selectable: opts.selectable,
+                    zebra: opts.zebra,
+                    keyboard: opts.keyboard,
+                    cursor: cursor as *mut i32,
+                    icon_fn: Some(icon_trampoline::<F, I, S>),
+                    selected_fn: Some(selected_trampoline::<F, I, S>),
+                },
+            )
+        };
+        TableResult {
+            selected: usize::try_from(raw.selected).ok(),
+            selection_changed: raw.selection_changed,
+            clicked: raw.clicked,
+            cursor: usize::try_from(raw.cursor).ok(),
+            cursor_changed: raw.cursor_changed,
+            activated: raw.activated,
+            clicked_row: usize::try_from(raw.clicked_row).ok(),
         }
     }
 
@@ -1245,6 +1425,52 @@ impl Frame {
         r.changed
     }
 
+    /// Move the caret of the text field identified by `label` (a byte offset
+    /// into the edit buffer, not a character index), collapsing any
+    /// selection. Call **before** [`Frame::textfield`] with the same label in
+    /// the same frame (or on an earlier frame) — typically right after
+    /// programmatically rewriting the buffer for Tab completion or a
+    /// pre-filled value. The write is unconditional: it wins over the field's
+    /// remembered position for that frame, then the field's own editing takes
+    /// over again.
+    ///
+    /// Out-of-range offsets clamp to the buffer length and offsets that land
+    /// mid-character snap back to a UTF-8 boundary, both at the next build.
+    /// Calling before the field's first-ever frame works (the state waits in
+    /// the retained store until the field appears). While an IME preedit is
+    /// active the field manages its own caret, so host writes then have no
+    /// visible effect.
+    pub fn textfield_set_caret(&mut self, label: &str, caret: u32) {
+        let c = cstr(label);
+        // SAFETY: ui is live for the frame.
+        unsafe { sys::lens_textfield_set_caret(self.ui, c.as_ptr(), caret) };
+    }
+
+    /// Like [`Self::textfield_set_caret`], but sets a selection: the anchor at
+    /// `anchor` and the caret at `caret` (both byte offsets; selecting
+    /// backwards is fine). Select-all is `anchor = 0, caret = u32::MAX` — the
+    /// caret clamps to the buffer length at the next build.
+    pub fn textfield_set_selection(&mut self, label: &str, anchor: u32, caret: u32) {
+        let c = cstr(label);
+        // SAFETY: ui is live for the frame.
+        unsafe { sys::lens_textfield_set_selection(self.ui, c.as_ptr(), anchor, caret) };
+    }
+
+    /// Like [`Self::textfield_set_selection`] but for a scoped field — the
+    /// `id` must match what was passed to [`Self::push_id`] around the
+    /// field's build.
+    pub fn textfield_scoped_set_selection(
+        &mut self,
+        id: &str,
+        label: &str,
+        anchor: u32,
+        caret: u32,
+    ) {
+        self.push_id(id);
+        self.textfield_set_selection(label, anchor, caret);
+        self.pop_id();
+    }
+
     /// A multi-line text editor with a minimum visible height.
     pub fn textarea(&mut self, label: &str, buf: &mut TextBuf, min_height: f32) -> bool {
         let c = cstr(label);
@@ -1294,7 +1520,9 @@ impl TextBuf {
     /// Replace the buffer contents with `text`, preserving the capacity.
     /// Truncated to `capacity - 1` bytes (room for the NUL terminator). Use to
     /// reset a persistent buffer the host owns alongside a textfield — lens
-    /// keeps its cursor clamped to the new length on the next frame.
+    /// keeps its cursor clamped to the new length on the next frame. Follow
+    /// with [`Frame::textfield_set_caret`] when the caret should land
+    /// somewhere specific instead (e.g. the end of a Tab completion).
     pub fn set(&mut self, text: &str) {
         let cap = self.bytes.len();
         if cap == 0 {
@@ -1383,7 +1611,11 @@ pub unsafe fn skin_scratch(ui: *mut sys::lens, node: *mut sys::lens_node) -> *mu
     // SAFETY: forwarded contract — the caller guarantees a live node.
     unsafe { sys::lens_skin_scratch(ui, node) }
 }
-
+/// Push a filled rounded rect from inside a skin.
+///
+/// # Safety
+/// `ui` and `node` must be the values the skin was called with, during
+/// that call.
 pub unsafe fn skin_rect(
     ui: *mut sys::lens,
     node: *mut sys::lens_node,
@@ -1430,7 +1662,17 @@ pub unsafe fn skin_text(
 ) {
     let c = cstr(text);
     // SAFETY: forwarded contract from the caller; c outlives the call.
-    unsafe { sys::lens_skin_text(ui, node, rel.to_raw(), color.raw(), c.as_ptr(), size_px, weight) };
+    unsafe {
+        sys::lens_skin_text(
+            ui,
+            node,
+            rel.to_raw(),
+            color.raw(),
+            c.as_ptr(),
+            size_px,
+            weight,
+        )
+    };
 }
 
 /// Push a vector icon glyph from inside a skin. `icon` is a raw

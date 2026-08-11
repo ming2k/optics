@@ -62,6 +62,20 @@ pub struct LiquidGlassFocus {
 /// adaptive body tint for accent-tinted glass (`[255, 255, 255]` = neutral),
 /// and an optional single-body optical `focus` field. Focus and `merged` are
 /// mutually exclusive.
+///
+/// The five `Option` knobs override dispatch-wide [`LiquidGlassParams`]
+/// policy per body and carry the adaptive-plate inputs (`None` maps to the
+/// C header's `<0` sentinel — inherit / legacy behaviour):
+/// - `frost_strength` / `tint_strength` / `saturation`: per-body override of
+///   the same params knob;
+/// - `plate_polarity`: the caller-chosen adaptive-tint polarity in `[0, 1]`
+///   — `0.0` pins the smoke plate, `1.0` the pearl plate — uniform for the
+///   whole body instead of the legacy per-pixel polarity. Text-bearing
+///   surfaces pin the polarity that opposes their text tone;
+///   backdrop-derived polarity can be computed from
+///   [`LiquidGlassFilter::stats`];
+/// - `backdrop_energy`: region high-frequency energy in `[0, 1]`, boosting
+///   the body tint over busy backdrops.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LiquidGlassGroup {
     pub primary: LiquidGlassShape,
@@ -73,6 +87,58 @@ pub struct LiquidGlassGroup {
     pub shadow_offset_y: f32,
     pub tint_color: [u8; 3],
     pub focus: Option<LiquidGlassFocus>,
+    pub frost_strength: Option<f32>,
+    pub tint_strength: Option<f32>,
+    pub saturation: Option<f32>,
+    pub plate_polarity: Option<f32>,
+    pub backdrop_energy: Option<f32>,
+}
+
+impl LiquidGlassGroup {
+    /// Map to the raw C struct. `None` becomes the `-1.0` inherit/disabled
+    /// sentinel; `Some` values are passed verbatim (the C side validates
+    /// finiteness and the `[0, 1]` range of the adaptive inputs).
+    pub fn as_raw(&self) -> sys::prism_liquid_glass_group {
+        let raw_shape = |shape: LiquidGlassShape| sys::prism_liquid_glass_shape {
+            bounds: sys::flux_rect {
+                x: shape.x,
+                y: shape.y,
+                w: shape.width,
+                h: shape.height,
+            },
+            corner_radius: shape.corner_radius,
+        };
+        let sentinel = |value: Option<f32>| value.unwrap_or(-1.0);
+        let mut shapes = [raw_shape(self.primary), raw_shape(self.primary)];
+        let shape_count = if let Some(merged) = self.merged {
+            shapes[1] = raw_shape(merged);
+            2
+        } else {
+            1
+        };
+        sys::prism_liquid_glass_group {
+            shapes,
+            shape_count,
+            blend_radius: self.blend_radius,
+            opacity: self.opacity,
+            shadow_alpha: self.shadow_alpha,
+            shadow_blur: self.shadow_blur,
+            shadow_offset_y: self.shadow_offset_y,
+            tint_color: (u32::from(self.tint_color[0]) << 16)
+                | (u32::from(self.tint_color[1]) << 8)
+                | u32::from(self.tint_color[2]),
+            focus: self
+                .focus
+                .map(|focus| raw_shape(focus.shape))
+                .unwrap_or_else(|| raw_shape(self.primary)),
+            focus_strength: self.focus.map_or(0.0, |focus| focus.strength),
+            frost_strength: sentinel(self.frost_strength),
+            tint_strength: sentinel(self.tint_strength),
+            saturation: sentinel(self.saturation),
+            plate_polarity: sentinel(self.plate_polarity),
+            backdrop_energy: sentinel(self.backdrop_energy),
+        }
+    }
 }
 
 /// Optical properties shared by all bodies in one liquid-glass dispatch.
@@ -121,6 +187,28 @@ impl Default for LiquidGlassParams {
     }
 }
 
+/// Per-group backdrop statistics measured by
+/// [`LiquidGlassFilter::apply`]: the mean Rec.709 luminance of the blurred
+/// backdrop over the group's primary body, and the mean |sharp − blurred|
+/// luminance (high-frequency energy). What a caller does with the numbers —
+/// mapping them onto [`LiquidGlassGroup::plate_polarity`] /
+/// [`LiquidGlassGroup::backdrop_energy`], temporal smoothing — is caller
+/// policy; prism only measures.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct BackdropStats {
+    pub mean_luminance: f32,
+    pub high_freq_energy: f32,
+}
+
+// The stats readback memcpy's the C array into `&mut [BackdropStats]`, so
+// the two types must stay layout-identical (bindgen's own layout tests pin
+// the C side).
+const _: () =
+    assert!(std::mem::size_of::<BackdropStats>() == std::mem::size_of::<sys::prism_backdrop_stat>());
+const _: () = assert!(
+    std::mem::align_of::<BackdropStats>() == std::mem::align_of::<sys::prism_backdrop_stat>()
+);
+
 /// Reusable analytic liquid-glass compositor with one output per frame slot.
 ///
 /// Threading: filters are not thread-safe per device. Serialize calls per
@@ -151,44 +239,8 @@ impl LiquidGlassFilter {
         groups: &[LiquidGlassGroup],
         params: LiquidGlassParams,
     ) -> Result<LiquidGlassImage<'filter>, Error> {
-        let raw_shape = |shape: LiquidGlassShape| sys::prism_liquid_glass_shape {
-            bounds: sys::flux_rect {
-                x: shape.x,
-                y: shape.y,
-                w: shape.width,
-                h: shape.height,
-            },
-            corner_radius: shape.corner_radius,
-        };
-        let raw_groups: Vec<sys::prism_liquid_glass_group> = groups
-            .iter()
-            .map(|group| {
-                let mut shapes = [raw_shape(group.primary), raw_shape(group.primary)];
-                let shape_count = if let Some(merged) = group.merged {
-                    shapes[1] = raw_shape(merged);
-                    2
-                } else {
-                    1
-                };
-                sys::prism_liquid_glass_group {
-                    shapes,
-                    shape_count,
-                    blend_radius: group.blend_radius,
-                    opacity: group.opacity,
-                    shadow_alpha: group.shadow_alpha,
-                    shadow_blur: group.shadow_blur,
-                    shadow_offset_y: group.shadow_offset_y,
-                    tint_color: (u32::from(group.tint_color[0]) << 16)
-                        | (u32::from(group.tint_color[1]) << 8)
-                        | u32::from(group.tint_color[2]),
-                    focus: group
-                        .focus
-                        .map(|focus| raw_shape(focus.shape))
-                        .unwrap_or_else(|| raw_shape(group.primary)),
-                    focus_strength: group.focus.map_or(0.0, |focus| focus.strength),
-                }
-            })
-            .collect();
+        let raw_groups: Vec<sys::prism_liquid_glass_group> =
+            groups.iter().map(LiquidGlassGroup::as_raw).collect();
         let desc = sys::prism_liquid_glass_desc {
             type_: sys::prism_struct_type::PRISM_TYPE_LIQUID_GLASS_DESC,
             input: input.as_raw(),
@@ -224,6 +276,34 @@ impl LiquidGlassFilter {
             raw,
             _filter: PhantomData,
         })
+    }
+
+    /// Read the backdrop statistics this frame slot last submitted —
+    /// `FLUX_MAX_FRAMES_IN_FLIGHT` frames ago: `begin_frame` has waited
+    /// that slot's fence, so the mapped buffer is stable while `frame`
+    /// records. Call before this frame's [`apply`](Self::apply) on the same
+    /// slot; the numbers always describe the slot's previous submission.
+    ///
+    /// Returns the number of group stats copied into `out` (the minimum of
+    /// `out.len()` and the group count that submission carried). Fails with
+    /// `FLUX_ERROR_INVALID_STATE` when the slot has never been applied with
+    /// stats.
+    pub fn stats(
+        &mut self,
+        frame: &flux::Frame<'_>,
+        out: &mut [BackdropStats],
+    ) -> Result<usize, Error> {
+        let mut count = 0u32;
+        check(unsafe {
+            sys::prism_liquid_glass_filter_stats(
+                self.raw,
+                frame.as_raw(),
+                out.as_mut_ptr().cast::<sys::prism_backdrop_stat>(),
+                u32::try_from(out.len()).unwrap_or(u32::MAX),
+                &mut count,
+            )
+        })?;
+        Ok(count as usize)
     }
 }
 

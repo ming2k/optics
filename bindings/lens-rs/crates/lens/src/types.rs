@@ -163,6 +163,10 @@ pub struct TableOpts {
     pub show_header: bool,
     pub selectable: bool,
     pub zebra: bool,
+    /// Arrow-key/Home/End cursor plus Return activation while the
+    /// table is focused (ADR-0066). Requires `selectable` — only selectable
+    /// tables take focus.
+    pub keyboard: bool,
 }
 
 /// Structural options for a tab strip (ADR-0061: the presentation knobs
@@ -189,6 +193,7 @@ impl Default for TableOpts {
             show_header: true,
             selectable: true,
             zebra: false,
+            keyboard: false,
         }
     }
 }
@@ -199,6 +204,15 @@ pub struct TableResult {
     pub selected: Option<usize>,
     pub selection_changed: bool,
     pub clicked: bool,
+    /// Effective cursor row after this frame (ADR-0066).
+    pub cursor: Option<usize>,
+    /// The effective cursor moved during this frame.
+    pub cursor_changed: bool,
+    /// Return fired on the cursor row (keyboard mode) or an a11y
+    /// DoAction fired this frame.
+    pub activated: bool,
+    /// Row clicked this frame.
+    pub clicked_row: Option<usize>,
 }
 
 impl Align {

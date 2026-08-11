@@ -7,6 +7,20 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Per-group material overrides and adaptive-plate inputs.**
+  `LiquidGlassGroup` gains `frost_strength`, `tint_strength`, `saturation`,
+  `plate_polarity`, and `backdrop_energy` as `Option<f32>`; `None` maps to
+  the C header's `< 0` inherit/disabled sentinel, `Some` is used verbatim.
+  `plate_polarity` pins the caller-chosen tint polarity (0 = smoke, 1 =
+  pearl) uniformly for the whole body. The group-to-raw mapping is now
+  public as `LiquidGlassGroup::as_raw`.
+- **Backdrop statistics.** `BackdropStats` and
+  `LiquidGlassFilter::stats(frame, out)` read the per-group GPU reduction
+  (mean blurred-backdrop luminance and high-frequency energy) the frame
+  slot last submitted — `FLUX_MAX_FRAMES_IN_FLIGHT` frames ago, stable
+  while the frame records. These are the inputs `plate_polarity` and
+  `backdrop_energy` consume; mapping and smoothing stay caller-side
+  (ADR-0065).
 - **Initial release.** The liquid-glass material moved out of libflux into
   libprism (the optics stack's material library); these bindings track it.
   `prism-sys` binds `<prism/prism.h>` at build time via bindgen, located
@@ -22,3 +36,10 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
   `flux::Device` / `flux::Frame` / `flux::Image` / `flux::BlurredImage`
   directly and reusing `flux::Error`. `LiquidGlassParams::glare` is renamed
   to `rim_light`, following the C header.
+
+### Changed
+
+- The C `prism_liquid_glass_group` grew the five fields above; the
+  push-constant block stays at 160 bytes via packing (`tint_color` +
+  `shape_count` in one u32, f16 `size_reference`/`size_scale_min` in one
+  u32). prism-sys' bindgen layout tests pin the new layout.

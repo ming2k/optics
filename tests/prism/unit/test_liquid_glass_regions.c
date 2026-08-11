@@ -58,6 +58,68 @@ int main(void) {
     group.shapes[0].bounds = (flux_rect){200.0f, 10.0f, 8.0f, 8.0f};
     EXPECT(!liquid_glass_group_dispatch_bounds(&group, 0.0f, 100u, 80u, &bounds));
 
+    /* Override/adaptive fields: INIT macro defaults are the inherit/disabled
+     * sentinel and validate; zero-init is an explicit zero override, not
+     * inherit. */
+    prism_liquid_glass_group overrides = PRISM_LIQUID_GLASS_GROUP_INIT;
+    overrides.shapes[0] = (prism_liquid_glass_shape){
+        .bounds = {0.0f, 0.0f, 16.0f, 16.0f},
+        .corner_radius = 4.0f,
+    };
+    EXPECT(overrides.frost_strength < 0.0f && overrides.tint_strength < 0.0f &&
+           overrides.saturation < 0.0f && overrides.plate_polarity < 0.0f &&
+           overrides.backdrop_energy < 0.0f);
+    EXPECT(liquid_glass_group_is_valid(&overrides));
+
+    /* NaN is rejected in each of the five fields; any other sentinel or
+     * in-range value is accepted. */
+    float *fields[5] = {&overrides.frost_strength, &overrides.tint_strength,
+                        &overrides.saturation, &overrides.plate_polarity,
+                        &overrides.backdrop_energy};
+    for (uint32_t i = 0; i < 5u; ++i) {
+        float keep = *fields[i];
+        *fields[i] = NAN;
+        EXPECT(!liquid_glass_group_is_valid(&overrides));
+        *fields[i] = keep;
+        EXPECT(liquid_glass_group_is_valid(&overrides));
+    }
+    /* plate_polarity / backdrop_energy accept <0 (disabled) or [0,1];
+     * anything above the range is rejected. */
+    overrides.plate_polarity = 0.0f;
+    overrides.backdrop_energy = 1.0f;
+    EXPECT(liquid_glass_group_is_valid(&overrides));
+    overrides.plate_polarity = 1.0f + 1e-6f;
+    EXPECT(!liquid_glass_group_is_valid(&overrides));
+    overrides.plate_polarity = -2.0f;
+    EXPECT(liquid_glass_group_is_valid(&overrides));
+    overrides.backdrop_energy = 1.5f;
+    EXPECT(!liquid_glass_group_is_valid(&overrides));
+    overrides.backdrop_energy = -1.0f;
+    EXPECT(liquid_glass_group_is_valid(&overrides));
+    /* The strength overrides accept any finite value: <0 inherits. */
+    overrides.frost_strength = 0.0f;
+    overrides.tint_strength = 2.5f;
+    overrides.saturation = -0.5f;
+    EXPECT(liquid_glass_group_is_valid(&overrides));
+
+    /* Inherit resolution: negative takes the desc value, non-negative is
+     * verbatim (an explicit 0 pins the knob to zero). */
+    EXPECT(liquid_glass_group_or_desc(-1.0f, 0.8f) == 0.8f);
+    EXPECT(liquid_glass_group_or_desc(-0.001f, 0.8f) == 0.8f);
+    EXPECT(liquid_glass_group_or_desc(0.0f, 0.8f) == 0.0f);
+    EXPECT(liquid_glass_group_or_desc(0.3f, 0.8f) == 0.3f);
+
+    /* Stats bounds: primary shape clipped to the image, rounded outward;
+     * off-screen or zero-area bodies reduce an empty region. */
+    liquid_glass_region stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
+    EXPECT(stats.width == 0u && stats.height == 0u); /* group sits at x=200 */
+    group.shapes[0].bounds = (flux_rect){-4.25f, 10.5f, 20.0f, 30.0f};
+    stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
+    EXPECT(same_region(stats, (liquid_glass_region){0u, 10u, 16u, 31u}));
+    group.shapes[0].bounds = (flux_rect){90.0f, 60.0f, 40.0f, 40.0f};
+    stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
+    EXPECT(same_region(stats, (liquid_glass_region){90u, 60u, 10u, 20u}));
+
     liquid_glass_region previous[LIQUID_GLASS_MAX_GROUPS] = {0};
     liquid_glass_region current[LIQUID_GLASS_MAX_GROUPS] = {0};
     liquid_glass_region clear[LIQUID_GLASS_MAX_CLEAR_REGIONS] = {0};

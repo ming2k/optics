@@ -33,12 +33,20 @@ static inline bool liquid_glass_rect_contains(flux_rect outer, flux_rect inner) 
 
 /* Validate one body's geometry and optical policy. A positive focus is an
  * interior field of a single body, never a second body or a smooth-union
- * participant, so its bounds must remain inside the primary shape. */
+ * participant, so its bounds must remain inside the primary shape. The five
+ * override/adaptive fields must be finite; plate_polarity and
+ * backdrop_energy are sentinel-driven (<0 disables), so only values above
+ * their [0,1] range are rejected. */
 static inline bool liquid_glass_group_is_valid(const prism_liquid_glass_group *group) {
     if (!group || group->shape_count < 1u || group->shape_count > 2u ||
         !isfinite(group->blend_radius) || !isfinite(group->opacity) ||
         !isfinite(group->shadow_alpha) || !isfinite(group->shadow_blur) ||
-        !isfinite(group->shadow_offset_y) || !isfinite(group->focus_strength))
+        !isfinite(group->shadow_offset_y) || !isfinite(group->focus_strength) ||
+        !isfinite(group->frost_strength) || !isfinite(group->tint_strength) ||
+        !isfinite(group->saturation) || !isfinite(group->plate_polarity) ||
+        !isfinite(group->backdrop_energy))
+        return false;
+    if (group->plate_polarity > 1.0f || group->backdrop_energy > 1.0f)
         return false;
     for (uint32_t j = 0; j < group->shape_count; ++j) {
         if (!liquid_glass_finite_rect(group->shapes[j].bounds) ||
@@ -51,6 +59,12 @@ static inline bool liquid_glass_group_is_valid(const prism_liquid_glass_group *g
          !liquid_glass_rect_contains(group->shapes[0].bounds, group->focus.bounds)))
         return false;
     return true;
+}
+
+/* Per-group override resolution: a negative group value inherits the
+ * dispatch-wide desc value, a non-negative one is used verbatim. */
+static inline float liquid_glass_group_or_desc(float group_value, float desc_value) {
+    return group_value >= 0.0f ? group_value : desc_value;
 }
 
 /* Conservative physical-pixel footprint of one analytic body, including the
@@ -95,6 +109,28 @@ static inline bool liquid_glass_group_dispatch_bounds(const prism_liquid_glass_g
         .height = (uint32_t)(iy1 - iy0),
     };
     return true;
+}
+
+/* Primary body bounds clipped to the image — the reduction window for
+ * per-region backdrop statistics. A body that does not intersect the
+ * capture yields a zero region, which the stats shader reports as zeros. */
+static inline liquid_glass_region liquid_glass_group_stats_bounds(
+    const prism_liquid_glass_group *group, uint32_t image_width, uint32_t image_height) {
+    liquid_glass_region region = {0u, 0u, 0u, 0u};
+    if (!group || group->shape_count < 1u || image_width == 0u || image_height == 0u)
+        return region;
+    flux_rect bounds = group->shapes[0].bounds;
+    float x0 = fmaxf(bounds.x, 0.0f);
+    float y0 = fmaxf(bounds.y, 0.0f);
+    float x1 = fminf(bounds.x + bounds.w, (float)image_width);
+    float y1 = fminf(bounds.y + bounds.h, (float)image_height);
+    if (x1 <= x0 || y1 <= y0)
+        return region;
+    uint32_t ix0 = (uint32_t)floorf(x0);
+    uint32_t iy0 = (uint32_t)floorf(y0);
+    uint32_t ix1 = (uint32_t)ceilf(x1);
+    uint32_t iy1 = (uint32_t)ceilf(y1);
+    return (liquid_glass_region){ix0, iy0, ix1 - ix0, iy1 - iy0};
 }
 
 static inline bool liquid_glass_regions_overlap(liquid_glass_region a, liquid_glass_region b) {

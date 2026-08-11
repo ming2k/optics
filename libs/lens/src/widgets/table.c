@@ -3,7 +3,9 @@
  * A scroll-area-backed table that builds only the visible window of rows.
  * The full row_count drives the scrollbar; only rows intersecting the
  * viewport are drawn (as positioned text), so cost is O(visible) regardless
- * of row_count. Selection persists per-row in the retained store. */
+ * of row_count. Selection persists per-row in the retained store.
+ * ADR-0066 adds a keyboard cursor (host-ownable), per-cell icons, and a
+ * host-owned selection pull callback — all opt-in through lens_table_opts. */
 
 #include "../internal.h"
 #include <stdio.h>
@@ -18,7 +20,23 @@ typedef struct {
     bool initialized;
     float drag_start_offset, drag_start_y;
     int selected; /* -1 = none */
+    int cursor;   /* retained keyboard cursor row, -1 = none (ADR-0066) */
+    /* The effective cursor reported at the end of the previous frame.
+     * Comparing against it catches host-driven jumps through opts.cursor
+     * (search-as-you-type), not just keyboard moves. */
+    int reported_cursor;
+    /* lens_node_state keys a node's allocation by BYTE SIZE, and the
+     * layout clamp pass (solve.c) plus the scrollbar skin request a
+     * lens_scroll_state on every is_scroll node — the table is one.
+     * Only a size mismatch keeps those writes from aliasing this
+     * struct; the assert below pins the distinction. If the two layouts
+     * ever collide, grow this pad. */
+    float size_guard;
 } lens_table_state;
+
+static_assert(sizeof(lens_table_state) != sizeof(lens_scroll_state),
+              "lens_table_state must not alias lens_scroll_state: lens_node_state keys "
+              "per-node state by byte size");
 
 /* ------------------------------------------------------------------ */
 /*  Cell text measurement helper                                       */
@@ -37,6 +55,8 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
                              lens_table_opts opts) {
     const lens_theme *t = &ui->theme;
     lens_table_result result = {0};
+    result.cursor = -1;
+    result.clicked_row = -1;
     lens_style eff = lensi_style_effective(ui);
     float font_size = lensi_style_font_size(&eff, t);
     float padding = lensi_style_padding(&eff, t);
@@ -79,6 +99,8 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
      * scrollbar geometry (tables without overflow never have a thumb). */
     if (st && !st->initialized) {
         st->selected = -1;
+        st->cursor = -1;
+        st->reported_cursor = -1;
         st->initialized = true;
     }
 
@@ -184,6 +206,93 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
             ui->active_id = 0;
     }
 
+    /* ---- keyboard cursor (ADR-0066) ----
+     * The cursor is a row INDEX owned by the host (opts.cursor) or by the
+     * retained node state. Clamping against the live row_count runs every
+     * frame: a host cursor beyond a shrunk model pulls back into range and
+     * reports cursor_changed once (the write-back re-seeds the host). */
+    int cursor = opts.cursor ? *opts.cursor : (st ? st->cursor : -1);
+    int cursor_start = cursor;
+    if (cursor >= row_count)
+        cursor = row_count - 1;
+    if (cursor < -1)
+        cursor = -1;
+
+    /* Key loop, before lensi_interact: arrows/Home/End move the cursor
+     * (from -1, Down lands on the first row, Up on the last; the ends
+     * clamp), Return activates a valid cursor row. Every handled key is
+     * consumed so the central activation in lensi_interact cannot
+     * double-fire and a later widget never sees the table's navigation.
+     * Space is deliberately NOT handled: it stays available to the host
+     * (search-as-you-type into names with spaces, Ctrl+Space toggles). */
+    if (opts.keyboard && ui->focused_id == n->id) {
+        for (uint32_t i = 0; i < ui->input.key_count; i++) {
+            const lens_key_event *k = &ui->input.keys[i];
+            if (!k->pressed || ui->key_consumed[i])
+                continue;
+            int next = cursor;
+            if (k->key == LENS_KEY_DOWN)
+                next = cursor < 0 ? 0 : (cursor + 1 < row_count ? cursor + 1 : cursor);
+            else if (k->key == LENS_KEY_UP)
+                next = cursor < 0 ? row_count - 1 : (cursor > 0 ? cursor - 1 : cursor);
+            else if (k->key == LENS_KEY_HOME)
+                next = row_count > 0 ? 0 : -1;
+            else if (k->key == LENS_KEY_END)
+                next = row_count - 1;
+            else if (k->key == LENS_KEY_RETURN) {
+                if (cursor >= 0)
+                    result.activated = true;
+                ui->key_consumed[i] = 1;
+                continue;
+            } else
+                continue;
+            ui->key_consumed[i] = 1;
+            if (next != cursor)
+                cursor = next;
+        }
+    }
+
+    /* Keep the cursor row visible whenever it moved for any reason — a
+     * keyboard move above or a host rewrite through opts.cursor (e.g.
+     * search-as-you-type jumping the cursor): minimal scroll so
+     * [cursor*row_h, (cursor+1)*row_h) intersects the body viewport. A
+     * static cursor never touches the offset, so this never fights wheel
+     * or thumb scrolling. */
+    if (st && cursor != st->reported_cursor && cursor >= 0) {
+        float row_top = (float)cursor * row_h;
+        if (row_top < st->offset_y)
+            st->offset_y = row_top;
+        else if (row_top + row_h > st->offset_y + body_h)
+            st->offset_y = row_top + row_h - body_h;
+        if (st->offset_y < 0.0f)
+            st->offset_y = 0.0f;
+        if (st->offset_y > scroll_range)
+            st->offset_y = scroll_range;
+        off = st->offset_y;
+    }
+    if (st)
+        st->reported_cursor = cursor;
+
+    result.cursor = cursor;
+    result.cursor_changed = cursor != cursor_start;
+    if (opts.cursor) {
+        if (result.cursor_changed)
+            *opts.cursor = cursor;
+    } else if (st) {
+        st->cursor = cursor;
+    }
+
+    /* Join the tab order (selectable tables only) — after the scrollbar
+     * block so a thumb press still claims active_id first. The table keeps
+     * its own row hit-test, so r.clicked is honored only for the a11y
+     * DoAction path (the pending id is captured before lensi_interact
+     * consumes it); a mouse click or central Return/Space press reported
+     * through r.clicked is deliberately ignored here. */
+    bool a11y_fire = ui->a11y_activate_id == n->id;
+    lens_response resp = lensi_interact(ui, n, opts.selectable, false);
+    if (a11y_fire && resp.clicked)
+        result.activated = true;
+
     /* ---- compute the visible row window ---- */
     int first = (int)(off / row_h);
     if (first < 0)
@@ -213,14 +322,21 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
         if (ly >= 0.0f && ly < body_h) {
             int r = (int)(ly / row_h);
             if (r >= 0 && r < row_count) {
-                st->selected = r;
-                result.selected = r;
-                result.selection_changed = true;
+                result.clicked_row = r;
                 clicked_row = true;
+                /* Host-owned selection (ADR-0066): the click is reported
+                 * only; the retained store stays out of it. */
+                if (!opts.selected_fn) {
+                    st->selected = r;
+                    result.selected = r;
+                    result.selection_changed = true;
+                }
             }
         }
     }
-    if (st)
+    if (opts.selected_fn)
+        result.selected = -1; /* the host owns the selection set */
+    else if (st)
         result.selected = st->selected;
 
     /* ---- column x positions ---- */
@@ -261,19 +377,37 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
         int out_r = 0;
         for (int r = first; r < last; r++) {
             float ry = header_h + (float)r * row_h - off;
-            bool sel = st && r == st->selected;
+            bool sel = opts.selected_fn ? opts.selected_fn(user, r)
+                                        : (st && r == st->selected);
+            bool cur = r == cursor;
             const char **cells =
                 flux_arena_alloc(&ui->arena, (size_t)col_count * sizeof *cells);
             float *cell_x = flux_arena_alloc(&ui->arena, (size_t)col_count * sizeof *cell_x);
-            if (!cells || !cell_x) {
+            /* Icon ids in an arena array parallel to cells (ADR-0066);
+             * allocated only when an icon callback was supplied. */
+            lens_icon_id *icons =
+                opts.icon_fn
+                    ? flux_arena_alloc(&ui->arena, (size_t)col_count * sizeof *icons)
+                    : NULL;
+            if (!cells || !cell_x || (opts.icon_fn && !icons)) {
                 lensi_set_overflow(ui);
                 break;
             }
             for (int c = 0; c < col_count && c < 32; c++) {
                 const char *txt = cell_at(cell, user, r, c);
                 cells[c] = txt;
+                if (icons)
+                    icons[c] = opts.icon_fn(user, r, c);
                 float cw = cols[c].width > 0 ? cols[c].width : flex_w;
                 float tx = col_x[c] + padding;
+                /* A start-aligned cell with a valid icon indents its text
+                 * past the glyph box (icon_size = font_size, gap 8 — the
+                 * selectable precedent); the skin draws the glyph at the
+                 * pre-shift x. Other alignments resolve from the column
+                 * edge and carry no icon. */
+                if (icons && cols[c].align == LENS_START &&
+                    lensi_icon_valid((int32_t)icons[c]))
+                    tx += font_size + 8.0f;
                 if (txt && txt[0]) {
                     if (cols[c].align == LENS_END || cols[c].align == LENS_STRETCH) {
                         lens_text_metrics tm = lensi_text_measure_label(ui, txt, font_size, 0.0f);
@@ -288,9 +422,10 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
             rows_out[out_r++] = (lens_grid_row){
                 .cells = cells,
                 .cell_x = cell_x,
+                .icons = icons,
                 .y = ry,
                 .index = r,
-                .state = sel ? LENS_STATE_SELECTED : 0,
+                .state = (sel ? LENS_STATE_SELECTED : 0) | (cur ? LENS_STATE_FOCUSED : 0),
             };
 
             /* a11y row mapping (ADR-0035): each visible row is a
@@ -316,7 +451,8 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
                     (flux_rect){n->prev_rect.x, n->prev_rect.y + ry, view_w, row_h};
                 lensi_node_semantics(ui, row_node, LENS_ROLE_ROW,
                                      cells[0] && cells[0][0] ? cells[0] : NULL, NULL,
-                                     sel ? LENS_A11Y_SELECTED : 0);
+                                     (sel ? LENS_A11Y_SELECTED : 0) |
+                                         (cur ? LENS_A11Y_FOCUSED : 0));
             }
         }
 

@@ -399,6 +399,90 @@ fn textbuf_set_replaces_and_truncates() {
 }
 
 #[test]
+fn table_ex_keyboard_drives_cursor_and_activation() {
+    let mut ui = Ui::headless().expect("create headless ui");
+    let columns = [TableColumn {
+        title: "Name",
+        width: 0.0,
+        align: Align::Start,
+    }];
+    let opts = TableOpts {
+        row_height: 28.0,
+        keyboard: true,
+        ..TableOpts::default()
+    };
+    let idle = Input::new((480.0, 320.0), 1.0 / 60.0);
+    let mut cursor = -1i32;
+
+    let build = |f: &mut lens::Frame, cursor: &mut i32| {
+        f.size_next(440.0, 240.0);
+        f.table_ex(
+            "files",
+            &columns,
+            50,
+            opts,
+            |row, _| format!("row {row}"),
+            |_, _| None,
+            |row| row == 2,
+            cursor,
+        )
+    };
+
+    // Settle two frames so the table has hit-test geometry. The host-owned
+    // selection callback keeps the retained store out of the result.
+    let mut header_h = 0.0f32;
+    for _ in 0..2 {
+        let result = ui.frame(&idle, |f| {
+            let theme = f.theme();
+            header_h = theme.font_size() + 2.0 * theme.padding();
+            build(f, &mut cursor)
+        });
+        assert_eq!(result.selected, None);
+        assert!(!result.selection_changed);
+        assert_eq!(result.cursor, None);
+    }
+
+    // Click row 1 to focus the table: reported via clicked_row only.
+    let mut click = Input::new((480.0, 320.0), 1.0 / 60.0);
+    click
+        .set_cursor(20.0, header_h + 28.0 + 14.0)
+        .set_mouse_down(MouseButton::Left, true)
+        .set_mouse_pressed(MouseButton::Left, true);
+    let result = ui.frame(&click, |f| build(f, &mut cursor));
+    assert!(result.clicked);
+    assert_eq!(result.clicked_row, Some(1));
+    assert_eq!(result.selected, None);
+
+    // Down from -1 lands on the first row and writes back through `cursor`.
+    let mut down = idle.clone();
+    down.push_key(lens::key::DOWN, true, false);
+    let result = ui.frame(&down, |f| build(f, &mut cursor));
+    assert_eq!(result.cursor, Some(0));
+    assert!(result.cursor_changed);
+    assert_eq!(cursor, 0);
+
+    let result = ui.frame(&down, |f| build(f, &mut cursor));
+    assert_eq!(result.cursor, Some(1));
+
+    // Return activates the cursor row.
+    let mut enter = idle.clone();
+    enter.push_key(lens::key::RETURN, true, false);
+    let result = ui.frame(&enter, |f| build(f, &mut cursor));
+    assert!(result.activated);
+    assert_eq!(result.cursor, Some(1));
+
+    // End jumps to the last row, Up steps back.
+    let mut end = idle.clone();
+    end.push_key(lens::key::END, true, false);
+    let result = ui.frame(&end, |f| build(f, &mut cursor));
+    assert_eq!(result.cursor, Some(49));
+    let mut up = idle.clone();
+    up.push_key(lens::key::UP, true, false);
+    let result = ui.frame(&up, |f| build(f, &mut cursor));
+    assert_eq!(result.cursor, Some(48));
+}
+
+#[test]
 fn input_builder_sets_fields() {
     let mut input = Input::new((1024.0, 768.0), 0.016);
     input
@@ -419,5 +503,75 @@ fn input_builder_sets_fields() {
     let mut ui = Ui::headless().unwrap();
     ui.frame(&input, |f| {
         f.button("Click");
+    });
+}
+
+#[test]
+fn textfield_host_caret_and_selection() {
+    let mut ui = Ui::headless().expect("create headless ui");
+    let mut buf = TextBuf::new(64, "ac");
+    let idle = Input::new((400.0, 200.0), 1.0 / 60.0);
+
+    // Frame 1: caret set before the field's first-ever build — the
+    // find-or-create touch must remember it until the field appears.
+    ui.frame(&idle, |f| {
+        f.textfield_set_caret("tf", 1);
+        f.textfield("tf", &mut buf);
+    });
+
+    // Frame 2: click inside the field to focus it (click grants focus; the
+    // press also places the caret at the click point — near the end here).
+    let mut click = Input::new((400.0, 200.0), 1.0 / 60.0);
+    click
+        .set_cursor(60.0, 20.0)
+        .set_mouse_down(MouseButton::Left, true)
+        .set_mouse_pressed(MouseButton::Left, true);
+    ui.frame(&click, |f| {
+        f.textfield("tf", &mut buf);
+    });
+
+    // Frame 3: release the button.
+    let mut release = Input::new((400.0, 200.0), 1.0 / 60.0);
+    release
+        .set_cursor(60.0, 20.0)
+        .set_mouse_released(MouseButton::Left, true);
+    ui.frame(&release, |f| {
+        f.textfield("tf", &mut buf);
+    });
+
+    // Frame 4: move the caret back to byte 1 and type in the same frame —
+    // the host write wins over the click-placed caret, so 'b' lands at 1.
+    let mut typing = Input::new((400.0, 200.0), 1.0 / 60.0);
+    typing.set_text("b");
+    let changed = ui.frame(&typing, |f| {
+        f.textfield_set_caret("tf", 1);
+        f.textfield("tf", &mut buf)
+    });
+    assert!(changed, "typing 'b' should edit the buffer");
+    assert_eq!(buf.as_str(), "abc");
+
+    // Frame 5: select-all (anchor 0, caret u32::MAX clamps to the length),
+    // then a typed char replaces the whole buffer.
+    let mut typing = Input::new((400.0, 200.0), 1.0 / 60.0);
+    typing.set_text("x");
+    let changed = ui.frame(&typing, |f| {
+        f.textfield_set_selection("tf", 0, u32::MAX);
+        f.textfield("tf", &mut buf)
+    });
+    assert!(changed, "typing 'x' should replace the selection");
+    assert_eq!(buf.as_str(), "x");
+
+    // The scoped variant addresses a field built under push_id; drive it
+    // once to prove the push/call/pop wiring.
+    ui.frame(&idle, |f| {
+        f.push_id("scope");
+        f.textfield("inner", &mut buf);
+        f.pop_id();
+    });
+    ui.frame(&idle, |f| {
+        f.textfield_scoped_set_selection("scope", "inner", 0, 1);
+        f.push_id("scope");
+        f.textfield("inner", &mut buf);
+        f.pop_id();
     });
 }

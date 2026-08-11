@@ -176,54 +176,52 @@ int main(int argc, char **argv) {
     const flux_rect pill = {60.0f, 560.0f, 1160.0f, 90.0f};
     const flux_rect panel = {430.0f, 140.0f, 420.0f, 260.0f};
     prism_liquid_glass_group groups[5] = {
-        {.shapes = {{.bounds = pill, .corner_radius = 45.0f}},
-         .shape_count = 1,
-         .opacity = 1.0f,
-         .shadow_alpha = 0.20f,
-         .shadow_blur = 12.0f,
-         .shadow_offset_y = 6.0f,
-         .tint_color = 0xFFFFFFu},
-        {.shapes = {{.bounds = panel, .corner_radius = 32.0f}},
-         .shape_count = 1,
-         .opacity = 1.0f,
-         .shadow_alpha = 0.22f,
-         .shadow_blur = 14.0f,
-         .shadow_offset_y = 7.0f,
-         .tint_color = 0xFFFFFFu,
-         /* One selected region changes the parent body's optics; it is not
-          * another glass body and therefore casts no nested rim or shadow. */
-         .focus = {.bounds = {474.0f, 184.0f, 212.0f, 156.0f}, .corner_radius = 18.0f},
-         .focus_strength = 1.0f},
-        {.shapes =
-             {
-                 {.bounds = {120.0f, 200.0f, 96.0f, 96.0f}, .corner_radius = 48.0f},
-                 {.bounds = {252.0f, 224.0f, 72.0f, 72.0f}, .corner_radius = 36.0f},
-             },
-         .shape_count = 2,
-         .blend_radius = 28.0f,
-         .opacity = 1.0f,
-         .shadow_alpha = 0.20f,
-         .shadow_blur = 10.0f,
-         .shadow_offset_y = 5.0f,
-         /* Cool accent tint: per-body tinting must read through the glass. */
-         .tint_color = 0xC8E0FFu},
-        /* HUD-chip scale with its own component shadow. */
-        {.shapes = {{.bounds = {880.0f, 500.0f, 240.0f, 32.0f}, .corner_radius = 16.0f}},
-         .shape_count = 1,
-         .opacity = 1.0f,
-         .shadow_alpha = 0.16f,
-         .shadow_blur = 4.0f,
-         .shadow_offset_y = 2.0f,
-         .tint_color = 0xFFFFFFu},
-        /* Dock-handle scale: a 6 px stadium indicator still casts a shadow. */
-        {.shapes = {{.bounds = {560.0f, 700.0f, 140.0f, 6.0f}, .corner_radius = 3.0f}},
-         .shape_count = 1,
-         .opacity = 1.0f,
-         .shadow_alpha = 0.20f,
-         .shadow_blur = 4.2f,
-         .shadow_offset_y = 2.1f,
-         .tint_color = 0xFFFFFFu},
+        PRISM_LIQUID_GLASS_GROUP_INIT,
+        PRISM_LIQUID_GLASS_GROUP_INIT,
+        PRISM_LIQUID_GLASS_GROUP_INIT,
+        PRISM_LIQUID_GLASS_GROUP_INIT,
+        PRISM_LIQUID_GLASS_GROUP_INIT,
     };
+    groups[0].shapes[0] = (prism_liquid_glass_shape){.bounds = pill, .corner_radius = 45.0f};
+    groups[0].shadow_alpha = 0.20f;
+    groups[0].shadow_blur = 12.0f;
+    groups[0].shadow_offset_y = 6.0f;
+
+    groups[1].shapes[0] = (prism_liquid_glass_shape){.bounds = panel, .corner_radius = 32.0f};
+    groups[1].shadow_alpha = 0.22f;
+    groups[1].shadow_blur = 14.0f;
+    groups[1].shadow_offset_y = 7.0f;
+    /* One selected region changes the parent body's optics; it is not
+     * another glass body and therefore casts no nested rim or shadow. */
+    groups[1].focus =
+        (prism_liquid_glass_shape){.bounds = {474.0f, 184.0f, 212.0f, 156.0f}, .corner_radius = 18.0f};
+    groups[1].focus_strength = 1.0f;
+
+    groups[2].shapes[0] =
+        (prism_liquid_glass_shape){.bounds = {120.0f, 200.0f, 96.0f, 96.0f}, .corner_radius = 48.0f};
+    groups[2].shapes[1] =
+        (prism_liquid_glass_shape){.bounds = {252.0f, 224.0f, 72.0f, 72.0f}, .corner_radius = 36.0f};
+    groups[2].shape_count = 2;
+    groups[2].blend_radius = 28.0f;
+    groups[2].shadow_alpha = 0.20f;
+    groups[2].shadow_blur = 10.0f;
+    groups[2].shadow_offset_y = 5.0f;
+    /* Cool accent tint: per-body tinting must read through the glass. */
+    groups[2].tint_color = 0xC8E0FFu;
+
+    /* HUD-chip scale with its own component shadow. */
+    groups[3].shapes[0] =
+        (prism_liquid_glass_shape){.bounds = {880.0f, 500.0f, 240.0f, 32.0f}, .corner_radius = 16.0f};
+    groups[3].shadow_alpha = 0.16f;
+    groups[3].shadow_blur = 4.0f;
+    groups[3].shadow_offset_y = 2.0f;
+
+    /* Dock-handle scale: a 6 px stadium indicator still casts a shadow. */
+    groups[4].shapes[0] =
+        (prism_liquid_glass_shape){.bounds = {560.0f, 700.0f, 140.0f, 6.0f}, .corner_radius = 3.0f};
+    groups[4].shadow_alpha = 0.20f;
+    groups[4].shadow_blur = 4.2f;
+    groups[4].shadow_offset_y = 2.1f;
     prism_liquid_glass_desc gd = PRISM_LIQUID_GLASS_DESC_INIT;
     gd.input = capture;
     gd.blurred_input = blurred;

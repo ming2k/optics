@@ -80,7 +80,26 @@ typedef struct prism_liquid_glass_shape {
  *   single-shape body. It changes clarity and directional light without
  *   creating or outlining another glass body. Focus bounds must remain
  *   inside shapes[0]. Focus and smooth union are mutually exclusive because
- *   both reuse the secondary-shape shader slot. */
+ *   both reuse the secondary-shape shader slot.
+ *
+ * The five trailing fields override dispatch-wide desc policy per body and
+ * carry adaptive-plate inputs; each is armed by a non-negative value and
+ * disabled/inherited by a negative one:
+ * - frost_strength / tint_strength / saturation: per-body override of the
+ *   same desc knob (<0 inherits the desc value; >=0 is used verbatim and
+ *   clamped like the desc value);
+ * - plate_polarity: [0,1] caller-chosen adaptive-tint polarity for the whole
+ *   body — 0 pins the smoke plate, 1 the pearl plate — uniform instead of the
+ *   legacy per-pixel polarity (<0 keeps the per-pixel behaviour). Text-bearing
+ *   surfaces pin the polarity that opposes their text tone; callers that want
+ *   backdrop-derived polarity can source it from
+ *   prism_liquid_glass_filter_stats;
+ * - backdrop_energy: [0,1] region high-frequency energy, boosting the body
+ *   tint over busy backdrops (<0 disables the boost).
+ *
+ * Build groups from PRISM_LIQUID_GLASS_GROUP_INIT: zero-init is NOT inherit
+ * — a zeroed group pins frost/tint/saturation to explicit zeros instead of
+ * inheriting the desc values. */
 typedef struct prism_liquid_glass_group {
     prism_liquid_glass_shape shapes[2];
     uint32_t shape_count;
@@ -92,12 +111,29 @@ typedef struct prism_liquid_glass_group {
     uint32_t tint_color;
     prism_liquid_glass_shape focus;
     float focus_strength;
+    float frost_strength;  /* <0 = inherit desc value */
+    float tint_strength;   /* <0 = inherit desc value */
+    float saturation;      /* <0 = inherit desc value */
+    float plate_polarity;  /* [0,1] caller-chosen plate polarity: 0 = smoke,
+                              1 = pearl, uniform for the whole body; <0 = legacy
+                              per-pixel adaptive behaviour */
+    float backdrop_energy; /* [0,1] region high-frequency energy; boosts body tint;
+                              <0 = disabled */
 } prism_liquid_glass_group;
 
 /* Neutral baseline for designated-initializer use: a single visible body
  * with no shadow and the neutral tint, so omitted fields can never turn
- * the glass black. Override the fields a body actually needs. */
-#define PRISM_LIQUID_GLASS_GROUP_INIT {.shape_count = 1, .opacity = 1.0f, .tint_color = 0xFFFFFFu}
+ * the glass black, and with every override/adaptive field in its
+ * inherit/disabled (<0) state. Override the fields a body actually needs. */
+#define PRISM_LIQUID_GLASS_GROUP_INIT                                                                \
+    {.shape_count = 1,                                                                               \
+     .opacity = 1.0f,                                                                                \
+     .tint_color = 0xFFFFFFu,                                                                        \
+     .frost_strength = -1.0f,                                                                        \
+     .tint_strength = -1.0f,                                                                         \
+     .saturation = -1.0f,                                                                            \
+     .plate_polarity = -1.0f,                                                                        \
+     .backdrop_energy = -1.0f}
 
 /* Dispatch-wide caller policy. Distances are capture-image pixels.
  * refraction controls the lens offset, chromatic_aberration separates the
@@ -114,7 +150,9 @@ typedef struct prism_liquid_glass_group {
  * size_scale_min floors the factor. tint_strength and frost_strength
  * multiply the adaptive body tint and the scattering layer (1.0 = the
  * reference recipe), letting callers dial a body between clearer and
- * frostier without forking the material. group_count may be zero (and
+ * frostier without forking the material; saturation, tint_strength and
+ * frost_strength are the dispatch-wide defaults that a group may override
+ * per body (see prism_liquid_glass_group). group_count may be zero (and
  * groups NULL) to clear any footprints retained by this frame slot after
  * all bodies disappear; otherwise it is capped at 64. */
 typedef struct prism_liquid_glass_desc {
@@ -172,6 +210,31 @@ PRISM_API void prism_liquid_glass_filter_release(prism_liquid_glass_filter *filt
 PRISM_NODISCARD PRISM_API flux_result
 prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, flux_frame *frame,
                                 const prism_liquid_glass_desc *desc, flux_image **out);
+
+/* Per-group backdrop statistics, reduced on the GPU by
+ * prism_liquid_glass_filter_apply: the mean Rec.709 luminance of the
+ * blurred backdrop over the group's primary body, and the mean
+ * |sharp − blurred| luminance (high-frequency energy). What a caller does
+ * with the numbers — mapping them onto plate_luminance / backdrop_energy or
+ * the strength overrides, temporal smoothing — is caller policy; prism only
+ * measures. */
+typedef struct prism_backdrop_stat {
+    float mean_luminance;
+    float high_freq_energy;
+} prism_backdrop_stat;
+
+/* Reads the stats this frame slot last submitted (FLUX_MAX_FRAMES_IN_FLIGHT
+ * frames ago): begin_frame has waited that slot's fence, so the mapped
+ * buffer is stable while `frame` records. Call before this frame's apply on
+ * the same slot — the numbers always describe the slot's previous
+ * submission. out_count receives the number of group stats copied
+ * (min of max_groups and the group count that submission carried). Returns
+ * FLUX_ERROR_INVALID_STATE when the slot has never been applied with
+ * stats. */
+PRISM_NODISCARD PRISM_API flux_result
+prism_liquid_glass_filter_stats(prism_liquid_glass_filter *filter, flux_frame *frame,
+                                prism_backdrop_stat *out, uint32_t max_groups,
+                                uint32_t *out_count);
 
 #ifdef __cplusplus
 }

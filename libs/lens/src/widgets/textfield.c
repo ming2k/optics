@@ -35,6 +35,14 @@ static size_t utf8_next(const char *s, size_t len, size_t pos) {
     return pos + utf8_char_len(s, pos);
 }
 
+/* Back `pos` off to the start of its code point — a no-op when it already
+ * sits on a boundary (or at 0, which covers the empty buffer). */
+static size_t utf8_snap_boundary(const char *s, size_t pos) {
+    while (pos > 0 && ((unsigned char)s[pos] & 0xc0) == 0x80)
+        pos--;
+    return pos;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Width of the first `len` bytes of a UTF-8 string.                 */
 /* ------------------------------------------------------------------ */
@@ -123,6 +131,13 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
         ts->cursor = (uint32_t)len;
     if (ts->sel_anchor > len)
         ts->sel_anchor = (uint32_t)len;
+    /* Host-set offsets (lens_textfield_set_caret / _set_selection) can land
+     * mid-character; snap back to a code-point boundary. Widget-written
+     * offsets are always boundaries, so this is a no-op for them. */
+    if (buf) {
+        ts->cursor = (uint32_t)utf8_snap_boundary(buf, ts->cursor);
+        ts->sel_anchor = (uint32_t)utf8_snap_boundary(buf, ts->sel_anchor);
+    }
 
     /* ---- Measure --------------------------------------------------- */
     lens_text_metrics tm = lensi_text_measure_label(ui, buf ? buf : "", font_size, 0.0f);
@@ -468,4 +483,29 @@ lens_response lens_textfield_ex(lens *ui, lens_textfield_opts o) {
     if (o.box.tooltip)
         lensi_tooltip(ui, o.box.tooltip);
     return ui->last_response;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Host caret / selection control (ADR-0064)                          */
+/* ------------------------------------------------------------------ */
+
+void lens_textfield_set_selection(lens *ui, const char *label, uint32_t anchor, uint32_t caret) {
+    if (!ui || !label)
+        return;
+    lens_node *n = lensi_store_touch(ui, lensi_gen_widget_id(ui, label));
+    if (!n)
+        return;
+    lens_textfield_state *ts = lens_node_state(n, sizeof *ts);
+    if (!ts)
+        return;
+    /* Unconditional: the host's write wins over the field's remembered
+     * position. Range/character repair is deferred to the next
+     * lens_textfield build, which clamps to the buffer length and snaps
+     * mid-character offsets back to a UTF-8 boundary. */
+    ts->sel_anchor = anchor;
+    ts->cursor = caret;
+}
+
+void lens_textfield_set_caret(lens *ui, const char *label, uint32_t caret) {
+    lens_textfield_set_selection(ui, label, caret, caret);
 }

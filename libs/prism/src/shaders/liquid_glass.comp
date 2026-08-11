@@ -54,19 +54,36 @@ layout(push_constant) uniform PC {
     float light_y;
     uint group_width;
     uint group_height;
-    uint shape_count;
+    uint tint_color_shape_count;
     float shadow_alpha;
     float shadow_blur;
     float shadow_offset_y;
-    float size_reference;
-    float size_scale_min;
+    uint size_params;
     float tint_strength;
     float frost_strength;
-    uint tint_color;
     float focus_strength;
+    float plate_polarity;
+    float backdrop_energy;
 } pc;
 
 layout(local_size_x = 16, local_size_y = 16) in;
+
+/* Packed push slots: 24-bit 0xRRGGBB tint with shape_count in the top
+ * byte, and size_reference/size_scale_min as two binary16 halves. */
+uint tint_color()
+{
+    return pc.tint_color_shape_count & 0x00FFFFFFu;
+}
+
+uint shape_count()
+{
+    return pc.tint_color_shape_count >> 24;
+}
+
+vec2 size_reference_scale_min()
+{
+    return unpackHalf2x16(pc.size_params);
+}
 
 vec4 sample_image(uint handle, vec2 uv)
 {
@@ -113,7 +130,7 @@ float smooth_union(float a, float b, float radius)
 float glass_sdf(vec2 p)
 {
     float d = rounded_rect_sdf(p, pc.shape0, pc.radius0);
-    if (pc.shape_count > 1u) {
+    if (shape_count() > 1u) {
         d = smooth_union(d, rounded_rect_sdf(p, pc.shape1, pc.radius1), pc.blend_radius);
     }
     return d;
@@ -156,9 +173,10 @@ void main()
      * rims, lensing and shadows. The caller owns the policy: a body whose
      * small side reaches size_reference renders at full strength, and
      * size_reference 0 disables the scaling entirely. */
+    vec2 size_ref_min = size_reference_scale_min();
     float size_scale = 1.0;
-    if (pc.size_reference > 0.0) {
-        size_scale = clamp(body_min / pc.size_reference, pc.size_scale_min, 1.0);
+    if (size_ref_min.x > 0.0) {
+        size_scale = clamp(body_min / size_ref_min.x, size_ref_min.y, 1.0);
     }
     /* The shadow is cast by the body's own SDF with the group's verbatim
      * parameters: component-sized shadows are the caller's policy. */
@@ -208,8 +226,13 @@ void main()
     refracted.b = sample_image(pc.input_handle, uv - normal_uv * bend_b).b;
     vec3 frost = sample_image(pc.blurred_handle, uv - normal_uv * bend_g * 0.5).rgb;
 
-    /* Scatter: mostly clear body; soft scattering grows through the rim. */
-    float frost_amount = clamp((0.08 + 0.20 * u * u) * pc.frost_strength, 0.0, 1.0);
+    /* Scatter: mostly clear body; soft scattering grows through the rim.
+     * The interior term takes the group's full strength while the rim band
+     * keeps the classic profile (capped at 1.0), so a per-group strength
+     * raise fogs the body without over-frosting the silhouette, where
+     * refraction legibility lives. */
+    float frost_amount =
+        clamp(0.08 * pc.frost_strength + 0.20 * u * u * min(pc.frost_strength, 1.0), 0.0, 1.0);
     frost_amount *= 1.0 - 0.62 * focus;
     vec3 colour = mix(refracted, frost, frost_amount);
     colour = adjust_saturation(colour, max(pc.saturation, 0.0));
@@ -217,15 +240,24 @@ void main()
     /* Adaptive body tint, opposing the backdrop: pearl over dark content,
      * smoke over bright. Weakest inside the rim band, where lensing and
      * light already provide separation. The smoke side is strong enough
-     * to hold the body apart from uniform white content. */
+     * to hold the body apart from uniform white content. A non-negative
+     * plate_polarity pins the caller-chosen polarity for the whole body
+     * (uniform plate tone); negative keeps the legacy per-pixel polarity
+     * from the local blurred sample. */
     float backdrop_luminance = dot(frost, vec3(0.2126, 0.7152, 0.0722));
-    float dark_backdrop = 1.0 - smoothstep(0.20, 0.62, backdrop_luminance);
-    vec3 tint_rgb = vec3((pc.tint_color >> 16) & 0xFFu, (pc.tint_color >> 8) & 0xFFu,
-                         pc.tint_color & 0xFFu) / 255.0;
+    float dark_backdrop = pc.plate_polarity >= 0.0
+                              ? pc.plate_polarity
+                              : 1.0 - smoothstep(0.20, 0.62, backdrop_luminance);
+    vec3 tint_rgb = vec3((tint_color() >> 16) & 0xFFu, (tint_color() >> 8) & 0xFFu,
+                         tint_color() & 0xFFu) / 255.0;
     vec3 tint_colour = mix(vec3(0.045, 0.05, 0.065), vec3(1.0), dark_backdrop) * tint_rgb;
     float tint_amount = mix(0.24, 0.10, dark_backdrop) * (0.65 + 0.35 * (1.0 - u)) *
                         pc.tint_strength;
     tint_amount *= 1.0 - 0.48 * focus;
+    /* Busy backdrops get a stronger tint: the energy boost lifts the body
+     * off high-frequency content without changing the quiet-content look. */
+    if (pc.backdrop_energy >= 0.0)
+        tint_amount *= min(1.0 + 1.5 * pc.backdrop_energy, 2.0);
     colour = mix(colour, tint_colour, tint_amount);
     colour *= max(pc.brightness, 0.0);
 

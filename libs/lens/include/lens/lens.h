@@ -557,10 +557,17 @@ typedef struct lens_grid_row {
     const char **cells;   /* column_count strings, frame-borrowed      */
     const float *cell_x;  /* per-cell text x, node-local, precomputed
                              (alignment resolved by the widget — a skin
-                             never measures text)                        */
+                             never measures text). A cell with an icon
+                             is shifted right past the glyph box, so the
+                             icon lands at cell_x - (font_size + 8)    */
+    const lens_icon_id *icons; /* per-cell glyph ids, parallel to cells
+                             (ADR-0066); NULL when the table was built
+                             without an icon callback. Only
+                             LENS_START-aligned columns carry icons   */
     float y;              /* node-local top edge                       */
     int index;            /* absolute row index (zebra parity)         */
-    uint32_t state;       /* LENS_STATE_SELECTED when selected         */
+    uint32_t state;       /* LENS_STATE_SELECTED when selected;
+                             LENS_STATE_FOCUSED on the cursor row     */
 } lens_grid_row;
 
 /* Per-tab data for a LENS_WIDGET_TABS record (ADR-0061): the strip gets one
@@ -916,6 +923,32 @@ LENS_API bool lens_slider_vertical(lens *ui, const char *label, float *value, fl
 LENS_API bool lens_adjust_float_on_scroll(lens *ui, float *value, float min, float max, float step);
 LENS_API bool lens_radio(lens *ui, const char *label, int *value, int option_value);
 LENS_API bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap);
+/* Move the caret / selection of the text field identified by `label` in the
+ * current id scope. Offsets are BYTE offsets into the edit buffer, not
+ * character indices.
+ *
+ * Call before the field's lens_textfield build in the same frame (or on an
+ * earlier frame) — typically right after programmatically rewriting the
+ * buffer for Tab completion or a pre-filled value. The write is
+ * unconditional: it wins over the field's remembered position for that
+ * frame, then the field's own editing takes over again.
+ *
+ * Out-of-range offsets clamp to the buffer length and offsets that land
+ * mid-character snap back to a UTF-8 boundary, both at the next build.
+ * Select-all is anchor 0 + caret UINT32_MAX (the caret clamps to the buffer
+ * length).
+ *
+ * The label is resolved with find-or-create, so calling before the field's
+ * first-ever frame works — the state waits in the store until the field
+ * appears. A label whose field never appears is dropped after the store's
+ * leaving-node grace frames (ADR-0038).
+ *
+ * While an IME preedit is active the field manages its own caret and
+ * selection (it clears the selection each focused preedit frame), so host
+ * writes during a preedit have no visible effect. */
+LENS_API void lens_textfield_set_caret(lens *ui, const char *label, uint32_t caret);
+LENS_API void lens_textfield_set_selection(lens *ui, const char *label, uint32_t anchor,
+                                           uint32_t caret);
 LENS_API bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float min_h);
 /* Select trigger with a trailing vector chevron and an opaque floating option
  * surface. Re-clicking the trigger closes once; a popup inside a scroll area
@@ -1310,17 +1343,58 @@ typedef struct lens_table_column {
 
 typedef const char *(*lens_table_cell_fn)(void *user, int row, int col);
 
+/* Leading glyph for one table cell (ADR-0066): return the icon id for
+ * (row, col), or LENS_ICON_INVALID for none. Called for the visible row
+ * window only, beside the cell callback. Only LENS_START-aligned columns
+ * draw an icon; other alignments resolve text from the column edge and
+ * ignore the id. Ids may be built-ins or runtime-registered SVG ids. */
+typedef lens_icon_id (*lens_table_icon_fn)(void *user, int row, int col);
+
+/* Host-owned selection query (ADR-0066): report whether `row` is in the
+ * host's selection set. Called per visible row when set. */
+typedef bool (*lens_table_selected_fn)(void *user, int row);
+
 typedef struct lens_table_opts {
     float row_height; /* px; 0 = font_size + padding */
     bool show_header; /* draw a fixed column-title row */
-    bool selectable;  /* click selects a row (persisted) */
+    bool selectable;  /* click selects a row (persisted); also gates focus */
     bool zebra;       /* alternate-row tint */
+    /* Keyboard cursor (ADR-0066): while the table is focused, Up/Down
+     * move the cursor one row, Home/End jump to the first/last row, and
+     * Return activates the cursor row; the cursor row scrolls into view.
+     * Space is left unconsumed for the host (search-as-you-type,
+     * Ctrl+Space toggles). Requires `selectable` (only selectable tables
+     * take focus). The cursor is a ROW INDEX, -1 = none; from -1 Down
+     * lands on the
+     * first row, Up on the last. Arrow keys move the table's own cursor,
+     * never keyboard focus. */
+    bool keyboard;
+    /* In/out host-owned cursor (dropdown-style): when non-NULL the table
+     * reads the cursor from here at build start and writes it back
+     * whenever the effective cursor moves (keys, or the clamp when the
+     * model shrank under it). Hosts re-seed the cursor on model resets
+     * by owning it here. NULL = retained in per-node widget state. */
+    int *cursor;
+    /* Cell icon callback; NULL = text-only cells. */
+    lens_table_icon_fn icon_fn;
+    /* Host-owned selection: when set, the row highlight and the a11y
+     * SELECTED flag come from this callback instead of the retained
+     * single-select store, and clicks only report `clicked_row` (the
+     * retained `selected` stays -1, `selection_changed` stays false).
+     * NULL = retained single-select, today's behavior. */
+    lens_table_selected_fn selected_fn;
 } lens_table_opts;
 
 typedef struct lens_table_result {
-    int selected;           /* current selected row, -1 = none */
-    bool selection_changed; /* selection changed this frame */
+    int selected;           /* current selected row, -1 = none (always -1
+                               when opts.selected_fn owns the selection) */
+    bool selection_changed; /* retained selection changed this frame */
     bool clicked;           /* a row was clicked this frame */
+    int cursor;             /* effective cursor row after this frame, -1 = none */
+    bool cursor_changed;    /* the effective cursor moved during this frame */
+    bool activated;         /* Return on the cursor row (keyboard mode)
+                               or an a11y DoAction fired this frame */
+    int clicked_row;        /* row clicked this frame, -1 = none */
 } lens_table_result;
 
 LENS_API lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *cols,

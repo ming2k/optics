@@ -47,11 +47,68 @@ fn shape_focus_group_are_plain_copy_data() {
         shadow_offset_y: 0.0,
         tint_color: [255, 255, 255],
         focus: Some(focus),
+        frost_strength: None,
+        tint_strength: None,
+        saturation: None,
+        plate_polarity: None,
+        backdrop_energy: None,
     };
     let copied = group; // Copy
     assert_eq!(group, copied);
     assert_eq!(copied.focus.expect("focus").strength, 0.5);
     assert_eq!(copied.tint_color, [255, 255, 255]);
+}
+
+#[test]
+fn group_overrides_map_none_to_inherit_sentinel() {
+    let primary = LiquidGlassShape {
+        x: 0.0,
+        y: 0.0,
+        width: 64.0,
+        height: 32.0,
+        corner_radius: 8.0,
+    };
+    let group = LiquidGlassGroup {
+        primary,
+        merged: None,
+        blend_radius: 0.0,
+        opacity: 1.0,
+        shadow_alpha: 0.0,
+        shadow_blur: 0.0,
+        shadow_offset_y: 0.0,
+        tint_color: [200, 224, 255],
+        focus: None,
+        frost_strength: Some(0.75),
+        tint_strength: None,
+        saturation: Some(1.2),
+        plate_polarity: Some(0.4),
+        backdrop_energy: None,
+    };
+    let raw = group.as_raw();
+    // None → the C header's <0 inherit/disabled sentinel; Some → verbatim.
+    assert_eq!(raw.frost_strength, 0.75);
+    assert_eq!(raw.tint_strength, -1.0);
+    assert_eq!(raw.saturation, 1.2);
+    assert_eq!(raw.plate_polarity, 0.4);
+    assert_eq!(raw.backdrop_energy, -1.0);
+    assert_eq!(raw.tint_color, 0xC8E0FF);
+    assert_eq!(raw.shape_count, 1);
+}
+
+#[test]
+fn stats_method_signature_and_stat_layout() {
+    // Compile-and-type level only: stats needs a recording Vulkan frame,
+    // whose GPU coverage stays with the C tests (see the module note).
+    fn accepts(
+        filter: &mut prism::LiquidGlassFilter,
+        frame: &flux::Frame<'_>,
+        out: &mut [prism::BackdropStats],
+    ) -> Result<usize, prism::Error> {
+        filter.stats(frame, out)
+    }
+    let _ = accepts;
+    let stat = prism::BackdropStats::default();
+    assert_eq!(stat, prism::BackdropStats { mean_luminance: 0.0, high_freq_energy: 0.0 });
 }
 
 #[test]

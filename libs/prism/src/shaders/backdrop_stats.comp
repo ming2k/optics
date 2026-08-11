@@ -1,0 +1,116 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+/*
+ * Per-region backdrop statistics for the liquid-glass material (ADR-0065).
+ *
+ * One 16x16 workgroup per glass body reduces the body's primary-shape
+ * backdrop into vec2(mean_luminance, high_freq_energy):
+ *   - mean_luminance: mean Rec.709 luma of the BLURRED input over the
+ *     region — the same quantity the material's adaptive tint reads
+ *     per-pixel, so a caller can pin a uniform plate polarity with it;
+ *   - high_freq_energy: mean |sharp luma − blurred luma|, a cheap
+ *     high-frequency content measure.
+ * prism only measures; mapping the numbers onto group fields (and any
+ * temporal smoothing) is caller policy.
+ *
+ * The destination is a per-frame-slot HOST_VISIBLE storage buffer whose
+ * 64-bit device address arrives as two u32 push words (flux devices do not
+ * guarantee shaderInt64), reconstructed with the uvec2 buffer-reference
+ * constructor. The CPU reads it back FLUX_MAX_FRAMES_IN_FLIGHT frames
+ * later, after the slot's fence has made the writes host-visible.
+ */
+
+layout(set = 0, binding = 0) uniform texture2D u_sampled[];
+layout(set = 0, binding = 2) uniform sampler u_samplers[];
+
+layout(buffer_reference, std430, buffer_reference_align = 8) buffer StatsBuffer {
+    vec2 stats[]; /* per group: (mean_luminance, high_freq_energy) */
+};
+
+layout(push_constant) uniform PC {
+    uint input_handle;
+    uint blurred_handle;
+    uint sampler_handle;
+    uint width;
+    uint height;
+    uint rect_x;
+    uint rect_y;
+    uint rect_width;
+    uint rect_height;
+    uint group_index;
+    uint stats_address_lo;
+    uint stats_address_hi;
+} pc;
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+shared float partial_luminance[256];
+shared float partial_energy[256];
+shared uint partial_count[256];
+
+float luminance_rec709(vec3 colour)
+{
+    return dot(colour, vec3(0.2126, 0.7152, 0.0722));
+}
+
+vec3 sample_rgb(uint handle, vec2 uv)
+{
+    return texture(
+        sampler2D(
+            u_sampled[nonuniformEXT(handle & 0x0FFFFFFFu)],
+            u_samplers[nonuniformEXT(pc.sampler_handle & 0x0FFFFFFFu)]
+        ),
+        clamp(uv, vec2(0.0), vec2(1.0))
+    ).rgb;
+}
+
+void main()
+{
+    /* Integer stride caps the total sample count at ~64k per group; every
+     * thread computes the same uniform value. */
+    uint pixel_count = pc.rect_width * pc.rect_height;
+    uint stride = max(uint(ceil(sqrt(float(pixel_count) / 65536.0))), 1u);
+
+    vec2 inv_extent = 1.0 / vec2(pc.width, pc.height);
+    uint rect_end_x = pc.rect_x + pc.rect_width;
+    uint rect_end_y = pc.rect_y + pc.rect_height;
+    float luminance_sum = 0.0;
+    float energy_sum = 0.0;
+    uint count = 0u;
+    for (uint y = pc.rect_y + gl_LocalInvocationID.y * stride; y < rect_end_y; y += 16u * stride) {
+        for (uint x = pc.rect_x + gl_LocalInvocationID.x * stride; x < rect_end_x;
+             x += 16u * stride) {
+            vec2 uv = (vec2(x, y) + 0.5) * inv_extent;
+            float blurred_lum = luminance_rec709(sample_rgb(pc.blurred_handle, uv));
+            float sharp_lum = luminance_rec709(sample_rgb(pc.input_handle, uv));
+            luminance_sum += blurred_lum;
+            energy_sum += abs(sharp_lum - blurred_lum);
+            ++count;
+        }
+    }
+
+    uint lane = gl_LocalInvocationID.y * 16u + gl_LocalInvocationID.x;
+    partial_luminance[lane] = luminance_sum;
+    partial_energy[lane] = energy_sum;
+    partial_count[lane] = count;
+    barrier();
+    for (uint offset = 128u; offset > 0u; offset >>= 1u) {
+        if (lane < offset) {
+            partial_luminance[lane] += partial_luminance[lane + offset];
+            partial_energy[lane] += partial_energy[lane + offset];
+            partial_count[lane] += partial_count[lane + offset];
+        }
+        barrier();
+    }
+
+    if (lane == 0u) {
+        vec2 result = partial_count[0] > 0u
+                          ? vec2(partial_luminance[0], partial_energy[0]) / float(partial_count[0])
+                          : vec2(0.0);
+        StatsBuffer(uvec2(pc.stats_address_lo, pc.stats_address_hi)).stats[pc.group_index] =
+            result;
+    }
+}

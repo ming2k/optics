@@ -72,3 +72,6 @@ a decision, write a new ADR and update the old one's status to
 | 0061 | [Lens style cascade and the mechanism / neutral-default / flavor rule](0061-lens-style-cascade-mechanism-neutral-flavor.md) | Accepted |
 | 0062 | [Bidirectional accessibility — a11y action invocation and text-changed events](0062-lens-bidirectional-a11y-action-and-text-changed.md) | Accepted |
 | 0063 | [Liquid glass moves to the prism material library](0063-liquid-glass-material-library.md) | Accepted |
+| 0064 | [Host-controlled caret and selection for lens_textfield](0064-lens-textfield-host-caret-selection.md) | Accepted |
+| 0065 | [Per-group material overrides and backdrop statistics](0065-per-group-overrides-and-backdrop-stats.md) | Accepted |
+| 0066 | [Keyboard cursor, icons, and host-owned selection for lens_table](0066-lens-table-keyboard-icons-host-selection.md) | Accepted |
