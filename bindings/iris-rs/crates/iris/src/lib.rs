@@ -658,7 +658,7 @@ fn pick_path(title: Option<&str>, folder: bool) -> Option<String> {
     String::from_utf8(buf).ok()
 }
 
-/// Library version string ("0.0.14" at the time of writing).
+/// Library version string ("0.0.15" at the time of writing).
 pub fn version() -> &'static str {
     unsafe {
         std::ffi::CStr::from_ptr(sys::iris_version_string())
