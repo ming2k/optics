@@ -395,6 +395,23 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
             }
             for (int c = 0; c < col_count && c < 32; c++) {
                 const char *txt = cell_at(cell, user, r, c);
+                /* The callback owns its buffer only until the next call
+                 * (a reused scratch is the binding norm), but the skin
+                 * reads the cell grid after the whole row loop — copy each
+                 * run into the per-frame arena, the same lifetime the
+                 * drawlist's text copy already guarantees (drawlist.c).
+                 * NULL/"" stay as-is: no text drawn, nothing copied. */
+                if (txt && txt[0]) {
+                    size_t len = strlen(txt) + 1;
+                    char *copy = flux_arena_alloc(&ui->arena, len);
+                    if (copy) {
+                        memcpy(copy, txt, len);
+                        txt = copy;
+                    } else {
+                        lensi_set_overflow(ui);
+                        txt = NULL;
+                    }
+                }
                 cells[c] = txt;
                 if (icons)
                     icons[c] = opts.icon_fn(user, r, c);

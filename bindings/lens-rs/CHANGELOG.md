@@ -45,5 +45,16 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
   next build. Select-all is `anchor = 0, caret = u32::MAX`.
   `TextBuf::set`'s docs now point at the caret API.
 
+### Fixed
+
+- **Table cell text lifetime.** The `Frame::table` / `Frame::table_ex`
+  cell callback hands out a reused scratch buffer per query, but the C
+  widget stored the raw pointers across the visible-row loop and the
+  skin read them only after later calls had recycled the scratch —
+  dangling reads drew garbled or duplicated cell text. The widget now
+  copies each run into the per-frame arena when received, making the
+  documented borrow contract (`lens_table_cell_fn`) real. Covered by a
+  scratch-reuse regression test (C side) under ASan.
+
 [lens]: https://github.com/ming2k/lens
 [flux-rs]: https://github.com/ming2k/flux-rs

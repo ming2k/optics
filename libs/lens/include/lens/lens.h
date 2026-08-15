@@ -1347,6 +1347,11 @@ typedef struct lens_table_column {
     lens_align align;  /* LENS_START (default), CENTER, END */
 } lens_table_column;
 
+/* Cell text pull callback: the UTF-8 text for (row, col), called for the
+ * visible row window only. The returned pointer is BORROWED — the table
+ * copies the run into its per-frame arena before the next invocation, so
+ * the callback may hand out a reused scratch buffer (the binding norm).
+ * NULL or "" draws an empty cell. */
 typedef const char *(*lens_table_cell_fn)(void *user, int row, int col);
 
 /* Leading glyph for one table cell (ADR-0066): return the icon id for

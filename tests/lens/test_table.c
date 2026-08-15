@@ -4,6 +4,7 @@
 #include "test_helpers.h"
 #include <lens/lens.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const lens_input ZERO_IN = {.display_size = {400, 300}, .dt_seconds = 0.016f};
@@ -768,6 +769,60 @@ static void test_host_cursor_jump_scrolls_into_view(void) {
     lens_destroy(ui);
 }
 
+/* Regression (ADR-0066-era API): the cell callback's returned buffer is
+ * borrowed only until the next call — a binding that reuses one heap
+ * scratch per query (the lens-rs trampoline) must still yield correct
+ * per-row text, because the table copies each run into the frame arena
+ * before the next invocation. Without the copy every stored cell pointer
+ * aliases the one scratch, and the skin draws the last row's string (or
+ * freed bytes) for all rows. */
+static char *g_scratch;
+
+static const char *scratch_cell_fn(void *user, int row, int col) {
+    (void)user;
+    (void)col;
+    char tmp[32];
+    int n = snprintf(tmp, sizeof tmp, "file-%02d.txt", row);
+    /* Free first so the allocator hands the same block back: the aliasing
+     * the test guards against is then deterministic, not heap luck. */
+    free(g_scratch);
+    g_scratch = malloc((size_t)n + 1);
+    if (!g_scratch)
+        return NULL;
+    memcpy(g_scratch, tmp, (size_t)n + 1);
+    return g_scratch;
+}
+
+static void test_cell_text_outlives_callback_scratch(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_set_skin(ui, LENS_WIDGET_TABLE, probe_skin);
+    g_probe_ran = false;
+
+    lens_begin(ui, &ZERO_IN);
+    lens_size(ui, 400, 300);
+    lens_table(ui, "scratch", COLS, 1, 50, scratch_cell_fn, NULL,
+               (lens_table_opts){.row_height = 28});
+    lens_end(ui);
+
+    CHECK(g_probe_ran);
+    int rows = g_probe.content.row_count;
+    CHECK(rows > 1);
+    for (int r = 0; r < rows; r++) {
+        char want[32];
+        snprintf(want, sizeof want, "file-%02d.txt", g_probe.content.rows[r].index);
+        const char *got = g_probe.content.rows[r].cells[0];
+        CHECK(got != NULL);
+        if (got)
+            CHECK(strcmp(got, want) == 0);
+    }
+
+    free(g_scratch);
+    g_scratch = NULL;
+    lens_set_skin(ui, LENS_WIDGET_TABLE, NULL);
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_table_builds();
     test_virtualization_large_count();
@@ -784,5 +839,6 @@ int main(void) {
     test_selected_fn_drives_highlight_and_click_reports();
     test_host_cursor_round_trip();
     test_host_cursor_jump_scrolls_into_view();
+    test_cell_text_outlives_callback_scratch();
     return TEST_REPORT();
 }
