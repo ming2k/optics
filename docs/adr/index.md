@@ -77,3 +77,5 @@ a decision, write a new ADR and update the old one's status to
 | 0066 | [Keyboard cursor, icons, and host-owned selection for lens_table](0066-lens-table-keyboard-icons-host-selection.md) | Accepted |
 | 0067 | [Wayland text-input depth — key repeat, compose, per-widget IME sessions](0067-wayland-text-input-depth.md) | Accepted |
 | 0068 | [Frame-scoped, node-stamped opacity for lens](0068-lens-frame-scoped-node-stamped-opacity.md) | Accepted |
+| 0069 | [Color management — parametric color spaces, scRGB working space, explicit output transform](0069-color-management.md) | Accepted (amended by ADR-0070) |
+| 0070 | [ICC profile support — in-tree C parser over vendored skcms](0070-icc-in-tree-parser.md) | Accepted |

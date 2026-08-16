@@ -581,6 +581,17 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
 
     flux_canvas_push pc;
     build_push(c, nullptr, &pc);
+    /* ADR-0069: images with an explicit color-space tag carry a params
+     * block (matrix/LUT in the shader); the untagged fast path decodes
+     * 8-bit UNORM texels as sRGB here. *_SRGB images are decoded by the
+     * sampler hardware and 16F images are already linear — both stay
+     * raw — and R8 coverage (kind 4) is not a colour. */
+    pc.color_params_address = img->color_params_address;
+    if (img->color_params_address != 0)
+        kind |= FLUX_CANVAS_PUSH_HAS_COLOR_PARAMS;
+    else if (kind != 4u &&
+             (img->format == FLUX_FORMAT_RGBA8_UNORM || img->format == FLUX_FORMAT_BGRA8_UNORM))
+        kind |= FLUX_CANVAS_PUSH_DECODE_SRGB;
     pc.kind = kind;
     pc.image_handle = img->bindless;
     pc.sampler_handle = sh;

@@ -122,6 +122,19 @@ FLUX_API flux_mat4 flux_mat4_orthographic(float left, float right, float bottom,
 FLUX_API flux_mat4 flux_mat4_look_at(flux_vec3 eye, flux_vec3 center, flux_vec3 up);
 
 /* ================================================================== */
+/*  3×3 matrix (color-space transforms; column-major like flux_mat4)  */
+/* ================================================================== */
+
+typedef struct flux_mat3 {
+    float m[9]; /* column-major: m[col*3 + row] */
+} flux_mat3;
+
+FLUX_API flux_mat3 flux_mat3_identity(void);
+FLUX_API flux_mat3 flux_mat3_multiply(flux_mat3 a, flux_mat3 b); /* a·b applies b first */
+FLUX_API flux_vec3 flux_mat3_transform_vec3(flux_mat3 m, flux_vec3 v);
+FLUX_API flux_mat3 flux_mat3_invert(flux_mat3 m); /* identity when singular */
+
+/* ================================================================== */
 /*  Quaternion operations                                             */
 /* ================================================================== */
 
@@ -143,6 +156,30 @@ FLUX_API flux_color flux_color_rgba_premul(uint8_t r, uint8_t g, uint8_t b, uint
 FLUX_API void flux_color_unpack(flux_color c, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a);
 FLUX_API flux_vec4 flux_color_to_linear(flux_color c);
 FLUX_API flux_color flux_color_from_linear(flux_vec4 linear);
+
+/* ================================================================== */
+/*  Color-space math (ADR-0069)                                       */
+/* ================================================================== */
+
+/* Validation and equality for flux_color_space values. Custom spaces are
+ * valid only with sane chromaticities (xy in (0,1), non-degenerate
+ * triangle, non-zero white); FLUX_TRANSFER_GAMMA requires gamma > 0. */
+FLUX_API bool flux_color_space_is_valid(flux_color_space cs);
+FLUX_API bool flux_color_space_equal(flux_color_space a, flux_color_space b);
+
+/* Scalar transfer functions between linear light and the encoded
+ * domain. `gamma` is read only for FLUX_TRANSFER_GAMMA. PQ linear is in
+ * units of 10000 cd/m²; HLG is nominal 0..1 scene light. Encode clamps
+ * to the representable range; decode mirrors it. */
+FLUX_API float flux_transfer_encode(flux_transfer_func tf, float gamma, float linear);
+FLUX_API float flux_transfer_decode(flux_transfer_func tf, float gamma, float encoded);
+
+/* Builds the 3×3 matrix converting linear-light RGB in `from` to
+ * linear-light RGB in `to` (primaries only — transfer functions are
+ * applied separately). Bradford-adapts when the white points differ.
+ * Returns false (and identity) when either space is invalid. */
+FLUX_API bool flux_color_space_transform_matrix(flux_color_space from, flux_color_space to,
+                                                flux_mat3 *out);
 
 /* ================================================================== */
 /*  Arena allocator (CPU-side bump)                                   */

@@ -36,6 +36,10 @@ typedef struct flux_surface_image_storage {
     bool *sync_exported;
     VkSemaphore *render_finished;
     flux_vk_alloc *allocs;
+    /* Bindless sampled-image handles for the views (ADR-0069): the canvas
+     * LOAD seed blit samples the previous contents of the very image it
+     * will overwrite. FLUX_BINDLESS_INVALID while unregistered. */
+    uint32_t *bindless;
 } flux_surface_image_storage;
 
 struct flux_readback {
@@ -55,6 +59,7 @@ static void image_storage_free(flux_device *d, flux_surface_image_storage *stora
     flux_internal_free(d, storage->sync_exported);
     flux_internal_free(d, storage->render_finished);
     flux_internal_free(d, storage->allocs);
+    flux_internal_free(d, storage->bindless);
     *storage = (flux_surface_image_storage){0};
 }
 
@@ -79,11 +84,15 @@ static bool image_storage_alloc(flux_device *d, uint32_t count,
     storage->render_finished =
         image_storage_alloc_array(d, count, sizeof(*storage->render_finished));
     storage->allocs = image_storage_alloc_array(d, count, sizeof(*storage->allocs));
+    storage->bindless = image_storage_alloc_array(d, count, sizeof(*storage->bindless));
     if (!storage->images || !storage->views || !storage->layouts || !storage->foreign_owned ||
-        !storage->sync_exported || !storage->render_finished || !storage->allocs) {
+        !storage->sync_exported || !storage->render_finished || !storage->allocs ||
+        !storage->bindless) {
         image_storage_free(d, storage);
         return false;
     }
+    for (uint32_t i = 0; i < count; ++i)
+        storage->bindless[i] = FLUX_BINDLESS_INVALID;
     storage->capacity = count;
     return true;
 }
@@ -99,6 +108,7 @@ static void surface_take_image_storage(flux_surface *s, flux_surface_image_stora
     s->image_sync_exported = storage->sync_exported;
     s->render_finished = storage->render_finished;
     s->image_allocs = storage->allocs;
+    s->image_bindless = storage->bindless;
     *storage = (flux_surface_image_storage){0};
 }
 
@@ -112,6 +122,7 @@ static void surface_free_image_storage(flux_surface *s) {
         .sync_exported = s->image_sync_exported,
         .render_finished = s->render_finished,
         .allocs = s->image_allocs,
+        .bindless = s->image_bindless,
     };
     image_storage_free(s->device, &storage);
     s->image_count = 0;
@@ -123,14 +134,99 @@ static void surface_free_image_storage(flux_surface *s) {
     s->image_sync_exported = nullptr;
     s->render_finished = nullptr;
     s->image_allocs = nullptr;
+    s->image_bindless = nullptr;
 }
 
 /* ------------------------------------------------------------------ */
 /*  Swapchain format / present-mode selection                          */
 /* ------------------------------------------------------------------ */
 
-static VkSurfaceFormatKHR pick_format(VkPhysicalDevice pd, VkSurfaceKHR srf, bool hdr_preferred) {
+/* ADR-0069: a requested flux_color_space is mapped to its Vulkan
+ * (colorSpace, format) candidates; negotiation walks the caller's
+ * preference list in order. Spaces with no VkColorSpaceKHR
+ * representation (SDR BT.2020 gamma, custom primaries) are unmappable
+ * and simply never match. */
+typedef struct surface_space_mapping {
+    VkColorSpaceKHR vk;
+    VkFormat preferred[3]; /* tried first, VK_FORMAT_UNDEFINED-terminated;
+                            * any format with `vk` is accepted as fallback */
+} surface_space_mapping;
+
+static bool color_space_to_vk(flux_color_space cs, surface_space_mapping *out) {
+#define MAP(vk_, ...)                                                                              \
+    do {                                                                                           \
+        *out = (surface_space_mapping){(vk_), {__VA_ARGS__}};                                      \
+        return true;                                                                               \
+    } while (0)
+    switch (cs.primaries) {
+    case FLUX_PRIMARIES_BT709:
+        if (cs.transfer == FLUX_TRANSFER_SRGB)
+            MAP(VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, VK_FORMAT_B8G8R8A8_UNORM,
+                VK_FORMAT_R8G8B8A8_UNORM);
+        if (cs.transfer == FLUX_TRANSFER_LINEAR)
+            /* sRGB-linear and scRGB are the same {primaries, transfer};
+             * the extended space is the scRGB surface intent. */
+            MAP(VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, VK_FORMAT_R16G16B16A16_SFLOAT);
+        return false;
+    case FLUX_PRIMARIES_DISPLAY_P3:
+        if (cs.transfer == FLUX_TRANSFER_SRGB)
+            MAP(VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT, VK_FORMAT_B8G8R8A8_UNORM,
+                VK_FORMAT_R8G8B8A8_UNORM);
+        if (cs.transfer == FLUX_TRANSFER_LINEAR)
+            MAP(VK_COLOR_SPACE_DISPLAY_P3_LINEAR_EXT, VK_FORMAT_R16G16B16A16_SFLOAT);
+        return false;
+    case FLUX_PRIMARIES_BT2020:
+        if (cs.transfer == FLUX_TRANSFER_PQ)
+            MAP(VK_COLOR_SPACE_HDR10_ST2084_EXT, VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+                VK_FORMAT_R16G16B16A16_SFLOAT);
+        if (cs.transfer == FLUX_TRANSFER_HLG)
+            MAP(VK_COLOR_SPACE_HDR10_HLG_EXT, VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+                VK_FORMAT_R16G16B16A16_SFLOAT);
+        if (cs.transfer == FLUX_TRANSFER_LINEAR)
+            MAP(VK_COLOR_SPACE_BT2020_LINEAR_EXT, VK_FORMAT_R16G16B16A16_SFLOAT);
+        return false;
+    case FLUX_PRIMARIES_ADOBE_RGB:
+        if (cs.transfer == FLUX_TRANSFER_GAMMA)
+            MAP(VK_COLOR_SPACE_ADOBERGB_NONLINEAR_EXT, VK_FORMAT_B8G8R8A8_UNORM);
+        if (cs.transfer == FLUX_TRANSFER_LINEAR)
+            MAP(VK_COLOR_SPACE_ADOBERGB_LINEAR_EXT, VK_FORMAT_R16G16B16A16_SFLOAT);
+        return false;
+    default:
+        return false;
+    }
+#undef MAP
+}
+
+/* Best-effort inverse for reporting when negotiation falls off the end
+ * of the preference list. Unrepresentable spaces report as sRGB. */
+static flux_color_space color_space_from_vk(VkColorSpaceKHR vk) {
+    switch (vk) {
+    case VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT:
+        return (flux_color_space)FLUX_COLOR_SPACE_SCRGB;
+    case VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT:
+        return (flux_color_space)FLUX_COLOR_SPACE_DISPLAY_P3;
+    case VK_COLOR_SPACE_DISPLAY_P3_LINEAR_EXT:
+        return (flux_color_space)FLUX_COLOR_SPACE_DISPLAY_P3_LINEAR;
+    case VK_COLOR_SPACE_ADOBERGB_NONLINEAR_EXT:
+        return (flux_color_space)FLUX_COLOR_SPACE_ADOBE_RGB;
+    case VK_COLOR_SPACE_ADOBERGB_LINEAR_EXT:
+        return (flux_color_space){FLUX_PRIMARIES_ADOBE_RGB, FLUX_TRANSFER_LINEAR, 0.0f, {0}};
+    case VK_COLOR_SPACE_HDR10_ST2084_EXT:
+        return (flux_color_space)FLUX_COLOR_SPACE_BT2020_PQ;
+    case VK_COLOR_SPACE_HDR10_HLG_EXT:
+        return (flux_color_space)FLUX_COLOR_SPACE_BT2020_HLG;
+    case VK_COLOR_SPACE_BT2020_LINEAR_EXT:
+        return (flux_color_space){FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_LINEAR, 0.0f, {0}};
+    default: /* SRGB_NONLINEAR, BT709_NONLINEAR, PASS_THROUGH, ... */
+        return (flux_color_space)FLUX_COLOR_SPACE_SRGB;
+    }
+}
+
+static VkSurfaceFormatKHR negotiate_format(VkPhysicalDevice pd, VkSurfaceKHR srf,
+                                           const flux_color_space *spaces, uint32_t space_count,
+                                           flux_color_space *out_actual) {
     VkSurfaceFormatKHR fallback = {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+    *out_actual = (flux_color_space)FLUX_COLOR_SPACE_SRGB;
     uint32_t count = 0;
     if (vkGetPhysicalDeviceSurfaceFormatsKHR(pd, srf, &count, nullptr) != VK_SUCCESS)
         return fallback;
@@ -144,36 +240,57 @@ static VkSurfaceFormatKHR pick_format(VkPhysicalDevice pd, VkSurfaceKHR srf, boo
         return fallback;
     }
 
-    /* HDR first if requested. */
-    if (hdr_preferred) {
-        for (uint32_t i = 0; i < count; ++i) {
-            if (fmts[i].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 &&
-                fmts[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) {
+    for (uint32_t si = 0; si < space_count; ++si) {
+        surface_space_mapping map;
+        if (!color_space_to_vk(spaces[si], &map))
+            continue;
+        /* Pass 0: a preferred format; pass 1: any format with the
+         * color space (e.g. an RGBA16F scRGB swapchain). */
+        for (int pass = 0; pass < 2; ++pass) {
+            for (uint32_t i = 0; i < count; ++i) {
+                if (fmts[i].colorSpace != map.vk)
+                    continue;
+                if (pass == 0) {
+                    bool pref = false;
+                    for (int f = 0; f < 3 && map.preferred[f] != VK_FORMAT_UNDEFINED; ++f)
+                        pref |= fmts[i].format == map.preferred[f];
+                    if (!pref)
+                        continue;
+                }
                 VkSurfaceFormatKHR r = fmts[i];
-                free(fmts);
-                return r;
-            }
-        }
-        for (uint32_t i = 0; i < count; ++i) {
-            if (fmts[i].colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) {
-                VkSurfaceFormatKHR r = fmts[i];
+                *out_actual = spaces[si];
                 free(fmts);
                 return r;
             }
         }
     }
-    /* SDR baseline: prefer BGRA8 sRGB nonlinear; fall back to first format. */
-    for (uint32_t i = 0; i < count; ++i) {
-        if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM &&
-            fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-            VkSurfaceFormatKHR r = fmts[i];
-            free(fmts);
-            return r;
-        }
-    }
+    /* Nothing matched: take whatever the compositor offered first. */
     VkSurfaceFormatKHR r = fmts[0];
+    *out_actual = color_space_from_vk(fmts[0].colorSpace);
     free(fmts);
     return r;
+}
+
+/* The effective preference list: the caller's extension when present,
+ * else the legacy hdr_preferred mapping whose observable pick order
+ * (HDR10 A2B10, then scRGB, then BGRA8 sRGB) is preserved exactly. */
+static void surface_color_preference(const flux_surface *s, const flux_color_space **out_spaces,
+                                     uint32_t *out_count) {
+    static const flux_color_space legacy_hdr[] = {
+        FLUX_COLOR_SPACE_BT2020_PQ,
+        FLUX_COLOR_SPACE_SCRGB,
+        FLUX_COLOR_SPACE_SRGB,
+    };
+    static const flux_color_space legacy_sdr[] = {
+        FLUX_COLOR_SPACE_SRGB,
+    };
+    if (s->requested_space_count > 0) {
+        *out_spaces = s->requested_spaces;
+        *out_count = s->requested_space_count;
+        return;
+    }
+    *out_spaces = s->hdr_preferred ? legacy_hdr : legacy_sdr;
+    *out_count = s->hdr_preferred ? 3u : 1u;
 }
 
 /* Pick the composite-alpha mode the swapchain will be presented with.
@@ -281,13 +398,24 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
             extent.height = caps.maxImageExtent.height;
     }
     if (extent.width == 0 || extent.height == 0) {
-        /* Minimised; defer swapchain creation until next resize. */
+        /* Minimised; defer swapchain creation until next resize. The
+         * reported color space is the top preference — negotiation
+         * resumes with the real swapchain. */
+        const flux_color_space *spaces;
+        uint32_t space_count;
+        surface_color_preference(s, &spaces, &space_count);
+        s->output_color_space = spaces[0];
+        s->content_space = s->has_output_override ? s->output_override : spaces[0];
         s->extent = (VkExtent2D){0, 0};
         return FLUX_OK;
     }
 
-    VkSurfaceFormatKHR fmt =
-        pick_format(s->device->physical_device, s->vk_surface, s->hdr_preferred);
+    const flux_color_space *spaces;
+    uint32_t space_count;
+    surface_color_preference(s, &spaces, &space_count);
+    flux_color_space actual_space;
+    VkSurfaceFormatKHR fmt = negotiate_format(s->device->physical_device, s->vk_surface, spaces,
+                                              space_count, &actual_space);
     VkPresentModeKHR pmode = pick_present_mode(s->device->physical_device, s->vk_surface, s->vsync);
 
     uint32_t image_count = caps.minImageCount;
@@ -296,6 +424,13 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
     if (caps.maxImageCount > 0 && image_count > caps.maxImageCount)
         image_count = caps.maxImageCount;
     bool readback_supported = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+    /* ADR-0069: the canvas LOAD seed blit samples the previous swapchain
+     * contents, so presentation must tolerate SAMPLED. Universal in
+     * practice; refuse the surface rather than ship a silent fallback. */
+    if (!(caps.supportedUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT)) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "surface does not support sampling swapchain images");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
 
     VkSwapchainCreateInfoKHR sci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -306,6 +441,7 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
         .imageExtent = extent,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                      VK_IMAGE_USAGE_SAMPLED_BIT |
                       (readback_supported ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0),
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = caps.currentTransform,
@@ -385,6 +521,11 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
                          vr);
             goto new_swapchain_fail;
         }
+        if (flux_bindless_register_image(s->device, storage.views[i],
+                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                         &storage.bindless[i]) != FLUX_OK) {
+            goto new_swapchain_fail;
+        }
     }
 
     /* Commit only after every image-side resource for the new swapchain exists. */
@@ -392,6 +533,8 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
     s->swapchain = new_swapchain;
     s->format = fmt.format;
     s->color_space = fmt.colorSpace;
+    s->output_color_space = actual_space;
+    s->content_space = s->has_output_override ? s->output_override : actual_space;
     s->extent = extent;
     s->hdr_actual = (fmt.colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
     s->readback_supported = readback_supported;
@@ -401,10 +544,17 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
         s->image_foreign_owned[i] = false;
     }
 
+    /* HDR10 static metadata rides the swapchain; reapply on every
+     * (re)creation (ADR-0069). */
+    if (s->hdr_metadata_present && s->device->pfn_set_hdr_metadata && s->hdr_actual)
+        s->device->pfn_set_hdr_metadata(s->device->device, 1, &s->swapchain, &s->hdr_metadata);
+
     return FLUX_OK;
 
 new_swapchain_fail:
     for (uint32_t i = 0; i < new_count; ++i) {
+        if (storage.bindless[i] != FLUX_BINDLESS_INVALID)
+            flux_bindless_release(s->device, storage.bindless[i]);
         if (storage.render_finished[i])
             vkDestroySemaphore(s->device->device, storage.render_finished[i], nullptr);
         if (storage.views[i])
@@ -427,6 +577,8 @@ static void offscreen_destroy_images(flux_surface *s) {
     s->last_readback_slot = UINT32_MAX;
     s->last_readback_region = (flux_readback_region){0};
     for (uint32_t i = 0; i < s->image_count; ++i) {
+        if (s->image_bindless[i] != FLUX_BINDLESS_INVALID)
+            flux_bindless_release(s->device, s->image_bindless[i]);
         if (s->image_views[i])
             vkDestroyImageView(s->device->device, s->image_views[i], nullptr);
         if (s->images[i])
@@ -442,6 +594,7 @@ static void offscreen_destroy_images(flux_surface *s) {
         s->image_sync_exported[i] = false;
         s->render_finished[i] = VK_NULL_HANDLE;
         s->image_allocs[i] = (flux_vk_alloc){0};
+        s->image_bindless[i] = FLUX_BINDLESS_INVALID;
     }
     surface_free_image_storage(s);
 }
@@ -503,6 +656,13 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
     s->color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     s->extent = (VkExtent2D){w, h};
     s->hdr_actual = false;
+    /* Offscreen: the caller's top preference is adopted verbatim (already
+     * validated as non-HDR at creation); default sRGB. An explicit output
+     * override wins over both. */
+    s->output_color_space =
+        s->requested_space_count > 0 ? s->requested_spaces[0]
+                                     : (flux_color_space)FLUX_COLOR_SPACE_SRGB;
+    s->content_space = s->has_output_override ? s->output_override : s->output_color_space;
 
     /* Decide whether offscreen images should be exportable as dma-buf. This
      * requires the device's external-memory / DRM-modifier extensions and an
@@ -737,6 +897,12 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
             offscreen_destroy_images(s);
             return FLUX_ERROR_BACKEND_FAILURE;
         }
+        if (flux_bindless_register_image(d, s->image_views[i],
+                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                         &s->image_bindless[i]) != FLUX_OK) {
+            offscreen_destroy_images(s);
+            return FLUX_ERROR_BACKEND_FAILURE;
+        }
         if (use_modifier && d->has_external_semaphore_fd) {
             VkExportSemaphoreCreateInfo export_info = {
                 .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
@@ -785,6 +951,8 @@ void flux_surface_destroy_swapchain(flux_surface *s) {
     s->last_readback_slot = UINT32_MAX;
     s->last_readback_region = (flux_readback_region){0};
     for (uint32_t i = 0; i < s->image_count; ++i) {
+        if (s->image_bindless[i] != FLUX_BINDLESS_INVALID)
+            flux_bindless_release(s->device, s->image_bindless[i]);
         if (s->image_views[i])
             vkDestroyImageView(s->device->device, s->image_views[i], nullptr);
         if (s->render_finished[i])
@@ -794,6 +962,7 @@ void flux_surface_destroy_swapchain(flux_surface *s) {
         s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
         s->image_foreign_owned[i] = false;
         s->render_finished[i] = VK_NULL_HANDLE;
+        s->image_bindless[i] = FLUX_BINDLESS_INVALID;
     }
     surface_free_image_storage(s);
     if (s->swapchain) {
@@ -919,7 +1088,105 @@ flux_result flux_surface_create(flux_device *device, const flux_surface_desc *de
     if (s->frames_in_flight > FLUX_MAX_FRAMES_IN_FLIGHT)
         s->frames_in_flight = FLUX_MAX_FRAMES_IN_FLIGHT;
 
+    /* Color-space preference list (ADR-0069) — honored on both windowed
+     * and offscreen surfaces, so it is parsed before the branch. */
     flux_result r;
+    {
+        const struct {
+            flux_struct_type type;
+            const void *next;
+        } *extension = desc->next;
+        while (extension) {
+            if (extension->type == FLUX_TYPE_SURFACE_COLOR_SPACE_DESC) {
+                const flux_surface_color_space_desc *color = (const void *)extension;
+                if (!color->spaces || color->space_count == 0) {
+                    FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                              "surface color-space extension needs spaces");
+                    r = FLUX_ERROR_INVALID_ARGUMENT;
+                    goto fail;
+                }
+                for (uint32_t i = 0; i < color->space_count; ++i) {
+                    if (!flux_color_space_is_valid(color->spaces[i])) {
+                        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                                  "surface color-space extension holds an invalid space");
+                        r = FLUX_ERROR_INVALID_ARGUMENT;
+                        goto fail;
+                    }
+                }
+                if (s->offscreen && (color->spaces[0].transfer == FLUX_TRANSFER_PQ ||
+                                     color->spaces[0].transfer == FLUX_TRANSFER_HLG)) {
+                    FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                              "offscreen surfaces are 8-bit; HDR transfer functions need a "
+                              "windowed surface");
+                    r = FLUX_ERROR_UNSUPPORTED;
+                    goto fail;
+                }
+                size_t bytes;
+                if (!flux_platform_mul_size((size_t)color->space_count,
+                                            sizeof(*s->requested_spaces), &bytes)) {
+                    r = FLUX_ERROR_OUT_OF_RANGE;
+                    goto fail;
+                }
+                s->requested_spaces = flux_internal_alloc(device, bytes);
+                if (!s->requested_spaces) {
+                    r = FLUX_ERROR_OUT_OF_MEMORY;
+                    goto fail;
+                }
+                memcpy(s->requested_spaces, color->spaces, bytes);
+                s->requested_space_count = color->space_count;
+            } else if (extension->type == FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC) {
+                const flux_surface_output_color_desc *outc = (const void *)extension;
+                flux_color_space space = outc->content_space;
+                if (outc->icc) {
+                    if (!flux_icc_profile_color_space(outc->icc, &space)) {
+                        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                                  "output override needs a parametric-extractable ICC profile");
+                        r = FLUX_ERROR_UNSUPPORTED;
+                        goto fail;
+                    }
+                }
+                if (!flux_color_space_is_valid(space)) {
+                    FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "output override space is invalid");
+                    r = FLUX_ERROR_INVALID_ARGUMENT;
+                    goto fail;
+                }
+                if (s->offscreen &&
+                    (space.transfer == FLUX_TRANSFER_PQ || space.transfer == FLUX_TRANSFER_HLG)) {
+                    FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                              "offscreen surfaces are 8-bit; HDR transfer functions need a "
+                              "windowed surface");
+                    r = FLUX_ERROR_UNSUPPORTED;
+                    goto fail;
+                }
+                s->output_override = space;
+                s->has_output_override = true;
+            } else if (extension->type == FLUX_TYPE_SURFACE_HDR_DESC) {
+                const flux_surface_hdr_desc *hdr = (const void *)extension;
+                if (!(hdr->sdr_white_nits >= 0.0f)) {
+                    FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "sdr_white_nits must be >= 0");
+                    r = FLUX_ERROR_INVALID_ARGUMENT;
+                    goto fail;
+                }
+                s->sdr_white_nits = hdr->sdr_white_nits;
+                s->hdr_metadata_present = hdr->has_metadata;
+                if (hdr->has_metadata) {
+                    s->hdr_metadata = (VkHdrMetadataEXT){
+                        .sType = VK_STRUCTURE_TYPE_HDR_METADATA_EXT,
+                        .displayPrimaryRed = {hdr->mastering.rx, hdr->mastering.ry},
+                        .displayPrimaryGreen = {hdr->mastering.gx, hdr->mastering.gy},
+                        .displayPrimaryBlue = {hdr->mastering.bx, hdr->mastering.by},
+                        .whitePoint = {hdr->mastering.wx, hdr->mastering.wy},
+                        .maxLuminance = hdr->max_luminance,
+                        .minLuminance = hdr->min_luminance,
+                        .maxContentLightLevel = hdr->max_cll,
+                        .maxFrameAverageLightLevel = hdr->max_fall,
+                    };
+                }
+            }
+            extension = extension->next;
+        }
+    }
+
     if (s->offscreen) {
         const struct {
             flux_struct_type type;
@@ -1002,6 +1269,7 @@ fail:
         offscreen_destroy_images(s);
     else
         flux_surface_destroy_swapchain(s);
+    flux_internal_free(device, s->requested_spaces);
     flux_internal_free(device, s->offscreen_allowed_modifiers);
     flux_device_release(s->device);
     flux_internal_free(device, s);
@@ -1067,6 +1335,7 @@ void flux_surface_release(flux_surface *s) {
     else
         flux_surface_destroy_swapchain(s);
     flux_device *dev = s->device;
+    flux_internal_free(dev, s->requested_spaces);
     flux_internal_free(dev, s->offscreen_allowed_modifiers);
     flux_internal_free(dev, s);
     flux_device_release(dev);
@@ -1108,6 +1377,8 @@ void flux_surface_get_info(const flux_surface *s, flux_surface_info *out) {
     out->height = s->extent.height;
     out->image_count = s->image_count;
     out->hdr = s->hdr_actual;
+    out->color_space = s->output_color_space;
+    out->content_space = s->content_space;
 }
 
 /* ------------------------------------------------------------------ */

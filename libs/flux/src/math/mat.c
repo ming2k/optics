@@ -300,3 +300,68 @@ flux_mat4 flux_mat4_look_at(flux_vec3 eye, flux_vec3 center, flux_vec3 up) {
     m.m[14] = flux_vec3_dot(f, eye);
     return m;
 }
+
+/* ================================================================== */
+/*  mat3 (color-space transforms; column-major like flux_mat4)        */
+/* ================================================================== */
+
+flux_mat3 flux_mat3_identity(void) {
+    return (flux_mat3){{1, 0, 0, 0, 1, 0, 0, 0, 1}};
+}
+
+flux_mat3 flux_mat3_multiply(flux_mat3 a, flux_mat3 b) {
+    flux_mat3 r;
+    for (int col = 0; col < 3; ++col) {
+        for (int row = 0; row < 3; ++row) {
+            r.m[col * 3 + row] = a.m[row] * b.m[col * 3] + a.m[3 + row] * b.m[col * 3 + 1] +
+                                 a.m[6 + row] * b.m[col * 3 + 2];
+        }
+    }
+    return r;
+}
+
+flux_vec3 flux_mat3_transform_vec3(flux_mat3 m, flux_vec3 v) {
+    return (flux_vec3){
+        m.m[0] * v.x + m.m[3] * v.y + m.m[6] * v.z,
+        m.m[1] * v.x + m.m[4] * v.y + m.m[7] * v.z,
+        m.m[2] * v.x + m.m[5] * v.y + m.m[8] * v.z,
+    };
+}
+
+flux_mat3 flux_mat3_invert(flux_mat3 m) {
+    /* A(r, c) reads the row-major view of the column-major storage. The
+     * matrix parameter is named `a`, not `m`: the preprocessor substitutes
+     * parameters by token, so a parameter named `m` would also rewrite the
+     * `.m` member access. */
+#define FLUX_M3(a, r, c) (a).m[(c) * 3 + (r)]
+    /* Cofactor matrix. */
+    float c00 = +(FLUX_M3(m, 1, 1) * FLUX_M3(m, 2, 2) - FLUX_M3(m, 1, 2) * FLUX_M3(m, 2, 1));
+    float c01 = -(FLUX_M3(m, 1, 0) * FLUX_M3(m, 2, 2) - FLUX_M3(m, 1, 2) * FLUX_M3(m, 2, 0));
+    float c02 = +(FLUX_M3(m, 1, 0) * FLUX_M3(m, 2, 1) - FLUX_M3(m, 1, 1) * FLUX_M3(m, 2, 0));
+    float c10 = -(FLUX_M3(m, 0, 1) * FLUX_M3(m, 2, 2) - FLUX_M3(m, 0, 2) * FLUX_M3(m, 2, 1));
+    float c11 = +(FLUX_M3(m, 0, 0) * FLUX_M3(m, 2, 2) - FLUX_M3(m, 0, 2) * FLUX_M3(m, 2, 0));
+    float c12 = -(FLUX_M3(m, 0, 0) * FLUX_M3(m, 2, 1) - FLUX_M3(m, 0, 1) * FLUX_M3(m, 2, 0));
+    float c20 = +(FLUX_M3(m, 0, 1) * FLUX_M3(m, 1, 2) - FLUX_M3(m, 0, 2) * FLUX_M3(m, 1, 1));
+    float c21 = -(FLUX_M3(m, 0, 0) * FLUX_M3(m, 1, 2) - FLUX_M3(m, 0, 2) * FLUX_M3(m, 1, 0));
+    float c22 = +(FLUX_M3(m, 0, 0) * FLUX_M3(m, 1, 1) - FLUX_M3(m, 0, 1) * FLUX_M3(m, 1, 0));
+    float det = FLUX_M3(m, 0, 0) * c00 + FLUX_M3(m, 0, 1) * c01 + FLUX_M3(m, 0, 2) * c02;
+    if (fabsf(det) <= 1e-20f) {
+        flux_set_last_error(FLUX_ERROR_INVALID_ARGUMENT, __func__, __FILE__, __LINE__,
+                            "singular mat3; returning identity", 0);
+        return flux_mat3_identity();
+    }
+    float inv = 1.0f / det;
+    /* inverse = adjugate / det, the adjugate being the cofactor transpose. */
+    flux_mat3 r;
+    FLUX_M3(r, 0, 0) = c00 * inv;
+    FLUX_M3(r, 0, 1) = c10 * inv;
+    FLUX_M3(r, 0, 2) = c20 * inv;
+    FLUX_M3(r, 1, 0) = c01 * inv;
+    FLUX_M3(r, 1, 1) = c11 * inv;
+    FLUX_M3(r, 1, 2) = c21 * inv;
+    FLUX_M3(r, 2, 0) = c02 * inv;
+    FLUX_M3(r, 2, 1) = c12 * inv;
+    FLUX_M3(r, 2, 2) = c22 * inv;
+    return r;
+#undef FLUX_M3
+}

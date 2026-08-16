@@ -281,7 +281,11 @@ struct flux_device {
      * (validation or not) so objects stay nameable under RenderDoc and
      * validation captures alike; pfn_set_name is NULL when unavailable. */
     bool has_debug_utils;
+    /* VK_EXT_hdr_metadata enabled at device creation when advertised
+     * (ADR-0069); gates vkSetHdrMetadataEXT on HDR swapchains. */
+    bool has_hdr_metadata;
     PFN_vkSetDebugUtilsObjectNameEXT pfn_set_name;
+    PFN_vkSetHdrMetadataEXT pfn_set_hdr_metadata; /* NULL unless has_hdr_metadata */
 
     VkPhysicalDevice physical_device;
     VkPhysicalDeviceProperties props;
@@ -744,6 +748,10 @@ void flux_frame_foreign_images_destroy(flux_surface *surface, flux_per_frame *pe
 flux_result flux_dmabuf_import_acquire_semaphore(flux_device *d, int fd, VkSemaphore *out);
 void flux_dmabuf_close_fd(int fd);
 
+/* ADR-0070: the profile's baked 65³ working-space LUT (R-fastest),
+ * or NULL when the profile is parametric-only. */
+const float *flux_icc_profile_lut(const flux_icc_profile *p, uint32_t *out_size);
+
 struct flux_surface {
     atomic_uint ref_count;
     flux_device *device; /* retained */
@@ -763,6 +771,9 @@ struct flux_surface {
     VkImage *images;
     VkImageView *image_views;
     VkImageLayout *image_layouts;
+    /* Bindless sampled-image handle per surface image (ADR-0069 canvas
+     * LOAD seed); FLUX_BINDLESS_INVALID until registered. */
+    flux_bindless_handle *image_bindless;
     /* Exportable offscreen images are released to FOREIGN on export. The host
      * must not let a frame slot be reused until its external consumer has
      * released the dma-buf; begin_frame then records the matching acquire. */
@@ -802,6 +813,30 @@ struct flux_surface {
     uint64_t *offscreen_allowed_modifiers;
     uint32_t offscreen_allowed_modifier_count;
     bool hdr_actual;
+
+    /* ADR-0069: the color space the surface presents in, and the
+     * caller's preference list (copied from flux_surface_color_space_desc;
+     * NULL/0 = legacy hdr_preferred mapping). Retained so resize
+     * re-negotiates the same contract. */
+    flux_color_space output_color_space;
+    flux_color_space *requested_spaces;
+    uint32_t requested_space_count;
+
+    /* What pixels are WRITTEN in (flux_surface_output_color_desc): the
+     * display's actual space on legacy platforms; equals
+     * output_color_space when no override was given. The canvas output
+     * transform targets this space and the LOAD seed decodes from it. */
+    flux_color_space content_space;
+    flux_color_space output_override; /* valid when has_output_override */
+    bool has_output_override;
+
+    /* ADR-0069 HDR presentation (from flux_surface_hdr_desc).
+     * sdr_white_nits == 0 selects the 203 cd/m² default at use sites.
+     * hdr_metadata is applied to every (re)created swapchain when
+     * hdr_metadata_present and the device has VK_EXT_hdr_metadata. */
+    float sdr_white_nits;
+    bool hdr_metadata_present;
+    VkHdrMetadataEXT hdr_metadata;
 
     /* Offscreen: slot of the most recently submitted frame, or
      * UINT32_MAX before the first submit. flux_surface_read_pixels

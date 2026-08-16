@@ -189,6 +189,15 @@ if opt_canvas
   )
   test('canvas_consistency', test_canvas_consistency, suite : 'integration')
 
+  # Colour management (ADR-0069): linear-light blending, P3 output
+  # transform, LOAD seeding, and linear gradient interpolation, asserted
+  # by offscreen readback against the public colour math API.
+  test_color_management = executable('test_color_management',
+    'test_color_management.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('color_management', test_color_management, suite : 'integration')
+
   # Image retire queue: churn create -> draw -> release every frame so
   # inline destruction of in-flight images (GPU hang on i915) or a
   # missing bindless-slot recycle fails loudly.

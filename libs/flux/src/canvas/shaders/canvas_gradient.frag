@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 /*
  * Canvas gradient fragment shader.
@@ -6,7 +7,9 @@
  * Computes a gradient parameter t per fragment and linearly
  * interpolates between two adjacent stops. Stops live in push
  * constants (struct layout matches flux_canvas_push in
- * src/canvas/internal.h). Colours are stored as packed 0xAARRGGBB.
+ * src/canvas/internal.h). Colours are stored as packed 0xAARRGGBB
+ * premultiplied sRGB and decoded to premultiplied linear at unpack
+ * (ADR-0069), so stop interpolation itself happens in linear light.
  *
  * kind == 1 (LINEAR):
  *   t = clamp(dot(p - from, to - from) / |to - from|^2, 0, 1)
@@ -14,6 +17,8 @@
  * kind == 2 (RADIAL):
  *   t = clamp(|p - centre| / radius, 0, 1)
  */
+
+#include "canvas_color.glsl"
 
 layout(location = 0) in  vec4 v_color;   /* unused — gradient determines colour */
 layout(location = 1) in  vec2 v_pos;
@@ -48,12 +53,12 @@ layout(push_constant) uniform PC {
 
 vec4 unpack_color(uint c)
 {
-    return vec4(
+    return flux_decode_premul_srgb(vec4(
         float((c >> 16) & 0xFFu),
         float((c >>  8) & 0xFFu),
         float((c >>  0) & 0xFFu),
         float((c >> 24) & 0xFFu)
-    ) / 255.0;
+    ) / 255.0);
 }
 
 void main()

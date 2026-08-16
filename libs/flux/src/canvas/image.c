@@ -3,6 +3,176 @@
 #include <stdio.h>
 #include <string.h>
 
+/* ADR-0070: GPU parameters for non-default content color spaces,
+ * consumed by canvas_image.frag through a buffer device address.
+ * std430 layout — keep in sync with the shader. */
+typedef struct flux_image_color_params {
+    float primaries[3][4]; /* content -> working space, column-major mat3 */
+    uint32_t transfer;     /* flux_transfer_func of the content */
+    float gamma;           /* FLUX_TRANSFER_GAMMA exponent */
+    uint32_t lut_handle;   /* bindless 3D LUT, or FLUX_BINDLESS_INVALID */
+    uint32_t lut_size;
+} flux_image_color_params;
+
+/* The content space an untagged image is interpreted as (ADR-0069). */
+static flux_color_space image_default_space(flux_format f) {
+    if (f == FLUX_FORMAT_RGBA16_SFLOAT)
+        return (flux_color_space)FLUX_COLOR_SPACE_SCRGB;
+    return (flux_color_space)FLUX_COLOR_SPACE_SRGB;
+}
+
+/* Create the 3D LUT image for a baked ICC profile: stored R-fastest in
+ * the profile, re-laid as a 2D (N² × N) image so the stock 2D bindless
+ * heap serves it; the shader does the slice lerp. RGBA32F keeps the
+ * upload a plain widening of the baked floats. */
+static flux_result image_create_lut(flux_device *d, flux_image *im, const float *lut,
+                                    uint32_t n) {
+    uint32_t w = n * n, h = n;
+    size_t texel_count = (size_t)w * h;
+    float *rgba = flux_internal_alloc(d, texel_count * 4 * sizeof(float));
+    if (!rgba)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    for (size_t i = 0; i < texel_count; ++i) {
+        rgba[i * 4 + 0] = lut[i * 3 + 0];
+        rgba[i * 4 + 1] = lut[i * 3 + 1];
+        rgba[i * 4 + 2] = lut[i * 3 + 2];
+        rgba[i * 4 + 3] = 1.0f;
+    }
+
+    flux_result r = FLUX_OK;
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .extent = {w, h, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    im->lut_bindless = FLUX_BINDLESS_INVALID;
+    r = flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &im->lut_image,
+                            &im->lut_alloc);
+    if (r != FLUX_OK)
+        goto out_free;
+    r = flux_vk_upload_to_image(d, im->lut_image, 0, 0, w, h, VK_IMAGE_LAYOUT_UNDEFINED, rgba,
+                                texel_count * 4 * sizeof(float));
+    if (r != FLUX_OK)
+        goto out_free;
+    VkImageViewCreateInfo ivci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = im->lut_image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    if (vkCreateImageView(d->device, &ivci, nullptr, &im->lut_view) != VK_SUCCESS) {
+        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "ICC LUT view failed");
+        r = FLUX_ERROR_BACKEND_FAILURE;
+        goto out_free;
+    }
+    r = flux_bindless_register_image(d, im->lut_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     &im->lut_bindless);
+
+out_free:
+    flux_internal_free(d, rgba);
+    return r;
+}
+
+/* ADR-0069/0070: resolve the image's content color space from the
+ * desc extension and build the GPU-side parameter block when the
+ * content leaves the format-derived fast path. */
+static flux_result image_init_color(flux_device *d, flux_image *im, const flux_image_desc *desc) {
+    flux_color_space content = image_default_space(im->format);
+    const float *lut = nullptr;
+    uint32_t lut_size = 0;
+    bool tagged = false;
+
+    const struct {
+        flux_struct_type type;
+        const void *next;
+    } *extension = desc->next;
+    while (extension) {
+        if (extension->type == FLUX_TYPE_IMAGE_COLOR_SPACE_DESC) {
+            const flux_image_color_space_desc *cs = (const void *)extension;
+            if (cs->space) {
+                if (!flux_color_space_is_valid(*cs->space)) {
+                    FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "image color space tag is invalid");
+                    return FLUX_ERROR_INVALID_ARGUMENT;
+                }
+                content = *cs->space;
+                tagged = true;
+            }
+            if (cs->icc) {
+                flux_color_space extracted;
+                im->icc = flux_icc_profile_retain(cs->icc);
+                if (flux_icc_profile_color_space(im->icc, &extracted)) {
+                    content = extracted;
+                } else {
+                    lut = flux_icc_profile_lut(im->icc, &lut_size);
+                    if (!lut) {
+                        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "ICC profile carries no transform");
+                        return FLUX_ERROR_INVALID_STATE;
+                    }
+                }
+                tagged = true;
+            }
+        }
+        extension = extension->next;
+    }
+
+    if (!tagged)
+        return FLUX_OK;
+    /* An explicit tag equal to the format default needs no GPU state. */
+    if (!lut && flux_color_space_equal(content, image_default_space(im->format)))
+        return FLUX_OK;
+
+    if (lut) {
+        flux_result r = image_create_lut(d, im, lut, lut_size);
+        if (r != FLUX_OK)
+            return r;
+    }
+
+    flux_image_color_params params = {0};
+    flux_mat3 to_working;
+    flux_color_space working = FLUX_COLOR_SPACE_SCRGB;
+    flux_color_space_transform_matrix(content, working, &to_working);
+    for (int col = 0; col < 3; ++col) {
+        for (int row = 0; row < 3; ++row)
+            params.primaries[col][row] = to_working.m[col * 3 + row];
+        params.primaries[col][3] = 0.0f;
+    }
+    params.transfer = (uint32_t)content.transfer;
+    params.gamma = content.gamma;
+    params.lut_handle = im->lut_bindless;
+    params.lut_size = lut_size;
+
+    flux_buffer_desc bd = FLUX_BUFFER_DESC_INIT;
+    bd.size = sizeof(params);
+    bd.usage = FLUX_BUFFER_USAGE_STORAGE;
+    bd.location = FLUX_BUFFER_HOST_VISIBLE;
+    bd.device_address = true;
+    bd.initial_data = &params;
+    flux_result r = flux_buffer_create(d, &bd, &im->color_params);
+    if (r != FLUX_OK)
+        return r;
+    im->color_params_address = flux_buffer_device_address(im->color_params);
+    if (im->color_params_address == 0) {
+        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "color params buffer has no device address");
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+    return FLUX_OK;
+}
+
+
 static uint32_t bytes_per_pixel(flux_format f) {
     switch (f) {
     case FLUX_FORMAT_R8_UNORM:
@@ -46,6 +216,7 @@ flux_result flux_image_create(flux_device *d, const flux_image_desc *desc, flux_
     im->format = desc->format;
     im->bindless = FLUX_BINDLESS_INVALID;
     im->bindless_storage = FLUX_BINDLESS_INVALID;
+    im->lut_bindless = FLUX_BINDLESS_INVALID;
     im->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     /* Image */
@@ -113,6 +284,10 @@ flux_result flux_image_create(flux_device *d, const flux_image_desc *desc, flux_
     if (r != FLUX_OK)
         goto fail;
 
+    r = image_init_color(d, im, desc);
+    if (r != FLUX_OK)
+        goto fail;
+
     *out = im;
     return FLUX_OK;
 
@@ -124,6 +299,18 @@ fail:
         flux_bindless_release(d, im->bindless);
     if (im->bindless_storage != FLUX_BINDLESS_INVALID)
         flux_bindless_release(d, im->bindless_storage);
+    if (im->lut_bindless != FLUX_BINDLESS_INVALID)
+        flux_bindless_release(d, im->lut_bindless);
+    if (im->lut_view)
+        vkDestroyImageView(d->device, im->lut_view, nullptr);
+    if (im->lut_image)
+        vkDestroyImage(d->device, im->lut_image, nullptr);
+    if (im->lut_alloc.memory)
+        flux_vk_deallocate(d, &im->lut_alloc);
+    if (im->color_params)
+        flux_buffer_release(im->color_params);
+    if (im->icc)
+        flux_icc_profile_release(im->icc);
     if (im->view)
         vkDestroyImageView(d->device, im->view, nullptr);
     if (im->image)
@@ -219,6 +406,13 @@ void flux_image_release(flux_image *im) {
      * could reference them. */
     flux_device_retire_image(d, im->view, im->image, &im->alloc, im->imported_memory,
                              im->imported_size, im->bindless, im->bindless_storage);
+    if (im->lut_image || im->lut_view)
+        flux_device_retire_image(d, im->lut_view, im->lut_image, &im->lut_alloc, VK_NULL_HANDLE, 0,
+                                 im->lut_bindless, FLUX_BINDLESS_INVALID);
+    if (im->color_params)
+        flux_buffer_release(im->color_params);
+    if (im->icc)
+        flux_icc_profile_release(im->icc);
     bool weak = im->device_weak;
     flux_internal_free(d, im);
     if (!weak)

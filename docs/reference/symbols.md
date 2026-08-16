@@ -62,7 +62,8 @@ or report through `flux_get_last_error` as noted.
 
 | Symbol | Description |
 |--------|-------------|
-| `flux_image_create` | Creates a core sampled GPU image (8-bit color formats), optionally uploads `initial_data`, and registers it in the bindless heap. |
+| `flux_image_create` | Creates a core sampled GPU image (8-bit color formats), optionally uploads `initial_data`, and registers it in the bindless heap. Content is untagged sRGB unless a `flux_image_color_space_desc` says otherwise (ADR-0069). |
+| `flux_image_color_space_desc` | Optional `flux_image_desc.next` extension tagging content color space (ADR-0069/0070): a parametric `flux_color_space`, or an `flux_icc_profile` (parametric-extractable profiles act like the parametric tag; LUT profiles are baked into a 3D LUT at creation). |
 | `flux_image_create_render_target` | Creates a color-attachment image with undefined initial contents. Its first target pass performs the initial transition and makes it sampleable on finish. |
 | `flux_image_retain` | Increments the refcount; returns the same handle. |
 | `flux_image_release` | Decrements the refcount; destroys at zero. Null-safe. |
@@ -88,11 +89,14 @@ or report through `flux_get_last_error` as noted.
 
 | Symbol | Description |
 |--------|-------------|
+| `flux_surface_dmabuf_desc` | Optional `flux_surface_desc.next` extension for a dma-buf-exportable offscreen surface; carries the consumer's DRM modifier set. |
+| `flux_surface_color_space_desc` | Optional `flux_surface_desc.next` extension listing presentable color spaces, most preferred first (ADR-0069). Flux negotiates the first entry the swapchain supports and reports the winner via `flux_surface_info.color_space`. Without it, `hdr_preferred` maps to `[BT2020_PQ, SCRGB, SRGB]`. Offscreen, the first entry is adopted (HDR transfer functions are rejected). |
+| `flux_surface_hdr_desc` | Optional `flux_surface_desc.next` extension for HDR presentation (ADR-0069): `sdr_white_nits` places SDR white on HDR output (0 = 203 cd/m² default), and the metadata fields feed `vkSetHdrMetadataEXT` on HDR swapchains when `VK_EXT_hdr_metadata` is available. |
 | `flux_surface_create` | Wraps a caller-created `VkSurfaceKHR` in a swapchain with per-frame sync objects. `hdr_preferred` requests an HDR format when available; `vsync` selects FIFO over MAILBOX/IMMEDIATE. A `NULL` `vk_surface_khr` creates an **offscreen** surface instead (ADR-0013): flux-owned RGBA8 images at `width` × `height` (both required non-zero), no window or swapchain, same frame loop. |
 | `flux_surface_retain` | Increments the refcount; returns the same handle. |
 | `flux_surface_release` | Decrements the refcount; destroys at zero. Null-safe. |
 | `flux_surface_resize` | Stalls the device and rebuilds the swapchain (or offscreen images) at the new extent. In-flight `flux_frame` handles from this surface become invalid; an offscreen surface's prior contents are dropped. Returns `FLUX_ERROR_INVALID_ARGUMENT` when either dimension is 0. |
-| `flux_surface_get_info` | Fills a `flux_surface_info` (current extent, image count, whether the surface is actually HDR). |
+| `flux_surface_get_info` | Fills a `flux_surface_info` (current extent, image count, whether the surface is actually HDR, and the negotiated `color_space`). |
 | `flux_surface_read_pixels` | Offscreen surfaces only: waits for the most recently submitted frame and copies it into `dst` as tightly packed RGBA8 (`width * height * 4` bytes minimum). Returns `FLUX_ERROR_UNSUPPORTED` on a windowed surface and `FLUX_ERROR_INVALID_STATE` before the first submitted frame. |
 | `flux_surface_exportable` | Reports whether an offscreen surface was created dma-buf-exportable (device had the external-memory extensions and a suitable DRM modifier was found). |
 | `flux_surface_export_dmabuf` | Offscreen exportable surfaces: exports the most recently submitted frame's image as a caller-owned dma-buf fd (zero-copy; waits for the frame's GPU work first). `FLUX_ERROR_UNSUPPORTED` on windowed/non-exportable surfaces, `FLUX_ERROR_INVALID_STATE` before the first submit. |
@@ -100,6 +104,15 @@ or report through `flux_get_last_error` as noted.
 | `flux_surface_dmabuf_modifier` | Returns the DRM format modifier of an exportable surface's images. |
 | `flux_surface_dmabuf_stride` | Returns the row stride in bytes of an exportable surface's images. |
 | `flux_surface_last_slot` | Offscreen surfaces: frame slot of the most recently submitted frame (`0..frames_in_flight-1`), `UINT32_MAX` before the first submit; aligns a per-slot dma-buf pool with the next export. |
+
+### ICC profile (ADR-0070)
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_icc_profile_create` | Parses and validates an ICC v2/v4 display/scanner-class RGB profile (matrix+TRC, or A2B0 LUT as mft1/mft2/mAB). Device-free; never touches the GPU. |
+| `flux_icc_profile_retain` | Increments the refcount; returns the same handle. |
+| `flux_icc_profile_release` | Decrements the refcount; destroys at zero. Null-safe. |
+| `flux_icc_profile_color_space` | Fills the parametric `flux_color_space` when the profile is exactly representable (matrix + flux-set transfer curve); returns false for LUT-only profiles, which images bake into a 3D LUT instead. |
 
 ### Frame
 
@@ -162,6 +175,34 @@ or report through `flux_get_last_error` as noted.
 | `flux_mat4_perspective` | Right-handed perspective projection (vertical FOV in radians, Vulkan depth range). |
 | `flux_mat4_orthographic` | Right-handed orthographic projection (Vulkan depth range). |
 | `flux_mat4_look_at` | Right-handed view matrix from eye, target, and up vector. |
+
+### 3×3 matrix (`flux_mat3`, color-space transforms)
+
+Column-major like `flux_mat4`.
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_mat3_identity` | Identity matrix. |
+| `flux_mat3_multiply` | Matrix product `a × b` (applies `b` first). |
+| `flux_mat3_transform_vec3` | Matrix-vector product. |
+| `flux_mat3_invert` | General inverse; a singular input returns identity and sets `FLUX_ERROR_INVALID_ARGUMENT` in the thread-local diagnostic. |
+
+### Color space (ADR-0069)
+
+A `flux_color_space` is `{ primaries, transfer function }`; presets
+(`FLUX_COLOR_SPACE_SRGB`, `FLUX_COLOR_SPACE_SCRGB`,
+`FLUX_COLOR_SPACE_DISPLAY_P3`, `FLUX_COLOR_SPACE_ADOBE_RGB`,
+`FLUX_COLOR_SPACE_BT2020`, `FLUX_COLOR_SPACE_BT2020_PQ`, …) are brace
+initializers, not values. PQ linear values are in units of
+10000 cd/m²; the working-space scale follows scRGB (1.0 = 80 cd/m²).
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_color_space_is_valid` | Returns `true` for a well-formed space: known tags, `gamma > 0` for `FLUX_TRANSFER_GAMMA`, sane non-degenerate chromaticities for `FLUX_PRIMARIES_CUSTOM`. |
+| `flux_color_space_equal` | Parametric equality (`FLUX_COLOR_SPACE_SCRGB` equals `FLUX_COLOR_SPACE_SRGB_LINEAR`). |
+| `flux_transfer_encode` | Scalar linear-light → encoded value for a transfer function (`gamma` read only for `FLUX_TRANSFER_GAMMA`). |
+| `flux_transfer_decode` | Scalar encoded → linear-light value; exact inverse of `flux_transfer_encode`. |
+| `flux_color_space_transform_matrix` | Builds the 3×3 linear-light primaries conversion `from` → `to`, Bradford-adapting when white points differ. Returns `false` (and identity) for invalid spaces. |
 
 ### Quaternion
 

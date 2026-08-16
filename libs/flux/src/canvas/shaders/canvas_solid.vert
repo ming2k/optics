@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 /*
  * Canvas vertex shader. Shared by solid + gradient frag shaders.
@@ -6,6 +7,11 @@
  * Vertex pulling via buffer device address: push constants carry the
  * GPU pointer to the per-frame vertex slice, and the shader indexes
  * it by gl_VertexIndex. No vertex input layout configured.
+ *
+ * Vertex colours are packed premultiplied sRGB (flux_color); they are
+ * decoded to premultiplied linear here (ADR-0069) so every downstream
+ * fragment shader and the fixed-function blender work in the linear
+ * working space.
  *
  * Outputs:
  *   v_color  - interpolated vertex colour (used by solid frag)
@@ -15,6 +21,8 @@
  */
 
 #extension GL_EXT_buffer_reference : enable
+
+#include "canvas_color.glsl"
 
 struct Vertex {
     vec2 pos;
@@ -44,12 +52,13 @@ void main()
     gl_Position = vec4(ndc, 0.0, 1.0);
 
     uint c = v.color;
-    v_color = vec4(
+    vec4 packed_srgb = vec4(
         float((c >> 16) & 0xFFu),
         float((c >>  8) & 0xFFu),
         float((c >>  0) & 0xFFu),
         float((c >> 24) & 0xFFu)
     ) / 255.0;
+    v_color = flux_decode_premul_srgb(packed_srgb);
 
     v_pos = v.pos;
 

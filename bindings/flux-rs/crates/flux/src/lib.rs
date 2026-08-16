@@ -50,6 +50,404 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/* ================================================================== */
+/*  Color management (ADR-0069/0070)                                  */
+/* ================================================================== */
+
+/// Named RGB primaries (mirrors `flux_color_primaries`). All named
+/// primaries are D65; [`ColorPrimaries::Custom`] carries its own
+/// chromaticities and white point (see [`ColorSpace::custom`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorPrimaries {
+    /// sRGB gamut, D65.
+    Bt709,
+    DisplayP3,
+    Bt2020,
+    AdobeRgb,
+    /// Chromaticities from [`PrimariesXy`].
+    Custom,
+}
+
+impl ColorPrimaries {
+    const fn raw(self) -> sys::flux_color_primaries {
+        match self {
+            Self::Bt709 => sys::flux_color_primaries::FLUX_PRIMARIES_BT709,
+            Self::DisplayP3 => sys::flux_color_primaries::FLUX_PRIMARIES_DISPLAY_P3,
+            Self::Bt2020 => sys::flux_color_primaries::FLUX_PRIMARIES_BT2020,
+            Self::AdobeRgb => sys::flux_color_primaries::FLUX_PRIMARIES_ADOBE_RGB,
+            Self::Custom => sys::flux_color_primaries::FLUX_PRIMARIES_CUSTOM,
+        }
+    }
+
+    fn from_raw(raw: sys::flux_color_primaries) -> Self {
+        match raw {
+            sys::flux_color_primaries::FLUX_PRIMARIES_BT709 => Self::Bt709,
+            sys::flux_color_primaries::FLUX_PRIMARIES_DISPLAY_P3 => Self::DisplayP3,
+            sys::flux_color_primaries::FLUX_PRIMARIES_BT2020 => Self::Bt2020,
+            sys::flux_color_primaries::FLUX_PRIMARIES_ADOBE_RGB => Self::AdobeRgb,
+            sys::flux_color_primaries::FLUX_PRIMARIES_CUSTOM => Self::Custom,
+        }
+    }
+}
+
+/// Transfer function between linear-light and encoded values (mirrors
+/// `flux_transfer_func`). PQ and HLG are absolute/nominal HDR curves
+/// (ITU-R BT.2100): PQ linear values are in units of 10000 cd/m²
+/// (1.0 = 10000 nits); HLG is nominal 0..1 scene light. The working-space
+/// luminance scale follows scRGB: 1.0 = 80 cd/m².
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferFunction {
+    Linear,
+    Srgb,
+    /// Pure power law; the exponent comes from [`ColorSpace`]'s gamma.
+    Gamma,
+    /// ST 2084.
+    Pq,
+    Hlg,
+}
+
+impl TransferFunction {
+    const fn raw(self) -> sys::flux_transfer_func {
+        match self {
+            Self::Linear => sys::flux_transfer_func::FLUX_TRANSFER_LINEAR,
+            Self::Srgb => sys::flux_transfer_func::FLUX_TRANSFER_SRGB,
+            Self::Gamma => sys::flux_transfer_func::FLUX_TRANSFER_GAMMA,
+            Self::Pq => sys::flux_transfer_func::FLUX_TRANSFER_PQ,
+            Self::Hlg => sys::flux_transfer_func::FLUX_TRANSFER_HLG,
+        }
+    }
+
+    fn from_raw(raw: sys::flux_transfer_func) -> Self {
+        match raw {
+            sys::flux_transfer_func::FLUX_TRANSFER_LINEAR => Self::Linear,
+            sys::flux_transfer_func::FLUX_TRANSFER_SRGB => Self::Srgb,
+            sys::flux_transfer_func::FLUX_TRANSFER_GAMMA => Self::Gamma,
+            sys::flux_transfer_func::FLUX_TRANSFER_PQ => Self::Pq,
+            sys::flux_transfer_func::FLUX_TRANSFER_HLG => Self::Hlg,
+        }
+    }
+
+    /// Encode a linear-light value into this function's encoded domain.
+    /// `gamma` is read only for [`TransferFunction::Gamma`]. The result
+    /// clamps to the representable range.
+    pub fn encode(self, gamma: f32, linear: f32) -> f32 {
+        unsafe { sys::flux_transfer_encode(self.raw(), gamma, linear) }
+    }
+
+    /// Decode an encoded value back to linear light; the exact inverse of
+    /// [`TransferFunction::encode`].
+    pub fn decode(self, gamma: f32, encoded: f32) -> f32 {
+        unsafe { sys::flux_transfer_decode(self.raw(), gamma, encoded) }
+    }
+}
+
+/// CIE 1931 xy chromaticities of the red/green/blue primaries and the
+/// white point — custom primaries for [`ColorSpace::custom`] and
+/// mastering-display metadata for [`Hdr10Metadata`].
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct PrimariesXy {
+    pub rx: f32,
+    pub ry: f32,
+    pub gx: f32,
+    pub gy: f32,
+    pub bx: f32,
+    pub by: f32,
+    /// White point.
+    pub wx: f32,
+    pub wy: f32,
+}
+
+const ZERO_XY: sys::flux_color_space__bindgen_ty_1 = sys::flux_color_space__bindgen_ty_1 {
+    rx: 0.0,
+    ry: 0.0,
+    gx: 0.0,
+    gy: 0.0,
+    bx: 0.0,
+    by: 0.0,
+    wx: 0.0,
+    wy: 0.0,
+};
+
+/// A parametric color space: `{ primaries, transfer function }` — the
+/// model VkColorSpaceKHR, DXGI, the Wayland color-management protocol and
+/// CSS Color 4 have converged on (ADR-0069). Use the associated presets
+/// ([`ColorSpace::SRGB`], [`ColorSpace::BT2020_PQ`], ...) or compose one
+/// with [`ColorSpace::new`] / [`ColorSpace::custom`].
+///
+/// The C presets are brace-initializer macros bindgen cannot see, so they
+/// are provided here as `const` values with identical contents. Equality
+/// follows the C `flux_color_space_equal` semantics, not field-wise
+/// comparison.
+#[derive(Clone, Copy)]
+pub struct ColorSpace {
+    raw: sys::flux_color_space,
+}
+
+impl ColorSpace {
+    /// sRGB (BT.709 primaries + sRGB transfer).
+    pub const SRGB: Self = Self::new(ColorPrimaries::Bt709, TransferFunction::Srgb);
+    /// Linear-light sRGB (BT.709 primaries, no transfer encoding).
+    pub const SRGB_LINEAR: Self = Self::new(ColorPrimaries::Bt709, TransferFunction::Linear);
+    /// scRGB: the fixed working space (extended linear BT.709,
+    /// 1.0 = 80 nits). Same `{primaries, transfer}` as
+    /// [`ColorSpace::SRGB_LINEAR`]; the distinct preset names the
+    /// extended-range surface intent.
+    pub const SCRGB: Self = Self::SRGB_LINEAR;
+    pub const DISPLAY_P3: Self = Self::new(ColorPrimaries::DisplayP3, TransferFunction::Srgb);
+    pub const DISPLAY_P3_LINEAR: Self =
+        Self::new(ColorPrimaries::DisplayP3, TransferFunction::Linear);
+    /// Adobe RGB (1998): the official profile's TRC is a pure 563/256 power.
+    pub const ADOBE_RGB: Self =
+        Self::new(ColorPrimaries::AdobeRgb, TransferFunction::Gamma).with_gamma(563.0 / 256.0);
+    /// SDR BT.2020 per BT.1886 practice: pure 2.4 power.
+    pub const BT2020: Self =
+        Self::new(ColorPrimaries::Bt2020, TransferFunction::Gamma).with_gamma(2.4);
+    /// HDR10 (BT.2020 primaries + ST 2084).
+    pub const BT2020_PQ: Self = Self::new(ColorPrimaries::Bt2020, TransferFunction::Pq);
+    pub const BT2020_HLG: Self = Self::new(ColorPrimaries::Bt2020, TransferFunction::Hlg);
+
+    /// A space from named primaries and a transfer function. For
+    /// [`TransferFunction::Gamma`] chain [`ColorSpace::with_gamma`] — a
+    /// zero gamma is invalid.
+    pub const fn new(primaries: ColorPrimaries, transfer: TransferFunction) -> Self {
+        Self {
+            raw: sys::flux_color_space {
+                primaries: primaries.raw(),
+                transfer: transfer.raw(),
+                gamma: 0.0,
+                xy: ZERO_XY,
+            },
+        }
+    }
+
+    /// Set the pure-power-law exponent (meaningful only with
+    /// [`TransferFunction::Gamma`]).
+    pub const fn with_gamma(mut self, gamma: f32) -> Self {
+        self.raw.gamma = gamma;
+        self
+    }
+
+    /// A space with custom CIE xy primaries and white point. Valid only
+    /// with sane chromaticities (xy in (0,1), non-degenerate triangle,
+    /// non-zero white) — see [`ColorSpace::is_valid`].
+    pub const fn custom(xy: PrimariesXy, transfer: TransferFunction) -> Self {
+        Self {
+            raw: sys::flux_color_space {
+                primaries: sys::flux_color_primaries::FLUX_PRIMARIES_CUSTOM,
+                transfer: transfer.raw(),
+                gamma: 0.0,
+                xy: sys::flux_color_space__bindgen_ty_1 {
+                    rx: xy.rx,
+                    ry: xy.ry,
+                    gx: xy.gx,
+                    gy: xy.gy,
+                    bx: xy.bx,
+                    by: xy.by,
+                    wx: xy.wx,
+                    wy: xy.wy,
+                },
+            },
+        }
+    }
+
+    pub fn primaries(&self) -> ColorPrimaries {
+        ColorPrimaries::from_raw(self.raw.primaries)
+    }
+
+    pub fn transfer(&self) -> TransferFunction {
+        TransferFunction::from_raw(self.raw.transfer)
+    }
+
+    /// Pure-power-law exponent; 0 unless the transfer is
+    /// [`TransferFunction::Gamma`].
+    pub fn gamma(&self) -> f32 {
+        self.raw.gamma
+    }
+
+    /// Whether flux can convert to and from this space: a known
+    /// primaries/transfer pair, gamma > 0 for [`TransferFunction::Gamma`],
+    /// and sane chromaticities for [`ColorPrimaries::Custom`].
+    pub fn is_valid(&self) -> bool {
+        unsafe { sys::flux_color_space_is_valid(self.raw) }
+    }
+
+    /// The 3×3 matrix converting linear-light RGB in `self` to
+    /// linear-light RGB in `to` (primaries only — transfer functions are
+    /// applied separately). Bradford-adapts when the white points differ.
+    /// `None` when either space is invalid.
+    pub fn transform_matrix(&self, to: ColorSpace) -> Option<Mat3> {
+        let mut raw = sys::flux_mat3::default();
+        let ok = unsafe { sys::flux_color_space_transform_matrix(self.raw, to.raw, &mut raw) };
+        ok.then_some(Mat3::from_raw(raw))
+    }
+
+    /// Encode a linear-light value with this space's transfer function
+    /// and gamma.
+    pub fn encode(&self, linear: f32) -> f32 {
+        self.transfer().encode(self.raw.gamma, linear)
+    }
+
+    /// Decode an encoded value back to linear light; the exact inverse of
+    /// [`ColorSpace::encode`].
+    pub fn decode(&self, encoded: f32) -> f32 {
+        self.transfer().decode(self.raw.gamma, encoded)
+    }
+
+    /// The raw C value, for desc assembly.
+    pub fn as_raw(&self) -> sys::flux_color_space {
+        self.raw
+    }
+
+    /// Wrap a raw C value (e.g. from [`SurfaceInfo`]) without validation.
+    pub fn from_raw(raw: sys::flux_color_space) -> Self {
+        Self { raw }
+    }
+}
+
+impl PartialEq for ColorSpace {
+    fn eq(&self, other: &Self) -> bool {
+        unsafe { sys::flux_color_space_equal(self.raw, other.raw) }
+    }
+}
+
+impl fmt::Debug for ColorSpace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ColorSpace")
+            .field("primaries", &self.primaries())
+            .field("transfer", &self.transfer())
+            .field("gamma", &self.raw.gamma)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Column-major 3×3 matrix for linear-light color-space transforms
+/// (mirrors `flux_mat3`; element layout is `m[col * 3 + row]`).
+#[derive(Debug, Clone, Copy)]
+pub struct Mat3 {
+    raw: sys::flux_mat3,
+}
+
+impl Mat3 {
+    pub fn identity() -> Mat3 {
+        Mat3 {
+            raw: unsafe { sys::flux_mat3_identity() },
+        }
+    }
+
+    /// `self · rhs` — the product applies `rhs` first.
+    pub fn multiply(self, rhs: Mat3) -> Mat3 {
+        Mat3 {
+            raw: unsafe { sys::flux_mat3_multiply(self.raw, rhs.raw) },
+        }
+    }
+
+    pub fn transform_vec3(self, v: [f32; 3]) -> [f32; 3] {
+        let out = unsafe { sys::flux_mat3_transform_vec3(self.raw, vec3(v)) };
+        [out.x, out.y, out.z]
+    }
+
+    /// The inverse, or the identity when the matrix is singular.
+    pub fn invert(self) -> Mat3 {
+        Mat3 {
+            raw: unsafe { sys::flux_mat3_invert(self.raw) },
+        }
+    }
+
+    /// Column-major elements (`m[col * 3 + row]`).
+    pub fn as_array(&self) -> [f32; 9] {
+        self.raw.m
+    }
+
+    pub fn from_raw(raw: sys::flux_mat3) -> Mat3 {
+        Mat3 { raw }
+    }
+
+    pub fn as_raw(&self) -> sys::flux_mat3 {
+        self.raw
+    }
+}
+
+impl PartialEq for Mat3 {
+    /// Exact element-wise equality (the C side defines no epsilon
+    /// comparison for matrices).
+    fn eq(&self, other: &Self) -> bool {
+        self.raw.m == other.raw.m
+    }
+}
+
+/// A parsed ICC v2/v4 display/scanner-class RGB profile (ADR-0070).
+/// Parsing implements the bounded subset flux consumes — matrix + TRC
+/// profiles (curveType gamma, parametricCurveType 0–4) and A2B0 LUT
+/// profiles (mft1/mft2/mAB) — and never touches the GPU.
+///
+/// Refcounted in C; this handle owns one reference, [`Clone`] retains.
+pub struct IccProfile {
+    raw: *mut sys::flux_icc_profile,
+}
+
+impl IccProfile {
+    /// Parse and validate `data` as an ICC profile.
+    pub fn new(data: &[u8]) -> Result<IccProfile, Error> {
+        let mut out: *mut sys::flux_icc_profile = std::ptr::null_mut();
+        Error::check(unsafe {
+            sys::flux_icc_profile_create(
+                data.as_ptr() as *const std::os::raw::c_void,
+                data.len(),
+                &mut out,
+            )
+        })?;
+        debug_assert!(!out.is_null());
+        Ok(IccProfile { raw: out })
+    }
+
+    /// The parametric color space when the profile is exactly
+    /// representable in the `{primaries, transfer}` model (matrix + a
+    /// transfer curve from the flux set). LUT-only profiles return
+    /// `None`; they are still usable on images, where they are baked into
+    /// a 3D LUT at creation (see [`ImageColorSpace`]).
+    pub fn color_space(&self) -> Option<ColorSpace> {
+        let mut raw = sys::flux_color_space {
+            primaries: sys::flux_color_primaries::FLUX_PRIMARIES_BT709,
+            transfer: sys::flux_transfer_func::FLUX_TRANSFER_LINEAR,
+            gamma: 0.0,
+            xy: ZERO_XY,
+        };
+        let ok = unsafe { sys::flux_icc_profile_color_space(self.raw, &mut raw) };
+        ok.then_some(ColorSpace::from_raw(raw))
+    }
+
+    /// Raw `flux_icc_profile` pointer. Borrowed; the `IccProfile` retains
+    /// ownership. For desc assembly in sibling binding crates.
+    pub fn as_raw(&self) -> *mut sys::flux_icc_profile {
+        self.raw
+    }
+}
+
+impl Clone for IccProfile {
+    fn clone(&self) -> Self {
+        // SAFETY: retain returns the same pointer with the refcount
+        // incremented; the new handle owns that reference.
+        IccProfile {
+            raw: unsafe { sys::flux_icc_profile_retain(self.raw) },
+        }
+    }
+}
+
+impl Drop for IccProfile {
+    fn drop(&mut self) {
+        // SAFETY: we own one reference taken at create/clone.
+        unsafe { sys::flux_icc_profile_release(self.raw) };
+    }
+}
+
+impl fmt::Debug for IccProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IccProfile")
+            .field("raw", &self.raw)
+            .finish()
+    }
+}
+
 /// Linux DRM character-device identity used to constrain Vulkan physical
 /// device selection. The node may be either a primary (`cardN`) or render
 /// (`renderDN`) node; Flux accepts only the physical device that reports it
@@ -377,6 +775,111 @@ pub struct SurfaceDmabuf {
     pub slot: u32,
 }
 
+/// HDR presentation tuning for [`SurfaceColorOptions`] (ADR-0069).
+/// Meaningful only when the negotiated color space is HDR (PQ or HLG);
+/// ignored otherwise.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SurfaceHdr {
+    /// Where SDR white (working-space 1.0) lands on the HDR output, in
+    /// cd/m². 0 selects the default 203 cd/m² (ITU-R BT.2408 graphics
+    /// white). Raise toward the panel's SDR brightness when mixing with
+    /// bright SDR windows.
+    pub sdr_white_nits: f32,
+    /// HDR10 static metadata (SMPTE ST 2086 / CTA-861.3). Applied to the
+    /// swapchain when the device advertises `VK_EXT_hdr_metadata`.
+    pub metadata: Option<Hdr10Metadata>,
+}
+
+impl SurfaceHdr {
+    fn raw(self) -> sys::flux_surface_hdr_desc {
+        let mut desc = sys::flux_surface_hdr_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_HDR_DESC,
+            next: std::ptr::null(),
+            sdr_white_nits: self.sdr_white_nits,
+            has_metadata: self.metadata.is_some(),
+            ..Default::default()
+        };
+        if let Some(m) = self.metadata {
+            desc.mastering = sys::flux_surface_hdr_desc__bindgen_ty_1 {
+                rx: m.mastering.rx,
+                ry: m.mastering.ry,
+                gx: m.mastering.gx,
+                gy: m.mastering.gy,
+                bx: m.mastering.bx,
+                by: m.mastering.by,
+                wx: m.mastering.wx,
+                wy: m.mastering.wy,
+            };
+            desc.max_luminance = m.max_luminance;
+            desc.min_luminance = m.min_luminance;
+            desc.max_cll = m.max_cll;
+            desc.max_fall = m.max_fall;
+        }
+        desc
+    }
+}
+
+/// HDR10 static metadata (SMPTE ST 2086 / CTA-861.3). Luminances are
+/// plain cd/m² (the ST 2086 0.0001-unit encoding is *not* used here).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Hdr10Metadata {
+    /// Mastering display primaries + white, CIE 1931 xy.
+    pub mastering: PrimariesXy,
+    pub max_luminance: f32,
+    pub min_luminance: f32,
+    /// MaxCLL, cd/m².
+    pub max_cll: f32,
+    /// MaxFALL, cd/m².
+    pub max_fall: f32,
+}
+
+/// Pins the space pixels are *written in* (the display's actual space),
+/// decoupled from the swapchain's negotiated space — the legacy-platform
+/// display-profile path (ADR-0069). Do NOT combine with color-managed
+/// compositors (Wayland color-management, Windows ACM): negotiate the
+/// true space via [`SurfaceColorOptions::color_spaces`] there instead.
+#[derive(Debug, Clone, Copy)]
+pub struct SurfaceOutputColor<'a> {
+    /// The display's actual space.
+    pub content_space: ColorSpace,
+    /// Optional ICC profile for the display; must be
+    /// parametric-extractable.
+    pub icc: Option<&'a IccProfile>,
+}
+
+/// Color-management extensions for surface creation (ADR-0069). All
+/// fields are optional and combine freely; the default keeps the legacy
+/// `hdr_preferred` negotiation behavior.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SurfaceColorOptions<'a> {
+    /// Presentation color spaces the application can present, most
+    /// preferred first. Flux walks the list and picks the first space the
+    /// swapchain can do; the winner is reported through
+    /// [`SurfaceInfo::color_space`]. On an offscreen surface the first
+    /// listed space is adopted verbatim (8-bit SDR encodings only).
+    pub color_spaces: &'a [ColorSpace],
+    /// HDR presentation tuning; ignored for SDR spaces.
+    pub hdr: Option<SurfaceHdr>,
+    /// Pin the written space independent of the swapchain space.
+    pub output_color: Option<SurfaceOutputColor<'a>>,
+}
+
+/// Negotiated surface state reported by [`Surface::info`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SurfaceInfo {
+    pub width: u32,
+    pub height: u32,
+    pub image_count: u32,
+    /// The surface is actually HDR (PQ, HLG, or extended-linear).
+    pub hdr: bool,
+    /// The color space the surface actually presents in (the negotiated
+    /// swapchain space).
+    pub color_space: ColorSpace,
+    /// What pixels are written in: equals `color_space` unless a
+    /// [`SurfaceOutputColor`] pinned the display's actual space.
+    pub content_space: ColorSpace,
+}
+
 /// A presentable or offscreen rendering surface. Refcounted in C; this handle
 /// owns one reference.
 pub struct Surface {
@@ -486,6 +989,112 @@ impl Surface {
         let mut out: *mut sys::flux_surface = std::ptr::null_mut();
         // SAFETY: `device` is live and the caller upholds the VkSurfaceKHR
         // lifetime and instance requirements documented by this function.
+        Error::check(unsafe { sys::flux_surface_create(device.raw, &desc, &mut out) })?;
+        Ok(Surface { raw: out })
+    }
+
+    /// Like [`Surface::from_vk`], plus color-management extensions
+    /// (presentation-space preference list, HDR tuning, output-space
+    /// override) — see [`SurfaceColorOptions`] (ADR-0069).
+    ///
+    /// # Safety
+    /// Same contract as [`Surface::from_vk`].
+    pub unsafe fn from_vk_with_color_options(
+        device: &Device,
+        vk_surface_khr: *mut std::os::raw::c_void,
+        width: u32,
+        height: u32,
+        vsync: bool,
+        options: SurfaceColorOptions<'_>,
+    ) -> Result<Surface, Error> {
+        Self::create_with_color_options(device, vk_surface_khr, width, height, vsync, options)
+    }
+
+    /// Like [`Surface::offscreen`], plus color-management extensions. An
+    /// offscreen surface adopts the first listed space verbatim (8-bit
+    /// SDR encodings only — HDR transfer functions are unsupported
+    /// offscreen); [`SurfaceColorOptions::output_color`] is equivalent to
+    /// requesting the space through `color_spaces`.
+    pub fn offscreen_with_color_options(
+        device: &Device,
+        width: u32,
+        height: u32,
+        options: SurfaceColorOptions<'_>,
+    ) -> Result<Surface, Error> {
+        Self::create_with_color_options(device, std::ptr::null_mut(), width, height, false, options)
+    }
+
+    /// Shared constructor for the color-managed surface entry points:
+    /// builds the three optional stack-owned pNext extensions and links
+    /// them into the base descriptor while every referenced value is
+    /// alive (same pattern as [`Device::new_with_options`]).
+    fn create_with_color_options(
+        device: &Device,
+        vk_surface_khr: *mut std::os::raw::c_void,
+        width: u32,
+        height: u32,
+        vsync: bool,
+        options: SurfaceColorOptions<'_>,
+    ) -> Result<Surface, Error> {
+        let raw_spaces: Vec<sys::flux_color_space> =
+            options.color_spaces.iter().map(|s| s.as_raw()).collect();
+        let mut color_space_extension = (!raw_spaces.is_empty())
+            .then(|| {
+                Ok(sys::flux_surface_color_space_desc {
+                    type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_COLOR_SPACE_DESC,
+                    next: std::ptr::null(),
+                    spaces: raw_spaces.as_ptr(),
+                    space_count: raw_spaces
+                        .len()
+                        .try_into()
+                        .map_err(|_| Error(sys::flux_result::FLUX_ERROR_OUT_OF_RANGE))?,
+                })
+            })
+            .transpose()?;
+        let mut hdr_extension = options.hdr.map(SurfaceHdr::raw);
+        let mut output_extension =
+            options
+                .output_color
+                .map(|output| sys::flux_surface_output_color_desc {
+                    type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC,
+                    next: std::ptr::null(),
+                    content_space: output.content_space.as_raw(),
+                    icc: output
+                        .icc
+                        .map(|p| p.as_raw() as *const sys::flux_icc_profile)
+                        .unwrap_or(std::ptr::null()),
+                });
+
+        let mut next = std::ptr::null();
+        if let Some(output) = output_extension.as_mut() {
+            output.next = next;
+            next = output as *const _ as *const std::ffi::c_void;
+        }
+        if let Some(hdr) = hdr_extension.as_mut() {
+            hdr.next = next;
+            next = hdr as *const _ as *const std::ffi::c_void;
+        }
+        if let Some(color_space) = color_space_extension.as_mut() {
+            color_space.next = next;
+            next = color_space as *const _ as *const std::ffi::c_void;
+        }
+
+        let desc = sys::flux_surface_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_DESC,
+            next,
+            vk_surface_khr,
+            width,
+            height,
+            vsync,
+            // SAFETY: the bindgen descriptor is a C POD type; zero is the
+            // documented default for fields not initialized above.
+            ..unsafe { std::mem::zeroed() }
+        };
+        let mut out: *mut sys::flux_surface = std::ptr::null_mut();
+        // SAFETY: desc is fully initialized; the extension structs and the
+        // raw_spaces Vec outlive this call. `vk_surface_khr` lifetime is
+        // upheld by the caller of the unsafe public entry point, and is
+        // null for offscreen surfaces.
         Error::check(unsafe { sys::flux_surface_create(device.raw, &desc, &mut out) })?;
         Ok(Surface { raw: out })
     }
@@ -709,6 +1318,21 @@ impl Surface {
         let mut info = sys::flux_surface_info::default();
         unsafe { sys::flux_surface_get_info(self.raw, &mut info) };
         (info.width, info.height)
+    }
+
+    /// Negotiated surface state: extent, image count, HDR flag, and the
+    /// color spaces the surface presents in / is written in (ADR-0069).
+    pub fn info(&self) -> SurfaceInfo {
+        let mut raw = sys::flux_surface_info::default();
+        unsafe { sys::flux_surface_get_info(self.raw, &mut raw) };
+        SurfaceInfo {
+            width: raw.width,
+            height: raw.height,
+            image_count: raw.image_count,
+            hdr: raw.hdr,
+            color_space: ColorSpace::from_raw(raw.color_space),
+            content_space: ColorSpace::from_raw(raw.content_space),
+        }
     }
 
     /// Backend-neutral color format selected for this surface.
@@ -2215,6 +2839,22 @@ pub struct Image {
     raw: *mut sys::flux_image,
 }
 
+/// Color-space tag for [`Image::from_bytes_with_color_space`]
+/// (ADR-0069/0070). Tagging changes how texels are decoded into the
+/// working space — it never re-encodes the stored pixels. Untagged images
+/// keep the format-derived default: 8-bit formats are sRGB,
+/// `RGBA16_SFLOAT` is working-space linear.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ImageColorSpace<'a> {
+    /// Parametric content tag (e.g. a Display P3 texture).
+    pub space: Option<ColorSpace>,
+    /// ICC profile tag; takes precedence over `space`. A
+    /// parametric-extractable profile behaves like `space`; a LUT-only
+    /// profile is baked into a 3D LUT at creation and sampled by the
+    /// canvas image pipeline.
+    pub icc: Option<&'a IccProfile>,
+}
+
 impl Image {
     /// Create a color image for an offscreen Canvas or scene attachment. Its
     /// initial contents are undefined; finishing its first target pass makes
@@ -2258,6 +2898,54 @@ impl Image {
             ..unsafe { std::mem::zeroed() }
         };
         let mut out: *mut sys::flux_image = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_image_create(device.raw, &desc, &mut out) })?;
+        Ok(Image { raw: out })
+    }
+
+    /// Like [`Image::from_bytes`], but tags the content's color space
+    /// through a `flux_image_color_space_desc` extension. The tag is read
+    /// only during creation.
+    pub fn from_bytes_with_color_space(
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: Format,
+        data: &[u8],
+        color_space: ImageColorSpace<'_>,
+    ) -> Result<Image, Error> {
+        let expected = image_data_len(width, height, format)?;
+        if data.len() != expected {
+            return Err(Error(sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT));
+        }
+
+        let raw_space = color_space.space.map(|s| s.as_raw());
+        let extension = sys::flux_image_color_space_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_IMAGE_COLOR_SPACE_DESC,
+            next: std::ptr::null(),
+            space: raw_space
+                .as_ref()
+                .map(|s| s as *const sys::flux_color_space)
+                .unwrap_or(std::ptr::null()),
+            icc: color_space
+                .icc
+                .map(|p| p.as_raw() as *const sys::flux_icc_profile)
+                .unwrap_or(std::ptr::null()),
+        };
+        let desc = sys::flux_image_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_IMAGE_DESC,
+            next: if raw_space.is_some() || color_space.icc.is_some() {
+                &extension as *const _ as *const std::os::raw::c_void
+            } else {
+                std::ptr::null()
+            },
+            width,
+            height,
+            format,
+            initial_data: data.as_ptr() as *const std::os::raw::c_void,
+        };
+        let mut out: *mut sys::flux_image = std::ptr::null_mut();
+        // SAFETY: desc is fully initialized; the extension and raw_space
+        // outlive this call.
         Error::check(unsafe { sys::flux_image_create(device.raw, &desc, &mut out) })?;
         Ok(Image { raw: out })
     }
@@ -2677,6 +3365,372 @@ mod tests {
             }
             .byte_len(),
             None
+        );
+    }
+
+    /* -------------------------------------------------------------- */
+    /*  Color management (ADR-0069/0070)                               */
+    /* -------------------------------------------------------------- */
+
+    #[test]
+    fn color_space_presets_follow_c_semantics() {
+        // scRGB names the extended-range intent over the same
+        // {primaries, transfer} as sRGB-linear (flux_color_space_equal).
+        assert_eq!(ColorSpace::SCRGB, ColorSpace::SRGB_LINEAR);
+        assert_eq!(ColorSpace::SRGB, ColorSpace::SRGB);
+        assert_ne!(ColorSpace::SRGB, ColorSpace::SRGB_LINEAR);
+        assert_ne!(ColorSpace::DISPLAY_P3, ColorSpace::SRGB);
+        assert_ne!(ColorSpace::DISPLAY_P3, ColorSpace::DISPLAY_P3_LINEAR);
+        assert_ne!(ColorSpace::BT2020_PQ, ColorSpace::BT2020_HLG);
+
+        assert_eq!(ColorSpace::SRGB.primaries(), ColorPrimaries::Bt709);
+        assert_eq!(ColorSpace::SRGB.transfer(), TransferFunction::Srgb);
+        assert_eq!(ColorSpace::BT2020.gamma(), 2.4);
+        assert_eq!(ColorSpace::ADOBE_RGB.gamma(), 563.0 / 256.0);
+        assert_eq!(ColorSpace::ADOBE_RGB.transfer(), TransferFunction::Gamma);
+
+        for space in [
+            ColorSpace::SRGB,
+            ColorSpace::SRGB_LINEAR,
+            ColorSpace::SCRGB,
+            ColorSpace::DISPLAY_P3,
+            ColorSpace::DISPLAY_P3_LINEAR,
+            ColorSpace::ADOBE_RGB,
+            ColorSpace::BT2020,
+            ColorSpace::BT2020_PQ,
+            ColorSpace::BT2020_HLG,
+        ] {
+            assert!(space.is_valid(), "{space:?} should be valid");
+        }
+
+        // A Gamma transfer without a positive exponent is invalid, as is
+        // a custom space without chromaticities.
+        assert!(!ColorSpace::new(ColorPrimaries::Bt709, TransferFunction::Gamma).is_valid());
+        assert!(!ColorSpace::custom(PrimariesXy::default(), TransferFunction::Srgb).is_valid());
+        let custom = ColorSpace::custom(
+            PrimariesXy {
+                rx: 0.64,
+                ry: 0.33,
+                gx: 0.30,
+                gy: 0.60,
+                bx: 0.15,
+                by: 0.06,
+                wx: 0.3127,
+                wy: 0.3290,
+            },
+            TransferFunction::Linear,
+        );
+        assert!(custom.is_valid());
+        // Equality is by primaries tag, not by gamut: a custom space never
+        // equals the named BT.709 space even with identical chromaticities.
+        assert_ne!(custom, ColorSpace::SRGB_LINEAR);
+        assert_eq!(custom, custom);
+    }
+
+    #[test]
+    fn transfer_functions_round_trip() {
+        for tf in [
+            TransferFunction::Linear,
+            TransferFunction::Srgb,
+            TransferFunction::Pq,
+            TransferFunction::Hlg,
+        ] {
+            for v in [0.0f32, 0.001, 0.18, 0.5, 1.0] {
+                let back = tf.decode(0.0, tf.encode(0.0, v));
+                assert!(
+                    (back - v).abs() < 1e-4,
+                    "{tf:?} round trip of {v} gave {back}"
+                );
+            }
+        }
+        let gamma = TransferFunction::Gamma;
+        let back = gamma.decode(2.2, gamma.encode(2.2, 0.25));
+        assert!((back - 0.25).abs() < 1e-5);
+
+        // The ColorSpace helpers use the space's own transfer + gamma.
+        let encoded = ColorSpace::SRGB.encode(0.18);
+        assert!((ColorSpace::SRGB.decode(encoded) - 0.18).abs() < 1e-5);
+        let encoded = ColorSpace::BT2020.encode(0.25);
+        assert!((ColorSpace::BT2020.decode(encoded) - 0.25).abs() < 1e-5);
+    }
+
+    #[test]
+    fn transform_matrix_is_identity_for_same_primaries() {
+        // Transfer functions do not enter the matrix: sRGB -> sRGB-linear
+        // is a primaries-only no-op.
+        let m = ColorSpace::SRGB
+            .transform_matrix(ColorSpace::SRGB_LINEAR)
+            .expect("both spaces are valid");
+        let identity = Mat3::identity().as_array();
+        for (a, b) in m.as_array().iter().zip(identity.iter()) {
+            assert!((a - b).abs() < 1e-5, "expected identity, got {a} vs {b}");
+        }
+
+        // Invalid spaces yield no matrix.
+        let invalid = ColorSpace::new(ColorPrimaries::Bt709, TransferFunction::Gamma);
+        assert!(invalid.transform_matrix(ColorSpace::SRGB).is_none());
+        assert!(ColorSpace::SRGB.transform_matrix(invalid).is_none());
+
+        // Display P3 -> sRGB is a genuine gamut transform, not identity.
+        let m = ColorSpace::DISPLAY_P3_LINEAR
+            .transform_matrix(ColorSpace::SRGB_LINEAR)
+            .unwrap();
+        let delta: f32 = m
+            .as_array()
+            .iter()
+            .zip(identity.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(delta > 1e-3, "P3 -> sRGB should differ from identity");
+    }
+
+    #[test]
+    fn mat3_multiply_transform_invert() {
+        let identity = Mat3::identity();
+        assert_eq!(identity.multiply(identity), identity);
+        assert_eq!(
+            identity.transform_vec3([0.5, 0.25, 0.75]),
+            [0.5, 0.25, 0.75]
+        );
+
+        // A transform and its inverse round-trip a vector.
+        let m = ColorSpace::SRGB_LINEAR
+            .transform_matrix(ColorSpace::DISPLAY_P3_LINEAR)
+            .unwrap();
+        let v = [0.5f32, 0.25, 0.75];
+        let back = m.invert().transform_vec3(m.transform_vec3(v));
+        for (a, b) in back.iter().zip(v.iter()) {
+            assert!((a - b).abs() < 1e-4, "invert round trip gave {a} vs {b}");
+        }
+
+        // Singular matrices invert to the identity.
+        let singular = Mat3::from_raw(sys::flux_mat3 { m: [0.0; 9] });
+        assert_eq!(singular.invert(), Mat3::identity());
+    }
+
+    #[test]
+    fn surface_hdr_maps_to_raw_extension() {
+        let raw = SurfaceHdr {
+            sdr_white_nits: 300.0,
+            metadata: Some(Hdr10Metadata {
+                mastering: PrimariesXy {
+                    rx: 0.708,
+                    ry: 0.292,
+                    gx: 0.170,
+                    gy: 0.797,
+                    bx: 0.131,
+                    by: 0.046,
+                    wx: 0.3127,
+                    wy: 0.3290,
+                },
+                max_luminance: 1000.0,
+                min_luminance: 0.01,
+                max_cll: 800.0,
+                max_fall: 400.0,
+            }),
+        }
+        .raw();
+        assert_eq!(raw.type_, sys::flux_struct_type::FLUX_TYPE_SURFACE_HDR_DESC);
+        assert!(raw.next.is_null());
+        assert_eq!(raw.sdr_white_nits, 300.0);
+        assert!(raw.has_metadata);
+        assert_eq!(raw.mastering.rx, 0.708);
+        assert_eq!(raw.mastering.wy, 0.3290);
+        assert_eq!(raw.max_luminance, 1000.0);
+        assert_eq!(raw.min_luminance, 0.01);
+        assert_eq!(raw.max_cll, 800.0);
+        assert_eq!(raw.max_fall, 400.0);
+
+        let bare = SurfaceHdr {
+            sdr_white_nits: 0.0,
+            metadata: None,
+        }
+        .raw();
+        assert!(!bare.has_metadata);
+        assert_eq!(bare.sdr_white_nits, 0.0);
+    }
+
+    /* --------------------------------------------------------------
+     * Synthetic ICC profiles, ported from the C test kit
+     * (tests/flux/icc_testkit.h) — same big-endian binary layout.
+     * -------------------------------------------------------------- */
+
+    fn w_u16(buf: &mut Vec<u8>, v: u16) {
+        buf.extend_from_slice(&v.to_be_bytes());
+    }
+
+    fn w_u32(buf: &mut Vec<u8>, v: u32) {
+        buf.extend_from_slice(&v.to_be_bytes());
+    }
+
+    fn w_s15f16(buf: &mut Vec<u8>, v: f64) {
+        w_u32(buf, (v * 65536.0).round() as i32 as u32);
+    }
+
+    fn w_align(buf: &mut Vec<u8>) {
+        while buf.len() % 4 != 0 {
+            buf.push(0);
+        }
+    }
+
+    /// Tag data block plus its (sig, offset, size) table entries.
+    struct IccTagBlock {
+        data: Vec<u8>,
+        defs: Vec<([u8; 4], u32, u32)>,
+    }
+
+    impl IccTagBlock {
+        fn new() -> Self {
+            Self {
+                data: Vec::new(),
+                defs: Vec::new(),
+            }
+        }
+
+        fn begin(&mut self, sig: [u8; 4]) {
+            w_align(&mut self.data);
+            let offset = self.data.len() as u32;
+            self.defs.push((sig, offset, 0));
+        }
+
+        fn end(&mut self) {
+            w_align(&mut self.data);
+            let last = self.defs.last_mut().unwrap();
+            last.2 = self.data.len() as u32 - last.1;
+        }
+
+        fn xyz(&mut self, sig: [u8; 4], x: f64, y: f64, z: f64) {
+            self.begin(sig);
+            self.data.extend_from_slice(b"XYZ ");
+            w_u32(&mut self.data, 0);
+            w_s15f16(&mut self.data, x);
+            w_s15f16(&mut self.data, y);
+            w_s15f16(&mut self.data, z);
+            self.end();
+        }
+
+        /// parametricCurveType 4 with the exact sRGB constants.
+        fn para_srgb(&mut self, sig: [u8; 4]) {
+            self.begin(sig);
+            self.data.extend_from_slice(b"para");
+            w_u32(&mut self.data, 0);
+            w_u16(&mut self.data, 4);
+            w_u16(&mut self.data, 0);
+            for v in [
+                2.4,
+                1.0 / 1.055,
+                0.055 / 1.055,
+                1.0 / 12.92,
+                0.04045,
+                0.0,
+                0.0,
+            ] {
+                w_s15f16(&mut self.data, v);
+            }
+            self.end();
+        }
+    }
+
+    /// Display-class ("mntr") matrix + sRGB-parametric-TRC profile — the
+    /// exact flavour the C parser tests extract onto FLUX_COLOR_SPACE_SRGB.
+    fn srgb_icc_profile() -> Vec<u8> {
+        // sRGB colorants adapted to the D50 PCS (the published ICC values).
+        const SRGB_D50: [f64; 9] = [
+            0.4360747, 0.2225045, 0.0139322, // rXYZ
+            0.3850649, 0.7168786, 0.0971045, // gXYZ
+            0.1430804, 0.0606169, 0.7141733, // bXYZ
+        ];
+        let mut block = IccTagBlock::new();
+        block.xyz(*b"rXYZ", SRGB_D50[0], SRGB_D50[1], SRGB_D50[2]);
+        block.xyz(*b"gXYZ", SRGB_D50[3], SRGB_D50[4], SRGB_D50[5]);
+        block.xyz(*b"bXYZ", SRGB_D50[6], SRGB_D50[7], SRGB_D50[8]);
+        block.para_srgb(*b"rTRC");
+        block.para_srgb(*b"gTRC");
+        block.para_srgb(*b"bTRC");
+
+        // 128-byte header + tag table, mirroring icc_build_profile.
+        let mut h = Vec::new();
+        w_u32(&mut h, 0); // size, patched below
+        w_u32(&mut h, 0); // CMM
+        w_u32(&mut h, 0x0430_0000); // ICC v4.3
+        h.extend_from_slice(b"mntr"); // display device class
+        h.extend_from_slice(b"RGB "); // data color space
+        h.extend_from_slice(b"XYZ "); // PCS
+        for v in [2026u16, 8, 15, 12, 0, 0] {
+            w_u16(&mut h, v); // creation date/time
+        }
+        h.extend_from_slice(b"acsp");
+        for _ in 0..6 {
+            w_u32(&mut h, 0); // platform, flags, manufacturer, model, attributes
+        }
+        w_u32(&mut h, 0); // rendering intent: perceptual
+        for v in [0.9642, 1.0, 0.8251] {
+            w_s15f16(&mut h, v); // D50 illuminant
+        }
+        for _ in 0..12 {
+            w_u32(&mut h, 0); // creator, profile ID, reserved
+        }
+        assert_eq!(h.len(), 128);
+
+        w_u32(&mut h, block.defs.len() as u32);
+        let base = (h.len() + block.defs.len() * 12) as u32;
+        for (sig, offset, size) in &block.defs {
+            h.extend_from_slice(sig);
+            w_u32(&mut h, base + offset);
+            w_u32(&mut h, *size);
+        }
+        let total = base + block.data.len() as u32;
+        h[0..4].copy_from_slice(&total.to_be_bytes());
+        h.extend_from_slice(&block.data);
+        h
+    }
+
+    #[test]
+    fn icc_profile_extracts_synthetic_srgb() {
+        let bytes = srgb_icc_profile();
+
+        // Raw sys layer: create/release round trip succeeds.
+        let mut raw: *mut sys::flux_icc_profile = std::ptr::null_mut();
+        let rc = unsafe {
+            sys::flux_icc_profile_create(
+                bytes.as_ptr() as *const std::os::raw::c_void,
+                bytes.len(),
+                &mut raw,
+            )
+        };
+        assert_eq!(rc, sys::flux_result::FLUX_OK);
+        assert!(!raw.is_null());
+        unsafe { sys::flux_icc_profile_release(raw) };
+
+        // Safe layer: the matrix + sRGB-TRC profile extracts exactly onto
+        // ColorSpace::SRGB (same assertion as the C parser tests).
+        let profile = IccProfile::new(&bytes).expect("parse synthetic sRGB profile");
+        let space = profile.color_space().expect("parametric-extractable");
+        assert_eq!(space, ColorSpace::SRGB);
+        assert_eq!(space.primaries(), ColorPrimaries::Bt709);
+        assert_eq!(space.transfer(), TransferFunction::Srgb);
+
+        // Clone retains; dropping the original leaves the clone usable.
+        let cloned = profile.clone();
+        drop(profile);
+        assert_eq!(cloned.color_space(), Some(ColorSpace::SRGB));
+    }
+
+    #[test]
+    fn icc_profile_rejects_malformed_input() {
+        assert_eq!(
+            IccProfile::new(&[]).unwrap_err(),
+            Error(sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT)
+        );
+        assert_eq!(
+            IccProfile::new(&[0u8; 64]).unwrap_err(),
+            Error(sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT)
+        );
+        // A valid sRGB profile truncated below its declared size.
+        let bytes = srgb_icc_profile();
+        assert_eq!(
+            IccProfile::new(&bytes[..bytes.len() / 2]).unwrap_err(),
+            Error(sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT)
         );
     }
 }

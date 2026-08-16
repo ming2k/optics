@@ -246,6 +246,13 @@ static flux_result create_instance(flux_device *d, const flux_device_desc *desc)
             exts[ext_count++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
             enumerate_portability = true;
         }
+        /* VK_EXT_swapchain_colorspace: required for any non-sRGB
+         * VkColorSpaceKHR (ADR-0069). Enable whenever advertised —
+         * drivers that lack it only offer SRGB_NONLINEAR anyway. */
+        if (has_extension(inst_exts, inst_avail, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) &&
+            ext_count < MAX_EXT) {
+            exts[ext_count++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
+        }
     }
     free(inst_exts);
 
@@ -717,6 +724,17 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
             return memory_budget_result;
         }
     }
+    /* VK_EXT_hdr_metadata when advertised: enables vkSetHdrMetadataEXT for
+     * HDR10 static metadata on HDR swapchains (ADR-0069). */
+    if (available && has_extension(available, avail, VK_EXT_HDR_METADATA_EXTENSION_NAME)) {
+        flux_result hdr_result = append_device_extension(
+            device_exts, &device_ext_count, VK_EXT_HDR_METADATA_EXTENSION_NAME);
+        if (hdr_result != FLUX_OK) {
+            free(available);
+            return hdr_result;
+        }
+        d->has_hdr_metadata = true;
+    }
     /* VK_KHR_portability_subset must be enabled whenever the physical
      * device advertises it (MoltenVK requires it; vkCreateDevice rejects
      * the device otherwise). Desktop Vulkan drivers never advertise it,
@@ -852,6 +870,10 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
     if (d->has_debug_utils) {
         d->pfn_set_name = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(
             d->device, "vkSetDebugUtilsObjectNameEXT");
+    }
+    if (d->has_hdr_metadata) {
+        d->pfn_set_hdr_metadata =
+            (PFN_vkSetHdrMetadataEXT)vkGetDeviceProcAddr(d->device, "vkSetHdrMetadataEXT");
     }
 
     /* Pipeline cache — seeded from the consumer's storage if a

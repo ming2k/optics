@@ -20,6 +20,11 @@
  * agree on this value. */
 #define FLUX_CANVAS_SAMPLES VK_SAMPLE_COUNT_4_BIT
 
+/* ADR-0069: the canvas always renders into this working-space
+ * intermediate (linear light, scRGB scale); the output transform
+ * pass converts to the destination's color space. */
+#define FLUX_CANVAS_LINEAR_FORMAT VK_FORMAT_R16G16B16A16_SFLOAT
+
 /* Integer clip rectangle in physical pixels. Backend-neutral (the Vulkan
  * backend converts it to VkRect2D at scissor time). */
 typedef struct flux_recti {
@@ -330,7 +335,8 @@ typedef struct flux_canvas_gradient_stop_pc {
 typedef struct flux_canvas_push {
     uint64_t verts_address;   /* offset  0 */
     float inv_window_size[2]; /* offset  8 */
-    float _pad0[2];           /* offset 16 */
+    uint64_t color_params_address; /* offset 16 — flux_image_color_params BDA,
+                                    * 0 = format-default content space (ADR-0069) */
     uint32_t kind;            /* offset 24 (0 solid, 1 linear, 2 radial, 3 image) */
     uint32_t num_stops;       /* offset 28 */
     float grad_from[2];       /* offset 32 */
@@ -351,6 +357,24 @@ typedef struct flux_canvas_push {
      * glyph's sub-rect so one texture serves every glyph. */
     float image_src[4]; /* offset 144 — u, v, du, dv (normalised) */
 } flux_canvas_push;
+
+/* Push constants for CANVAS_PIPE_OUTPUT (ADR-0069). Layout matches the
+ * push block in shaders/canvas_output.frag and fits inside the shared
+ * canvas layout's 160-byte range. */
+typedef struct flux_output_push {
+    float primaries[3][4]; /* column-major mat3, one column per vec4 */
+    uint32_t image_handle;
+    uint32_t sampler_handle;
+    uint32_t transfer;      /* flux_transfer_func of the encoded side */
+    uint32_t flags;         /* bit0 decode, bit1 no-dither */
+    float gamma;            /* FLUX_TRANSFER_GAMMA exponent */
+    float dither_levels;    /* 255 / 1023; ignored when no-dither */
+    float sdr_white_nits;   /* Phase 3 tone mapping; 203 default */
+    float _pad;
+} flux_output_push;
+
+#define FLUX_OUTPUT_F_DECODE 0x1u
+#define FLUX_OUTPUT_F_NO_DITHER 0x2u
 
 /* ------------------------------------------------------------------ */
 /*  Display-list segment bodies (forward-declared above)              */
@@ -449,8 +473,20 @@ typedef enum canvas_pipe_id {
     CANVAS_PIPE_COVER_GRADIENT,
     CANVAS_PIPE_GLYPH, /* batched glyph run (ADR-0010) */
     CANVAS_PIPE_SDF,   /* analytic rounded-rect / circle (fill + ring) */
+    /* Working-space intermediate -> destination output transform
+     * (ADR-0069). Never emitted by draws; backend_vk records it in
+     * end_pass (encode) and in the LOAD seed blit (decode). Always
+     * built 1x / no-stencil / blend-off. */
+    CANVAS_PIPE_OUTPUT,
     CANVAS_PIPE_COUNT,
 } canvas_pipe_id;
+
+/* flux_canvas_push.kind high bits: content decode hints (ADR-0069).
+ * Set when the sampled 8-bit UNORM image holds sRGB-encoded content
+ * that hardware views cannot decode for us. */
+#define FLUX_CANVAS_PUSH_DECODE_SRGB 0x100u
+/* color_params_address holds a live buffer reference (ADR-0070). */
+#define FLUX_CANVAS_PUSH_HAS_COLOR_PARAMS 0x200u
 
 flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format,
                                 VkSampleCountFlagBits samples, flux_paint_kind kind,

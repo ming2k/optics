@@ -240,13 +240,14 @@ int main(void) {
     /* --- state-identical submit batching.
      * Solid colours live in vertices, so 64 adjacent rect submissions share
      * all draw-visible Vulkan state and must collapse to one vkCmdDraw while
-     * preserving every submitted primitive. --- */
+     * preserving every submitted primitive. ADR-0069 adds one output-transform
+     * blit per pass (CLEAR pass: no seed blit), so recorded draws are 1+1. --- */
     {
         uint64_t submits = flux_canvas_submit_calls(canvas);
         uint64_t draws = flux_canvas_recorded_draws(canvas);
         EXPECT(render_frame(s, canvas, draw_batchable_rects, nullptr) == FLUX_OK);
         EXPECT(flux_canvas_submit_calls(canvas) - submits == 64);
-        EXPECT(flux_canvas_recorded_draws(canvas) - draws == 1);
+        EXPECT(flux_canvas_recorded_draws(canvas) - draws == 2);
 
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
@@ -290,10 +291,14 @@ int main(void) {
         const uint8_t *left = px_at(px, 2, H / 2);
         const uint8_t *mid = px_at(px, W / 2, H / 2);
         const uint8_t *right = px_at(px, W - 3, H / 2);
-        EXPECT(left[0] > 220 && left[2] < 35);   /* red end */
-        EXPECT(right[2] > 220 && right[0] < 35); /* blue end */
-        /* Midpoint mixes both; monotone along the axis. */
-        EXPECT(mid[0] > 64 && mid[0] < 200 && mid[2] > 64 && mid[2] < 200);
+        /* ADR-0069: stops interpolate in linear light. One pixel in from an
+         * end (t = 2.5/128) the off channel is 0.0195 linear, which
+         * sRGB-encodes to ~38 (gamma-space interpolation gave ~5); the
+         * midpoint is 0.5 linear per channel -> ~187, not 128. Dither adds
+         * ±1 LSB on top of the reference values. */
+        EXPECT(left[0] > 220 && left[2] > 30 && left[2] < 48);   /* red end */
+        EXPECT(right[2] > 220 && right[0] > 30 && right[0] < 48); /* blue end */
+        EXPECT(mid[0] > 183 && mid[0] < 192 && mid[2] > 183 && mid[2] < 192);
         EXPECT(left[0] > mid[0] && mid[0] > right[0]);
         EXPECT(right[2] > mid[2] && mid[2] > left[2]);
     }
@@ -363,13 +368,14 @@ int main(void) {
 
         /* Centre of the hole: background. Ring interior (between the
          * radii, four directions): white. Outside the outer circle:
-         * background. */
+         * background. ADR-0069: the output dither costs up to 1 LSB, so
+         * full-white reads back as 254/255, not exactly 255. */
         EXPECT(px_at(px, W / 2, H / 2)[0] < 20);
         uint32_t ring = (uint32_t)((r_in + r_out) / 2.0f);
-        EXPECT(px_at(px, W / 2 + ring, H / 2)[0] == 255);
-        EXPECT(px_at(px, W / 2 - ring, H / 2)[0] == 255);
-        EXPECT(px_at(px, W / 2, H / 2 + ring)[0] == 255);
-        EXPECT(px_at(px, W / 2, H / 2 - ring)[0] == 255);
+        EXPECT(px_at(px, W / 2 + ring, H / 2)[0] >= 253);
+        EXPECT(px_at(px, W / 2 - ring, H / 2)[0] >= 253);
+        EXPECT(px_at(px, W / 2, H / 2 + ring)[0] >= 253);
+        EXPECT(px_at(px, W / 2, H / 2 - ring)[0] >= 253);
         EXPECT(px_at(px, 2, 2)[0] < 20);
     }
 
@@ -477,14 +483,18 @@ int main(void) {
         const uint8_t *bottom_right = px_at(px, 72, 80); /* source top-right: green */
         const uint8_t *bottom_left = px_at(px, 56, 80);  /* source bottom-right: blue */
         const uint8_t *top_left = px_at(px, 56, 48);     /* source bottom-left: white */
-        EXPECT(top_right[0] > 112 && top_right[0] < 144 && top_right[1] < 8 &&
+        /* ADR-0069: the half-alpha white tint multiplies in linear light, so
+         * the lit channels are 0.502 linear over black, which sRGB-encodes
+         * to ~188 (gamma-space blending gave 128). ±4 absorbs the output
+         * dither and quantisation. */
+        EXPECT(top_right[0] > 184 && top_right[0] < 192 && top_right[1] < 8 &&
                top_right[2] < 8);
-        EXPECT(bottom_right[0] < 8 && bottom_right[1] > 112 && bottom_right[1] < 144 &&
+        EXPECT(bottom_right[0] < 8 && bottom_right[1] > 184 && bottom_right[1] < 192 &&
                bottom_right[2] < 8);
-        EXPECT(bottom_left[0] < 8 && bottom_left[1] < 8 && bottom_left[2] > 112 &&
-               bottom_left[2] < 144);
-        EXPECT(top_left[0] > 112 && top_left[0] < 144 && top_left[1] > 112 &&
-               top_left[1] < 144 && top_left[2] > 112 && top_left[2] < 144);
+        EXPECT(bottom_left[0] < 8 && bottom_left[1] < 8 && bottom_left[2] > 184 &&
+               bottom_left[2] < 192);
+        EXPECT(top_left[0] > 184 && top_left[0] < 192 && top_left[1] > 184 &&
+               top_left[1] < 192 && top_left[2] > 184 && top_left[2] < 192);
         EXPECT(px_at(px, 40, 64)[0] < 8); /* outside the rotated 32×64 quad */
 
         /* A display-list segment owns both referenced bindless resources.
@@ -515,7 +525,13 @@ int main(void) {
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         const uint8_t *centre = px_at(px, W / 2, H / 2);
-        EXPECT(centre[0] == 37 && centre[1] == 113 && centre[2] == 211 && centre[3] == 255);
+        /* ADR-0069: the UNORM texel is sRGB-decoded on sampling and
+         * re-encoded at output; the round trip is the identity up to the
+         * ±1 LSB output dither and quantisation. */
+        EXPECT(centre[0] >= 35 && centre[0] <= 39);
+        EXPECT(centre[1] >= 111 && centre[1] <= 115);
+        EXPECT(centre[2] >= 209 && centre[2] <= 213);
+        EXPECT(centre[3] == 255);
         flux_image_release(image);
     }
 
@@ -579,11 +595,12 @@ int main(void) {
         const uint8_t *a = px_at(px, 28, 28);
         EXPECT(a[0] > 240 && a[1] < 12 && a[2] < 12);
 
-        /* Quad B centre: quarter coverage × white = ~64 grey
-         * (premultiplied over black background). */
+        /* Quad B centre: quarter coverage × white tint. ADR-0069: coverage
+         * scales in linear light — 64/255 ≈ 0.251 linear over black, which
+         * sRGB-encodes to ~137 (gamma-space blending gave ~64). */
         const uint8_t *b = px_at(px, 84, 28);
-        EXPECT(b[0] > 48 && b[0] < 84);
-        EXPECT(b[1] > 48 && b[1] < 84);
+        EXPECT(b[0] > 128 && b[0] < 148);
+        EXPECT(b[1] > 128 && b[1] < 148);
 
         /* Between the quads and outside them: background. */
         EXPECT(px_at(px, 56, 28)[0] < 20);

@@ -48,9 +48,12 @@ fn rgba_premultiplies_translucent_colours_for_src_over() {
     c.fill_rect(0.0, 0.0, 1.0, 1.0, rgba(255, 255, 255, 32));
     c.end();
     let (_, _, _, pixels) = c.read_pixels().expect("CPU readback");
+    // ADR-0069: blending happens in the linear-light working space, so the
+    // result is sRGB-encoded on output: srgb_encode(32/255) * 255 ~= 99,
+    // not the 32 of the old gamma-space pipeline.
     assert!(
-        (30..=34).contains(&pixels[0]),
-        "translucent white over black should remain near 32, got {}",
+        (95..=103).contains(&pixels[0]),
+        "translucent white over black should encode linear 32/255 to ~99, got {}",
         pixels[0]
     );
     assert_eq!(pixels[0], pixels[1]);
@@ -142,7 +145,10 @@ fn linear_gradient_follows_canvas_transform() {
         pixels[near_start]
     );
     assert!(
-        (90..=170).contains(&pixels[mid]),
+        (183..=192).contains(&pixels[mid]),
+        // ADR-0069: stops interpolate in linear light, so the midpoint is
+        // linear 0.5, sRGB-encoded to ~187 on output (not the ~128 of the
+        // old gamma-space pipeline).
         "device x=64 should sit mid-gradient, R = {}",
         pixels[mid]
     );

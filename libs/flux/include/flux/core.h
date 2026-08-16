@@ -152,6 +152,69 @@ typedef enum flux_format {
 } flux_format;
 
 /* ================================================================== */
+/*  Color space (ADR-0069)                                            */
+/* ================================================================== */
+
+/* A color space is { primaries, transfer function } — the parametric
+ * model VkColorSpaceKHR, DXGI, the Wayland color-management protocol
+ * and CSS Color 4 have converged on. There is deliberately no range
+ * field: flux renders RGB only; video-range YUV belongs to the decoder
+ * that hands flux RGB content.
+ *
+ * All named primaries are D65; custom primaries carry their own white
+ * point and conversions adapt chromatically (Bradford). */
+
+typedef enum flux_color_primaries {
+    FLUX_PRIMARIES_BT709 = 0,      /* sRGB gamut, D65 */
+    FLUX_PRIMARIES_DISPLAY_P3 = 1, /* D65 */
+    FLUX_PRIMARIES_BT2020 = 2,     /* D65 */
+    FLUX_PRIMARIES_ADOBE_RGB = 3,  /* D65 */
+    FLUX_PRIMARIES_CUSTOM = 4,     /* chromaticities from flux_color_space.xy */
+} flux_color_primaries;
+
+/* Transfer function between linear-light and encoded values. PQ and
+ * HLG are absolute/nominal HDR curves (ITU-R BT.2100): PQ linear
+ * values are in units of 10000 cd/m² (1.0 = 10000 nits); HLG is
+ * nominal 0..1 scene light. The working-space luminance scale follows
+ * scRGB: 1.0 = 80 cd/m². */
+typedef enum flux_transfer_func {
+    FLUX_TRANSFER_LINEAR = 0,
+    FLUX_TRANSFER_SRGB = 1,
+    FLUX_TRANSFER_GAMMA = 2, /* pure power law, exponent from flux_color_space.gamma */
+    FLUX_TRANSFER_PQ = 3,    /* ST 2084 */
+    FLUX_TRANSFER_HLG = 4,
+} flux_transfer_func;
+
+typedef struct flux_color_space {
+    flux_color_primaries primaries;
+    flux_transfer_func transfer;
+    float gamma; /* FLUX_TRANSFER_GAMMA only; 0 otherwise */
+    struct {
+        float rx, ry, gx, gy, bx, by;
+        float wx, wy; /* white point */
+    } xy; /* FLUX_PRIMARIES_CUSTOM only; zero otherwise */
+} flux_color_space;
+
+/* Brace-initializer presets (same convention as FLUX_SURFACE_DESC_INIT).
+ * The set follows CSS Color 4 plus the HDR surface spaces. */
+#define FLUX_COLOR_SPACE_SRGB {FLUX_PRIMARIES_BT709, FLUX_TRANSFER_SRGB, 0.0f, {0}}
+#define FLUX_COLOR_SPACE_SRGB_LINEAR {FLUX_PRIMARIES_BT709, FLUX_TRANSFER_LINEAR, 0.0f, {0}}
+/* scRGB: the fixed working space (extended linear BT.709, 1.0 = 80 nits).
+ * Same {primaries, transfer} as SRGB_LINEAR; the distinct preset names the
+ * extended-range surface intent (VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT). */
+#define FLUX_COLOR_SPACE_SCRGB {FLUX_PRIMARIES_BT709, FLUX_TRANSFER_LINEAR, 0.0f, {0}}
+#define FLUX_COLOR_SPACE_DISPLAY_P3 {FLUX_PRIMARIES_DISPLAY_P3, FLUX_TRANSFER_SRGB, 0.0f, {0}}
+#define FLUX_COLOR_SPACE_DISPLAY_P3_LINEAR                                                     \
+    {FLUX_PRIMARIES_DISPLAY_P3, FLUX_TRANSFER_LINEAR, 0.0f, {0}}
+/* Adobe RGB (1998): the official profile's TRC is a pure 563/256 power. */
+#define FLUX_COLOR_SPACE_ADOBE_RGB                                                             \
+    {FLUX_PRIMARIES_ADOBE_RGB, FLUX_TRANSFER_GAMMA, 2.19921875f, {0}}
+/* SDR BT.2020 per BT.1886 practice: pure 2.4 power. */
+#define FLUX_COLOR_SPACE_BT2020 {FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_GAMMA, 2.4f, {0}}
+#define FLUX_COLOR_SPACE_BT2020_PQ {FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_PQ, 0.0f, {0}} /* HDR10 */
+#define FLUX_COLOR_SPACE_BT2020_HLG {FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_HLG, 0.0f, {0}}
+
+/* ================================================================== */
 /*  Tagged-struct discriminator                                       */
 /* ================================================================== */
 
@@ -185,6 +248,10 @@ typedef enum flux_struct_type {
     FLUX_TYPE_DEVICE_DRM_NODE_DESC = 25,
     FLUX_TYPE_DEVICE_FEATURES_DESC = 26,
     FLUX_TYPE_GLYPH_RUN_HOST_ATLAS_DESC = 27,
+    FLUX_TYPE_SURFACE_COLOR_SPACE_DESC = 28,
+    FLUX_TYPE_SURFACE_HDR_DESC = 29,
+    FLUX_TYPE_IMAGE_COLOR_SPACE_DESC = 30,
+    FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC = 31,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -222,6 +289,27 @@ typedef struct flux_readback flux_readback;
 typedef struct flux_buffer flux_buffer;
 typedef struct flux_target flux_target;
 typedef struct flux_image flux_image;
+typedef struct flux_icc_profile flux_icc_profile;
+
+/* ------------------------------------------------------------------ */
+/*  ICC profile (device-free parsed transform source, ADR-0070)       */
+/* ------------------------------------------------------------------ */
+
+/* Parses and validates an ICC v2/v4 display/scanner-class RGB profile.
+ * The parser implements the bounded subset flux consumes: matrix +
+ * TRC profiles (curveType gamma, parametricCurveType 0-4) and A2B0
+ * LUT profiles (mft1/mft2/mAB); anything else is
+ * FLUX_ERROR_UNSUPPORTED. Parsing never touches the GPU. */
+FLUX_NODISCARD FLUX_API flux_result flux_icc_profile_create(const void *data, size_t size,
+                                                            flux_icc_profile **out);
+FLUX_NODISCARD FLUX_API flux_icc_profile *flux_icc_profile_retain(flux_icc_profile *p);
+FLUX_API void flux_icc_profile_release(flux_icc_profile *p);
+
+/* When the profile is exactly representable in the parametric model
+ * (matrix + a transfer curve from the flux set), fills `out` and
+ * returns true. LUT-only profiles return false; they are still usable
+ * on images, where they are baked into a 3D LUT at creation. */
+FLUX_API bool flux_icc_profile_color_space(const flux_icc_profile *p, flux_color_space *out);
 
 /* ------------------------------------------------------------------ */
 /*  Sampled image (refcounted GPU resource)                           */
@@ -240,6 +328,25 @@ typedef struct flux_image_desc {
 } flux_image_desc;
 
 #define FLUX_IMAGE_DESC_INIT {.type = FLUX_TYPE_IMAGE_DESC}
+
+/* Optional flux_image_desc extension tagging the content's color space
+ * (ADR-0069/0070). Untagged images keep the format-derived default:
+ * 8-bit formats are sRGB, RGBA16_SFLOAT is working-space linear.
+ *
+ * `space` tags parametric content (e.g. a Display P3 texture). `icc`
+ * takes precedence: a parametric-extractable profile behaves like
+ * `space`; a LUT-only profile is baked into a 3D LUT at creation and
+ * sampled by the canvas image pipeline. Both are read only during
+ * flux_image_create. Tagging changes how texels are decoded into the
+ * working space — it never re-encodes the stored pixels. */
+typedef struct flux_image_color_space_desc {
+    flux_struct_type type; /* FLUX_TYPE_IMAGE_COLOR_SPACE_DESC */
+    const void *next;
+    const flux_color_space *space;     /* nullable */
+    const flux_icc_profile *icc;       /* nullable; precedence over space */
+} flux_image_color_space_desc;
+
+#define FLUX_IMAGE_COLOR_SPACE_DESC_INIT {.type = FLUX_TYPE_IMAGE_COLOR_SPACE_DESC}
 
 FLUX_NODISCARD FLUX_API flux_result flux_image_create(flux_device *d,
                                                       const flux_image_desc *desc,
@@ -664,11 +771,99 @@ typedef struct flux_surface_readback_desc {
 
 #define FLUX_SURFACE_READBACK_DESC_INIT {.type = FLUX_TYPE_SURFACE_READBACK_DESC}
 
+/* Optional flux_surface_desc extension listing the color spaces the
+ * application can present, most preferred first (ADR-0069). Flux walks
+ * the list in order and picks the first space the swapchain can do;
+ * the winner is reported through flux_surface_info.color_space.
+ *
+ * Without this extension the legacy behavior is kept: `hdr_preferred`
+ * maps to the preference list [BT2020_PQ, SCRGB, SRGB], otherwise
+ * [SRGB] — the exact pick order pick_format always had.
+ *
+ * Spaces without a Vulkan swapchain representation (e.g. SDR BT.2020,
+ * Adobe RGB, custom primaries) never match on a windowed surface;
+ * on an offscreen surface the first listed space is adopted verbatim
+ * (8-bit sRGB-family encodings only — HDR transfer functions are
+ * FLUX_ERROR_UNSUPPORTED offscreen until an offscreen format field
+ * lands). The array is read only during flux_surface_create. */
+typedef struct flux_surface_color_space_desc {
+    flux_struct_type type; /* FLUX_TYPE_SURFACE_COLOR_SPACE_DESC */
+    const void *next;
+    const flux_color_space *spaces;
+    uint32_t space_count;
+} flux_surface_color_space_desc;
+
+#define FLUX_SURFACE_COLOR_SPACE_DESC_INIT {.type = FLUX_TYPE_SURFACE_COLOR_SPACE_DESC}
+
+/* Optional flux_surface_desc extension tuning HDR presentation
+ * (ADR-0069). Meaningful only when the negotiated color space is HDR
+ * (PQ or HLG); ignored otherwise.
+ *
+ * `sdr_white_nits` places SDR white (working-space 1.0) on the HDR
+ * output — 0 selects the default 203 cd/m² (ITU-R BT.2408 graphics
+ * white). Raise it toward the panel's SDR brightness when mixing with
+ * bright SDR windows (the Windows "SDR brightness" slider semantic).
+ *
+ * The remaining fields carry HDR10 static metadata
+ * (SMPTE ST 2086 / CTA-861.3): with `has_metadata` set and the device
+ * advertising VK_EXT_hdr_metadata, flux calls vkSetHdrMetadataEXT on
+ * the (re)created swapchain. Mastering chromaticities are CIE 1931 xy;
+ * luminances are cd/m² (min in the ST 2086 0.0001-unit sense is
+ * NOT used here — plain cd/m²). */
+typedef struct flux_surface_hdr_desc {
+    flux_struct_type type; /* FLUX_TYPE_SURFACE_HDR_DESC */
+    const void *next;
+    float sdr_white_nits; /* 0 = 203 default */
+    bool has_metadata;
+    struct {
+        float rx, ry, gx, gy, bx, by;
+        float wx, wy;
+    } mastering; /* mastering display primaries + white, CIE xy */
+    float max_luminance;  /* cd/m² */
+    float min_luminance;  /* cd/m² */
+    float max_cll;        /* MaxCLL, cd/m² */
+    float max_fall;       /* MaxFALL, cd/m² */
+} flux_surface_hdr_desc;
+
+#define FLUX_SURFACE_HDR_DESC_INIT {.type = FLUX_TYPE_SURFACE_HDR_DESC}
+
+/* Optional flux_surface_desc extension pinning the space pixels are
+ * *written in*, decoupled from the swapchain's negotiated space
+ * (ADR-0069). This is the legacy-platform display-profile path: the
+ * host supplies the display's actual color space (parametric, or an
+ * ICC profile extractable to one), flux converts working space ->
+ * content space in the output transform, and the swapchain stays a
+ * plain sRGB/scRGB container the compositor passes through.
+ *
+ * Do NOT combine this with color-managed compositors (Wayland
+ * color-management, Windows ACM): there the compositor performs the
+ * display transform and double-conversion results. On those platforms
+ * negotiate the true space via flux_surface_color_space_desc instead.
+ *
+ * Offscreen surfaces: equivalent to requesting the space through
+ * flux_surface_color_space_desc (8-bit SDR encodings only). */
+typedef struct flux_surface_output_color_desc {
+    flux_struct_type type; /* FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC */
+    const void *next;
+    flux_color_space content_space;   /* the display's actual space */
+    const flux_icc_profile *icc;      /* optional; must be parametric-extractable */
+} flux_surface_output_color_desc;
+
+#define FLUX_SURFACE_OUTPUT_COLOR_DESC_INIT {.type = FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC}
+
 typedef struct flux_surface_info {
     uint32_t width;
     uint32_t height;
     uint32_t image_count;
-    bool hdr; /* surface is actually HDR */
+    bool hdr; /* surface is actually HDR (PQ, HLG, or extended-linear) */
+    /* The color space the surface actually presents in (the negotiated
+     * swapchain space). Content rendered through flux is transformed
+     * into `content_space` at output (ADR-0069). */
+    flux_color_space color_space;
+    /* What pixels are written in: equals color_space unless a
+     * flux_surface_output_color_desc pinned the display's actual space
+     * (the legacy-platform pre-conversion path). */
+    flux_color_space content_space;
 } flux_surface_info;
 
 /* Pixel-aligned surface region used by asynchronous frame readback. Coordinates

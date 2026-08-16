@@ -2,8 +2,9 @@
  * CPU (software) implementation of the canvas rendering backend.
  *
  * Renders the same triangle-batch stream the Vulkan backend consumes, but
- * rasterizes on the host into a premultiplied-RGBA framebuffer — no GPU,
- * device, or surface required. It reproduces the canvas fragment shaders:
+ * rasterizes on the host into a premultiplied-RGBA float framebuffer — no
+ * GPU, device, or surface required. It reproduces the canvas fragment
+ * shaders:
  *   - solid            (canvas_solid.frag):    interpolated vertex colour
  *   - linear/radial    (canvas_gradient.frag): per-pixel gradient lookup
  *   - rounded-rect SDF  (canvas_sdf.frag):      analytic distance-field coverage
@@ -13,6 +14,15 @@
  * with a sample-resolution accumulation buffer: STENCIL_WRITE adds signed
  * winding, STENCIL_WRITE_EO toggles parity, COVER_* tests != 0 and resets —
  * so even-odd and self-intersecting fills match the GPU pixel-for-pixel.
+ *
+ * ADR-0069: the framebuffer holds premultiplied linear-light values in the
+ * scRGB working space, exactly like the GPU's RGBA16F intermediate. Packed
+ * sRGB colours (vertex colours, gradient stops, clear, glyph tints) decode
+ * at the edges via flux_color_to_linear — the same curve the shaders'
+ * flux_decode_premul_srgb applies — and the 8-bit readback performs the
+ * output transform once (un-premultiply, sRGB-encode, re-premultiply). The
+ * CPU backend deliberately does NOT dither: it is the deterministic oracle;
+ * the GPU's ±1 LSB TPDF dither is absorbed by test tolerances.
  *
  * Unsupported (they need GPU-resident textures): image draws. Glyph draws
  * ARE supported on a device-less canvas via a host-resident R8 coverage
@@ -55,10 +65,11 @@ typedef struct vec4f {
     float r, g, b, a;
 } vec4f;
 
+/* Packed premultiplied sRGB -> premultiplied linear (working space).
+ * Same semantics as the GPU vertex shader's flux_decode_premul_srgb. */
 static inline vec4f unpack_premul(flux_color c) {
-    uint8_t r, g, b, a;
-    flux_color_unpack(c, &r, &g, &b, &a);
-    return (vec4f){r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f};
+    flux_vec4 l = flux_color_to_linear(c);
+    return (vec4f){l.x, l.y, l.z, l.w};
 }
 
 static inline float clampf(float x, float lo, float hi) {
@@ -711,7 +722,10 @@ static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canv
         if (!v->rgba8)
             return nullptr;
     }
-    /* Box-downsample the SS x SS sample block per output pixel. */
+    /* Box-downsample the SS x SS sample block per output pixel (averaging
+     * premultiplied linear, like the GPU's MSAA resolve), then run the
+     * ADR-0069 output transform once: un-premultiply, sRGB-encode,
+     * re-premultiply, quantise. No dither — deterministic oracle. */
     const float norm = 1.0f / (float)(FLUX_CPU_SS * FLUX_CPU_SS);
     for (uint32_t y = 0; y < v->height; ++y) {
         for (uint32_t x = 0; x < v->width; ++x) {
@@ -728,8 +742,14 @@ static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canv
                 }
             }
             uint8_t *o = &v->rgba8[((size_t)y * v->width + x) * 4];
-            for (int k = 0; k < 4; ++k)
-                o[k] = (uint8_t)(clampf(acc[k] * norm, 0.0f, 1.0f) * 255.0f + 0.5f);
+            float a = acc[3] * norm;
+            float inv_a = a > 0.0f ? 1.0f / a : 0.0f;
+            o[3] = (uint8_t)(clampf(a, 0.0f, 1.0f) * 255.0f + 0.5f);
+            for (int k = 0; k < 3; ++k) {
+                float straight = acc[k] * norm * inv_a; /* a == 0 -> black */
+                float enc = flux_transfer_encode(FLUX_TRANSFER_SRGB, 0.0f, straight);
+                o[k] = (uint8_t)(clampf(enc * a, 0.0f, 1.0f) * 255.0f + 0.5f);
+            }
         }
     }
     if (width)

@@ -15,6 +15,18 @@ test_math = executable('test_math',
 )
 test('math', test_math, suite : 'unit')
 
+test_colorspace = executable('test_colorspace',
+  'test_colorspace.c',
+  dependencies : [test_helpers_dep],
+)
+test('colorspace', test_colorspace, suite : 'unit')
+
+test_icc = executable('test_icc',
+  'test_icc.c',
+  dependencies : [test_helpers_dep],
+)
+test('icc', test_icc, suite : 'unit')
+
 test_format = executable('test_format',
   'test_format.c',
   dependencies : [test_helpers_dep],
