@@ -34,7 +34,6 @@ static flux_color lensi_button_text_color(uint32_t bg) {
 void lensi_skin_button(lens *ui, lens_node *n, const lens_widget_record *rec) {
     const lens_style_resolved *rs = &rec->style;
     bool disabled = (rec->state & LENS_STATE_DISABLED) != 0;
-    float h = rec->bounds.h;
 
     /* The body ramp runs accent -> active on the theme path; an instance
      * `bg` replaces the accent end of the ramp (its derived bg_pressed
@@ -46,19 +45,21 @@ void lensi_skin_button(lens *ui, lens_node *n, const lens_widget_record *rec) {
                                     rec->active_t > rec->hover_t * 0.4f ? rec->active_t
                                                                         : rec->hover_t * 0.4f);
 
-    float text_y = (h - rec->content.text.height) * 0.5f;
-    if (text_y < 0.0f)
-        text_y = 0.0f;
-
     lensi_drawlist_push(
         ui, n,
         (lens_draw_cmd){
             .kind = LENS_DRAW_RECT, .rel = {0, 0, 0, 0}, .color = bg, .radius = rs->corner_radius});
 
+    /* Vertical centring uses the replay-time convention (negative rel.h —
+     * "centre in the final node height", shared with lens_heading and the
+     * padded labels): a build-time offset glues the ink to the middle of
+     * the MEASURED box, so a button stretched taller than its intrinsic
+     * height (a cross-stretched row sibling, an explicit min_height) would
+     * show high-riding text. */
     lensi_drawlist_push(
         ui, n,
         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                        .rel = {rs->padding, text_y, -1.0f, 0},
+                        .rel = {rs->padding, 0, -1.0f, -1.0f},
                         .color = disabled ? rs->fg : lensi_button_text_color(bg),
                         .text = rec->content.label,
                         .text_size = rs->font_size});

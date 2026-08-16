@@ -1007,21 +1007,24 @@ static void drain_input(w32_platform *pl, lens_input *in, float dt) {
     pl->acc.text[0] = '\0';
 }
 
+/* Diagnostics go to stderr, never stdout: a consumer's stdout may be an
+ * IPC wire (see flux_console_logger). */
 static void log_raw(const lens_input *in) {
     static const char *names[LENS_MOUSE_COUNT] = {"left", "right", "middle"};
     for (int b = 0; b < LENS_MOUSE_COUNT; b++) {
         if (in->mouse_pressed[b])
-            printf("[raw] mouse press   %s\n", names[b]);
+            fprintf(stderr, "[raw] mouse press   %s\n", names[b]);
         if (in->mouse_released[b])
-            printf("[raw] mouse release %s\n", names[b]);
+            fprintf(stderr, "[raw] mouse release %s\n", names[b]);
     }
     if (in->scroll_x != 0.0f || in->scroll_y != 0.0f)
-        printf("[raw] scroll dx=%.2f dy=%.2f\n", in->scroll_x, in->scroll_y);
+        fprintf(stderr, "[raw] scroll dx=%.2f dy=%.2f\n", in->scroll_x, in->scroll_y);
     if (in->scroll_pixels_x != 0.0f || in->scroll_pixels_y != 0.0f)
-        printf("[raw] scroll pixels dx=%.2f dy=%.2f\n", in->scroll_pixels_x, in->scroll_pixels_y);
+        fprintf(stderr, "[raw] scroll pixels dx=%.2f dy=%.2f\n", in->scroll_pixels_x,
+                in->scroll_pixels_y);
     for (uint32_t k = 0; k < in->key_count; k++)
-        printf("[raw] key %d %s%s\n", in->keys[k].key, in->keys[k].pressed ? "down" : "up  ",
-               in->keys[k].repeat ? " (repeat)" : "");
+        fprintf(stderr, "[raw] key %d %s%s\n", in->keys[k].key, in->keys[k].pressed ? "down" : "up  ",
+                in->keys[k].repeat ? " (repeat)" : "");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1540,8 +1543,8 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                 surface_needs_paint = false;
 
             if (++frame_no == 1)
-                printf("first frame presented: %dx%d logical, %ux%u device (scale=%.2f)\n",
-                       pl.width, pl.height, info.width, info.height, (double)pl.scale);
+                fprintf(stderr, "first frame presented: %dx%d logical, %ux%u device (scale=%.2f)\n",
+                        pl.width, pl.height, info.width, info.height, (double)pl.scale);
         }
 
         /* Refine the tentative deadline now that the repaint query and the

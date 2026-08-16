@@ -146,6 +146,9 @@ struct lens_node {
     float min_h, max_h;     /* 0 = unconstrained */
     float scroll_x, scroll_y;
     float scroll_gutter; /* trailing viewport space reserved for scrollbar */
+    /* Build-time stamp of the context opacity (lens_set_opacity): emission
+     * bakes it into every command pushed onto this node this frame. */
+    float opacity;
 
     /* layout outputs */
     flux_point measured;  /* measure pass */
@@ -244,6 +247,9 @@ struct lens {
                        * after create — degrades to mono internally */
     int text_family;  /* lens_text_family for subsequently built widgets;
                        * 0 (DEFAULT) keeps the engine's sans default */
+    float opacity;    /* lens_set_opacity context switch; frame-scoped
+                       * (reset to 1.0 by lens_begin), stamped per node at
+                       * build time. */
 
     lens_store store;
     lens_node *root;
@@ -372,6 +378,8 @@ struct lens {
         bool active;
         flux_rect anchor;
         char text[128];
+        float opacity; /* context opacity at lensi_tooltip time; the tooltip
+                        * paints outside the draw list, so replay applies it */
     } tooltip;
     bool prev_tooltip_active; /* tooltip.active at the end of last frame;
                                * a disappearing tooltip is damage too */
@@ -651,6 +659,17 @@ static inline flux_color lensi_lerp_color(flux_color a, flux_color b, float t) {
 
 static inline flux_color lensi_color_alpha(flux_color c, uint8_t a) {
     return (c & 0x00FFFFFFu) | ((uint32_t)a << 24);
+}
+
+/* Scale a packed colour's alpha by `o` (clamped 0..1), RGB untouched — the
+ * fade bake behind lens_set_opacity. */
+static inline flux_color lensi_opacity_color(flux_color c, float o) {
+    if (o < 0.0f)
+        o = 0.0f;
+    if (o > 1.0f)
+        o = 1.0f;
+    uint32_t a = (uint32_t)((float)(uint8_t)(c >> 24) * o + 0.5f);
+    return (c & 0x00FFFFFFu) | (a << 24);
 }
 
 #endif /* LENSI_INTERNAL_H */

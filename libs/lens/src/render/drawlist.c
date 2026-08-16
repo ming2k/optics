@@ -58,6 +58,15 @@ void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd) {
     if (!n)
         return;
 
+    /* Bake the node's build-time opacity (lens_set_opacity) into the
+     * command colours: one knob fades every paint path — rects, borders,
+     * text, icons, host images — and the colour-bearing cmd hash keeps
+     * display-list records honest across the animation. */
+    if (n->opacity < 1.0f) {
+        cmd.color = lensi_opacity_color(cmd.color, n->opacity);
+        cmd.outline_color = lensi_opacity_color(cmd.outline_color, n->opacity);
+    }
+
     /* Text commands keep only a pointer, but replay runs after the build
      * phase returns — so a caller's stack buffer (snprintf'd labels,
      * loop-local strings) would dangle. Copy the run into the per-frame

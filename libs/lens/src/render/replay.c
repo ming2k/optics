@@ -614,21 +614,27 @@ flux_result lens_render(lens *ui, flux_canvas *canvas) {
         float x = ui->tooltip.anchor.x;
         float y = ui->tooltip.anchor.y + ui->tooltip.anchor.h + 4.0f;
 
+        /* The tooltip bypasses the draw list, so the build-time opacity
+         * stamped by lensi_tooltip is applied here at paint. */
         flux_rect bg = {x, y, w, h};
-        flux_canvas_fill_rect_color(canvas, bg, t->color_bg);
+        flux_canvas_fill_rect_color(canvas, bg,
+                                    lensi_opacity_color(t->color_bg, ui->tooltip.opacity));
 
         flux_path *p = NULL;
         if (flux_path_create(&p, &ui->arena) == FLUX_OK) {
             flux_path_add_rect(p, bg);
-            flux_paint paint = flux_paint_solid(t->color_border);
+            flux_paint paint =
+                flux_paint_solid(lensi_opacity_color(t->color_border, ui->tooltip.opacity));
             paint.stroke_width = 1.0f;
             flux_canvas_stroke_path(canvas, p, &paint);
         }
 
         if (ui->text) {
-            flux_text_draw(ui->text, canvas, &ui->arena, x + pad, y + pad, ui->tooltip.text,
-                           strlen(ui->tooltip.text),
-                           &(flux_text_style){.size_px = size, .color = t->color_fg});
+            flux_text_draw(
+                ui->text, canvas, &ui->arena, x + pad, y + pad, ui->tooltip.text,
+                strlen(ui->tooltip.text),
+                &(flux_text_style){.size_px = size,
+                                   .color = lensi_opacity_color(t->color_fg, ui->tooltip.opacity)});
         }
         if (scaled)
             flux_canvas_restore(canvas);

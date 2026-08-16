@@ -748,6 +748,18 @@ FLUX_NODISCARD LENS_API flux_result lens_create(const lens_desc *desc, lens **ou
 LENS_API void lens_destroy(lens *ui);
 LENS_API void lens_set_theme(lens *ui, lens_theme theme);
 LENS_API lens_theme lens_get_theme(const lens *ui);
+
+/* Frame-scoped opacity switch (0..1; default 1.0): the single fade knob
+ * for enter/exit motion. Every node built while an opacity is in effect
+ * carries it as a build-time stamp, and emission bakes it into each draw
+ * command's colour alpha — rects, borders, text, icons, host images and
+ * scrollbars fade together, with no per-colour work by the caller. Like
+ * the style scope stack, the switch resets to 1.0 at every lens_begin, so
+ * a forgotten restore cannot dim the next frame; within a frame, set it
+ * back after building the faded subtree. Mechanism, not animation: the
+ * host owns the clock. */
+LENS_API void lens_set_opacity(lens *ui, float opacity);
+LENS_API float lens_opacity(const lens *ui);
 LENS_API float lens_dt(const lens *ui); /* frame delta, seconds */
 
 /* Device-pixel scale (HiDPI). The application reports the compositor /
@@ -884,6 +896,11 @@ LENS_API void lens_spacer(lens *ui, float size);     /* fixed empty main-axis ga
 /*  `*_ex` form below.                                                */
 /* ================================================================== */
 
+/* A standalone button. The label is drawn centred on both axes within the
+ * RESOLVED node box (the replay-time convention shared with lens_heading
+ * and the padded labels), so it stays centred even when a cross-stretching
+ * row or an explicit min_height arranges the button taller than its
+ * intrinsic padded height. */
 LENS_API bool lens_button(lens *ui, const char *label);
 /* Inline text action for breadcrumbs and secondary navigation. It has no
  * surface at rest and indicates hover/focus with an accent underline without

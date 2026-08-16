@@ -10,6 +10,8 @@ tests = ['test_id', 'test_store', 'test_layout', 'test_input',
          'test_place_occlusion', 'test_scroll_hit_clip',
          'test_reduced_motion', 'test_tree', 'test_repaint',
          'test_record_replay', 'test_icon_runtime', 'test_label_centering',
+         'test_button_centering',
+         'test_opacity',
          'test_skin', 'test_audit_fixes', 'test_a11y_activate']
 
 foreach t : tests

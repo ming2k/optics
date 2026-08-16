@@ -265,6 +265,25 @@ impl Frame {
         unsafe { sys::lens_set_theme(self.ui, theme.0) };
     }
 
+    /// Frame-scoped opacity switch (0..1, clamped; default 1.0): the single
+    /// fade knob for enter/exit motion. Every node built while an opacity is
+    /// in effect carries it as a build-time stamp, and emission bakes it into
+    /// each draw command's colour alpha — rects, borders, text, icons, host
+    /// images and scrollbars fade together, with no per-colour work by the
+    /// caller. The switch resets to 1.0 at every frame begin, so a forgotten
+    /// restore cannot dim the next frame; within a frame, set it back after
+    /// building the faded subtree.
+    pub fn set_opacity(&mut self, opacity: f32) {
+        // SAFETY: ui is live inside a frame.
+        unsafe { sys::lens_set_opacity(self.ui, opacity) };
+    }
+
+    /// The opacity currently applied to built widgets.
+    pub fn opacity(&self) -> f32 {
+        // SAFETY: ui is live inside a frame; the call only reads state.
+        unsafe { sys::lens_opacity(self.ui as *const sys::lens) }
+    }
+
     /// Set the typeface family for subsequently built widgets in this frame.
     /// Set it, build the widgets that need another voice, then set it back —
     /// the same pattern as [`Frame::set_theme`].
@@ -387,6 +406,35 @@ impl Frame {
         // SAFETY: matched lens_column_ex / lens_close.
         unsafe { sys::lens_close(self.ui) };
         r
+    }
+
+    /// Center `body` on both axes inside a `width` × `height` box.
+    ///
+    /// Lens containers align only on the cross axis ([`LayoutOpts::cross`]);
+    /// the main axis always packs from the start, so a bare label inside a
+    /// fixed-size column sits at the top and a bare label inside a fixed-size
+    /// row sits at the left. `centered` supplies the missing half of the
+    /// idiom: a fixed-size row centres the content vertically on its cross
+    /// axis, and a matched pair of flexible spacers shares the remaining
+    /// main-axis space equally around it. Use it for button labels, icons,
+    /// and any fixed-size tile whose content must sit at the optical centre.
+    pub fn centered<R>(&mut self, width: f32, height: f32, body: impl FnOnce(&mut Frame) -> R) -> R {
+        self.row_ex(
+            &LayoutOpts {
+                width,
+                height,
+                cross: Align::Center,
+                ..Default::default()
+            },
+            |frame| {
+                frame.flex(1.0);
+                frame.spacer(0.0);
+                let r = body(frame);
+                frame.flex(1.0);
+                frame.spacer(0.0);
+                r
+            },
+        )
     }
 
     /// A composable row whose complete bounds form one button interaction

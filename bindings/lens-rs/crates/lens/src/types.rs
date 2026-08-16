@@ -571,6 +571,41 @@ impl Theme {
         Color(self.0.color_error)
     }
 
+    /// Unfilled slider-track colour.
+    pub fn slider_track_color(self) -> Color {
+        Color(self.0.color_slider_track)
+    }
+
+    /// Filled-range colour for horizontal and vertical sliders.
+    pub fn slider_fill_color(self) -> Color {
+        Color(self.0.color_slider_fill)
+    }
+
+    /// Slider knob colour.
+    pub fn slider_knob_color(self) -> Color {
+        Color(self.0.color_slider_knob)
+    }
+
+    /// Scrollbar track fill colour.
+    pub fn scrollbar_track_color(self) -> Color {
+        Color(self.0.color_scrollbar_track)
+    }
+
+    /// Scrollbar thumb colour at rest.
+    pub fn scrollbar_thumb_color(self) -> Color {
+        Color(self.0.color_scrollbar_thumb)
+    }
+
+    /// Scrollbar thumb colour when the cursor hovers the track.
+    pub fn scrollbar_thumb_hover_color(self) -> Color {
+        Color(self.0.color_scrollbar_thumb_hover)
+    }
+
+    /// Scrollbar thumb colour while the thumb is being dragged.
+    pub fn scrollbar_thumb_active_color(self) -> Color {
+        Color(self.0.color_scrollbar_thumb_active)
+    }
+
     /// Base body-font size in logical pixels.
     pub fn font_size(self) -> f32 {
         self.0.font_size

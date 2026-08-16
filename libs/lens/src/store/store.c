@@ -118,6 +118,9 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
         }
         n->phase = n->has_prev ? LENS_NODE_STABLE : LENS_NODE_ENTERING;
         lensi_node_reset_frame(n);
+        /* Stamp the build-time opacity context (lens_set_opacity): every
+         * command pushed onto this node this frame bakes it in. */
+        n->opacity = ui->opacity;
     }
     return n;
 }

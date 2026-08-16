@@ -248,6 +248,7 @@ void lensi_tooltip(lens *ui, const char *text) {
         return;
     ui->tooltip.active = true;
     ui->tooltip.anchor = r.rect;
+    ui->tooltip.opacity = ui->opacity;
     size_t len = strlen(text);
     if (len >= sizeof ui->tooltip.text)
         len = sizeof ui->tooltip.text - 1;

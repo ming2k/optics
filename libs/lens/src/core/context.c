@@ -39,6 +39,8 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
     ui->theme = (desc && desc->theme.size) ? desc->theme : lens_theme_default();
     lensi_theme_normalize(&ui->theme);
     ui->scale = (desc && desc->scale > 0.0f) ? desc->scale : 1.0f;
+    ui->opacity = 1.0f;
+    ui->tooltip.opacity = 1.0f;
     if (desc)
         ui->clipboard = desc->clipboard;
 
@@ -136,6 +138,20 @@ void lens_set_theme(lens *ui, lens_theme theme) {
 
 lens_theme lens_get_theme(const lens *ui) {
     return ui ? ui->theme : lens_theme_default();
+}
+
+void lens_set_opacity(lens *ui, float opacity) {
+    if (!ui)
+        return;
+    if (opacity < 0.0f)
+        opacity = 0.0f;
+    if (opacity > 1.0f)
+        opacity = 1.0f;
+    ui->opacity = opacity;
+}
+
+float lens_opacity(const lens *ui) {
+    return ui ? ui->opacity : 1.0f;
 }
 
 void lens_set_scale(lens *ui, float scale) {
@@ -274,6 +290,8 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->next_style = lens_style_init();
     ui->style_top = 0; /* style scopes are frame-scoped (ADR-0061): a
                         * forgotten lens_pop_style cannot leak across frames */
+    ui->opacity = 1.0f; /* likewise: a forgotten lens_set_opacity restore
+                         * cannot dim the next frame */
     ui->click_hit_focusable = false;
     ui->scroll_hot_id = 0;
     ui->cursor_hint = LENS_CURSOR_DEFAULT;
