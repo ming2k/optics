@@ -73,9 +73,11 @@ static uint8_t clamp_u8(float f) {
 
 flux_color flux_color_from_linear(flux_vec4 linear) {
     float inv_a = linear.w > 0.0f ? 1.0f / linear.w : 0.0f;
+    /* encode(straight) * a is already premultiplied in the encoded
+     * space — pack verbatim; a second premultiply would square alpha. */
     uint8_t r = clamp_u8(linear_to_srgb(linear.x * inv_a) * linear.w);
     uint8_t g = clamp_u8(linear_to_srgb(linear.y * inv_a) * linear.w);
     uint8_t b = clamp_u8(linear_to_srgb(linear.z * inv_a) * linear.w);
     uint8_t a = clamp_u8(linear.w);
-    return flux_color_rgba_premul(r, g, b, a);
+    return flux_color_rgba(r, g, b, a);
 }
