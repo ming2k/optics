@@ -40,4 +40,10 @@ struct flux_image {
     flux_bindless_handle lut_bindless;
 };
 
+/* Resolve an image's content color space from a creation desc's `next`
+ * chain (ADR-0069/0070 flux_image_color_space_desc) and build the
+ * GPU-side params block / baked 3D LUT when tagged. Shared by the
+ * upload path (flux_image_create) and the dma-buf import path. */
+flux_result flux_image_init_color(flux_device *d, flux_image *im, const void *next_chain);
+
 #endif /* FLUX_IMAGE_INTERNAL_H */

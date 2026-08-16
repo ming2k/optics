@@ -26,7 +26,13 @@
  */
 
 layout(set = 0, binding = 0) uniform texture2D u_sampled[];
+/* Storage qualifier matches the output format (ADR-0069): rgba16f for
+ * working-space (16F) inputs, rgba8 otherwise. Compiled twice, see meson. */
+#ifdef PRISM_STORAGE_RGBA16F
+layout(set = 0, binding = 1, rgba16f) uniform image2D u_storage[];
+#else
 layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+#endif
 layout(set = 0, binding = 2) uniform sampler u_samplers[];
 
 layout(push_constant) uniform PC {
@@ -305,9 +311,12 @@ void main()
     float trough = away * away * smoothstep(0.25, 0.75, u) * (1.0 - smoothstep(0.85, 1.0, u));
     colour += vec3(1.0) * (0.05 * pc.rim_light * trough);
 
-    /* Sub-LSB dither: smooth studio gradients band visibly in rgba8. */
+    /* Sub-LSB dither: smooth studio gradients band visibly in rgba8.
+     * 16F outputs keep full float precision instead. */
+#ifndef PRISM_STORAGE_RGBA16F
     float dither = fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
     colour += dither * (1.5 / 255.0);
+#endif
 
     /* Body alpha, then shadow composited underneath the AA fringe and any
      * semi-transparent body. */

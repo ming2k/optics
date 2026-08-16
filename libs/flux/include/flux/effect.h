@@ -40,10 +40,12 @@ extern "C" {
 /*  Gaussian blur                                                     */
 /* ------------------------------------------------------------------ */
 
-/* Separable two-pass Gaussian blur. The output image has RGBA8_UNORM format
- * and the same dimensions as the input. Normalizing BGRA inputs before the
- * storage write keeps the shader's declared rgba8 format valid on strict
- * Vulkan drivers. Kernel radius is derived
+/* Separable two-pass Gaussian blur. The output image has the same
+ * dimensions as the input; its format follows the input: RGBA8_UNORM
+ * for 8-bit SDR content, RGBA16_SFLOAT for 16F working-space content
+ * (ADR-0069 — linear-light blurring, requires rgba16f storage support;
+ * a 16F input on a device without it fails with FLUX_ERROR_UNSUPPORTED).
+ * Kernel radius is derived
  * from sigma; sigma is clamped to [0, FLUX_EFFECT_BLUR_SIGMA_MAX]
  * — values outside that range are clamped silently.
  *
@@ -111,7 +113,9 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_blur(VkCommandBuffer cmd,
  * A filter owns its pyramid/output images per frame-in-flight slot and needs
  * no transient-pool growth or whole-device wait. Use one filter with one
  * surface/frame stream; begin_frame has already waited for the selected slot
- * before that slot is reused. Output is RGBA8_UNORM with the input dimensions.
+ * before that slot is reused. Output follows the input: RGBA8_UNORM for
+ * 8-bit SDR content, RGBA16_SFLOAT for 16F working-space content (with the
+ * input dimensions).
  *
  * The image returned by apply is borrowed from the filter and remains valid
  * until the same slot is applied again, the filter is released, or its input

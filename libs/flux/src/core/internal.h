@@ -704,12 +704,12 @@ struct flux_frame {
      *
      * scene_bound_* mirror the command buffer's current pipeline /
      * descriptor bindings so scene_draw can skip redundant rebinds
-     * (the canvas backend does the same per pass). Pipeline and
-     * descriptor bindings persist across the passes of one command
-     * buffer, so the mirror stays valid when a frame holds several
-     * scene passes; it does *not* observe other modules' passes, so a
-     * scene pass interleaved with e.g. a canvas pass in one frame must
-     * rebind (see scene.c).
+     * (the canvas backend does the same per pass). Other modules'
+     * passes bind their own pipelines on this command buffer (the
+     * canvas end_pass output blit always does), and bindings persist
+     * across passes — so the mirror is only valid within one pass and
+     * flux_frame_begin_pass resets it, forcing the first scene draw of
+     * each pass to rebind.
      *
      * scene_view_* cache inverse(camera.view): one memcmp per draw
      * instead of a 4x4 inverse for the common static-camera pass. */
@@ -812,6 +812,11 @@ struct flux_surface {
      * at creation and retained so resize preserves the same contract. */
     uint64_t *offscreen_allowed_modifiers;
     uint32_t offscreen_allowed_modifier_count;
+    /* Optional offscreen container constraint copied from
+     * flux_surface_offscreen_format_desc; NULL/0 = transfer-derived
+     * defaults. Retained so resize re-negotiates the same contract. */
+    flux_format *offscreen_formats;
+    uint32_t offscreen_format_count;
     bool hdr_actual;
 
     /* ADR-0069: the color space the surface presents in, and the

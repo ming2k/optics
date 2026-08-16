@@ -90,6 +90,105 @@ typedef struct blur_record_ctx {
     VkBuffer dst_buffer;
 } blur_record_ctx;
 
+/* IEEE-754 binary16 helpers for the 16F effect cases. */
+static uint16_t f32_to_f16(float f) {
+    uint32_t x;
+    memcpy(&x, &f, 4);
+    uint32_t sign = (x >> 16) & 0x8000u;
+    int exp = (int)((x >> 23) & 0xFFu) - 112; /* rebased exponent */
+    uint32_t mant = x & 0x7FFFFFu;
+    if (exp <= 0)
+        return (uint16_t)sign; /* underflow to zero (test values never go subnormal) */
+    if (exp >= 31)
+        return (uint16_t)(sign | 0x7C00u);
+    return (uint16_t)(sign | ((uint32_t)exp << 10) | (mant >> 13));
+}
+
+static float f16_to_f32(uint16_t h) {
+    uint32_t sign = (uint32_t)(h & 0x8000u) << 16;
+    uint32_t exp = (h >> 10) & 0x1Fu;
+    uint32_t mant = h & 0x3FFu;
+    uint32_t bits;
+    if (exp == 0) {
+        if (mant == 0) {
+            bits = sign;
+        } else {
+            int shifts = 0;
+            while (!(mant & 0x400u)) {
+                mant <<= 1;
+                ++shifts;
+            }
+            bits = sign | ((uint32_t)(113 - shifts) << 23) | ((mant & 0x3FFu) << 13);
+        }
+    } else if (exp == 31) {
+        bits = sign | 0x7F800000u | (mant << 13);
+    } else {
+        bits = sign | ((exp + 112) << 23) | (mant << 13);
+    }
+    float out;
+    memcpy(&out, &bits, 4);
+    return out;
+}
+
+typedef struct blur16_record_ctx {
+    const flux_effect_blur_desc *bdesc;
+    flux_image **out;
+    VkBuffer dst_buffer;
+    flux_result result;
+} blur16_record_ctx;
+
+static void record_blur16_and_readback(VkCommandBuffer cmd, void *user) {
+    blur16_record_ctx *ctx = user;
+    ctx->result = flux_effect_blur(cmd, ctx->bdesc, ctx->out);
+    if (ctx->result != FLUX_OK)
+        return;
+
+    VkImage img = flux_image_vk_image(*ctx->out);
+    VkImageMemoryBarrier2 b = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .image = img,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    VkDependencyInfo di = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &b,
+    };
+    vkCmdPipelineBarrier2(cmd, &di);
+
+    VkBufferImageCopy region = {
+        .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
+        .imageExtent = {W, H, 1},
+    };
+    vkCmdCopyImageToBuffer(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, ctx->dst_buffer, 1,
+                           &region);
+
+    VkMemoryBarrier2 mb = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+        .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
+    };
+    VkDependencyInfo di2 = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount = 1,
+        .pMemoryBarriers = &mb,
+    };
+    vkCmdPipelineBarrier2(cmd, &di2);
+}
+
 static void record_blur_and_readback(VkCommandBuffer cmd, void *user) {
     blur_record_ctx *ctx = user;
     EXPECT(flux_effect_blur(cmd, ctx->bdesc, ctx->out) == FLUX_OK);
@@ -476,6 +575,90 @@ int main(void) {
         EXPECT(owned == nullptr);
 
         EXPECT(flux_effect_promote(nullptr, &owned) == FLUX_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* --- 16F working-space input: HDR values survive the blur (ADR-0069) --- */
+    {
+        /* Left half 0.0, right half 2.0 (HDR highlight). An 8-bit
+         * intermediate would clamp the highlight to 1.0; the rgba16f
+         * path must carry it through. */
+        static uint16_t f16pixels[W * H * 4];
+        for (uint32_t y = 0; y < H; ++y)
+            for (uint32_t x = 0; x < W; ++x) {
+                float v = (x < W / 2) ? 0.0f : 2.0f;
+                size_t at = (y * W + x) * 4;
+                f16pixels[at + 0] = f32_to_f16(v);
+                f16pixels[at + 1] = f32_to_f16(v);
+                f16pixels[at + 2] = f32_to_f16(v);
+                f16pixels[at + 3] = f32_to_f16(1.0f);
+            }
+        flux_image_desc f16desc = FLUX_IMAGE_DESC_INIT;
+        f16desc.width = W;
+        f16desc.height = H;
+        f16desc.format = FLUX_FORMAT_RGBA16_SFLOAT;
+        f16desc.initial_data = f16pixels;
+        flux_image *f16input = nullptr;
+        EXPECT(flux_image_create(d, &f16desc, &f16input) == FLUX_OK);
+
+        VkBuffer buffer16 = VK_NULL_HANDLE;
+        VkDeviceMemory memory16 = VK_NULL_HANDLE;
+        void *mapped16 = nullptr;
+        {
+            VkBufferCreateInfo bci = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = W * H * 8u,
+                .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            };
+            EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer16) == VK_SUCCESS);
+            VkMemoryRequirements mr;
+            vkGetBufferMemoryRequirements(vk, buffer16, &mr);
+            uint32_t mt = test_helpers_find_memory_type(d, mr.memoryTypeBits,
+                                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            EXPECT(mt != UINT32_MAX);
+            VkMemoryAllocateInfo mai = {
+                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .allocationSize = mr.size,
+                .memoryTypeIndex = mt,
+            };
+            EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory16) == VK_SUCCESS);
+            vkBindBufferMemory(vk, buffer16, memory16, 0);
+            vkMapMemory(vk, memory16, 0, VK_WHOLE_SIZE, 0, &mapped16);
+        }
+
+        flux_image *out = nullptr;
+        flux_effect_blur_desc bdesc = FLUX_EFFECT_BLUR_DESC_INIT;
+        bdesc.input = f16input;
+        bdesc.sigma = 4.0f;
+        blur16_record_ctx ctx = {.bdesc = &bdesc, .out = &out, .dst_buffer = buffer16};
+        run_one_shot(d, record_blur16_and_readback, &ctx);
+
+        if (ctx.result == FLUX_ERROR_UNSUPPORTED) {
+            fprintf(stderr, "test_effect_blur: no rgba16f storage; 16F case skipped\n");
+        } else {
+            EXPECT(ctx.result == FLUX_OK);
+            EXPECT(flux_image_format(out) == FLUX_FORMAT_RGBA16_SFLOAT);
+            const uint16_t *hx = mapped16;
+            float far_right = f16_to_f32(hx[(15 * W + (W - 1)) * 4 + 0]);
+            float edge_left = f16_to_f32(hx[(15 * W + (W / 2 - 1)) * 4 + 0]);
+            float edge_right = f16_to_f32(hx[(15 * W + (W / 2)) * 4 + 0]);
+            /* The 2.0 highlight survived (8-bit would clamp at 1.0). */
+            EXPECT(far_right > 1.9f && far_right < 2.1f);
+            /* Symmetric kernel around the step: both sides of the edge
+             * land on the linear midpoint 1.0 — above every 8-bit encode. */
+            EXPECT(edge_left > 0.85f && edge_left < 1.15f);
+            EXPECT(edge_right > 0.85f && edge_right < 1.15f);
+        }
+
+        if (mapped16)
+            vkUnmapMemory(vk, memory16);
+        if (memory16)
+            vkFreeMemory(vk, memory16, nullptr);
+        if (buffer16)
+            vkDestroyBuffer(vk, buffer16, nullptr);
+        flux_image_release(f16input);
+        flux_effect_reset(d);
     }
 
     /* --- reset is safe to call repeatedly and on an empty pool --- */

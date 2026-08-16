@@ -26,6 +26,19 @@ backdrop_stats_comp_spv = custom_target('backdrop_stats.comp.spv',
   output  : 'backdrop_stats.comp.spv',
   command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
 )
+# ADR-0069: rgba16f storage variants for working-space (16F) inputs.
+liquid_glass_16f_comp_spv = custom_target('liquid_glass_16f.comp.spv',
+  input   : 'src/shaders/liquid_glass.comp',
+  output  : 'liquid_glass_16f.comp.spv',
+  command : [glslang, '-V', '--target-env', 'vulkan1.3', '-DPRISM_STORAGE_RGBA16F',
+             '@INPUT@', '-o', '@OUTPUT@'],
+)
+storage_clear_16f_comp_spv = custom_target('storage_clear_16f.comp.spv',
+  input   : 'src/shaders/storage_clear.comp',
+  output  : 'storage_clear_16f.comp.spv',
+  command : [glslang, '-V', '--target-env', 'vulkan1.3', '-DPRISM_STORAGE_RGBA16F',
+             '@INPUT@', '-o', '@OUTPUT@'],
+)
 
 prism_c_args = ['-DPRISM_BUILDING=1']
 # C23 #embed bakes each compiled .spv into the binary (src/liquid_glass.c).
@@ -54,11 +67,23 @@ backdrop_stats_spv_h = custom_target('backdrop_stats_spv.h',
   output  : 'backdrop_stats_spv.h',
   command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'backdrop_stats_spv'],
 )
+liquid_glass_16f_spv_h = custom_target('liquid_glass_16f_spv.h',
+  input   : liquid_glass_16f_comp_spv,
+  output  : 'liquid_glass_16f_spv.h',
+  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'liquid_glass_16f_spv'],
+)
+storage_clear_16f_spv_h = custom_target('storage_clear_16f_spv.h',
+  input   : storage_clear_16f_comp_spv,
+  output  : 'storage_clear_16f_spv.h',
+  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'storage_clear_16f_spv'],
+)
 
 prism_lib = library('prism',
   'src/liquid_glass.c',
   liquid_glass_comp_spv, storage_clear_comp_spv, backdrop_stats_comp_spv,
+  liquid_glass_16f_comp_spv, storage_clear_16f_comp_spv,
   liquid_glass_spv_h, storage_clear_spv_h, backdrop_stats_spv_h,
+  liquid_glass_16f_spv_h, storage_clear_16f_spv_h,
   include_directories   : prism_inc,
   c_args                : prism_c_args,
   dependencies          : [flux_dep, m_dep],

@@ -187,47 +187,51 @@ if opt_scene
   if not is_variable('glslang')
     glslang = find_program('glslangValidator', required : true)
   endif
+  scene_shader_deps = ['src/scene/shaders/scene_color.glsl',
+                       'src/canvas/shaders/canvas_color.glsl']
+  scene_shader_inc = ['-I' + meson.current_source_dir() / 'src/canvas/shaders',
+                      '-I' + meson.current_source_dir() / 'src/scene/shaders']
   scene_unlit_vert_spv = custom_target('scene_unlit.vert.spv',
     input   : 'src/scene/shaders/scene_unlit.vert',
+    depend_files : scene_shader_deps,
     output  : 'scene_unlit.vert.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+               scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_unlit_frag_spv = custom_target('scene_unlit.frag.spv',
     input   : 'src/scene/shaders/scene_unlit.frag',
+    depend_files : scene_shader_deps,
     output  : 'scene_unlit.frag.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+               scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_phong_vert_spv = custom_target('scene_phong.vert.spv',
     input   : 'src/scene/shaders/scene_phong.vert',
+    depend_files : scene_shader_deps,
     output  : 'scene_phong.vert.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+               scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_phong_frag_spv = custom_target('scene_phong.frag.spv',
     input   : 'src/scene/shaders/scene_phong.frag',
+    depend_files : scene_shader_deps,
     output  : 'scene_phong.frag.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+               scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_unlit_skin_vert_spv = custom_target('scene_unlit_skin.vert.spv',
     input   : 'src/scene/shaders/scene_unlit_skin.vert',
+    depend_files : scene_shader_deps,
     output  : 'scene_unlit_skin.vert.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+               scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_phong_skin_vert_spv = custom_target('scene_phong_skin.vert.spv',
     input   : 'src/scene/shaders/scene_phong_skin.vert',
+    depend_files : scene_shader_deps,
     output  : 'scene_phong_skin.vert.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+               scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   flux_extra_inputs += [scene_unlit_vert_spv, scene_unlit_frag_spv,
                         scene_phong_vert_spv, scene_phong_frag_spv,
@@ -264,9 +268,27 @@ if opt_effect
                '-I' + meson.current_source_dir() / 'src/canvas/shaders',
                '@INPUT@', '-o', '@OUTPUT@'],
   )
-  flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv]
-  flux_shader_spvs += [effect_blur_comp_spv, effect_backdrop_comp_spv]
-  flux_shader_names += ['effect_blur_spv', 'effect_backdrop_spv']
+  # ADR-0069: rgba16f storage variants for working-space (16F) content.
+  effect_blur_16f_comp_spv = custom_target('effect_blur_16f.comp.spv',
+    input   : 'src/effect/shaders/effect_blur.comp',
+    output  : 'effect_blur_16f.comp.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '-DEFFECT_STORAGE_RGBA16F',
+               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+               '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  effect_backdrop_16f_comp_spv = custom_target('effect_backdrop_16f.comp.spv',
+    input   : 'src/effect/shaders/effect_backdrop.comp',
+    output  : 'effect_backdrop_16f.comp.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '-DEFFECT_STORAGE_RGBA16F',
+               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+               '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
+                        effect_blur_16f_comp_spv, effect_backdrop_16f_comp_spv]
+  flux_shader_spvs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
+                       effect_blur_16f_comp_spv, effect_backdrop_16f_comp_spv]
+  flux_shader_names += ['effect_blur_spv', 'effect_backdrop_spv',
+                        'effect_blur_16f_spv', 'effect_backdrop_16f_spv']
 endif
 
 # Generated shader headers for the no-#embed fallback (MSVC cl / Apple

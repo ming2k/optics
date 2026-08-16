@@ -136,6 +136,9 @@ typedef enum flux_format {
     FLUX_FORMAT_RGBA8_SRGB = 4,
     FLUX_FORMAT_BGRA8_SRGB = 5,
 
+    /* 10-bit colour (packed A2B10G10R10; DRM_FORMAT_ABGR2101010) */
+    FLUX_FORMAT_RGB10A2_UNORM = 14,
+
     /* HDR / float colour */
     FLUX_FORMAT_RGBA16_SFLOAT = 6,
 
@@ -252,6 +255,7 @@ typedef enum flux_struct_type {
     FLUX_TYPE_SURFACE_HDR_DESC = 29,
     FLUX_TYPE_IMAGE_COLOR_SPACE_DESC = 30,
     FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC = 31,
+    FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC = 32,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -323,7 +327,8 @@ typedef struct flux_image_desc {
     const void *next;
     uint32_t width;
     uint32_t height;
-    flux_format format;       /* must be an 8-bit colour format */
+    flux_format format;       /* 8-bit colour formats, or RGBA16_SFLOAT
+                               * (working-space linear content, ADR-0069) */
     const void *initial_data; /* optional; size = w*h*bytes_per_pixel */
 } flux_image_desc;
 
@@ -377,9 +382,11 @@ FLUX_NODISCARD FLUX_API flux_result flux_frame_finish_image_target(flux_frame *f
 /* Create a STORAGE | SAMPLED image with undefined initial contents, in
  * VK_IMAGE_LAYOUT_GENERAL, registered into both the sampled and the storage
  * bindless slots (read them via flux_image_bindless_handle and
- * flux_image_bindless_storage_handle in <flux/vulkan.h>). Only RGBA8_UNORM
- * and BGRA8_UNORM are supported — the two formats Vulkan guarantees for
- * storage access without optional features. This is the output and
+ * flux_image_bindless_storage_handle in <flux/vulkan.h>). RGBA8/BGRA8_UNORM
+ * are supported everywhere (Vulkan guarantees their storage access);
+ * RGBA16_SFLOAT — the ADR-0069 working-space format — requires the
+ * device's rgba16f storage feature and fails with FLUX_ERROR_UNSUPPORTED
+ * where it is absent. This is the output and
  * intermediate currency of compute effects; the effect module's own
  * operators are built on it.
  *
@@ -771,6 +778,30 @@ typedef struct flux_surface_readback_desc {
 
 #define FLUX_SURFACE_READBACK_DESC_INIT {.type = FLUX_TYPE_SURFACE_READBACK_DESC}
 
+/* Optional flux_surface_desc extension constraining the pixel format of
+ * an OFFSCREEN surface, most preferred first (the format field ADR-0013
+ * anticipated). The container must suit the transfer function of the
+ * space being written: sRGB/gamma encodings accept any colour format,
+ * PQ/HLG require FLUX_FORMAT_RGB10A2_UNORM or FLUX_FORMAT_RGBA16_SFLOAT,
+ * linear requires FLUX_FORMAT_RGBA16_SFLOAT. Flux picks the first listed
+ * format that is both suitable and device-supported (including dma-buf
+ * modifier support when flux_surface_dmabuf_desc requests export) and
+ * fails with FLUX_ERROR_UNSUPPORTED when nothing qualifies.
+ *
+ * Without this extension the container is derived from the transfer:
+ * BGRA8 for sRGB/gamma (the historic default), RGB10A2 then RGBA16F for
+ * PQ/HLG, RGBA16F for linear. Ignored on windowed surfaces, where the
+ * swapchain negotiation owns the format. The array is read only during
+ * flux_surface_create; the winner is reported via flux_surface_info.format. */
+typedef struct flux_surface_offscreen_format_desc {
+    flux_struct_type type; /* FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC */
+    const void *next;
+    const flux_format *formats;
+    uint32_t format_count;
+} flux_surface_offscreen_format_desc;
+
+#define FLUX_SURFACE_OFFSCREEN_FORMAT_DESC_INIT {.type = FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC}
+
 /* Optional flux_surface_desc extension listing the color spaces the
  * application can present, most preferred first (ADR-0069). Flux walks
  * the list in order and picks the first space the swapchain can do;
@@ -782,10 +813,10 @@ typedef struct flux_surface_readback_desc {
  *
  * Spaces without a Vulkan swapchain representation (e.g. SDR BT.2020,
  * Adobe RGB, custom primaries) never match on a windowed surface;
- * on an offscreen surface the first listed space is adopted verbatim
- * (8-bit sRGB-family encodings only — HDR transfer functions are
- * FLUX_ERROR_UNSUPPORTED offscreen until an offscreen format field
- * lands). The array is read only during flux_surface_create. */
+ * on an offscreen surface the first listed space is adopted verbatim,
+ * with the pixel container chosen by transfer function (see
+ * flux_surface_offscreen_format_desc). The array is read only during
+ * flux_surface_create. */
 typedef struct flux_surface_color_space_desc {
     flux_struct_type type; /* FLUX_TYPE_SURFACE_COLOR_SPACE_DESC */
     const void *next;
@@ -841,7 +872,8 @@ typedef struct flux_surface_hdr_desc {
  * negotiate the true space via flux_surface_color_space_desc instead.
  *
  * Offscreen surfaces: equivalent to requesting the space through
- * flux_surface_color_space_desc (8-bit SDR encodings only). */
+ * flux_surface_color_space_desc (the container follows the transfer;
+ * see flux_surface_offscreen_format_desc). */
 typedef struct flux_surface_output_color_desc {
     flux_struct_type type; /* FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC */
     const void *next;
@@ -864,6 +896,11 @@ typedef struct flux_surface_info {
      * flux_surface_output_color_desc pinned the display's actual space
      * (the legacy-platform pre-conversion path). */
     flux_color_space content_space;
+    /* Pixel format of the surface's images: the negotiated swapchain
+     * format on a windowed surface, the chosen container on an offscreen
+     * one. Compositors mapping the dma-buf export to a DRM fourcc key
+     * off this. */
+    flux_format format;
 } flux_surface_info;
 
 /* Pixel-aligned surface region used by asynchronous frame readback. Coordinates

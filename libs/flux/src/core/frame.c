@@ -564,6 +564,16 @@ void flux_frame_begin_pass(flux_frame *f, const flux_pass_desc *desc) {
     flux_surface *s = f->surface;
     flux_per_frame *pf = &s->frames[f->slot];
 
+    /* Pipeline and descriptor bindings persist across the passes of one
+     * command buffer, and any module's pass may bind its own state (the
+     * canvas end_pass output blit always binds its transform pipeline).
+     * The scene bind mirror only observes scene's own binds, so it is
+     * stale by the time a new pass begins: drop it and let the first
+     * scene draw of this pass rebind. */
+    f->scene_bound_pipeline = VK_NULL_HANDLE;
+    f->scene_bound_set = VK_NULL_HANDLE;
+    f->scene_bound_layout = VK_NULL_HANDLE;
+
     VkRenderingAttachmentInfo color = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .imageView = s->image_views[s->current_image],

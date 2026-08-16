@@ -49,11 +49,14 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_blur(
 |----------|------------------|----------|--------------------------------------------------------------------|
 | `type`   | `flux_struct_type` | yes    | Must be `FLUX_TYPE_EFFECT_BLUR_DESC`. `FLUX_EFFECT_BLUR_DESC_INIT` sets it. |
 | `next`   | `const void *`   | no       | Reserved for future chained extensions.                            |
-| `input`  | `flux_image *`   | yes      | Must be RGBA8_UNORM or BGRA8_UNORM. Sampled bindless handle required. |
+| `input`  | `flux_image *`   | yes      | Must be RGBA8_UNORM, BGRA8_UNORM, or RGBA16_SFLOAT (ADR-0069 working space; requires rgba16f storage support). Sampled bindless handle required. |
 | `sigma`  | `float`          | yes      | Gaussian sigma in pixels. Clamped silently to `[0, FLUX_EFFECT_BLUR_SIGMA_MAX]`. |
 
-The output keeps the input dimensions and uses `FLUX_FORMAT_RGBA8_UNORM`.
-BGRA input remains valid for sampling but is normalized before storage writes.
+The output keeps the input dimensions. Its format follows the input:
+`FLUX_FORMAT_RGBA8_UNORM` for 8-bit SDR content (BGRA input remains valid
+for sampling but is normalized before storage writes),
+`FLUX_FORMAT_RGBA16_SFLOAT` for 16F content, so blurring stays in linear
+light.
 
 ### Returns
 
@@ -61,7 +64,7 @@ BGRA input remains valid for sampling but is normalized before storage writes.
 |-------------------------------|----------------------------------------------------------------------------------|
 | `FLUX_OK`                     | Output image written to `*out`. Two dispatches recorded into `cmd`.              |
 | `FLUX_ERROR_INVALID_ARGUMENT` | Null `cmd` / `desc` / `out`, wrong `desc->type`, null `desc->input`, or input lacks a sampled bindless handle. |
-| `FLUX_ERROR_UNSUPPORTED`      | Input format is not RGBA8_UNORM or BGRA8_UNORM.                                  |
+| `FLUX_ERROR_UNSUPPORTED`      | Input format is not RGBA8/BGRA8_UNORM or RGBA16_SFLOAT, or the device lacks rgba16f storage for a 16F input. |
 | `FLUX_ERROR_OUT_OF_MEMORY`    | Transient image allocation failed.                                               |
 | `FLUX_ERROR_BACKEND_FAILURE`  | Compute pipeline or image creation rejected by the driver. See `flux_get_last_error` for the VkResult. |
 
@@ -106,7 +109,8 @@ flux_blur_filter_apply(filter, frame, &blur, &output);
 The filter selects storage by `flux_frame_index(frame)`. Since
 `flux_surface_begin_frame` has waited that slot's fence, it can overwrite the
 slot without waiting for unrelated frames or growing the transient pool. The
-output has the input dimensions and `FLUX_FORMAT_RGBA8_UNORM`. It remains valid until the same
+output has the input dimensions and the input-following format (RGBA8_UNORM
+for 8-bit inputs, RGBA16_SFLOAT for 16F inputs). It remains valid until the same
 slot is applied again, the input extent/format changes, or the filter is
 released. Positive `sigma` values control bounded sample offsets; they never
 increase the four-dispatch sample count. Sigma 0 records a copy. Release the

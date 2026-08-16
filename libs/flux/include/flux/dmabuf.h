@@ -51,7 +51,9 @@ typedef struct flux_dmabuf_plane {
 
 typedef struct flux_dmabuf_image_desc {
     flux_struct_type type; /* FLUX_TYPE_DMABUF_IMAGE_DESC */
-    const void *next;
+    const void *next;      /* optional flux_image_color_space_desc (ADR-0069/0070):
+                            * tags the imported content's color space so texels
+                            * decode into the working space when sampled */
     uint32_t width;
     uint32_t height;
     flux_format format; /* a flux_format matching the fourcc */

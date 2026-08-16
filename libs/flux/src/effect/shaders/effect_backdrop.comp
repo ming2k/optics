@@ -11,7 +11,13 @@
  */
 
 layout(set = 0, binding = 0) uniform texture2D u_sampled[];
+/* Storage qualifier matches the pyramid format (ADR-0069): rgba16f for
+ * working-space content, rgba8 otherwise. Compiled twice, see meson. */
+#ifdef EFFECT_STORAGE_RGBA16F
+layout(set = 0, binding = 1, rgba16f) uniform image2D u_storage[];
+#else
 layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+#endif
 layout(set = 0, binding = 2) uniform sampler u_samplers[];
 
 layout(push_constant) uniform PC {

@@ -398,6 +398,121 @@ int main(void) {
         flux_mesh_release(c.quad);
     }
 
+    /* --- Working-space scene rendering: 16F target decodes texels at the
+     * edge, so lighting runs in linear light (ADR-0069) --- */
+    {
+        /* Phong with ndotl = 0.5 over a mid-gray sRGB texture. Linear
+         * light: srgb_decode(0.502) x 0.5 = 0.108 -> sRGB ~92. The legacy
+         * gamma-space path computes 0.502 x 0.5 -> 64. */
+        const uint8_t gray[4] = {128, 128, 128, 255};
+        flux_image_desc image_desc = FLUX_IMAGE_DESC_INIT;
+        image_desc.width = 1;
+        image_desc.height = 1;
+        image_desc.format = FLUX_FORMAT_RGBA8_UNORM;
+        image_desc.initial_data = gray;
+        flux_image *tex = nullptr;
+        EXPECT(flux_image_create(d, &image_desc, &tex) == FLUX_OK);
+
+        flux_material_surface_desc surface = FLUX_MATERIAL_SURFACE_DESC_INIT;
+        surface.base_color_image = tex;
+        surface.base_color_sampler = nullptr; /* device default */
+        flux_scene_light light = {
+            .direction = {0.0f, 0.8660254f, -0.5f}, /* L . N = 0.5 */
+            .color = {1, 1, 1},
+            .ambient = 0.0f,
+        };
+
+        const float want_linear = flux_transfer_decode(FLUX_TRANSFER_SRGB, 0.0f, 128.0f / 255.0f) *
+                                  0.5f; /* ndotl */
+        const int want16f =
+            (int)lrintf(flux_transfer_encode(FLUX_TRANSFER_SRGB, 0.0f, want_linear) * 255.0f);
+
+        int got[2] = {0, 0};
+        for (int variant = 0; variant < 2; ++variant) {
+            /* variant 0: legacy 8-bit target (raw gamma path, unchanged);
+             * variant 1: 16F working-space target (edge decode). */
+            flux_format tfmt = variant == 0 ? color_fmt : FLUX_FORMAT_RGBA16_SFLOAT;
+            flux_image *rt = nullptr;
+            EXPECT(flux_image_create_render_target(d, W, H, tfmt, &rt) == FLUX_OK);
+
+            flux_material_desc md = {
+                .type = FLUX_TYPE_MATERIAL_DESC,
+                .next = &surface,
+                .kind = FLUX_MATERIAL_PHONG,
+                .base_color = {1, 1, 1, 1},
+                .color_format = tfmt,
+                .depth_format = FLUX_DEPTH_FORMAT,
+                .shininess = 32.0f,
+                .specular = 0.0f,
+            };
+            flux_material *mat = nullptr;
+            EXPECT(flux_material_create(d, &md, &mat) == FLUX_OK);
+            flux_mesh *quad = make_quad(d, 1.5f, 0.0f);
+            EXPECT(quad != nullptr);
+
+            flux_frame *frame = nullptr;
+            EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+            EXPECT(flux_frame_prepare_image_target(frame, rt) == FLUX_OK);
+            flux_pass_attachment color_att = {
+                .view = flux_image_vk_image_view(rt),
+                .format = flux_format_to_vk(tfmt),
+                .load_op = FLUX_LOAD_CLEAR,
+                .store_op = FLUX_STORE_STORE,
+                .clear_color = {0.0f, 0.0f, 0.0f, 1.0f},
+            };
+            flux_pass_depth_attachment depth_att = {
+                .view = flux_target_vk_view(depth),
+                .format = DEPTH_FORMAT,
+                .load_op = FLUX_LOAD_CLEAR,
+                .store_op = FLUX_STORE_DONT_CARE,
+                .clear_depth = 1.0f,
+            };
+            flux_pass_desc pass = {
+                .type = FLUX_TYPE_PASS_DESC,
+                .color_attachment_count = 1,
+                .color_attachments = &color_att,
+                .depth = &depth_att,
+                .width = W,
+                .height = H,
+            };
+            flux_frame_begin_pass(frame, &pass);
+            flux_frame_set_viewport(frame, 0.0f, 0.0f, (float)W, (float)H, 0.0f, 1.0f);
+            flux_frame_set_scissor(frame, 0, 0, W, H);
+            flux_scene_draw_mesh_lit(frame, &cam, flux_mat4_identity(), quad, mat, &light);
+            flux_frame_end_pass(frame);
+            EXPECT(flux_frame_finish_image_target(frame, rt) == FLUX_OK);
+
+            /* Composite the target onto the sRGB surface through the
+             * canvas (16F images are working-space linear; 8-bit UNORM
+             * decodes as sRGB — the round trip is identity). */
+            flux_canvas *canvas = nullptr;
+            flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
+            cd.surface = s;
+            EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
+            flux_color black = flux_color_rgba(0, 0, 0, 255);
+            EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+            flux_canvas_draw_image(canvas, rt, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+            flux_canvas_end(canvas);
+            EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            EXPECT(flux_frame_present(frame) == FLUX_OK);
+
+            memset(px, 0xCD, BYTES);
+            EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+            got[variant] = px_at(px, W / 2, H / 2)[0];
+
+            flux_canvas_destroy(canvas);
+            flux_mesh_release(quad);
+            flux_material_release(mat);
+            flux_image_release(rt);
+        }
+
+        EXPECT(got[0] > 58 && got[0] < 70);          /* legacy gamma path */
+        EXPECT(got[1] > want16f - 5 && got[1] < want16f + 5);
+        EXPECT(got[1] > got[0] + 15); /* linear-light lift is unmistakable */
+
+        flux_image_release(tex);
+    }
+
     flux_device_wait_idle(d);
     flux_target_release(depth);
     flux_surface_release(s);

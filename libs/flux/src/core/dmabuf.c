@@ -36,6 +36,7 @@ static uint32_t dmabuf_min_bytes_per_pixel(flux_format f) {
     case FLUX_FORMAT_BGRA8_UNORM:
     case FLUX_FORMAT_RGBA8_SRGB:
     case FLUX_FORMAT_BGRA8_SRGB:
+    case FLUX_FORMAT_RGB10A2_UNORM:
         return 4;
     case FLUX_FORMAT_RGBA16_SFLOAT:
         return 8;
@@ -565,6 +566,7 @@ flux_result flux_image_import_dmabuf(flux_device *d, const flux_dmabuf_image_des
     im->format = desc->format;
     im->bindless = FLUX_BINDLESS_INVALID;
     im->bindless_storage = FLUX_BINDLESS_INVALID;
+    im->lut_bindless = FLUX_BINDLESS_INVALID;
     im->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
     im->imported_memory = VK_NULL_HANDLE;
 
@@ -708,6 +710,12 @@ flux_result flux_image_import_dmabuf(flux_device *d, const flux_dmabuf_image_des
     if (r != FLUX_OK)
         goto fail;
 
+    /* ADR-0069/0070: an optional color-space tag on the desc's next
+     * chain decodes the imported texels into the working space. */
+    r = flux_image_init_color(d, im, desc->next);
+    if (r != FLUX_OK)
+        goto fail;
+
     *out = im;
     /* The import bypasses the slab; count it so stats and the teardown
      * leak warning see it. Uncounted at retire time via imported_size. */
@@ -727,6 +735,18 @@ fail:
         close(import_fd);
     if (im->bindless != FLUX_BINDLESS_INVALID)
         flux_bindless_release(d, im->bindless);
+    if (im->lut_bindless != FLUX_BINDLESS_INVALID)
+        flux_bindless_release(d, im->lut_bindless);
+    if (im->lut_view)
+        vkDestroyImageView(d->device, im->lut_view, nullptr);
+    if (im->lut_image)
+        vkDestroyImage(d->device, im->lut_image, nullptr);
+    if (im->lut_alloc.memory)
+        flux_vk_deallocate(d, &im->lut_alloc);
+    if (im->color_params)
+        flux_buffer_release(im->color_params);
+    if (im->icc)
+        flux_icc_profile_release(im->icc);
     if (im->view)
         vkDestroyImageView(d->device, im->view, nullptr);
     if (im->image)

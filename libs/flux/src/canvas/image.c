@@ -88,9 +88,10 @@ out_free:
 }
 
 /* ADR-0069/0070: resolve the image's content color space from the
- * desc extension and build the GPU-side parameter block when the
- * content leaves the format-derived fast path. */
-static flux_result image_init_color(flux_device *d, flux_image *im, const flux_image_desc *desc) {
+ * color-space desc on the creation desc's `next` chain (flux_image_desc
+ * or flux_dmabuf_image_desc) and build the GPU-side parameter block when
+ * the content leaves the format-derived fast path. */
+flux_result flux_image_init_color(flux_device *d, flux_image *im, const void *next_chain) {
     flux_color_space content = image_default_space(im->format);
     const float *lut = nullptr;
     uint32_t lut_size = 0;
@@ -99,7 +100,7 @@ static flux_result image_init_color(flux_device *d, flux_image *im, const flux_i
     const struct {
         flux_struct_type type;
         const void *next;
-    } *extension = desc->next;
+    } *extension = next_chain;
     while (extension) {
         if (extension->type == FLUX_TYPE_IMAGE_COLOR_SPACE_DESC) {
             const flux_image_color_space_desc *cs = (const void *)extension;
@@ -113,7 +114,9 @@ static flux_result image_init_color(flux_device *d, flux_image *im, const flux_i
             }
             if (cs->icc) {
                 flux_color_space extracted;
-                im->icc = flux_icc_profile_retain(cs->icc);
+                /* Profiles are immutable apart from the atomic refcount,
+                 * so retaining through the desc's const pointer is sound. */
+                im->icc = flux_icc_profile_retain((flux_icc_profile *)cs->icc);
                 if (flux_icc_profile_color_space(im->icc, &extracted)) {
                     content = extracted;
                 } else {
@@ -182,6 +185,8 @@ static uint32_t bytes_per_pixel(flux_format f) {
     case FLUX_FORMAT_RGBA8_SRGB:
     case FLUX_FORMAT_BGRA8_SRGB:
         return 4;
+    case FLUX_FORMAT_RGBA16_SFLOAT:
+        return 8; /* ADR-0069 working-space content */
     default:
         return 0;
     }
@@ -284,7 +289,7 @@ flux_result flux_image_create(flux_device *d, const flux_image_desc *desc, flux_
     if (r != FLUX_OK)
         goto fail;
 
-    r = image_init_color(d, im, desc);
+    r = flux_image_init_color(d, im, desc->next);
     if (r != FLUX_OK)
         goto fail;
 
@@ -432,14 +437,26 @@ flux_result flux_image_create_compute_writable(flux_device *d, uint32_t width, u
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "compute-writable image unsupported format");
         return FLUX_ERROR_UNSUPPORTED;
     }
-    /* Storage-image access requires a UNORM-class format. sRGB views
-     * over storage are not portable; reject early to avoid driver
-     * surprises. RGBA8/BGRA8 UNORM are guaranteed by the spec for
-     * STORAGE_IMAGE without format features. */
-    if (fmt != FLUX_FORMAT_RGBA8_UNORM && fmt != FLUX_FORMAT_BGRA8_UNORM) {
+    /* Storage-image access requires a format with STORAGE_IMAGE support.
+     * sRGB views over storage are not portable; reject early to avoid
+     * driver surprises. RGBA8/BGRA8 UNORM are guaranteed by the spec;
+     * RGBA16_SFLOAT (ADR-0069 working-space effects) needs the optional
+     * feature bit, checked here. */
+    if (fmt != FLUX_FORMAT_RGBA8_UNORM && fmt != FLUX_FORMAT_BGRA8_UNORM &&
+        fmt != FLUX_FORMAT_RGBA16_SFLOAT) {
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "compute-writable image format not storage-compatible "
-                                          "(use RGBA8_UNORM or BGRA8_UNORM)");
+                                          "(use RGBA8/BGRA8_UNORM or RGBA16_SFLOAT)");
         return FLUX_ERROR_UNSUPPORTED;
+    }
+    if (fmt == FLUX_FORMAT_RGBA16_SFLOAT) {
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(d->physical_device,
+                                            VK_FORMAT_R16G16B16A16_SFLOAT, &props);
+        if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0) {
+            FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
+                      "compute-writable RGBA16_SFLOAT needs rgba16f storage support");
+            return FLUX_ERROR_UNSUPPORTED;
+        }
     }
     *out = nullptr;
 

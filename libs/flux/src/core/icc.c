@@ -12,7 +12,8 @@
  *
  * All ICC integers are big-endian; fixed point is s15Fixed16 unless
  * noted. Profile connection space is XYZ D50 (v4) or Lab, converted to
- * XYZ D50 and Bradford-adapted to the D65 working space.
+ * XYZ D50 and adapted to the D65 working space — via the profile's own
+ * 'chad' matrix when present, else a Bradford D50 -> D65 adaptation.
  */
 #include "../math/colorspace_internal.h"
 #include "internal.h"
@@ -77,10 +78,6 @@ static float cur_u8f8(icc_cursor *c) {
     return (float)cur_u16(c) / 256.0f;
 }
 
-static float cur_u16f16(icc_cursor *c) {
-    return (float)cur_u32(c) / 65536.0f;
-}
-
 /* ------------------------------------------------------------------ */
 /*  Tag table                                                          */
 /* ------------------------------------------------------------------ */
@@ -137,13 +134,17 @@ typedef struct icc_trc {
 
 static float icc_trc_eval_para(const icc_trc *t, float x) {
     const float g = t->p[0], a = t->p[1], b = t->p[2], cc = t->p[3], d = t->p[4];
+    /* Degenerate a == 0 makes the -b/a threshold inf/NaN. a*x+b is then
+     * the constant b: with b >= 0 the power branch applies everywhere;
+     * with b < 0 powf would be NaN, so the constant branch applies. */
+    const float thr = fabsf(a) > 1e-12f ? -b / a : (b >= 0.0f ? -INFINITY : INFINITY);
     switch (t->para_type) {
     case 0:
         return x <= 0.0f ? 0.0f : powf(x, g);
     case 1:
-        return x >= -b / a ? powf(a * x + b, g) : 0.0f;
+        return x >= thr ? powf(a * x + b, g) : 0.0f;
     case 2:
-        return x >= -b / a ? powf(a * x + b, g) + cc : cc;
+        return x >= thr ? powf(a * x + b, g) + cc : cc;
     case 3:
         return x >= d ? powf(a * x + b, g) : cc * x;
     case 4: {
@@ -274,6 +275,24 @@ static bool icc_xyz_tag(const uint8_t *data, size_t size, uint32_t sig, flux_vec
 
 static const flux_vec3 ICC_D50 = {0.9642f, 1.0f, 0.8251f};
 
+/* Chromatic adaptation matrix ('chad', s15Fixed16 array of 9, row-major
+ * in the file): a v4 profile's record of the actual-white -> D50
+ * adaptation applied to its matrix colorants. Absent in most v2
+ * profiles. */
+static bool icc_chad_tag(const uint8_t *data, size_t size, flux_mat3 *out) {
+    icc_tag_view tag;
+    if (!icc_find_tag(data, size, 0x63686164u /* 'chad' */, &tag))
+        return false;
+    if (tag_u32(tag.ptr, tag.size, 0) != 0x73663332u /* 'sf32' */ || tag.size < 44)
+        return false;
+    icc_cursor c = {.base = tag.ptr, .size = tag.size, .pos = 8, .ok = true};
+    for (int i = 0; i < 9; ++i) {
+        float v = cur_s15f16(&c);
+        out->m[(i % 3) * 3 + i / 3] = v; /* file row-major -> column-major */
+    }
+    return c.ok;
+}
+
 /* Match adapted-D65 colorants against the named primaries; returns the
  * named tag or FLUX_PRIMARIES_CUSTOM (xy filled). */
 static flux_color_primaries icc_match_primaries(flux_mat3 rgb_to_xyz_d65,
@@ -393,11 +412,16 @@ static void clut_eval(const icc_lut *l, float r, float g, float b, float out[3])
     }
 }
 
-/* Lab (PCS, encoded 0..1 per channel as in the tag) -> XYZ D50. */
-static void lab_to_xyz(const float in[3], float out[3]) {
-    float L = in[0] * 100.0f;
-    float a = in[1] * 255.0f - 128.0f;
-    float b = in[2] * 255.0f - 128.0f;
+/* Lab (PCS, encoded 0..1 per channel as in the tag) -> XYZ D50.
+ * `v2` selects the ICC v2 16-bit encoding, whose 16-bit range tops out
+ * at 0xFF00 instead of 0xFFFF (ICC v2 Annex A; v4 uses the full range).
+ * Only applies to 16-bit table data — 8-bit encodings are identical
+ * across versions and normalise to the same 0..1 floats. */
+static void lab_to_xyz(const float in[3], bool v2, float out[3]) {
+    const float s = v2 ? 65535.0f / 65280.0f : 1.0f;
+    float L = in[0] * s * 100.0f;
+    float a = in[1] * s * 255.0f - 128.0f;
+    float b = in[2] * s * 255.0f - 128.0f;
     float fy = (L + 16.0f) / 116.0f;
     float fx = fy + a / 500.0f;
     float fz = fy - b / 200.0f;
@@ -516,7 +540,7 @@ static bool icc_parse_mab(icc_tag_view tag, icc_lut *out) {
         return false;
     /* lutAtoBType header: sig/reserved(8), in_ch(8), out_ch(9), then
      * five u32 element offsets. A zero offset means "element absent". */
-    if (tag.ptr[9] != 3)
+    if (tag.ptr[8] != 3 || tag.ptr[9] != 3)
         return false;
     uint32_t b_off = tag_u32(tag.ptr, tag.size, 12);
     uint32_t matrix_off = tag_u32(tag.ptr, tag.size, 16);
@@ -585,9 +609,10 @@ static flux_mat3 pcs_to_working(void) {
 /* Bake the 65³ LUT: encoded straight RGB -> working-space straight
  * linear RGB. Stored R-fastest, then G, then B. `lut_pipeline` (A2B0)
  * or the matrix+TRC pair supplies the PCS conversion; `lab_pcs`
- * converts encoded Lab PCS to XYZ D50 first. */
+ * converts encoded Lab PCS to XYZ D50 first (with the v2 16-bit
+ * encoding when `lab_v2`). */
 static float *icc_bake_lut(flux_mat3 pcs2work, const icc_lut *lut_pipeline, const icc_trc trc[3],
-                           flux_mat3 colorants_pcs, bool lab_pcs) {
+                           flux_mat3 colorants_pcs, bool lab_pcs, bool lab_v2) {
     size_t n = (size_t)ICC_LUT_SIZE * ICC_LUT_SIZE * ICC_LUT_SIZE;
     float *lut = malloc(n * 3 * sizeof(float));
     if (!lut)
@@ -611,7 +636,7 @@ static float *icc_bake_lut(flux_mat3 pcs2work, const icc_lut *lut_pipeline, cons
                 }
                 if (lab_pcs) {
                     float xyz[3];
-                    lab_to_xyz(pcs, xyz);
+                    lab_to_xyz(pcs, lab_v2, xyz);
                     memcpy(pcs, xyz, sizeof(xyz));
                 }
                 flux_vec3 w =
@@ -635,6 +660,8 @@ FLUX_API flux_result flux_icc_profile_create(const void *data, size_t size,
 
     icc_cursor h = {.base = data, .size = size, .pos = 0, .ok = true};
     uint32_t declared_size = cur_u32(&h);
+    h.pos = 8;
+    uint32_t version_major = cur_u8(&h); /* BCD major version */
     h.pos = 12;
     uint32_t dev_class = cur_u32(&h);
     uint32_t color_space = cur_u32(&h);
@@ -686,7 +713,10 @@ FLUX_API flux_result flux_icc_profile_create(const void *data, size_t size,
             return FLUX_ERROR_UNSUPPORTED;
         }
         flux_mat3 conv = pcs_to_working();
-        p->lut = icc_bake_lut(conv, lut, nullptr, flux_mat3_identity(), is_lab_pcs);
+        /* The v2 16-bit Lab encoding only rides mft2 (lut16) tables;
+         * mft1 is 8-bit (identical across versions) and mAB is v4-era. */
+        bool lab_v2 = is_lab_pcs && version_major < 4 && lut_sig == 0x6D667432u;
+        p->lut = icc_bake_lut(conv, lut, nullptr, flux_mat3_identity(), is_lab_pcs, lab_v2);
         icc_lut_free(lut);
         free(lut);
         if (!p->lut) {
@@ -704,7 +734,11 @@ FLUX_API flux_result flux_icc_profile_create(const void *data, size_t size,
     static const uint32_t xyz_sigs[3] = {0x7258595Au, 0x6758595Au, 0x6258595Au}; /* rXYZ gXYZ bXYZ */
     static const uint32_t trc_sigs[3] = {0x72545243u, 0x67545243u, 0x62545243u}; /* rTRC gTRC bTRC */
     flux_vec3 *xyz_out[3] = {&r_xyz, &g_xyz, &b_xyz};
-    icc_trc trcs[3];
+    icc_trc *trcs = calloc(3, sizeof(*trcs)); /* 16 KB table each: heap, not stack */
+    if (!trcs) {
+        free(p);
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
     bool matrix_ok = true;
     for (int i = 0; i < 3; ++i) {
         matrix_ok &= icc_xyz_tag(data, size, xyz_sigs[i], xyz_out[i]);
@@ -713,22 +747,37 @@ FLUX_API flux_result flux_icc_profile_create(const void *data, size_t size,
             matrix_ok &= icc_trc_parse_tag(trc_tags[i], &trcs[i]);
     }
     if (!matrix_ok) {
+        free(trcs);
         free(p);
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "ICC profile has neither A2B0 nor matrix+TRC tags");
         return FLUX_ERROR_UNSUPPORTED;
     }
     if (is_lab_pcs) {
+        free(trcs);
         free(p);
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "ICC matrix profile with Lab PCS");
         return FLUX_ERROR_UNSUPPORTED;
     }
 
-    /* Colorant columns are D50-relative; adapt to the D65 working white. */
+    /* Colorant columns are D50-relative; adapt to the D65 working white.
+     * With a 'chad' tag the profile records its own actual-white -> D50
+     * adaptation: invert it to recover the actual-white colorants, then
+     * adapt that white to D65. Without one (typical v2) fall back to a
+     * Bradford D50 -> D65 adaptation. A singular chad inverts to the
+     * identity and degrades to the same fallback. */
     flux_mat3 colorants = {{
         r_xyz.x, r_xyz.y, r_xyz.z, g_xyz.x, g_xyz.y, g_xyz.z, b_xyz.x, b_xyz.y, b_xyz.z,
     }};
     flux_vec3 d65 = {0.95047f, 1.0f, 1.08883f};
-    flux_mat3 adapt = flux_colorspace_adapt_xyz(ICC_D50, d65);
+    flux_mat3 chad;
+    flux_mat3 adapt;
+    if (icc_chad_tag(data, size, &chad)) {
+        flux_mat3 inv = flux_mat3_invert(chad);
+        flux_vec3 actual_white = flux_mat3_transform_vec3(inv, ICC_D50);
+        adapt = flux_mat3_multiply(flux_colorspace_adapt_xyz(actual_white, d65), inv);
+    } else {
+        adapt = flux_colorspace_adapt_xyz(ICC_D50, d65);
+    }
     flux_mat3 colorants_d65 = flux_mat3_multiply(adapt, colorants);
 
     /* Parametric extraction: identical TRCs in the flux transfer set. */
@@ -749,7 +798,7 @@ FLUX_API flux_result flux_icc_profile_create(const void *data, size_t size,
             have_tf = true;
         }
         if (have_tf) {
-            float xy[8];
+            float xy[8] = {0}; /* degenerate colorants leave it untouched */
             flux_color_primaries prim = icc_match_primaries(colorants_d65, xy);
             p->space = (flux_color_space){0};
             p->space.primaries = prim;
@@ -767,15 +816,18 @@ FLUX_API flux_result flux_icc_profile_create(const void *data, size_t size,
             }
             if (flux_color_space_is_valid(p->space)) {
                 p->parametric_ok = true;
+                free(trcs);
                 *out = p;
                 return FLUX_OK;
             }
         }
     }
 
-    /* Not exactly representable: bake through the matrix path. */
+    /* Not exactly representable: bake through the matrix path. The D50
+     * colorants are PCS output here, so no chad involvement. */
     flux_mat3 conv = pcs_to_working();
-    p->lut = icc_bake_lut(conv, nullptr, trcs, colorants, false);
+    p->lut = icc_bake_lut(conv, nullptr, trcs, colorants, false, false);
+    free(trcs);
     if (!p->lut) {
         free(p);
         return FLUX_ERROR_OUT_OF_MEMORY;

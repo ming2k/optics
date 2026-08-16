@@ -6,6 +6,7 @@
  * scene_draw assumes the frame's current pass has a depth attachment
  * matching material.depth_format.
  */
+#include "../core/image_internal.h"
 #include "../core/internal.h"
 #include <flux/scene.h>
 #include <flux/vulkan.h>
@@ -232,6 +233,10 @@ struct flux_material {
     flux_bindless_handle sampler_handle;
     float shininess; /* PHONG only */
     float specular;  /* PHONG only */
+    /* The material renders into the linear working space (its declared
+     * color_format is 16F), so base-color texels are decoded at the edge
+     * (ADR-0069). 8-bit targets keep the legacy raw-gamma path. */
+    bool renders_working_space;
     VkShaderStageFlags push_stages;
     uint32_t push_bytes;
     VkPipelineLayout layout;
@@ -256,7 +261,17 @@ typedef struct scene_surface_params {
     float uv_scale_offset[4];          /* scale.xy, offset.xy */
     float uv_rotation_alpha_cutoff[4]; /* cos, sin, cutoff, unused */
     uint32_t texture_info[4];          /* image, sampler, alpha mode, textured */
+    uint64_t color_params_address;     /* flux_image_color_params BDA; 0 = none */
+    uint32_t color_flags;              /* SCENE_COLOR_* */
+    uint32_t _color_pad;
 } scene_surface_params;
+
+/* scene_surface_params.color_flags (ADR-0069): DECODE converts sampled
+ * texels into the linear working space at the edge (material targets a
+ * 16F attachment); HAS_PARAMS selects the tagged transform (parametric
+ * matrix or baked ICC LUT) over the untagged sRGB fallback. */
+#define SCENE_COLOR_DECODE 0x1u
+#define SCENE_COLOR_HAS_PARAMS 0x2u
 
 typedef struct scene_unlit_params {
     scene_surface_params surface;
@@ -541,6 +556,7 @@ flux_result flux_material_create(flux_device *d, const flux_material_desc *desc,
     }
     m->shininess = desc->shininess > 0.0f ? desc->shininess : SCENE_PHONG_DEFAULT_SHININESS;
     m->specular = desc->specular;
+    m->renders_working_space = desc->color_format == FLUX_FORMAT_RGBA16_SFLOAT;
     if (desc->kind == FLUX_MATERIAL_PHONG) {
         m->push_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         m->push_bytes = sizeof(scene_params_push);
@@ -623,6 +639,25 @@ static void fill_surface_params(scene_surface_params *p, const flux_material *ma
     p->texture_info[1] = material->sampler_handle;
     p->texture_info[2] = (uint32_t)material->alpha_mode;
     p->texture_info[3] = material->base_color_image ? 1u : 0u;
+    /* ADR-0069: rendering into the linear working space (16F target)
+     * decodes texels at the edge — tagged content via its params block,
+     * untagged 8-bit UNORM as sRGB. 16F sources are already linear and
+     * *_SRGB sources are decoded by the sampler hardware: both stay raw.
+     * Legacy 8-bit targets keep the historical raw path. */
+    const flux_image *img = material->base_color_image;
+    p->color_params_address = 0;
+    p->color_flags = 0;
+    p->_color_pad = 0;
+    if (material->renders_working_space && img) {
+        if (img->color_params_address != 0) {
+            p->color_params_address = img->color_params_address;
+            p->color_flags = SCENE_COLOR_DECODE | SCENE_COLOR_HAS_PARAMS;
+        } else if (img->format == FLUX_FORMAT_RGBA8_UNORM ||
+                   img->format == FLUX_FORMAT_BGRA8_UNORM ||
+                   img->format == FLUX_FORMAT_RGB10A2_UNORM) {
+            p->color_flags = SCENE_COLOR_DECODE;
+        }
+    }
 }
 
 static void fill_phong_params(scene_phong_params *p, const flux_mat4 *view_inv, flux_mat4 world,
@@ -713,13 +748,12 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
     }
 
     /* Skip redundant rebinds: the frame mirrors the bindings scene
-     * last made on this command buffer (reset every begin_frame).
-     * Bindings persist across the passes of one command buffer, so the
-     * mirror holds for consecutive scene draws — the same dedup the
-     * canvas backend applies per pass. Draws recorded by other modules
-     * are not mirrored; interleaving another module's graphics pass
-     * between scene passes of one frame is outside scene's contract
-     * (each scene pass is expected to own its draws). */
+     * last made on this command buffer (reset every begin_frame and by
+     * every flux_frame_begin_pass — other modules' passes bind their
+     * own pipelines, e.g. the canvas end_pass output blit, and bindings
+     * persist across the passes of one command buffer). The mirror
+     * therefore holds for the consecutive scene draws of one pass; the
+     * first draw of each pass always rebinds. */
     VkPipeline pipeline = skinned ? material->skinned_pipeline : material->pipeline;
     if (f->scene_bound_pipeline != pipeline) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);

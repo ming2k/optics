@@ -856,12 +856,21 @@ pub struct SurfaceColorOptions<'a> {
     /// preferred first. Flux walks the list and picks the first space the
     /// swapchain can do; the winner is reported through
     /// [`SurfaceInfo::color_space`]. On an offscreen surface the first
-    /// listed space is adopted verbatim (8-bit SDR encodings only).
+    /// listed space with a workable container is adopted, the container
+    /// following the space's transfer function (see `offscreen_formats`).
     pub color_spaces: &'a [ColorSpace],
     /// HDR presentation tuning; ignored for SDR spaces.
     pub hdr: Option<SurfaceHdr>,
     /// Pin the written space independent of the swapchain space.
     pub output_color: Option<SurfaceOutputColor<'a>>,
+    /// Offscreen-only: constrain the pixel container, most preferred
+    /// first. A format must suit the written space's transfer function:
+    /// sRGB/gamma accept any colour format, PQ/HLG require
+    /// [`Format::FLUX_FORMAT_RGB10A2_UNORM`] or
+    /// [`Format::FLUX_FORMAT_RGBA16_SFLOAT`], linear requires
+    /// `RGBA16_SFLOAT`. Empty keeps the transfer-derived defaults
+    /// (BGRA8 for gamma encodings). Ignored on windowed surfaces.
+    pub offscreen_formats: &'a [Format],
 }
 
 /// Negotiated surface state reported by [`Surface::info`].
@@ -878,6 +887,11 @@ pub struct SurfaceInfo {
     /// What pixels are written in: equals `color_space` unless a
     /// [`SurfaceOutputColor`] pinned the display's actual space.
     pub content_space: ColorSpace,
+    /// Pixel format of the surface's images: the negotiated swapchain
+    /// format on a windowed surface, the chosen container on an offscreen
+    /// one. Compositors mapping the dma-buf export to a DRM fourcc key
+    /// off this.
+    pub format: Format,
 }
 
 /// A presentable or offscreen rendering surface. Refcounted in C; this handle
@@ -1007,21 +1021,46 @@ impl Surface {
         vsync: bool,
         options: SurfaceColorOptions<'_>,
     ) -> Result<Surface, Error> {
-        Self::create_with_color_options(device, vk_surface_khr, width, height, vsync, options)
+        Self::create_with_color_options(device, vk_surface_khr, width, height, vsync, options, None)
     }
 
     /// Like [`Surface::offscreen`], plus color-management extensions. An
-    /// offscreen surface adopts the first listed space verbatim (8-bit
-    /// SDR encodings only — HDR transfer functions are unsupported
-    /// offscreen); [`SurfaceColorOptions::output_color`] is equivalent to
-    /// requesting the space through `color_spaces`.
+    /// offscreen surface adopts the first listed space whose container is
+    /// workable (deep-color/HDR spaces pick RGB10A2 or RGBA16F; see
+    /// [`SurfaceColorOptions::offscreen_formats`]);
+    /// [`SurfaceColorOptions::output_color`] is equivalent to requesting
+    /// the space through `color_spaces`.
     pub fn offscreen_with_color_options(
         device: &Device,
         width: u32,
         height: u32,
         options: SurfaceColorOptions<'_>,
     ) -> Result<Surface, Error> {
-        Self::create_with_color_options(device, std::ptr::null_mut(), width, height, false, options)
+        Self::create_with_color_options(device, std::ptr::null_mut(), width, height, false, options,
+                                        None)
+    }
+
+    /// Like [`Surface::offscreen_dmabuf`], plus color-management extensions
+    /// (ADR-0069): negotiate the written color space and the pixel container
+    /// — e.g. BT.2020 PQ into RGB10A2 for direct HDR scanout through
+    /// DRM/KMS. Fails when no shared modifier supports a suitable container.
+    pub fn offscreen_dmabuf_with_color_options(
+        device: &Device,
+        width: u32,
+        height: u32,
+        modifiers: &[u64],
+        options: SurfaceColorOptions<'_>,
+    ) -> Result<Surface, Error> {
+        if modifiers.is_empty() {
+            return Err(Error(sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT));
+        }
+        let surface =
+            Self::create_with_color_options(device, std::ptr::null_mut(), width, height, false,
+                                            options, Some(modifiers))?;
+        if !surface.is_exportable() {
+            return Err(Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED));
+        }
+        Ok(surface)
     }
 
     /// Shared constructor for the color-managed surface entry points:
@@ -1035,7 +1074,21 @@ impl Surface {
         height: u32,
         vsync: bool,
         options: SurfaceColorOptions<'_>,
+        dmabuf_modifiers: Option<&[u64]>,
     ) -> Result<Surface, Error> {
+        let mut dmabuf_extension = dmabuf_modifiers
+            .map(|modifiers| {
+                Ok(sys::flux_surface_dmabuf_desc {
+                    type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_DMABUF_DESC,
+                    next: std::ptr::null(),
+                    modifiers: modifiers.as_ptr(),
+                    modifier_count: modifiers
+                        .len()
+                        .try_into()
+                        .map_err(|_| Error(sys::flux_result::FLUX_ERROR_OUT_OF_RANGE))?,
+                })
+            })
+            .transpose()?;
         let raw_spaces: Vec<sys::flux_color_space> =
             options.color_spaces.iter().map(|s| s.as_raw()).collect();
         let mut color_space_extension = (!raw_spaces.is_empty())
@@ -1052,6 +1105,20 @@ impl Surface {
             })
             .transpose()?;
         let mut hdr_extension = options.hdr.map(SurfaceHdr::raw);
+        let mut offscreen_format_extension = (!options.offscreen_formats.is_empty())
+            .then(|| {
+                Ok(sys::flux_surface_offscreen_format_desc {
+                    type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC,
+                    next: std::ptr::null(),
+                    formats: options.offscreen_formats.as_ptr(),
+                    format_count: options
+                        .offscreen_formats
+                        .len()
+                        .try_into()
+                        .map_err(|_| Error(sys::flux_result::FLUX_ERROR_OUT_OF_RANGE))?,
+                })
+            })
+            .transpose()?;
         let mut output_extension =
             options
                 .output_color
@@ -1066,6 +1133,14 @@ impl Surface {
                 });
 
         let mut next = std::ptr::null();
+        if let Some(dmabuf) = dmabuf_extension.as_mut() {
+            dmabuf.next = next;
+            next = dmabuf as *const _ as *const std::ffi::c_void;
+        }
+        if let Some(offscreen_format) = offscreen_format_extension.as_mut() {
+            offscreen_format.next = next;
+            next = offscreen_format as *const _ as *const std::ffi::c_void;
+        }
         if let Some(output) = output_extension.as_mut() {
             output.next = next;
             next = output as *const _ as *const std::ffi::c_void;
@@ -1332,6 +1407,7 @@ impl Surface {
             hdr: raw.hdr,
             color_space: ColorSpace::from_raw(raw.color_space),
             content_space: ColorSpace::from_raw(raw.content_space),
+            format: raw.format,
         }
     }
 
@@ -2825,6 +2901,7 @@ fn image_data_len(width: u32, height: u32, format: Format) -> Result<usize, Erro
         | Format::FLUX_FORMAT_BGRA8_UNORM
         | Format::FLUX_FORMAT_RGBA8_SRGB
         | Format::FLUX_FORMAT_BGRA8_SRGB => 4usize,
+        Format::FLUX_FORMAT_RGBA16_SFLOAT => 8usize, // ADR-0069 working space
         _ => return Err(Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED)),
     };
     (width as usize)
@@ -2996,7 +3073,16 @@ impl Image {
         // documented by this function; all values are forwarded unchanged.
         unsafe {
             Self::import_dmabuf_impl(
-                device, width, height, format, modifier, fd, offset, stride, None,
+                device,
+                width,
+                height,
+                format,
+                modifier,
+                fd,
+                offset,
+                stride,
+                None,
+                ImageColorSpace::default(),
             )
         }
     }
@@ -3033,6 +3119,46 @@ impl Image {
                 offset,
                 stride,
                 Some(acquire_sync_fd),
+                ImageColorSpace::default(),
+            )
+        }
+    }
+
+    /// Like [`Image::import_dmabuf`], plus an optional acquire fence and a
+    /// color-space tag (ADR-0069/0070): the tag decodes the imported texels
+    /// into the working space when the canvas samples them — the zero-copy
+    /// path for color-tagged client buffers. The tag is read only during
+    /// creation.
+    ///
+    /// # Safety
+    /// Same contract as [`Image::import_dmabuf_with_acquire_fence`].
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn import_dmabuf_with_color_space(
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: Format,
+        modifier: u64,
+        fd: i32,
+        offset: u32,
+        stride: u32,
+        acquire_sync_fd: Option<i32>,
+        color_space: ImageColorSpace<'_>,
+    ) -> Result<Image, Error> {
+        // SAFETY: the caller guarantees the dma-buf/sync-file descriptor
+        // requirements documented above; all values are forwarded unchanged.
+        unsafe {
+            Self::import_dmabuf_impl(
+                device,
+                width,
+                height,
+                format,
+                modifier,
+                fd,
+                offset,
+                stride,
+                acquire_sync_fd,
+                color_space,
             )
         }
     }
@@ -3048,9 +3174,28 @@ impl Image {
         offset: u32,
         stride: u32,
         acquire_sync_fd: Option<i32>,
+        color_space: ImageColorSpace<'_>,
     ) -> Result<Image, Error> {
+        let raw_space = color_space.space.map(|s| s.as_raw());
+        let color_extension = sys::flux_image_color_space_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_IMAGE_COLOR_SPACE_DESC,
+            next: std::ptr::null(),
+            space: raw_space
+                .as_ref()
+                .map(|s| s as *const sys::flux_color_space)
+                .unwrap_or(std::ptr::null()),
+            icc: color_space
+                .icc
+                .map(|p| p.as_raw() as *const sys::flux_icc_profile)
+                .unwrap_or(std::ptr::null()),
+        };
         let mut desc = sys::flux_dmabuf_image_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_DMABUF_IMAGE_DESC,
+            next: if raw_space.is_some() || color_space.icc.is_some() {
+                &color_extension as *const _ as *const std::ffi::c_void
+            } else {
+                std::ptr::null()
+            },
             width,
             height,
             format,
@@ -3067,7 +3212,8 @@ impl Image {
         }
         let mut out: *mut sys::flux_image = std::ptr::null_mut();
         // SAFETY: the caller of this function guarantees that `desc` describes
-        // valid dma-buf and optional sync-file descriptors.
+        // valid dma-buf and optional sync-file descriptors; the color
+        // extension and raw_space outlive this call.
         Error::check(unsafe { sys::flux_image_import_dmabuf(device.raw, &desc, &mut out) })?;
         Ok(Image { raw: out })
     }
@@ -3329,7 +3475,11 @@ mod tests {
             24
         );
         assert_eq!(
-            image_data_len(1, 1, Format::FLUX_FORMAT_RGBA16_SFLOAT).unwrap_err(),
+            image_data_len(3, 2, Format::FLUX_FORMAT_RGBA16_SFLOAT).unwrap(),
+            48
+        );
+        assert_eq!(
+            image_data_len(1, 1, Format::FLUX_FORMAT_RGB10A2_UNORM).unwrap_err(),
             Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED)
         );
     }

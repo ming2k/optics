@@ -143,6 +143,16 @@ typedef struct icc_tag_def {
     size_t size;
 } icc_tag_def;
 
+/* 'chad' chromatic adaptation matrix: 'sf32' + 9 row-major s15Fixed16. */
+static inline void w_chad_tag(icc_writer *w, const char sig[4], const double m[9]) {
+    w_tag_begin(w, sig);
+    w_tag_sig(w, "sf32");
+    w_u32(w, 0);
+    for (int i = 0; i < 9; ++i)
+        w_s15f16(w, m[i]);
+    w_tag_end(w);
+}
+
 /* Assemble header + tag table + data block; returns the profile size. */
 static inline size_t icc_build_profile(uint8_t *out, const char class_[4], const char pcs[4],
                                        const uint8_t *data, size_t data_size,
@@ -174,9 +184,11 @@ static const double ICC_SRGB_D50[9] = {
 };
 
 /* Matrix tags + TRC tags; trc_kind: 0 = sRGB para, 1 = gamma 2.2 curv,
- * 2 = identity table (forces the parser's bake path). */
-static inline uint32_t icc_build_matrix_tags(uint8_t *data, icc_tag_def defs[6], int trc_kind,
-                                             size_t *out_len) {
+ * 2 = identity table (forces the parser's bake path), 3 = degenerate
+ * parametric type 1 with a == 0 (hardening case). `chad`, when non-NULL,
+ * appends a 'chad' chromatic adaptation tag (row-major doubles). */
+static inline uint32_t icc_build_matrix_tags_ex(uint8_t *data, icc_tag_def *defs, int trc_kind,
+                                                const double *chad, size_t *out_len) {
     icc_writer t = {0};
     w_xyz_tag(&t, "rXYZ", ICC_SRGB_D50[0], ICC_SRGB_D50[1], ICC_SRGB_D50[2]);
     w_xyz_tag(&t, "gXYZ", ICC_SRGB_D50[3], ICC_SRGB_D50[4], ICC_SRGB_D50[5]);
@@ -188,9 +200,23 @@ static inline uint32_t icc_build_matrix_tags(uint8_t *data, icc_tag_def defs[6],
             w_para_srgb(&t, trc_sigs[i]);
         else if (trc_kind == 1)
             w_curv_gamma(&t, trc_sigs[i], 2.2);
-        else
+        else if (trc_kind == 3) {
+            /* parametricCurveType 1 with a == 0: the -b/a threshold is
+             * degenerate; the parser must not produce inf/NaN. */
+            w_tag_begin(&t, trc_sigs[i]);
+            w_tag_sig(&t, "para");
+            w_u32(&t, 0);
+            w_u16(&t, 1);
+            w_u16(&t, 0);
+            w_s15f16(&t, 2.2);  /* g */
+            w_s15f16(&t, 0.0);  /* a */
+            w_s15f16(&t, 0.25); /* b */
+            w_tag_end(&t);
+        } else
             w_curv_table(&t, trc_sigs[i], ident, 2);
     }
+    if (chad)
+        w_chad_tag(&t, "chad", chad);
     memcpy(data, t.buf, t.len);
     for (uint32_t i = 0; i < t.tag_count; ++i) {
         defs[i].sig = t.tags[i * 3 + 0];
@@ -199,6 +225,94 @@ static inline uint32_t icc_build_matrix_tags(uint8_t *data, icc_tag_def defs[6],
     }
     *out_len = t.len;
     return t.tag_count;
+}
+
+static inline uint32_t icc_build_matrix_tags(uint8_t *data, icc_tag_def defs[6], int trc_kind,
+                                             size_t *out_len) {
+    return icc_build_matrix_tags_ex(data, defs, trc_kind, nullptr, out_len);
+}
+
+/* The published sRGB profile's 'chad': Bradford D65 -> D50. */
+static const double ICC_CHAD_BRADFORD_D65_D50[9] = {
+    0.9555766, -0.0230393, 0.0631636, -0.0282895, 1.0099416, 0.0210077, 0.0122982, -0.0204830,
+    1.3299098,
+};
+
+/* Minimal lutAtoBType ('mAB '): header + three 2-entry identity 'curv'
+ * tables as the B element (no matrix, M, CLUT, or A). Channel counts are
+ * parameters so the parser's in/out validation is exercisable. */
+static inline size_t icc_build_mab_identity(uint8_t *data, icc_tag_def *def, uint8_t in_ch,
+                                            uint8_t out_ch) {
+    icc_writer t = {0};
+    w_tag_begin(&t, "A2B0");
+    w_tag_sig(&t, "mAB ");
+    w_u32(&t, 0);
+    w_u8(&t, in_ch);
+    w_u8(&t, out_ch);
+    w_u8(&t, 0);
+    w_u8(&t, 0);
+    w_u32(&t, 32); /* B curves: right after the 32-byte header */
+    w_u32(&t, 0);  /* matrix */
+    w_u32(&t, 0);  /* M curves */
+    w_u32(&t, 0);  /* CLUT */
+    w_u32(&t, 0);  /* A curves */
+    for (int ch = 0; ch < 3; ++ch) {
+        w_tag_sig(&t, "curv");
+        w_u32(&t, 0);
+        w_u32(&t, 2);
+        w_u16(&t, 0);
+        w_u16(&t, 65535);
+    }
+    w_tag_end(&t);
+    memcpy(data, t.buf, t.len);
+    def->sig = t.tags[0];
+    def->offset = t.tags[1];
+    def->size = t.tags[2];
+    return t.len;
+}
+
+/* mft2 A2B0 holding a constant Lab PCS colour: identity 2-entry input
+ * and output tables, a 2^3 CLUT repeating one encoded Lab triple. `v2`
+ * selects the ICC v2 16-bit Lab encoding (0xFF00 full scale) over the
+ * v4 encoding (0xFFFF). Pair with pcs "Lab " and a matching profile
+ * version (byte 8 < 4 for v2). */
+static inline size_t icc_build_mft2_constant_lab(uint8_t *data, icc_tag_def *def, double L,
+                                                 double a, double b, bool v2) {
+    icc_writer t = {0};
+    w_tag_begin(&t, "A2B0");
+    w_tag_sig(&t, "mft2");
+    w_u32(&t, 0);
+    w_u8(&t, 3);
+    w_u8(&t, 3);
+    w_u8(&t, 2); /* grid */
+    w_u8(&t, 0);
+    for (int i = 0; i < 9; ++i)
+        w_s15f16(&t, i % 4 == 0 ? 1.0 : 0.0); /* matrix (applies in mft2) */
+    w_u16(&t, 2);                             /* input table entries */
+    w_u16(&t, 2);                             /* output table entries */
+    for (int ch = 0; ch < 3; ++ch) {
+        w_u16(&t, 0);
+        w_u16(&t, 65535); /* identity input tables */
+    }
+    const double full = v2 ? 65280.0 : 65535.0;
+    const uint16_t enc[3] = {
+        (uint16_t)lrint(L / 100.0 * full),
+        (uint16_t)lrint((a + 128.0) / 255.0 * full),
+        (uint16_t)lrint((b + 128.0) / 255.0 * full),
+    };
+    for (int i = 0; i < 8; ++i)
+        for (int ch = 0; ch < 3; ++ch)
+            w_u16(&t, enc[ch]);
+    for (int ch = 0; ch < 3; ++ch) {
+        w_u16(&t, 0);
+        w_u16(&t, 65535); /* identity output tables */
+    }
+    w_tag_end(&t);
+    memcpy(data, t.buf, t.len);
+    def->sig = t.tags[0];
+    def->offset = t.tags[1];
+    def->size = t.tags[2];
+    return t.len;
 }
 
 /* mft1 A2B0 with identity curves and a constant D50-white CLUT. */

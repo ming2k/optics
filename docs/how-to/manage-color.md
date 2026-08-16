@@ -44,8 +44,13 @@ swapchain supports and reports the winner:
 
 Without the extension, behaviour is unchanged: `hdr_preferred = true`
 maps to `[BT2020_PQ, SCRGB, SRGB]`, plain surfaces to `[SRGB]`.
-Offscreen surfaces adopt the first listed space verbatim (HDR transfer
-functions are rejected there — offscreen storage is 8-bit).
+Offscreen surfaces adopt the first listed space whose container the
+device supports, the container following the transfer function: BGRA8
+for sRGB/gamma (the historic default), RGB10A2 then RGBA16F for PQ/HLG,
+RGBA16F for linear. Constrain the container explicitly with
+`flux_surface_offscreen_format_desc` — a compositor exporting the
+images through DRM/KMS uses it to match its plane formats, and reads
+the winner back as `flux_surface_info.format` alongside the spaces.
 
 You never re-encode anything yourself: draw as usual and the output
 transform targets `content_space`.
@@ -161,15 +166,19 @@ canvas, which applies the output transform:
 
 16F images are working-space linear, so the canvas treats them
 correctly with no tag. Lights are already linear RGB
-(`flux_scene_light`); mesh base colors and textures go through the
-same decode rules as canvas images.
+(`flux_scene_light`); mesh base colors are linear floats. When the
+material's `color_format` is RGBA16_SFLOAT (as in the pattern above),
+base-color *textures* go through the same decode rules as canvas
+images — tagged via `flux_image_color_space_desc`, untagged 8-bit
+UNORM sampled as sRGB — so lighting runs in linear light. Materials
+declared for 8-bit targets keep the legacy raw-gamma path.
 
 ## Current boundaries
 
-- The **effect** module (blur/backdrop) is an SDR island: it computes
-  on 8-bit sRGB intermediates. Visually fine for UI blur; not a
-  wide-gamut path.
-- Offscreen surfaces are 8-bit; HDR transfer functions on them are
-  rejected at creation. Windowed surfaces are the HDR path.
+- The **effect** module (blur/backdrop, and the prism liquid-glass
+  material built on it) follows its input: 8-bit SDR content keeps the
+  historic RGBA8 path; 16F working-space inputs run in 16F (linear
+  light) when the device advertises rgba16f storage, and fail cleanly
+  with `FLUX_ERROR_UNSUPPORTED` where it does not.
 - YUV is out of scope by design: video decoders hand flux RGB images
   with a color tag.

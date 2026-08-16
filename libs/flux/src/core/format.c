@@ -18,6 +18,8 @@ VkFormat flux_format_to_vk(flux_format f) {
         return VK_FORMAT_R8G8B8A8_SRGB;
     case FLUX_FORMAT_BGRA8_SRGB:
         return VK_FORMAT_B8G8R8A8_SRGB;
+    case FLUX_FORMAT_RGB10A2_UNORM:
+        return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
     case FLUX_FORMAT_RGBA16_SFLOAT:
         return VK_FORMAT_R16G16B16A16_SFLOAT;
     case FLUX_FORMAT_D32_SFLOAT:
@@ -50,6 +52,8 @@ flux_format flux_format_from_vk(VkFormat vf) {
         return FLUX_FORMAT_RGBA8_SRGB;
     case VK_FORMAT_B8G8R8A8_SRGB:
         return FLUX_FORMAT_BGRA8_SRGB;
+    case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+        return FLUX_FORMAT_RGB10A2_UNORM;
     case VK_FORMAT_R16G16B16A16_SFLOAT:
         return FLUX_FORMAT_RGBA16_SFLOAT;
     case VK_FORMAT_D32_SFLOAT:

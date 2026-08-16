@@ -1,22 +1,9 @@
 #version 450
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_GOOGLE_include_directive : require
 
-layout(set = 0, binding = 0) uniform texture2D u_textures[];
-layout(set = 0, binding = 2) uniform sampler u_samplers[];
-
-layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer JointPalette {
-    mat4 joints[];
-};
-
-layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer UnlitParams {
-    vec4 base_color;
-    vec4 uv_scale_offset;
-    vec4 uv_rotation_alpha_cutoff;
-    uvec4 texture_info;
-    JointPalette palette;
-    uint joint_count;
-};
+#include "scene_color.glsl"
 
 layout(push_constant) uniform PC {
     mat4 mvp;
@@ -39,8 +26,15 @@ void main()
     if (pc.params.texture_info.w != 0u) {
         uint ih = pc.params.texture_info.x & 0x0FFFFFFFu;
         uint sh = pc.params.texture_info.y & 0x0FFFFFFFu;
-        base *= texture(sampler2D(u_textures[nonuniformEXT(ih)],
-                                  u_samplers[nonuniformEXT(sh)]), uv);
+        vec4 texel = texture(sampler2D(u_textures[nonuniformEXT(ih)],
+                                       u_samplers[nonuniformEXT(sh)]), uv);
+        /* ADR-0069: rendering into the linear working space (16F target)
+         * decodes texels at the edge; legacy 8-bit targets stay raw. */
+        if ((pc.params.color_flags & SCENE_COLOR_DECODE) != 0u)
+            texel.rgb = (pc.params.color_flags & SCENE_COLOR_HAS_PARAMS) != 0u
+                            ? scene_decode_tagged(pc.params.color_params.cp, sh, texel.rgb)
+                            : flux_tf_decode3(FLUX_TF_SRGB, 0.0, texel.rgb);
+        base *= texel;
     }
 
     uint alpha_mode = pc.params.texture_info.z;

@@ -57,8 +57,11 @@ prism_liquid_glass_filter_apply(filter, frame, &glass, &output);
 ```
 
 All distances use capture-image pixels. `input`, `blurred_input`, and the
-output have identical extents; the sharp input may be RGBA8 or BGRA8,
-while the blurred input and output are RGBA8. The output is transparent
+output have identical extents. For 8-bit SDR captures the sharp input may
+be RGBA8 or BGRA8 while the blurred input and output are RGBA8; for 16F
+working-space captures (ADR-0069) the sharp input is RGBA16_SFLOAT and the
+blurred input and output are RGBA16_SFLOAT, so the material composites in
+linear light. The output is transparent
 outside the body SDF and its shadow. An empty group list clears
 footprints retained by the current frame slot after all bodies disappear.
 

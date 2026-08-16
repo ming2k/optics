@@ -443,6 +443,163 @@ int main(void) {
         flux_icc_profile_release(lut_icc);
     }
 
+    /* --- 10. BT.2020 PQ offscreen: deep container + PQ output encode --- */
+    {
+        flux_color_space spaces[] = {(flux_color_space)FLUX_COLOR_SPACE_BT2020_PQ};
+        flux_surface_color_space_desc csd = FLUX_SURFACE_COLOR_SPACE_DESC_INIT;
+        csd.spaces = spaces;
+        csd.space_count = 1;
+        flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+        sd.next = &csd;
+        sd.width = W;
+        sd.height = H;
+        flux_surface *pqs = nullptr;
+        EXPECT(flux_surface_create(d, &sd, &pqs) == FLUX_OK);
+        flux_canvas *pqc = nullptr;
+        flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
+        cd.surface = pqs;
+        EXPECT(flux_canvas_create(&cd, &pqc) == FLUX_OK);
+
+        /* The 8-bit era rejected this outright; now the container must be
+         * deep (10-bit preferred, 16F fallback) and the info reports HDR. */
+        flux_surface_info info;
+        flux_surface_get_info(pqs, &info);
+        EXPECT(info.color_space.primaries == FLUX_PRIMARIES_BT2020);
+        EXPECT(info.content_space.transfer == FLUX_TRANSFER_PQ);
+        EXPECT(info.hdr);
+        EXPECT(info.format == FLUX_FORMAT_RGB10A2_UNORM ||
+               info.format == FLUX_FORMAT_RGBA16_SFLOAT);
+
+        /* 50% white over black = 0.502 working-space linear; the output
+         * transform maps it through the BT.2408 SDR-white scale and PQ
+         * encodes. Readback quantizes the deep container back to 8-bit. */
+        const float lin = 128.0f / 255.0f;
+        int want = (int)lrintf(
+            flux_transfer_encode(FLUX_TRANSFER_PQ, 0.0f, lin * (203.0f / 10000.0f)) * 255.0f);
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        EXPECT(render_frame(pqs, pqc, black, draw_half_white, nullptr) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(pqs, px, BYTES) == FLUX_OK);
+        const uint8_t *centre = px_at(px, W / 2, H / 2);
+        EXPECT(near_ch(centre[0], want, 4));
+        EXPECT(near_ch(centre[0], centre[1], 2) && near_ch(centre[1], centre[2], 2));
+        /* PQ ~0.51 here: plainly not the SDR sRGB (~188) or linear (128)
+         * numbers — the encode stage provably ran. */
+        EXPECT(centre[0] > 100 && centre[0] < 160);
+
+        flux_canvas_destroy(pqc);
+        flux_surface_release(pqs);
+    }
+
+    /* --- 11. explicit offscreen format list: sRGB in a 16F container --- */
+    {
+        flux_color_space spaces[] = {(flux_color_space)FLUX_COLOR_SPACE_SRGB};
+        flux_surface_color_space_desc csd = FLUX_SURFACE_COLOR_SPACE_DESC_INIT;
+        csd.spaces = spaces;
+        csd.space_count = 1;
+        flux_format formats[] = {FLUX_FORMAT_RGBA16_SFLOAT};
+        flux_surface_offscreen_format_desc fsd = FLUX_SURFACE_OFFSCREEN_FORMAT_DESC_INIT;
+        fsd.formats = formats;
+        fsd.format_count = 1;
+        csd.next = &fsd;
+        flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+        sd.next = &csd;
+        sd.width = W;
+        sd.height = H;
+        flux_surface *fs = nullptr;
+        EXPECT(flux_surface_create(d, &sd, &fs) == FLUX_OK);
+        flux_canvas *fc = nullptr;
+        flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
+        cd.surface = fs;
+        EXPECT(flux_canvas_create(&cd, &fc) == FLUX_OK);
+
+        flux_surface_info info;
+        flux_surface_get_info(fs, &info);
+        EXPECT(info.format == FLUX_FORMAT_RGBA16_SFLOAT);
+        EXPECT(!info.hdr);
+
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        EXPECT(render_frame(fs, fc, black, draw_red, nullptr) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(fs, px, BYTES) == FLUX_OK);
+        const uint8_t *centre = px_at(px, W / 2, H / 2);
+        EXPECT(near_ch(centre[0], 255, 2) && centre[1] < 3 && centre[2] < 3);
+
+        flux_canvas_destroy(fc);
+        flux_surface_release(fs);
+    }
+
+    /* --- 12. an unsuitable explicit format list is rejected --- */
+    {
+        /* PQ content cannot live in an 8-bit container. */
+        flux_color_space spaces[] = {(flux_color_space)FLUX_COLOR_SPACE_BT2020_PQ};
+        flux_surface_color_space_desc csd = FLUX_SURFACE_COLOR_SPACE_DESC_INIT;
+        csd.spaces = spaces;
+        csd.space_count = 1;
+        flux_format formats[] = {FLUX_FORMAT_BGRA8_UNORM};
+        flux_surface_offscreen_format_desc fsd = FLUX_SURFACE_OFFSCREEN_FORMAT_DESC_INIT;
+        fsd.formats = formats;
+        fsd.format_count = 1;
+        csd.next = &fsd;
+        flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+        sd.next = &csd;
+        sd.width = W;
+        sd.height = H;
+        flux_surface *rs = nullptr;
+        EXPECT(flux_surface_create(d, &sd, &rs) == FLUX_ERROR_UNSUPPORTED);
+        EXPECT(rs == nullptr);
+    }
+
+    /* --- 13. v2 and v4 Lab PCS profiles render the same gray --- */
+    {
+        uint8_t profile[16384];
+        uint8_t pdata[8192];
+        icc_tag_def defs[8];
+
+        size_t len = icc_build_mft2_constant_lab(pdata, &defs[0], 50.0, 0.0, 0.0, true);
+        size_t size = icc_build_profile(profile, "mntr", "Lab ", pdata, len, defs, 1);
+        profile[8] = 0x02; /* ICC v2: the 0xFF00-full-scale Lab encoding */
+        flux_icc_profile *lab_v2 = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &lab_v2) == FLUX_OK);
+
+        len = icc_build_mft2_constant_lab(pdata, &defs[0], 50.0, 0.0, 0.0, false);
+        size = icc_build_profile(profile, "mntr", "Lab ", pdata, len, defs, 1);
+        flux_icc_profile *lab_v4 = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &lab_v4) == FLUX_OK);
+
+        /* L* 50 neutral: working-space Y ~0.184, sRGB-encoded ~119. */
+        uint8_t got[2][3];
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        const flux_icc_profile *profiles[2] = {lab_v2, lab_v4};
+        for (int i = 0; i < 2; ++i) {
+            flux_image_color_space_desc csd = FLUX_IMAGE_COLOR_SPACE_DESC_INIT;
+            csd.icc = profiles[i];
+            flux_image_desc idesc = FLUX_IMAGE_DESC_INIT;
+            idesc.next = &csd;
+            idesc.width = 1;
+            idesc.height = 1;
+            idesc.format = FLUX_FORMAT_RGBA8_UNORM;
+            static const uint8_t any[4] = {77, 88, 99, 255}; /* CLUT is constant */
+            idesc.initial_data = any;
+            flux_image *img = nullptr;
+            EXPECT(flux_image_create(d, &idesc, &img) == FLUX_OK);
+            EXPECT(render_frame(s, canvas, black, draw_image_full, img) == FLUX_OK);
+            memset(px, 0xCD, BYTES);
+            EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+            memcpy(got[i], px_at(px, W / 2, H / 2), 3);
+            flux_image_release(img);
+        }
+        for (int ch = 0; ch < 3; ++ch) {
+            EXPECT(near_ch(got[0][ch], 119, 5));
+            EXPECT(near_ch(got[0][ch], got[1][ch], 2));
+        }
+        /* Neutral stays neutral. */
+        EXPECT(near_ch(got[0][0], got[0][1], 3) && near_ch(got[0][1], got[0][2], 3));
+
+        flux_icc_profile_release(lab_v2);
+        flux_icc_profile_release(lab_v4);
+    }
+
     flux_canvas_destroy(canvas);
     flux_surface_release(s);
     flux_device_release(d);

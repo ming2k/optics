@@ -19,7 +19,14 @@
  */
 
 layout(set = 0, binding = 0) uniform texture2D u_sampled[];
+/* The storage qualifier must match the intermediate format (ADR-0069:
+ * 16F when blurring working-space content and the device advertises
+ * rgba16f storage, rgba8 otherwise). Compiled twice, see meson. */
+#ifdef EFFECT_STORAGE_RGBA16F
+layout(set = 0, binding = 1, rgba16f) uniform image2D u_storage[];
+#else
 layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+#endif
 layout(set = 0, binding = 2) uniform sampler   u_samplers[];
 
 layout(push_constant) uniform PC {

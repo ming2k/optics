@@ -7,6 +7,14 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `SurfaceColorOptions::offscreen_formats` constrains an offscreen
+  surface's pixel container (most preferred first), and offscreen color
+  spaces now negotiate deep containers by transfer function — RGB10A2 or
+  RGBA16F for PQ/HLG, RGBA16F for linear, BGRA8 unchanged for gamma
+  spaces. `SurfaceInfo::format` reports the winner (the DRM-fourcc key
+  for dma-buf export), and deep containers read back as clamped RGBA8.
+  16F effect inputs blur in linear light when the device advertises
+  rgba16f storage.
 - `DeviceOptions`, `DeviceFeatures`, and `Device::new_with_options` request
   required or optional DMA-BUF capabilities without exposing Vulkan extension
   bundles. `Device::enabled_features` reports the negotiated result, and

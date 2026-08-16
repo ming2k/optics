@@ -3,8 +3,13 @@
 
 /* Region-limited transparent clear for persistent material outputs. The host
  * dispatches one invocation rectangle per disjoint previous/current footprint
- * before any material shader runs. */
+ * before any material shader runs. The storage qualifier matches the output
+ * format (ADR-0069): rgba16f for working-space outputs, rgba8 otherwise. */
+#ifdef PRISM_STORAGE_RGBA16F
+layout(set = 0, binding = 1, rgba16f) uniform image2D u_storage[];
+#else
 layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+#endif
 
 layout(push_constant) uniform PC {
     uint output_handle;

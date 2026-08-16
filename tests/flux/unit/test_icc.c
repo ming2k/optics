@@ -93,5 +93,85 @@ int main(void) {
         EXPECT(flux_icc_profile_create(profile, size / 2, &p) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
+    /* --- 6. 'chad' = Bradford D65->D50: extraction still lands on sRGB --- */
+    {
+        uint32_t n = icc_build_matrix_tags_ex(data, defs, 0, ICC_CHAD_BRADFORD_D65_D50, &dlen);
+        size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
+        flux_icc_profile *p = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        flux_color_space cs;
+        EXPECT(flux_icc_profile_color_space(p, &cs));
+        EXPECT(flux_color_space_equal(cs, (flux_color_space)FLUX_COLOR_SPACE_SRGB));
+        flux_icc_profile_release(p);
+    }
+
+    /* --- 7. a non-Bradford 'chad' is actually applied --- */
+    {
+        /* A bogus adaptation (diag 0.8/1.0/0.9) shifts the recovered
+         * primaries off BT.709 — proof the tag is read, not ignored.
+         * The profile still parses; extraction just no longer matches a
+         * named primary set. */
+        static const double weird_chad[9] = {0.8, 0, 0, 0, 1.0, 0, 0, 0, 0.9};
+        uint32_t n = icc_build_matrix_tags_ex(data, defs, 0, weird_chad, &dlen);
+        size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
+        flux_icc_profile *p = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        flux_color_space cs;
+        if (flux_icc_profile_color_space(p, &cs))
+            EXPECT(cs.primaries == FLUX_PRIMARIES_CUSTOM);
+        flux_icc_profile_release(p);
+    }
+
+    /* --- 8. degenerate parametric TRC (a == 0) parses without inf/NaN --- */
+    {
+        uint32_t n = icc_build_matrix_tags(data, defs, 3, &dlen);
+        size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
+        flux_icc_profile *p = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        /* para type 1 is outside the extraction set -> LUT bake. */
+        flux_color_space cs;
+        EXPECT(!flux_icc_profile_color_space(p, &cs));
+        flux_icc_profile_release(p);
+    }
+
+    /* --- 9. mAB channel validation --- */
+    {
+        size_t len = icc_build_mab_identity(data, &defs[0], 3, 3);
+        size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, len, defs, 1);
+        flux_icc_profile *p = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        flux_icc_profile_release(p);
+
+        /* 4-channel input/output is not an RGB profile flux can consume. */
+        len = icc_build_mab_identity(data, &defs[0], 4, 3);
+        size = icc_build_profile(profile, "mntr", "XYZ ", data, len, defs, 1);
+        p = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_ERROR_UNSUPPORTED);
+
+        len = icc_build_mab_identity(data, &defs[0], 3, 4);
+        size = icc_build_profile(profile, "mntr", "XYZ ", data, len, defs, 1);
+        p = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_ERROR_UNSUPPORTED);
+    }
+
+    /* --- 10. v2 / v4 Lab PCS mft2 profiles both parse and bake --- */
+    {
+        size_t len = icc_build_mft2_constant_lab(data, &defs[0], 50.0, 0.0, 0.0, true);
+        size_t size = icc_build_profile(profile, "mntr", "Lab ", data, len, defs, 1);
+        profile[8] = 0x02; /* ICC v2 */
+        flux_icc_profile *v2 = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &v2) == FLUX_OK);
+        flux_color_space cs;
+        EXPECT(!flux_icc_profile_color_space(v2, &cs));
+
+        len = icc_build_mft2_constant_lab(data, &defs[0], 50.0, 0.0, 0.0, false);
+        size = icc_build_profile(profile, "mntr", "Lab ", data, len, defs, 1);
+        flux_icc_profile *v4 = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &v4) == FLUX_OK);
+        EXPECT(!flux_icc_profile_color_space(v4, &cs));
+        flux_icc_profile_release(v2);
+        flux_icc_profile_release(v4);
+    }
+
     TEST_SUMMARY();
 }
