@@ -28,6 +28,11 @@ jobs:
       - name: Material boundary check
         run: tools/check-material-boundary.sh
 
+      # Library stdout guardrail: diagnostics go to stderr, never stdout —
+      # a consumer's stdout may be an IPC wire (e.g. the portal prompter).
+      - name: No library stdout writes
+        run: tools/check-no-library-stdout.sh
+
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
