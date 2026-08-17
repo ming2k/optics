@@ -43,6 +43,21 @@ typedef struct canvas_attachment_set {
     canvas_owned_image linear;
 } canvas_attachment_set;
 
+#define FLUX_CANVAS_TARGET_ATTACHMENT_CAP 16
+
+typedef struct canvas_target_attachment_entry {
+    canvas_attachment_set attachments;
+    uint32_t width;
+    uint32_t height;
+    uint64_t last_used_serial;
+} canvas_target_attachment_entry;
+
+typedef struct canvas_target_slot {
+    canvas_target_attachment_entry entries[FLUX_CANVAS_TARGET_ATTACHMENT_CAP];
+    uint32_t count;
+    uint64_t use_counter;
+} canvas_target_slot;
+
 typedef struct flux_vk_canvas {
     VkPipelineLayout layout;   /* borrowed from the device canvas cache */
     VkFormat color_format;     /* active surface/target colour format */
@@ -70,9 +85,12 @@ typedef struct flux_vk_canvas {
 
     /* Attachments are isolated by frame slot and destination class. A target
      * capture and the final surface pass can have different extents/formats in
-     * one command buffer; neither may destroy resources recorded by the other. */
+     * one command buffer; neither may destroy resources recorded by the other.
+     * Target attachments are pooled per slot by dimension to avoid recreation
+     * thrashing across multi-target frames (e.g. HUD, panels, backdrop blur). */
     canvas_attachment_set surface_attachments[FLUX_MAX_FRAMES_IN_FLIGHT];
-    canvas_attachment_set target_attachments[FLUX_MAX_FRAMES_IN_FLIGHT];
+    canvas_target_slot target_slots[FLUX_MAX_FRAMES_IN_FLIGHT];
+    canvas_attachment_set *active_attachments;
 
     /* ADR-0069 output-transform state for the active pass, filled by
      * begin_pass and consumed by end_pass (and by the LOAD seed blit). */
@@ -284,6 +302,52 @@ static bool msaa_ensure(flux_canvas *c, canvas_attachment_set *attachments, uint
     return true;
 }
 
+static canvas_attachment_set *target_attachments_get(flux_canvas *c, uint32_t slot, uint32_t w,
+                                                     uint32_t h) {
+    flux_vk_canvas *v = vkc(c);
+    if (slot >= FLUX_MAX_FRAMES_IN_FLIGHT)
+        return nullptr;
+    canvas_target_slot *ts = &v->target_slots[slot];
+    ts->use_counter++;
+    uint64_t now = ts->use_counter;
+
+    for (uint32_t i = 0; i < ts->count; ++i) {
+        if (ts->entries[i].width == w && ts->entries[i].height == h) {
+            ts->entries[i].last_used_serial = now;
+            return &ts->entries[i].attachments;
+        }
+    }
+
+    if (ts->count < FLUX_CANVAS_TARGET_ATTACHMENT_CAP) {
+        uint32_t idx = ts->count++;
+        canvas_target_attachment_entry *entry = &ts->entries[idx];
+        *entry = (canvas_target_attachment_entry){0};
+        entry->attachments.linear.bindless = FLUX_BINDLESS_INVALID;
+        entry->width = w;
+        entry->height = h;
+        entry->last_used_serial = now;
+        return &entry->attachments;
+    }
+
+    uint32_t lru_idx = 0;
+    uint64_t oldest = ts->entries[0].last_used_serial;
+    for (uint32_t i = 1; i < ts->count; ++i) {
+        if (ts->entries[i].last_used_serial < oldest) {
+            oldest = ts->entries[i].last_used_serial;
+            lru_idx = i;
+        }
+    }
+
+    canvas_target_attachment_entry *lru = &ts->entries[lru_idx];
+    attachments_destroy(c, &lru->attachments);
+    *lru = (canvas_target_attachment_entry){0};
+    lru->attachments.linear.bindless = FLUX_BINDLESS_INVALID;
+    lru->width = w;
+    lru->height = h;
+    lru->last_used_serial = now;
+    return &lru->attachments;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Lifecycle                                                         */
 /* ------------------------------------------------------------------ */
@@ -301,7 +365,8 @@ static flux_result vk_canvas_init(const flux_canvas_backend *self, flux_canvas *
     v->stencil_format = flux_canvas_stencil_format(d);
     for (uint32_t i = 0; i < FLUX_MAX_FRAMES_IN_FLIGHT; ++i) {
         v->surface_attachments[i].linear.bindless = FLUX_BINDLESS_INVALID;
-        v->target_attachments[i].linear.bindless = FLUX_BINDLESS_INVALID;
+        v->target_slots[i].count = 0;
+        v->target_slots[i].use_counter = 0;
     }
 
     /* ADR-0069: the working-space intermediate must support blending —
@@ -393,7 +458,11 @@ static void vk_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) {
      * teardown is exactly the pause class ADR-0021/0022 removed. */
     for (uint32_t i = 0; i < FLUX_MAX_FRAMES_IN_FLIGHT; ++i) {
         attachments_destroy(c, &v->surface_attachments[i]);
-        attachments_destroy(c, &v->target_attachments[i]);
+        canvas_target_slot *ts = &v->target_slots[i];
+        for (uint32_t j = 0; j < ts->count; ++j) {
+            attachments_destroy(c, &ts->entries[j].attachments);
+        }
+        ts->count = 0;
     }
     /* Pipeline + layout are owned by the device's canvas cache; we just drop
      * the borrowed references. */
@@ -538,7 +607,12 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     if (slot >= FLUX_MAX_FRAMES_IN_FLIGHT)
         return FLUX_ERROR_OUT_OF_RANGE;
     canvas_attachment_set *attachments =
-        target ? &v->target_attachments[slot] : &v->surface_attachments[slot];
+        target ? target_attachments_get(c, slot, w, h) : &v->surface_attachments[slot];
+    if (!attachments) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "canvas target attachment pool unavailable");
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    v->active_attachments = attachments;
 
     /* ADR-0069: every pass renders into the per-slot working-space
      * intermediate; the destination only sees pixels through the output
@@ -802,8 +876,14 @@ static void vk_end_pass(const flux_canvas_backend *self, flux_canvas *c) {
     c->pass_active = false;
 
     flux_vk_canvas *v = vkc(c);
-    canvas_attachment_set *attachments = c->target ? &v->target_attachments[v->active_slot]
-                                                   : &v->surface_attachments[v->active_slot];
+    canvas_attachment_set *attachments = v->active_attachments;
+    if (!attachments) {
+        attachments = c->target ? target_attachments_get(c, v->active_slot, c->fb_width, c->fb_height)
+                                : &v->surface_attachments[v->active_slot];
+    }
+    v->active_attachments = nullptr;
+    if (!attachments)
+        return;
     canvas_owned_image *linear = &attachments->linear;
     VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
 
@@ -902,8 +982,11 @@ static bool vk_bind_program(const flux_canvas_backend *self, flux_canvas *c, can
  * bound one — vk_bind_program flushes before recording a new bind. */
 static void batch_flush(flux_canvas *c) {
     flux_vk_canvas *v = vkc(c);
-    if (v->batch.pipeline == VK_NULL_HANDLE)
+    if (v->batch.pipeline == VK_NULL_HANDLE || v->batch.vertex_count == 0) {
+        v->batch.pipeline = VK_NULL_HANDLE;
+        v->batch.vertex_count = 0;
         return;
+    }
     VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
     VkRect2D sc = {.offset = {v->batch.scissor.x, v->batch.scissor.y},
                    .extent = {v->batch.scissor.w, v->batch.scissor.h}};
@@ -913,6 +996,7 @@ static void batch_flush(flux_canvas *c) {
     vkCmdDraw(cmd, v->batch.vertex_count, 1, 0, 0);
     c->recorded_draws++;
     v->batch.pipeline = VK_NULL_HANDLE;
+    v->batch.vertex_count = 0;
 }
 
 /* Every push-constant byte after verts_address must match for two
