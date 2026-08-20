@@ -48,7 +48,7 @@ extern "C" {
 
 #define LENS_VERSION_MAJOR 0
 #define LENS_VERSION_MINOR 0
-#define LENS_VERSION_PATCH 18
+#define LENS_VERSION_PATCH 19
 
 LENS_API const char *lens_version_string(void);
 
