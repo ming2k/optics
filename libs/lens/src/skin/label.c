@@ -28,7 +28,9 @@ void lensi_skin_label(lens *ui, lens_node *n, const lens_widget_record *rec) {
 
     if (rec->content.compact) {
         /* Compact form: no padding, text centred in the intrinsic box, with
-         * the opt-in outline atoms (ADR-0061). */
+         * the opt-in outline atoms (ADR-0061). The record's text_weight
+         * rides through like the padded forms — callers that never set it
+         * keep the theme's regular weight (0 = default). */
         float y = (rec->bounds.h - rec->content.text.height) * 0.5f;
         if (y < 0.0f)
             y = 0.0f;
@@ -40,7 +42,7 @@ void lensi_skin_label(lens *ui, lens_node *n, const lens_widget_record *rec) {
                                             .outline_width = rs->outline_width,
                                             .text = rec->content.label,
                                             .text_size = size,
-                                            .text_weight = 0.0f});
+                                            .text_weight = rec->content.text_weight});
         return;
     }
 

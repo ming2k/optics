@@ -926,6 +926,10 @@ LENS_API void lens_label_ex(lens *ui, const char *text, float size);
 LENS_API void lens_label_wrapped(lens *ui, const char *text, float max_width);
 LENS_API void lens_label_wrapped_ex(lens *ui, const char *text, float size, float max_width);
 LENS_API void lens_label_compact_ex(lens *ui, const char *text, float size);
+/* Weight-aware compact form: the run measures AND draws at `weight`
+ * (0 = the theme's regular weight, the historic behaviour). Skins that
+ * re-stamp the weight see the same value in the record. */
+LENS_API void lens_label_compact_ex2(lens *ui, const char *text, float size, float weight);
 LENS_API void lens_title(lens *ui, const char *text);
 LENS_API void lens_heading(lens *ui, const char *text, int level);
 LENS_API bool lens_checkbox(lens *ui, const char *label, bool *value);

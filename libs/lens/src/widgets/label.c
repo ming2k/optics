@@ -281,6 +281,10 @@ void lens_label_wrapped_ex(lens *ui, const char *text, float size, float max_wid
 }
 
 void lens_label_compact_ex(lens *ui, const char *text, float size) {
+    lens_label_compact_ex2(ui, text, size, 0.0f);
+}
+
+void lens_label_compact_ex2(lens *ui, const char *text, float size, float weight) {
     lens_style eff = lensi_style_effective(ui);
     lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, text);
@@ -290,7 +294,7 @@ void lens_label_compact_ex(lens *ui, const char *text, float size) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    lens_text_metrics tm = lensi_text_measure_label(ui, text, size, 0.0f);
+    lens_text_metrics tm = lensi_text_measure_label(ui, text, size, weight);
     float w = (n->fixed_w > 0) ? n->fixed_w : tm.width;
     float h = (n->fixed_h > 0) ? n->fixed_h : tm.height;
     n->measured = (flux_point){w, h};
@@ -312,6 +316,7 @@ void lens_label_compact_ex(lens *ui, const char *text, float size) {
                         .content = {.label = text,
                                     .text = tm,
                                     .text_size = size,
+                                    .text_weight = weight,
                                     .compact = true},
                     });
 

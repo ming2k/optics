@@ -1339,6 +1339,15 @@ impl Frame {
         unsafe { sys::lens_label_compact_ex(self.ui, c.as_ptr(), size) };
     }
 
+    /// A compact label that measures and draws at an explicit weight
+    /// (0 = the theme's regular weight). The weight rides the widget
+    /// record, so an overriding label skin sees the same value.
+    pub fn label_compact_weighted(&mut self, text: &str, size: f32, weight: f32) {
+        let c = cstr(text);
+        // SAFETY: ui is live for the frame; c outlives the call.
+        unsafe { sys::lens_label_compact_ex2(self.ui, c.as_ptr(), size, weight) };
+    }
+
     /// A title (larger, emphasized label).
     pub fn title(&mut self, text: &str) {
         let c = cstr(text);
