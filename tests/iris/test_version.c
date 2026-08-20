@@ -10,7 +10,7 @@
 int main(void) {
     const char *v = iris_version_string();
     CHECK(v != NULL);
-    CHECK_STR_EQ(v, "0.0.17");
+    CHECK_STR_EQ(v, "0.0.18");
 
     /* The string is X.Y.Z with all-numeric components. */
     int maj = 0, min = 0, pat = 0;
