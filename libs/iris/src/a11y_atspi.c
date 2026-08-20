@@ -414,7 +414,7 @@ static int m_get_toolkit_name(sd_bus_message *m, void *u, sd_bus_error *e) {
 static int m_get_version(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
     (void)e;
-    return sd_bus_reply_method_return(m, "s", "0.0.19");
+    return sd_bus_reply_method_return(m, "s", "0.0.20");
 }
 static int m_get_locale(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
