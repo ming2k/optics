@@ -129,6 +129,26 @@ typedef struct iris_app_config {
  * thread-affine to iris_app_run and is a no-op outside an active app. */
 IRIS_API void iris_request_animation_frame(void);
 
+/* Declare the current frame's host canvas content static.
+ *
+ * A paint callback's content is opaque to lens, so backends normally keep
+ * painting every scheduled frame — including a full clear to the theme
+ * background. When the host knows its scene is pixel-identical to what is
+ * already on screen (a paused animation, a settled audio visualizer), this
+ * call lets the backend skip the entire acquire → clear → paint → present
+ * cycle for this frame: no swapchain image is committed and the GPU does no
+ * host work, which unloads the compositor exactly like a host without a
+ * paint callback.
+ *
+ * The declaration covers one frame only. Any user input, a resize or buffer
+ * scale change, a following iris_request_animation_frame, or lens-reported
+ * chrome damage forces the next frame to paint again; hosts should keep
+ * calling this every frame their scene is still static. Drawing inside the
+ * paint callback after declaring it static is contradictory — the draws are
+ * skipped along with the pass. No-op without an active app or without a
+ * paint callback. */
+IRIS_API void iris_paint_mark_static(void);
+
 /* ================================================================== */
 /*  Cross-thread delivery                                             */
 /* ================================================================== */

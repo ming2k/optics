@@ -83,6 +83,15 @@ impl Ui {
         Ok(Ui { raw: out })
     }
 
+    /// Whether the retained store overflowed: an id ring wrapped or the
+    /// node pool filled, so some widgets from earlier frames may have lost
+    /// their retained state. Long-lived hosts can surface this in
+    /// diagnostics; ordinary UIs never hit it.
+    pub fn overflowed(&self) -> bool {
+        // SAFETY: self.raw is live; the call only reads state.
+        unsafe { sys::lens_overflowed(self.raw as *const sys::lens) }
+    }
+
     /// Run one immediate-mode frame. The closure receives a [`Frame`] that
     /// borrows the context; widget calls on it build the tree, which is
     /// reconciled and laid out when the closure returns.
@@ -1113,6 +1122,13 @@ impl Frame {
     pub fn active_widget(&self) -> bool {
         // SAFETY: ui is live; the call only reads state.
         unsafe { sys::lens_active(self.ui as *const sys::lens) != 0 }
+    }
+
+    /// Whether the retained store overflowed (see [`Ui::overflowed`]).
+    /// Convenience mirror for hosts driving the frame closure.
+    pub fn overflowed(&self) -> bool {
+        // SAFETY: ui is live for the duration of the build closure.
+        unsafe { sys::lens_overflowed(self.ui as *const sys::lens) }
     }
 
     /// Cursor intent accumulated from hovered widgets built so far. Read this

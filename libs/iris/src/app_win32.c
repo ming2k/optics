@@ -133,6 +133,7 @@ typedef struct w32_platform {
     bool minimized; /* SIZE_MINIMIZED: no valid render target    */
     bool force_paint;                       /* WM_PAINT asked for a real frame      */
     bool animation_frame_requested;         /* host asked for active-rate follow-up */
+    bool paint_static;                      /* host declared this frame's canvas static */
     bool theme_watching;                    /* backend theme watch registered       */
     bool a11y_running;                      /* a11y bridge initialised (inert stub) */
     lens *ui;                               /* for caret/hint/paste on the loop thread */
@@ -173,6 +174,12 @@ void iris_request_animation_frame_win32(void) {
     w32_platform *pl = g_active_pl;
     if (pl)
         pl->animation_frame_requested = true;
+}
+
+void iris_paint_mark_static_win32(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl)
+        pl->paint_static = true;
 }
 
 /* Theme watcher callback: invoked on the iris main thread (from the WndProc
@@ -1492,9 +1499,26 @@ int iris_app_run_win32(const iris_app_config *cfg) {
          * paint callback, no host animation is in flight, and no resize /
          * scale just happened, the frame just built is pixel-identical to
          * what is on screen — skip the whole begin_frame → canvas → present
-         * cycle (no swapchain image acquired, nothing committed). */
-        bool must_paint = lens_frame_needs_repaint(ui) || cfg->paint != NULL || host_animating ||
-                          resized_this_frame || surface_needs_paint;
+         * cycle (no swapchain image acquired, nothing committed).
+         *
+         * Hosts with a paint callback can opt into the same skip per frame
+         * via iris_paint_mark_static(): only they know whether their opaque
+         * content moved. The declaration is consumed here and must be
+         * re-issued every frame; lens chrome damage, host animation,
+         * resizes, and a forced WM_PAINT always paint regardless. */
+        /* A static declaration is the host's final word for the frame's
+         * canvas content, but it only covers the host's own pixels: lens
+         * chrome damage still forces a paint, or a hover highlight would
+         * freeze mid-transition while the host scene is static. Host
+         * animation, resizes, and a forced WM_PAINT always paint too. */
+        bool chrome_damaged = lens_frame_needs_repaint(ui);
+        bool host_canvas_static = cfg->paint != NULL && pl.paint_static && !host_animating &&
+                                  !resized_this_frame && !surface_needs_paint && !chrome_damaged &&
+                                  !pl.force_paint;
+        pl.paint_static = false;
+        bool must_paint = !host_canvas_static &&
+                          (cfg->paint != NULL || chrome_damaged || host_animating ||
+                           resized_this_frame || surface_needs_paint);
         if (must_paint) {
             surface_needs_paint = true;
             flux_frame *frame = NULL;
@@ -1551,10 +1575,18 @@ int iris_app_run_win32(const iris_app_config *cfg) {
          * post-build animation state are known (identical policy to
          * app_wayland.c: active rate while input is warm or animation is in
          * flight, idle cadence for a focused caret, otherwise unschedule
-         * and sleep in the message wait until the next event). */
-        if (cfg->paint) {
+         * and sleep in the message wait until the next event). Hosts with
+         * a paint callback keep the always-render pacing unless they
+         * declared this frame static. */
+        if (cfg->paint && !host_canvas_static) {
             if (pl.animation_frame_requested)
                 next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
+            frame_scheduled = true;
+        } else if (cfg->paint) {
+            /* Static-declaring host: keep the low idle tick so build/paint
+             * keep running and the host can resume animating on its own;
+             * only the GPU work skips. */
+            next_deadline = t + IDLE_PERIOD_NS;
             frame_scheduled = true;
         } else if (t - last_input_ns < INPUT_GRACE_NS || pl.animation_frame_requested ||
                    lens_anim_pending(ui)) {

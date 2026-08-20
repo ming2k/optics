@@ -43,6 +43,10 @@ int main(void) {
      * exactly like a request made after the window has closed. */
     iris_request_animation_frame();
 
+    /* iris_paint_mark_static: same headless contract — a no-op without an
+     * active app, and never a crash. */
+    iris_paint_mark_static();
+
     /* Pickers reject NULL buffers / zero capacity before contacting the
      * portal. A valid buffer would open a live desktop picker. */
     CHECK(iris_pick_file(NULL, NULL, 0) != 0);

@@ -5,7 +5,7 @@
 
 example_deps = [iris_dep, m_dep]
 
-foreach demo : ['hello_app', 'minimal', 'widgets', 'fonts', 'overlay_demo', 'forms', 'desktop_demo']
+foreach demo : ['hello_app', 'minimal', 'widgets', 'fonts', 'overlay_demo', 'forms', 'desktop_demo', 'paint_static_demo']
   executable(demo, demo + '.c',
     dependencies        : example_deps,
     include_directories : iris_inc,

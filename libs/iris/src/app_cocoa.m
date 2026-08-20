@@ -137,6 +137,7 @@ typedef struct cp_accum {
     bool running;
     bool resized;                 /* size or scale changed -> resize swap  */
     bool animation_frame_requested; /* host asked for active-rate follow-up */
+    bool paint_static;              /* host declared this frame's canvas static */
     bool theme_watching;
     bool a11y_running;
 
@@ -162,6 +163,12 @@ void iris_request_animation_frame_cocoa(void) {
     IrisPlatform *pl = g_active_pl;
     if (pl)
         pl->animation_frame_requested = true;
+}
+
+void iris_paint_mark_static_cocoa(void) {
+    IrisPlatform *pl = g_active_pl;
+    if (pl)
+        pl->paint_static = true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1490,9 +1497,22 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                  * needs the anchor), so there is nothing per-frame to do
                  * here — unlike zwp_text_input_v3_set_cursor_rectangle. */
 
-                /* Static-frame skip: identical to app_wayland.c. */
-                bool must_paint = lens_frame_needs_repaint(ui) || cfg->paint != NULL ||
-                                  host_animating || resized_this_frame || surface_needs_paint;
+                /* Static-frame skip: identical to app_wayland.c. Hosts with
+                 * a paint callback opt in per frame via
+                 * iris_paint_mark_static(); the declaration is consumed here
+                 * and must be re-issued every frame. It only covers the
+                 * host's own pixels — lens chrome damage still forces a
+                 * paint, or a hover highlight would freeze mid-transition
+                 * while the host scene is static. */
+                bool chrome_damaged = lens_frame_needs_repaint(ui);
+                bool host_canvas_static = cfg->paint != NULL && pl->paint_static &&
+                                          !host_animating && !resized_this_frame &&
+                                          !surface_needs_paint && !chrome_damaged;
+                pl->paint_static = false;
+                bool must_paint =
+                    !host_canvas_static &&
+                    (cfg->paint != NULL || chrome_damaged || host_animating ||
+                     resized_this_frame || surface_needs_paint);
                 if (must_paint) {
                     surface_needs_paint = true;
                     flux_frame *frame = NULL;
@@ -1549,10 +1569,18 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                 /* Refine the tentative deadline — same rules as Wayland:
                  * active rate while input is warm or an animation is in
                  * flight; low cadence for the caret blink; otherwise stop
-                 * scheduling frames entirely and block on the next event. */
-                if (cfg->paint) {
+                 * scheduling frames entirely and block on the next event.
+                 * A host paint callback keeps the always-render pacing
+                 * unless it declared this frame static. */
+                if (cfg->paint && !host_canvas_static) {
                     if (pl->animation_frame_requested)
                         next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
+                    frame_scheduled = true;
+                } else if (cfg->paint) {
+                    /* Static-declaring host: keep the low idle tick so
+                     * build/paint keep running and the host can resume
+                     * animating on its own; only the GPU work skips. */
+                    next_deadline = t + IDLE_PERIOD_NS;
                     frame_scheduled = true;
                 } else if (t - last_input_ns < INPUT_GRACE_NS || pl->animation_frame_requested ||
                            lens_anim_pending(ui)) {

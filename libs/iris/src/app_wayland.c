@@ -247,6 +247,7 @@ typedef struct wp_platform {
     bool running;
     bool resized; /* size or scale changed -> resize swap  */
     bool animation_frame_requested; /* host asked for active-rate follow-up */
+    bool paint_static;              /* host declared this frame's canvas content static */
     lens *ui;     /* so output/scale callbacks can update  */
 
     /* Live colour-scheme watching + AT-SPI bridge: optional, fail-soft. */
@@ -455,6 +456,12 @@ void iris_request_animation_frame_wayland(void) {
     wp_platform *pl = g_active_pl;
     if (pl)
         pl->animation_frame_requested = true;
+}
+
+void iris_paint_mark_static_wayland(void) {
+    wp_platform *pl = g_active_pl;
+    if (pl)
+        pl->paint_static = true;
 }
 
 /* Map the public cursor enum to the cursor-shape-v1 shape enum. The
@@ -2877,7 +2884,11 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                                : IDLE_PERIOD_NS;
         next_deadline = t + period;
         frame_scheduled = true;
-        last_render_ns = t;
+        /* last_render_ns anchors the "earliest active frame after input"
+         * throttle. It is refreshed only when a frame is actually rendered
+         * (below, after a successful present) so a run of skipped frames
+         * does not silently march the anchor forward. */
+        long long render_anchor_ns = t;
 
         /* Scale change (e.g. surface dragged to a HiDPI output): apply
          * the new buffer scale, resize the swapchain in device pixels,
@@ -2939,9 +2950,29 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * paint callback, no host animation is in flight, and no resize /
          * scale just happened, the frame just built is pixel-identical to
          * what is on screen — skip the whole begin_frame → canvas → present
-         * cycle (no swapchain image acquired, nothing committed). */
-        bool must_paint = lens_frame_needs_repaint(ui) || cfg->paint != NULL || host_animating ||
-                          resized_this_frame || surface_needs_paint;
+         * cycle (no swapchain image acquired, nothing committed).
+         *
+         * Hosts with a paint callback can opt into the same skip per frame
+         * via iris_paint_mark_static(): their content is opaque to lens, so
+         * only they know whether it moved. The declaration is consumed here
+         * and must be re-issued every frame, so a stale flag can never skip
+         * a frame the host wanted painted; lens chrome damage, host
+         * animation, and resizes always force a paint regardless. */
+        /* A static declaration is the host's final word for the frame's
+         * canvas content — it outranks a stray animation request made by
+         * the previous frame's paint callback (the request paced that
+         * frame; the new declaration covers the current one). It only
+         * covers the host's own pixels: lens chrome damage still forces a
+         * paint, or a hover highlight would freeze mid-transition while
+         * the host scene is static. Resizes and the not-yet-presented
+         * latch force a paint too. */
+        bool chrome_damaged = lens_frame_needs_repaint(ui);
+        bool host_canvas_static = cfg->paint != NULL && pl.paint_static && !resized_this_frame &&
+                                  !surface_needs_paint && !chrome_damaged;
+        pl.paint_static = false;
+        bool must_paint = !host_canvas_static &&
+                          (cfg->paint != NULL || chrome_damaged || host_animating ||
+                           resized_this_frame || surface_needs_paint);
         if (must_paint) {
             surface_needs_paint = true;
             flux_frame *frame = NULL;
@@ -2988,8 +3019,10 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                                           (uint32_t)(pl.height * pl.buffer_scale));
             else if (r != FLUX_OK)
                 break;
-            else if (drew)
+            else if (drew) {
                 surface_needs_paint = false;
+                last_render_ns = render_anchor_ns;
+            }
 
             if (++frame_no == 1)
                 fprintf(stderr, "first frame presented: %dx%d logical, %ux%u device (scale=%d)\n",
@@ -3002,12 +3035,20 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * in flight; keep a low cadence for the caret blink while a text
          * field is focused; otherwise stop scheduling frames entirely —
          * the loop sleeps in poll() until the next event. Hosts with a
-         * paint callback never unschedule: their content is opaque to lens,
-         * so they keep the always-render pacing (a mid-frame animation
-         * request pulls their tentative idle deadline forward). */
-        if (cfg->paint) {
+         * paint callback keep the always-render pacing unless they declared
+         * this frame static: a static declaration is the host's promise
+         * that nothing moved, so unscheduling is exactly as safe as for a
+         * host without canvas content. */
+        if (cfg->paint && !host_canvas_static) {
             if (pl.animation_frame_requested)
                 next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
+            frame_scheduled = true;
+        } else if (cfg->paint) {
+            pl.animation_frame_requested = false;
+            /* Static-declaring host: keep the low idle tick so build/paint
+             * keep running (~4 Hz) and the host can observe state changes
+             * and resume animating on its own; only the GPU work skips. */
+            next_deadline = t + IDLE_PERIOD_NS;
             frame_scheduled = true;
         } else if (t - last_input_ns < INPUT_GRACE_NS || pl.animation_frame_requested ||
                    lens_anim_pending(ui)) {

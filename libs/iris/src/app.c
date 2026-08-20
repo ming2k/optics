@@ -25,6 +25,16 @@ IRIS_API void iris_request_animation_frame(void) {
 #endif
 }
 
+IRIS_API void iris_paint_mark_static(void) {
+#if defined(IRIS_BACKEND_WAYLAND)
+    iris_paint_mark_static_wayland();
+#elif defined(IRIS_BACKEND_WIN32)
+    iris_paint_mark_static_win32();
+#elif defined(IRIS_BACKEND_COCOA)
+    iris_paint_mark_static_cocoa();
+#endif
+}
+
 IRIS_API int iris_post_to_main_thread(iris_main_thread_fn fn, void *user) {
 #if defined(IRIS_BACKEND_WAYLAND) || defined(IRIS_BACKEND_WIN32) || \
     defined(IRIS_BACKEND_COCOA)

@@ -222,6 +222,32 @@ pub fn request_animation_frame() {
     unsafe { sys::iris_request_animation_frame() };
 }
 
+/// Declare the current frame's host canvas content static.
+///
+/// A paint callback's content is opaque to lens, so the backend normally
+/// keeps painting every scheduled frame — including a full clear to the
+/// theme background. When the host knows its scene is pixel-identical to
+/// what is already on screen (a paused animation, a settled audio
+/// visualizer), this call lets the backend skip the entire
+/// acquire → clear → paint → present cycle: no swapchain image is
+/// committed and the GPU does no host work, unloading the compositor
+/// exactly like a host without a paint callback.
+///
+/// The declaration covers one frame only and must be re-issued every frame
+/// it applies to — call it from the **build** callback (build runs on every
+/// scheduled frame, including skipped ones; a declaration made in paint is
+/// cleared with the first skipped frame and the cadence bounces back).
+/// Any user input, a resize or buffer-scale change, a following
+/// [`request_animation_frame`], or lens-reported chrome damage forces the
+/// next frame to paint again.
+///
+/// While static, the backend keeps a low idle tick (~4 Hz) so build (and
+/// paint, when it chooses) still run and the host can resume animating on
+/// its own. No-op without an active app or without a paint callback.
+pub fn paint_mark_static() {
+    unsafe { sys::iris_paint_mark_static() };
+}
+
 impl Application {
     pub fn run<B, P>(config: Config, build: B, paint: Option<P>) -> Result<(), RunError>
     where
