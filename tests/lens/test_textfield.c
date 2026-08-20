@@ -360,6 +360,15 @@ static void host_request_text2(void *user) {
     ((host_clip *)user)->request_count++;
 }
 
+/* Plain byte-sink for the UTF-8 selection test (host_clip couples the
+ * copy to its own bookkeeping). */
+static void copy_sink(const char *utf8, size_t len, void *user) {
+    char *dst = user;
+    size_t n = len < 63 ? len : 63;
+    memcpy(dst, utf8, n);
+    dst[n] = '\0';
+}
+
 static void test_textfield_copy_cut(void) {
     host_clip host = {0};
     lens *ui = NULL;
@@ -657,6 +666,104 @@ static void test_textfield_preedit_clause(void) {
     lens_destroy(ui);
 }
 
+
+/* ------------------------------------------------------------------ */
+/*  UTF-8 editing: every key path must respect code-point boundaries    */
+/* ------------------------------------------------------------------ */
+static void test_textfield_utf8_editing(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    /* "aé中🦀": 1 + 2 + 3 + 4 = 10 bytes, four code points. */
+    static const char text[] = "a\xc3\xa9\xe4\xb8\xad\xf0\x9f\xa6\x80";
+    char buf[64];
+    memcpy(buf, text, sizeof text);
+
+    /* --- backspace at EOL removes the 4-byte emoji, not one byte ---- */
+    setup_textfield(ui, "tf", buf, sizeof buf); /* cursor at EOL (10) */
+    lens_input in = IN0;
+    in.key_count = 1;
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_BACKSPACE, .pressed = true};
+    lens_begin(ui, &in);
+    bool changed = lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(changed == true);
+    CHECK(strcmp(buf, "a\xc3\xa9\xe4\xb8\xad") == 0); /* "aé中" */
+
+    /* --- backspace again removes the 3-byte CJK char ---------------- */
+    lens_begin(ui, &IN0);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    in.keys[0].pressed = true;
+    lens_begin(ui, &in);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(strcmp(buf, "a\xc3\xa9") == 0); /* "aé" */
+
+    /* --- LEFT moves by code point (2 bytes over the é) -------------- */
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_LEFT, .pressed = true};
+    lens_begin(ui, &in);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    /* caret is not directly observable; verify by typing — the insert
+     * must land before the é at byte 1: "axé" */
+    lens_input in2 = IN0;
+    strcpy(in2.text_utf8, "x");
+    lens_begin(ui, &in2);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(strcmp(buf, "ax\xc3\xa9") == 0);
+
+    /* --- DELETE forward removes a full code point -------------------- */
+    /* caret sits at 2 ("a x | é"); forward-delete removes the é (2 bytes) */
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_DELETE, .pressed = true};
+    lens_begin(ui, &in);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+    CHECK(strcmp(buf, "ax") == 0);
+
+    lens_destroy(ui);
+}
+
+/* Selection + copy over multibyte runes: the copied byte range must be
+ * code-point aligned because LEFT/RIGHT moved by code points. */
+static void test_textfield_utf8_selection_copy(void) {
+    static char copied[64];
+    copied[0] = '\0';
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){.clipboard = {.user = copied, .set_text = copy_sink}}, &ui) ==
+          FLUX_OK);
+
+    /* "é中" = 5 bytes. */
+    static const char text[] = "\xc3\xa9\xe4\xb8\xad";
+    char buf[64];
+    memcpy(buf, text, sizeof text);
+    setup_textfield(ui, "tf", buf, sizeof buf); /* caret at EOL (5) */
+
+    /* shift+LEFT twice selects both runes (5..3, 3..0) */
+    lens_input in = IN0;
+    in.key_count = 2;
+    in.mods = LENS_MOD_SHIFT;
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_LEFT, .pressed = true};
+    in.keys[1] = (lens_key_event){.key = LENS_KEY_LEFT, .pressed = true};
+    lens_begin(ui, &in);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+
+    /* ctrl+C copies the selection through the host sink. */
+    lens_input in2 = IN0;
+    in2.key_count = 1;
+    in2.mods = LENS_MOD_CTRL;
+    in2.keys[0] = (lens_key_event){.key = 'c', .pressed = true};
+    lens_begin(ui, &in2);
+    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_end(ui);
+
+    CHECK(strcmp(copied, "\xc3\xa9\xe4\xb8\xad") == 0);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_textfield_paste();
     test_textfield_committed_text();
@@ -677,5 +784,7 @@ int main(void) {
     test_textfield_set_selection_select_all();
     test_textfield_set_caret_clamp_on_shrink();
     test_textfield_set_caret_utf8_snap();
+    test_textfield_utf8_editing();
+    test_textfield_utf8_selection_copy();
     return TEST_REPORT();
 }
