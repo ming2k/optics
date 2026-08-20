@@ -222,4 +222,11 @@ if opt_effect
     dependencies : [test_helpers_dep],
   )
   test('canvas_target', test_canvas_target, suite : 'integration')
+
+  # Bucketed target-attachment pool: a size sweep must not churn allocations.
+  test_canvas_target_pool = executable('test_canvas_target_pool',
+    'test_canvas_target_pool.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('canvas_target_pool', test_canvas_target_pool, suite : 'integration')
 endif
