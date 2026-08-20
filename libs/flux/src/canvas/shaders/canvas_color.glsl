@@ -163,6 +163,20 @@ vec3 flux_tonemap_shoulder(vec3 c) {
     return c * (compressed / m);
 }
 
+/* ITU-R BT.2390 EDR highlight rolloff: compresses values above knee up to
+ * headroom with a smooth Hermite spline, preserving hue by scaling max component. */
+vec3 flux_tonemap_bt2390_shoulder(vec3 c, float knee, float headroom) {
+    if (headroom <= knee)
+        return clamp(c, 0.0, headroom);
+    float m = max(c.r, max(c.g, c.b));
+    if (m <= knee)
+        return c;
+    float t = clamp((m - knee) / (headroom - knee), 0.0, 1.0);
+    float h = 3.0 * t * t - 2.0 * t * t * t;
+    float compressed = mix(knee, headroom, h);
+    return c * (compressed / m);
+}
+
 /* Triangular-PDF dither, ±1 LSB of `levels`, keyed on the fragment
  * coordinate. Kills banding when quantising linear gradients to 8 bit. */
 float flux_dither_tpdf(vec2 frag_coord, float levels) {

@@ -83,12 +83,16 @@ void main()
 
     vec3 linear = primaries * straight;
     /* HDR destinations: rescale the scRGB working range (1.0 = 80 nits)
-     * so SDR white lands on sdr_white_nits, then clamp to the signal
-     * range. SDR destinations: roll off above-1.0 highlights. */
+     * so SDR white lands on sdr_white_nits, then apply EDR BT.2390 rolloff.
+     * SDR destinations: roll off above-1.0 highlights. */
     if (pc.transfer == FLUX_TF_PQ) {
-        linear = clamp(linear * (pc.sdr_white_nits / 10000.0), 0.0, 1.0);
+        vec3 nits = linear * pc.sdr_white_nits;
+        vec3 rolled = flux_tonemap_bt2390_shoulder(nits, 1000.0, 10000.0);
+        linear = clamp(rolled / 10000.0, 0.0, 1.0);
     } else if (pc.transfer == FLUX_TF_HLG) {
-        linear = clamp(linear * (pc.sdr_white_nits / 1000.0), 0.0, 1.0);
+        vec3 nits = linear * pc.sdr_white_nits;
+        vec3 rolled = flux_tonemap_bt2390_shoulder(nits, 300.0, 1000.0);
+        linear = clamp(rolled / 1000.0, 0.0, 1.0);
     } else if (pc.transfer != FLUX_TF_LINEAR) {
         linear = flux_tonemap_shoulder(linear);
     }
