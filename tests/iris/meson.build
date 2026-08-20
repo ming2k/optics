@@ -4,6 +4,7 @@
 #   - test_version       iris_version_string / version macros
 #   - test_app_api       iris_app_run / iris_pick_file argument validation
 #   - test_theme         colour-scheme query (GTK_THEME branch; gsettings shadowed)
+#   - test_uri           file:// URI → path decoding for dialog results
 #   - test_a11y_util     AT-SPI role/state maps, value parser, tree diff
 #   - test_platform_text UTF-8 boundary-aware truncation helpers
 #
@@ -12,7 +13,7 @@
 
 src_inc = include_directories('../../libs/iris/src')
 
-tests = ['test_version', 'test_app_api', 'test_theme']
+tests = ['test_version', 'test_app_api', 'test_theme', 'test_uri']
 
 foreach t : tests
   exe = executable(t, t + '.c',

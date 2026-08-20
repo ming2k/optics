@@ -14,7 +14,7 @@ a decision, write a new ADR and update the old one's status to
 | 0006 | [No runtime RHI; build-time backend selection if ever needed](0006-no-runtime-rhi.md) | Accepted |
 | 0007 | [Hand-rolled Vulkan slab allocator (no VMA)](0007-vk-slab-allocator.md)         | Accepted |
 | 0008 | [Image-effect pipeline as the home for blur and friends](0008-image-effect-pipeline.md) | Accepted |
-| 0009 | [Canvas sample count joins the pipeline-cache key](0009-canvas-msaa-pipeline-key.md) | Proposed |
+| 0009 | [Canvas sample count joins the pipeline-cache key](0009-canvas-msaa-pipeline-key.md) | Superseded by ADR-0071 |
 | 0010 | [Glyph-blit primitive — text rendering at the canvas seam](0010-glyph-blit-primitive.md) | Accepted |
 | 0011 | [Hole-bridging ear-clipping tessellator](0011-hole-bridging-tessellator.md) | Accepted |
 | 0012 | [Phong lighting parameters ride a transient buffer-device-address block](0012-phong-light-transient-block.md) | Accepted |
@@ -79,3 +79,4 @@ a decision, write a new ADR and update the old one's status to
 | 0068 | [Frame-scoped, node-stamped opacity for lens](0068-lens-frame-scoped-node-stamped-opacity.md) | Accepted |
 | 0069 | [Color management — parametric color spaces, scRGB working space, explicit output transform](0069-color-management.md) | Accepted (amended by ADR-0070) |
 | 0070 | [ICC profile support — in-tree C parser over vendored skcms](0070-icc-in-tree-parser.md) | Accepted |
+| 0071 | [Pass-scoped canvas antialiasing policy](0071-pass-scoped-canvas-antialiasing.md) | Accepted |

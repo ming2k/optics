@@ -26,6 +26,7 @@ iris_sources = files(
   'src/app.c',
   'src/a11y_util.c',
   'src/platform_text.c',
+  'src/uri.c',
 )
 
 iris_c_args = ['-DIRIS_BUILDING=1']

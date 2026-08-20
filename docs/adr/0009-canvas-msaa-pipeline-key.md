@@ -1,6 +1,6 @@
 # ADR-0009: Canvas sample count joins the pipeline-cache key
 
-- Status: Proposed
+- Status: Superseded by ADR-0071
 - Date: 2026-05-24
 
 ## Context

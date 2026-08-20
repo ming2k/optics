@@ -684,6 +684,35 @@ fn pick_path(title: Option<&str>, folder: bool) -> Option<String> {
     String::from_utf8(buf).ok()
 }
 
+/// Why a URI-to-path conversion is not a `file://`-prefix strip:
+/// the portal percent-encodes escapes the filesystem needs back
+/// (`%20`, `%C3%A9`, …), and a remote authority (`file://host/…`) is not a
+/// local path at all.
+///
+/// Convert a picker result (`file://` URI) into a local filesystem path.
+/// Returns `None` when the URI is malformed, names a remote authority, or
+/// decodes to more than `PATH_MAX`-ish bytes.
+///
+/// ```
+/// # use iris::file_uri_to_path;
+/// assert_eq!(file_uri_to_path("file:///home/my%20docs/a.png").as_deref(),
+///            Some("/home/my docs/a.png"));
+/// assert_eq!(file_uri_to_path("file://server/share/x"), None);
+/// ```
+pub fn file_uri_to_path(uri: &str) -> Option<String> {
+    let c = CString::new(uri).ok()?;
+    // Longest realistic decoded path: URIs from the portal are bounded by
+    // PATH_MAX-ish lengths; 8 KiB leaves headroom for percent expansion.
+    let mut buf = vec![0u8; 8192];
+    let rc = unsafe { sys::iris_file_uri_to_path(c.as_ptr(), buf.as_mut_ptr().cast(), buf.len()) };
+    if rc != 0 {
+        return None;
+    }
+    let len = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+    buf.truncate(len);
+    String::from_utf8(buf).ok()
+}
+
 /// Library version string ("0.0.23" at the time of writing).
 pub fn version() -> &'static str {
     unsafe {

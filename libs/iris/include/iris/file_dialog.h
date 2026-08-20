@@ -60,6 +60,16 @@ IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *
 IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths, size_t out_cap,
                              size_t *out_bytes_used);
 
+/* Convert a `file://` URI (as returned by the pickers above) into a local
+ * filesystem path, percent-decoding %XX escapes. Returns 0 on success.
+ * Returns -1 for invalid arguments or a URI that is not `file://`,
+ * -2 for a non-empty authority component (`file://host/...` is a remote
+ * resource, not a local path), -3 for a malformed escape (a '%' not
+ * followed by two hex digits), and -4 when out_cap is too small for the
+ * decoded path. Non-ASCII bytes pass through verbatim: the portal emits
+ * percent-encoded ASCII, and a host supplying raw UTF-8 gets it back. */
+IRIS_API int iris_file_uri_to_path(const char *uri, char *out_path, size_t out_cap);
+
 #ifdef __cplusplus
 }
 #endif
