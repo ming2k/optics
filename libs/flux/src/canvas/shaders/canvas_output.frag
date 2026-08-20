@@ -48,7 +48,10 @@ layout(push_constant) uniform PC {
     float gamma;        /* FLUX_TF_GAMMA exponent */
     float dither_levels;/* 255 / 1023; ignored with NO_DITHER */
     float sdr_white_nits; /* Phase 3 (tone mapping); 203 default */
-    float _pad;
+    /* Two scalars, not vec2: std430 aligns vec2 to 8 bytes and would
+     * desync from the C push block (uv_scale at offset 76). */
+    float uv_scale_u;     /* pass width / sampled image width (bucketed pool) */
+    float uv_scale_v;     /* pass height / sampled image height */
 } pc;
 
 layout(location = 0) in  vec2 v_uv;
@@ -58,11 +61,12 @@ void main()
 {
     uint ih = pc.image_handle   & 0x0FFFFFFFu;
     uint sh = pc.sampler_handle & 0x0FFFFFFFu;
+    vec2 uv = clamp(v_uv, vec2(0.0), vec2(1.0)) * vec2(pc.uv_scale_u, pc.uv_scale_v);
     vec4 c = texture(
         sampler2D(
             u_textures[nonuniformEXT(ih)],
             u_samplers[nonuniformEXT(sh)]
-        ), v_uv);
+        ), uv);
 
     mat3 primaries = mat3(pc.primaries_rows[0].xyz,
                           pc.primaries_rows[1].xyz,

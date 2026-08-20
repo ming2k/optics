@@ -125,6 +125,7 @@ typedef struct intermediate_entry {
     flux_format format;
     flux_image *image;
     bool leased;
+    uint64_t last_used_serial;
     struct intermediate_entry *next;
 } intermediate_entry;
 
@@ -136,8 +137,17 @@ typedef struct output_entry {
     flux_format format;
     flux_image *image;
     bool leased;
+    uint64_t last_used_serial;
     struct output_entry *next;
 } output_entry;
+
+/* Pool growth bound. The pools historically grew unbounded — every distinct
+ * (format,w,h) key observed lived until device teardown — which was fine for
+ * fixed-size blurs but turns a size-sweeping animation (resizes, reveals)
+ * into one pooled image per visited size. LRU-evict above this many entries;
+ * flux_image_release parks the resources on the device retire queue, so
+ * eviction at lease time is safe with batches still in flight. */
+#define EFFECT_POOL_CAP 16
 
 typedef struct effect_state {
     flux_platform_mutex lock;
@@ -149,6 +159,9 @@ typedef struct effect_state {
     bool storage_16f_supported; /* VK_FORMAT_R16G16B16A16_SFLOAT STORAGE_IMAGE */
     intermediate_entry *intermediates;
     output_entry *outputs;
+    uint64_t pool_serial;
+    uint32_t intermediate_count;
+    uint32_t output_count;
 } effect_state;
 
 typedef struct blur_filter_slot {
@@ -247,17 +260,36 @@ static effect_state *effect_state_get_or_init(flux_device *d) {
 /* ------------------------------------------------------------------ */
 
 /* Look up or allocate the intermediate for this key. Returned image
- * is owned by the pool and lives until reset. */
+ * is owned by the pool and lives until reset. Above EFFECT_POOL_CAP
+ * distinct keys the least-recently-used unleased entry is evicted —
+ * released through the device retire queue, so in-flight batches that
+ * still sample it stay safe. */
 static flux_result acquire_intermediate(flux_device *d, effect_state *st, uint32_t w, uint32_t h,
                                         flux_format fmt, flux_image **out,
                                         intermediate_entry **out_lease) {
-    for (intermediate_entry *e = st->intermediates; e; e = e->next) {
+    st->pool_serial++;
+    uint64_t now = st->pool_serial;
+    intermediate_entry **lru_prev = nullptr;
+    intermediate_entry *lru = nullptr;
+    for (intermediate_entry *e = st->intermediates, **prev = &st->intermediates; e;
+         prev = &e->next, e = e->next) {
         if (!e->leased && e->width == w && e->height == h && e->format == fmt) {
             e->leased = true;
+            e->last_used_serial = now;
             *out = e->image;
             *out_lease = e;
             return FLUX_OK;
         }
+        if (!e->leased && (!lru || e->last_used_serial < lru->last_used_serial)) {
+            lru = e;
+            lru_prev = prev;
+        }
+    }
+    if (st->intermediate_count >= EFFECT_POOL_CAP && lru) {
+        *lru_prev = lru->next;
+        flux_image_release(lru->image);
+        flux_internal_free(d, lru);
+        st->intermediate_count--;
     }
     flux_image *img = nullptr;
     flux_result r = flux_image_create_compute_writable(d, w, h, fmt, &img);
@@ -274,23 +306,41 @@ static flux_result acquire_intermediate(flux_device *d, effect_state *st, uint32
     e->format = fmt;
     e->image = img;
     e->leased = true;
+    e->last_used_serial = now;
     e->next = st->intermediates;
     st->intermediates = e;
+    st->intermediate_count++;
     *out = img;
     *out_lease = e;
     return FLUX_OK;
 }
 
-/* Lease a same-key output, growing the pool to the epoch high-water mark. */
+/* Lease a same-key output, growing the pool to the epoch high-water mark;
+ * bounded and LRU-evicted above EFFECT_POOL_CAP like the intermediates. */
 static flux_result acquire_output(flux_device *d, effect_state *st, uint32_t w, uint32_t h,
                                   flux_format fmt, flux_image **out, output_entry **out_lease) {
-    for (output_entry *o = st->outputs; o; o = o->next) {
+    st->pool_serial++;
+    uint64_t now = st->pool_serial;
+    output_entry **lru_prev = nullptr;
+    output_entry *lru = nullptr;
+    for (output_entry *o = st->outputs, **prev = &st->outputs; o; prev = &o->next, o = o->next) {
         if (!o->leased && o->width == w && o->height == h && o->format == fmt) {
             o->leased = true;
+            o->last_used_serial = now;
             *out = o->image;
             *out_lease = o;
             return FLUX_OK;
         }
+        if (!o->leased && (!lru || o->last_used_serial < lru->last_used_serial)) {
+            lru = o;
+            lru_prev = prev;
+        }
+    }
+    if (st->output_count >= EFFECT_POOL_CAP && lru) {
+        *lru_prev = lru->next;
+        flux_image_release(lru->image);
+        flux_internal_free(d, lru);
+        st->output_count--;
     }
     flux_image *img = nullptr;
     flux_result r = flux_image_create_compute_writable(d, w, h, fmt, &img);
@@ -307,8 +357,10 @@ static flux_result acquire_output(flux_device *d, effect_state *st, uint32_t w, 
     o->format = fmt;
     o->image = img;
     o->leased = true;
+    o->last_used_serial = now;
     o->next = st->outputs;
     st->outputs = o;
+    st->output_count++;
     *out = img;
     *out_lease = o;
     return FLUX_OK;

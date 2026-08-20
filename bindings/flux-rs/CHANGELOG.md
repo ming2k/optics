@@ -5,6 +5,20 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **flux: bucket the canvas target attachment pool and bound the effect
+  pools.** Target attachments were pooled per exact `(slot, w, h)`; a
+  size-sweeping animation (resizes, reveals, window streams) missed every
+  frame, thrashing `vkCreateImage` through the LRU tail and parking up to
+  sixteen full-resolution RGBA16F intermediates per slot. Entries are now
+  keyed by 128-pixel buckets, with the output-transform blit scaling its
+  sampling UV into the written sub-rect, so a sweep keeps hitting one
+  entry. The `flux_effect_blur` intermediate/output pools likewise grew
+  unbounded — one pooled image per distinct `(format, w, h)` ever seen;
+  they are now LRU-evicted above sixteen entries each (release parks
+  resources on the device retire queue, so in-flight batches stay safe).
+
 ### Added
 
 - `SurfaceColorOptions::offscreen_formats` constrains an offscreen

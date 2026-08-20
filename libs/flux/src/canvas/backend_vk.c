@@ -302,6 +302,19 @@ static bool msaa_ensure(flux_canvas *c, canvas_attachment_set *attachments, uint
     return true;
 }
 
+/* Target attachment buckets round a requested extent up to a multiple of
+ * this many pixels. An animation that grows or shrinks its capture a few
+ * pixels per frame then hits one pooled entry instead of thrashing
+ * vkCreateImage through the LRU tail; the render area still clamps the
+ * pass to the true extent. 128 keeps bucket count small (a 4K-wide
+ * animation sweeps ≤17 buckets per axis) while wasting at most ~127px of
+ * an intermediate's edge. */
+#define FLUX_CANVAS_TARGET_BUCKET 128
+
+static uint32_t bucket_up(uint32_t v) {
+    return (v + (FLUX_CANVAS_TARGET_BUCKET - 1)) & ~(uint32_t)(FLUX_CANVAS_TARGET_BUCKET - 1);
+}
+
 static canvas_attachment_set *target_attachments_get(flux_canvas *c, uint32_t slot, uint32_t w,
                                                      uint32_t h) {
     flux_vk_canvas *v = vkc(c);
@@ -310,9 +323,13 @@ static canvas_attachment_set *target_attachments_get(flux_canvas *c, uint32_t sl
     canvas_target_slot *ts = &v->target_slots[slot];
     ts->use_counter++;
     uint64_t now = ts->use_counter;
+    /* Entries are bucketed, so an exact bucket match serves every extent
+     * inside it — an animation sweeping its capture size a few pixels per
+     * frame keeps hitting the same entry instead of churning the LRU tail. */
+    uint32_t bw = bucket_up(w), bh = bucket_up(h);
 
     for (uint32_t i = 0; i < ts->count; ++i) {
-        if (ts->entries[i].width == w && ts->entries[i].height == h) {
+        if (ts->entries[i].width == bw && ts->entries[i].height == bh) {
             ts->entries[i].last_used_serial = now;
             return &ts->entries[i].attachments;
         }
@@ -323,8 +340,8 @@ static canvas_attachment_set *target_attachments_get(flux_canvas *c, uint32_t sl
         canvas_target_attachment_entry *entry = &ts->entries[idx];
         *entry = (canvas_target_attachment_entry){0};
         entry->attachments.linear.bindless = FLUX_BINDLESS_INVALID;
-        entry->width = w;
-        entry->height = h;
+        entry->width = bw;
+        entry->height = bh;
         entry->last_used_serial = now;
         return &entry->attachments;
     }
@@ -342,8 +359,8 @@ static canvas_attachment_set *target_attachments_get(flux_canvas *c, uint32_t sl
     attachments_destroy(c, &lru->attachments);
     *lru = (canvas_target_attachment_entry){0};
     lru->attachments.linear.bindless = FLUX_BINDLESS_INVALID;
-    lru->width = w;
-    lru->height = h;
+    lru->width = bw;
+    lru->height = bh;
     lru->last_used_serial = now;
     return &lru->attachments;
 }
@@ -614,10 +631,22 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     }
     v->active_attachments = attachments;
 
+    /* Bucketed target pool (see target_attachments_get): the pooled
+     * attachments — including the working-space intermediate — are sized
+     * to the entry's bucket; the render area keeps every pass clamped to
+     * the true extent and the output transform scales its sampling UV to
+     * the written sub-rect. Surface passes keep the exact extent: the
+     * intermediate is reallocated on swapchain resize either way. */
+    uint32_t alloc_w = w, alloc_h = h;
+    if (target) {
+        alloc_w = bucket_up(w);
+        alloc_h = bucket_up(h);
+    }
+
     /* ADR-0069: every pass renders into the per-slot working-space
      * intermediate; the destination only sees pixels through the output
      * transform at end_pass. */
-    if (!linear_ensure(c, attachments, w, h)) {
+    if (!linear_ensure(c, attachments, alloc_w, alloc_h)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas linear intermediate unavailable");
         return FLUX_ERROR_BACKEND_FAILURE;
     }
@@ -663,11 +692,17 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     if (!target && c->surface->sdr_white_nits > 0.0f)
         sdr_white = c->surface->sdr_white_nits;
     v->out_encode.sdr_white_nits = sdr_white;
+    v->out_encode.uv_scale[0] = (float)w / (float)alloc_w;
+    v->out_encode.uv_scale[1] = (float)h / (float)alloc_h;
 
     v->out_decode = v->out_encode;
     mat3_to_push(&dec, v->out_decode.primaries);
     v->out_decode.flags = FLUX_OUTPUT_F_DECODE | FLUX_OUTPUT_F_NO_DITHER;
     v->out_decode.image_handle = FLUX_BINDLESS_INVALID; /* filled by the seed blit */
+    /* The seed samples the destination (exact pass extent), not the
+     * bucketed intermediate — no sub-rect scaling on that side. */
+    v->out_decode.uv_scale[0] = 1.0f;
+    v->out_decode.uv_scale[1] = 1.0f;
     v->out_area = area;
     v->active_slot = slot;
     /* fb size feeds the seed blit's viewport, so publish it before the
@@ -770,7 +805,7 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
      * intermediate, so vector fills are anti-aliased. LOAD deliberately
      * bypasses this block. */
     if (use_msaa) {
-        if (!msaa_ensure(c, attachments, w, h)) {
+        if (!msaa_ensure(c, attachments, alloc_w, alloc_h)) {
             FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas MSAA attachment unavailable");
             return FLUX_ERROR_BACKEND_FAILURE;
         }
@@ -795,7 +830,7 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     canvas_owned_image *stencil = nullptr;
     bool has_stencil = false;
     if (!config->skip_stencil)
-        has_stencil = stencil_ensure(c, attachments, w, h, samples, &stencil);
+        has_stencil = stencil_ensure(c, attachments, alloc_w, alloc_h, samples, &stencil);
     if (!config->skip_stencil && v->stencil_format != VK_FORMAT_UNDEFINED && !has_stencil) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas stencil attachment unavailable");
         return FLUX_ERROR_BACKEND_FAILURE;

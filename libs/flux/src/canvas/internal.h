@@ -370,7 +370,11 @@ typedef struct flux_output_push {
     float gamma;            /* FLUX_TRANSFER_GAMMA exponent */
     float dither_levels;    /* 255 / 1023; ignored when no-dither */
     float sdr_white_nits;   /* Phase 3 tone mapping; 203 default */
-    float _pad;
+    /* Was `_pad`. The bucketed target-attachment pool can serve a pass
+     * from an intermediate larger than the pass extent; the blit then
+     * scales its sampling UV by extent/image to read the right sub-rect.
+     * Exact-size passes pass {1,1}. */
+    float uv_scale[2];      /* pass extent / intermediate extent */
 } flux_output_push;
 
 #define FLUX_OUTPUT_F_DECODE 0x1u
