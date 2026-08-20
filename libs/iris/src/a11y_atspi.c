@@ -414,7 +414,7 @@ static int m_get_toolkit_name(sd_bus_message *m, void *u, sd_bus_error *e) {
 static int m_get_version(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
     (void)e;
-    return sd_bus_reply_method_return(m, "s", "0.0.22");
+    return sd_bus_reply_method_return(m, "s", "0.0.23");
 }
 static int m_get_locale(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
@@ -648,7 +648,8 @@ static iris_a11y__node *node_on_path(sd_bus_message *m) {
 }
 
 static const char *text_value_of(iris_a11y__node *n) {
-    return (n && iris_a11y__supports_text(n->role) && n->value) ? n->value : "";
+    /* `value` is an array (never NULL); the emptiness test is on [0]. */
+    return (n && iris_a11y__supports_text(n->role) && n->value[0] != '\0') ? n->value : "";
 }
 
 static int text_char_count(sd_bus_message *m, void *u, sd_bus_error *e) {
