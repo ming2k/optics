@@ -362,6 +362,13 @@ struct flux_device {
     flux_platform_mutex upload_lock;
     bool upload_lock_initialized;
     bool upload_batch_open;
+    /* Nesting depth of flux_uploads_begin without a matching flush. A
+     * host that opens several upload scopes per frame (a compositor
+     * batching per draw pass) reuses the single open batch instead of
+     * submitting and later recycling one command pool per scope: each
+     * recycled pool costs a vkResetCommandPool on the next frame's
+     * sweep, which measured as a top CPU consumer on the frame path. */
+    uint32_t upload_batch_depth;
     VkCommandPool upload_batch_pool;         /* VK_NULL_HANDLE when no batch ever opened */
     VkCommandBuffer upload_batch_cmd;        /* recording while open */
     flux_staging_buf *upload_batch_stagings; /* checked-out list, `next` chained */

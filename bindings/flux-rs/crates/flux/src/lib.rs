@@ -750,22 +750,26 @@ impl Device {
     /// Open a batched-upload window. While a batch is open, texture uploads
     /// from `Image::from_bytes*`, `Image::update_region`, and mesh/buffer
     /// creation with initial data are recorded into one command buffer and
-    /// submitted as a **single** `vkQueueSubmit` when the guard returned by
-    /// this method is dropped.
+    /// submitted as a **single** `vkQueueSubmit` when the outermost guard
+    /// returned by this method is dropped.
     ///
     /// Without a batch, every individual upload performs its own queue
     /// submit; hosts that refresh several textures per frame (compositors
     /// with continuously-updating SHM clients) pay a per-upload submission
     /// and command-pool recycling cost that this window removes.
     ///
-    /// Batches must not be nested; the C layer rejects a second
-    /// `flux_uploads_begin` with `FLUX_ERROR_INVALID_STATE` while one is
-    /// open, which this binding surfaces as an `Err`. A batch left open
-    /// holds its command buffer until the next flush, so keep the guard's
-    /// lifetime scoped to the upload phase of a frame. Errors from the
-    /// implicit flush at drop are swallowed (the upload already reached
-    /// the queue-recording stage or failed atomically); pass a `log`
-    /// context via [`UploadBatch::with_logging`] when that matters.
+    /// Scopes nest: a `uploads_begin` while a batch is already open joins
+    /// that batch instead of failing, and only the outermost guard's drop
+    /// (or explicit [`UploadBatch::flush`]) submits. A host that batches per
+    /// draw pass therefore still produces one submission per frame, not one
+    /// per pass — each recycled batch pool costs a `vkResetCommandPool` on
+    /// the next frame's sweep, which dominates the frame path when it
+    /// happens several times per frame.
+    ///
+    /// A batch left open holds its command buffer until the next flush, so
+    /// keep the guard's lifetime scoped to the upload phase of a frame.
+    /// Errors from the implicit flush at drop are swallowed; call
+    /// [`UploadBatch::flush`] explicitly when they matter.
     pub fn uploads_begin(&self) -> Result<UploadBatch<'_>, Error> {
         Error::check(unsafe { sys::flux_uploads_begin(self.raw) })?;
         Ok(UploadBatch {
@@ -787,9 +791,10 @@ pub struct UploadBatch<'a> {
 }
 
 impl UploadBatch<'_> {
-    /// Submit the recorded uploads now instead of waiting for drop. Safe to
-    /// call more than once; only the first call submits. A failed flush
-    /// returns the error and still marks the batch closed.
+    /// Close this scope. For an inner (nested) scope this is a no-op join;
+    /// for the outermost scope it submits every upload recorded since the
+    /// outermost `uploads_begin`. Safe to call more than once; only the
+    /// first call closes the scope.
     pub fn flush(&mut self) -> Result<(), Error> {
         if self.flushed {
             return Ok(());

@@ -540,9 +540,11 @@ flux_result flux_uploads_begin(flux_device *d) {
     upload_pending_sweep(d);
     flux_platform_mutex_lock(&d->upload_lock);
     if (d->upload_batch_open) {
+        /* Nested scope: the outer batch already records every upload;
+         * just bump the depth so its flush waits for this scope too. */
+        d->upload_batch_depth++;
         flux_platform_mutex_unlock(&d->upload_lock);
-        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "flux_uploads_begin: a batch is already open");
-        return FLUX_ERROR_INVALID_STATE;
+        return FLUX_OK;
     }
     /* Batches always record on the graphics queue: same-queue implicit
      * ordering against in-flight frames is what makes live-image
@@ -555,6 +557,7 @@ flux_result flux_uploads_begin(flux_device *d) {
         return FLUX_ERROR_BACKEND_FAILURE;
     }
     d->upload_batch_open = true;
+    d->upload_batch_depth = 1;
     flux_platform_mutex_unlock(&d->upload_lock);
     return FLUX_OK;
 }
@@ -568,6 +571,12 @@ flux_result flux_uploads_flush(flux_device *d) {
         flux_platform_mutex_unlock(&d->upload_lock);
         return FLUX_OK;
     }
+    if (d->upload_batch_depth > 1) {
+        /* Inner scope close: the outermost flush submits everything. */
+        d->upload_batch_depth--;
+        flux_platform_mutex_unlock(&d->upload_lock);
+        return FLUX_OK;
+    }
     /* Detach the batch state first: the submit below is device-global
      * queue work, not batch state, and a concurrent uploads_begin must
      * not wait on it. */
@@ -578,6 +587,7 @@ flux_result flux_uploads_flush(flux_device *d) {
     d->upload_batch_cmd = VK_NULL_HANDLE;
     d->upload_batch_stagings = NULL;
     d->upload_batch_open = false;
+    d->upload_batch_depth = 0;
     flux_platform_mutex_unlock(&d->upload_lock);
 
     /* Deferred submit, no fence wait. Later same-queue work (the frame

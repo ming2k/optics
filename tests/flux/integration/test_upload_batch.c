@@ -2,7 +2,8 @@
  * Batched uploads (flux_uploads_begin / flux_uploads_flush).
  *
  * Verifies the batch fast path end to end:
- *   - flush without an open batch is a no-op; nested begin is rejected
+ *   - flush without an open batch is a no-op; a nested begin joins the
+ *     open batch and only the outermost flush submits
  *   - images/meshes/buffers created inside a batch land correctly after
  *     one flush (pixel-asserted via offscreen canvas readback)
  *   - flux_surface_begin_frame auto-flushes an unflushed batch, so a
@@ -48,12 +49,16 @@ int main(void) {
         return 0;
     }
 
-    /* --- API shape: flush without a batch is a no-op; nested begin
-     *     is rejected and the outer batch stays usable. --- */
+    /* --- API shape: flush without a batch is a no-op; a nested begin
+     *     joins the open batch and only the outermost flush submits. --- */
     EXPECT(flux_uploads_flush(d) == FLUX_OK);
     EXPECT(flux_uploads_begin(nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
     EXPECT(flux_uploads_begin(d) == FLUX_OK);
-    EXPECT(flux_uploads_begin(d) == FLUX_ERROR_INVALID_STATE);
+    EXPECT(flux_uploads_begin(d) == FLUX_OK);
+    EXPECT(flux_uploads_flush(d) == FLUX_OK);
+    EXPECT(flux_uploads_flush(d) == FLUX_OK);
+    /* The outermost flush above closed the batch; another flush is a
+     * no-op, and a fresh begin opens a new one. */
     EXPECT(flux_uploads_flush(d) == FLUX_OK);
 
     /* Offscreen canvas for pixel assertions. */
