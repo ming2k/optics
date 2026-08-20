@@ -146,7 +146,9 @@ fn main() {
         .map(|p| format!("-I{}", p.display()))
         .collect();
     if let Some(src) = &source_dir {
-        clang_args.push(format!("-I{}", src.join("libs/iris/include").display()));
+        clang_args.insert(0, format!("-I{}", src.join("libs/iris/include").display()));
+        clang_args.insert(1, format!("-I{}", src.join("libs/lens/include").display()));
+        clang_args.insert(2, format!("-I{}", src.join("libs/flux/include").display()));
     }
 
     let bindings = bindgen::Builder::default()
@@ -225,7 +227,6 @@ fn discover_optics_checkout(component: &str) -> Option<PathBuf> {
         if ancestor
             .join(format!("libs/{component}/include/{component}"))
             .exists()
-            && ancestor.join("build/meson-uninstalled").exists()
         {
             return Some(ancestor.to_path_buf());
         }

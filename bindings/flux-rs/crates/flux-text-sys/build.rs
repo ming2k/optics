@@ -181,9 +181,7 @@ fn normalize_flux_source_dir(dir: PathBuf) -> PathBuf {
 fn discover_optics_checkout() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
     for ancestor in manifest_dir.ancestors() {
-        if ancestor.join("libs/flux/include/flux").exists()
-            && ancestor.join("build/meson-uninstalled").exists()
-        {
+        if ancestor.join("libs/flux/include/flux").exists() {
             return Some(ancestor.to_path_buf());
         }
     }

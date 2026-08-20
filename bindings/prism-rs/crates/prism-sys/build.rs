@@ -236,9 +236,7 @@ fn main() {
 fn discover_optics_checkout() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
     for ancestor in manifest_dir.ancestors() {
-        if ancestor.join("libs/prism/include/prism").exists()
-            && ancestor.join("build/meson-uninstalled").exists()
-        {
+        if ancestor.join("libs/prism/include/prism").exists() {
             return Some(ancestor.to_path_buf());
         }
     }
