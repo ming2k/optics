@@ -2959,16 +2959,20 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * a frame the host wanted painted; lens chrome damage, host
          * animation, and resizes always force a paint regardless. */
         /* A static declaration is the host's final word for the frame's
-         * canvas content — it outranks a stray animation request made by
-         * the previous frame's paint callback (the request paced that
-         * frame; the new declaration covers the current one). It only
-         * covers the host's own pixels: lens chrome damage still forces a
-         * paint, or a hover highlight would freeze mid-transition while
-         * the host scene is static. Resizes and the not-yet-presented
-         * latch force a paint too. */
+         * canvas content — but per the iris_paint_mark_static contract, a
+         * following iris_request_animation_frame outranks it: a host that
+         * asks for another frame is announcing its content is about to
+         * change, so the skip must never eat the request. The request is
+         * sampled and cleared above (host_animating) exactly like win32
+         * and cocoa; the scheduling branch below re-arms the active
+         * cadence off the same flag. It only covers the host's own
+         * pixels: lens chrome damage still forces a paint, or a hover
+         * highlight would freeze mid-transition while the host scene is
+         * static. Resizes and the not-yet-presented latch force a paint
+         * too. */
         bool chrome_damaged = lens_frame_needs_repaint(ui);
-        bool host_canvas_static = cfg->paint != NULL && pl.paint_static && !resized_this_frame &&
-                                  !surface_needs_paint && !chrome_damaged;
+        bool host_canvas_static = cfg->paint != NULL && pl.paint_static && !host_animating &&
+                                  !resized_this_frame && !surface_needs_paint && !chrome_damaged;
         pl.paint_static = false;
         bool must_paint = !host_canvas_static &&
                           (cfg->paint != NULL || chrome_damaged || host_animating ||
@@ -3044,10 +3048,12 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                 next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
             frame_scheduled = true;
         } else if (cfg->paint) {
-            pl.animation_frame_requested = false;
             /* Static-declaring host: keep the low idle tick so build/paint
              * keep running (~4 Hz) and the host can observe state changes
-             * and resume animating on its own; only the GPU work skips. */
+             * and resume animating on their own; only the GPU work skips.
+             * The request flag was already cleared into host_animating
+             * above, so a host that asked for another frame during build
+             * never reaches this skip branch. */
             next_deadline = t + IDLE_PERIOD_NS;
             frame_scheduled = true;
         } else if (t - last_input_ns < INPUT_GRACE_NS || pl.animation_frame_requested ||

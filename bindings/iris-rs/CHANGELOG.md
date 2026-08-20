@@ -5,6 +5,16 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A following `iris_request_animation_frame` outranks a static
+  declaration on Wayland too.** The Wayland backend consumed the
+  animation request before the skip decision and dropped a fresh request
+  in its static branch, freezing a host that declared static and then
+  asked for another frame — win32 and cocoa already force the paint. All
+  three backends now apply the documented contract: the request always
+  forces the next frame to paint.
+
 ### Added
 
 - **Initial extraction from the iris monorepo.** The two Rust crates
