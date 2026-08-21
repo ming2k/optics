@@ -7,25 +7,24 @@
  * direction/script, and the layout pass advances a single L->R pen across the
  * visually-ordered runs.
  *
- * Working-set policy: the four transient codepoint arrays (cps, bos, bidi
- * types, levels) live on the stack for short input and fall back to the heap
- * past ITEMIZE_STACK_CP bytes/codepoints. The run list and per-run levels are
- * written into t->runs_buf / t->run_levels_buf, which grow on demand and have
- * no MAX_RUNS cap — a previous hard cap of 64 used to silently drop trailing
- * codepoints past the 64th script/face transition. bos uses uint32_t (not
+ * Working-set policy: every scratch array (codepoints, byte offsets,
+ * bidi types, embedding levels, and the run list + per-run levels)
+ * lives on the flux_text context and follows one high-water rule —
+ * grow to the largest input ever seen, reuse thereafter, release on
+ * shutdown or flux_text_compact. An earlier version malloc/free'd the
+ * four codepoint arrays per call past a 256-entry stack fallback,
+ * which meant an 8-branch manual cleanup at every early exit (the
+ * classic leak-on-error shape) and a transient ~13 B/byte peak that
+ * the caller could not observe or reclaim. bos uses uint32_t (not
  * size_t) since strings > 4 GiB are rejected at the door, halving the
  * per-byte working set. */
 
 #include "text_internal.h"
 
-#include <fribidi/fribidi.h>
-
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define ITEMIZE_STACK_CP 256
 
 /* Resolve a per-codepoint script, letting Common/Inherited extend the run. */
 static hb_script_t resolve_script(hb_unicode_funcs_t *uf, uint32_t cp, hb_script_t cur) {
@@ -110,6 +109,61 @@ static bool runs_reserve(flux_text *t, int need) {
     return true;
 }
 
+/* Grow the four itemizer codepoint arrays (cp/bo/bt/lv) to at least
+ * `need` entries. Same transactional high-water policy as runs_reserve:
+ * either all four move to the new capacity or none do, and the old
+ * buffers are left untouched on failure. The sizes are per-entry: a
+ * uint32_t offset, a codepoint, a bidi type and a level — ~13 B per
+ * input byte in the worst case, bounded by TXT_MAX_INPUT_BYTES at the
+ * txt_itemize door. */
+static bool cp_scratch_reserve(flux_text *t, int need) {
+    if (need <= t->cp_cap)
+        return true;
+    int cap = t->cp_cap ? t->cp_cap : 256;
+    while (cap < need) {
+        if (cap > INT_MAX / 2)
+            return false;
+        cap *= 2;
+    }
+
+    FriBidiChar *cp = malloc((size_t)cap * sizeof *cp);
+    uint32_t *bo = malloc((size_t)cap * sizeof *bo);
+    FriBidiCharType *bt = malloc((size_t)cap * sizeof *bt);
+    FriBidiLevel *lv = malloc((size_t)cap * sizeof *lv);
+    if (!cp || !bo || !bt || !lv) {
+        free(cp);
+        free(bo);
+        free(bt);
+        free(lv);
+        return false;
+    }
+    free(t->cp_buf);
+    free(t->bo_buf);
+    free(t->bt_buf);
+    free(t->lv_buf);
+    t->cp_buf = cp;
+    t->bo_buf = bo;
+    t->bt_buf = bt;
+    t->lv_buf = lv;
+    t->cp_cap = cap;
+    return true;
+}
+
+/* Release the itemizer scratch (shutdown + flux_text_compact). */
+void txt_itemize_release_scratch(flux_text *t) {
+    if (!t)
+        return;
+    free(t->cp_buf);
+    free(t->bo_buf);
+    free(t->bt_buf);
+    free(t->lv_buf);
+    t->cp_buf = NULL;
+    t->bo_buf = NULL;
+    t->bt_buf = NULL;
+    t->lv_buf = NULL;
+    t->cp_cap = 0;
+}
+
 int txt_itemize(flux_text *t, int slot_idx, const char *utf8, size_t len) {
     if (!t || !utf8 || len == 0)
         return 0;
@@ -123,23 +177,13 @@ int txt_itemize(flux_text *t, int slot_idx, const char *utf8, size_t len) {
     /* --- Decode to codepoints, tracking each one's source byte offset. --- */
     size_t blen = len;
 
-    FriBidiChar stack_cp[ITEMIZE_STACK_CP];
-    uint32_t stack_bo[ITEMIZE_STACK_CP];
-    FriBidiChar *cps = stack_cp;
-    uint32_t *bos = stack_bo;
-    bool heap = false;
-    if (blen + 1 > ITEMIZE_STACK_CP) {
-        /* blen ≤ TXT_MAX_INPUT_BYTES < UINT32_MAX, so (blen+1) fits in
-         * size_t without overflow and the offsets fit in uint32_t. */
-        cps = malloc((blen + 1) * sizeof *cps);
-        bos = malloc((blen + 1) * sizeof *bos);
-        if (!cps || !bos) {
-            free(cps);
-            free(bos);
-            return 0;
-        }
-        heap = true;
-    }
+    /* Grow the four codepoint arrays to blen+1 (sentinel slot) in ONE
+     * transactional step: on failure the old buffers are untouched.
+     * blen ≤ TXT_MAX_INPUT_BYTES < UINT32_MAX, so offsets fit uint32_t. */
+    if (!cp_scratch_reserve(t, (int)blen + 1))
+        return 0;
+    FriBidiChar *cps = t->cp_buf;
+    uint32_t *bos = t->bo_buf;
 
     int ncp = 0;
     for (size_t b = 0; b < blen;) {
@@ -151,34 +195,12 @@ int txt_itemize(flux_text *t, int slot_idx, const char *utf8, size_t len) {
         b += adv;
     }
     bos[ncp] = (uint32_t)blen; /* sentinel: end byte of last codepoint's run */
-    if (ncp == 0) {
-        if (heap) {
-            free(cps);
-            free(bos);
-        }
+    if (ncp == 0)
         return 0;
-    }
 
     /* --- FriBidi embedding levels (auto base direction). --- */
-    FriBidiCharType stack_bt[ITEMIZE_STACK_CP];
-    FriBidiLevel stack_lv[ITEMIZE_STACK_CP];
-    FriBidiCharType *bt = stack_bt;
-    FriBidiLevel *lv = stack_lv;
-    bool heap2 = false;
-    if ((size_t)ncp > ITEMIZE_STACK_CP) {
-        bt = malloc((size_t)ncp * sizeof *bt);
-        lv = malloc((size_t)ncp * sizeof *lv);
-        if (!bt || !lv) {
-            free(bt);
-            free(lv);
-            if (heap) {
-                free(cps);
-                free(bos);
-            }
-            return 0;
-        }
-        heap2 = true;
-    }
+    FriBidiCharType *bt = t->bt_buf;
+    FriBidiLevel *lv = t->lv_buf;
 
     fribidi_get_bidi_types(cps, ncp, bt);
     FriBidiParType base = FRIBIDI_PAR_ON; /* auto-detect per paragraph */
@@ -196,17 +218,8 @@ int txt_itemize(flux_text *t, int slot_idx, const char *utf8, size_t len) {
     hb_script_t cur_script = HB_SCRIPT_INVALID;
     int run_start_cp = 0;
 
-    if (!runs_reserve(t, 1)) {
-        if (heap2) {
-            free(bt);
-            free(lv);
-        }
-        if (heap) {
-            free(cps);
-            free(bos);
-        }
+    if (!runs_reserve(t, 1))
         return 0;
-    }
     int n = 0;
 
     for (int i = 0; i < ncp; i++) {
@@ -218,17 +231,8 @@ int txt_itemize(flux_text *t, int slot_idx, const char *utf8, size_t len) {
                    (face != cur_face || lvl != cur_lvl ||
                     (sc != cur_script && sc != HB_SCRIPT_COMMON && sc != HB_SCRIPT_INHERITED));
         if (brk) {
-            if (!runs_reserve(t, n + 1)) {
-                if (heap2) {
-                    free(bt);
-                    free(lv);
-                }
-                if (heap) {
-                    free(cps);
-                    free(bos);
-                }
+            if (!runs_reserve(t, n + 1))
                 return n; /* partial result; caller sees what fit */
-            }
             uint32_t bo = bos[run_start_cp];
             t->runs_buf[n] = (text_run){
                 .text = utf8 + bo,
@@ -251,17 +255,8 @@ int txt_itemize(flux_text *t, int slot_idx, const char *utf8, size_t len) {
      * silently drops characters — runs_buf grows to fit whatever the input
      * needs. */
     if (cur_face != -1) {
-        if (!runs_reserve(t, n + 1)) {
-            if (heap2) {
-                free(bt);
-                free(lv);
-            }
-            if (heap) {
-                free(cps);
-                free(bos);
-            }
+        if (!runs_reserve(t, n + 1))
             return n;
-        }
         uint32_t bo = bos[run_start_cp];
         t->runs_buf[n] = (text_run){
             .text = utf8 + bo,
@@ -277,14 +272,5 @@ int txt_itemize(flux_text *t, int slot_idx, const char *utf8, size_t len) {
     }
 
     reorder_runs_visual(t->runs_buf, (const FriBidiLevel *)t->run_levels_buf, n);
-
-    if (heap2) {
-        free(bt);
-        free(lv);
-    }
-    if (heap) {
-        free(cps);
-        free(bos);
-    }
     return n;
 }

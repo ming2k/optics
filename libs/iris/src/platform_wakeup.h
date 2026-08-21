@@ -29,18 +29,23 @@
  *     drain — when poll reports the eventfd readable, read it empty and
  *             call iris_platform_wakeup_drain() before dispatching.
  *
- *   Win32 (app_win32.c, to be implemented):
+ *   Win32 (app_win32.c, implemented):
  *     kick  — PostThreadMessage(loop_thread_id, WM_IRIS_WAKEUP, 0, 0)
  *             where WM_IRIS_WAKEUP is a WM_APP-based message the backend
  *             reserves. PostThreadMessage is thread-safe by design.
  *     drain — the GetMessage/DispatchMessage pump calls
  *             iris_platform_wakeup_drain() when it retrieves WM_IRIS_WAKEUP.
  *
- *   Cocoa (app_cocoa.m, to be implemented):
- *     kick  — CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopDefaultMode,
- *             ^{ iris_platform_wakeup_drain(); }) followed by
- *             CFRunLoopWakeUp(CFRunLoopGetMain()). The block IS the drain;
- *             no extra message handling is needed.
+ *   Cocoa (app_cocoa.m, implemented — note the deviation):
+ *     kick  — posts an NSEventTypeApplicationDefined event via
+ *             [NSApp postEvent:atStart:NO]. Do NOT substitute the literal
+ *             CFRunLoopPerformBlock recipe that earlier revisions of this
+ *             header prescribed: a PerformBlock scheduled on the main run
+ *             loop runs during the wait but does NOT make
+ *             nextEventMatchingMask return, so in the fully-idle state
+ *             (distantFuture deadline) the frame loop would never wake.
+ *             The posted event both wakes the wait and gives the dispatch
+ *             site the place to call iris_platform_wakeup_drain().
  *
  * Lifecycle: the backend calls iris_platform_wakeup_set_kick(kick, user)
  * on the loop thread before entering its loop and

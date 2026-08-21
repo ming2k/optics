@@ -68,18 +68,16 @@ void lensi_skin_textfield(lens *ui, lens_node *n, const lens_widget_record *rec)
 
     /* Active clause of the composition, emphasised over the underline */
     if (c->preedit_clause.w > 0) {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = c->preedit_clause,
-                                            .color = rs->accent});
+        lensi_drawlist_push(
+            ui, n,
+            (lens_draw_cmd){.kind = LENS_DRAW_RECT, .rel = c->preedit_clause, .color = rs->accent});
     }
 
     /* Caret */
     if (c->show_caret) {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = c->caret,
-                                            .color = rs->accent,
-                                            .radius = 1.0f});
+        lensi_drawlist_push(
+            ui, n,
+            (lens_draw_cmd){
+                .kind = LENS_DRAW_RECT, .rel = c->caret, .color = rs->accent, .radius = 1.0f});
     }
 }

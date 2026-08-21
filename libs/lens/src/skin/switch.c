@@ -39,11 +39,12 @@ void lensi_skin_switch(lens *ui, lens_node *n, const lens_widget_record *rec) {
     if (has_description) {
         lensi_drawlist_push(
             ui, n,
-            (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                            .rel = {rs->padding, text_y + rec->content.text.height + text_gap, 0, 0},
-                            .color = rs->disabled,
-                            .text = rec->content.description,
-                            .text_size = desc_size});
+            (lens_draw_cmd){
+                .kind = LENS_DRAW_TEXT,
+                .rel = {rs->padding, text_y + rec->content.text.height + text_gap, 0, 0},
+                .color = rs->disabled,
+                .text = rec->content.description,
+                .text_size = desc_size});
     }
 
     float track_y = (rec->bounds.h - track_h) * 0.5f;

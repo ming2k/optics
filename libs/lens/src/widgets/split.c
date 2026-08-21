@@ -63,15 +63,13 @@ bool lens_split_begin(lens *ui, const char *id, lens_split_direction dir,
 bool lens_split_pane(lens *ui) {
     lens_node *current = lensi_open_container(ui);
     lens_node *split = current;
-    lens_split_state *sst =
-        current && current->state_bytes == sizeof *sst ? current->state : NULL;
+    lens_split_state *sst = current && current->state_bytes == sizeof *sst ? current->state : NULL;
 
     /* The second call arrives with pane 1 as the open container. Resolve its
      * parent split without allocating split-shaped state on the pane itself:
      * that old allocation made pane 2 a child of pane 1 on the first frame
      * and only happened to self-correct on later frames. */
-    if (!sst && current && current->parent
-        && current->parent->state_bytes == sizeof *sst) {
+    if (!sst && current && current->parent && current->parent->state_bytes == sizeof *sst) {
         lens_split_state *parent_state = current->parent->state;
         if (parent_state && parent_state->pane_open) {
             split = current->parent;
@@ -146,9 +144,8 @@ void lens_split_end(lens *ui) {
     bool occluded = split->has_prev && lensi_widget_occluded(ui, split);
     bool clipped_out = lensi_point_clipped_by_scroll(split, ui->input.cursor);
     bool over_handle = split->has_prev && !occluded && !clipped_out &&
-                       cur_main >= div_pos - thick * 0.5f &&
-                       cur_main <= div_pos + thick * 0.5f && cur_cross >= cross_lo &&
-                       cur_cross <= cross_hi;
+                       cur_main >= div_pos - thick * 0.5f && cur_main <= div_pos + thick * 0.5f &&
+                       cur_cross >= cross_lo && cur_cross <= cross_hi;
 
     /* Drag state machine (scroll-thumb model). The captured branch checks
      * the press edge through the same occlusion/clip lens: a press that
@@ -202,8 +199,8 @@ void lens_split_end(lens *ui) {
     bool hov = over_handle || st->dragging;
     if (hov)
         ui->cursor_hint = vertical ? LENS_CURSOR_RESIZE_EW : LENS_CURSOR_RESIZE_NS;
-    uint32_t split_state = (over_handle ? LENS_STATE_HOVERED : 0) |
-                           (st->dragging ? LENS_STATE_DRAGGED : 0);
+    uint32_t split_state =
+        (over_handle ? LENS_STATE_HOVERED : 0) | (st->dragging ? LENS_STATE_DRAGGED : 0);
     lensi_skin_emit(ui, split,
                     &(lens_widget_record){
                         .kind = LENS_WIDGET_SPLIT,

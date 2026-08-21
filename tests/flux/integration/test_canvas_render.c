@@ -124,8 +124,8 @@ static void draw_batchable_rects(flux_canvas *canvas, void *user) {
     for (uint32_t i = 0; i < 64; ++i) {
         uint32_t x = (i % 8u) * 8u;
         uint32_t y = (i / 8u) * 8u;
-        flux_color color = (i & 1u) ? flux_color_rgba(220, 40, 80, 255)
-                                    : flux_color_rgba(40, 160, 220, 255);
+        flux_color color =
+            (i & 1u) ? flux_color_rgba(220, 40, 80, 255) : flux_color_rgba(40, 160, 220, 255);
         flux_canvas_fill_rect_color(canvas, (flux_rect){x, y, 8, 8}, color);
     }
 }
@@ -153,8 +153,7 @@ static void draw_rotated_image(flux_canvas *canvas, void *user) {
 
 static void draw_round_image(flux_canvas *canvas, void *user) {
     image_transform_case *tc = user;
-    flux_canvas_draw_image_rrect(canvas, tc->image, (flux_rect){32, 32, 64, 64}, 32.0f,
-                                 nullptr);
+    flux_canvas_draw_image_rrect(canvas, tc->image, (flux_rect){32, 32, 64, 64}, 32.0f, nullptr);
 }
 
 static void draw_image_through_independent_round_clip(flux_canvas *canvas, void *user) {
@@ -296,7 +295,7 @@ int main(void) {
          * sRGB-encodes to ~38 (gamma-space interpolation gave ~5); the
          * midpoint is 0.5 linear per channel -> ~187, not 128. Dither adds
          * ±1 LSB on top of the reference values. */
-        EXPECT(left[0] > 220 && left[2] > 30 && left[2] < 48);   /* red end */
+        EXPECT(left[0] > 220 && left[2] > 30 && left[2] < 48);    /* red end */
         EXPECT(right[2] > 220 && right[0] > 30 && right[0] < 48); /* blue end */
         EXPECT(mid[0] > 183 && mid[0] < 192 && mid[2] > 183 && mid[2] < 192);
         EXPECT(left[0] > mid[0] && mid[0] > right[0]);
@@ -433,8 +432,10 @@ int main(void) {
          * sampled the wrong quadrant after rotation. A half-alpha white
          * paint simultaneously verifies image tint/opacity modulation. */
         uint32_t image_px[4] = {
-            0xFF0000FFu, 0xFF00FF00u, /* red, green */
-            0xFFFFFFFFu, 0xFFFF0000u, /* white, blue */
+            0xFF0000FFu,
+            0xFF00FF00u, /* red, green */
+            0xFFFFFFFFu,
+            0xFFFF0000u, /* white, blue */
         };
         flux_image_desc idesc = FLUX_IMAGE_DESC_INIT;
         idesc.width = 2;
@@ -487,14 +488,13 @@ int main(void) {
          * the lit channels are 0.502 linear over black, which sRGB-encodes
          * to ~188 (gamma-space blending gave 128). ±4 absorbs the output
          * dither and quantisation. */
-        EXPECT(top_right[0] > 184 && top_right[0] < 192 && top_right[1] < 8 &&
-               top_right[2] < 8);
+        EXPECT(top_right[0] > 184 && top_right[0] < 192 && top_right[1] < 8 && top_right[2] < 8);
         EXPECT(bottom_right[0] < 8 && bottom_right[1] > 184 && bottom_right[1] < 192 &&
                bottom_right[2] < 8);
         EXPECT(bottom_left[0] < 8 && bottom_left[1] < 8 && bottom_left[2] > 184 &&
                bottom_left[2] < 192);
-        EXPECT(top_left[0] > 184 && top_left[0] < 192 && top_left[1] > 184 &&
-               top_left[1] < 192 && top_left[2] > 184 && top_left[2] < 192);
+        EXPECT(top_left[0] > 184 && top_left[0] < 192 && top_left[1] > 184 && top_left[1] < 192 &&
+               top_left[2] > 184 && top_left[2] < 192);
         EXPECT(px_at(px, 40, 64)[0] < 8); /* outside the rotated 32×64 quad */
 
         /* A display-list segment owns both referenced bindless resources.

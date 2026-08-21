@@ -73,11 +73,11 @@ void lensi_skin_tabs(lens *ui, lens_node *strip, const lens_widget_record *rec) 
 
             lensi_drawlist_push(
                 ui, strip,
-                (lens_draw_cmd){.kind = LENS_DRAW_TAB_INDICATOR,
-                                .rel = {left, 0,
-                                        fmaxf(LENSI_TABS_INDICATOR_THICKNESS, right - left), 0},
-                                .color = rs->accent,
-                                .width = LENSI_TABS_INDICATOR_THICKNESS});
+                (lens_draw_cmd){
+                    .kind = LENS_DRAW_TAB_INDICATOR,
+                    .rel = {left, 0, fmaxf(LENSI_TABS_INDICATOR_THICKNESS, right - left), 0},
+                    .color = rs->accent,
+                    .width = LENSI_TABS_INDICATOR_THICKNESS});
         }
     }
 }

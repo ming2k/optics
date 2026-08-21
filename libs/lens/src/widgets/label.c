@@ -15,10 +15,7 @@ static size_t utf8_next_boundary(const char *text, size_t len, size_t pos) {
     if (pos >= len)
         return len;
     unsigned char lead = (unsigned char)text[pos];
-    size_t width = lead < 0x80   ? 1
-                   : lead < 0xe0 ? 2
-                   : lead < 0xf0 ? 3
-                                 : 4;
+    size_t width = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
     if (width > len - pos)
         width = 1;
     return pos + width;
@@ -43,8 +40,8 @@ static flux_text_metrics measure_slice(lens *ui, const char *text, size_t len, f
 /* Pick the next visual line in [start, len). Whole words are preferred; a
  * token wider than max_width is split at the nearest UTF-8 cluster boundary
  * reported by flux-text so URLs and identifiers cannot escape the box. */
-static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t start,
-                               float size, float max_width, size_t *next) {
+static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t start, float size,
+                               float max_width, size_t *next) {
     size_t segment_end = start;
     while (segment_end < len && text[segment_end] != '\n')
         segment_end++;
@@ -61,9 +58,8 @@ static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t st
 
     const char *segment = text + start;
     size_t segment_len = segment_end - start;
-    const flux_text_style style = {.size_px = size,
-                                   .weight = 0.0f,
-                                   .family = (flux_text_family)ui->text_family};
+    const flux_text_style style = {
+        .size_px = size, .weight = 0.0f, .family = (flux_text_family)ui->text_family};
     size_t cut = flux_text_byte_for_x(ui->text, segment, segment_len, max_width, &style);
     if (cut > segment_len)
         cut = segment_len;
@@ -155,8 +151,8 @@ static void label_wrapped(lens *ui, const char *text, float size, float max_widt
 
     lens_text_metrics intrinsic = lensi_text_measure_label(ui, text, size, 0.0f);
     float requested_width = max_width > 0.0f ? max_width : intrinsic.width + 2.0f * padding;
-    float w = n->fixed_w > 0.0f ? n->fixed_w
-                                : fminf(intrinsic.width + 2.0f * padding, requested_width);
+    float w =
+        n->fixed_w > 0.0f ? n->fixed_w : fminf(intrinsic.width + 2.0f * padding, requested_width);
     float content_width = fmaxf(w - 2.0f * padding, 1.0f);
     flux_text_metrics line_metrics = measure_slice(ui, "Ag", 2, size);
     float line_height = line_metrics.height > 0.0f ? line_metrics.height : size;

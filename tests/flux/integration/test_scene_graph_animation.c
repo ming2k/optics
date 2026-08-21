@@ -39,8 +39,8 @@ static test_glb make_glb(const char *json, const void *bin, size_t bin_size) {
     if (!bytes)
         return (test_glb){0};
 
-    put_u32_le(bytes, 0x46546c67u);      /* glTF */
-    put_u32_le(bytes + 4u, 2u);          /* GLB 2 */
+    put_u32_le(bytes, 0x46546c67u); /* glTF */
+    put_u32_le(bytes + 4u, 2u);     /* GLB 2 */
     put_u32_le(bytes + 8u, (uint32_t)total);
     put_u32_le(bytes + 12u, (uint32_t)json_padded);
     put_u32_le(bytes + 16u, 0x4e4f534au); /* JSON */
@@ -110,10 +110,8 @@ static test_glb make_animation(void) {
         "}]}";
     /* times; hips translations; head quaternions (identity -> +90 deg Z). */
     static const float samples[16] = {
-        0.0f, 1.0f,
-        0.0f, 1.0f, 0.0f, 0.0f, 2.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-        0.0f, 0.0f, 0.70710678f, 0.70710678f,
+        0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f, 2.0f,        0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.70710678f, 0.70710678f,
     };
     return make_glb(json, samples, sizeof(samples));
 }
@@ -137,8 +135,7 @@ int main(void) {
     }
 
     flux_sg_scene *scene = NULL;
-    flux_result load_result =
-        flux_sg_load_glb(device, target_glb.bytes, target_glb.size, &scene);
+    flux_result load_result = flux_sg_load_glb(device, target_glb.bytes, target_glb.size, &scene);
     if (load_result != FLUX_OK)
         fprintf(stderr, "target GLB load failed: %s\n", flux_result_string(load_result));
     EXPECT(load_result == FLUX_OK);
@@ -156,8 +153,7 @@ int main(void) {
         /* The scene retains both table and fallback references. */
         flux_material_release(material);
         EXPECT(flux_sg_scene_set_materials(scene, NULL, 0, NULL) == FLUX_OK);
-        EXPECT(flux_sg_scene_set_materials(NULL, NULL, 0, NULL) ==
-               FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_sg_scene_set_materials(NULL, NULL, 0, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
     }
     flux_sg_animation *animation = NULL;
     if (scene)

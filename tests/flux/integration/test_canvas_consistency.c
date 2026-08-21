@@ -16,10 +16,10 @@
  *   - the mean absolute channel difference over the frame stays small;
  *   - only a small fraction of pixels may show large (edge) deviation.
  */
-#include <flux/flux.h>
-#include <flux/canvas_cpu.h>
-#include <flux/vulkan.h>
 #include "test_helpers.h"
+#include <flux/canvas_cpu.h>
+#include <flux/flux.h>
+#include <flux/vulkan.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -59,8 +59,8 @@ static void draw_scene(flux_canvas *canvas, flux_arena *arena) {
 
     /* Checkerboard strip of solid rects (vertex-colour batching path). */
     for (uint32_t i = 0; i < 16; ++i) {
-        flux_color c = (i & 1u) ? flux_color_rgba(20, 20, 30, 255)
-                                : flux_color_rgba(200, 200, 210, 255);
+        flux_color c =
+            (i & 1u) ? flux_color_rgba(20, 20, 30, 255) : flux_color_rgba(200, 200, 210, 255);
         flux_canvas_fill_rect_color(canvas, (flux_rect){(float)(i * 8), 52, 8, 8}, c);
     }
 

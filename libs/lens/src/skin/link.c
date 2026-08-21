@@ -12,8 +12,8 @@ void lensi_skin_link(lens *ui, lens_node *n, const lens_widget_record *rec) {
     float tm_h = rec->content.text.height;
 
     float text_y = fmaxf((h - tm_h) * 0.5f - 1.0f, 0.0f);
-    flux_color fg = disabled ? rs->disabled
-                             : lensi_lerp_color(rs->fg, rs->accent, rec->hover_t * 0.35f);
+    flux_color fg =
+        disabled ? rs->disabled : lensi_lerp_color(rs->fg, rs->accent, rec->hover_t * 0.35f);
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
                                         .rel = {0.0f, text_y, 0.0f, 0.0f},
@@ -27,11 +27,12 @@ void lensi_skin_link(lens *ui, lens_node *n, const lens_widget_record *rec) {
          * with the hover float — hover feedback is colour/alpha only; width
          * growth was the last eased-geometry signature in the default skins. */
         float underline_y = fminf(text_y + tm_h + 2.0f, h - 1.5f);
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {0.0f, underline_y, rec->content.text.width, 1.5f},
-                                            .color = lensi_color_alpha(rs->accent,
-                                                                       (uint8_t)(255.0f * rec->hover_t)),
-                                            .radius = 0.75f});
+        lensi_drawlist_push(
+            ui, n,
+            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                            .rel = {0.0f, underline_y, rec->content.text.width, 1.5f},
+                            .color =
+                                lensi_color_alpha(rs->accent, (uint8_t)(255.0f * rec->hover_t)),
+                            .radius = 0.75f});
     }
 }

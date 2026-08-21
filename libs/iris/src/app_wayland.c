@@ -80,9 +80,9 @@ typedef struct wp_accum {
 /* The staging buffers feed lens_input by whole-buffer memcpy in
  * drain_input; pin the sizes so a lens-side change fails at compile time
  * instead of over-reading the accumulator. */
-static_assert(sizeof ((wp_accum *)0)->text == sizeof ((lens_input *)0)->text_utf8,
+static_assert(sizeof((wp_accum *)0)->text == sizeof((lens_input *)0)->text_utf8,
               "wp_accum.text must match lens_input.text_utf8");
-static_assert(sizeof ((wp_accum *)0)->preedit == sizeof ((lens_input *)0)->preedit_utf8,
+static_assert(sizeof((wp_accum *)0)->preedit == sizeof((lens_input *)0)->preedit_utf8,
               "wp_accum.preedit must match lens_input.preedit_utf8");
 
 /* ------------------------------------------------------------------ */
@@ -177,8 +177,8 @@ typedef struct wp_platform {
     struct wp_cursor_shape_device_v1 *cursor_shape_device;
     iris_cursor host_cursor;      /* last explicit iris_set_cursor (DEFAULT = none) */
     iris_cursor effective_cursor; /* what the compositor is asked to show       */
-    uint32_t cursor_serial; /* most recent enter/motion serial */
-    bool cursor_inside;     /* pointer currently inside our surface */
+    uint32_t cursor_serial;       /* most recent enter/motion serial */
+    bool cursor_inside;           /* pointer currently inside our surface */
     struct xkb_context *xkb_ctx;
     struct xkb_keymap *xkb_keymap;
     struct xkb_state *xkb_state;
@@ -247,10 +247,10 @@ typedef struct wp_platform {
     int min_w, min_h;         /* size hints last sent to the compositor */
     int max_w, max_h;         /* 0 = no limit                            */
     bool running;
-    bool resized; /* size or scale changed -> resize swap  */
+    bool resized;                   /* size or scale changed -> resize swap  */
     bool animation_frame_requested; /* host asked for active-rate follow-up */
     bool paint_static;              /* host declared this frame's canvas content static */
-    lens *ui;     /* so output/scale callbacks can update  */
+    lens *ui;                       /* so output/scale callbacks can update  */
 
     /* Live colour-scheme watching + AT-SPI bridge: optional, fail-soft. */
     bool theme_watching;
@@ -712,8 +712,8 @@ static void touch_up(void *data, struct wl_touch *t, uint32_t serial, uint32_t t
         }
     }
 }
-static void touch_motion(void *data, struct wl_touch *t, uint32_t time, int32_t id,
-                         wl_fixed_t x, wl_fixed_t y) {
+static void touch_motion(void *data, struct wl_touch *t, uint32_t time, int32_t id, wl_fixed_t x,
+                         wl_fixed_t y) {
     (void)t;
     (void)time;
     wp_platform *pl = data;
@@ -737,8 +737,7 @@ static void touch_cancel(void *d, struct wl_touch *t) {
     }
     g_touch_active_id = -1;
 }
-static void touch_shape(void *d, struct wl_touch *t, int32_t id, wl_fixed_t maj,
-                        wl_fixed_t min) {
+static void touch_shape(void *d, struct wl_touch *t, int32_t id, wl_fixed_t maj, wl_fixed_t min) {
     (void)d;
     (void)t;
     (void)id;
@@ -1014,8 +1013,7 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
         /* Boundary-aware append: an over-long commit is clipped on a
          * code-point boundary instead of being dropped wholesale (old
          * behaviour) or split mid-sequence. */
-        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, pl->ime.commit,
-                         strlen(pl->ime.commit));
+        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, pl->ime.commit, strlen(pl->ime.commit));
         pl->ime.commit[0] = '\0';
     }
 
@@ -1082,8 +1080,7 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
     xkb_layout_index_t layout = xkb_state_key_get_layout(pl->xkb_state, code);
     const xkb_keysym_t *level0 = NULL;
     int n_level0 = xkb_keymap_key_get_syms_by_level(pl->xkb_keymap, code, layout, 0, &level0);
-    xkb_keysym_t sym = (n_level0 > 0) ? level0[0]
-                                      : xkb_state_key_get_one_sym(pl->xkb_state, code);
+    xkb_keysym_t sym = (n_level0 > 0) ? level0[0] : xkb_state_key_get_one_sym(pl->xkb_state, code);
 
     int fk = 0;
     if (pl->acc.key_count < LENS_INPUT_MAX_KEYS) {
@@ -1275,9 +1272,8 @@ static void ddev_data_offer(void *data, struct wl_data_device *dev, struct wl_da
      * enter referenced it) is ours to destroy, or it leaks. */
     if (pl->pending_offer_mimes.offer && pl->pending_offer_mimes.offer != offer)
         wl_data_offer_destroy(pl->pending_offer_mimes.offer);
-    pl->pending_offer_mimes =
-        (struct wp_offer_mimes){.offer = offer, .uri_list = false, .text_utf8 = false,
-                                .text_plain = false};
+    pl->pending_offer_mimes = (struct wp_offer_mimes){
+        .offer = offer, .uri_list = false, .text_utf8 = false, .text_plain = false};
     wl_data_offer_add_listener(offer, &data_offer_listener, pl);
 }
 static void ddev_selection(void *data, struct wl_data_device *dev, struct wl_data_offer *offer) {
@@ -1616,8 +1612,7 @@ static struct wp_offer_mimes *primsel_mime_slot(wp_platform *pl,
     return NULL;
 }
 
-static void poffer_offer(void *data, struct zwp_primary_selection_offer_v1 *off,
-                         const char *mime) {
+static void poffer_offer(void *data, struct zwp_primary_selection_offer_v1 *off, const char *mime) {
     wp_platform *pl = data;
     struct wp_offer_mimes *slot = primsel_mime_slot(pl, off);
     if (!slot)
@@ -1641,8 +1636,7 @@ static void pdev_data_offer(void *data, struct zwp_primary_selection_device_v1 *
         (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer != offer)
         zwp_primary_selection_offer_v1_destroy(
             (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer);
-    pl->primsel_pending_mimes = (struct wp_offer_mimes){
-        .offer = (struct wl_data_offer *)offer};
+    pl->primsel_pending_mimes = (struct wp_offer_mimes){.offer = (struct wl_data_offer *)offer};
     zwp_primary_selection_offer_v1_add_listener(offer, &primary_offer_listener, pl);
 }
 static void pdev_selection(void *data, struct zwp_primary_selection_device_v1 *dev,
@@ -1653,8 +1647,8 @@ static void pdev_selection(void *data, struct zwp_primary_selection_device_v1 *d
         zwp_primary_selection_offer_v1_destroy(pl->primsel_offer);
     pl->primsel_offer = offer; /* may be NULL when the selection is cleared */
     pl->primsel_offer_mimes = (struct wp_offer_mimes){.offer = (struct wl_data_offer *)offer};
-    if (offer && (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer ==
-                     offer) {
+    if (offer &&
+        (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer == offer) {
         pl->primsel_offer_mimes = pl->primsel_pending_mimes;
         pl->primsel_pending_mimes = (struct wp_offer_mimes){0};
     }
@@ -1666,8 +1660,8 @@ static const struct zwp_primary_selection_device_v1_listener primary_device_list
 
 /* Our outgoing primary selection: serves the same buffer as the clipboard
  * source (clip_set_text mirrors every copy onto both). */
-static void psource_send(void *data, struct zwp_primary_selection_source_v1 *src,
-                         const char *mime, int32_t fd) {
+static void psource_send(void *data, struct zwp_primary_selection_source_v1 *src, const char *mime,
+                         int32_t fd) {
     wp_platform *pl = data;
     (void)src;
     (void)mime;
@@ -1698,8 +1692,7 @@ static void wp_maybe_create_primsel_device(wp_platform *pl) {
         return;
     pl->primsel_device =
         zwp_primary_selection_device_manager_v1_get_device(pl->primsel_mgr, pl->seat);
-    zwp_primary_selection_device_v1_add_listener(pl->primsel_device, &primary_device_listener,
-                                                 pl);
+    zwp_primary_selection_device_v1_add_listener(pl->primsel_device, &primary_device_listener, pl);
 }
 
 /* Middle-click paste: request the primary selection's text and deliver it
@@ -1752,10 +1745,9 @@ static void clip_set_text(const char *utf8, size_t len, void *user) {
     wl_data_device_set_selection(pl->data_device, pl->copy_source, pl->last_serial);
 
     if (pl->primsel_mgr && pl->primsel_device) {
-        pl->primsel_source =
-            zwp_primary_selection_device_manager_v1_create_source(pl->primsel_mgr);
-        zwp_primary_selection_source_v1_add_listener(pl->primsel_source,
-                                                     &primary_source_listener, pl);
+        pl->primsel_source = zwp_primary_selection_device_manager_v1_create_source(pl->primsel_mgr);
+        zwp_primary_selection_source_v1_add_listener(pl->primsel_source, &primary_source_listener,
+                                                     pl);
         zwp_primary_selection_source_v1_offer(pl->primsel_source, "text/plain;charset=utf-8");
         zwp_primary_selection_source_v1_offer(pl->primsel_source, "text/plain");
         zwp_primary_selection_device_v1_set_selection(pl->primsel_device, pl->primsel_source,
@@ -2366,8 +2358,8 @@ static void log_raw(const lens_input *in) {
     if (in->scroll_x != 0.0f || in->scroll_y != 0.0f)
         fprintf(stderr, "[raw] scroll dx=%.2f dy=%.2f\n", in->scroll_x, in->scroll_y);
     for (uint32_t k = 0; k < in->key_count; k++)
-        fprintf(stderr, "[raw] key %d %s%s\n", in->keys[k].key, in->keys[k].pressed ? "down" : "up  ",
-                in->keys[k].repeat ? " (repeat)" : "");
+        fprintf(stderr, "[raw] key %d %s%s\n", in->keys[k].key,
+                in->keys[k].pressed ? "down" : "up  ", in->keys[k].repeat ? " (repeat)" : "");
 }
 
 /* ------------------------------------------------------------------ */
@@ -2551,11 +2543,11 @@ static void im_frame_update(wp_platform *pl) {
     if (want != pl->im_active) {
         if (want) {
             zwp_text_input_v3_enable(pl->text_input);
-            zwp_text_input_v3_set_content_type(
-                pl->text_input,
-                ctx.multiline ? ZWP_TEXT_INPUT_V3_CONTENT_HINT_MULTILINE
-                              : ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
-                ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
+            zwp_text_input_v3_set_content_type(pl->text_input,
+                                               ctx.multiline
+                                                   ? ZWP_TEXT_INPUT_V3_CONTENT_HINT_MULTILINE
+                                                   : ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
+                                               ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
             im_report_surrounding(pl, &ctx); /* fresh session: always reports */
             zwp_text_input_v3_commit(pl->text_input);
             pl->im_active = true;
@@ -2649,11 +2641,10 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     if (!locale || !locale[0])
         locale = setlocale(LC_CTYPE, NULL);
     if (locale && locale[0]) {
-        pl.compose_table = xkb_compose_table_new_from_locale(pl.xkb_ctx, locale,
-                                                             XKB_COMPOSE_COMPILE_NO_FLAGS);
+        pl.compose_table =
+            xkb_compose_table_new_from_locale(pl.xkb_ctx, locale, XKB_COMPOSE_COMPILE_NO_FLAGS);
         if (pl.compose_table)
-            pl.compose_state =
-                xkb_compose_state_new(pl.compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
+            pl.compose_state = xkb_compose_state_new(pl.compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
     }
 
     /* Key-repeat timer: armed per held key from the compositor's
@@ -2701,8 +2692,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     pl.toplevel = xdg_surface_get_toplevel(pl.xdg_surface);
     xdg_toplevel_add_listener(pl.toplevel, &toplevel_listener, &pl);
     xdg_toplevel_set_title(pl.toplevel, cfg->title ? cfg->title : "iris");
-    xdg_toplevel_set_app_id(pl.toplevel,
-                            cfg->app_id ? cfg->app_id : "ai.opencode.iris");
+    xdg_toplevel_set_app_id(pl.toplevel, cfg->app_id ? cfg->app_id : "ai.opencode.iris");
 
     /* Bind a fractional-scale object if the compositor exposes the global;
      * it carries the precise 1/120-step scale used on HiDPI mixed-DPI
@@ -2711,8 +2701,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         pl.fractional_scale_obj = wp_fractional_scale_manager_v1_get_fractional_scale(
             pl.fractional_scale_mgr, pl.surface);
         if (pl.fractional_scale_obj)
-            wp_fractional_scale_v1_add_listener(pl.fractional_scale_obj,
-                                                &fractional_scale_listener, &pl);
+            wp_fractional_scale_v1_add_listener(pl.fractional_scale_obj, &fractional_scale_listener,
+                                                &pl);
     }
 
     /* Ask the compositor for a server-side title bar when it can. */
@@ -2918,9 +2908,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         t = now_ns();
         bool host_animating = pl.animation_frame_requested;
         pl.animation_frame_requested = false;
-        long long period = (t - last_input_ns < INPUT_GRACE_NS || host_animating)
-                               ? ACTIVE_PERIOD_NS
-                               : IDLE_PERIOD_NS;
+        long long period = (t - last_input_ns < INPUT_GRACE_NS || host_animating) ? ACTIVE_PERIOD_NS
+                                                                                  : IDLE_PERIOD_NS;
         next_deadline = t + period;
         frame_scheduled = true;
         /* last_render_ns anchors the "earliest active frame after input"
@@ -3013,9 +3002,9 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         bool host_canvas_static = cfg->paint != NULL && pl.paint_static && !host_animating &&
                                   !resized_this_frame && !surface_needs_paint && !chrome_damaged;
         pl.paint_static = false;
-        bool must_paint = !host_canvas_static &&
-                          (cfg->paint != NULL || chrome_damaged || host_animating ||
-                           resized_this_frame || surface_needs_paint);
+        bool must_paint =
+            !host_canvas_static && (cfg->paint != NULL || chrome_damaged || host_animating ||
+                                    resized_this_frame || surface_needs_paint);
         if (must_paint) {
             surface_needs_paint = true;
             flux_frame *frame = NULL;
@@ -3104,6 +3093,13 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             frame_scheduled = true;
         } else {
             frame_scheduled = false;
+            /* Fully idle (no caret, no animation, no scheduled paint):
+             * the text engine's high-water scratch from any earlier
+             * one-off huge paste can go home (ADR-0072 item 5). Cheap
+             * and null-safe; the next shape reallocates what it needs.
+             * Skipped on the caret tick so an active text field never
+             * pays a re-shape of its own content. */
+            lens_text_compact(ui);
         }
     }
 

@@ -28,7 +28,7 @@
 /* Shader bytecode: C23 #embed, or generated headers (tools/spv2h.py)
  * where the compiler lacks it — see renderer.c for the full rationale. */
 #if defined(__has_embed) && !defined(FLUX_SHADER_NO_EMBED)
-#if __has_embed("effect_blur.comp.spv") && __has_embed("effect_backdrop.comp.spv") &&            \
+#if __has_embed("effect_blur.comp.spv") && __has_embed("effect_backdrop.comp.spv") &&              \
     __has_embed("effect_blur_16f.comp.spv") && __has_embed("effect_backdrop_16f.comp.spv")
 #define FLUX_EFFECT_SHADERS_EMBED 1
 #endif
@@ -156,7 +156,7 @@ typedef struct effect_state {
      * advertises rgba16f storage). Lazily built; shared across calls. */
     flux_compute_pipeline *blur_pipelines[2];
     flux_compute_pipeline *backdrop_pipelines[2]; /* fixed-cost live-compositor filter */
-    bool storage_16f_supported; /* VK_FORMAT_R16G16B16A16_SFLOAT STORAGE_IMAGE */
+    bool storage_16f_supported;                   /* VK_FORMAT_R16G16B16A16_SFLOAT STORAGE_IMAGE */
     intermediate_entry *intermediates;
     output_entry *outputs;
     uint64_t pool_serial;
@@ -231,8 +231,8 @@ static effect_state *effect_state_get_or_init(flux_device *d) {
      * the format features"). */
     {
         VkFormatProperties props;
-        vkGetPhysicalDeviceFormatProperties(d->physical_device,
-                                            VK_FORMAT_R16G16B16A16_SFLOAT, &props);
+        vkGetPhysicalDeviceFormatProperties(d->physical_device, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                            &props);
         candidate->storage_16f_supported =
             (props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
     }
@@ -391,10 +391,9 @@ static flux_result ensure_pipeline(flux_device *d, flux_compute_pipeline **slot,
 }
 
 static flux_result ensure_blur_pipeline(flux_device *d, effect_state *st, bool is16f) {
-    return ensure_pipeline(d, &st->blur_pipelines[is16f ? 1 : 0],
-                           is16f ? effect_blur_16f_spv : effect_blur_spv,
-                           is16f ? sizeof(effect_blur_16f_spv) : sizeof(effect_blur_spv),
-                           sizeof(effect_blur_push));
+    return ensure_pipeline(
+        d, &st->blur_pipelines[is16f ? 1 : 0], is16f ? effect_blur_16f_spv : effect_blur_spv,
+        is16f ? sizeof(effect_blur_16f_spv) : sizeof(effect_blur_spv), sizeof(effect_blur_push));
 }
 
 static flux_result ensure_backdrop_pipeline(flux_device *d, effect_state *st, bool is16f) {
@@ -408,8 +407,8 @@ static flux_result ensure_backdrop_pipeline(flux_device *d, effect_state *st, bo
  * SDR content keeps the historic RGBA8 path; 16F working-space content
  * stays 16F so blurring runs in linear light — when the device
  * advertises rgba16f storage. */
-static flux_result effect_resolve_storage(effect_state *st, const flux_image *in,
-                                          flux_format *out, bool *out_16f) {
+static flux_result effect_resolve_storage(effect_state *st, const flux_image *in, flux_format *out,
+                                          bool *out_16f) {
     if (in->format == FLUX_FORMAT_RGBA8_UNORM || in->format == FLUX_FORMAT_BGRA8_UNORM) {
         *out = FLUX_FORMAT_RGBA8_UNORM;
         *out_16f = false;

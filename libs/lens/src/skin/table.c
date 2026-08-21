@@ -36,14 +36,15 @@ void lensi_skin_table(lens *ui, lens_node *n, const lens_widget_record *rec) {
             const lens_grid_column *col = &c->columns[i];
             if (!col->title)
                 continue;
-            lensi_drawlist_push(ui, n,
-                                (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                                .rel = {col->x + padding,
-                                                        (c->header_height - font_size) * 0.5f, 0, 0},
-                                                .color = rs->fg,
-                                                .text = col->title,
-                                                .text_size = font_size,
-                                                .text_weight = t->font_weight_bold});
+            lensi_drawlist_push(
+                ui, n,
+                (lens_draw_cmd){
+                    .kind = LENS_DRAW_TEXT,
+                    .rel = {col->x + padding, (c->header_height - font_size) * 0.5f, 0, 0},
+                    .color = rs->fg,
+                    .text = col->title,
+                    .text_size = font_size,
+                    .text_weight = t->font_weight_bold});
         }
     }
 
@@ -91,36 +92,36 @@ void lensi_skin_table(lens *ui, lens_node *n, const lens_widget_record *rec) {
             /* Clip each cell independently. Without this, a long title can
              * paint through artist/album/duration columns even though the
              * table itself is clipped to the viewport. */
-            lensi_drawlist_push(ui, n,
-                                (lens_draw_cmd){.kind = LENS_DRAW_CLIP_PUSH,
-                                                .rel = {c->columns[i].x, row->y, c->columns[i].w,
-                                                        c->row_height}});
+            lensi_drawlist_push(
+                ui, n,
+                (lens_draw_cmd){.kind = LENS_DRAW_CLIP_PUSH,
+                                .rel = {c->columns[i].x, row->y, c->columns[i].w, c->row_height}});
             if (has_icon) {
                 float icon_size = font_size;
-                lensi_drawlist_push(ui, n,
-                                    (lens_draw_cmd){
-                                        .kind = LENS_DRAW_ICON,
-                                        .rel = {row->cell_x[i] - icon_size - 8.0f,
-                                                row->y + (c->row_height - icon_size) * 0.5f,
-                                                icon_size, icon_size},
-                                        .color = sel ? rs->accent : rs->fg,
-                                        .width = 2.0f * (icon_size / 24.0f),
-                                        .icon_id = row->icons[i]});
+                lensi_drawlist_push(
+                    ui, n,
+                    (lens_draw_cmd){.kind = LENS_DRAW_ICON,
+                                    .rel = {row->cell_x[i] - icon_size - 8.0f,
+                                            row->y + (c->row_height - icon_size) * 0.5f, icon_size,
+                                            icon_size},
+                                    .color = sel ? rs->accent : rs->fg,
+                                    .width = 2.0f * (icon_size / 24.0f),
+                                    .icon_id = row->icons[i]});
             }
             if (has_txt) {
                 lensi_drawlist_push(
                     ui, n,
-                    (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                    .rel = {row->cell_x[i],
-                                            row->y + (c->row_height - font_size) * 0.5f, 0, 0},
-                                    .color = sel ? rs->accent : rs->fg,
-                                    .text = txt,
-                                    .text_size = font_size});
+                    (lens_draw_cmd){
+                        .kind = LENS_DRAW_TEXT,
+                        .rel = {row->cell_x[i], row->y + (c->row_height - font_size) * 0.5f, 0, 0},
+                        .color = sel ? rs->accent : rs->fg,
+                        .text = txt,
+                        .text_size = font_size});
             }
-            lensi_drawlist_push(ui, n,
-                                (lens_draw_cmd){.kind = LENS_DRAW_CLIP_POP,
-                                                .rel = {c->columns[i].x, row->y, c->columns[i].w,
-                                                        c->row_height}});
+            lensi_drawlist_push(
+                ui, n,
+                (lens_draw_cmd){.kind = LENS_DRAW_CLIP_POP,
+                                .rel = {c->columns[i].x, row->y, c->columns[i].w, c->row_height}});
         }
     }
 

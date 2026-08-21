@@ -8,10 +8,10 @@
  * test skips (no ink drawn) rather than failing.
  */
 #include "test_helpers.h"
+#include <flux-text/text.h>
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <flux/math.h>
-#include <flux-text/text.h>
 
 int main(void) {
     const uint32_t W = 128, H = 64;

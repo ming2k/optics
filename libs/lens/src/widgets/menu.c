@@ -58,8 +58,7 @@ static lens_node *menu_sibling(lens_node *n, bool forward) {
         return NULL;
     }
     lens_node *prev = NULL;
-    for (lens_node *c = n->parent ? n->parent->first_child : NULL; c && c != n;
-         c = c->next_sibling)
+    for (lens_node *c = n->parent ? n->parent->first_child : NULL; c && c != n; c = c->next_sibling)
         if (c->semantics.role != LENS_ROLE_NONE)
             prev = c;
     return prev;
@@ -125,8 +124,7 @@ bool lens_menu_item_flags(lens *ui, const char *label, const char *shortcut, uin
     lens_style eff = lensi_style_effective(ui);
     float font_size = lensi_style_font_size(&eff, t);
     float padding = lensi_style_padding(&eff, t);
-    lens_style_resolved rs = lensi_style_resolve(&eff, t,
-        disabled ? LENS_STATE_DISABLED : 0);
+    lens_style_resolved rs = lensi_style_resolve(&eff, t, disabled ? LENS_STATE_DISABLED : 0);
 
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
@@ -306,21 +304,19 @@ bool lens_menu_begin(lens *ui, const char *label) {
     n->hover_t = lensi_approach(ui, n->hover_t, (open || r.hovered) ? 1.f : 0.f, dt, 15.f);
 
     /* emit — through the replaceable skin (ADR-0059) */
-    lensi_skin_emit(ui, n,
-                    &(lens_widget_record){
-                        .kind = LENS_WIDGET_MENU_ITEM,
-                        .state = r.state,
-                        .bounds = {0, 0, w, h},
-                        .last_bounds = n->prev_rect,
-                        .style = rs,
-                        .style_fields = eff.fields,
-                        .hover_t = n->hover_t,
-                        .active_t = n->active_t,
-                        .content = {.label = label,
-                                    .text = tm,
-                                    .menu_trigger = true,
-                                    .popup_open = open},
-                    });
+    lensi_skin_emit(
+        ui, n,
+        &(lens_widget_record){
+            .kind = LENS_WIDGET_MENU_ITEM,
+            .state = r.state,
+            .bounds = {0, 0, w, h},
+            .last_bounds = n->prev_rect,
+            .style = rs,
+            .style_fields = eff.fields,
+            .hover_t = n->hover_t,
+            .active_t = n->active_t,
+            .content = {.label = label, .text = tm, .menu_trigger = true, .popup_open = open},
+        });
 
     ui->last_response = r;
 

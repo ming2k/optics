@@ -45,8 +45,8 @@ or report through `flux_get_last_error` as noted.
 | `flux_device_memory_budget` | Fills a `flux_memory_budget` snapshot per heap. `has_budget_extension` reports whether `VK_EXT_memory_budget` data is live or totals are estimates. |
 | `flux_device_memory_stats` | Fills a `flux_memory_stats` snapshot of the GPU allocator: bytes in use vs reserved, live allocation/block counts, lost ranges. dma-buf imports/exports are included. Counters return to zero once all resources are released and the retire queue has drained. |
 | `flux_device_log` | Forwards a message to the device's `flux_log_fn`; `category` is a short filter tag. Sibling libraries (flux-text, …) use this instead of dereferencing the desc logger. |
-| `flux_uploads_begin` | Opens a batched-upload window: subsequent uploads from `flux_image_create`, `flux_image_update_region`, `flux_mesh_create`, `flux_buffer_create` (with `initial_data`) and layout transitions accumulate into one submission. Nested begin returns `FLUX_ERROR_INVALID_STATE`. |
-| `flux_uploads_flush` | Submits the open batch once and waits for completion; resources created in the batch are usable on return. No-op when no batch is open. `flux_surface_begin_frame` flushes automatically. |
+| `flux_uploads_begin` | Opens a batched-upload window: subsequent uploads from `flux_image_create`, `flux_image_update_region`, `flux_mesh_create`, `flux_buffer_create` (with `initial_data`) and layout transitions accumulate into one submission. Nesting is allowed and reference-counted: a nested `begin` bumps the batch depth and returns `FLUX_OK`; only the outermost `flush` submits (the inner scope's uploads are already recorded in the same batch). A `flush` with no batch open is a harmless no-op. |
+| `flux_uploads_flush` | Submits the open batch once and returns **without waiting** for the GPU (ADR-0022): resources created in the batch are safe to sample as soon as their creating call returns, because every later submission on the same queue is ordered after the copies. Non-frame consumers (compute dispatch, readback) must flush explicitly before assuming the copies are visible. No-op when no batch is open; `flux_surface_begin_frame` flushes automatically before recording. |
 
 ### Buffer
 
@@ -96,9 +96,9 @@ or report through `flux_get_last_error` as noted.
 | `flux_surface_create` | Wraps a caller-created `VkSurfaceKHR` in a swapchain with per-frame sync objects. `hdr_preferred` requests an HDR format when available; `vsync` selects FIFO over MAILBOX/IMMEDIATE. A `NULL` `vk_surface_khr` creates an **offscreen** surface instead (ADR-0013): flux-owned colour images at `width` × `height` (both required non-zero; BGRA8 by default, deep-color/HDR containers via the color-space/format extensions), no window or swapchain, same frame loop. |
 | `flux_surface_retain` | Increments the refcount; returns the same handle. |
 | `flux_surface_release` | Decrements the refcount; destroys at zero. Null-safe. |
-| `flux_surface_resize` | Stalls the device and rebuilds the swapchain (or offscreen images) at the new extent. In-flight `flux_frame` handles from this surface become invalid; an offscreen surface's prior contents are dropped. Returns `FLUX_ERROR_INVALID_ARGUMENT` when either dimension is 0. |
+| `flux_surface_resize` | Rebuilds the swapchain (or offscreen images) at the new extent behind a queue/slot-scoped quiesce — not a device-wide stall (ADR-0021); the transfer queue and unrelated work keep running. In-flight `flux_frame` handles from this surface become invalid; an offscreen surface's prior contents are dropped. Returns `FLUX_ERROR_INVALID_ARGUMENT` when either dimension is 0. |
 | `flux_surface_get_info` | Fills a `flux_surface_info` (current extent, image count, whether the surface is actually HDR, the negotiated `color_space`/`content_space`, and the pixel `format` — the DRM-fourcc key for dma-buf export). |
-| `flux_surface_read_pixels` | Offscreen surfaces only: waits for the most recently submitted frame and copies it into `dst` as tightly packed RGBA8 (`width * height * 4` bytes minimum). Returns `FLUX_ERROR_UNSUPPORTED` on a windowed surface and `FLUX_ERROR_INVALID_STATE` before the first submitted frame. |
+| `flux_surface_read_pixels` | Waits for the most recently submitted frame and copies it into `dst` as tightly packed RGBA8 (`width * height * 4` bytes minimum). Offscreen surfaces always support it; a **windowed** surface supports it once a persistent readback staging image has been prepared via `flux_surface_prepare_readback`, and returns `FLUX_ERROR_UNSUPPORTED` without one. Returns `FLUX_ERROR_INVALID_STATE` before the first submitted frame. |
 | `flux_surface_exportable` | Reports whether an offscreen surface was created dma-buf-exportable (device had the external-memory extensions and a suitable DRM modifier was found). |
 | `flux_surface_export_dmabuf` | Offscreen exportable surfaces: exports the most recently submitted frame's image as a caller-owned dma-buf fd (zero-copy; waits for the frame's GPU work first). `FLUX_ERROR_UNSUPPORTED` on windowed/non-exportable surfaces, `FLUX_ERROR_INVALID_STATE` before the first submit. |
 | `flux_surface_export_dmabuf_explicit` | Like `flux_surface_export_dmabuf` but also exports a sync fd for explicit acquire synchronisation (no CPU-side GPU wait). Requires `VK_KHR_external_semaphore_fd`; once per submitted slot. |
@@ -466,3 +466,55 @@ transient-output lifetime rules.
 | `flux_blur_filter_apply` | Records two downsample and two upsample passes using the current frame slot, suitable for animated compositors without sigma-dependent loops, pool growth, or device-wide waits. |
 | `flux_effect_promote` | Synchronously copies a transient effect output into a fresh caller-owned `flux_image` with the regular refcounted lifecycle. |
 | `flux_effect_reset` | Ends an effect lease epoch after every command buffer referencing its images has completed; old output pointers become invalid. |
+
+## `<flux/canvas.h>` — batching, display lists (additions)
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_canvas_submit_calls` | Diagnostics: canvas submits this frame (host call count). |
+| `flux_canvas_recorded_draws` | Diagnostics: `vkCmdDraw` commands recorded this frame after consecutive-compatible merging; always `<= submit_calls`. A widening gap means the merge is paying off. |
+| `flux_canvas_begin_record` / `flux_canvas_end_record` | Capture the canvas's emission between the two calls into a replayable display-list segment. Returns a `flux_canvas_record` handle. |
+| `flux_canvas_replay` | Re-emits a recorded segment without re-tessellating. Recorded segments hold their own image retains, so old atlas UVs stay self-consistent until every referencing batch retires. |
+| `flux_canvas_record_release` | Drops a record handle (the segment pool reclaims it under its LRU byte budget). |
+| `flux_canvas_begin_pass` / `flux_canvas_begin_target_pass` | Descriptor-form pass entry: attach depth/stencil or render to an offscreen `flux_target` without the legacy surface-bound spelling. |
+| `flux_canvas_end_checked` / `flux_canvas_end_frame_checked` / `flux_canvas_end_target_checked` | Same as the plain `end*` calls but return a `flux_result` instead of logging and continuing — for hosts that surface errors programmatically. |
+
+## `<flux/core.h>` — readback family (additions)
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_frame_request_readback` / `flux_frame_request_readback_region` | Schedules a copy of the current pass's colour attachment (or a sub-region) into the surface's persistent staging image at end of frame. |
+| `flux_surface_prepare_readback` / `flux_surface_prepare_readback_region` | Allocates the persistent staging image that makes `flux_surface_read_pixels` work on a **windowed** surface (offscreen surfaces have one implicitly). |
+| `flux_surface_read_pixels_ready` | Non-blocking readiness probe for the staged readback. |
+| `flux_surface_take_readback` | Moves the staged readback out as an owned `flux_readback` handle. |
+| `flux_readback_read_pixels` / `flux_readback_read_region` / `flux_readback_release` | Read (a region of) an owned readback into host memory; release frees the staging slot. |
+| `flux_frame_get_state` / `flux_frame_has_active_pass` / `flux_frame_device` | Frame introspection for hosts that pass frames through abstraction boundaries. |
+| `FLUX_MAX_FRAMES_IN_FLIGHT` | Frames a surface overlaps before `begin_frame` waits (3). Bounds per-frame transient ring slots and retire-queue dwell. |
+
+## `<flux-text/text.h>` (sibling library)
+
+The text engine ships as its own sibling library (`-Dtext=true`). It owns
+FreeType/HarfBuzz shaping, the R8 glyph atlas (multi-page, 4096²), and the
+bounded glyph cache.
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_text_create` / `flux_text_destroy` | Context lifecycle. The desc's `device` is retained (atlas uploads); NULL = measure-only. |
+| `flux_text_measure` | Shapes `len` bytes of utf8 and returns the extent + baseline. Zeroed metrics when no shaping backend is compiled in. |
+| `flux_text_draw` | Shapes (cached) and emits glyph quads onto a canvas at the canvas's effective scale. Subpixel phases are distinct cache keys, so fractional pen positions stay crisp. |
+| `flux_text_compact` | Releases the high-water scratch (layout/run/codepoint buffers) and the shaping cache. Call from the host's idle path after a one-off huge paste; cheap enough to call every frame. |
+| `flux_text_get_stats` | Long-session diagnostics: glyph table cap/live/max, hits/misses/evictions/invalidations/grows, atlas pages in use and full-atlas clears. The soak suite pins these counters' steady states. |
+| `flux_text_set_default_family` | Selects the default face family; fontconfig is only queried when a new family is first shaped. |
+
+## Retire queue + memory backpressure (behaviour notes)
+
+- Released GPU resources are parked on a per-device retire FIFO until the
+  graphics queue provably passes every batch that referenced them
+  (inline destruction faulted on i915; ADR-0020).
+- The FIFO has a hard entry bound (`FLUX_RETIRE_MAX_PENDING`); crossing it
+  forces a full drain (queue wait + watermark advance), so a host that
+  releases resources while submitting no frames cannot pin GPU memory
+  without bound. `test_retire_backpressure` pins this contract.
+- The GPU slab allocator reclaims whole empty 64 MiB blocks (sibling-keyed)
+  immediately, retries after reclamation on OOM, and honours
+  `VK_EXT_memory_budget` before allocating fresh blocks.

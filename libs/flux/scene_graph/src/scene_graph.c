@@ -106,8 +106,8 @@ FLUX_SG_API uint32_t flux_sg_scene_primitive_count(const flux_sg_scene *scene) {
 }
 
 FLUX_SG_API bool flux_sg_scene_humanoid_bone_position(const flux_sg_scene *scene,
-                                                       const char *bone_name,
-                                                       flux_vec3 *out_position) {
+                                                      const char *bone_name,
+                                                      flux_vec3 *out_position) {
     if (!scene || !bone_name || !out_position)
         return false;
     int bone = sg_human_bone_index(bone_name, false);
@@ -122,7 +122,8 @@ FLUX_SG_API bool flux_sg_scene_humanoid_bone_position(const flux_sg_scene *scene
 }
 
 static flux_mat4 node_local(const flux_sg_node *node) {
-    flux_mat4 t = flux_mat4_translate(node->translation.x, node->translation.y, node->translation.z);
+    flux_mat4 t =
+        flux_mat4_translate(node->translation.x, node->translation.y, node->translation.z);
     flux_mat4 r = flux_mat4_rotation_quat(node->rotation);
     flux_mat4 s = flux_mat4_scale(node->scale.x, node->scale.y, node->scale.z);
     return flux_mat4_multiply(t, flux_mat4_multiply(r, s));
@@ -262,11 +263,11 @@ static void draw_primitive(flux_frame *frame, const flux_camera *cam, flux_mat4 
          * draw world is identity (world * inverse(world) form). */
         flux_mat4 identity = flux_mat4_identity();
         if (light)
-            flux_scene_draw_mesh_skinned_lit(frame, cam, identity, primitive->mesh, material,
-                                              light, skin->palette, skin->joint_count);
+            flux_scene_draw_mesh_skinned_lit(frame, cam, identity, primitive->mesh, material, light,
+                                             skin->palette, skin->joint_count);
         else
             flux_scene_draw_mesh_skinned(frame, cam, identity, primitive->mesh, material,
-                                          skin->palette, skin->joint_count);
+                                         skin->palette, skin->joint_count);
     } else if (light) {
         flux_scene_draw_mesh_lit(frame, cam, world, primitive->mesh, material, light);
     } else {
@@ -292,14 +293,13 @@ FLUX_SG_API void flux_sg_draw(flux_frame *frame, const flux_camera *cam, const f
                     break;
                 const flux_sg_primitive *p = &scene->prims[k];
                 flux_material *material = primitive_material(scene, p, opts->material);
-                bool blend = material && flux_material_get_alpha_mode(material) ==
-                                             FLUX_MATERIAL_ALPHA_BLEND;
+                bool blend =
+                    material && flux_material_get_alpha_mode(material) == FLUX_MATERIAL_ALPHA_BLEND;
                 if (!material || blend != (blend_phase != 0))
                     continue;
-                const flux_sg_skin *skin =
-                    n->skin >= 0 && (uint32_t)n->skin < scene->skin_count
-                        ? &scene->skins[n->skin]
-                        : NULL;
+                const flux_sg_skin *skin = n->skin >= 0 && (uint32_t)n->skin < scene->skin_count
+                                               ? &scene->skins[n->skin]
+                                               : NULL;
                 draw_primitive(frame, cam, n->world, p, material, opts->light, skin);
             }
         }
@@ -310,8 +310,8 @@ FLUX_SG_API void flux_sg_draw(flux_frame *frame, const flux_camera *cam, const f
             for (uint32_t k = 0; k < scene->prim_count; ++k) {
                 const flux_sg_primitive *p = &scene->prims[k];
                 flux_material *material = primitive_material(scene, p, opts->material);
-                bool blend = material && flux_material_get_alpha_mode(material) ==
-                                             FLUX_MATERIAL_ALPHA_BLEND;
+                bool blend =
+                    material && flux_material_get_alpha_mode(material) == FLUX_MATERIAL_ALPHA_BLEND;
                 if (material && blend == (blend_phase != 0))
                     draw_primitive(frame, cam, identity, p, material, opts->light, NULL);
             }

@@ -70,6 +70,9 @@ unchanged; only the interpretation of the same parameters changes.
 - `examples/flux/liquid_glass_study` renders the material headlessly
   over a hostile backdrop for pixel-level review; run it after every
   shader change.
-- ccache does not track `#embed` inputs. After editing the shader,
-  rebuild with `CCACHE_DISABLE=1` or a cleared cache, or the library
-  keeps the previous SPIR-V.
+- ccache does not track `#embed` inputs. ~~Rebuild with
+  `CCACHE_DISABLE=1` or a cleared cache.~~ *(Fixed centrally: the build
+  now generates a shader-content manifest header — see
+  `tools/shader_manifest.py` — that every `#embed` consumer includes,
+  putting the shader bytes' hash into the cache key. No operator action
+  is needed.)*

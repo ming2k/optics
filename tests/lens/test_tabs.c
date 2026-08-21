@@ -85,8 +85,7 @@ static void test_equal_width_is_an_independent_layout_policy(void) {
 
     lens_begin(ui, &IN0);
     lens_size(ui, 300.0f, 0.0f);
-    lens_tabs_begin_ex(ui, "equal-standard-tabs", &active,
-                       (lens_tabs_opts){.equal_width = true});
+    lens_tabs_begin_ex(ui, "equal-standard-tabs", &active, (lens_tabs_opts){.equal_width = true});
     lens_tab(ui, "A");
     lens_tab(ui, "A much longer label");
     lens_tabs_end(ui);
@@ -119,9 +118,8 @@ static void test_static_indicator_tracks_selection_without_animation(void) {
 
     /* Keep the cursor off the strip: a hover ease in transit would set
      * anim_pending on its own and drown the tabs signal. */
-    const lens_input AWAY = {.display_size = {400, 200},
-                             .dt_seconds = 0.016f,
-                             .cursor = {390.0f, 195.0f}};
+    const lens_input AWAY = {
+        .display_size = {400, 200}, .dt_seconds = 0.016f, .cursor = {390.0f, 195.0f}};
 
     lens_begin(ui, &AWAY);
     lens_size(ui, 300.0f, 0.0f);

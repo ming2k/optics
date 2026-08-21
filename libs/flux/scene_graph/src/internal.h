@@ -95,7 +95,7 @@ typedef struct flux_sg_node {
     flux_mat4 world; /* cached; recomputed each draw */
     int mesh_first;  /* -1 if this node has no mesh */
     int mesh_prim_count;
-    int skin;        /* -1 if this node is not skinned */
+    int skin; /* -1 if this node is not skinned */
     char *name;
 } flux_sg_node;
 

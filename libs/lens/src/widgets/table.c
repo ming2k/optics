@@ -192,8 +192,7 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
             st->offset_y = 0.0f;
         if (st->offset_y > scroll_range)
             st->offset_y = scroll_range;
-        st->hovering = st->dragging ||
-                       (!occluded && lensi_point_in(ui->input.cursor, track_rect));
+        st->hovering = st->dragging || (!occluded && lensi_point_in(ui->input.cursor, track_rect));
         off = st->offset_y;
         n->scroll_y = 0.0f;
     } else if (st) {
@@ -311,8 +310,8 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
     float hovered_row_y = ui->input.cursor.y - n->prev_rect.y + off - header_h;
     bool hovering_row = opts.selectable && n->has_prev && !occluded && !clipped_out &&
                         lensi_point_in(ui->input.cursor, n->prev_rect) &&
-                        ui->input.cursor.x < n->prev_rect.x + view_w &&
-                        hovered_row_y >= 0.0f && hovered_row_y < body_h;
+                        ui->input.cursor.x < n->prev_rect.x + view_w && hovered_row_y >= 0.0f &&
+                        hovered_row_y < body_h;
     if (hovering_row)
         ui->cursor_hint = LENS_CURSOR_POINTER;
     if (opts.selectable && st && n->has_prev && !occluded && !clipped_out &&
@@ -377,18 +376,15 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
         int out_r = 0;
         for (int r = first; r < last; r++) {
             float ry = header_h + (float)r * row_h - off;
-            bool sel = opts.selected_fn ? opts.selected_fn(user, r)
-                                        : (st && r == st->selected);
+            bool sel = opts.selected_fn ? opts.selected_fn(user, r) : (st && r == st->selected);
             bool cur = r == cursor;
-            const char **cells =
-                flux_arena_alloc(&ui->arena, (size_t)col_count * sizeof *cells);
+            const char **cells = flux_arena_alloc(&ui->arena, (size_t)col_count * sizeof *cells);
             float *cell_x = flux_arena_alloc(&ui->arena, (size_t)col_count * sizeof *cell_x);
             /* Icon ids in an arena array parallel to cells (ADR-0066);
              * allocated only when an icon callback was supplied. */
             lens_icon_id *icons =
-                opts.icon_fn
-                    ? flux_arena_alloc(&ui->arena, (size_t)col_count * sizeof *icons)
-                    : NULL;
+                opts.icon_fn ? flux_arena_alloc(&ui->arena, (size_t)col_count * sizeof *icons)
+                             : NULL;
             if (!cells || !cell_x || (opts.icon_fn && !icons)) {
                 lensi_set_overflow(ui);
                 break;
@@ -422,8 +418,7 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
                  * selectable precedent); the skin draws the glyph at the
                  * pre-shift x. Other alignments resolve from the column
                  * edge and carry no icon. */
-                if (icons && cols[c].align == LENS_START &&
-                    lensi_icon_valid((int32_t)icons[c]))
+                if (icons && cols[c].align == LENS_START && lensi_icon_valid((int32_t)icons[c]))
                     tx += font_size + 8.0f;
                 if (txt && txt[0]) {
                     if (cols[c].align == LENS_END || cols[c].align == LENS_STRETCH) {
@@ -462,14 +457,12 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
                     n->first_child = row_node;
                 n->last_child = row_node;
                 n->child_count++;
-                n->child_hash =
-                    n->child_hash * 31 + (uint32_t)(row_id ^ (row_id >> 32));
+                n->child_hash = n->child_hash * 31 + (uint32_t)(row_id ^ (row_id >> 32));
                 row_node->final_rect =
                     (flux_rect){n->prev_rect.x, n->prev_rect.y + ry, view_w, row_h};
-                lensi_node_semantics(ui, row_node, LENS_ROLE_ROW,
-                                     cells[0] && cells[0][0] ? cells[0] : NULL, NULL,
-                                     (sel ? LENS_A11Y_SELECTED : 0) |
-                                         (cur ? LENS_A11Y_FOCUSED : 0));
+                lensi_node_semantics(
+                    ui, row_node, LENS_ROLE_ROW, cells[0] && cells[0][0] ? cells[0] : NULL, NULL,
+                    (sel ? LENS_A11Y_SELECTED : 0) | (cur ? LENS_A11Y_FOCUSED : 0));
             }
         }
 

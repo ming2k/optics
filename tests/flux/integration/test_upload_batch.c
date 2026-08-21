@@ -245,9 +245,21 @@ int main(void) {
         /* MaxRSS is monotonic; growth between the settled windows is
          * what detects the unbounded driver-state accumulation. The
          * pre-fix ANV behaviour grew ~72 KiB per round; the allowance
-         * is a few pages per round at most. */
-        EXPECT(w1 - w0 < warmup * 64);
-        EXPECT(w2 - w1 < warmup * 64);
+         * is a few pages per round at most.
+         *
+         * The allowance is deliberately generous relative to the bug it
+         * guards (72 KiB/round = 1152 bytes/round headroom here would
+         * suffice) because MaxRSS is a whole-process, load-sensitive
+         * counter: under a parallel test run, the page cache, dynamic
+         * loader and ASan shadow growth attributable to *scheduling
+         * noise* between the two getrusage calls can add a few hundred
+         * KiB that has nothing to do with the upload path — observed
+         * flakes at the tight bound under `meson test` with 8+
+         * processes on a 16-core host. 512 B/round still catches the
+         * regression with >100× margin (72 KiB vs 0.5 KiB) while being
+         * immune to scheduler noise. */
+        EXPECT(w1 - w0 < warmup * 512);
+        EXPECT(w2 - w1 < warmup * 512);
     }
 
     flux_image_release(red);

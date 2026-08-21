@@ -2,6 +2,8 @@
 
 #include "../internal.h"
 
+#include <stdio.h>
+
 void lens_progress(lens *ui, const char *label, float value) {
     lens_style eff = lensi_style_effective(ui);
     float font_size = lensi_style_font_size(&eff, &ui->theme);
@@ -23,8 +25,14 @@ void lens_progress(lens *ui, const char *label, float value) {
 
     float fill = (value < 0.0f) ? 0.0f : (value > 1.0f ? 1.0f : value);
 
+    /* Expose the clamped percentage through the a11y value: AT clients
+     * read this as the bar's position (ADR-0035). Pre-clamped so an
+     * out-of-range caller never leaks "1.5" to assistive technology. */
+    char value_buf[16];
+    snprintf(value_buf, sizeof value_buf, "%.0f%%", fill * 100.0f);
+
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0);
-    lensi_node_semantics(ui, n, LENS_ROLE_PROGRESS, label, NULL, sem_flags);
+    lensi_node_semantics(ui, n, LENS_ROLE_PROGRESS, label, value_buf, sem_flags);
 
     /* emit — through the replaceable skin (ADR-0059) */
     lensi_skin_emit(ui, n,

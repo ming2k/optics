@@ -156,9 +156,9 @@ static void test_resolver_null_instance_is_verbatim_theme(void) {
     /* Even with every interactive state bit set, the theme path must come
      * through untouched — this is what keeps migrated widgets
      * pixel-identical. */
-    lens_style_resolved r =
-        lensi_style_resolve(NULL, &t, LENS_STATE_HOVERED | LENS_STATE_PRESSED |
-                                          LENS_STATE_FOCUSED | LENS_STATE_DISABLED);
+    lens_style_resolved r = lensi_style_resolve(NULL, &t,
+                                                LENS_STATE_HOVERED | LENS_STATE_PRESSED |
+                                                    LENS_STATE_FOCUSED | LENS_STATE_DISABLED);
     CHECK(r.bg == t.color_bg);
     CHECK(r.bg_hover == t.color_hover);
     CHECK(r.bg_pressed == t.color_active);
@@ -183,8 +183,8 @@ static void test_resolver_override_and_derivation(void) {
     inst.padding = 3.0f;
 
     lens_style_resolved r = lensi_style_resolve(&inst, &t, LENS_STATE_HOVERED);
-    CHECK(r.bg == red);                    /* set field wins           */
-    CHECK(r.fg == t.color_fg);             /* unset field falls back   */
+    CHECK(r.bg == red);        /* set field wins           */
+    CHECK(r.fg == t.color_fg); /* unset field falls back   */
     CHECK(r.accent == t.color_accent);
     CHECK_NEAR(r.padding, 3.0f, 0.0f);
     CHECK_NEAR(r.gap, t.gap, 0.0f);

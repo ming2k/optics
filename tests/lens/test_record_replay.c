@@ -21,15 +21,12 @@
 /* Cursor parked inside the window (but off any hoverable control in
  * these builds) so hover easing does not leak damage into "static"
  * frames; the scroll test moves it over the scroll container. */
-static const lens_input IN0 = {.display_size = {W, H},
-                               .cursor = {50, 50},
-                               .dt_seconds = 0.016f};
+static const lens_input IN0 = {.display_size = {W, H}, .cursor = {50, 50}, .dt_seconds = 0.016f};
 
 /* Cursor over the scroll container's body (the header label above it is
  * ~51 px tall): wheel routing requires the cursor inside its bounds. */
-static const lens_input IN_SCROLL = {.display_size = {W, H},
-                                     .cursor = {50, 80},
-                                     .dt_seconds = 0.016f};
+static const lens_input IN_SCROLL = {
+    .display_size = {W, H}, .cursor = {50, 80}, .dt_seconds = 0.016f};
 
 typedef struct fixture {
     lens *ui;
@@ -140,9 +137,8 @@ static void test_scale_switch_invalidates_all(void) {
     fixture_open(&f);
     uint8_t zoomed[W * H * 4], stable[W * H * 4];
 
-    const lens_input in_zoom = {.display_size = {W / 2, H / 2},
-                                .cursor = {25, 25},
-                                .dt_seconds = 0.016f};
+    const lens_input in_zoom = {
+        .display_size = {W / 2, H / 2}, .cursor = {25, 25}, .dt_seconds = 0.016f};
 
     for (int i = 0; i < 3; i++) {
         build_two_blocks(f.ui, &IN0, 0.5f);
@@ -361,4 +357,3 @@ int main(void) {
     test_child_removal_invalidates_record();
     return TEST_REPORT();
 }
-

@@ -83,12 +83,12 @@ typedef struct flux_path_segment {
 /*  recorded bytes are capped (LRU eviction), as is each segment.     */
 /* ------------------------------------------------------------------ */
 
-#define FLUX_CANVAS_RECORD_DEPTH_CAP 16u              /* nested recordings  */
-#define FLUX_CANVAS_RECORD_SLOT_CAP 1024u             /* pool size          */
-#define FLUX_CANVAS_RECORD_TOTAL_BUDGET (16u << 20)   /* bytes, all segs    */
-#define FLUX_CANVAS_RECORD_SEG_BUDGET (2u << 20)      /* bytes, one segment */
-#define FLUX_CANVAS_RECORD_IMG_CAP 32u                /* retained images    */
-#define FLUX_CANVAS_RECORD_SAMPLER_CAP 16u            /* retained samplers  */
+#define FLUX_CANVAS_RECORD_DEPTH_CAP 16u            /* nested recordings  */
+#define FLUX_CANVAS_RECORD_SLOT_CAP 1024u           /* pool size          */
+#define FLUX_CANVAS_RECORD_TOTAL_BUDGET (16u << 20) /* bytes, all segs    */
+#define FLUX_CANVAS_RECORD_SEG_BUDGET (2u << 20)    /* bytes, one segment */
+#define FLUX_CANVAS_RECORD_IMG_CAP 32u              /* retained images    */
+#define FLUX_CANVAS_RECORD_SAMPLER_CAP 16u          /* retained samplers  */
 
 /* Host-atlas generation registry size (one entry per live producer) and
  * the sentinel recorded when a glyph run carried no generation
@@ -341,16 +341,16 @@ typedef struct flux_canvas_gradient_stop_pc {
 } flux_canvas_gradient_stop_pc;
 
 typedef struct flux_canvas_push {
-    uint64_t verts_address;   /* offset  0 */
-    float inv_window_size[2]; /* offset  8 */
+    uint64_t verts_address;        /* offset  0 */
+    float inv_window_size[2];      /* offset  8 */
     uint64_t color_params_address; /* offset 16 — flux_image_color_params BDA,
                                     * 0 = format-default content space (ADR-0069) */
-    uint32_t kind;            /* offset 24 (0 solid, 1 linear, 2 radial, 3 image) */
-    uint32_t num_stops;       /* offset 28 */
-    float grad_from[2];       /* offset 32 */
-    float grad_to[2];         /* offset 40 */
-    float grad_radius;        /* offset 48 */
-    float _pad1;              /* offset 52 */
+    uint32_t kind;                 /* offset 24 (0 solid, 1 linear, 2 radial, 3 image) */
+    uint32_t num_stops;            /* offset 28 */
+    float grad_from[2];            /* offset 32 */
+    float grad_to[2];              /* offset 40 */
+    float grad_radius;             /* offset 48 */
+    float _pad1;                   /* offset 52 */
     flux_canvas_gradient_stop_pc stops[FLUX_GRADIENT_MAX_STOPS]; /* offset 56, size 64 */
     /* Image draw extension (read by the image and SDF fragment shaders).
      * Image UVs are carried per vertex; image_dst remains shared storage for
@@ -373,16 +373,16 @@ typedef struct flux_output_push {
     float primaries[3][4]; /* column-major mat3, one column per vec4 */
     uint32_t image_handle;
     uint32_t sampler_handle;
-    uint32_t transfer;      /* flux_transfer_func of the encoded side */
-    uint32_t flags;         /* bit0 decode, bit1 no-dither */
-    float gamma;            /* FLUX_TRANSFER_GAMMA exponent */
-    float dither_levels;    /* 255 / 1023; ignored when no-dither */
-    float sdr_white_nits;   /* Phase 3 tone mapping; 203 default */
+    uint32_t transfer;    /* flux_transfer_func of the encoded side */
+    uint32_t flags;       /* bit0 decode, bit1 no-dither */
+    float gamma;          /* FLUX_TRANSFER_GAMMA exponent */
+    float dither_levels;  /* 255 / 1023; ignored when no-dither */
+    float sdr_white_nits; /* Phase 3 tone mapping; 203 default */
     /* Was `_pad`. The bucketed target-attachment pool can serve a pass
      * from an intermediate larger than the pass extent; the blit then
      * scales its sampling UV by extent/image to read the right sub-rect.
      * Exact-size passes pass {1,1}. */
-    float uv_scale[2];      /* pass extent / intermediate extent */
+    float uv_scale[2]; /* pass extent / intermediate extent */
 } flux_output_push;
 
 #define FLUX_OUTPUT_F_DECODE 0x1u

@@ -217,18 +217,19 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
     frac = frac < 0.0f ? 0.0f : (frac > 1.0f ? 1.0f : frac);
 
     /* resolve + emit — through the replaceable skin (ADR-0059) */
-    lensi_skin_emit(ui, n,
-                    &(lens_widget_record){
-                        .kind = LENS_WIDGET_SLIDER,
-                        .state = r.state,
-                        .bounds = {0, 0, w, h},
-                        .last_bounds = n->prev_rect,
-                        .style = lensi_style_resolve(&eff, t, r.state),
-                        .style_fields = eff.fields,
-                        .hover_t = n->hover_t,
-                        .active_t = n->active_t,
-                        .content = {.label = label, .ratio = frac, .vertical = true, .error = error},
-                    });
+    lensi_skin_emit(
+        ui, n,
+        &(lens_widget_record){
+            .kind = LENS_WIDGET_SLIDER,
+            .state = r.state,
+            .bounds = {0, 0, w, h},
+            .last_bounds = n->prev_rect,
+            .style = lensi_style_resolve(&eff, t, r.state),
+            .style_fields = eff.fields,
+            .hover_t = n->hover_t,
+            .active_t = n->active_t,
+            .content = {.label = label, .ratio = frac, .vertical = true, .error = error},
+        });
 
     ui->last_response = r;
     return r.changed;

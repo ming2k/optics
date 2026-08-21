@@ -1,4 +1,5 @@
-/* test_render_null.c — lens_render argument validation (ADR-0007). CPU-only. */
+/* test_render_null.c — lens_render argument validation (render seam,
+ * ADR-0024/0025). CPU-only. */
 
 #include "test_helpers.h"
 #include <lens/lens.h>

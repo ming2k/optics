@@ -164,8 +164,8 @@ int main(void) {
 
         /* D65 -> D65 preserves white exactly. */
         EXPECT(flux_color_space_transform_matrix(srgb, p3, &m));
-        EXPECT(vec3_near(flux_mat3_transform_vec3(m, (flux_vec3){1, 1, 1}),
-                         (flux_vec3){1, 1, 1}, 1e-3f));
+        EXPECT(vec3_near(flux_mat3_transform_vec3(m, (flux_vec3){1, 1, 1}), (flux_vec3){1, 1, 1},
+                         1e-3f));
 
         /* P3 red is out of sRGB gamut: r > 1, g < 0. */
         EXPECT(flux_color_space_transform_matrix(p3, srgb, &m));
@@ -204,8 +204,8 @@ int main(void) {
                                       0.0f,
                                       {0.64f, 0.33f, 0.30f, 0.60f, 0.15f, 0.06f, 0.3457f, 0.3585f}};
         EXPECT(flux_color_space_transform_matrix(d50_space, srgb, &m));
-        EXPECT(vec3_near(flux_mat3_transform_vec3(m, (flux_vec3){1, 1, 1}),
-                         (flux_vec3){1, 1, 1}, 1e-3f));
+        EXPECT(vec3_near(flux_mat3_transform_vec3(m, (flux_vec3){1, 1, 1}), (flux_vec3){1, 1, 1},
+                         1e-3f));
         /* ...but is not the identity — adaptation actually happened. */
         EXPECT(!mat3_near(m, flux_mat3_identity(), 1e-3f));
 

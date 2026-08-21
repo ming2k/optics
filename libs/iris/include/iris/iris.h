@@ -3,7 +3,7 @@
  *
  * Pulls in the cross-platform application API, theme query, file dialog,
  * and the accessibility seam. Per-platform backends are selected at
- * build time (today: Wayland only; future: Win32, Cocoa) by the
+ * build time (Wayland, Win32, or Cocoa — ADR-0044/0056) by the
  * dispatcher in src/app.c.
  *
  * The surface is intentionally small in v0.1: iris_app_run drives a

@@ -117,8 +117,7 @@ static void build_icon_button_plain(lens *ui, bool s) {
 }
 static void build_icon_toggle_plain(lens *ui, bool s) {
     (void)s;
-    lens_icon_toggle_button(ui, LENS_ICON_STAR_ROUNDED, LENS_ICON_STAR_ROUNDED_FILLED, 26.0f,
-                            true);
+    lens_icon_toggle_button(ui, LENS_ICON_STAR_ROUNDED, LENS_ICON_STAR_ROUNDED_FILLED, 26.0f, true);
 }
 static void build_icon_badged_plain(lens *ui, bool s) {
     (void)s;
@@ -128,12 +127,11 @@ static void build_icon_badged_plain(lens *ui, bool s) {
 static void test_null_override_equality(void) {
     /* Every migrated kind: plain form vs an explicit context-wide default
      * skin must emit identical commands. */
-    check_null_override("OK", build_button_plain, build_button_plain, true,
-                        LENS_WIDGET_BUTTON);
+    check_null_override("OK", build_button_plain, build_button_plain, true, LENS_WIDGET_BUTTON);
     check_null_override("Row", build_selectable_plain, build_selectable_plain, true,
                         LENS_WIDGET_SELECTABLE);
-    check_null_override("IRow", build_selectable_icon_plain, build_selectable_icon_plain,
-                        true, LENS_WIDGET_SELECTABLE);
+    check_null_override("IRow", build_selectable_icon_plain, build_selectable_icon_plain, true,
+                        LENS_WIDGET_SELECTABLE);
     check_null_override("Check", build_checkbox_plain, build_checkbox_plain, true,
                         LENS_WIDGET_CHECKBOX);
     check_null_override("Sw", build_switch_plain, build_switch_plain, true, LENS_WIDGET_SWITCH);
@@ -459,7 +457,7 @@ static void test_composite_records_carry_their_data(void) {
         lens_dropdown(ui, "Drp", &sel, items, 2);
     }
     lens_end(ui);
-    CHECK(g_probe_seen.content.label != NULL); /* the preview text */
+    CHECK(g_probe_seen.content.label != NULL);                  /* the preview text */
     CHECK(g_probe_seen.content.icon == LENS_ICON_CHEVRON_DOWN); /* closed */
     CHECK(!g_probe_seen.content.popup_open);
 

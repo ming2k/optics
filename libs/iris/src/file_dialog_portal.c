@@ -19,8 +19,8 @@
  * (name + glob), an initial URI, and a default save name (SaveFile mode).
  */
 
-#include <iris/file_dialog.h>
 #include <errno.h>
+#include <iris/file_dialog.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -51,10 +51,10 @@ const char *iris_wayland__foreign_handle(void);
 #endif
 
 typedef struct iris_picker_response {
-    char *out;       /* single-URI buffer or NUL-separated multi-URI buffer */
+    char *out; /* single-URI buffer or NUL-separated multi-URI buffer */
     size_t cap;
-    size_t used;     /* bytes written (excluding the final NUL terminator)   */
-    int count;       /* URIs received                                       */
+    size_t used; /* bytes written (excluding the final NUL terminator)   */
+    int count;   /* URIs received                                       */
     int done;
     int result;
 } iris_picker_response;

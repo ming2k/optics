@@ -7,22 +7,60 @@
 #include <string.h>
 
 static const char *const human_bone_names[SG_HUMAN_BONE_COUNT] = {
-    "hips",          "spine",          "chest",          "upperChest",
-    "neck",          "head",           "leftEye",        "rightEye",
-    "jaw",           "leftUpperLeg",   "leftLowerLeg",   "leftFoot",
-    "leftToes",      "rightUpperLeg",  "rightLowerLeg",  "rightFoot",
-    "rightToes",     "leftShoulder",   "leftUpperArm",   "leftLowerArm",
-    "leftHand",      "rightShoulder",  "rightUpperArm",  "rightLowerArm",
-    "rightHand",     "leftThumbMetacarpal", "leftThumbProximal",
-    "leftThumbDistal", "leftIndexProximal", "leftIndexIntermediate",
-    "leftIndexDistal", "leftMiddleProximal", "leftMiddleIntermediate",
-    "leftMiddleDistal", "leftRingProximal", "leftRingIntermediate",
-    "leftRingDistal", "leftLittleProximal", "leftLittleIntermediate",
-    "leftLittleDistal", "rightThumbMetacarpal", "rightThumbProximal",
-    "rightThumbDistal", "rightIndexProximal", "rightIndexIntermediate",
-    "rightIndexDistal", "rightMiddleProximal", "rightMiddleIntermediate",
-    "rightMiddleDistal", "rightRingProximal", "rightRingIntermediate",
-    "rightRingDistal", "rightLittleProximal", "rightLittleIntermediate",
+    "hips",
+    "spine",
+    "chest",
+    "upperChest",
+    "neck",
+    "head",
+    "leftEye",
+    "rightEye",
+    "jaw",
+    "leftUpperLeg",
+    "leftLowerLeg",
+    "leftFoot",
+    "leftToes",
+    "rightUpperLeg",
+    "rightLowerLeg",
+    "rightFoot",
+    "rightToes",
+    "leftShoulder",
+    "leftUpperArm",
+    "leftLowerArm",
+    "leftHand",
+    "rightShoulder",
+    "rightUpperArm",
+    "rightLowerArm",
+    "rightHand",
+    "leftThumbMetacarpal",
+    "leftThumbProximal",
+    "leftThumbDistal",
+    "leftIndexProximal",
+    "leftIndexIntermediate",
+    "leftIndexDistal",
+    "leftMiddleProximal",
+    "leftMiddleIntermediate",
+    "leftMiddleDistal",
+    "leftRingProximal",
+    "leftRingIntermediate",
+    "leftRingDistal",
+    "leftLittleProximal",
+    "leftLittleIntermediate",
+    "leftLittleDistal",
+    "rightThumbMetacarpal",
+    "rightThumbProximal",
+    "rightThumbDistal",
+    "rightIndexProximal",
+    "rightIndexIntermediate",
+    "rightIndexDistal",
+    "rightMiddleProximal",
+    "rightMiddleIntermediate",
+    "rightMiddleDistal",
+    "rightRingProximal",
+    "rightRingIntermediate",
+    "rightRingDistal",
+    "rightLittleProximal",
+    "rightLittleIntermediate",
     "rightLittleDistal",
 };
 
@@ -57,7 +95,8 @@ void sg_read_humanoid(const jv *root, const char *extension_name, bool legacy_vr
         for (size_t i = 0; i < bones->arr.count; ++i) {
             const jv *bone = jv_arr_at(bones, i);
             const jv *name = jv_obj_get(bone, "bone");
-            int index = name && name->kind == J_STR ? sg_human_bone_index(name->str.data, true) : -1;
+            int index =
+                name && name->kind == J_STR ? sg_human_bone_index(name->str.data, true) : -1;
             int node = (int)jv_num(jv_obj_get(bone, "node"), -1);
             if (index >= 0)
                 out_bones[index] = node;
@@ -162,11 +201,11 @@ static int source_bone_for_node(const int bones[SG_HUMAN_BONE_COUNT], int node) 
     return -1;
 }
 
-static void retarget_channel_values(flux_sg_animation_channel *channel,
-                                    const flux_sg_node *source, const flux_sg_node *target,
-                                    bool humanoid, bool hips, float translation_scale) {
-    uint32_t samples = channel->interpolation == SG_INTERP_CUBIC ? channel->key_count * 3u
-                                                                 : channel->key_count;
+static void retarget_channel_values(flux_sg_animation_channel *channel, const flux_sg_node *source,
+                                    const flux_sg_node *target, bool humanoid, bool hips,
+                                    float translation_scale) {
+    uint32_t samples =
+        channel->interpolation == SG_INTERP_CUBIC ? channel->key_count * 3u : channel->key_count;
     if (channel->path == SG_ANIM_ROTATION) {
         for (uint32_t i = 0; i < samples; ++i) {
             bool is_value = channel->interpolation != SG_INTERP_CUBIC || i % 3u == 1u;
@@ -204,24 +243,35 @@ flux_result sg_parse_animation_glb(const flux_sg_scene *target, const void *byte
     flux_result result = sg_glb_parse(bytes, len, &glb);
     if (result != FLUX_OK)
         return result;
+
+    /* Declared up front and NULL/zero-initialised so the single `fail`
+     * block at the bottom can release them from any exit (the repo's
+     * standard single-exit discipline). */
+    flux_result r = FLUX_OK;
+    jv *root = NULL;
+    flux_sg_node *source_nodes = NULL;
+    uint32_t source_node_count = 0;
+    flux_sg_animation *animation = NULL;
+
     size_t error_offset = 0;
-    jv *root = jv_parse((const char *)glb.json, glb.json_len, &error_offset);
+    root = jv_parse((const char *)glb.json, glb.json_len, &error_offset);
     if (!root || root->kind != J_OBJ) {
-        jv_free(root);
-        return FLUX_ERROR_INVALID_ARGUMENT;
+        r = FLUX_ERROR_INVALID_ARGUMENT;
+        goto fail;
     }
 
     const jv *nodes_json = jv_obj_get(root, "nodes");
     if (nodes_json && nodes_json->kind == J_ARR && nodes_json->arr.count > UINT32_MAX) {
-        jv_free(root);
-        return FLUX_ERROR_INVALID_ARGUMENT;
+        r = FLUX_ERROR_INVALID_ARGUMENT;
+        goto fail;
     }
-    uint32_t source_node_count =
+    source_node_count =
         nodes_json && nodes_json->kind == J_ARR ? (uint32_t)nodes_json->arr.count : 0;
-    flux_sg_node *source_nodes = source_node_count ? calloc(source_node_count, sizeof(*source_nodes))
-                                                   : NULL;
-    if (source_node_count && !source_nodes)
-        goto oom;
+    source_nodes = source_node_count ? calloc(source_node_count, sizeof(*source_nodes)) : NULL;
+    if (source_node_count && !source_nodes) {
+        r = FLUX_ERROR_OUT_OF_MEMORY;
+        goto fail;
+    }
     for (uint32_t i = 0; i < source_node_count; ++i)
         sg_read_node(jv_arr_at(nodes_json, i), &source_nodes[i]);
     for (uint32_t i = 0; i < source_node_count; ++i) {
@@ -251,18 +301,24 @@ flux_result sg_parse_animation_glb(const flux_sg_scene *target, const void *byte
     const jv *channels_json = jv_obj_get(animation_json, "channels");
     const jv *samplers_json = jv_obj_get(animation_json, "samplers");
     if (!animation_json || !channels_json || channels_json->kind != J_ARR || !samplers_json ||
-        samplers_json->kind != J_ARR)
-        goto malformed;
-    if (channels_json->arr.count > UINT32_MAX)
-        goto malformed;
+        samplers_json->kind != J_ARR) {
+        r = FLUX_ERROR_INVALID_ARGUMENT;
+        goto fail;
+    }
+    if (channels_json->arr.count > UINT32_MAX) {
+        r = FLUX_ERROR_INVALID_ARGUMENT;
+        goto fail;
+    }
 
-    flux_sg_animation *animation = calloc(1, sizeof(*animation));
-    if (!animation)
-        goto oom;
+    animation = calloc(1, sizeof(*animation));
+    if (!animation) {
+        r = FLUX_ERROR_OUT_OF_MEMORY;
+        goto fail;
+    }
     animation->channels = calloc(channels_json->arr.count, sizeof(*animation->channels));
     if (channels_json->arr.count && !animation->channels) {
-        free(animation);
-        goto oom;
+        r = FLUX_ERROR_OUT_OF_MEMORY;
+        goto fail;
     }
     animation->refcount = 1;
     /* A clip is permanently bound to this scene's node indices. Holding a
@@ -294,7 +350,8 @@ flux_result sg_parse_animation_glb(const flux_sg_scene *target, const void *byte
         }
 
         int bone = source_bone_for_node(source_bones, source_node);
-        if (vrma && (bone < 0 || path == SG_ANIM_SCALE || (path == SG_ANIM_TRANSLATION && bone != 0)))
+        if (vrma &&
+            (bone < 0 || path == SG_ANIM_SCALE || (path == SG_ANIM_TRANSLATION && bone != 0)))
             continue;
         int target_node = bone >= 0 ? target->human_bones[bone]
                                     : find_target_by_name(target, source_nodes[source_node].name);
@@ -336,8 +393,8 @@ flux_result sg_parse_animation_glb(const flux_sg_scene *target, const void *byte
             free(channel.values);
             continue;
         }
-        uint32_t expected = interpolation == SG_INTERP_CUBIC ? channel.key_count * 3u
-                                                              : channel.key_count;
+        uint32_t expected =
+            interpolation == SG_INTERP_CUBIC ? channel.key_count * 3u : channel.key_count;
         if (output_count != expected) {
             free(channel.times);
             free(channel.values);
@@ -371,23 +428,22 @@ flux_result sg_parse_animation_glb(const flux_sg_scene *target, const void *byte
         animation->channels[animation->channel_count++] = channel;
     }
 
+    if (animation->channel_count == 0) {
+        r = FLUX_ERROR_UNSUPPORTED;
+        goto fail;
+    }
+    /* Success: the source-scene scratch and the JSON tree are no longer
+     * needed; ownership of the animation passes to the caller. */
     free_nodes(source_nodes, source_node_count);
     jv_free(root);
-    if (animation->channel_count == 0) {
-        free_animation(animation);
-        return FLUX_ERROR_UNSUPPORTED;
-    }
     *out = animation;
     return FLUX_OK;
 
-oom:
+fail:
+    free_animation(animation);
     free_nodes(source_nodes, source_node_count);
     jv_free(root);
-    return FLUX_ERROR_OUT_OF_MEMORY;
-malformed:
-    free_nodes(source_nodes, source_node_count);
-    jv_free(root);
-    return FLUX_ERROR_INVALID_ARGUMENT;
+    return r;
 }
 
 static void sample_channel(const flux_sg_animation_channel *channel, float time, float *out) {
@@ -400,7 +456,8 @@ static void sample_channel(const flux_sg_animation_channel *channel, float time,
         return;
     }
     if (time >= channel->times[last]) {
-        uint32_t index = last * value_stride + (channel->interpolation == SG_INTERP_CUBIC ? 1u : 0u);
+        uint32_t index =
+            last * value_stride + (channel->interpolation == SG_INTERP_CUBIC ? 1u : 0u);
         memcpy(out, channel->values + (size_t)index * channel->components,
                channel->components * sizeof(float));
         return;
@@ -456,8 +513,7 @@ void flux_sg_scene_reset_pose(flux_sg_scene *scene) {
     sg_update_skin_palettes(scene);
 }
 
-flux_result flux_sg_scene_apply_animation(flux_sg_scene *scene,
-                                          const flux_sg_animation *animation,
+flux_result flux_sg_scene_apply_animation(flux_sg_scene *scene, const flux_sg_animation *animation,
                                           float time_seconds, bool loop) {
     if (!scene || !animation || animation->target != scene || !isfinite(time_seconds))
         return FLUX_ERROR_INVALID_ARGUMENT;

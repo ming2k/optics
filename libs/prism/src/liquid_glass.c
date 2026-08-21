@@ -32,8 +32,8 @@
 /* Shader bytecode: C23 #embed, or generated headers (tools/spv2h.py)
  * where the compiler lacks it — same idiom as flux's renderer. */
 #if defined(__has_embed) && !defined(PRISM_SHADER_NO_EMBED)
-#if __has_embed("liquid_glass.comp.spv") && __has_embed("storage_clear.comp.spv") &&             \
-    __has_embed("backdrop_stats.comp.spv") && __has_embed("liquid_glass_16f.comp.spv") &&        \
+#if __has_embed("liquid_glass.comp.spv") && __has_embed("storage_clear.comp.spv") &&               \
+    __has_embed("backdrop_stats.comp.spv") && __has_embed("liquid_glass_16f.comp.spv") &&          \
     __has_embed("storage_clear_16f.comp.spv")
 #define PRISM_SHADERS_EMBED 1
 #endif
@@ -172,7 +172,7 @@ static uint16_t liquid_glass_f32_to_f16(float value) {
         /* f16 subnormal or signed zero. */
         if (half_exp < -10)
             return (uint16_t)sign;
-        mantissa |= 0x800000u; /* restore the hidden bit */
+        mantissa |= 0x800000u;                      /* restore the hidden bit */
         uint32_t shift = (uint32_t)(14 - half_exp); /* 13..24 */
         uint32_t half = mantissa >> shift;
         uint32_t remainder = mantissa & ((1u << shift) - 1u);
@@ -343,8 +343,7 @@ static void barrier_stats_write_to_compute(VkCommandBuffer cmd, VkBuffer buffer)
 /*  Filter lifecycle                                                  */
 /* ------------------------------------------------------------------ */
 
-flux_result prism_liquid_glass_filter_create(flux_device *device,
-                                             prism_liquid_glass_filter **out) {
+flux_result prism_liquid_glass_filter_create(flux_device *device, prism_liquid_glass_filter **out) {
     if (!device || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;
@@ -442,24 +441,24 @@ static flux_result liquid_glass_ensure_pipelines(prism_liquid_glass_filter *filt
     if (need_clear && !filter->clear_pipelines[cls]) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
         pdesc.spirv = (const uint32_t *)(is16f ? storage_clear_16f_spv : storage_clear_spv);
-        pdesc.spirv_word_count = (is16f ? sizeof(storage_clear_16f_spv) : sizeof(storage_clear_spv)) /
-                                 sizeof(uint32_t);
+        pdesc.spirv_word_count =
+            (is16f ? sizeof(storage_clear_16f_spv) : sizeof(storage_clear_spv)) / sizeof(uint32_t);
         pdesc.entry_point = "main";
         pdesc.push_constant_bytes = sizeof(storage_clear_push);
-        flux_result r = flux_compute_pipeline_create(filter->device, &pdesc,
-                                                     &filter->clear_pipelines[cls]);
+        flux_result r =
+            flux_compute_pipeline_create(filter->device, &pdesc, &filter->clear_pipelines[cls]);
         if (r != FLUX_OK)
             return r;
     }
     if (need_glass && !filter->glass_pipelines[cls]) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
         pdesc.spirv = (const uint32_t *)(is16f ? liquid_glass_16f_spv : liquid_glass_spv);
-        pdesc.spirv_word_count = (is16f ? sizeof(liquid_glass_16f_spv) : sizeof(liquid_glass_spv)) /
-                                 sizeof(uint32_t);
+        pdesc.spirv_word_count =
+            (is16f ? sizeof(liquid_glass_16f_spv) : sizeof(liquid_glass_spv)) / sizeof(uint32_t);
         pdesc.entry_point = "main";
         pdesc.push_constant_bytes = sizeof(liquid_glass_push);
-        flux_result r = flux_compute_pipeline_create(filter->device, &pdesc,
-                                                     &filter->glass_pipelines[cls]);
+        flux_result r =
+            flux_compute_pipeline_create(filter->device, &pdesc, &filter->glass_pipelines[cls]);
         if (r != FLUX_OK)
             return r;
     }
@@ -469,7 +468,8 @@ static flux_result liquid_glass_ensure_pipelines(prism_liquid_glass_filter *filt
         pdesc.spirv_word_count = sizeof(backdrop_stats_spv) / sizeof(uint32_t);
         pdesc.entry_point = "main";
         pdesc.push_constant_bytes = sizeof(backdrop_stats_push);
-        flux_result r = flux_compute_pipeline_create(filter->device, &pdesc, &filter->stats_pipeline);
+        flux_result r =
+            flux_compute_pipeline_create(filter->device, &pdesc, &filter->stats_pipeline);
         if (r != FLUX_OK)
             return r;
     }
@@ -675,7 +675,8 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
             .light_y = desc->light_direction.y,
             .group_width = region.width,
             .group_height = region.height,
-            .tint_color_shape_count = (group->tint_color & 0x00FFFFFFu) | (group->shape_count << 24u),
+            .tint_color_shape_count =
+                (group->tint_color & 0x00FFFFFFu) | (group->shape_count << 24u),
             .shadow_alpha = fminf(fmaxf(group->shadow_alpha, 0.0f), 1.0f),
             .shadow_blur = fmaxf(group->shadow_blur, 0.0f),
             .shadow_offset_y = group->shadow_offset_y,
@@ -734,8 +735,7 @@ flux_result prism_liquid_glass_filter_stats(prism_liquid_glass_filter *filter, f
     const liquid_glass_filter_slot *slot = &filter->slots[index];
     if (!slot->stats_submitted || !slot->stats)
         return FLUX_ERROR_INVALID_STATE;
-    uint32_t count =
-        slot->stats_group_count < max_groups ? slot->stats_group_count : max_groups;
+    uint32_t count = slot->stats_group_count < max_groups ? slot->stats_group_count : max_groups;
     if (count > 0u)
         memcpy(out, flux_buffer_mapped(slot->stats), count * sizeof(*out));
     *out_count = count;

@@ -2,8 +2,24 @@
 
 #include "test_helpers.h"
 #include <lens/lens.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
+
+/* Collected a11y records from the walk (file-scope; C has no closures). */
+static const lens_semantics *g_prog[8];
+static int g_prog_n;
+static void prog_collect(const lens_semantics *s, flux_rect b, lens_id id, lens_id parent,
+                         void *user) {
+    (void)b;
+    (void)id;
+    (void)parent;
+    (void)user;
+    if (g_prog_n < (int)(sizeof g_prog / sizeof g_prog[0]))
+        g_prog[g_prog_n++] = s;
+}
 
 static void test_progress_renders(void) {
     lens *ui = NULL;
@@ -13,8 +29,17 @@ static void test_progress_renders(void) {
     lens_progress(ui, "Loading", 0.5f);
     lens_end(ui);
 
-    /* Progress bar is non-interactive; just verify it doesn't crash. */
-    CHECK(1);
+    /* The bar is non-interactive, but it must still expose its role and
+     * value on the a11y tree — that is its entire contract (ADR-0035). */
+    g_prog_n = 0;
+    lens_accessibility_walk(ui, prog_collect, NULL);
+    CHECK(g_prog_n >= 1);
+    CHECK(g_prog[0]->role == LENS_ROLE_PROGRESS);
+    CHECK(g_prog[0]->name && strcmp(g_prog[0]->name, "Loading") == 0);
+    /* value is a clamped percentage string, e.g. "50%" */
+    CHECK(g_prog[0]->value);
+    if (g_prog[0]->value)
+        CHECK(atof(g_prog[0]->value) == 50.0f);
 
     lens_destroy(ui);
 }
@@ -28,7 +53,15 @@ static void test_progress_clamps(void) {
     lens_progress(ui, "Over", 1.5f);
     lens_end(ui);
 
-    CHECK(1);
+    /* Out-of-range values must clamp before reaching the a11y value —
+     * AT clients read "1.5" as a broken progress bar. */
+    g_prog_n = 0;
+    lens_accessibility_walk(ui, prog_collect, NULL);
+    CHECK(g_prog_n == 2);
+    for (int i = 0; i < g_prog_n; i++) {
+        float v = g_prog[i]->value ? atof(g_prog[i]->value) : -1.0f;
+        CHECK(v >= 0.0f && v <= 100.0f); /* clamped percentage */
+    }
 
     lens_destroy(ui);
 }

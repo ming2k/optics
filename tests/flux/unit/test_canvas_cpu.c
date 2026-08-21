@@ -25,9 +25,9 @@ typedef struct legacy_flux_canvas_pass_desc {
 
 _Static_assert(sizeof(flux_canvas_pass_desc) == sizeof(legacy_flux_canvas_pass_desc),
                "flux_canvas_pass_desc ABI changed");
-#define ASSERT_PASS_DESC_FIELD(field)                                                           \
-    _Static_assert(offsetof(flux_canvas_pass_desc, field) ==                                    \
-                       offsetof(legacy_flux_canvas_pass_desc, field),                           \
+#define ASSERT_PASS_DESC_FIELD(field)                                                              \
+    _Static_assert(offsetof(flux_canvas_pass_desc, field) ==                                       \
+                       offsetof(legacy_flux_canvas_pass_desc, field),                              \
                    "flux_canvas_pass_desc field layout changed: " #field)
 ASSERT_PASS_DESC_FIELD(type);
 ASSERT_PASS_DESC_FIELD(next);

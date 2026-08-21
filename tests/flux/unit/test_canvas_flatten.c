@@ -98,8 +98,8 @@ int main(void) {
         flux_path_line_to(p, 60.0f, 40.0f);
 
         flux_canvas_contour cons[FLUX_CANVAS_MAX_CONTOURS];
-        flatten_multi r = flatten_path_to_contours(p, 1.0f, pts, FLUX_CANVAS_PATH_SCRATCH_CAP,
-                                                   cons, FLUX_CANVAS_MAX_CONTOURS);
+        flatten_multi r = flatten_path_to_contours(p, 1.0f, pts, FLUX_CANVAS_PATH_SCRATCH_CAP, cons,
+                                                   FLUX_CANVAS_MAX_CONTOURS);
         EXPECT(r.contour_count == 2);
         EXPECT(r.point_count < 16); /* 2^16-duplicate flood would hit the cap */
         EXPECT(cons[1].count == 2); /* the trailing subpath kept both points */

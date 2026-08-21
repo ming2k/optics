@@ -104,8 +104,8 @@ FLUX_SG_API bool flux_sg_scene_bounds(const flux_sg_scene *scene, flux_vec3 *out
 /* Current model-space position of a VRM humanoid bone (for example "head" or
  * "hips"). Useful for cameras and attachments that must follow animation. */
 FLUX_SG_API bool flux_sg_scene_humanoid_bone_position(const flux_sg_scene *scene,
-                                                       const char *bone_name,
-                                                       flux_vec3 *out_position);
+                                                      const char *bone_name,
+                                                      flux_vec3 *out_position);
 
 /* Load the first animation from a binary glTF/VRMA file and bind its channels
  * to `target`. VRMC_vrm_animation humanoid channels are retargeted by bone

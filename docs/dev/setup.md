@@ -111,7 +111,10 @@ or link the database into the repository root if that path is unused:
 ln -s build/compile_commands.json compile_commands.json
 ```
 
-The root `.clang-format` defines the C formatting style.
+The root `.clang-format` defines the C formatting style, enforced by
+`tools/check-format.sh` (CI runs it on every push; it pins clang-format 22,
+so a different local major version will refuse rather than produce noise).
+`tools/check-format.sh --fix` reformats the tree in place.
 
 ## Troubleshooting
 

@@ -42,19 +42,17 @@ void lens_title(lens *ui, const char *text) {
     /* emit — through the replaceable skin (ADR-0059). The heading size and
      * bold weight are theme-only tokens (no style atom), so they ride the
      * record as content. */
-    lensi_skin_emit(ui, n,
-                    &(lens_widget_record){
-                        .kind = LENS_WIDGET_LABEL,
-                        .state = 0,
-                        .bounds = {0, 0, w, h},
-                        .last_bounds = n->prev_rect,
-                        .style = rs,
-                        .style_fields = eff.fields,
-                        .content = {.label = text,
-                                    .text = tm,
-                                    .text_size = size,
-                                    .text_weight = weight},
-                    });
+    lensi_skin_emit(
+        ui, n,
+        &(lens_widget_record){
+            .kind = LENS_WIDGET_LABEL,
+            .state = 0,
+            .bounds = {0, 0, w, h},
+            .last_bounds = n->prev_rect,
+            .style = rs,
+            .style_fields = eff.fields,
+            .content = {.label = text, .text = tm, .text_size = size, .text_weight = weight},
+        });
 
     ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
 }
@@ -79,19 +77,17 @@ void lens_heading(lens *ui, const char *text, int level) {
 
     lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
 
-    lensi_skin_emit(ui, n,
-                    &(lens_widget_record){
-                        .kind = LENS_WIDGET_LABEL,
-                        .state = 0,
-                        .bounds = {0, 0, w, h},
-                        .last_bounds = n->prev_rect,
-                        .style = rs,
-                        .style_fields = eff.fields,
-                        .content = {.label = text,
-                                    .text = tm,
-                                    .text_size = size,
-                                    .text_weight = weight},
-                    });
+    lensi_skin_emit(
+        ui, n,
+        &(lens_widget_record){
+            .kind = LENS_WIDGET_LABEL,
+            .state = 0,
+            .bounds = {0, 0, w, h},
+            .last_bounds = n->prev_rect,
+            .style = rs,
+            .style_fields = eff.fields,
+            .content = {.label = text, .text = tm, .text_size = size, .text_weight = weight},
+        });
 
     ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
 }

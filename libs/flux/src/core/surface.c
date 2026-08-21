@@ -649,12 +649,10 @@ static bool offscreen_format_suitable(flux_transfer_func tf, VkFormat f) {
         return f == VK_FORMAT_R16G16B16A16_SFLOAT;
     case FLUX_TRANSFER_PQ:
     case FLUX_TRANSFER_HLG:
-        return f == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ||
-               f == VK_FORMAT_R16G16B16A16_SFLOAT;
+        return f == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || f == VK_FORMAT_R16G16B16A16_SFLOAT;
     default:
         return f == VK_FORMAT_B8G8R8A8_UNORM || f == VK_FORMAT_R8G8B8A8_UNORM ||
-               f == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ||
-               f == VK_FORMAT_R16G16B16A16_SFLOAT;
+               f == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || f == VK_FORMAT_R16G16B16A16_SFLOAT;
     }
 }
 
@@ -684,10 +682,9 @@ static uint32_t offscreen_default_formats(flux_transfer_func tf, VkFormat out[2]
 static bool offscreen_format_optimal_renderable(flux_device *d, VkFormat format) {
     VkFormatProperties props;
     vkGetPhysicalDeviceFormatProperties(d->physical_device, format, &props);
-    const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
-                                      VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
-                                      VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
-                                      VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+    const VkFormatFeatureFlags need =
+        VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+        VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
     return (props.optimalTilingFeatures & need) == need;
 }
 
@@ -1402,9 +1399,13 @@ flux_result flux_surface_create(flux_device *device, const flux_surface_desc *de
         if (!supported) {
             FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
                       "graphics queue family does not support presentation to this surface");
-            flux_device_release(s->device);
-            flux_internal_free(device, s);
-            return FLUX_ERROR_UNSUPPORTED;
+            /* Same fail path as every other error below: the extension
+             * loop may already have populated requested_spaces /
+             * offscreen_allowed_modifiers / offscreen_formats before we
+             * reached the queue check — an inline free here would skip
+             * them and leak. */
+            r = FLUX_ERROR_UNSUPPORTED;
+            goto fail;
         }
 
         r = flux_surface_create_swapchain(s, desc->width, desc->height);

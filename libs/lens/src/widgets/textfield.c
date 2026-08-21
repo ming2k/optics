@@ -292,14 +292,14 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
         /* Mouse: a press places the caret (and clears any selection); a
          * drag with the button held extends the selection from that anchor. */
         if (ui->input.mouse_pressed[LENS_MOUSE_LEFT] && r.hovered) {
-            ts->cursor = (uint32_t)mouse_x_to_cursor(ui, buf, len, n, padding, ts->scroll_x,
-                                                     font_size);
+            ts->cursor =
+                (uint32_t)mouse_x_to_cursor(ui, buf, len, n, padding, ts->scroll_x, font_size);
             sel_clear(ts);
         }
         if (ui->active_id == id && ui->input.mouse_down[LENS_MOUSE_LEFT] &&
             !ui->input.mouse_pressed[LENS_MOUSE_LEFT]) {
-            ts->cursor = (uint32_t)mouse_x_to_cursor(ui, buf, len, n, padding, ts->scroll_x,
-                                                     font_size);
+            ts->cursor =
+                (uint32_t)mouse_x_to_cursor(ui, buf, len, n, padding, ts->scroll_x, font_size);
         }
         if (ui->active_id == id && !ui->input.mouse_down[LENS_MOUSE_LEFT]) {
             ui->active_id = 0;
@@ -368,8 +368,8 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
         lens_text_xrange xr[8];
         int nr = lensi_text_sel_rects(ui, buf, sel_lo(ts), sel_hi(ts), font_size, 0.0f, xr, 8);
         for (int i = 0; i < nr; i++)
-            sel_rects[sel_count++] = (flux_rect){padding + xr[i].x0, text_y,
-                                                 xr[i].x1 - xr[i].x0, fm.height};
+            sel_rects[sel_count++] =
+                (flux_rect){padding + xr[i].x0, text_y, xr[i].x1 - xr[i].x0, fm.height};
     }
 
     /* Caret X inside the widget (relative to text origin) */

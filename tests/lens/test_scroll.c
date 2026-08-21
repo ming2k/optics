@@ -11,31 +11,49 @@ static void test_scroll_offset(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
-    /* First frame: build scroll container with many items */
-    lens_begin(ui, &IN0);
-    lens_size(ui, 0, 200);
-    lens_scroll_begin(ui, "scroll");
-    for (int i = 0; i < 20; i++) {
-        lens_label(ui, "Item");
+    /* First frame: build scroll container with many DISTINCT items. Every
+     * label needs a unique id (push_id_int): same-label siblings merge
+     * into one node (ADR-0026), and a single row of content leaves zero
+     * scroll range — the earlier version of this test scrolled nothing
+     * and its placeholder assertion hid it. */
+    for (int f = 0; f < 2; f++) {
+        lens_begin(ui, f == 0 ? &IN0 : &IN0);
+        lens_size(ui, 0, 200);
+        lens_scroll_begin(ui, "scroll");
+        for (int i = 0; i < 20; i++) {
+            lens_push_id_int(ui, i);
+            lens_label(ui, "Item");
+            lens_pop_id(ui);
+        }
+        lens_scroll_end(ui);
+        lens_end(ui);
     }
-    lens_scroll_end(ui);
-    lens_end(ui);
 
-    /* Second frame: scroll wheel over it */
+    /* Wheel notch over it: -5 notches at LENS_SCROLL_SPEED px/notch move
+     * the content up; the clamped offset must come back positive. */
     lens_input in = IN0;
     in.cursor = (flux_point){50, 50};
-    in.scroll_y = 5.0f; /* scroll down */
+    in.scroll_y = -5.0f; /* wheel notch: negative delta = content moves up */
     lens_begin(ui, &in);
     lens_size(ui, 0, 200);
     lens_scroll_begin(ui, "scroll");
     for (int i = 0; i < 20; i++) {
+        lens_push_id_int(ui, i);
         lens_label(ui, "Item");
+        lens_pop_id(ui);
     }
     lens_scroll_end(ui);
     lens_end(ui);
 
-    /* Just verify no crash; scroll consumption is internal. */
-    CHECK(1);
+    /* The wheel event over the container must move its offset: 20 items
+     * in a 200-unit viewport leave scrollable range, so a down-wheel
+     * scroll produces a strictly positive offset (direction matches the
+     * precise-scroll test below). This replaces a bare "no crash"
+     * placeholder — scroll consumption IS observable through the public
+     * offset query. */
+    float sx = -1.0f, sy = -1.0f;
+    CHECK(lens_scroll_offset(ui, "scroll", &sx, &sy));
+    CHECK(sy > 0.0f);
 
     lens_destroy(ui);
 }

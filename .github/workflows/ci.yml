@@ -11,6 +11,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  format:
+    name: clang-format (pinned 22)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Formatting is locked to a major version: output drifts between
+      # clang-format releases, so "whatever the runner ships" would flake
+      # on image updates. The pin matches tools/check-format.sh.
+      - name: Install pinned clang-format
+        run: |
+          sudo install -d /etc/apt/keyrings
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | \
+            sudo tee /etc/apt/keyrings/llvm.asc >/dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/llvm.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | \
+            sudo tee /etc/apt/sources.list.d/llvm-22.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang-format-22
+          sudo update-alternatives --install /usr/bin/clang-format clang-format \
+            /usr/bin/clang-format-22 100
+
+      - name: Format check
+        run: tools/check-format.sh
+
   build-and-test:
     name: build & test (ubuntu-24.04, ${{ matrix.config }})
     runs-on: ubuntu-24.04
@@ -61,12 +85,17 @@ jobs:
       - name: Test (Lavapipe via VK_ICD_FILENAMES)
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          # LeakSanitizer reports fontconfig / FreeType / FriBidi global-cache
-          # allocations that survive process exit; those are system-library
-          # behaviour and not bugs in this codebase. Keep the ASAN crash
-          # detection but disable leak reporting until those libraries
-          # provide leak-free shutdown hooks.
-          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:halt_on_error=0
+          # Leak detection is ON: the root meson.build registers an 'asan'
+          # test setup (default when b_sanitize includes 'address') that
+          # points LSAN_OPTIONS at tools/lsan.supp, which suppresses the
+          # fontconfig process-lifetime pattern cache (upstream design,
+          # not our allocation) and the Vulkan ICD driver caches
+          # (suppressed per-ICD in tests/flux/test_helpers.c). With those
+          # in place the suite runs leak-clean — verified across the full
+          # local matrix. If a new legitimate leak appears, the
+          # LeakSanitizer report is the signal; fix the leak rather than
+          # re-disabling detection here.
+          ASAN_OPTIONS: abort_on_error=1:halt_on_error=0
           UBSAN_OPTIONS: print_stacktrace=1
         run: meson test -C build --no-suite bench --print-errorlogs --timeout-multiplier 4
 

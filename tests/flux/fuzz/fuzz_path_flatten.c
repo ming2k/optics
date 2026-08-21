@@ -26,8 +26,8 @@ static float read_f32(const uint8_t *p, size_t avail, size_t *cursor) {
             b[i] = p[*cursor + i];
     }
     *cursor += 4;
-    uint32_t u = (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
-                 ((uint32_t)b[3] << 24);
+    uint32_t u =
+        (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
     float f;
     memcpy(&f, &u, sizeof f);
     /* Filter out non-finite values: the flattener has a recursion cap but

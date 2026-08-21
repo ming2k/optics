@@ -171,8 +171,7 @@ void flux_frame_prepare_target(flux_frame *f, const flux_target *t) {
     VkAccessFlags2 access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
     if (depth) {
         aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-        if (t->format == VK_FORMAT_D24_UNORM_S8_UINT ||
-            t->format == VK_FORMAT_D32_SFLOAT_S8_UINT)
+        if (t->format == VK_FORMAT_D24_UNORM_S8_UINT || t->format == VK_FORMAT_D32_SFLOAT_S8_UINT)
             aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
         layout = (aspect & VK_IMAGE_ASPECT_STENCIL_BIT)
                      ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL

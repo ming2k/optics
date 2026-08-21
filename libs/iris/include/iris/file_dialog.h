@@ -29,11 +29,11 @@ typedef struct iris_file_filter {
 } iris_file_filter;
 
 typedef struct iris_file_dialog_opts {
-    const char *title;       /* dialog title (UTF-8, optional)        */
-    const char *initial_uri; /* file:// URI to start at (optional)    */
+    const char *title;               /* dialog title (UTF-8, optional)        */
+    const char *initial_uri;         /* file:// URI to start at (optional)    */
     const iris_file_filter *filters; /* NULL-terminated array (opt)   */
-    bool multiple_selection; /* allow more than one (open mode only)  */
-    bool directory_only;     /* restrict to directories               */
+    bool multiple_selection;         /* allow more than one (open mode only)  */
+    bool directory_only;             /* restrict to directories               */
 } iris_file_dialog_opts;
 
 /* Open a single-file picker. On success, writes a NUL-terminated UTF-8

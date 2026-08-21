@@ -211,6 +211,14 @@ typedef struct flux_retire_zombie {
     struct flux_retire_zombie *next;
 } flux_retire_zombie;
 
+/* Backpressure bound for the retire FIFO (see flux_device and
+ * zombie_park in device.c). Sized so normal operation — a few frames
+ * in flight times the per-frame release churn of pools and atlases —
+ * never reaches it; only a frozen watermark (host stops submitting
+ * while still releasing, or the GPU is wedged) can, and then the
+ * forced full drain is the intended behaviour. */
+#define FLUX_RETIRE_MAX_PENDING 4096u
+
 /* One idle staging buffer in the device cache (see flux_device).
  * Buffer + allocation stay alive and mapped while cached. */
 typedef struct flux_staging_buf {
@@ -367,6 +375,12 @@ struct flux_device {
     bool retire_lock_initialized;
     flux_retire_zombie *retire_head; /* FIFO; tags are non-decreasing */
     flux_retire_zombie **retire_tail;
+    /* Live entries on the FIFO. Backpressure bound: parking more than
+     * FLUX_RETIRE_MAX_PENDING forces a full drain (see zombie_park), so
+     * a host that releases resources while submitting no frames cannot
+     * grow GPU memory without bound. Frames-in-flight operation stays
+     * orders of magnitude below it. */
+    uint32_t retire_pending;
 
     /* Batched uploads (public flux_uploads_begin/flush). While a batch
      * is open, the one-shot upload helpers record their copies into

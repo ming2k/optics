@@ -19,23 +19,22 @@ void lensi_skin_dropdown(lens *ui, lens_node *n, const lens_widget_record *rec) 
         (lens_draw_cmd){
             .kind = LENS_DRAW_RECT, .rel = {0, 0, 0, 0}, .color = bg, .radius = rs->corner_radius});
 
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {rs->padding, (h - rec->content.text.height) * 0.5f,
-                                                0, 0},
-                                        .color = rs->fg,
-                                        .text = rec->content.label,
-                                        .text_size = rs->font_size});
+    lensi_drawlist_push(
+        ui, n,
+        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
+                        .rel = {rs->padding, (h - rec->content.text.height) * 0.5f, 0, 0},
+                        .color = rs->fg,
+                        .text = rec->content.label,
+                        .text_size = rs->font_size});
 
     float icon_size = rs->font_size;
     float icon_y = (h - icon_size) * 0.5f;
-    lensi_drawlist_push(
-        ui, n,
-        (lens_draw_cmd){.kind = LENS_DRAW_ICON,
-                        .rel = {-rs->padding, icon_y, icon_size, icon_size},
-                        .color = (open || focused) ? rs->accent : rs->fg,
-                        .width = 1.8f * (icon_size / 24.0f),
-                        .icon_id = rec->content.icon});
+    lensi_drawlist_push(ui, n,
+                        (lens_draw_cmd){.kind = LENS_DRAW_ICON,
+                                        .rel = {-rs->padding, icon_y, icon_size, icon_size},
+                                        .color = (open || focused) ? rs->accent : rs->fg,
+                                        .width = 1.8f * (icon_size / 24.0f),
+                                        .icon_id = rec->content.icon});
 
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_BORDER,

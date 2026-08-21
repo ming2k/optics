@@ -25,8 +25,7 @@ static flux_color_space image_default_space(flux_format f) {
  * the profile, re-laid as a 2D (N² × N) image so the stock 2D bindless
  * heap serves it; the shader does the slice lerp. RGBA32F keeps the
  * upload a plain widening of the baked floats. */
-static flux_result image_create_lut(flux_device *d, flux_image *im, const float *lut,
-                                    uint32_t n) {
+static flux_result image_create_lut(flux_device *d, flux_image *im, const float *lut, uint32_t n) {
     uint32_t w = n * n, h = n;
     size_t texel_count = (size_t)w * h;
     float *rgba = flux_internal_alloc(d, texel_count * 4 * sizeof(float));
@@ -174,7 +173,6 @@ flux_result flux_image_init_color(flux_device *d, flux_image *im, const void *ne
     }
     return FLUX_OK;
 }
-
 
 static uint32_t bytes_per_pixel(flux_format f) {
     switch (f) {
@@ -450,8 +448,8 @@ flux_result flux_image_create_compute_writable(flux_device *d, uint32_t width, u
     }
     if (fmt == FLUX_FORMAT_RGBA16_SFLOAT) {
         VkFormatProperties props;
-        vkGetPhysicalDeviceFormatProperties(d->physical_device,
-                                            VK_FORMAT_R16G16B16A16_SFLOAT, &props);
+        vkGetPhysicalDeviceFormatProperties(d->physical_device, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                            &props);
         if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0) {
             FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
                       "compute-writable RGBA16_SFLOAT needs rgba16f storage support");

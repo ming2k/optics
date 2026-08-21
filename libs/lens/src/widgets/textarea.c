@@ -564,8 +564,8 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
                 const char *line = line_cstr(ui, buf, pos, llen, stack);
                 if (line) {
                     lens_text_xrange xr[8];
-                    int nr = lensi_text_sel_rects(ui, line, seg_start, seg_end, font_size, 0.0f,
-                                                  xr, 8);
+                    int nr =
+                        lensi_text_sel_rects(ui, line, seg_start, seg_end, font_size, 0.0f, xr, 8);
                     for (int i = 0; i < nr; i++) {
                         if (sel_count == sel_cap) {
                             int nc = sel_cap ? sel_cap * 2 : 8;
@@ -606,21 +606,21 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
     if (has_preedit)
         find_line(buf, ts->cursor, &cursor_line_start, &cursor_line_idx);
 
-#define TEXTAREA_PUSH_LINE(txt, yy)                                                              \
-    do {                                                                                         \
-        if (line_count == line_cap) {                                                            \
-            int nc = line_cap ? line_cap * 2 : 8;                                                \
-            lens_text_line *na = flux_arena_alloc(&ui->arena, (size_t)nc * sizeof *na);          \
-            if (!na) {                                                                           \
-                lensi_set_overflow(ui);                                                          \
-                break;                                                                           \
-            }                                                                                    \
-            if (line_items)                                                                      \
-                memcpy(na, line_items, (size_t)line_count * sizeof *na);                         \
-            line_items = na;                                                                     \
-            line_cap = nc;                                                                       \
-        }                                                                                        \
-        line_items[line_count++] = (lens_text_line){.text = (txt), .x = padding, .y = (yy)};          \
+#define TEXTAREA_PUSH_LINE(txt, yy)                                                                \
+    do {                                                                                           \
+        if (line_count == line_cap) {                                                              \
+            int nc = line_cap ? line_cap * 2 : 8;                                                  \
+            lens_text_line *na = flux_arena_alloc(&ui->arena, (size_t)nc * sizeof *na);            \
+            if (!na) {                                                                             \
+                lensi_set_overflow(ui);                                                            \
+                break;                                                                             \
+            }                                                                                      \
+            if (line_items)                                                                        \
+                memcpy(na, line_items, (size_t)line_count * sizeof *na);                           \
+            line_items = na;                                                                       \
+            line_cap = nc;                                                                         \
+        }                                                                                          \
+        line_items[line_count++] = (lens_text_line){.text = (txt), .x = padding, .y = (yy)};       \
     } while (0)
 
     if (buf) {
@@ -695,9 +695,9 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
         uint32_t clause_hi = ui->input.preedit_sel_hi;
         if (clause_hi > clause_lo && clause_hi <= pe_len) {
             float clause_x = prefix_width(ui, pe, clause_lo, font_size);
-            preedit_clause = (flux_rect){padding + clause_x, line_y + line_h - 1.0f,
-                                         prefix_width(ui, pe, clause_hi, font_size) - clause_x,
-                                         2.0f};
+            preedit_clause =
+                (flux_rect){padding + clause_x, line_y + line_h - 1.0f,
+                            prefix_width(ui, pe, clause_hi, font_size) - clause_x, 2.0f};
         }
     }
 
@@ -717,8 +717,8 @@ bool lens_textarea(lens *ui, const char *label, char *buf, size_t buf_cap, float
         float pw = caret_line_x(ui, buf, ts->cursor, font_size);
         if (has_preedit)
             pw += prefix_width(ui, ui->input.preedit_utf8, ui->input.preedit_cursor, font_size);
-        caret = (flux_rect){padding + pw - 1.0f, padding + cidx * line_h - ts->scroll_y, 2.0f,
-                            line_h};
+        caret =
+            (flux_rect){padding + pw - 1.0f, padding + cidx * line_h - ts->scroll_y, 2.0f, line_h};
     }
 
     /* emit — through the replaceable skin (ADR-0059) */

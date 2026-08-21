@@ -56,8 +56,8 @@ static iris_color_scheme g_last = IRIS_COLOR_SCHEME_PREFER_DARK;
 IRIS_API iris_color_scheme iris_query_system_color_scheme(void) {
     HKEY hkey;
     if (RegOpenKeyExW(HKEY_CURRENT_USER,
-                      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                      0, KEY_READ, &hkey) == ERROR_SUCCESS) {
+                      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 0,
+                      KEY_READ, &hkey) == ERROR_SUCCESS) {
         DWORD value = 1, cb = sizeof value;
         LSTATUS st = RegQueryValueExW(hkey, L"AppsUseLightTheme", NULL, NULL, (LPBYTE)&value, &cb);
         RegCloseKey(hkey);

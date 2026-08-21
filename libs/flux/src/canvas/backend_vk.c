@@ -391,8 +391,8 @@ static flux_result vk_canvas_init(const flux_canvas_backend *self, flux_canvas *
     {
         VkFormatProperties fp;
         vkGetPhysicalDeviceFormatProperties(d->physical_device, FLUX_CANVAS_LINEAR_FORMAT, &fp);
-        const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
-                                          VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT;
+        const VkFormatFeatureFlags need =
+            VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT;
         if ((fp.optimalTilingFeatures & need) != need) {
             flux_internal_free(d, v);
             c->backend_data = nullptr;
@@ -407,8 +407,9 @@ static flux_result vk_canvas_init(const flux_canvas_backend *self, flux_canvas *
      * the working-space intermediate format up front (ADR-0069: draws no
      * longer target the surface format): the glyph pipeline in particular pulls
      * in SPIR-V JIT work on first use that can take ~0.5-1.5 s on Mesa/Intel,
-     * which trips IME watchdogs on the first banner render. Warming here keeps
-     * the cost inside canvas_create and turns first-draw into a hot path. */
+     * which blows any real frame deadline on the first frame containing text.
+     * Warming here keeps the cost inside canvas_create and turns first-draw
+     * into a hot path. */
     static const VkSampleCountFlagBits sample_counts[] = {
         VK_SAMPLE_COUNT_1_BIT,
         FLUX_CANVAS_SAMPLES,
@@ -421,9 +422,9 @@ static flux_result vk_canvas_init(const flux_canvas_backend *self, flux_canvas *
              * blend variants are built lazily on first use. */
             VkPipeline warm;
             if (v->stencil_format != VK_FORMAT_UNDEFINED) {
-                flux_result r = get_canvas_pipeline_id(d, FLUX_CANVAS_LINEAR_FORMAT,
-                                                       sample_counts[sample], (canvas_pipe_id)id,
-                                                       FLUX_BLEND_SRC_OVER, true, &v->layout, &warm);
+                flux_result r = get_canvas_pipeline_id(
+                    d, FLUX_CANVAS_LINEAR_FORMAT, sample_counts[sample], (canvas_pipe_id)id,
+                    FLUX_BLEND_SRC_OVER, true, &v->layout, &warm);
                 if (r != FLUX_OK) {
                     flux_internal_free(d, v);
                     c->backend_data = nullptr;
@@ -434,10 +435,9 @@ static flux_result vk_canvas_init(const flux_canvas_backend *self, flux_canvas *
                 id == CANVAS_PIPE_STENCIL_WRITE || id == CANVAS_PIPE_STENCIL_WRITE_EO ||
                 id == CANVAS_PIPE_COVER_SOLID || id == CANVAS_PIPE_COVER_GRADIENT;
             if (!stencil_program) {
-                flux_result r = get_canvas_pipeline_id(d, FLUX_CANVAS_LINEAR_FORMAT,
-                                                       sample_counts[sample], (canvas_pipe_id)id,
-                                                       FLUX_BLEND_SRC_OVER, false, &v->layout,
-                                                       &warm);
+                flux_result r = get_canvas_pipeline_id(
+                    d, FLUX_CANVAS_LINEAR_FORMAT, sample_counts[sample], (canvas_pipe_id)id,
+                    FLUX_BLEND_SRC_OVER, false, &v->layout, &warm);
                 if (r != FLUX_OK) {
                     flux_internal_free(d, v);
                     c->backend_data = nullptr;
@@ -452,9 +452,9 @@ static flux_result vk_canvas_init(const flux_canvas_backend *self, flux_canvas *
      * variants stay lazy: their formats differ per caller image. */
     {
         VkPipeline warm;
-        flux_result r = get_canvas_pipeline_id(d, v->color_format, VK_SAMPLE_COUNT_1_BIT,
-                                               CANVAS_PIPE_OUTPUT, FLUX_BLEND_SRC_OVER, false,
-                                               &v->layout, &warm);
+        flux_result r =
+            get_canvas_pipeline_id(d, v->color_format, VK_SAMPLE_COUNT_1_BIT, CANVAS_PIPE_OUTPUT,
+                                   FLUX_BLEND_SRC_OVER, false, &v->layout, &warm);
         if (r != FLUX_OK) {
             flux_internal_free(d, v);
             c->backend_data = nullptr;
@@ -552,8 +552,7 @@ static void record_output_blit(flux_canvas *c, VkImageView dest_view, VkFormat d
     VkPipelineLayout layout;
     VkPipeline pipeline;
     if (get_canvas_pipeline_id(c->device, dest_format, VK_SAMPLE_COUNT_1_BIT, CANVAS_PIPE_OUTPUT,
-                               FLUX_BLEND_SRC_OVER, false, &layout,
-                               &pipeline) != FLUX_OK) {
+                               FLUX_BLEND_SRC_OVER, false, &layout, &pipeline) != FLUX_OK) {
         if (c->pass_error == FLUX_OK)
             c->pass_error = FLUX_ERROR_BACKEND_FAILURE;
         return;
@@ -751,23 +750,20 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
             record_output_blit(c, linear->view, FLUX_CANVAS_LINEAR_FORMAT, area, &v->out_decode);
             /* The seed's attachment writes must be visible to the main
              * pass's load-op read of the same image. */
-            color_barrier2(cmd, linear->image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                           VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
-                               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+            color_barrier2(
+                cmd, linear->image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         }
         if (!target) {
             flux_surface *s = c->surface;
-            color_barrier2(cmd, s->images[s->current_image],
-                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
-                           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                           VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
-                               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+            color_barrier2(
+                cmd, s->images[s->current_image], VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_ACCESS_2_SHADER_READ_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
             s->image_layouts[s->current_image] = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
     }
@@ -809,13 +805,12 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
             FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas MSAA attachment unavailable");
             return FLUX_ERROR_BACKEND_FAILURE;
         }
-        color_barrier2(cmd, attachments->msaa.image,
-                       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                       VK_IMAGE_LAYOUT_UNDEFINED, /* contents cleared at load */
-                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        color_barrier2(
+            cmd, attachments->msaa.image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_UNDEFINED, /* contents cleared at load */
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
         att.view = attachments->msaa.view;
         att.resolve_view = linear->view;
@@ -837,7 +832,7 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     }
     if (has_stencil) {
         image_barrier2(cmd, stencil->image, VK_IMAGE_ASPECT_STENCIL_BIT,
-                   VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                       VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
                            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
@@ -913,8 +908,9 @@ static void vk_end_pass(const flux_canvas_backend *self, flux_canvas *c) {
     flux_vk_canvas *v = vkc(c);
     canvas_attachment_set *attachments = v->active_attachments;
     if (!attachments) {
-        attachments = c->target ? target_attachments_get(c, v->active_slot, c->fb_width, c->fb_height)
-                                : &v->surface_attachments[v->active_slot];
+        attachments = c->target
+                          ? target_attachments_get(c, v->active_slot, c->fb_width, c->fb_height)
+                          : &v->surface_attachments[v->active_slot];
     }
     v->active_attachments = nullptr;
     if (!attachments)
@@ -959,8 +955,7 @@ static void vk_end_pass(const flux_canvas_backend *self, flux_canvas *c) {
      * flux_effect_blur / draw_image needs no caller sync. */
     color_barrier2(cmd, t->image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                       VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                    VK_ACCESS_2_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     t->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;

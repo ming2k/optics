@@ -18,18 +18,18 @@ void lensi_skin_split(lens *ui, lens_node *n, const lens_widget_record *rec) {
 
     flux_color hc = hov ? rs->bg_pressed : rs->border;
     if (rec->content.vertical) {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {first_len - thick * 0.5f, 0, thick,
-                                                    rec->last_bounds.h},
-                                            .color = hc,
-                                            .radius = thick * 0.5f});
+        lensi_drawlist_push(
+            ui, n,
+            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                            .rel = {first_len - thick * 0.5f, 0, thick, rec->last_bounds.h},
+                            .color = hc,
+                            .radius = thick * 0.5f});
     } else {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {0, first_len - thick * 0.5f,
-                                                    rec->last_bounds.w, thick},
-                                            .color = hc,
-                                            .radius = thick * 0.5f});
+        lensi_drawlist_push(
+            ui, n,
+            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                            .rel = {0, first_len - thick * 0.5f, rec->last_bounds.w, thick},
+                            .color = hc,
+                            .radius = thick * 0.5f});
     }
 }

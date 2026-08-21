@@ -58,8 +58,8 @@ static void build(lens *ui, const lens_input *in, void *user) {
     if (tb - d->last_report >= 2.0) {
         d->last_report = tb;
         fprintf(stderr,
-                "[paint_static t=%.1fs] animated frames: %d, static calls: %d, builds: %d\n",
-                tb, d->frames_animated, d->frames_static, d->build_calls);
+                "[paint_static t=%.1fs] animated frames: %d, static calls: %d, builds: %d\n", tb,
+                d->frames_animated, d->frames_static, d->build_calls);
         fflush(stderr);
     }
 }
@@ -80,8 +80,7 @@ static void paint(flux_canvas *canvas, flux_device *device, float scale, void *u
 }
 
 static void report(demo_state *d) {
-    fprintf(stderr,
-            "[paint_static] animated-phase frames: %d, static-phase calls: %d\n",
+    fprintf(stderr, "[paint_static] animated-phase frames: %d, static-phase calls: %d\n",
             d->frames_animated, d->frames_static);
 }
 

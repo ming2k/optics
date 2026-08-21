@@ -38,9 +38,8 @@ void lensi_skin_slider(lens *ui, lens_node *n, const lens_widget_record *rec) {
      * lensi_approach on hover_t/active_t marks animation pending, so
      * input-driven hosts keep rendering until the colour settles. */
     float emphasis = fmaxf(rec->hover_t * 0.35f, rec->active_t * 0.6f);
-    flux_color knob_color = disabled || error
-                                ? knob_target
-                                : lensi_lerp_color(knob_target, rs->accent, emphasis);
+    flux_color knob_color =
+        disabled || error ? knob_target : lensi_lerp_color(knob_target, rs->accent, emphasis);
 
     if (!rec->content.vertical) {
         float track_x0 = rs->padding + knob_extent * 0.5f;

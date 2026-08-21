@@ -7,9 +7,8 @@
 static const lens_input ZERO_IN = {.display_size = {400, 300}, .dt_seconds = 0.016f};
 
 static void build_modal(lens *ui, const char *id, const char *title, bool pinned) {
-    if (lens_modal_begin(
-            ui, id,
-            (lens_modal_opts){.title = title, .min_width = 200, .pinned = pinned})) {
+    if (lens_modal_begin(ui, id,
+                         (lens_modal_opts){.title = title, .min_width = 200, .pinned = pinned})) {
         lens_label(ui, "body");
         lens_button(ui, "OK"); /* focusable, inside the trap */
         lens_button(ui, "No"); /* focusable, inside the trap */

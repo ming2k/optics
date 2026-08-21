@@ -183,7 +183,7 @@ static void build(lens *ui, const lens_input *in, void *user) {
     row(ui, "Nav strip");
     lens_style nav = lens_style_init();
     nav.fields = LENS_STYLE_FG | LENS_STYLE_BG_PRESSED;
-    nav.fg = th.color_accent; /* glyph colour at rest and active */
+    nav.fg = th.color_accent;                                 /* glyph colour at rest and active */
     nav.bg_pressed = flux_color_rgba(0x3A, 0x6A, 0xC0, 0x30); /* active tile tint */
     lens_push_style(ui, nav);
     if (lens_icon_button_active(ui, LENS_ICON_HOME, a->nav_sel == 0))

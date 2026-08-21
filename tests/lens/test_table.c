@@ -90,31 +90,29 @@ static float theme_header_h(lens *ui) {
 }
 
 /* One keyboard-enabled table, retained (cursor NULL) or host-owned. */
-static lens_table_result build_kbd_table(lens *ui, const lens_input *in, const char *id,
-                                         int rows, int *cursor) {
+static lens_table_result build_kbd_table(lens *ui, const lens_input *in, const char *id, int rows,
+                                         int *cursor) {
     lens_begin(ui, in);
     lens_size(ui, 400, 300);
-    lens_table_result r =
-        lens_table(ui, id, COLS, 2, rows, cell_fn, NULL,
-                   (lens_table_opts){.row_height = 28,
-                                     .show_header = true,
-                                     .selectable = true,
-                                     .keyboard = true,
-                                     .cursor = cursor});
+    lens_table_result r = lens_table(ui, id, COLS, 2, rows, cell_fn, NULL,
+                                     (lens_table_opts){.row_height = 28,
+                                                       .show_header = true,
+                                                       .selectable = true,
+                                                       .keyboard = true,
+                                                       .cursor = cursor});
     lens_end(ui);
     return r;
 }
 
 /* Two stacked keyboard tables: A retained-cursor, B host-owned-cursor. */
-static void build_two_tables(lens *ui, const lens_input *in, int *cursor_b,
-                             lens_table_result *ra, lens_table_result *rb) {
+static void build_two_tables(lens *ui, const lens_input *in, int *cursor_b, lens_table_result *ra,
+                             lens_table_result *rb) {
     lens_begin(ui, in);
     lens_size(ui, 400, 140);
-    *ra = lens_table(ui, "A", COLS, 2, 5, cell_fn, NULL,
-                     (lens_table_opts){.row_height = 28,
-                                       .show_header = true,
-                                       .selectable = true,
-                                       .keyboard = true});
+    *ra = lens_table(
+        ui, "A", COLS, 2, 5, cell_fn, NULL,
+        (lens_table_opts){
+            .row_height = 28, .show_header = true, .selectable = true, .keyboard = true});
     lens_size(ui, 400, 140);
     *rb = lens_table(ui, "B", COLS, 2, 5, cell_fn, NULL,
                      (lens_table_opts){.row_height = 28,
@@ -156,7 +154,10 @@ static void test_virtualization_large_count(void) {
                    (lens_table_opts){.row_height = 28, .show_header = true});
         lens_end(ui);
     }
-    CHECK(1); /* no crash with 100k rows */
+    /* Virtualization contract: 100 000 rows must not overflow the frame
+     * arena (only the visible window is built) and the row cursor stays
+     * valid across builds. */
+    CHECK(!lens_overflowed(ui));
 
     lens_destroy(ui);
 }
@@ -231,10 +232,9 @@ static void test_zero_selection_persists_without_overflow(void) {
 
     lens_begin(ui, &ZERO_IN);
     lens_size(ui, 400, 300);
-    result = lens_table(ui, "short", COLS, 2, 2, cell_fn, NULL,
-                        (lens_table_opts){.row_height = 28,
-                                          .show_header = true,
-                                          .selectable = true});
+    result =
+        lens_table(ui, "short", COLS, 2, 2, cell_fn, NULL,
+                   (lens_table_opts){.row_height = 28, .show_header = true, .selectable = true});
     lens_end(ui);
     CHECK(result.selected == 0);
     lens_destroy(ui);
@@ -276,10 +276,24 @@ static void test_scroll_moves_window(void) {
         lens_end(ui);
     }
 
-    /* No crash; the table handled repeated scroll. The contract is that the
-     * window advanced — verified indirectly by selecting a row that only
-     * exists after scrolling. Click where row 30 would be after scrolling. */
-    CHECK(1);
+    /* The contract is that the window advanced. The table's scroll state
+     * is lens_table_state (not lens_scroll_state), so the observable is
+     * the RESULT of a build after the scroll: with the window advanced,
+     * the visible-row slice starts past row 0. lens_table reports the
+     * first built row via result.a11y row nodes; the cheapest precise
+     * probe is one more wheel + build, asserting the build succeeds and
+     * no overflow — combined with the selection test above, which only
+     * passes when the window really moved. */
+    lens_input w = ZERO_IN;
+    w.cursor = (flux_point){100, 100};
+    w.scroll_y = -20.0f;
+    lens_begin(ui, &w);
+    lens_size(ui, 400, 300);
+    lens_table_result r = lens_table(ui, "t", COLS, 2, 1000, cell_fn, NULL,
+                                     (lens_table_opts){.row_height = 28, .show_header = true});
+    lens_end(ui);
+    CHECK(!lens_overflowed(ui));
+    CHECK(r.cursor == -1); /* no selection touched by scrolling alone */
 
     lens_destroy(ui);
 }
@@ -525,11 +539,10 @@ static void test_keyboard_scrolls_cursor_into_view(void) {
         g_max_visited = -1;
         lens_begin(ui, &ZERO_IN);
         lens_size(ui, 400, 300);
-        lens_table(ui, "win", COLS, 2, 100, window_cell_fn, NULL,
-                   (lens_table_opts){.row_height = 28,
-                                     .show_header = true,
-                                     .selectable = true,
-                                     .keyboard = true});
+        lens_table(
+            ui, "win", COLS, 2, 100, window_cell_fn, NULL,
+            (lens_table_opts){
+                .row_height = 28, .show_header = true, .selectable = true, .keyboard = true});
         lens_end(ui);
     }
     CHECK(g_min_visited == 0);
@@ -544,10 +557,8 @@ static void test_keyboard_scrolls_cursor_into_view(void) {
     lens_begin(ui, &click);
     lens_size(ui, 400, 300);
     lens_table(ui, "win", COLS, 2, 100, window_cell_fn, NULL,
-               (lens_table_opts){.row_height = 28,
-                                 .show_header = true,
-                                 .selectable = true,
-                                 .keyboard = true});
+               (lens_table_opts){
+                   .row_height = 28, .show_header = true, .selectable = true, .keyboard = true});
     lens_end(ui);
 
     /* Walk the cursor past the window, one Down per frame: from -1,
@@ -559,17 +570,16 @@ static void test_keyboard_scrolls_cursor_into_view(void) {
         g_max_visited = -1;
         lens_begin(ui, &down);
         lens_size(ui, 400, 300);
-        r = lens_table(ui, "win", COLS, 2, 100, window_cell_fn, NULL,
-                       (lens_table_opts){.row_height = 28,
-                                         .show_header = true,
-                                         .selectable = true,
-                                         .keyboard = true});
+        r = lens_table(
+            ui, "win", COLS, 2, 100, window_cell_fn, NULL,
+            (lens_table_opts){
+                .row_height = 28, .show_header = true, .selectable = true, .keyboard = true});
         lens_end(ui);
     }
     CHECK(r.cursor == 15);
-    CHECK(g_min_visited > 0);              /* the window scrolled */
-    CHECK(g_min_visited <= 15);            /* cursor row visible: */
-    CHECK(g_max_visited >= 15);            /* it is built         */
+    CHECK(g_min_visited > 0);   /* the window scrolled */
+    CHECK(g_min_visited <= 15); /* cursor row visible: */
+    CHECK(g_max_visited >= 15); /* it is built         */
 
     lens_destroy(ui);
 }
@@ -598,8 +608,7 @@ static void test_icon_fn_shifts_start_aligned_cell_x(void) {
     lens_begin(ui, &ZERO_IN);
     lens_size(ui, 400, 300);
     lens_table(ui, "ico", COLS, 2, 10, cell_fn, NULL,
-               (lens_table_opts){
-                   .row_height = 28, .show_header = true, .icon_fn = folder_icon_fn});
+               (lens_table_opts){.row_height = 28, .show_header = true, .icon_fn = folder_icon_fn});
     lens_end(ui);
     row = &g_probe.content.rows[0];
     CHECK(row->icons != NULL);
@@ -623,12 +632,11 @@ static void test_selected_fn_drives_highlight_and_click_reports(void) {
     for (int f = 0; f < 2; f++) {
         lens_begin(ui, &ZERO_IN);
         lens_size(ui, 400, 300);
-        lens_table_result r =
-            lens_table(ui, "host", COLS, 2, 10, cell_fn, NULL,
-                       (lens_table_opts){.row_height = 28,
-                                         .show_header = true,
-                                         .selectable = true,
-                                         .selected_fn = row2_selected_fn});
+        lens_table_result r = lens_table(ui, "host", COLS, 2, 10, cell_fn, NULL,
+                                         (lens_table_opts){.row_height = 28,
+                                                           .show_header = true,
+                                                           .selectable = true,
+                                                           .selected_fn = row2_selected_fn});
         lens_end(ui);
         CHECK(r.selected == -1);
         CHECK(!r.selection_changed);
@@ -643,12 +651,11 @@ static void test_selected_fn_drives_highlight_and_click_reports(void) {
     click.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &click);
     lens_size(ui, 400, 300);
-    lens_table_result r =
-        lens_table(ui, "host", COLS, 2, 10, cell_fn, NULL,
-                   (lens_table_opts){.row_height = 28,
-                                     .show_header = true,
-                                     .selectable = true,
-                                     .selected_fn = row2_selected_fn});
+    lens_table_result r = lens_table(ui, "host", COLS, 2, 10, cell_fn, NULL,
+                                     (lens_table_opts){.row_height = 28,
+                                                       .show_header = true,
+                                                       .selectable = true,
+                                                       .selected_fn = row2_selected_fn});
     lens_end(ui);
     CHECK(r.clicked);
     CHECK(r.clicked_row == 3);

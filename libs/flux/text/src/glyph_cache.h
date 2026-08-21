@@ -30,9 +30,15 @@
  * cache's own invalidate() path, and put() at the cap evicts the
  * least-recently-used entry instead of failing.
  *
+ * A third, subtler failure mode is designed against explicitly: at
+ * saturation every eviction mints a tombstone, so tombstone hygiene
+ * must not depend on the growth trigger (which always fires at
+ * saturation and would otherwise starve the sweep — see put()).
+ *
  * Only compiled when FLUX_TEXT_HAVE_FTHB is defined; consumers include
  * it via text_internal.h.
  */
+
 #ifndef FLUX_GLYPH_CACHE_H
 #define FLUX_GLYPH_CACHE_H
 
@@ -48,8 +54,9 @@
  * outline at a different horizontal subpixel phase is a distinct entry
  * so fractional pen positions stay crisp without snapping.
  *
- * `last_used` is private to the cache's LRU policy; callers should
- * treat it as read-only.
+ * `last_used` and `lru_prev`/`lru_next` are private to the cache's LRU
+ * policy (a doubly-linked ring through slot indices, MRU first);
+ * callers should treat them as read-only.
  *
  * Slot lifecycle (tri-state, encoded by the occupied/live pair):
  *
@@ -75,7 +82,8 @@ typedef struct glyph_entry {
     uint16_t atlas_x, atlas_y;
     int w, h;
     int left, top;
-    uint64_t last_used; /* LRU tick; bumped on lookup hit */
+    uint64_t last_used;          /* LRU tick; bumped on lookup hit */
+    uint32_t lru_prev, lru_next; /* intrusive ring; UINT32_MAX = none */
 } glyph_entry;
 
 /* ------------------------------------------------------------------ */
@@ -102,9 +110,14 @@ glyph_entry *glyph_cache_lookup(glyph_cache *c, int face_id, uint32_t gid, uint3
  * caller is expected to rasterise + populate atlas_x/y/w/h/left/top
  * before the next lookup that might evict it.
  *
- * If the table is at the load-factor grow trigger:
- *   - below max_cap: doubles the table;
- *   - at max_cap: evicts the least-recently-used live entry.
+ * Capacity policy — two independent rules, evaluated in this order:
+ *   - working set: live entries are capped at max_cap/2; a put that
+ *     would exceed the cap evicts the LRU tail in O(1);
+ *   - occupancy: (live+tombstones) past 50 % of cap grows the table
+ *     while cap < max_cap, and tombstones alone past 25 % of cap
+ *     trigger a same-cap rehash — independently of the first rule, so
+ *     the sweep still runs at saturation where evictions mint
+ *     tombstones fastest.
  *
  * Never returns NULL when any entry is evictable, which is always true
  * for a non-empty cache. Returns NULL only on unrecoverable allocation

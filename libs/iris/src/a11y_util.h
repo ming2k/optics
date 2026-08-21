@@ -113,14 +113,14 @@ typedef struct iris_a11y__node {
     lens_role role;
     char name[IRIS_A11Y__NODE_NAME_MAX];
     char value[IRIS_A11Y__NODE_VALUE_MAX];
-    uint32_t flags;    /* LENS_A11Y_*                        */
-    int32_t index;     /* index among same-parent siblings    */
+    uint32_t flags; /* LENS_A11Y_*                        */
+    int32_t index;  /* index among same-parent siblings    */
 } iris_a11y__node;
 
 /* Copy one walked lens node into snapshot storage (deep string copies,
  * sibling index computed against the partially built `cur` array). */
-void iris_a11y__node_fill(iris_a11y__node *dst, const lens_semantics *s, lens_id id,
-                          lens_id parent, const iris_a11y__node *cur, size_t n_cur);
+void iris_a11y__node_fill(iris_a11y__node *dst, const lens_semantics *s, lens_id id, lens_id parent,
+                          const iris_a11y__node *cur, size_t n_cur);
 
 /* ------------------------------------------------------------------ */
 /*  Text-changed delta (Event.Object::TextChanged)                     */
@@ -133,9 +133,9 @@ void iris_a11y__node_fill(iris_a11y__node *dst, const lens_semantics *s, lens_id
  * and stay valid as long as those strings do. A replace (both sides
  * non-empty) is meant to be emitted as delete-then-insert. */
 typedef struct iris_a11y__text_delta {
-    int32_t offset;  /* code-point offset of the change           */
-    int32_t removed; /* code points removed (0 = pure insert)     */
-    int32_t inserted;    /* code points inserted (0 = pure delete)    */
+    int32_t offset;           /* code-point offset of the change           */
+    int32_t removed;          /* code points removed (0 = pure insert)     */
+    int32_t inserted;         /* code points inserted (0 = pure delete)    */
     const char *removed_text; /* removed run inside `prev`          */
     size_t removed_bytes;
     const char *inserted_text; /* inserted run inside `cur`          */
@@ -152,26 +152,26 @@ bool iris_a11y__text_delta_of(const char *prev, const char *cur, iris_a11y__text
  * NOT diffed here: it is tracked by pointer (the focused id) so removals of
  * the focused node still produce a focused-off event. */
 typedef enum iris_a11y__event_kind {
-    IRIS_A11Y__EV_ADD,        /* node appeared (id, parent, index set)      */
-    IRIS_A11Y__EV_REMOVE,     /* node vanished (id, parent, index = old)    */
-    IRIS_A11Y__EV_NAME,       /* accessible-name changed (name = new)       */
-    IRIS_A11Y__EV_VALUE,      /* accessible-value changed (value = new)     */
-    IRIS_A11Y__EV_ROLE,       /* accessible-role changed (role = new)       */
-    IRIS_A11Y__EV_STATE_ON,   /* state bit turned on  (state = AT-SPI bit)  */
-    IRIS_A11Y__EV_STATE_OFF,  /* state bit turned off (state = AT-SPI bit)  */
-    IRIS_A11Y__EV_TEXT,       /* text edit on a TEXT* role (text = delta)   */
+    IRIS_A11Y__EV_ADD,       /* node appeared (id, parent, index set)      */
+    IRIS_A11Y__EV_REMOVE,    /* node vanished (id, parent, index = old)    */
+    IRIS_A11Y__EV_NAME,      /* accessible-name changed (name = new)       */
+    IRIS_A11Y__EV_VALUE,     /* accessible-value changed (value = new)     */
+    IRIS_A11Y__EV_ROLE,      /* accessible-role changed (role = new)       */
+    IRIS_A11Y__EV_STATE_ON,  /* state bit turned on  (state = AT-SPI bit)  */
+    IRIS_A11Y__EV_STATE_OFF, /* state bit turned off (state = AT-SPI bit)  */
+    IRIS_A11Y__EV_TEXT,      /* text edit on a TEXT* role (text = delta)   */
 } iris_a11y__event_kind;
 
 typedef struct iris_a11y__event {
     iris_a11y__event_kind kind;
     lens_id id;
-    lens_id parent;   /* add/remove: the parent the change is reported on */
-    int32_t index;    /* add/remove: index in that parent's child list    */
-    int32_t state;    /* STATE_ON/OFF: iris_atspi_state bit               */
-    lens_role role;   /* ROLE: the new role                               */
-    iris_a11y__text_delta text; /* TEXT: the edit delta                   */
-    const iris_a11y__node *node; /* the current-frame node (NULL for REMOVE,
-                                    which points at `prev_node` instead)   */
+    lens_id parent;                   /* add/remove: the parent the change is reported on */
+    int32_t index;                    /* add/remove: index in that parent's child list    */
+    int32_t state;                    /* STATE_ON/OFF: iris_atspi_state bit               */
+    lens_role role;                   /* ROLE: the new role                               */
+    iris_a11y__text_delta text;       /* TEXT: the edit delta                   */
+    const iris_a11y__node *node;      /* the current-frame node (NULL for REMOVE,
+                                         which points at `prev_node` instead)   */
     const iris_a11y__node *prev_node; /* REMOVE: the old node            */
 } iris_a11y__event;
 
@@ -181,8 +181,7 @@ typedef struct iris_a11y__event {
  * may exceed `cap` (callers size `out` generously: 2 * max_nodes + slack).
  * Only CHECKED / EXPANDED / SELECTED state bits are diffed; focus is the
  * caller's pointer-tracked concern (see above). */
-size_t iris_a11y__diff(const iris_a11y__node *prev, size_t n_prev,
-                       const iris_a11y__node *cur, size_t n_cur, iris_a11y__event *out,
-                       size_t cap);
+size_t iris_a11y__diff(const iris_a11y__node *prev, size_t n_prev, const iris_a11y__node *cur,
+                       size_t n_cur, iris_a11y__event *out, size_t cap);
 
 #endif /* IRIS_A11Y_UTIL_H */

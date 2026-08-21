@@ -221,8 +221,7 @@ static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(voi
 
     bool center_lit = false;
     size_t contour = 0;
-    size_t lit =
-        rendered_icon_pixels_with_outline(LENS_ICON_GLOBE, &center_lit, true, &contour);
+    size_t lit = rendered_icon_pixels_with_outline(LENS_ICON_GLOBE, &center_lit, true, &contour);
     CHECK(lit > 0);
     CHECK(contour > 0);
 }
@@ -294,7 +293,6 @@ static void test_icon_button_requests_pointer_cursor(void) {
 
     lens_destroy(ui);
 }
-
 
 static void test_button_mouse_secondary(void) {
     lens *ui = NULL;

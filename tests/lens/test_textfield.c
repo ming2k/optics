@@ -666,7 +666,6 @@ static void test_textfield_preedit_clause(void) {
     lens_destroy(ui);
 }
 
-
 /* ------------------------------------------------------------------ */
 /*  UTF-8 editing: every key path must respect code-point boundaries    */
 /* ------------------------------------------------------------------ */

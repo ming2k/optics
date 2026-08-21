@@ -1,7 +1,10 @@
 # ADR-0030: Lens damage / redraw tracking — deferred, full-tree repaint today
 
-- Status: Accepted
+- Status: Accepted (Decision #3 superseded by implementation — see the
+  status note below and ADR-0017's canvas display lists)
 - Date: 2026-07-21
+- Amended: 2026-08-21 — subtree skip IS now delivered, via canvas
+  record/replay rather than a lens-side offscreen cache
 - Scope: lens (L2 toolkit). Records the draw-list hashing infrastructure
   and the current "repaint the whole tree" policy.
 
@@ -42,6 +45,13 @@ Forces:
    computed for future use and explicitly marked as disabled in
    `replay.c` with a note tying re-enablement to a subtree offscreen
    cache.
+   *(Superseded 2026-08-21: `libs/lens/src/render/replay.c` now records
+   each subtree's emission into a canvas display-list segment and
+   replays it when the subtree's command hash, child hash, and the
+   flux-text atlas generation are unchanged — the "offscreen cache"
+   this decision waited for turned out to be the canvas-side segment
+   pool, not a lens-side bitmap cache. The decision text above is kept
+   for the reasoning that produced the hash infrastructure.)*
 4. **Draw commands live in the per-frame arena.** Text runs are copied
    into the arena on push so caller buffers may be short-lived; other
    commands are arena-allocated as the list grows.

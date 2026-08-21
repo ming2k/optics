@@ -196,8 +196,8 @@ void iris_a11y__state_bits(uint32_t lens_flags, uint32_t *out_lo, uint32_t *out_
 /*  Per-frame tree diff                                                */
 /* ------------------------------------------------------------------ */
 
-void iris_a11y__node_fill(iris_a11y__node *dst, const lens_semantics *s, lens_id id,
-                          lens_id parent, const iris_a11y__node *cur, size_t n_cur) {
+void iris_a11y__node_fill(iris_a11y__node *dst, const lens_semantics *s, lens_id id, lens_id parent,
+                          const iris_a11y__node *cur, size_t n_cur) {
     dst->id = id;
     dst->parent = parent;
     dst->role = s->role;
@@ -271,15 +271,14 @@ bool iris_a11y__text_delta_of(const char *prev, const char *cur, iris_a11y__text
     return true;
 }
 
-size_t iris_a11y__diff(const iris_a11y__node *prev, size_t n_prev,
-                       const iris_a11y__node *cur, size_t n_cur, iris_a11y__event *out,
-                       size_t cap) {
+size_t iris_a11y__diff(const iris_a11y__node *prev, size_t n_prev, const iris_a11y__node *cur,
+                       size_t n_cur, iris_a11y__event *out, size_t cap) {
     size_t n = 0;
-#define PUSH(ev)                          \
-    do {                                  \
-        if (n < cap)                      \
-            out[n] = (ev);                \
-        n++;                              \
+#define PUSH(ev)                                                                                   \
+    do {                                                                                           \
+        if (n < cap)                                                                               \
+            out[n] = (ev);                                                                         \
+        n++;                                                                                       \
     } while (0)
 
     /* Removals first (clients drop the subtree before additions land). */
@@ -313,10 +312,8 @@ size_t iris_a11y__diff(const iris_a11y__node *prev, size_t n_prev,
         if (!p)
             continue;
         if (c->role != p->role) {
-            PUSH(((iris_a11y__event){.kind = IRIS_A11Y__EV_ROLE,
-                                     .id = c->id,
-                                     .role = c->role,
-                                     .node = c}));
+            PUSH(((iris_a11y__event){
+                .kind = IRIS_A11Y__EV_ROLE, .id = c->id, .role = c->role, .node = c}));
         }
         if (strcmp(c->name, p->name) != 0) {
             PUSH(((iris_a11y__event){.kind = IRIS_A11Y__EV_NAME, .id = c->id, .node = c}));
@@ -330,10 +327,8 @@ size_t iris_a11y__diff(const iris_a11y__node *prev, size_t n_prev,
         if (iris_a11y__supports_text(c->role) && strcmp(c->value, p->value) != 0) {
             iris_a11y__text_delta d;
             if (iris_a11y__text_delta_of(p->value, c->value, &d)) {
-                PUSH(((iris_a11y__event){.kind = IRIS_A11Y__EV_TEXT,
-                                         .id = c->id,
-                                         .text = d,
-                                         .node = c}));
+                PUSH(((iris_a11y__event){
+                    .kind = IRIS_A11Y__EV_TEXT, .id = c->id, .text = d, .node = c}));
             }
         }
         static const struct {
@@ -348,8 +343,8 @@ size_t iris_a11y__diff(const iris_a11y__node *prev, size_t n_prev,
             bool was = (p->flags & tracked[t].lens_flag) != 0;
             bool is = (c->flags & tracked[t].lens_flag) != 0;
             if (was != is) {
-                PUSH(((iris_a11y__event){.kind = is ? IRIS_A11Y__EV_STATE_ON
-                                                    : IRIS_A11Y__EV_STATE_OFF,
+                PUSH(((iris_a11y__event){.kind =
+                                             is ? IRIS_A11Y__EV_STATE_ON : IRIS_A11Y__EV_STATE_OFF,
                                          .id = c->id,
                                          .state = tracked[t].atspi_state,
                                          .node = c}));

@@ -35,8 +35,8 @@ void lensi_skin_icon_button(lens *ui, lens_node *n, const lens_widget_record *re
      * signal, identical for flat and rounded tiles. */
     float fill = active_surface ? 1.0f : rec->hover_t * 0.6f;
     if (fill > 0.001f) {
-        flux_color bg = active_surface ? rs->bg_pressed
-                                       : lensi_lerp_color(rs->bg, rs->bg_hover, fill);
+        flux_color bg =
+            active_surface ? rs->bg_pressed : lensi_lerp_color(rs->bg, rs->bg_hover, fill);
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_RECT,
                                             .rel = {0, 0, 0, 0},
@@ -49,9 +49,7 @@ void lensi_skin_icon_button(lens *ui, lens_node *n, const lens_widget_record *re
 
     /* Glyph: dimmed when disabled, accent only for the checked toggle (a
      * glyph-swap content variant), plain foreground otherwise. */
-    flux_color glyph = disabled         ? rs->disabled
-                       : rec->content.accent_checked ? rs->accent
-                                                     : rs->fg;
+    flux_color glyph = disabled ? rs->disabled : rec->content.accent_checked ? rs->accent : rs->fg;
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){
                             .kind = LENS_DRAW_ICON,

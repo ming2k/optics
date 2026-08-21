@@ -54,9 +54,9 @@ static void test_merge_is_per_field(void) {
     over.font_size = 22.0f;
 
     lens_style m = lensi_style_merge(&base, &over);
-    CHECK(m.fg == 0xFF445566u);         /* over wins where set        */
+    CHECK(m.fg == 0xFF445566u); /* over wins where set        */
     CHECK_NEAR(m.font_size, 22.0f, 0.0f);
-    CHECK_NEAR(m.padding, 9.0f, 0.0f);  /* base fills the rest        */
+    CHECK_NEAR(m.padding, 9.0f, 0.0f); /* base fills the rest        */
     CHECK(m.fields == (LENS_STYLE_FG | LENS_STYLE_PADDING | LENS_STYLE_FONT_SIZE));
     CHECK_NEAR(base.font_size, 0.0f, 0.0f); /* inputs untouched (pure) */
 }
@@ -164,8 +164,7 @@ static void test_box_style_beats_scope_beats_theme(void) {
     lens_button_ex(ui, (lens_button_opts){.label = "themed"});
     lens_push_style(ui, bg_only(red));
     lens_button_ex(ui, (lens_button_opts){.label = "scoped"});
-    lens_button_ex(ui,
-                   (lens_button_opts){.label = "per-call", .box = {.style = bg_only(blue)}});
+    lens_button_ex(ui, (lens_button_opts){.label = "per-call", .box = {.style = bg_only(blue)}});
     lens_pop_style(ui);
     lens_end(ui);
 

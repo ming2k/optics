@@ -134,10 +134,7 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
                                  .mode = LENS_PLACE_ANCHORED,
                                  .rect = a->file_btn_rect,
                                  .transient = true,
-                                 .layout = {.pad = 6,
-                                            .min_width = 140,
-                                            .bg = tn.card,
-                                            .radius = 6},
+                                 .layout = {.pad = 6, .min_width = 140, .bg = tn.card, .radius = 6},
                              })) {
             if (lens_button(ui, "New")) {
                 printf("  FILE     New\n");
@@ -169,10 +166,7 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
                                  .mode = LENS_PLACE_ANCHORED,
                                  .rect = a->edit_btn_rect,
                                  .transient = true,
-                                 .layout = {.pad = 6,
-                                            .min_width = 140,
-                                            .bg = tn.card,
-                                            .radius = 6},
+                                 .layout = {.pad = 6, .min_width = 140, .bg = tn.card, .radius = 6},
                              })) {
             if (lens_button(ui, "Cut")) {
                 printf("  EDIT     Cut\n");
@@ -198,27 +192,25 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
          * before the dialog content: same band, later registration = on top. */
         flux_color dim =
             a->dark_theme ? flux_color_rgba(0, 0, 0, 0xAA) : flux_color_rgba(255, 255, 255, 0xAA);
-        if (lens_place_begin(ui, "modal##bd",
-                             (lens_place_opts){
-                                 .band = LENS_BAND_POPUP,
-                                 .mode = LENS_PLACE_EXACT,
-                                 .rect = {0, 0, in ? in->display_size.x : 0,
-                                          in ? in->display_size.y : 0},
-                                 .layout = {.bg = dim},
-                             })) {
+        if (lens_place_begin(
+                ui, "modal##bd",
+                (lens_place_opts){
+                    .band = LENS_BAND_POPUP,
+                    .mode = LENS_PLACE_EXACT,
+                    .rect = {0, 0, in ? in->display_size.x : 0, in ? in->display_size.y : 0},
+                    .layout = {.bg = dim},
+                })) {
             lens_place_end(ui);
         }
 
-        if (lens_place_begin(ui, "modal",
-                             (lens_place_opts){
-                                 .band = LENS_BAND_POPUP,
-                                 .mode = LENS_PLACE_CENTERED,
-                                 .transient = true,
-                                 .layout = {.pad = 20,
-                                            .min_width = 280,
-                                            .bg = tn.card,
-                                            .radius = 10},
-                             })) {
+        if (lens_place_begin(
+                ui, "modal",
+                (lens_place_opts){
+                    .band = LENS_BAND_POPUP,
+                    .mode = LENS_PLACE_CENTERED,
+                    .transient = true,
+                    .layout = {.pad = 20, .min_width = 280, .bg = tn.card, .radius = 10},
+                })) {
             lens_label(ui, "Modal Dialog");
             lens_label(ui, "Popups can stack. Escape or click outside to close.");
             lens_row(ui);

@@ -10,6 +10,14 @@ generated header unconditionally, which puts the shader bytes' hash
 into the preprocessed source and therefore into the cache key.
 
 Usage: shader_manifest.py <out.h> <in.spv>...
+
+Revocation: when a ccache release hashes `#embed` inputs into its
+cache key (check with a shader edit under a warm cache), delete this
+script, the manifest custom_target in libs/flux/meson.build (and the
+prism/examples/test twins), and the unconditional includes of the
+generated header in renderer.c / scene.c / effect.c. Until then this
+is load-bearing: removing it silently reintroduces stale-shader
+builds for every ccache user.
 """
 import hashlib
 import sys

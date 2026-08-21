@@ -278,9 +278,8 @@ int main(int argc, char **argv) {
     }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    GLFWwindow *win = glfwCreateWindow(960, 540, orbit ? "flux gltf viewer — orbit"
-                                                       : "flux gltf viewer",
-                                       nullptr, nullptr);
+    GLFWwindow *win = glfwCreateWindow(
+        960, 540, orbit ? "flux gltf viewer — orbit" : "flux gltf viewer", nullptr, nullptr);
     if (!win) {
         glfwTerminate();
         free(mem_glb);
@@ -485,8 +484,7 @@ int main(int argc, char **argv) {
             float deg = fmodf(yaw * 180.0f / (float)M_PI, 360.0f);
             if (deg < 0.0f)
                 deg += 360.0f;
-            snprintf(title, sizeof(title), "flux gltf viewer — orbit r=%.2f yaw=%.0f°", dist,
-                     deg);
+            snprintf(title, sizeof(title), "flux gltf viewer — orbit r=%.2f yaw=%.0f°", dist, deg);
             glfwSetWindowTitle(win, title);
         } else {
             /* Fixed camera framing the unit cube at the origin. */
@@ -496,8 +494,8 @@ int main(int argc, char **argv) {
         }
 
         flux_scene_light light = FLUX_SCENE_LIGHT_DEFAULT;
-        light.direction = orbit ? (flux_vec3){-0.5f, -0.9f, -0.35f}
-                                : (flux_vec3){-0.6f, -1.0f, -0.4f};
+        light.direction =
+            orbit ? (flux_vec3){-0.5f, -0.9f, -0.35f} : (flux_vec3){-0.6f, -1.0f, -0.4f};
         light.ambient = orbit ? 0.22f : 0.12f;
         draw_opts.light = &light;
         flux_sg_draw(frame, &cam, scene, &draw_opts);

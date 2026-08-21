@@ -67,9 +67,9 @@ typedef struct julia_push {
     uint32_t out_handle; /* storage image bindless slot */
     uint32_t width;      /* output extent in pixels     */
     uint32_t height;
-    float c_re;          /* Julia constant, animated    */
+    float c_re; /* Julia constant, animated    */
     float c_im;
-    float time;          /* seconds; palette phase      */
+    float time; /* seconds; palette phase      */
 } julia_push;
 static_assert(sizeof(julia_push) == 24, "julia_push must match the GLSL push block");
 
@@ -84,14 +84,14 @@ static_assert(sizeof(julia_push) == 24, "julia_push must match the GLSL push blo
  * canvas module): no per-frame layout transitions on the compute image,
  * at the cost of the sampling-side optimisations GENERAL gives up. */
 typedef struct storage_target {
-    VkImage image;               /* STORAGE | TRANSFER_SRC            */
+    VkImage image; /* STORAGE | TRANSFER_SRC            */
     VkDeviceMemory memory;
     VkImageView view;
     flux_bindless_handle handle; /* bindless storage slot             */
     flux_image *present;         /* SAMPLED | TRANSFER_DST copy dest  */
     uint32_t width;
     uint32_t height;
-    bool first_use;              /* image still in UNDEFINED layout   */
+    bool first_use; /* image still in UNDEFINED layout   */
 } storage_target;
 
 static uint32_t find_mt(flux_device *d, uint32_t filter, VkMemoryPropertyFlags want) {
@@ -434,15 +434,13 @@ int main(void) {
         VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
 
         /* 1 — last frame's copy read (or creation) -> this write. */
-        record_image_barrier(cmd, target.image,
-                             target.first_use ? VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT
-                                              : VK_PIPELINE_STAGE_2_COPY_BIT,
-                             target.first_use ? 0 : VK_ACCESS_2_TRANSFER_READ_BIT,
-                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                             target.first_use ? VK_IMAGE_LAYOUT_UNDEFINED
-                                              : VK_IMAGE_LAYOUT_GENERAL,
-                             VK_IMAGE_LAYOUT_GENERAL);
+        record_image_barrier(
+            cmd, target.image,
+            target.first_use ? VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_2_COPY_BIT,
+            target.first_use ? 0 : VK_ACCESS_2_TRANSFER_READ_BIT,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+            target.first_use ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL,
+            VK_IMAGE_LAYOUT_GENERAL);
         target.first_use = false;
 
         float time = (float)(glfwGetTime() - start_time);
@@ -455,8 +453,7 @@ int main(void) {
             .c_im = 0.7885f * sinf(orbit),
             .time = time,
         };
-        flux_compute_dispatch(cmd, pipe, &pc, sizeof(pc),
-                              (info.width + WORKGROUP - 1u) / WORKGROUP,
+        flux_compute_dispatch(cmd, pipe, &pc, sizeof(pc), (info.width + WORKGROUP - 1u) / WORKGROUP,
                               (info.height + WORKGROUP - 1u) / WORKGROUP, 1u);
 
         /* 2 — compute write -> copy read (image stays in GENERAL). */
@@ -468,11 +465,10 @@ int main(void) {
         /* 3 — the flux_image becomes the copy destination. Last frame's
          * sampling of it finished with the frame fence (one frame in
          * flight), so TOP_OF_PIPE suffices. */
-        record_image_barrier(cmd, flux_image_vk_image(target.present),
-                             VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0, VK_PIPELINE_STAGE_2_COPY_BIT,
-                             VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        record_image_barrier(
+            cmd, flux_image_vk_image(target.present), VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+            VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
         VkImageCopy region = {
             .srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
@@ -480,16 +476,15 @@ int main(void) {
             .extent = {info.width, info.height, 1},
         };
         vkCmdCopyImage(cmd, target.image, VK_IMAGE_LAYOUT_GENERAL,
-                       flux_image_vk_image(target.present), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &region);
+                       flux_image_vk_image(target.present), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                       &region);
 
         /* 4 — copy write -> canvas sample below. */
-        record_image_barrier(cmd, flux_image_vk_image(target.present),
-                             VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        record_image_barrier(
+            cmd, flux_image_vk_image(target.present), VK_PIPELINE_STAGE_2_COPY_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
         r = flux_canvas_begin(canvas, frame, &clear);

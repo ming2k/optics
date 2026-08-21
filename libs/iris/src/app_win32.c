@@ -58,9 +58,9 @@
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
+#include <imm.h>
 #include <windows.h>
 #include <windowsx.h>
-#include <imm.h>
 
 /* Win32 platform surface glue: included as the platform child header (the
  * way app_wayland.c pulls <vulkan/vulkan_wayland.h>), after windows.h has
@@ -101,13 +101,13 @@ typedef struct w32_accum {
     bool down[LENS_MOUSE_COUNT];    /* held state (persists)          */
     bool pressed[LENS_MOUSE_COUNT]; /* edges this frame               */
     bool released[LENS_MOUSE_COUNT];
-    double scroll_x, scroll_y;      /* wheel notches this frame       */
+    double scroll_x, scroll_y;       /* wheel notches this frame       */
     double scroll_px_x, scroll_px_y; /* smooth pixel deltas this frame */
-    uint32_t mods;                  /* level state (persists)         */
-    char text[32];                  /* committed text this frame      */
-    char preedit[LENS_PREEDIT_MAX]; /* IME preedit string             */
-    uint32_t preedit_cursor;        /* caret byte offset in preedit   */
-    uint32_t preedit_sel_lo;        /* active clause, byte range      */
+    uint32_t mods;                   /* level state (persists)         */
+    char text[32];                   /* committed text this frame      */
+    char preedit[LENS_PREEDIT_MAX];  /* IME preedit string             */
+    uint32_t preedit_cursor;         /* caret byte offset in preedit   */
+    uint32_t preedit_sel_lo;         /* active clause, byte range      */
     uint32_t preedit_sel_hi;
     lens_key_event keys[LENS_INPUT_MAX_KEYS];
     uint32_t key_count;
@@ -129,14 +129,14 @@ typedef struct w32_platform {
     float pending_scale; /* from WM_DPICHANGED, applied next frame     */
 
     bool running;
-    bool resized;   /* size or scale changed -> resize swapchain */
-    bool minimized; /* SIZE_MINIMIZED: no valid render target    */
-    bool force_paint;                       /* WM_PAINT asked for a real frame      */
-    bool animation_frame_requested;         /* host asked for active-rate follow-up */
-    bool paint_static;                      /* host declared this frame's canvas static */
-    bool theme_watching;                    /* backend theme watch registered       */
-    bool a11y_running;                      /* a11y bridge initialised (inert stub) */
-    lens *ui;                               /* for caret/hint/paste on the loop thread */
+    bool resized;                   /* size or scale changed -> resize swapchain */
+    bool minimized;                 /* SIZE_MINIMIZED: no valid render target    */
+    bool force_paint;               /* WM_PAINT asked for a real frame      */
+    bool animation_frame_requested; /* host asked for active-rate follow-up */
+    bool paint_static;              /* host declared this frame's canvas static */
+    bool theme_watching;            /* backend theme watch registered       */
+    bool a11y_running;              /* a11y bridge initialised (inert stub) */
+    lens *ui;                       /* for caret/hint/paste on the loop thread */
 
     iris_cursor host_cursor;      /* last iris_set_cursor value (explicit) */
     iris_cursor effective_cursor; /* what WM_SETCURSOR currently applies   */
@@ -503,8 +503,7 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
         LONG cur = ImmGetCompositionStringW(himc, GCS_CURSORPOS, NULL, 0);
         if (cur < 0 || cur > wlen)
             cur = wlen;
-        int cb =
-            cur > 0 ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)cur, NULL, 0, NULL, NULL) : 0;
+        int cb = cur > 0 ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)cur, NULL, 0, NULL, NULL) : 0;
         pl->acc.preedit_cursor = (uint32_t)((size_t)cb <= kept ? (size_t)cb : kept);
 
         /* Active clause: the run of ATTR_TARGET_* bytes under conversion.
@@ -1030,8 +1029,8 @@ static void log_raw(const lens_input *in) {
         fprintf(stderr, "[raw] scroll pixels dx=%.2f dy=%.2f\n", in->scroll_pixels_x,
                 in->scroll_pixels_y);
     for (uint32_t k = 0; k < in->key_count; k++)
-        fprintf(stderr, "[raw] key %d %s%s\n", in->keys[k].key, in->keys[k].pressed ? "down" : "up  ",
-                in->keys[k].repeat ? " (repeat)" : "");
+        fprintf(stderr, "[raw] key %d %s%s\n", in->keys[k].key,
+                in->keys[k].pressed ? "down" : "up  ", in->keys[k].repeat ? " (repeat)" : "");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1406,9 +1405,8 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         t = now_ns();
         bool host_animating = pl.animation_frame_requested;
         pl.animation_frame_requested = false;
-        long long period = (t - last_input_ns < INPUT_GRACE_NS || host_animating)
-                               ? ACTIVE_PERIOD_NS
-                               : IDLE_PERIOD_NS;
+        long long period = (t - last_input_ns < INPUT_GRACE_NS || host_animating) ? ACTIVE_PERIOD_NS
+                                                                                  : IDLE_PERIOD_NS;
         next_deadline = t + period;
         frame_scheduled = true;
         last_render_ns = t;
@@ -1424,8 +1422,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             pl.resized = true;
         }
         if (pl.resized) {
-            (void)flux_surface_resize(surface,
-                                      (uint32_t)lroundf((float)pl.width * pl.scale),
+            (void)flux_surface_resize(surface, (uint32_t)lroundf((float)pl.width * pl.scale),
                                       (uint32_t)lroundf((float)pl.height * pl.scale));
             pl.resized = false;
             resized_this_frame = true;
@@ -1516,16 +1513,15 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                                   !resized_this_frame && !surface_needs_paint && !chrome_damaged &&
                                   !pl.force_paint;
         pl.paint_static = false;
-        bool must_paint = !host_canvas_static &&
-                          (cfg->paint != NULL || chrome_damaged || host_animating ||
-                           resized_this_frame || surface_needs_paint);
+        bool must_paint =
+            !host_canvas_static && (cfg->paint != NULL || chrome_damaged || host_animating ||
+                                    resized_this_frame || surface_needs_paint);
         if (must_paint) {
             surface_needs_paint = true;
             flux_frame *frame = NULL;
             flux_result r = flux_surface_begin_frame(surface, NULL, &frame);
             if (r == FLUX_ERROR_SURFACE_LOST) {
-                (void)flux_surface_resize(surface,
-                                          (uint32_t)lroundf((float)pl.width * pl.scale),
+                (void)flux_surface_resize(surface, (uint32_t)lroundf((float)pl.width * pl.scale),
                                           (uint32_t)lroundf((float)pl.height * pl.scale));
                 continue;
             }
@@ -1558,8 +1554,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                 break;
             r = flux_frame_present(frame);
             if (r == FLUX_ERROR_SURFACE_LOST)
-                (void)flux_surface_resize(surface,
-                                          (uint32_t)lroundf((float)pl.width * pl.scale),
+                (void)flux_surface_resize(surface, (uint32_t)lroundf((float)pl.width * pl.scale),
                                           (uint32_t)lroundf((float)pl.height * pl.scale));
             else if (r != FLUX_OK)
                 break;
@@ -1597,6 +1592,11 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             frame_scheduled = true;
         } else {
             frame_scheduled = false;
+            /* Fully idle: release the text engine's high-water scratch
+             * (ADR-0072 item 5). Mirrors the Wayland backend's idle
+             * branch — the frame-pacing policy is ported line-by-line
+             * across backends (ADR-0056 item 2). */
+            lens_text_compact(ui);
         }
     }
 

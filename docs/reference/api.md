@@ -18,6 +18,8 @@ lookup surfaces for this checkout.
 | `<flux/scene.h>`      | Iff `-Dscene=true`   | 3D primitives: camera, mesh, material, draw.                       |
 | `<flux/compute.h>`    | Iff `-Dcompute=true` | Compute pipeline + dispatch.                                       |
 | `<flux/effect.h>`     | Iff `-Deffect=true`  | Image-domain effects (blur). See [effect reference](effect.md).    |
+| `<flux-text/text.h>`  | Iff `-Dtext=true`    | Sibling library: shaping, glyph atlas, text measure/draw. See [symbols](symbols.md#flux-texth-sibling-library). |
+| `<flux-scene-graph/scene-graph.h>` | Iff `-Dscene-graph=true` | Sibling library: glTF/GLB loading, animation, materials. |
 
 `<flux/core.h>` and `<flux/math.h>` do **not** include `<vulkan/vulkan.h>`.
 Include `<flux/vulkan.h>` at the seam where you hand flux a `VkSurfaceKHR`
@@ -98,10 +100,23 @@ reset the arena for the next frame.
 
 ## Execution model
 
-flux is **immediate-recording** — every public draw call records
-directly into the active Vulkan command buffer at the moment it is
-called. There is no internal display list, no batching layer, no
-deferred submission.
+flux is **immediate-recording** as its default path — a draw call
+tessellates and records into the frame's transient ring right away —
+with three explicit batching layers on top:
+
+1. **Draw merging** (automatic): consecutive canvas submits with an
+   identical pipeline, scissor, and push constants merge into a single
+   `vkCmdDraw`, so `recorded_draws <= submit_calls`
+   (`flux_canvas_recorded_draws` / `flux_canvas_submit_calls` report
+   both).
+2. **Display lists** (opt-in): `flux_canvas_begin_record` /
+   `flux_canvas_end_record` capture a subtree's emission into a
+   replayable segment; `flux_canvas_replay` re-emits it without
+   re-tessellating. lens uses this to skip unchanged subtrees
+   (ADR-0030's disabled-subtree-skip decision, delivered).
+3. **Deferred uploads** (automatic): `flux_uploads_begin`/`flush`
+   accumulate buffer/image copies into one queue submission that is
+   ordered before every later batch on the same queue (ADR-0022).
 
 | Layer              | What happens on each call                                                |
 |--------------------|--------------------------------------------------------------------------|
@@ -125,10 +140,10 @@ OPAQUE/MASK/BLEND, alpha cutoff, and double-sided materials. Referenced
 external images and non-zero texture-coordinate sets return `LoadError`
 instead of silently rendering an incomplete material.
 
-The pipeline-bound state is cached per-canvas / per-pass so an
-identical paint kind drawn N times in a row produces N `vkCmdDraw`
-calls but only one `vkCmdBindPipeline`. That's the only batching the
-library does.
+Pipeline-bound state is cached per-canvas / per-pass so an identical
+paint kind drawn N times in a row costs one `vkCmdBindPipeline`; with
+unchanged scissor/push constants those draws also merge (see the
+execution model above), so a run of like paints is one `vkCmdDraw`.
 
 Recording is bounded by `flux_surface_begin_frame` → `flux_frame_submit`.
 The frame's command buffer is reset (pool-level) at the start of

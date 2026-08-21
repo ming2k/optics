@@ -82,9 +82,12 @@ bool lens_button_mouse(lens *ui, const char *label, int button) {
     lens_response r;
     button_ex_impl(ui, label, &r);
     switch (button) {
-    case LENS_MOUSE_RIGHT: return r.right_clicked;
-    case LENS_MOUSE_MIDDLE: return r.middle_clicked;
-    default: return r.clicked;
+    case LENS_MOUSE_RIGHT:
+        return r.right_clicked;
+    case LENS_MOUSE_MIDDLE:
+        return r.middle_clicked;
+    default:
+        return r.clicked;
     }
 }
 

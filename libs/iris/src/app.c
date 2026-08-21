@@ -36,8 +36,7 @@ IRIS_API void iris_paint_mark_static(void) {
 }
 
 IRIS_API int iris_post_to_main_thread(iris_main_thread_fn fn, void *user) {
-#if defined(IRIS_BACKEND_WAYLAND) || defined(IRIS_BACKEND_WIN32) || \
-    defined(IRIS_BACKEND_COCOA)
+#if defined(IRIS_BACKEND_WAYLAND) || defined(IRIS_BACKEND_WIN32) || defined(IRIS_BACKEND_COCOA)
     /* The backend wakeup seam (platform_wakeup.h) IS the delivery
      * mechanism: each backend registers a thread-safe kick that makes its
      * event-loop wait return, and drains the shared FIFO on the loop

@@ -145,8 +145,8 @@ LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8) {
             }
             if (bad)
                 break;
-            cmds[n++] = (lens_icon_cmd){
-                .type = 0, .params = {pts[0] * scale + ox, pts[1] * scale + oy}};
+            cmds[n++] =
+                (lens_icon_cmd){.type = 0, .params = {pts[0] * scale + ox, pts[1] * scale + oy}};
             float cx = pts[0] * scale + ox;
             float cy = pts[1] * scale + oy;
             for (int i = 1; i + 2 < p->npts; i += 3) {
@@ -164,10 +164,10 @@ LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8) {
                 float farthest = fmaxf(d1, fmaxf(d2, d3));
                 if (farthest < 1e-8f)
                     continue;
-                cmds[n++] = (lens_icon_cmd){.type = 2,
-                                            .params = {q[0] * scale + ox, q[1] * scale + oy,
-                                                       q[2] * scale + ox, q[3] * scale + oy,
-                                                       ex, ey}};
+                cmds[n++] =
+                    (lens_icon_cmd){.type = 2,
+                                    .params = {q[0] * scale + ox, q[1] * scale + oy,
+                                               q[2] * scale + ox, q[3] * scale + oy, ex, ey}};
                 cx = ex;
                 cy = ey;
             }

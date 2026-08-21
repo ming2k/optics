@@ -218,7 +218,7 @@ typedef struct lens_response {
     bool middle_clicked; /* middle press + release inside */
     bool changed;        /* value mutated this frame */
     bool focused;
-    uint32_t state;      /* lens_widget_state bits (ADR-0058) */
+    uint32_t state; /* lens_widget_state bits (ADR-0058) */
 } lens_response;
 
 /* Semantic cursor requested by the hovered Lens widget. Lens only reports
@@ -249,7 +249,7 @@ typedef enum lens_role {
     LENS_ROLE_TEXTAREA,  /* multi-line text input                   */
     LENS_ROLE_MENU,      /* popup menu (ADR-0040)                     */
     LENS_ROLE_RADIO,
-    LENS_ROLE_DIALOG, /* modal dialog window (ADR-0039)            */
+    LENS_ROLE_DIALOG,   /* modal dialog window (ADR-0039)            */
     LENS_ROLE_PROGRESS, /* progress indicator; read-only value, NOT a slider */
     LENS_ROLE_TABLE,    /* grid container; rows/cells nest beneath   */
     LENS_ROLE_ROW,      /* a row inside a TABLE                      */
@@ -401,12 +401,12 @@ LENS_API lens_theme lens_theme_dark(void);
 
 /* Field tags for lens_style.fields — one bit per optional field. */
 typedef enum lens_style_field : uint32_t {
-    LENS_STYLE_BG = 1u << 0,             /* resting surface           */
-    LENS_STYLE_BG_HOVER = 1u << 1,       /* hovered surface           */
-    LENS_STYLE_BG_PRESSED = 1u << 2,     /* pressed/selected surface  */
-    LENS_STYLE_FG = 1u << 3,             /* foreground (text, glyphs) */
-    LENS_STYLE_BORDER = 1u << 4,         /* border stroke             */
-    LENS_STYLE_ACCENT = 1u << 5,         /* accent (emphasis colour)    */
+    LENS_STYLE_BG = 1u << 0,         /* resting surface           */
+    LENS_STYLE_BG_HOVER = 1u << 1,   /* hovered surface           */
+    LENS_STYLE_BG_PRESSED = 1u << 2, /* pressed/selected surface  */
+    LENS_STYLE_FG = 1u << 3,         /* foreground (text, glyphs) */
+    LENS_STYLE_BORDER = 1u << 4,     /* border stroke             */
+    LENS_STYLE_ACCENT = 1u << 5,     /* accent (emphasis colour)    */
     LENS_STYLE_CORNER_RADIUS = 1u << 6,
     LENS_STYLE_BORDER_WIDTH = 1u << 7,
     LENS_STYLE_PADDING = 1u << 8,
@@ -545,8 +545,8 @@ typedef enum lens_widget_kind : uint32_t {
     LENS_WIDGET_TABS = 7,        /* one record per strip per frame       */
     LENS_WIDGET_LABEL = 8,       /* label/title/heading, incl. wrapped   */
     LENS_WIDGET_SEPARATOR = 9,
-    LENS_WIDGET_ICON = 10,       /* bare glyph (lens_icon)               */
-    LENS_WIDGET_IMAGE = 11,      /* static image and the image buttons   */
+    LENS_WIDGET_ICON = 10,  /* bare glyph (lens_icon)               */
+    LENS_WIDGET_IMAGE = 11, /* static image and the image buttons   */
     LENS_WIDGET_PROGRESS = 12,
     LENS_WIDGET_TEXTFIELD = 13,
     LENS_WIDGET_TEXTAREA = 14,
@@ -554,8 +554,8 @@ typedef enum lens_widget_kind : uint32_t {
     LENS_WIDGET_TREE = 16,
     LENS_WIDGET_TABLE = 17,
     LENS_WIDGET_SPLIT = 18,
-    LENS_WIDGET_MENU_ITEM = 19,  /* bar trigger, item, submenu, separator */
-    LENS_WIDGET_DROPDOWN = 20,   /* the trigger; the popup is place+cascade */
+    LENS_WIDGET_MENU_ITEM = 19, /* bar trigger, item, submenu, separator */
+    LENS_WIDGET_DROPDOWN = 20,  /* the trigger; the popup is place+cascade */
     LENS_WIDGET_LINK = 21,
     LENS_WIDGET_KIND_COUNT
 } lens_widget_kind;
@@ -578,20 +578,20 @@ typedef struct lens_grid_column {
 } lens_grid_column;
 
 typedef struct lens_grid_row {
-    const char **cells;   /* column_count strings, frame-borrowed      */
-    const float *cell_x;  /* per-cell text x, node-local, precomputed
-                             (alignment resolved by the widget — a skin
-                             never measures text). A cell with an icon
-                             is shifted right past the glyph box, so the
-                             icon lands at cell_x - (font_size + 8)    */
+    const char **cells;        /* column_count strings, frame-borrowed      */
+    const float *cell_x;       /* per-cell text x, node-local, precomputed
+                                  (alignment resolved by the widget — a skin
+                                  never measures text). A cell with an icon
+                                  is shifted right past the glyph box, so the
+                                  icon lands at cell_x - (font_size + 8)    */
     const lens_icon_id *icons; /* per-cell glyph ids, parallel to cells
                              (ADR-0066); NULL when the table was built
                              without an icon callback. Only
                              LENS_START-aligned columns carry icons   */
-    float y;              /* node-local top edge                       */
-    int index;            /* absolute row index (zebra parity)         */
-    uint32_t state;       /* LENS_STATE_SELECTED when selected;
-                             LENS_STATE_FOCUSED on the cursor row     */
+    float y;                   /* node-local top edge                       */
+    int index;                 /* absolute row index (zebra parity)         */
+    uint32_t state;            /* LENS_STATE_SELECTED when selected;
+                                  LENS_STATE_FOCUSED on the cursor row     */
 } lens_grid_row;
 
 /* Per-tab data for a LENS_WIDGET_TABS record (ADR-0061): the strip gets one
@@ -610,45 +610,45 @@ typedef struct lens_tab_item {
  * borrowed for the frame (arena-backed); `text` metrics come from the
  * widget's own measure pass, so a skin never re-measures the label. */
 typedef struct lens_widget_content {
-    const char *label;       /* BUTTON SELECTABLE CHECKBOX SWITCH RADIO SLIDER
-                                LABEL LINK COLLAPSING TREE MENU_ITEM DROPDOWN */
-    lens_text_metrics text;  /* measured label (same kinds + TEXTFIELD: the
-                                "Ag" line metrics the caret height reads)    */
-    float text_size;         /* LABEL: explicit point size; 0 = resolved style */
-    float text_weight;       /* LABEL: 0 = default weight                    */
-    bool compact;            /* LABEL: unpadded form (lens_label_compact_ex) */
-    const lens_text_line *lines; /* LABEL (wrapped) / TEXTAREA: line slices  */
-    int line_count;              /* LABEL (wrapped) / TEXTAREA               */
-    const char *description; /* SWITCH: supporting text; NULL = none           */
-    lens_text_metrics desc_text; /* SWITCH: measured description               */
-    lens_icon_id icon;       /* SELECTABLE / ICON_BUTTON: leading glyph;
-                                DROPDOWN: the chevron; LENS_ICON_INVALID = none */
-    float glyph_size;        /* ICON_BUTTON / ICON: glyph box, logical px    */
-    const char *badge;       /* ICON_BUTTON: corner badge; NULL/empty = none   */
-    bool rounded;            /* ICON_BUTTON: rounded-tile variant              */
-    bool active_surface;     /* ICON_BUTTON: steady active tint variant        */
-    bool accent_checked;     /* ICON_BUTTON: accent glyph while checked        */
-    float ratio;             /* SLIDER / PROGRESS / SPLIT: fraction in [0,1]   */
-    bool vertical;           /* SLIDER / SEPARATOR / SPLIT: orientation        */
-    bool error;              /* SLIDER / TEXTFIELD / TEXTAREA: error styling   */
-    const lens_tab_item *tabs; /* TABS: per-tab array, `tab_count` entries   */
-    int tab_count;             /* TABS                                        */
-    int active_index;          /* TABS: selected tab, clamped into range      */
-    bool expanded;             /* COLLAPSING / TREE: body open                */
-    bool leaf;                 /* TREE: leaf row (dot, no chevron)            */
-    const char *shortcut;        /* MENU_ITEM: trailing hint; NULL = none    */
+    const char *label;               /* BUTTON SELECTABLE CHECKBOX SWITCH RADIO SLIDER
+                                        LABEL LINK COLLAPSING TREE MENU_ITEM DROPDOWN */
+    lens_text_metrics text;          /* measured label (same kinds + TEXTFIELD: the
+                                        "Ag" line metrics the caret height reads)    */
+    float text_size;                 /* LABEL: explicit point size; 0 = resolved style */
+    float text_weight;               /* LABEL: 0 = default weight                    */
+    bool compact;                    /* LABEL: unpadded form (lens_label_compact_ex) */
+    const lens_text_line *lines;     /* LABEL (wrapped) / TEXTAREA: line slices  */
+    int line_count;                  /* LABEL (wrapped) / TEXTAREA               */
+    const char *description;         /* SWITCH: supporting text; NULL = none           */
+    lens_text_metrics desc_text;     /* SWITCH: measured description               */
+    lens_icon_id icon;               /* SELECTABLE / ICON_BUTTON: leading glyph;
+                                        DROPDOWN: the chevron; LENS_ICON_INVALID = none */
+    float glyph_size;                /* ICON_BUTTON / ICON: glyph box, logical px    */
+    const char *badge;               /* ICON_BUTTON: corner badge; NULL/empty = none   */
+    bool rounded;                    /* ICON_BUTTON: rounded-tile variant              */
+    bool active_surface;             /* ICON_BUTTON: steady active tint variant        */
+    bool accent_checked;             /* ICON_BUTTON: accent glyph while checked        */
+    float ratio;                     /* SLIDER / PROGRESS / SPLIT: fraction in [0,1]   */
+    bool vertical;                   /* SLIDER / SEPARATOR / SPLIT: orientation        */
+    bool error;                      /* SLIDER / TEXTFIELD / TEXTAREA: error styling   */
+    const lens_tab_item *tabs;       /* TABS: per-tab array, `tab_count` entries   */
+    int tab_count;                   /* TABS                                        */
+    int active_index;                /* TABS: selected tab, clamped into range      */
+    bool expanded;                   /* COLLAPSING / TREE: body open                */
+    bool leaf;                       /* TREE: leaf row (dot, no chevron)            */
+    const char *shortcut;            /* MENU_ITEM: trailing hint; NULL = none    */
     lens_text_metrics shortcut_text; /* MENU_ITEM: measured shortcut         */
-    bool menu_check;             /* MENU_ITEM: draw a check glyph            */
-    bool menu_radio;             /* MENU_ITEM: the glyph is a radio dot      */
-    bool menu_separator;         /* MENU_ITEM: divider row; rest unused      */
-    bool menu_trigger;           /* MENU_ITEM: a menu-bar trigger            */
-    bool submenu;                /* MENU_ITEM: trailing submenu chevron      */
-    bool popup_open;             /* MENU_ITEM (trigger) / DROPDOWN: open     */
-    flux_image *image;           /* IMAGE: host texture, frame-borrowed      */
-    flux_color tint;             /* IMAGE: premultiplied modulation          */
-    bool image_button;           /* IMAGE: the interactive button variant    */
-    float split_pos;             /* SPLIT: divider main offset, node-local   */
-    float split_thickness;       /* SPLIT: handle strip thickness            */
+    bool menu_check;                 /* MENU_ITEM: draw a check glyph            */
+    bool menu_radio;                 /* MENU_ITEM: the glyph is a radio dot      */
+    bool menu_separator;             /* MENU_ITEM: divider row; rest unused      */
+    bool menu_trigger;               /* MENU_ITEM: a menu-bar trigger            */
+    bool submenu;                    /* MENU_ITEM: trailing submenu chevron      */
+    bool popup_open;                 /* MENU_ITEM (trigger) / DROPDOWN: open     */
+    flux_image *image;               /* IMAGE: host texture, frame-borrowed      */
+    flux_color tint;                 /* IMAGE: premultiplied modulation          */
+    bool image_button;               /* IMAGE: the interactive button variant    */
+    float split_pos;                 /* SPLIT: divider main offset, node-local   */
+    float split_thickness;           /* SPLIT: handle strip thickness            */
     const lens_grid_column *columns; /* TABLE: column bands                 */
     int column_count;                /* TABLE                                */
     const lens_grid_row *rows;       /* TABLE: the visible row window       */
@@ -674,15 +674,15 @@ typedef struct lens_widget_content {
                                    draw it in the disabled colour           */
     const flux_rect *sel_rects; /* selection highlight quads                */
     int sel_rect_count;
-    flux_rect caret;            /* caret quad; valid when show_caret         */
+    flux_rect caret; /* caret quad; valid when show_caret         */
     bool show_caret;
     flux_rect preedit_underline; /* IME composition underline; valid when
                                    has_preedit                               */
     bool has_preedit;
-    flux_rect preedit_clause;    /* active clause of the composition (the IME's
-                                    preedit_sel byte range), node-local; valid
-                                    when its w > 0. Skins emphasise it over the
-                                    flat underline. */
+    flux_rect preedit_clause; /* active clause of the composition (the IME's
+                                 preedit_sel byte range), node-local; valid
+                                 when its w > 0. Skins emphasise it over the
+                                 flat underline. */
 } lens_widget_content;
 
 /* Everything a skin needs to draw one widget for one frame.
@@ -867,17 +867,17 @@ typedef struct lens_box {
 /* ================================================================== */
 
 typedef struct lens_layout_opts {
-    lens_box box;     /* identity, flex, and fixed size of the container
-                       itself (.disabled/.error/.tooltip unused here) */
-    float min_width;  /* minimum resolved width; 0 = no lower bound */
-    float max_width;  /* maximum resolved width; 0 = no upper bound */
-    float min_height; /* minimum resolved height; 0 = no lower bound */
-    float max_height; /* maximum resolved height; 0 = no upper bound */
-    float gap;        /* between children, main axis */
-    float pad;        /* inside the container, all sides */
-    lens_align cross; /* cross-axis alignment; LENS_STRETCH fills */
-    flux_color bg;    /* background fill; alpha 0 = no background */
-    float radius;     /* corner radius for the background fill */
+    lens_box box;       /* identity, flex, and fixed size of the container
+                         itself (.disabled/.error/.tooltip unused here) */
+    float min_width;    /* minimum resolved width; 0 = no lower bound */
+    float max_width;    /* maximum resolved width; 0 = no upper bound */
+    float min_height;   /* minimum resolved height; 0 = no lower bound */
+    float max_height;   /* maximum resolved height; 0 = no upper bound */
+    float gap;          /* between children, main axis */
+    float pad;          /* inside the container, all sides */
+    lens_align cross;   /* cross-axis alignment; LENS_STRETCH fills */
+    flux_color bg;      /* background fill; alpha 0 = no background */
+    float radius;       /* corner radius for the background fill */
     flux_color border;  /* border stroke; alpha 0 = no border */
     float border_width; /* border stroke width when border alpha > 0 */
 } lens_layout_opts;
@@ -1249,15 +1249,15 @@ typedef enum lens_place_mode {
 } lens_place_mode;
 
 typedef struct lens_place_opts {
-    lens_band band;         /* z band for the subtree */
-    lens_place_mode mode;   /* how rect/bounds resolve to a position */
-    flux_rect rect;         /* EXACT: top-left + minimum extent; ANCHORED: owner
-                               anchor (counts as inside for click-outside) */
-    flux_rect bounds;       /* placement + render boundary; w/h <= 0 = display */
-    bool transient;         /* open-set managed: begin is gated by
-                               lens_place_open; Esc/click-outside dismiss */
-    bool interactive;       /* BACKDROP only: opt into hit-testing (default:
-                               a backdrop is hit-transparent) */
+    lens_band band;          /* z band for the subtree */
+    lens_place_mode mode;    /* how rect/bounds resolve to a position */
+    flux_rect rect;          /* EXACT: top-left + minimum extent; ANCHORED: owner
+                                anchor (counts as inside for click-outside) */
+    flux_rect bounds;        /* placement + render boundary; w/h <= 0 = display */
+    bool transient;          /* open-set managed: begin is gated by
+                                lens_place_open; Esc/click-outside dismiss */
+    bool interactive;        /* BACKDROP only: opt into hit-testing (default:
+                                a backdrop is hit-transparent) */
     lens_layout_opts layout; /* the subtree's internal flexbox + surface
                                (gap/pad/cross/bg/border/radius; min_width >
                                0 fixes the node's width, as do box.width /

@@ -433,8 +433,7 @@ void flux_canvas_clip_rect(flux_canvas *c, flux_rect r) {
         return;
 
     flux_canvas_state *state = &c->states[c->state_top];
-    flux_rect transformed =
-        flux_mat3x2_transform_rect(state->transform, r);
+    flux_rect transformed = flux_mat3x2_transform_rect(state->transform, r);
     flux_recti current = state->scissor;
     int64_t current_left = current.x;
     int64_t current_top = current.y;
@@ -442,36 +441,25 @@ void flux_canvas_clip_rect(flux_canvas *c, flux_rect r) {
     int64_t current_bottom = current_top + (int64_t)current.h;
     flux_recti sc = {current.x, current.y, 0, 0};
 
-    if (isfinite(transformed.x) && isfinite(transformed.y)
-        && isfinite(transformed.w) && isfinite(transformed.h)
-        && transformed.w > 0.0f && transformed.h > 0.0f) {
+    if (isfinite(transformed.x) && isfinite(transformed.y) && isfinite(transformed.w) &&
+        isfinite(transformed.h) && transformed.w > 0.0f && transformed.h > 0.0f) {
         double left_d = floor((double)transformed.x);
         double top_d = floor((double)transformed.y);
-        double right_d =
-            ceil((double)transformed.x + (double)transformed.w);
-        double bottom_d =
-            ceil((double)transformed.y + (double)transformed.h);
+        double right_d = ceil((double)transformed.x + (double)transformed.w);
+        double bottom_d = ceil((double)transformed.y + (double)transformed.h);
         int64_t left = current_left;
         int64_t top = current_top;
         int64_t right = current_right;
         int64_t bottom = current_bottom;
 
         if (left_d > (double)left)
-            left = left_d < (double)current_right
-                       ? (int64_t)left_d
-                       : current_right;
+            left = left_d < (double)current_right ? (int64_t)left_d : current_right;
         if (top_d > (double)top)
-            top = top_d < (double)current_bottom
-                      ? (int64_t)top_d
-                      : current_bottom;
+            top = top_d < (double)current_bottom ? (int64_t)top_d : current_bottom;
         if (right_d < (double)right)
-            right = right_d > (double)current_left
-                        ? (int64_t)right_d
-                        : current_left;
+            right = right_d > (double)current_left ? (int64_t)right_d : current_left;
         if (bottom_d < (double)bottom)
-            bottom = bottom_d > (double)current_top
-                         ? (int64_t)bottom_d
-                         : current_top;
+            bottom = bottom_d > (double)current_top ? (int64_t)bottom_d : current_top;
 
         if (right > left && bottom > top) {
             sc.x = (int32_t)left;
@@ -548,8 +536,7 @@ static bool image_quad_intersects_scissor(const flux_canvas *c, const flux_canva
     }
     float right = (float)((int64_t)scissor.x + scissor.w);
     float bottom = (float)((int64_t)scissor.y + scissor.h);
-    return max_x > (float)scissor.x && min_x < right && max_y > (float)scissor.y &&
-           min_y < bottom;
+    return max_x > (float)scissor.x && min_x < right && max_y > (float)scissor.y && min_y < bottom;
 }
 
 static void *frame_retain_image(void *resource) {
@@ -634,8 +621,8 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
         pc.image_dst[1] = transformed.y;
         pc.image_dst[2] = rounded_clip->w * 0.5f * scale;
         pc.image_dst[3] = rounded_clip->h * 0.5f * scale;
-        pc.grad_radius = fminf(fmaxf(radius * scale, 0.0f),
-                               fminf(pc.image_dst[2], pc.image_dst[3]));
+        pc.grad_radius =
+            fminf(fmaxf(radius * scale, 0.0f), fminf(pc.image_dst[2], pc.image_dst[3]));
     }
 
     canvas_record_retain_image(c, img);
@@ -833,7 +820,8 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
     /* Two atlas sources, mutually exclusive (ADR-0019):
      *   - GPU:   `atlas` (flux_image, bindless). Requires a device.
      *   - Host:  `host_coverage` (R8 buffer). Device-less CPU canvas. */
-    const bool host = (desc->host_coverage != NULL && desc->host_atlas_w > 0 && desc->host_atlas_h > 0);
+    const bool host =
+        (desc->host_coverage != NULL && desc->host_atlas_w > 0 && desc->host_atlas_h > 0);
 
     /* Optional producer generation for a host coverage buffer
      * (flux_glyph_run_host_atlas_desc): recorded with each batch so replay

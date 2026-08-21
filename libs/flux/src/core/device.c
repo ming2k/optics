@@ -727,8 +727,8 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
     /* VK_EXT_hdr_metadata when advertised: enables vkSetHdrMetadataEXT for
      * HDR10 static metadata on HDR swapchains (ADR-0069). */
     if (available && has_extension(available, avail, VK_EXT_HDR_METADATA_EXTENSION_NAME)) {
-        flux_result hdr_result = append_device_extension(
-            device_exts, &device_ext_count, VK_EXT_HDR_METADATA_EXTENSION_NAME);
+        flux_result hdr_result = append_device_extension(device_exts, &device_ext_count,
+                                                         VK_EXT_HDR_METADATA_EXTENSION_NAME);
         if (hdr_result != FLUX_OK) {
             free(available);
             return hdr_result;
@@ -1329,14 +1329,31 @@ void flux_vk_note_graphics_completed(flux_device *d, uint64_t serial) {
  * recording (and may have referenced the resource earlier this frame)
  * gets the *next* serial, so tag one past the counter to cover it. Later
  * batches cannot reference the resource — its refcount reached zero, so
- * no live reference remains to be recorded. */
+ * no live reference remains to be recorded.
+ *
+ * Backpressure: the FIFO holds real GPU memory alive, so it has a hard
+ * entry bound (FLUX_RETIRE_MAX_PENDING). The bound is only reachable
+ * when the watermark is frozen — the host stopped submitting frames (or
+ * no fence ever completes) while resources keep being released. Passing
+ * the bound forces a full drain: wait for the queue, advance the
+ * watermark, destroy everything. That stall is deliberate and strictly
+ * better than the alternative (unbounded GPU memory growth while the
+ * host is idle), and the normal path never comes near it: with frames
+ * in flight the watermark advances every begin_frame and the queue
+ * holds at most a few frames' worth of releases. */
 static void zombie_park(flux_device *d, flux_retire_zombie *z) {
+    uint32_t pending;
     z->next = nullptr;
     flux_platform_mutex_lock(&d->retire_lock);
     z->retire_after = atomic_load_explicit(&d->submit_serial, memory_order_acquire) + 1u;
     *d->retire_tail = z;
     d->retire_tail = &z->next;
+    d->retire_pending++;
+    pending = d->retire_pending;
     flux_platform_mutex_unlock(&d->retire_lock);
+
+    if (pending >= FLUX_RETIRE_MAX_PENDING)
+        flux_device_wait_idle(d); /* full drain: see comment above */
 }
 
 void flux_device_retire_image(flux_device *d, VkImageView view, VkImage image,
@@ -1445,6 +1462,7 @@ static void sweep_retire_below(flux_device *d, uint64_t completed) {
     flux_retire_zombie *last_ready = nullptr;
     for (flux_retire_zombie *z = d->retire_head; z && z->retire_after <= completed; z = z->next) {
         last_ready = z;
+        d->retire_pending--;
     }
     flux_retire_zombie *ready = nullptr;
     if (last_ready) {

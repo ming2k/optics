@@ -86,8 +86,7 @@ bool lens_tree_node(lens *ui, const char *label, bool leaf) {
                         .active_t = n->active_t,
                         .content = {.label = label,
                                     .text = tm,
-                                    .icon = open ? LENS_ICON_CHEVRON_DOWN
-                                                 : LENS_ICON_CHEVRON_RIGHT,
+                                    .icon = open ? LENS_ICON_CHEVRON_DOWN : LENS_ICON_CHEVRON_RIGHT,
                                     .expanded = open,
                                     .leaf = leaf},
                     });

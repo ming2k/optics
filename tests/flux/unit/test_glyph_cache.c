@@ -282,6 +282,149 @@ static void test_null_safety(void) {
     glyph_cache_destroy(c);
 }
 
+/* ---- Production-scale + saturation invariants --------------------- */
+
+/* Internal invariant checker: the LRU ring must be a permutation of
+ * the live entries, head = MRU, tail = LRU, and the walk tail→head
+ * must have non-increasing last_used ticks. Broken ring maintenance
+ * (a missed unlink, a stale index across rehash) silently degrades
+ * eviction into "evict a random/wrong glyph", which no behavioural
+ * test catches until hit rate collapses — so assert the structure
+ * directly here. */
+static bool ring_consistent(const glyph_cache *c) {
+    uint32_t seen = 0;
+    uint64_t prev_tick = UINT64_MAX;
+    if (c->lru_head == LRU_NONE || c->lru_tail == LRU_NONE) {
+        /* Empty ring allowed only with zero live entries. */
+        return c->live_count == 0 && c->lru_head == LRU_NONE && c->lru_tail == LRU_NONE;
+    }
+    for (uint32_t i = c->lru_head; i != LRU_NONE; i = c->slots[i].lru_next) {
+        glyph_entry *e = (glyph_entry *)&c->slots[i];
+        if (!e->occupied || !e->live)
+            return false; /* dead entry on the ring */
+        if (e->lru_prev != LRU_NONE && c->slots[e->lru_prev].lru_next != i)
+            return false; /* broken back-link */
+        if (e->lru_next != LRU_NONE && c->slots[e->lru_next].lru_prev != i)
+            return false; /* broken forward-link */
+        if (e->last_used > prev_tick)
+            return false; /* recency inverted: not MRU-first */
+        prev_tick = e->last_used;
+        if (++seen > c->live_count)
+            return false; /* cycle */
+    }
+    if (c->slots[c->lru_head].lru_prev != LRU_NONE)
+        return false;
+    if (c->slots[c->lru_tail].lru_next != LRU_NONE)
+        return false;
+    return seen == c->live_count;
+}
+
+/* Production parameters (text_internal.h: init 256, max 16384): fill
+ * to saturation, then push a large churn of distinct keys through it.
+ * Pins three things the cap-64 tests above cannot see:
+ *   - put() never returns NULL at production scale;
+ *   - live count stays pinned at max_cap/2 (8192);
+ *   - the LRU ring stays consistent across many grows + evictions
+ *     (checked every 512 inserts; O(live) per check). */
+static void test_production_scale_saturation(void) {
+    const uint32_t init_cap = 256, max_cap = 16384;
+    glyph_cache *c = glyph_cache_new(init_cap, max_cap);
+    CHECK(c != NULL);
+
+    /* Fill past saturation: 4x the live ceiling in distinct keys. */
+    const uint32_t churn = max_cap * 2;
+    for (uint32_t i = 0; i < churn; i++) {
+        glyph_entry *e = glyph_cache_put(c, 1, i, 16, 0);
+        if (!e) {
+            CHECK(e != NULL);
+            break;
+        }
+        if ((i & 511u) == 511u)
+            CHECK(ring_consistent(c));
+    }
+    glyph_cache_stats s;
+    glyph_cache_get_stats(c, &s);
+    CHECK(s.count == max_cap / 2); /* pinned at the live ceiling */
+    CHECK(s.evictions == churn - max_cap / 2);
+    CHECK(ring_consistent(c));
+
+    /* The survivors must be exactly the most recent max_cap/2 keys. */
+    uint32_t missing_recent = 0, present_ancient = 0;
+    for (uint32_t i = 0; i < max_cap / 2; i++)
+        if (glyph_cache_lookup(c, 1, churn - 1 - i, 16, 0) == NULL)
+            missing_recent++;
+    for (uint32_t i = 0; i < 64; i++)
+        if (glyph_cache_lookup(c, 1, i, 16, 0) != NULL)
+            present_ancient++;
+    CHECK(missing_recent == 0);
+    CHECK(present_ancient == 0);
+    CHECK(ring_consistent(c));
+
+    glyph_cache_destroy(c);
+}
+
+/* The saturation-tombstone regression: at max_cap, every eviction mints
+ * a tombstone and the live count is pinned at cap/2, so the old
+ * else-if tombstone sweep (chained under the load-factor branch) could
+ * never fire — tombstones accumulated until probe chains degraded to a
+ * full-table walk per miss. Assert the fix end to end: at saturation,
+ * tombstones must stay a small fraction of cap. */
+static void test_saturation_tombstones_stay_bounded(void) {
+    const uint32_t cap = 256; /* init == max */
+    glyph_cache *c = glyph_cache_new(cap, cap);
+    CHECK(c != NULL);
+
+    for (uint32_t i = 0; i < cap * 8; i++)
+        CHECK(glyph_cache_put(c, 1, i, 16, 0) != NULL);
+
+    glyph_cache_stats s;
+    glyph_cache_get_stats(c, &s);
+    CHECK(s.count == cap / 2);
+    CHECK(s.evictions == cap * 8 - cap / 2);
+    /* The independent sweep keeps tombstones from accumulating toward
+     * full occupancy. The equilibrium sits under half the sweep
+     * watermark (cap/4): every put re-checks the watermark, so the
+     * count cannot run far past the trigger before a rehash collapses
+     * it. Assert the observed equilibrium with margin on both sides:
+     * far below cap/4 (sweep working) but non-zero (evictions are
+     * happening between sweeps). */
+    uint32_t tombs = 0;
+    for (uint32_t i = 0; i < s.cap; i++)
+        if (c->slots[i].occupied && !c->slots[i].live)
+            tombs++;
+    CHECK(tombs < cap / 4);
+    CHECK(tombs > 0);
+    CHECK(ring_consistent(c));
+
+    /* And misses terminate quickly: a lookup for an absent key must
+     * hit a truly-empty slot before walking the whole table. Measure
+     * indirectly via stats — a degraded table would be all-occupied. */
+    uint32_t empty = 0;
+    for (uint32_t i = 0; i < s.cap; i++)
+        if (!c->slots[i].occupied)
+            empty++;
+    CHECK(empty >= cap / 8);
+
+    glyph_cache_destroy(c);
+}
+
+/* clear() empties the ring as well as the table; a subsequent insert
+ * must not reference any stale indices. */
+static void test_clear_resets_ring(void) {
+    glyph_cache *c = glyph_cache_new(16, 64);
+    CHECK(c != NULL);
+    for (uint32_t i = 0; i < 24; i++)
+        CHECK(glyph_cache_put(c, 1, i, 0, 0) != NULL);
+    CHECK(ring_consistent(c));
+    glyph_cache_clear(c);
+    CHECK(ring_consistent(c)); /* empty ring is consistent */
+    CHECK(glyph_cache_put(c, 2, 7, 0, 0) != NULL);
+    CHECK(ring_consistent(c));
+    /* The lone entry is both head and tail. */
+    CHECK(c->lru_head == c->lru_tail);
+    glyph_cache_destroy(c);
+}
+
 int main(void) {
     test_basic_insert_lookup();
     test_eviction_at_cap();
@@ -290,6 +433,9 @@ int main(void) {
     test_clear_resets_count();
     test_visit_with_invalidate_even();
     test_null_safety();
+    test_production_scale_saturation();
+    test_saturation_tombstones_stay_bounded();
+    test_clear_resets_ring();
 
     fprintf(stderr, "%s: %d/%d passed\n", __FILE__, count - failed, count);
     return failed ? 1 : 0;

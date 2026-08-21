@@ -56,8 +56,8 @@ typedef struct flux_cpu_canvas {
      * Fixed for the canvas lifetime: the sample buffer, stencil, and the
      * readback downsample are all sized from it. */
     uint32_t ss;
-    float *fb;              /* premultiplied RGBA, sw*sh*4, row-major */
-    uint8_t *rgba8;         /* cached downsampled 8-bit view (width*height*4) */
+    float *fb;      /* premultiplied RGBA, sw*sh*4, row-major */
+    uint8_t *rgba8; /* cached downsampled 8-bit view (width*height*4) */
     /* Stencil-then-cover accumulation (ADR-0014), one int8 per sample,
      * lazily allocated on the first stencil submit. STENCIL_WRITE adds the
      * triangle's signed winding, STENCIL_WRITE_EO toggles parity; COVER_*
@@ -171,8 +171,7 @@ static inline bool edge_is_top_left(float ax, float ay, float bx, float by) {
  * the sign. Coverage uses the same top-left rule as raster_tri so stencil
  * and colour agree on shared edges. */
 static void raster_stencil_tri(flux_cpu_canvas *v, flux_recti clip, const flux_canvas_vertex *a,
-                               const flux_canvas_vertex *b, const flux_canvas_vertex *c,
-                               bool eo) {
+                               const flux_canvas_vertex *b, const flux_canvas_vertex *c, bool eo) {
     const float ss = (float)v->ss;
     float ax = a->pos[0] * ss, ay = a->pos[1] * ss;
     float bx = b->pos[0] * ss, by = b->pos[1] * ss;
@@ -563,8 +562,7 @@ static flux_result cpu_canvas_init(const flux_canvas_backend *self, flux_canvas 
      * (4 samples/pixel) that mirrors the GPU's 4x MSAA. The factor is
      * fixed at create time: buffer sizing, clipping, and the readback
      * downsample all derive from it. */
-    uint32_t ss =
-        (c->create_antialias == FLUX_CANVAS_ANTIALIAS_NONE) ? 1u : FLUX_CPU_SS_DEFAULT;
+    uint32_t ss = (c->create_antialias == FLUX_CANVAS_ANTIALIAS_NONE) ? 1u : FLUX_CPU_SS_DEFAULT;
     if (c->fb_width == 0 || c->fb_height == 0 || c->fb_width > UINT32_MAX / ss ||
         c->fb_height > UINT32_MAX / ss) {
         FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "CPU canvas dimensions overflow sample buffer");
@@ -720,8 +718,7 @@ static void cpu_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_p
         return; /* textured image draws unsupported on CPU */
 
     for (uint32_t i = 0; i + 3 <= vertex_count; i += 3)
-        raster_tri(v, clip, id, push, c->pending_blend, &verts[i], &verts[i + 1],
-                   &verts[i + 2]);
+        raster_tri(v, clip, id, push, c->pending_blend, &verts[i], &verts[i + 1], &verts[i + 2]);
 
     /* A cover submit consumes the accumulation: reset to zero like the GPU's
      * stencil attachment after its cover pass. */
@@ -753,8 +750,7 @@ static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canv
             float acc[4] = {0, 0, 0, 0};
             for (uint32_t sy = 0; sy < ss; ++sy) {
                 for (uint32_t sx = 0; sx < ss; ++sx) {
-                    const float *s =
-                        &v->fb[(((size_t)(y * ss + sy)) * v->sw + (x * ss + sx)) * 4];
+                    const float *s = &v->fb[(((size_t)(y * ss + sy)) * v->sw + (x * ss + sx)) * 4];
                     acc[0] += s[0];
                     acc[1] += s[1];
                     acc[2] += s[2];
@@ -811,8 +807,7 @@ flux_result flux_canvas_create_cpu_aa(uint32_t width, uint32_t height, float sca
                                       flux_canvas_antialias antialias, flux_canvas **out) {
     if (!out || width == 0 || height == 0)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    if (antialias != FLUX_CANVAS_ANTIALIAS_AUTO &&
-        antialias != FLUX_CANVAS_ANTIALIAS_NONE &&
+    if (antialias != FLUX_CANVAS_ANTIALIAS_AUTO && antialias != FLUX_CANVAS_ANTIALIAS_NONE &&
         antialias != FLUX_CANVAS_ANTIALIAS_MSAA_4X)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;

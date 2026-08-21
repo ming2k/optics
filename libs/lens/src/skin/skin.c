@@ -94,9 +94,9 @@ float *lens_skin_scratch(lens *ui, lens_node *node) {
  * directly — they predate the seam and need its full field set. */
 
 void lens_skin_rect(lens *ui, lens_node *node, flux_rect rel, flux_color color, float radius) {
-    lensi_drawlist_push(ui, node,
-                        (lens_draw_cmd){
-                            .kind = LENS_DRAW_RECT, .rel = rel, .color = color, .radius = radius});
+    lensi_drawlist_push(
+        ui, node,
+        (lens_draw_cmd){.kind = LENS_DRAW_RECT, .rel = rel, .color = color, .radius = radius});
 }
 
 void lens_skin_border(lens *ui, lens_node *node, flux_rect rel, flux_color color, float radius,
@@ -122,17 +122,14 @@ void lens_skin_text(lens *ui, lens_node *node, flux_rect rel, flux_color color, 
 
 void lens_skin_icon(lens *ui, lens_node *node, flux_rect rel, flux_color color, float stroke,
                     lens_icon_id icon) {
-    lensi_drawlist_push(ui, node,
-                        (lens_draw_cmd){.kind = LENS_DRAW_ICON,
-                                        .rel = rel,
-                                        .color = color,
-                                        .width = stroke,
-                                        .icon_id = icon});
+    lensi_drawlist_push(
+        ui, node,
+        (lens_draw_cmd){
+            .kind = LENS_DRAW_ICON, .rel = rel, .color = color, .width = stroke, .icon_id = icon});
 }
 
 void lens_skin_clip_push(lens *ui, lens_node *node, flux_rect rel) {
-    lensi_drawlist_push(ui, node,
-                        (lens_draw_cmd){.kind = LENS_DRAW_CLIP_PUSH, .rel = rel});
+    lensi_drawlist_push(ui, node, (lens_draw_cmd){.kind = LENS_DRAW_CLIP_PUSH, .rel = rel});
 }
 
 void lens_skin_clip_pop(lens *ui, lens_node *node) {

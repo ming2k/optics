@@ -19,10 +19,10 @@
  * hard-coded, so the test tracks the parametric model, not a driver.
  * Tolerances absorb the ±1 LSB TPDF output dither and 8-bit quantisation.
  */
-#include <flux/flux.h>
-#include <flux/vulkan.h>
 #include "../icc_testkit.h"
 #include "test_helpers.h"
+#include <flux/flux.h>
+#include <flux/vulkan.h>
 
 #include <stdlib.h>
 #include <string.h>

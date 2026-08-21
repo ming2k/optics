@@ -36,9 +36,9 @@ typedef struct wp_tablet {
      * leaves — same policy GTK uses to avoid crossed streams). */
     struct zwp_tablet_tool_v2 *active_tool;
     bool in_proximity;
-    bool down;         /* tip contact or a barrel button is held */
-    bool eraser;       /* tool type says eraser end */
-    double pressure;   /* normalised 0..1, 1.0 when the tool has none */
+    bool down;       /* tip contact or a barrel button is held */
+    bool eraser;     /* tool type says eraser end */
+    double pressure; /* normalised 0..1, 1.0 when the tool has none */
     uint32_t proximity_serial;
 } wp_tablet;
 
@@ -66,9 +66,8 @@ static void tool_apply_down(bool down) {
         g_host.button(g_host.user, LENS_MOUSE_LEFT, down);
 }
 
-static void tablet_tool_proximity_in(void *data, struct zwp_tablet_tool_v2 *tool,
-                                     uint32_t serial, struct zwp_tablet_v2 *tablet,
-                                     struct wl_surface *surface) {
+static void tablet_tool_proximity_in(void *data, struct zwp_tablet_tool_v2 *tool, uint32_t serial,
+                                     struct zwp_tablet_v2 *tablet, struct wl_surface *surface) {
     (void)data;
     (void)tablet;
     (void)surface;
@@ -261,8 +260,7 @@ void iris_wayland__tablet_fill_input(lens_input *in) {
     /* Tools without a pressure axis never send pressure events; contact
      * should still read as full pressure so opacity math degrades
      * gracefully to mouse semantics. */
-    in->pen_pressure = g_tablet.down && g_tablet.pressure == 0.0 ? 1.0f
-                                                               : (float)g_tablet.pressure;
+    in->pen_pressure = g_tablet.down && g_tablet.pressure == 0.0 ? 1.0f : (float)g_tablet.pressure;
     in->pen_eraser = g_tablet.in_proximity && g_tablet.eraser;
 }
 

@@ -206,6 +206,14 @@ if opt_canvas
     dependencies : [test_helpers_dep],
   )
   test('image_retire', test_image_retire, suite : 'integration')
+
+  # Retire-FIFO backpressure: releasing past the pending bound with a
+  # frozen watermark must force a full drain, not unbounded growth.
+  test_retire_backpressure = executable('test_retire_backpressure',
+    'test_retire_backpressure.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('retire_backpressure', test_retire_backpressure, suite : 'integration')
 endif
 
 # Built only when the effect module is enabled.

@@ -49,13 +49,11 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
      * the popup scrolls the owner, so close the popup before its anchor can
      * leave the viewport; a wheel over the popup itself drives the popup's
      * own list and must not close it. */
-    if (open &&
-        (fabsf(ui->input.scroll_x) > 0.0001f || fabsf(ui->input.scroll_y) > 0.0001f ||
-         fabsf(ui->input.scroll_pixels_x) > 0.0001f ||
-         fabsf(ui->input.scroll_pixels_y) > 0.0001f)) {
+    if (open && (fabsf(ui->input.scroll_x) > 0.0001f || fabsf(ui->input.scroll_y) > 0.0001f ||
+                 fabsf(ui->input.scroll_pixels_x) > 0.0001f ||
+                 fabsf(ui->input.scroll_pixels_y) > 0.0001f)) {
         lens_node *ov = lensi_store_find(ui, lens_current_id(ui, ov_label));
-        bool over_popup =
-            ov && ov->has_prev && lensi_point_in(ui->input.cursor, ov->prev_rect);
+        bool over_popup = ov && ov->has_prev && lensi_point_in(ui->input.cursor, ov->prev_rect);
         if (!over_popup) {
             lens_place_close(ui, ov_label);
             open = false;
@@ -113,13 +111,11 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
                         .active_t = n->active_t,
                         .content = {.label = preview,
                                     .text = tm,
-                                    .icon = open ? LENS_ICON_CHEVRON_UP
-                                                 : LENS_ICON_CHEVRON_DOWN,
+                                    .icon = open ? LENS_ICON_CHEVRON_UP : LENS_ICON_CHEVRON_DOWN,
                                     .popup_open = open},
                     });
 
-    uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) |
-                         (disabled ? LENS_A11Y_DISABLED : 0) |
+    uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0) |
                          (open ? LENS_A11Y_EXPANDED : 0);
     lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, preview, sem_flags);
 
@@ -198,26 +194,26 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
          * never reveal or visually merge with content behind it. The popup
          * is constrained to the owner's scroll viewport so it escapes the
          * ordinary layout flow without crossing the inspector that owns it. */
-        if (lens_place_begin(ui, ov_label,
-                             (lens_place_opts){
-                                 .band = LENS_BAND_POPUP,
-                                 .mode = LENS_PLACE_ANCHORED,
-                                 .rect = anchor,
-                                 .bounds = has_owner_bounds ? owner_bounds
-                                                            : (flux_rect){0, 0, 0, 0},
-                                 .transient = true,
-                                 .layout =
-                                     {
-                                         .pad = padding,
-                                         .gap = list_gap,
-                                         .bg = rs.bg | 0xff000000u,
-                                         .border = rs.border,
-                                         .border_width = rs.border_width,
-                                         .radius = rs.corner_radius,
-                                         .min_width = popup_w,
-                                         .cross = LENS_STRETCH,
-                                     },
-                             })) {
+        if (lens_place_begin(
+                ui, ov_label,
+                (lens_place_opts){
+                    .band = LENS_BAND_POPUP,
+                    .mode = LENS_PLACE_ANCHORED,
+                    .rect = anchor,
+                    .bounds = has_owner_bounds ? owner_bounds : (flux_rect){0, 0, 0, 0},
+                    .transient = true,
+                    .layout =
+                        {
+                            .pad = padding,
+                            .gap = list_gap,
+                            .bg = rs.bg | 0xff000000u,
+                            .border = rs.border,
+                            .border_width = rs.border_width,
+                            .radius = rs.corner_radius,
+                            .min_width = popup_w,
+                            .cross = LENS_STRETCH,
+                        },
+                })) {
             /* Flat selectable rows, not filled accent buttons: a column of
              * lens_button reads as a stack of bordered pills, whereas a menu
              * wants one flat list with the current value highlighted. The
@@ -251,8 +247,8 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
                 lens_scroll_state *ss =
                     (lens_scroll_state *)lens_node_state(list, sizeof(lens_scroll_state));
                 if (ss) {
-                    float viewport_h = fminf(
-                        (float)count * row_h + (float)(count - 1) * list_gap, list_max_h);
+                    float viewport_h =
+                        fminf((float)count * row_h + (float)(count - 1) * list_gap, list_max_h);
                     float row_top = (float)*selected * (row_h + list_gap);
                     if (just_opened)
                         ss->offset_y = 0.0f;

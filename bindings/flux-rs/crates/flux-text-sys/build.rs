@@ -176,7 +176,7 @@ fn normalize_flux_source_dir(dir: PathBuf) -> PathBuf {
 
 /// Walk up from this crate's manifest dir looking for the optics checkout:
 /// identified by `libs/flux/include/flux` plus a meson `build/` tree. Mirrors
-/// `flux-sys/build.rs` so out-of-tree consumers (e.g. typio) auto-discover a
+/// `flux-sys/build.rs` so out-of-tree consumers auto-discover a
 /// dev build tree without setting FLUX_BUILD_DIR.
 fn discover_optics_checkout() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);

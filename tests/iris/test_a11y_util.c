@@ -74,24 +74,24 @@ int main(void) {
     /* --- Role mapping: exact AT-SPI wire values (atspi-constants.h).
      * Regression cover for the audit finding that these numbers drifted
      * from the protocol (clients compare them numerically). --- */
-    CHECK(iris_a11y__map_role(LENS_ROLE_BUTTON) == 43);   /* PUSH_BUTTON   */
-    CHECK(iris_a11y__map_role(LENS_ROLE_CHECKBOX) == 7);  /* CHECK_BOX     */
-    CHECK(iris_a11y__map_role(LENS_ROLE_RADIO) == 44);    /* RADIO_BUTTON  */
-    CHECK(iris_a11y__map_role(LENS_ROLE_SLIDER) == 51);   /* SLIDER        */
-    CHECK(iris_a11y__map_role(LENS_ROLE_LABEL) == 29);    /* LABEL         */
-    CHECK(iris_a11y__map_role(LENS_ROLE_GROUP) == 39);    /* PANEL         */
+    CHECK(iris_a11y__map_role(LENS_ROLE_BUTTON) == 43);     /* PUSH_BUTTON   */
+    CHECK(iris_a11y__map_role(LENS_ROLE_CHECKBOX) == 7);    /* CHECK_BOX     */
+    CHECK(iris_a11y__map_role(LENS_ROLE_RADIO) == 44);      /* RADIO_BUTTON  */
+    CHECK(iris_a11y__map_role(LENS_ROLE_SLIDER) == 51);     /* SLIDER        */
+    CHECK(iris_a11y__map_role(LENS_ROLE_LABEL) == 29);      /* LABEL         */
+    CHECK(iris_a11y__map_role(LENS_ROLE_GROUP) == 39);      /* PANEL         */
     CHECK(iris_a11y__map_role(LENS_ROLE_SCROLLAREA) == 49); /* SCROLL_PANE */
     CHECK(iris_a11y__map_role(LENS_ROLE_TEXTFIELD) == 79);  /* ENTRY       */
     CHECK(iris_a11y__map_role(LENS_ROLE_TEXTAREA) == 61);   /* TEXT        */
     CHECK(iris_a11y__map_role(LENS_ROLE_DISCLOSURE) == 62); /* TOGGLE_BUTTON */
-    CHECK(iris_a11y__map_role(LENS_ROLE_MENU) == 33);     /* MENU          */
-    CHECK(iris_a11y__map_role(LENS_ROLE_DIALOG) == 16);   /* DIALOG        */
-    CHECK(iris_a11y__map_role(LENS_ROLE_PROGRESS) == 42); /* PROGRESS_BAR  */
-    CHECK(iris_a11y__map_role(LENS_ROLE_TABLE) == 55);    /* TABLE         */
-    CHECK(iris_a11y__map_role(LENS_ROLE_ROW) == 90);      /* TABLE_ROW     */
-    CHECK(iris_a11y__map_role(LENS_ROLE_MENUITEM) == 35); /* MENU_ITEM     */
-    CHECK(iris_a11y__map_role(LENS_ROLE_LINK) == 88);     /* LINK          */
-    CHECK(iris_a11y__map_role(LENS_ROLE_NONE) == 67);     /* UNKNOWN       */
+    CHECK(iris_a11y__map_role(LENS_ROLE_MENU) == 33);       /* MENU          */
+    CHECK(iris_a11y__map_role(LENS_ROLE_DIALOG) == 16);     /* DIALOG        */
+    CHECK(iris_a11y__map_role(LENS_ROLE_PROGRESS) == 42);   /* PROGRESS_BAR  */
+    CHECK(iris_a11y__map_role(LENS_ROLE_TABLE) == 55);      /* TABLE         */
+    CHECK(iris_a11y__map_role(LENS_ROLE_ROW) == 90);        /* TABLE_ROW     */
+    CHECK(iris_a11y__map_role(LENS_ROLE_MENUITEM) == 35);   /* MENU_ITEM     */
+    CHECK(iris_a11y__map_role(LENS_ROLE_LINK) == 88);       /* LINK          */
+    CHECK(iris_a11y__map_role(LENS_ROLE_NONE) == 67);       /* UNKNOWN       */
     CHECK_STR_EQ(iris_a11y__role_name(IRIS_ATSPI_ROLE_PROGRESS_BAR), "progress bar");
     CHECK_STR_EQ(iris_a11y__role_name(IRIS_ATSPI_ROLE_TABLE_ROW), "table row");
 
@@ -101,9 +101,8 @@ int main(void) {
     /* default: FOCUSABLE(11) | ENABLED(8) | SENSITIVE(24) | SHOWING(25) */
     CHECK(lo == ((1u << 11) | (1u << 8) | (1u << 24) | (1u << 25)));
     CHECK(hi == 0);
-    iris_a11y__state_bits(LENS_A11Y_FOCUSED | LENS_A11Y_CHECKED | LENS_A11Y_EXPANDED |
-                              LENS_A11Y_SELECTED,
-                          &lo, &hi);
+    iris_a11y__state_bits(
+        LENS_A11Y_FOCUSED | LENS_A11Y_CHECKED | LENS_A11Y_EXPANDED | LENS_A11Y_SELECTED, &lo, &hi);
     /* + FOCUSED(12) | CHECKED(4) | EXPANDED(10) | SELECTED(23) */
     CHECK(lo == ((1u << 11) | (1u << 8) | (1u << 24) | (1u << 25) | (1u << 12) | (1u << 4) |
                  (1u << 10) | (1u << 23)));
@@ -124,8 +123,8 @@ int main(void) {
     CHECK(cur[0].name != sem.name);
     sem.name = "Cancel";
     iris_a11y__node_fill(&cur[1], &sem, 101, 0, cur, 1);
-    CHECK(cur[1].index == 1);           /* second child of parent 0 */
-    CHECK_STR_EQ(cur[0].name, "OK");    /* first node's copy survives */
+    CHECK(cur[1].index == 1);        /* second child of parent 0 */
+    CHECK_STR_EQ(cur[0].name, "OK"); /* first node's copy survives */
     /* a different parent restarts the index */
     iris_a11y__node_fill(&cur[2], &sem, 102, 100, cur, 2);
     CHECK(cur[2].index == 0);
@@ -138,10 +137,8 @@ int main(void) {
     memset(f1, 0, sizeof f1);
     memset(f2, 0, sizeof f2);
     lens_semantics s1 = {.role = LENS_ROLE_BUTTON, .name = "One", .value = NULL, .flags = 0};
-    lens_semantics s2 = {.role = LENS_ROLE_CHECKBOX,
-                         .name = "Two",
-                         .value = NULL,
-                         .flags = LENS_A11Y_CHECKED};
+    lens_semantics s2 = {
+        .role = LENS_ROLE_CHECKBOX, .name = "Two", .value = NULL, .flags = LENS_A11Y_CHECKED};
     iris_a11y__node_fill(&f1[0], &s1, 1, 0, f1, 0);
     iris_a11y__node_fill(&f1[1], &s2, 2, 0, f1, 1);
     size_t n = iris_a11y__diff(NULL, 0, f1, 2, evs, 32);
@@ -172,15 +169,12 @@ int main(void) {
      * the fixed per-node order role, name, value, states; node order is the
      * cur walk order (id 1 first, then id 3). */
     CHECK(n == 2);
-    CHECK(evs[0].kind == IRIS_A11Y__EV_ROLE && evs[0].id == 1 &&
-          evs[0].role == LENS_ROLE_LINK);
+    CHECK(evs[0].kind == IRIS_A11Y__EV_ROLE && evs[0].id == 1 && evs[0].role == LENS_ROLE_LINK);
     CHECK(evs[1].kind == IRIS_A11Y__EV_VALUE && evs[1].id == 3);
 
     /* state flip: checked -> unchecked on a stable id */
-    lens_semantics c_on = {.role = LENS_ROLE_CHECKBOX,
-                           .name = "C",
-                           .value = NULL,
-                           .flags = LENS_A11Y_CHECKED};
+    lens_semantics c_on = {
+        .role = LENS_ROLE_CHECKBOX, .name = "C", .value = NULL, .flags = LENS_A11Y_CHECKED};
     lens_semantics c_off = {.role = LENS_ROLE_CHECKBOX, .name = "C", .value = NULL, .flags = 0};
     memset(f1, 0, sizeof f1);
     memset(f2, 0, sizeof f2);
@@ -253,8 +247,7 @@ int main(void) {
     CHECK(n == 1);
     CHECK(evs[0].kind == IRIS_A11Y__EV_TEXT && evs[0].id == 7);
     CHECK(evs[0].text.offset == 3 && evs[0].text.removed == 0 && evs[0].text.inserted == 2);
-    CHECK(evs[0].text.inserted_bytes == 2 &&
-          memcmp(evs[0].text.inserted_text, "lo", 2) == 0);
+    CHECK(evs[0].text.inserted_bytes == 2 && memcmp(evs[0].text.inserted_text, "lo", 2) == 0);
 
     return TEST_REPORT();
 }

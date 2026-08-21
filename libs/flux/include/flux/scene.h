@@ -117,7 +117,7 @@ typedef struct flux_material_surface_desc {
     bool double_sided;
 } flux_material_surface_desc;
 
-#define FLUX_MATERIAL_SURFACE_DESC_INIT                                                        \
+#define FLUX_MATERIAL_SURFACE_DESC_INIT                                                            \
     {.type = FLUX_TYPE_MATERIAL_SURFACE_DESC, .uv_scale = {1.0f, 1.0f}, .alpha_cutoff = 0.5f}
 
 typedef struct flux_material_desc {
@@ -202,10 +202,12 @@ FLUX_API void flux_scene_draw_mesh_skinned(flux_frame *f, const flux_camera *cam
                                            flux_mesh *mesh, flux_material *material,
                                            const flux_mat4 *joint_matrices, uint32_t joint_count);
 
-FLUX_API void flux_scene_draw_mesh_skinned_lit(
-    flux_frame *f, const flux_camera *cam, flux_mat4 world, flux_mesh *mesh,
-    flux_material *material, const flux_scene_light *light, const flux_mat4 *joint_matrices,
-    uint32_t joint_count);
+FLUX_API void flux_scene_draw_mesh_skinned_lit(flux_frame *f, const flux_camera *cam,
+                                               flux_mat4 world, flux_mesh *mesh,
+                                               flux_material *material,
+                                               const flux_scene_light *light,
+                                               const flux_mat4 *joint_matrices,
+                                               uint32_t joint_count);
 
 #ifdef __cplusplus
 }

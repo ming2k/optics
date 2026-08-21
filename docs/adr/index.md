@@ -12,7 +12,7 @@ a decision, write a new ADR and update the old one's status to
 | 0004 | [Paint kind drives pipeline selection](0004-paint-kind-drives-pipeline.md)     | Accepted |
 | 0005 | [Ear-clipping tessellator with stencil-then-cover deferred](0005-tessellator-scope.md) | Superseded by ADR-0011 |
 | 0006 | [No runtime RHI; build-time backend selection if ever needed](0006-no-runtime-rhi.md) | Accepted |
-| 0007 | [Hand-rolled Vulkan slab allocator (no VMA)](0007-vk-slab-allocator.md)         | Accepted |
+| 0007 | [Hand-rolled Vulkan slab allocator (no VMA)](0007-vk-slab-allocator.md)         | Accepted (amended by [0020](0020-gpu-memory-production-hardening.md)) |
 | 0008 | [Image-effect pipeline as the home for blur and friends](0008-image-effect-pipeline.md) | Accepted |
 | 0009 | [Canvas sample count joins the pipeline-cache key](0009-canvas-msaa-pipeline-key.md) | Superseded by ADR-0071 |
 | 0010 | [Glyph-blit primitive — text rendering at the canvas seam](0010-glyph-blit-primitive.md) | Accepted |
@@ -25,7 +25,7 @@ a decision, write a new ADR and update the old one's status to
 | 0017 | [Canvas render-target capture for real backdrop effects](0017-canvas-render-target-capture.md) | Accepted |
 | 0018 | [Meson subprojects for the flux + lens + iris stack](0018-obsolete-iris-meson-subprojects.md) | Superseded by ADR-0023 |
 | 0019 | [Canvas rendering backend seam + software (CPU) backend](0019-canvas-backend-seam-and-cpu-backend.md) | Accepted |
-| 0020 | [GPU memory production hardening (amends ADR-0007)](0020-gpu-memory-production-hardening.md) | Accepted |
+| 0020 | [GPU memory production hardening (amends ADR-0007)](0020-gpu-memory-production-hardening.md) | Accepted (item 5 amended by [0021](0021-batched-uploads-and-quiescent-waits.md)) |
 | 0021 | [Batched uploads, surface-scoped quiescent waits, prefers-dedicated floor](0021-batched-uploads-and-quiescent-waits.md) | Accepted |
 | 0022 | [Deferred upload submission (amends ADR-0021 item 1)](0022-deferred-upload-submission.md) | Accepted |
 | 0023 | [Unified monorepo build](0023-unified-monorepo-build.md) | Accepted |
@@ -36,18 +36,18 @@ a decision, write a new ADR and update the old one's status to
 | 0025 | [Lens draws only through \<flux/canvas.h\>](0025-lens-draws-through-flux-canvas.md) | Accepted |
 | 0026 | [Lens widget identity — FNV-1a hashing over an id stack](0026-lens-id-system.md) | Accepted |
 | 0027 | [Lens retained store — open-addressing id→node map with ENTERING/STABLE/LEAVING GC](0027-lens-retained-store.md) | Accepted |
-| 0028 | [Lens two-phase flexbox layout (measure / arrange)](0028-lens-flexbox-layout.md) | Accepted |
-| 0029 | [Lens interaction model — prev-frame geometry, one-frame hit-test latency](0029-lens-interaction-model.md) | Accepted |
-| 0030 | [Lens damage / redraw tracking — deferred, full-tree repaint today](0030-lens-damage-tracking.md) | Accepted |
+| 0028 | [Lens two-phase flexbox layout (measure / arrange)](0028-lens-flexbox-layout.md) | Accepted (amended by [0060](0060-lens-single-tree-placement-and-z-bands.md)) |
+| 0029 | [Lens interaction model — prev-frame geometry, one-frame hit-test latency](0029-lens-interaction-model.md) | Accepted (amended 2026-08-10) |
+| 0030 | [Lens damage / redraw tracking — deferred, full-tree repaint today](0030-lens-damage-tracking.md) | Accepted (Decision 3 superseded by implementation; see status note) |
 | 0031 | [Lens symbol namespaces — public `lens_*`, internal `lensi_*`](0031-lens-symbol-namespaces.md) | Accepted |
 | 0032 | [Lens theme token system — sized struct with ABI guard](0032-lens-theme-tokens.md) | Accepted |
 | 0033 | [Lens text seam — draw and shape through flux-text, no in-tree font engine](0033-lens-text-seam.md) | Accepted |
 | 0034 | [Lens text measurement — host port + monospace fallback](0034-lens-text-measurement.md) | Accepted |
-| 0035 | [Lens accessibility semantic tree — per-node records and post-end walk](0035-lens-accessibility-tree.md) | Accepted |
+| 0035 | [Lens accessibility semantic tree — per-node records and post-end walk](0035-lens-accessibility-tree.md) | Accepted (amended by [0060](0060-lens-single-tree-placement-and-z-bands.md)) |
 | 0036 | [Lens input / clipboard / IME — host-supplied, size-guarded ABI](0036-lens-input-clipboard-ime.md) | Accepted |
 | 0037 | [Lens overlay layers — transient overlays + persistent floating panels](0037-lens-overlay-layers.md) | Superseded by ADR-0060 |
 | 0038 | [Lens node state GC — 8-frame grace window for leaving nodes](0038-lens-node-state-gc.md) | Accepted |
-| 0039 | [Lens modal dialog — centered overlay + backdrop + Tab focus trap](0039-lens-modal-dialog.md) | Accepted |
+| 0039 | [Lens modal dialog — centered overlay + backdrop + Tab focus trap](0039-lens-modal-dialog.md) | Accepted (amended 2026-08-10) |
 | 0040 | [Lens menus — menubar, context menu, submenu, items (hover-dwell)](0040-lens-menus.md) | Accepted |
 | 0041 | [Lens resizable split panel — persisted ratio, draggable divider](0041-lens-resizable-split.md) | Accepted |
 | 0042 | [Lens virtualized table / data grid](0042-lens-virtualized-table.md) | Accepted |
@@ -80,3 +80,4 @@ a decision, write a new ADR and update the old one's status to
 | 0069 | [Color management — parametric color spaces, scRGB working space, explicit output transform](0069-color-management.md) | Accepted (amended by ADR-0070) |
 | 0070 | [ICC profile support — in-tree C parser over vendored skcms](0070-icc-in-tree-parser.md) | Accepted |
 | 0071 | [Pass-scoped canvas antialiasing policy](0071-pass-scoped-canvas-antialiasing.md) | Accepted |
+| 0072 | [Long-session resource governance — bounded queues, O(1) eviction, live-list GC](0072-long-session-resource-governance.md) | Accepted |

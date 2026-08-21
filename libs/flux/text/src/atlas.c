@@ -173,8 +173,8 @@ static void atlas_upload_rect(flux_text *t, uint8_t page, uint32_t x, uint32_t y
     size_t upload_bytes = row_bytes * h;
 
     if (row_bytes == (size_t)ATLAS_W && x == 0) {
-        (void)flux_image_update_region(img, x, y, w, h,
-                                       t->atlas_pixels + (size_t)y * ATLAS_W + x, upload_bytes);
+        (void)flux_image_update_region(img, x, y, w, h, t->atlas_pixels + (size_t)y * ATLAS_W + x,
+                                       upload_bytes);
     } else {
         /* Tight-row staging. This sits on the hottest text path (every
          * atlas flush whose dirty box is narrower than the full texture),

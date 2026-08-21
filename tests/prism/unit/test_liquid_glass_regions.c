@@ -73,9 +73,8 @@ int main(void) {
 
     /* NaN is rejected in each of the five fields; any other sentinel or
      * in-range value is accepted. */
-    float *fields[5] = {&overrides.frost_strength, &overrides.tint_strength,
-                        &overrides.saturation, &overrides.plate_polarity,
-                        &overrides.backdrop_energy};
+    float *fields[5] = {&overrides.frost_strength, &overrides.tint_strength, &overrides.saturation,
+                        &overrides.plate_polarity, &overrides.backdrop_energy};
     for (uint32_t i = 0; i < 5u; ++i) {
         float keep = *fields[i];
         *fields[i] = NAN;

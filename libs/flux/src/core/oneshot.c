@@ -457,8 +457,8 @@ void flux_vk_upload_pending_park_families(flux_device *d, VkFence fence, VkComma
         vkWaitForFences(d->device, 1, &fence, VK_TRUE, UINT64_MAX);
         if (serial)
             flux_vk_note_graphics_completed(d, serial);
-        upload_pending_recycle(d, fence, pool, pool_family, pool_cmd, pool2, pool2_family, pool2_cmd,
-                               sem, stagings);
+        upload_pending_recycle(d, fence, pool, pool_family, pool_cmd, pool2, pool2_family,
+                               pool2_cmd, sem, stagings);
         return;
     }
     *p = (flux_upload_pending){
@@ -661,10 +661,9 @@ static void record_buffer_copy_barrier(VkCommandBuffer cmd, VkBuffer dst, VkDevi
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
         .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT |
-                        VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstStageMask =
+            VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         .dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT |
                          VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT,
         .buffer = dst,
@@ -816,9 +815,9 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
                                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, &gfence,
                                    &gserial);
         if (vr == VK_SUCCESS) {
-            flux_vk_upload_pending_park_families(d, gfence, xfer_pool, d->transfer_family,
-                                                 xfer_cmd, gfx_pool, d->graphics_family, gfx_cmd,
-                                                 handoff, staging, gserial);
+            flux_vk_upload_pending_park_families(d, gfence, xfer_pool, d->transfer_family, xfer_cmd,
+                                                 gfx_pool, d->graphics_family, gfx_cmd, handoff,
+                                                 staging, gserial);
             return FLUX_OK;
         }
         /* The transfer batch is in flight and references the staging
@@ -835,9 +834,9 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
         vr = flux_vk_submit_upload(d, d->graphics_queue, xfer_cmd, VK_NULL_HANDLE, 0,
                                    VK_NULL_HANDLE, 0, &fence, &serial);
         if (vr == VK_SUCCESS) {
-            flux_vk_upload_pending_park_families(d, fence, xfer_pool, d->graphics_family,
-                                                 xfer_cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE,
-                                                 VK_NULL_HANDLE, staging, serial);
+            flux_vk_upload_pending_park_families(d, fence, xfer_pool, d->graphics_family, xfer_cmd,
+                                                 VK_NULL_HANDLE, 0, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                                 staging, serial);
             return FLUX_OK;
         }
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "upload submit failed", vr);
@@ -1110,9 +1109,9 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
                                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, &gfence,
                                    &gserial);
         if (vr == VK_SUCCESS) {
-            flux_vk_upload_pending_park_families(d, gfence, xfer_pool, d->transfer_family,
-                                                 xfer_cmd, gfx_pool, d->graphics_family, gfx_cmd,
-                                                 handoff, staging, gserial);
+            flux_vk_upload_pending_park_families(d, gfence, xfer_pool, d->transfer_family, xfer_cmd,
+                                                 gfx_pool, d->graphics_family, gfx_cmd, handoff,
+                                                 staging, gserial);
             return FLUX_OK;
         }
         /* The transfer batch is in flight and still reads the staging
@@ -1128,9 +1127,9 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
         vr = flux_vk_submit_upload(d, d->graphics_queue, xfer_cmd, VK_NULL_HANDLE, 0,
                                    VK_NULL_HANDLE, 0, &fence, &serial);
         if (vr == VK_SUCCESS) {
-            flux_vk_upload_pending_park_families(d, fence, xfer_pool, d->graphics_family,
-                                                 xfer_cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE,
-                                                 VK_NULL_HANDLE, staging, serial);
+            flux_vk_upload_pending_park_families(d, fence, xfer_pool, d->graphics_family, xfer_cmd,
+                                                 VK_NULL_HANDLE, 0, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                                 staging, serial);
             return FLUX_OK;
         }
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "image upload submit failed", vr);

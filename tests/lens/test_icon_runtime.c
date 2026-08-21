@@ -24,10 +24,9 @@ static const char SVG_STROKE[] =
     "</svg>";
 
 /* Material-style: one filled rect (default black fill). */
-static const char SVG_FILL[] =
-    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
-    "<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\"/>"
-    "</svg>";
+static const char SVG_FILL[] = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+                               "<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\"/>"
+                               "</svg>";
 
 static int has_icon_cmd(const lens_node *n, int32_t id) {
     if (!n)

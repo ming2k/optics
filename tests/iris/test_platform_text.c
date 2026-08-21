@@ -38,7 +38,10 @@ int main(void) {
     CHECK_STR_EQ(buf, "abc");
 
     /* appends on a code-point boundary when full */
-    CHECK(iris_utf8_append(buf, sizeof buf, "\xc3\xa9""zzw", 5) == 4); /* ézz, w cut */
+    CHECK(iris_utf8_append(buf, sizeof buf,
+                           "\xc3\xa9"
+                           "zzw",
+                           5) == 4); /* ézz, w cut */
     CHECK_STR_EQ(buf, "abc\xc3\xa9zz");
 
     /* no room left: appends nothing, buffer stays NUL-terminated */
@@ -47,8 +50,12 @@ int main(void) {
 
     /* oversized single append is boundary-truncated, not dropped */
     buf[0] = '\0';
-    CHECK(iris_utf8_append(buf, 5, "a\xc3\xa9""bcd", 6) == 4); /* room = 4: "aéb" */
-    CHECK_STR_EQ(buf, "a\xc3\xa9""b");
+    CHECK(iris_utf8_append(buf, 5,
+                           "a\xc3\xa9"
+                           "bcd",
+                           6) == 4); /* room = 4: "aéb" */
+    CHECK_STR_EQ(buf, "a\xc3\xa9"
+                      "b");
 
     /* --- copy --- */
     iris_utf8_copy(buf, sizeof buf, "h\xc3\xa9llo");
@@ -64,13 +71,13 @@ int main(void) {
      * text_utf8 grew to 256 for full-sentence IME conversion and preedit to
      * LENS_PREEDIT_MAX=256; the Wayland accumulator mirrors these sizes and
      * static_asserts against them, so pin the lens side here. */
-    CHECK(sizeof ((lens_input *)0)->text_utf8 == 256);
-    CHECK(sizeof ((lens_input *)0)->preedit_utf8 == 256);
+    CHECK(sizeof((lens_input *)0)->text_utf8 == 256);
+    CHECK(sizeof((lens_input *)0)->preedit_utf8 == 256);
     CHECK(LENS_PREEDIT_MAX == 256);
 
     /* A full-sentence IME commit staged at the new size: 300 bytes into a
      * 256 buffer keeps 255 (NUL takes the last byte), boundary-clean. */
-    char big[sizeof ((lens_input *)0)->text_utf8];
+    char big[sizeof((lens_input *)0)->text_utf8];
     char src[300];
     memset(src, 'a', sizeof src - 1);
     src[sizeof src - 1] = '\0';

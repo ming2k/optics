@@ -82,8 +82,8 @@ static char *utf8_from_wide(const WCHAR *w) {
 }
 
 static bool uri_byte_unreserved(unsigned char c) {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-           c == '-' || c == '.' || c == '_' || c == '~';
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
+           c == '.' || c == '_' || c == '~';
 }
 
 /* Native path (C:\dir\file.txt) -> freshly allocated file URI
@@ -275,8 +275,8 @@ static WCHAR *shell_item_path(IShellItem *item) {
  * multi-selection out_paths holds a NUL-separated list and *out_bytes_used
  * (optional) the total bytes written including each URI's NUL separator —
  * matching the portal backend's accounting. */
-static int pick_open(const iris_file_dialog_opts *opts, bool multiple, bool folder,
-                     char *out_paths, size_t out_cap, size_t *out_bytes_used) {
+static int pick_open(const iris_file_dialog_opts *opts, bool multiple, bool folder, char *out_paths,
+                     size_t out_cap, size_t *out_bytes_used) {
     if (!out_paths || out_cap == 0)
         return 0;
     out_paths[0] = '\0';

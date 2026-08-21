@@ -259,16 +259,30 @@ static flux_vec3 white_xyz(flux_color_space cs) {
 /* ------------------------------------------------------------------ */
 
 static const flux_mat3 BRADFORD = {{
-    0.8951f, -0.7502f, 0.0389f, /* column 0 */
-    0.2664f, 1.7135f, -0.0685f, /* column 1 */
-    -0.1614f, 0.0367f, 1.0296f, /* column 2 */
+    0.8951f,
+    -0.7502f,
+    0.0389f, /* column 0 */
+    0.2664f,
+    1.7135f,
+    -0.0685f, /* column 1 */
+    -0.1614f,
+    0.0367f,
+    1.0296f, /* column 2 */
 }};
 
 static flux_mat3 adapt_xyz(flux_vec3 src_white, flux_vec3 dst_white) {
     flux_vec3 cs = flux_mat3_transform_vec3(BRADFORD, src_white);
     flux_vec3 cd = flux_mat3_transform_vec3(BRADFORD, dst_white);
     flux_mat3 d = {{
-        cd.x / cs.x, 0, 0, 0, cd.y / cs.y, 0, 0, 0, cd.z / cs.z,
+        cd.x / cs.x,
+        0,
+        0,
+        0,
+        cd.y / cs.y,
+        0,
+        0,
+        0,
+        cd.z / cs.z,
     }};
     return flux_mat3_multiply(flux_mat3_invert(BRADFORD), flux_mat3_multiply(d, BRADFORD));
 }
@@ -287,8 +301,7 @@ flux_mat3 flux_colorspace_rgb_to_xyz(flux_color_space cs) {
 /*  Public transform builder                                          */
 /* ------------------------------------------------------------------ */
 
-bool flux_color_space_transform_matrix(flux_color_space from, flux_color_space to,
-                                       flux_mat3 *out) {
+bool flux_color_space_transform_matrix(flux_color_space from, flux_color_space to, flux_mat3 *out) {
     if (!out)
         return false;
     *out = flux_mat3_identity();

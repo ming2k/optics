@@ -30,10 +30,9 @@ static const char SVG_STROKE[] =
     "</svg>";
 
 /* Material-style: one filled rect (default black fill). */
-static const char SVG_FILL[] =
-    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
-    "<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\"/>"
-    "</svg>";
+static const char SVG_FILL[] = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+                               "<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\"/>"
+                               "</svg>";
 
 /* A 48x48 viewBox: coordinates must halve into the 24 box. */
 static const char SVG_WIDE_VIEWBOX[] =
@@ -54,16 +53,16 @@ int main(void) {
     uint32_t moves = 0, degenerate = 0, cubics = 0;
     float px = 0.0f, py = 0.0f;
     float min_x = 1e30f, min_y = 1e30f, max_x = -1e30f, max_y = -1e30f;
-#define TRACK(x, y)                                                                              \
-    do {                                                                                         \
-        if ((x) < min_x)                                                                         \
-            min_x = (x);                                                                         \
-        if ((x) > max_x)                                                                         \
-            max_x = (x);                                                                         \
-        if ((y) < min_y)                                                                         \
-            min_y = (y);                                                                         \
-        if ((y) > max_y)                                                                         \
-            max_y = (y);                                                                         \
+#define TRACK(x, y)                                                                                \
+    do {                                                                                           \
+        if ((x) < min_x)                                                                           \
+            min_x = (x);                                                                           \
+        if ((x) > max_x)                                                                           \
+            max_x = (x);                                                                           \
+        if ((y) < min_y)                                                                           \
+            min_y = (y);                                                                           \
+        if ((y) > max_y)                                                                           \
+            max_y = (y);                                                                           \
     } while (0)
     for (uint32_t i = 0; i < desc->count; i++) {
         const lens_icon_cmd *cmd = &desc->cmds[i];

@@ -422,8 +422,8 @@ int main(void) {
             .ambient = 0.0f,
         };
 
-        const float want_linear = flux_transfer_decode(FLUX_TRANSFER_SRGB, 0.0f, 128.0f / 255.0f) *
-                                  0.5f; /* ndotl */
+        const float want_linear =
+            flux_transfer_decode(FLUX_TRANSFER_SRGB, 0.0f, 128.0f / 255.0f) * 0.5f; /* ndotl */
         const int want16f =
             (int)lrintf(flux_transfer_encode(FLUX_TRANSFER_SRGB, 0.0f, want_linear) * 255.0f);
 
@@ -506,7 +506,7 @@ int main(void) {
             flux_image_release(rt);
         }
 
-        EXPECT(got[0] > 58 && got[0] < 70);          /* legacy gamma path */
+        EXPECT(got[0] > 58 && got[0] < 70); /* legacy gamma path */
         EXPECT(got[1] > want16f - 5 && got[1] < want16f + 5);
         EXPECT(got[1] > got[0] + 15); /* linear-light lift is unmistakable */
 

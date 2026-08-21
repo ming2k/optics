@@ -55,6 +55,15 @@ test_canvas_cpu_text = executable('test_canvas_cpu_text',
 )
 test('canvas_cpu_text', test_canvas_cpu_text, suite : 'unit')
 
+# Long-session text soak: drives the glyph cache past its live ceiling and
+# replays resident working sets, asserting the diagnostic counters (evictions,
+# hits vs misses, atlas pages/clears) stay in their documented steady states.
+test_text_soak = executable('test_text_soak',
+  'test_text_soak.c',
+  dependencies : [test_helpers_dep, flux_text_dep],
+)
+test('text_soak', test_text_soak, suite : 'unit', timeout : 120)
+
 # Atlas-clear invalidation: a segment recorded before an atlas_clear carries
 # pre-clear glyph UVs, so replay must be refused via the host-atlas
 # generation check (flux_glyph_run_host_atlas_desc) and a live re-draw must

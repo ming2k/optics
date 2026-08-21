@@ -278,8 +278,7 @@ txtp_font_list *txt_platform_font_query_family(const char *family_name, float we
     IDWriteFontList *fonts = NULL;
     WCHAR *custom_wname = NULL;
 
-    if (FAILED(factory->lpVtbl->GetSystemFontCollection(factory, &collection, TRUE)) ||
-        !collection)
+    if (FAILED(factory->lpVtbl->GetSystemFontCollection(factory, &collection, TRUE)) || !collection)
         goto done;
 
     /* Resolve the family name to an index in the collection. */
@@ -382,8 +381,8 @@ static ULONG STDMETHODCALLTYPE tas_Release(IDWriteTextAnalysisSource *self) {
     return r;
 }
 
-static HRESULT STDMETHODCALLTYPE tas_GetTextAtPosition(IDWriteTextAnalysisSource *self,
-                                                       UINT32 pos, const WCHAR **str, UINT32 *len) {
+static HRESULT STDMETHODCALLTYPE tas_GetTextAtPosition(IDWriteTextAnalysisSource *self, UINT32 pos,
+                                                       const WCHAR **str, UINT32 *len) {
     txt_analysis_source *s = (txt_analysis_source *)self;
     if (pos < s->len) {
         *str = s->text + pos;
@@ -435,9 +434,14 @@ static HRESULT STDMETHODCALLTYPE tas_GetNumberSubstitution(IDWriteTextAnalysisSo
 }
 
 static const IDWriteTextAnalysisSourceVtbl g_tas_vtbl = {
-    tas_QueryInterface,  tas_AddRef,           tas_Release,
-    tas_GetTextAtPosition,    tas_GetTextBeforePosition, tas_GetParagraphReadingDirection,
-    tas_GetLocaleName,   tas_GetNumberSubstitution,
+    tas_QueryInterface,
+    tas_AddRef,
+    tas_Release,
+    tas_GetTextAtPosition,
+    tas_GetTextBeforePosition,
+    tas_GetParagraphReadingDirection,
+    tas_GetLocaleName,
+    tas_GetNumberSubstitution,
 };
 
 /* ------------------------------------------------------------------ */
@@ -505,8 +509,7 @@ bool txt_platform_font_query_codepoint(const char *family_name, float weight, bo
     UINT32 mapped_len = 0; /* covered text length — we map a single scalar, so unused */
     if (FAILED(fallback->lpVtbl->MapCharacters(
             fallback, (IDWriteTextAnalysisSource *)src, 0, text_len, NULL, base,
-            css_to_dw_weight(weight),
-            italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+            css_to_dw_weight(weight), italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, &mapped_len, &mapped, &scale)) ||
         !mapped)
         goto done;

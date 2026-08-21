@@ -292,13 +292,13 @@ bool txt_init_slot_faces(flux_text *t, int slot_idx, float weight, bool italic,
      * FT_New_Face on a large CJK font (Noto Sans CJK ~20 MB) takes
      * 50-200 ms; with up to MAX_FACES_PER_SLOT fallbacks in the slot,
      * the lazy-load path made the first render of any CJK glyph stall
-     * for ~1 s inside flux_text_draw. That stall ran in the panel
-     * flush stage and tripped the daemon's 3 s watchdog on first
-     * indicator banner render.
+     * for ~1 s inside flux_text_draw — a visible multi-frame freeze on
+     * the first frame containing CJK text (observed in a real consumer
+     * whose frame deadline was 3 s).
      *
-     * Loading every face at init pays the cost once, before the
-     * watchdog is armed (typio's App::init runs with no watchdog
-     * constructed). Subsequent renders only pay the FT_Set_Pixel_Sizes
+     * Loading every face at init pays the cost once, inside the
+     * consumer's init phase before any frame deadline is armed.
+     * Subsequent renders only pay the FT_Set_Pixel_Sizes
      * delta, which is sub-millisecond. A failed face load is logged
      * and skipped — the primary face is required, fallbacks are best
      * effort. */
@@ -416,6 +416,7 @@ void txt_engine_shutdown(flux_text *t) {
     free(t->atlas_upload_scratch);
     free(t->runs_buf);
     free(t->run_levels_buf);
+    txt_itemize_release_scratch(t);
     if (t->nearest_sampler)
         flux_sampler_release(t->nearest_sampler);
     if (t->hb_buf)

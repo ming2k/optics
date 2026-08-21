@@ -51,8 +51,8 @@ The caller can still use flux from multiple threads, with these rules:
 |---------------------------------------------|---------------------------------------------------|
 | Render on a background thread               | Create the surface on that thread; only call frame/canvas functions from there. |
 | Build paths on multiple threads             | Give each thread its own `flux_arena` and `flux_path`. |
-| Upload images concurrently                  | Serialise calls externally, or create one `flux_device` per worker thread (each with its own queue). |
-| Drive two windows                           | One surface per window. Operations on different surfaces from different threads are safe as long as the same `flux_device` is not used to submit work from both at the exact same instant (Vulkan queue access is external sync). |
+| Upload images concurrently                  | Safe: uploads check out staging buffers from a locked pool and the queue submit is internally locked (ADR-0022). Worker threads may upload in parallel on one device. |
+| Drive two windows                           | One surface per window. Submits from different threads are safe: `vkQueueSubmit2`/`vkQueuePresentKHR` are serialised by the device's queue lock (the same lock that makes worker-thread uploads sound). |
 
 ## Vulkan external synchronisation
 

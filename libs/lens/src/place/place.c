@@ -173,9 +173,9 @@ bool lens_place_begin(lens *ui, const char *id_str, lens_place_opts opts) {
      * the rect is additionally a minimum extent: content may grow beyond
      * it, but an empty paint-only node (scrims, dim backdrops, selection
      * borders) must still cover the caller-supplied rectangle. */
-    float fw = opts.layout.box.width > 0.0f      ? opts.layout.box.width
-               : opts.layout.min_width > 0.0f    ? opts.layout.min_width
-                                                 : 0.0f;
+    float fw = opts.layout.box.width > 0.0f   ? opts.layout.box.width
+               : opts.layout.min_width > 0.0f ? opts.layout.min_width
+                                              : 0.0f;
     float fh = opts.layout.box.height > 0.0f ? opts.layout.box.height : 0.0f;
     if (n->mode == LENS_PLACE_EXACT) {
         if (opts.rect.w > fw)

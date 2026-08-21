@@ -125,14 +125,14 @@ typedef struct prism_liquid_glass_group {
  * with no shadow and the neutral tint, so omitted fields can never turn
  * the glass black, and with every override/adaptive field in its
  * inherit/disabled (<0) state. Override the fields a body actually needs. */
-#define PRISM_LIQUID_GLASS_GROUP_INIT                                                                \
-    {.shape_count = 1,                                                                               \
-     .opacity = 1.0f,                                                                                \
-     .tint_color = 0xFFFFFFu,                                                                        \
-     .frost_strength = -1.0f,                                                                        \
-     .tint_strength = -1.0f,                                                                         \
-     .saturation = -1.0f,                                                                            \
-     .plate_polarity = -1.0f,                                                                        \
+#define PRISM_LIQUID_GLASS_GROUP_INIT                                                              \
+    {.shape_count = 1,                                                                             \
+     .opacity = 1.0f,                                                                              \
+     .tint_color = 0xFFFFFFu,                                                                      \
+     .frost_strength = -1.0f,                                                                      \
+     .tint_strength = -1.0f,                                                                       \
+     .saturation = -1.0f,                                                                          \
+     .plate_polarity = -1.0f,                                                                      \
      .backdrop_energy = -1.0f}
 
 /* Dispatch-wide caller policy. Distances are capture-image pixels.
@@ -233,8 +233,7 @@ typedef struct prism_backdrop_stat {
  * stats. */
 PRISM_NODISCARD PRISM_API flux_result
 prism_liquid_glass_filter_stats(prism_liquid_glass_filter *filter, flux_frame *frame,
-                                prism_backdrop_stat *out, uint32_t max_groups,
-                                uint32_t *out_count);
+                                prism_backdrop_stat *out, uint32_t max_groups, uint32_t *out_count);
 
 #ifdef __cplusplus
 }

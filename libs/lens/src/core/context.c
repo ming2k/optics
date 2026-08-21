@@ -275,7 +275,7 @@ void lens_begin(lens *ui, const lens_input *input) {
     }
     memset(ui->key_consumed, 0, sizeof ui->key_consumed);
     ui->menu_nav = 0;
-    ui->caret_rect = (flux_rect){0, 0, 0, 0}; /* refreshed by text widget */
+    ui->caret_rect = (flux_rect){0, 0, 0, 0};  /* refreshed by text widget */
     ui->text_context = (lens_text_context){0}; /* refreshed alongside it */
 
     /* per-frame build state */
@@ -288,8 +288,8 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->next_error = false;
     ui->next_placeholder = NULL;
     ui->next_style = lens_style_init();
-    ui->style_top = 0; /* style scopes are frame-scoped (ADR-0061): a
-                        * forgotten lens_pop_style cannot leak across frames */
+    ui->style_top = 0;  /* style scopes are frame-scoped (ADR-0061): a
+                         * forgotten lens_pop_style cannot leak across frames */
     ui->opacity = 1.0f; /* likewise: a forgotten lens_set_opacity restore
                          * cannot dim the next frame */
     ui->click_hit_focusable = false;
@@ -332,11 +332,11 @@ void lens_end(lens *ui) {
     while (ui->cont_top > 1)
         lensi_open_container_pop(ui);
 
-    lensi_store_reap(ui);     /* phase transitions + GC (ADR-0027) */
-    lensi_layout_solve(ui);   /* two-pass measure/arrange, ABS-aware (ADR-0028/0060) */
-    lensi_place_bucket(ui);   /* bucket ABS nodes into z bands (ADR-0060)  */
-    lensi_place_dismiss(ui);  /* click-outside + Escape, post-build        */
-    lensi_focus_tab(ui);      /* Tab / Shift+Tab focus traversal     */
+    lensi_store_reap(ui);    /* phase transitions + GC (ADR-0027) */
+    lensi_layout_solve(ui);  /* two-pass measure/arrange, ABS-aware (ADR-0028/0060) */
+    lensi_place_bucket(ui);  /* bucket ABS nodes into z bands (ADR-0060)  */
+    lensi_place_dismiss(ui); /* click-outside + Escape, post-build        */
+    lensi_focus_tab(ui);     /* Tab / Shift+Tab focus traversal     */
 
     /* Click outside any focusable widget clears focus. */
     if (ui->input.mouse_pressed[LENS_MOUSE_LEFT] && !ui->click_hit_focusable) {

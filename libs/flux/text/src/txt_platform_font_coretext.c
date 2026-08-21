@@ -45,8 +45,8 @@
 /* ------------------------------------------------------------------ */
 
 struct txtp_charset {
-    CTFontRef font;           /* retained */
-    CFCharacterSetRef chars;  /* owned copy; NULL = coverage unknown */
+    CTFontRef font;          /* retained */
+    CFCharacterSetRef chars; /* owned copy; NULL = coverage unknown */
 };
 
 bool txtp_charset_has_char(const txtp_charset *cs, uint32_t cp) {
@@ -153,9 +153,9 @@ static CTFontDescriptorRef make_descriptor(const char *family_name, float weight
     if (wnum && snum) {
         CFStringRef tkeys[] = {kCTFontWeightTrait, kCTFontSymbolicTrait};
         CFTypeRef tvals[] = {wnum, snum};
-        traits = CFDictionaryCreate(kCFAllocatorDefault, (const void **)tkeys,
-                                    (const void **)tvals, 2, &kCFTypeDictionaryKeyCallBacks,
-                                    &kCFTypeDictionaryValueCallBacks);
+        traits =
+            CFDictionaryCreate(kCFAllocatorDefault, (const void **)tkeys, (const void **)tvals, 2,
+                               &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     }
     if (traits) {
         CFStringRef akeys[] = {kCTFontFamilyNameAttribute, kCTFontTraitsAttribute};

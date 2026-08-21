@@ -15,10 +15,11 @@
  *   4. stop(ui, device) — releases host resources before Iris tears down
  *      Lens, Flux, and the device.
  *
- * Today only the Linux/Wayland backend is built; it lives inside libiris
- * (src/app_wayland.c) and is dispatched from iris_app_run in src/app.c.
- * The same C signature is the contract future backends (Win32, Cocoa)
- * will satisfy. A backend is compiled in when its platform dependency is
+ * One platform backend is compiled in per build (ADR-0044): Wayland
+ * (src/app_wayland.c), Win32 (src/app_win32.c), or Cocoa
+ * (src/app_cocoa.m) — dispatched from iris_app_run in src/app.c. The
+ * same C signature is the contract every backend satisfies. A backend
+ * is compiled in when its platform dependency is
  * satisfied; defining IRIS_BUILD_NO_BACKEND at compile time produces a
  * linkable libiris with iris_app_run returning a non-zero code, for
  * platform-less CI / bindgen builds.

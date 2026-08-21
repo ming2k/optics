@@ -49,7 +49,8 @@ static void draw_study_scene(flux_canvas *c) {
             {0.0f, flux_color_rgba_premul(226, 64, 44, 235)},
             {1.0f, flux_color_rgba_premul(226, 64, 44, 0)},
         };
-        flux_paint g = flux_paint_radial_gradient((flux_point){W * 0.16f, H * 0.28f}, 330.0f, red, 2);
+        flux_paint g =
+            flux_paint_radial_gradient((flux_point){W * 0.16f, H * 0.28f}, 330.0f, red, 2);
         flux_canvas_fill_rect(c, (flux_rect){0, 0, W * 0.5f, H * 0.7f}, &g);
     }
     {
@@ -176,11 +177,8 @@ int main(int argc, char **argv) {
     const flux_rect pill = {60.0f, 560.0f, 1160.0f, 90.0f};
     const flux_rect panel = {430.0f, 140.0f, 420.0f, 260.0f};
     prism_liquid_glass_group groups[5] = {
-        PRISM_LIQUID_GLASS_GROUP_INIT,
-        PRISM_LIQUID_GLASS_GROUP_INIT,
-        PRISM_LIQUID_GLASS_GROUP_INIT,
-        PRISM_LIQUID_GLASS_GROUP_INIT,
-        PRISM_LIQUID_GLASS_GROUP_INIT,
+        PRISM_LIQUID_GLASS_GROUP_INIT, PRISM_LIQUID_GLASS_GROUP_INIT, PRISM_LIQUID_GLASS_GROUP_INIT,
+        PRISM_LIQUID_GLASS_GROUP_INIT, PRISM_LIQUID_GLASS_GROUP_INIT,
     };
     groups[0].shapes[0] = (prism_liquid_glass_shape){.bounds = pill, .corner_radius = 45.0f};
     groups[0].shadow_alpha = 0.20f;
@@ -193,14 +191,14 @@ int main(int argc, char **argv) {
     groups[1].shadow_offset_y = 7.0f;
     /* One selected region changes the parent body's optics; it is not
      * another glass body and therefore casts no nested rim or shadow. */
-    groups[1].focus =
-        (prism_liquid_glass_shape){.bounds = {474.0f, 184.0f, 212.0f, 156.0f}, .corner_radius = 18.0f};
+    groups[1].focus = (prism_liquid_glass_shape){.bounds = {474.0f, 184.0f, 212.0f, 156.0f},
+                                                 .corner_radius = 18.0f};
     groups[1].focus_strength = 1.0f;
 
-    groups[2].shapes[0] =
-        (prism_liquid_glass_shape){.bounds = {120.0f, 200.0f, 96.0f, 96.0f}, .corner_radius = 48.0f};
-    groups[2].shapes[1] =
-        (prism_liquid_glass_shape){.bounds = {252.0f, 224.0f, 72.0f, 72.0f}, .corner_radius = 36.0f};
+    groups[2].shapes[0] = (prism_liquid_glass_shape){.bounds = {120.0f, 200.0f, 96.0f, 96.0f},
+                                                     .corner_radius = 48.0f};
+    groups[2].shapes[1] = (prism_liquid_glass_shape){.bounds = {252.0f, 224.0f, 72.0f, 72.0f},
+                                                     .corner_radius = 36.0f};
     groups[2].shape_count = 2;
     groups[2].blend_radius = 28.0f;
     groups[2].shadow_alpha = 0.20f;
@@ -210,8 +208,8 @@ int main(int argc, char **argv) {
     groups[2].tint_color = 0xC8E0FFu;
 
     /* HUD-chip scale with its own component shadow. */
-    groups[3].shapes[0] =
-        (prism_liquid_glass_shape){.bounds = {880.0f, 500.0f, 240.0f, 32.0f}, .corner_radius = 16.0f};
+    groups[3].shapes[0] = (prism_liquid_glass_shape){.bounds = {880.0f, 500.0f, 240.0f, 32.0f},
+                                                     .corner_radius = 16.0f};
     groups[3].shadow_alpha = 0.16f;
     groups[3].shadow_blur = 4.0f;
     groups[3].shadow_offset_y = 2.0f;

@@ -64,8 +64,7 @@ bool lens_collapsing(lens *ui, const char *label) {
                         .active_t = n->active_t,
                         .content = {.label = label,
                                     .text = tm,
-                                    .icon = open ? LENS_ICON_CHEVRON_DOWN
-                                                 : LENS_ICON_CHEVRON_RIGHT,
+                                    .icon = open ? LENS_ICON_CHEVRON_DOWN : LENS_ICON_CHEVRON_RIGHT,
                                     .expanded = open},
                     });
 

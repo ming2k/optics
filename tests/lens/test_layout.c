@@ -186,8 +186,7 @@ static void test_container_width_constraints_bound_intrinsic_size(void) {
     lens_column_ex(ui, (lens_layout_opts){.min_width = 90.0f, .pad = pad});
     (void)lens_button(ui, "A");
     lens_close(ui);
-    lens_column_ex(ui,
-                   (lens_layout_opts){.min_width = 20.0f, .max_width = 240.0f, .pad = pad});
+    lens_column_ex(ui, (lens_layout_opts){.min_width = 20.0f, .max_width = 240.0f, .pad = pad});
     (void)lens_button(ui, "natural");
     lens_close(ui);
     lens_column_ex(ui, (lens_layout_opts){.max_width = 100.0f, .pad = pad});
@@ -239,8 +238,8 @@ static void test_flex_respects_min_width_while_shrinking(void) {
 
     lens_begin(ui, &in);
     lens_row_ex(ui, (lens_layout_opts){.cross = LENS_STRETCH});
-    lens_column_ex(ui, (lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f},
-                                          .min_width = 80.0f});
+    lens_column_ex(ui,
+                   (lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f}, .min_width = 80.0f});
     (void)lens_button(ui, "A");
     lens_close(ui);
     lens_column_ex(ui, (lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f}});

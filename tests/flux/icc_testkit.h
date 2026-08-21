@@ -234,8 +234,8 @@ static inline uint32_t icc_build_matrix_tags(uint8_t *data, icc_tag_def defs[6],
 
 /* The published sRGB profile's 'chad': Bradford D65 -> D50. */
 static const double ICC_CHAD_BRADFORD_D65_D50[9] = {
-    0.9555766, -0.0230393, 0.0631636, -0.0282895, 1.0099416, 0.0210077, 0.0122982, -0.0204830,
-    1.3299098,
+    0.9555766, -0.0230393, 0.0631636,  -0.0282895, 1.0099416,
+    0.0210077, 0.0122982,  -0.0204830, 1.3299098,
 };
 
 /* Minimal lutAtoBType ('mAB '): header + three 2-entry identity 'curv'

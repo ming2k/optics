@@ -258,8 +258,7 @@ static void layout_cache_make_room(flux_text *t) {
     uint32_t swept = 0;
     for (uint32_t i = 0; i < t->layout_entries_cap; i++) {
         txt_layout_entry *e = &t->layout_entries[i];
-        if (e->occupied && e->live &&
-            t->layout_cache_tick - e->last_used > TXT_LAYOUT_SWEEP_AGE) {
+        if (e->occupied && e->live && t->layout_cache_tick - e->last_used > TXT_LAYOUT_SWEEP_AGE) {
             layout_entry_evict(t, e);
             swept++;
         }
@@ -318,8 +317,7 @@ static txt_layout_entry *layout_cache_insert(flux_text *t, uint32_t hash, const 
         }
         /* Empty slot or reusable tombstone. */
         char *utf8_copy = malloc(len);
-        txt_placed_glyph *glyphs_copy =
-            malloc((size_t)layout->count * sizeof *glyphs_copy);
+        txt_placed_glyph *glyphs_copy = malloc((size_t)layout->count * sizeof *glyphs_copy);
         if (!utf8_copy || !glyphs_copy) {
             free(utf8_copy);
             free(glyphs_copy);
@@ -481,7 +479,17 @@ bool txt_text_layout_build(flux_text *t, const char *utf8, size_t len, float siz
      * line start ½ em earlier. Applied as delta shifts so each glyph's
      * HarfBuzz x_offset and the inter-script run gaps already baked into
      * g->x are preserved. Adjacent 【】 keep their mutual spacing — their
-     * empty halves face outward, not each other. */
+     * empty halves face outward, not each other.
+     *
+     * Line edges compress too (JLREQ 行頭/行末 約物 half-width setting): an
+     * opening bracket at the very start of the run has no previous glyph
+     * whose advance could absorb the trim, but its own ink sits in the
+     * trailing half of the em-box, so shifting the glyph left by ½ em puts
+     * the ink at the pen origin and every following glyph inherits the
+     * shift; a closing bracket at the very end simply trims its own
+     * advance — there is no following glyph to move, and the width formula
+     * (last.x + last.advance) already reflects it. Without this, "（你）"
+     * measured 3¼ em instead of 2 em: both of its brackets sit at an edge. */
     if (count > 1) {
         const float half = 0.5f * size_px;
         float shift = 0.0f;
@@ -492,13 +500,15 @@ bool txt_text_layout_build(flux_text *t, const char *utf8, size_t len, float siz
             size_t off = (size_t)g->cluster;
             if (off < len)
                 txt_utf8_decode(utf8 + off, len - off, &cp);
-            if (k > 0 && txt_is_opening_bracket(cp)) {
-                float *pa = &t->layout_buf[k - 1].advance;
-                *pa = fmaxf(0.0f, *pa - half);
+            if (txt_is_opening_bracket(cp)) {
+                if (k > 0) {
+                    float *pa = &t->layout_buf[k - 1].advance;
+                    *pa = fmaxf(0.0f, *pa - half);
+                }
                 g->x -= half;
                 shift += half;
             }
-            if (k + 1 < count && txt_is_closing_bracket(cp)) {
+            if (txt_is_closing_bracket(cp)) {
                 g->advance = fmaxf(0.0f, g->advance - half);
                 shift += half;
             }
@@ -516,8 +526,8 @@ bool txt_text_layout_build(flux_text *t, const char *utf8, size_t len, float siz
         /* Populate the cache. The entry owns copies of the string and the
          * glyph list so they outlive the caller and t->layout_buf. On
          * allocation failure we simply proceed uncached. */
-        txt_layout_entry *e = layout_cache_insert(t, hash, utf8, len, size_px, weight, italic,
-                                                  family, scale, out);
+        txt_layout_entry *e =
+            layout_cache_insert(t, hash, utf8, len, size_px, weight, italic, family, scale, out);
         if (e)
             /* Point out->glyphs at the cached buffer so it outlives this call. */
             out->glyphs = e->glyphs;
@@ -767,7 +777,7 @@ static void text_draw_impl(flux_text *t, flux_canvas *canvas, flux_arena *arena,
     bool italic;
     flux_text_family family;
     style_unpack(t, style, &size_px, &weight, &italic, &family);
-    flux_color color = style ? style->color : (flux_color){0};
+    flux_color color = style ? style->color : 0;
     /* The canvas owns the content scale; rasterise glyphs to match it so the
      * canvas's base transform maps the logical quads onto physical pixels
      * crisply. Fall back to the context's own scale (measure-only contexts,
@@ -788,14 +798,9 @@ static void text_draw_impl(flux_text *t, flux_canvas *canvas, flux_arena *arena,
          * TEXT_RUN_BATCH, so a batch boundary can never darken earlier text. */
         const float diagonal = outline_width * 0.70710678f;
         const flux_point offsets[8] = {
-            {-outline_width, 0.0f},
-            {outline_width, 0.0f},
-            {0.0f, -outline_width},
-            {0.0f, outline_width},
-            {-diagonal, -diagonal},
-            {diagonal, -diagonal},
-            {-diagonal, diagonal},
-            {diagonal, diagonal},
+            {-outline_width, 0.0f}, {outline_width, 0.0f},  {0.0f, -outline_width},
+            {0.0f, outline_width},  {-diagonal, -diagonal}, {diagonal, -diagonal},
+            {-diagonal, diagonal},  {diagonal, diagonal},
         };
         for (size_t i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++)
             draw_layout_pass(t, canvas, &L, x, y, offsets[i].x, offsets[i].y, outline_color);
@@ -1004,5 +1009,6 @@ void flux_text_compact(flux_text *t) {
     free(t->run_levels_buf);
     t->run_levels_buf = NULL;
     t->runs_cap = 0;
+    txt_itemize_release_scratch(t);
     txt_layout_cache_reset(t);
 }

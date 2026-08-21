@@ -1,90 +1,11 @@
-/* test_widgets.c — widget behavior: button, checkbox, slider, collapsing, scroll. */
+/* test_widgets.c — widget behaviours without a dedicated test file:
+ * collapsing sections, scrollbar thumb dragging, heading sizes, and
+ * label metrics. Button/checkbox/slider/scroll basics live in their own
+ * files (test_button.c, test_checkbox.c, test_slider.c, test_scroll.c);
+ * the weaker near-duplicates that used to live here were removed. */
 
 #include "test_helpers.h"
 #include <lens/lens.h>
-
-static void test_button_click(void) {
-    lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
-
-    /* frame 1: enter */
-    lens_begin(ui, &in);
-    (void)lens_button(ui, "A");
-    lens_end(ui);
-
-    /* frame 2: press */
-    lens_input in2 = in;
-    in2.cursor = (flux_point){10, 10};
-    in2.mouse_pressed[LENS_MOUSE_LEFT] = true;
-    in2.mouse_down[LENS_MOUSE_LEFT] = true;
-    lens_begin(ui, &in2);
-    (void)lens_button(ui, "A");
-    lens_end(ui);
-
-    /* frame 3: release → click */
-    lens_input in3 = in;
-    in3.cursor = (flux_point){10, 10};
-    in3.mouse_released[LENS_MOUSE_LEFT] = true;
-    lens_begin(ui, &in3);
-    bool clicked = lens_button(ui, "A");
-    lens_end(ui);
-    CHECK(clicked == true);
-
-    lens_destroy(ui);
-}
-
-static void test_checkbox_toggle(void) {
-    lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
-
-    bool val = false;
-    lens_begin(ui, &in);
-    (void)lens_checkbox(ui, "X", &val);
-    lens_end(ui);
-
-    lens_input in2 = in;
-    in2.cursor = (flux_point){10, 10};
-    in2.mouse_pressed[LENS_MOUSE_LEFT] = true;
-    in2.mouse_down[LENS_MOUSE_LEFT] = true;
-    lens_begin(ui, &in2);
-    (void)lens_checkbox(ui, "X", &val);
-    lens_end(ui);
-
-    lens_input in3 = in;
-    in3.cursor = (flux_point){10, 10};
-    in3.mouse_released[LENS_MOUSE_LEFT] = true;
-    lens_begin(ui, &in3);
-    bool changed = lens_checkbox(ui, "X", &val);
-    lens_end(ui);
-    CHECK(changed == true);
-    CHECK(val == true);
-
-    lens_destroy(ui);
-}
-
-static void test_slider_clamp_and_drag(void) {
-    lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    lens_input in = {.display_size = {400, 100}, .dt_seconds = 0.016f};
-
-    float v = 0.5f;
-    lens_begin(ui, &in);
-    (void)lens_slider(ui, "S", &v, 0.0f, 1.0f);
-    lens_end(ui);
-
-    /* frame 2: press inside slider track */
-    lens_input in2 = in;
-    in2.cursor = (flux_point){200, 20};
-    in2.mouse_pressed[LENS_MOUSE_LEFT] = true;
-    in2.mouse_down[LENS_MOUSE_LEFT] = true;
-    lens_begin(ui, &in2);
-    (void)lens_slider(ui, "S", &v, 0.0f, 1.0f);
-    lens_end(ui);
-
-    lens_destroy(ui);
-}
 
 static void test_collapsing_toggle(void) {
     lens *ui = NULL;
@@ -195,46 +116,6 @@ static void test_collapsing_nested_click(void) {
     lens_end(ui);
     CHECK(open == true);
     CHECK(nested_clicked == true);
-
-    lens_destroy(ui);
-}
-
-static void test_scroll_offset(void) {
-    lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
-
-    lens_begin(ui, &in);
-    lens_size(ui, 0, 80);
-    lens_scroll_begin(ui, "sc");
-    for (int i = 0; i < 10; i++) {
-        char lbl[16];
-        snprintf(lbl, sizeof lbl, "line %d", i);
-        lens_label(ui, lbl);
-    }
-    lens_scroll_end(ui);
-    lens_end(ui);
-
-    lens_node *first = lens_node_first_child(lens_node_first_child(lens_root(ui)));
-    float y0 = lens_node_bounds(first).y;
-
-    /* scroll down (negative scroll_y = wheel down) */
-    lens_input in2 = in;
-    in2.scroll_y = -3.0f;
-    lens_begin(ui, &in2);
-    lens_size(ui, 0, 80);
-    lens_scroll_begin(ui, "sc");
-    for (int i = 0; i < 10; i++) {
-        char lbl[16];
-        snprintf(lbl, sizeof lbl, "line %d", i);
-        lens_label(ui, lbl);
-    }
-    lens_scroll_end(ui);
-    lens_end(ui);
-
-    first = lens_node_first_child(lens_node_first_child(lens_root(ui)));
-    float y1 = lens_node_bounds(first).y;
-    CHECK(y1 < y0 - 10.0f); /* content scrolled down */
 
     lens_destroy(ui);
 }
@@ -425,12 +306,8 @@ static void test_wrapped_label_respects_width_and_grows_height(void) {
 }
 
 int main(void) {
-    test_button_click();
-    test_checkbox_toggle();
-    test_slider_clamp_and_drag();
     test_collapsing_toggle();
     test_collapsing_nested_click();
-    test_scroll_offset();
     test_scroll_thumb_drag();
     test_title_and_heading_sizes();
     test_compact_outlined_label_preserves_intrinsic_metrics();

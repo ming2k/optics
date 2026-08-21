@@ -1591,6 +1591,12 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     frame_scheduled = true;
                 } else {
                     frame_scheduled = false;
+                    /* Fully idle: release the text engine's high-water
+                     * scratch (ADR-0072 item 5). Mirrors the Wayland
+                     * backend's idle branch — the frame-pacing policy is
+                     * ported line-by-line across backends (ADR-0056
+                     * item 2). */
+                    lens_text_compact(ui);
                 }
             } /* @autoreleasepool (loop iteration) */
         }

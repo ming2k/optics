@@ -114,8 +114,9 @@ static inline bool liquid_glass_group_dispatch_bounds(const prism_liquid_glass_g
 /* Primary body bounds clipped to the image — the reduction window for
  * per-region backdrop statistics. A body that does not intersect the
  * capture yields a zero region, which the stats shader reports as zeros. */
-static inline liquid_glass_region liquid_glass_group_stats_bounds(
-    const prism_liquid_glass_group *group, uint32_t image_width, uint32_t image_height) {
+static inline liquid_glass_region
+liquid_glass_group_stats_bounds(const prism_liquid_glass_group *group, uint32_t image_width,
+                                uint32_t image_height) {
     liquid_glass_region region = {0u, 0u, 0u, 0u};
     if (!group || group->shape_count < 1u || image_width == 0u || image_height == 0u)
         return region;

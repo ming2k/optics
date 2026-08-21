@@ -25,10 +25,10 @@
 #define LENSI_ID_STACK_MAX 64u
 #define LENSI_CONTAINER_STACK_MAX 64u
 #define LENSI_PASTE_MAX (1024u * 1024u) /* clipboard staging (ADR-0036) */
-#define LENSI_TRANSIENT_MAX 8u   /* max simultaneously-open transients (ADR-0060) */
-#define LENSI_BAND_PREV_MAX 16u  /* per-band prev-frame ids carried for hit-testing */
-#define LENSI_STYLE_STACK_MAX 16u /* style scope stack depth (ADR-0061) */
-#define LENSI_MODAL_STACK_MAX 4u  /* nested modal focus traps (ADR-0039) */
+#define LENSI_TRANSIENT_MAX 8u          /* max simultaneously-open transients (ADR-0060) */
+#define LENSI_BAND_PREV_MAX 16u         /* per-band prev-frame ids carried for hit-testing */
+#define LENSI_STYLE_STACK_MAX 16u       /* style scope stack depth (ADR-0061) */
+#define LENSI_MODAL_STACK_MAX 4u        /* nested modal focus traps (ADR-0039) */
 
 /* Node placement (ADR-0060): FLOW participates in its parent's flexbox;
  * ABS escapes the flow and the ancestor clips and is emitted in its z
@@ -67,16 +67,16 @@ typedef struct lens_draw_cmd {
     flux_color color;
     flux_color outline_color; /* opt-in foreground contour */
     float radius;
-    float width;      /* border width */
+    float width; /* border width */
     float outline_width;
     const char *text; /* LENS_DRAW_TEXT: arena-copied utf8 */
     float text_size;
-    float text_weight; /* 0 = use theme default */
+    float text_weight;   /* 0 = use theme default */
     int32_t text_family; /* lens_text_family captured at build; 0 = default */
-    int32_t icon_id;   /* LENS_DRAW_ICON: enum lens_icon_id */
-    uint32_t flags;    /* kind-specific flags */
-    flux_image *image; /* LENS_DRAW_IMAGE: host-owned texture, borrowed
-                          for the frame; must outlive lens_render */
+    int32_t icon_id;     /* LENS_DRAW_ICON: enum lens_icon_id */
+    uint32_t flags;      /* kind-specific flags */
+    flux_image *image;   /* LENS_DRAW_IMAGE: host-owned texture, borrowed
+                            for the frame; must outlive lens_render */
 } lens_draw_cmd;
 
 enum {
@@ -114,7 +114,7 @@ struct lens_node {
     lens_node *last_child;
     lens_node *next_sibling;
     uint32_t child_count;
-    uint32_t child_seq; /* sibling-disambiguation counter */
+    uint32_t child_seq;       /* sibling-disambiguation counter */
     uint32_t child_hash;      /* rolling hash of this frame's child id sequence */
     uint32_t last_child_hash; /* previous frame's child_hash */
 
@@ -226,12 +226,21 @@ typedef struct lens_scroll_state {
 typedef struct lens_store_slot {
     lens_id id; /* 0 = empty */
     lens_node *node;
+    /* Live-list link (see store.c): index of the next occupied slot in
+     * insertion order, LENSI_STORE_LINK_NONE at the tail. Stored per
+     * slot so the table stays one flat array. */
+    uint32_t next_live;
 } lens_store_slot;
 
 typedef struct lens_store {
     lens_store_slot *slots;
     uint32_t cap; /* power of two */
     uint32_t count;
+    /* Live-list endpoints (see store.c): reap iterates these instead of
+     * scanning all `cap` slots, keeping the per-frame GC cost O(live)
+     * even when the table capacity sits far above the live population
+     * (post-spike dwell during the shrink hysteresis window). */
+    uint32_t live_head, live_tail;
     /* Frames the load has stayed under the shrink threshold (1/8 of cap).
      * Sustained dwell triggers a halving rehash; see lensi_store_reap. */
     uint32_t idle_frames;
@@ -266,12 +275,12 @@ struct lens {
     lens_node *root;
     uint64_t frame;
 
-    lens_input input;  /* copy for the frame */
-    bool overflow;     /* arena overflowed this frame */
-    bool anim_pending; /* an eased value is still in transit this
-                        * frame; the host should schedule another
-                        * frame so the animation can settle even
-                        * without further input (see lens_anim_pending) */
+    lens_input input;    /* copy for the frame */
+    bool overflow;       /* arena overflowed this frame */
+    bool anim_pending;   /* an eased value is still in transit this
+                          * frame; the host should schedule another
+                          * frame so the animation can settle even
+                          * without further input (see lens_anim_pending) */
     bool reduced_motion; /* accessibility: when set, every eased value
                           * resolves to its target in one frame (see
                           * lens_set_reduced_motion) */
@@ -305,11 +314,11 @@ struct lens {
      * context-global hovered id had no reader (dead state). */
     lens_id active_id; /* captured (e.g. dragging) */
     lens_id focused_id;
-    bool focus_visible; /* keyboard modality (ADR-0058): true when the last
-                         * focus move came from Tab traversal; cleared by a
-                         * pointer press or programmatic lens_set_focus.
-                         * Drives LENS_STATE_FOCUS_VISIBLE. */
-    lens_id scroll_hot_id; /* deepest scroll container under cursor */
+    bool focus_visible;           /* keyboard modality (ADR-0058): true when the last
+                                   * focus move came from Tab traversal; cleared by a
+                                   * pointer press or programmatic lens_set_focus.
+                                   * Drives LENS_STATE_FOCUS_VISIBLE. */
+    lens_id scroll_hot_id;        /* deepest scroll container under cursor */
     lens_cursor_hint cursor_hint; /* semantic cursor for the top hovered control */
     lens_response last_response;
     lens_node *last_node; /* most recently linked node (for lens_a11y) */
@@ -337,14 +346,14 @@ struct lens {
 
     /* clipboard + IME (ADR-0036) */
     lens_clipboard clipboard;
-    flux_rect caret_rect; /* set by the focused text widget */
+    flux_rect caret_rect;           /* set by the focused text widget */
     lens_text_context text_context; /* set alongside caret_rect (surrounding
                                      * text + content hints for the host IME) */
     char paste_buf[LENSI_PASTE_MAX];
-    uint32_t paste_len;     /* 0 = nothing pending */
-    lens_id paste_target;   /* focused widget at lens_request_paste time;
-                               0 = unbound (host pushed lens_paste directly) */
-    uint64_t paste_frame;   /* ui->frame when the paste payload arrived */
+    uint32_t paste_len;   /* 0 = nothing pending */
+    lens_id paste_target; /* focused widget at lens_request_paste time;
+                             0 = unbound (host pushed lens_paste directly) */
+    uint64_t paste_frame; /* ui->frame when the paste payload arrived */
 
     /* transient open-set (ADR-0060): retained per id; only transient place
      * nodes enter this table. Drives begin gating, is_open queries, and

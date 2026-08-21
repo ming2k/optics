@@ -195,7 +195,7 @@ typedef struct flux_color_space {
     struct {
         float rx, ry, gx, gy, bx, by;
         float wx, wy; /* white point */
-    } xy; /* FLUX_PRIMARIES_CUSTOM only; zero otherwise */
+    } xy;             /* FLUX_PRIMARIES_CUSTOM only; zero otherwise */
 } flux_color_space;
 
 /* Brace-initializer presets (same convention as FLUX_SURFACE_DESC_INIT).
@@ -207,14 +207,14 @@ typedef struct flux_color_space {
  * extended-range surface intent (VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT). */
 #define FLUX_COLOR_SPACE_SCRGB {FLUX_PRIMARIES_BT709, FLUX_TRANSFER_LINEAR, 0.0f, {0}}
 #define FLUX_COLOR_SPACE_DISPLAY_P3 {FLUX_PRIMARIES_DISPLAY_P3, FLUX_TRANSFER_SRGB, 0.0f, {0}}
-#define FLUX_COLOR_SPACE_DISPLAY_P3_LINEAR                                                     \
+#define FLUX_COLOR_SPACE_DISPLAY_P3_LINEAR                                                         \
     {FLUX_PRIMARIES_DISPLAY_P3, FLUX_TRANSFER_LINEAR, 0.0f, {0}}
 /* Adobe RGB (1998): the official profile's TRC is a pure 563/256 power. */
-#define FLUX_COLOR_SPACE_ADOBE_RGB                                                             \
-    {FLUX_PRIMARIES_ADOBE_RGB, FLUX_TRANSFER_GAMMA, 2.19921875f, {0}}
+#define FLUX_COLOR_SPACE_ADOBE_RGB {FLUX_PRIMARIES_ADOBE_RGB, FLUX_TRANSFER_GAMMA, 2.19921875f, {0}}
 /* SDR BT.2020 per BT.1886 practice: pure 2.4 power. */
 #define FLUX_COLOR_SPACE_BT2020 {FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_GAMMA, 2.4f, {0}}
-#define FLUX_COLOR_SPACE_BT2020_PQ {FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_PQ, 0.0f, {0}} /* HDR10 */
+/* HDR10. */
+#define FLUX_COLOR_SPACE_BT2020_PQ {FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_PQ, 0.0f, {0}}
 #define FLUX_COLOR_SPACE_BT2020_HLG {FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_HLG, 0.0f, {0}}
 
 /* ================================================================== */
@@ -348,14 +348,13 @@ typedef struct flux_image_desc {
 typedef struct flux_image_color_space_desc {
     flux_struct_type type; /* FLUX_TYPE_IMAGE_COLOR_SPACE_DESC */
     const void *next;
-    const flux_color_space *space;     /* nullable */
-    const flux_icc_profile *icc;       /* nullable; precedence over space */
+    const flux_color_space *space; /* nullable */
+    const flux_icc_profile *icc;   /* nullable; precedence over space */
 } flux_image_color_space_desc;
 
 #define FLUX_IMAGE_COLOR_SPACE_DESC_INIT {.type = FLUX_TYPE_IMAGE_COLOR_SPACE_DESC}
 
-FLUX_NODISCARD FLUX_API flux_result flux_image_create(flux_device *d,
-                                                      const flux_image_desc *desc,
+FLUX_NODISCARD FLUX_API flux_result flux_image_create(flux_device *d, const flux_image_desc *desc,
                                                       flux_image **out);
 FLUX_NODISCARD FLUX_API flux_image *flux_image_retain(flux_image *image);
 FLUX_API void flux_image_release(flux_image *image);
@@ -370,8 +369,7 @@ FLUX_API flux_device *flux_image_device(const flux_image *image);
 /* Create a COLOR_ATTACHMENT | SAMPLED image with undefined initial contents.
  * Prepare it immediately before flux_frame_begin_pass and finish it after
  * flux_frame_end_pass; outside that interval it is sampleable. */
-FLUX_NODISCARD FLUX_API flux_result flux_image_create_render_target(flux_device *d,
-                                                                    uint32_t width,
+FLUX_NODISCARD FLUX_API flux_result flux_image_create_render_target(flux_device *d, uint32_t width,
                                                                     uint32_t height,
                                                                     flux_format format,
                                                                     flux_image **out);
@@ -394,11 +392,8 @@ FLUX_NODISCARD FLUX_API flux_result flux_frame_finish_image_target(flux_frame *f
  * The image holds only a weak device reference: the caller must keep the
  * device alive for the image's whole lifetime (a filter or pool that
  * retains the device satisfies this). Release with flux_image_release. */
-FLUX_NODISCARD FLUX_API flux_result flux_image_create_compute_writable(flux_device *d,
-                                                                       uint32_t width,
-                                                                       uint32_t height,
-                                                                       flux_format format,
-                                                                       flux_image **out);
+FLUX_NODISCARD FLUX_API flux_result flux_image_create_compute_writable(
+    flux_device *d, uint32_t width, uint32_t height, flux_format format, flux_image **out);
 
 /* Upload tightly packed pixels into an in-bounds sub-region. The image view
  * and bindless handle remain valid across the update. Requires the image to
@@ -614,9 +609,11 @@ FLUX_API void flux_device_memory_stats(flux_device *d, flux_memory_stats *out);
  * recording, so an unflushed batch can never be sampled by a frame.
  * Non-frame consumers (compute dispatch, readback) must flush
  * explicitly. begin/flush are device-global; the upload calls
- * themselves may run on any thread. Nested begin returns
- * FLUX_ERROR_INVALID_STATE; flushing with no batch open is a harmless
- * no-op. */
+ * themselves may run on any thread. Nested begin is reference-counted:
+ * it returns FLUX_OK and bumps the batch depth so every scope's flush
+ * wait covers it; only the outermost flush submits (inner uploads are
+ * already recorded in the same batch). Flushing with no batch open is
+ * a harmless no-op. */
 FLUX_NODISCARD FLUX_API flux_result flux_uploads_begin(flux_device *d);
 FLUX_NODISCARD FLUX_API flux_result flux_uploads_flush(flux_device *d);
 
@@ -850,11 +847,11 @@ typedef struct flux_surface_hdr_desc {
     struct {
         float rx, ry, gx, gy, bx, by;
         float wx, wy;
-    } mastering; /* mastering display primaries + white, CIE xy */
-    float max_luminance;  /* cd/m² */
-    float min_luminance;  /* cd/m² */
-    float max_cll;        /* MaxCLL, cd/m² */
-    float max_fall;       /* MaxFALL, cd/m² */
+    } mastering;         /* mastering display primaries + white, CIE xy */
+    float max_luminance; /* cd/m² */
+    float min_luminance; /* cd/m² */
+    float max_cll;       /* MaxCLL, cd/m² */
+    float max_fall;      /* MaxFALL, cd/m² */
 } flux_surface_hdr_desc;
 
 #define FLUX_SURFACE_HDR_DESC_INIT {.type = FLUX_TYPE_SURFACE_HDR_DESC}
@@ -878,8 +875,8 @@ typedef struct flux_surface_hdr_desc {
 typedef struct flux_surface_output_color_desc {
     flux_struct_type type; /* FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC */
     const void *next;
-    flux_color_space content_space;   /* the display's actual space */
-    const flux_icc_profile *icc;      /* optional; must be parametric-extractable */
+    flux_color_space content_space; /* the display's actual space */
+    const flux_icc_profile *icc;    /* optional; must be parametric-extractable */
 } flux_surface_output_color_desc;
 
 #define FLUX_SURFACE_OUTPUT_COLOR_DESC_INIT {.type = FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC}

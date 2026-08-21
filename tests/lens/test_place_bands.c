@@ -28,8 +28,8 @@ static void test_exact_always_entered(void) {
     int body_runs = 0;
     for (int frame = 0; frame < 2; frame++) {
         lens_begin(ui, &ZERO_IN);
-        if (lens_place_begin(ui, "dock", exact_at((flux_rect){100, 260, 200, 36},
-                                                  LENS_BAND_CHROME, 0))) {
+        if (lens_place_begin(ui, "dock",
+                             exact_at((flux_rect){100, 260, 200, 36}, LENS_BAND_CHROME, 0))) {
             body_runs++;
             lens_label(ui, "tile");
             lens_place_end(ui);
@@ -120,8 +120,7 @@ static void test_persistent_not_dismissed(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "wsbar",
-                         exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
+    if (lens_place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
         lens_label(ui, "ws1");
         lens_place_end(ui);
     }
@@ -132,8 +131,7 @@ static void test_persistent_not_dismissed(void) {
     in_esc.keys[0] = (lens_key_event){.key = LENS_KEY_ESCAPE, .pressed = true};
     lens_begin(ui, &in_esc);
     int runs_after_esc = 0;
-    if (lens_place_begin(ui, "wsbar",
-                         exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
+    if (lens_place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
         runs_after_esc++;
         lens_label(ui, "ws1");
         lens_place_end(ui);
@@ -147,8 +145,7 @@ static void test_persistent_not_dismissed(void) {
     in_click.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in_click);
     int runs_after_click = 0;
-    if (lens_place_begin(ui, "wsbar",
-                         exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
+    if (lens_place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
         runs_after_click++;
         lens_label(ui, "ws1");
         lens_place_end(ui);
@@ -286,7 +283,7 @@ static void test_backdrop_hit_transparent(void) {
         lens_place_end(ui);
     }
     lens_end(ui);
-    CHECK(base_clicked == true);  /* BACKDROP does not occlude the base tree */
+    CHECK(base_clicked == true);   /* BACKDROP does not occlude the base tree */
     CHECK(ghost_clicked == false); /* default BACKDROP swallows no hits */
 
     lens_destroy(ui);

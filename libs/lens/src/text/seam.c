@@ -75,3 +75,10 @@ size_t lensi_text_caret_visual(lens *ui, const char *utf8, size_t byte, bool for
     flux_text_style s = style_of(ui, size_px, weight);
     return flux_text_visual_move(ui ? ui->text : NULL, utf8, strlen(utf8), byte, forward, &s);
 }
+
+void lens_text_compact(lens *ui) {
+    /* Thin forward: the policy (when to call) belongs to the host; the
+     * mechanism lives in the engine. See ADR-0072 item 5. */
+    if (ui)
+        flux_text_compact(ui->text);
+}

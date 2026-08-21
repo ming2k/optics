@@ -64,9 +64,9 @@ int main(void) {
     EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
     EXPECT(stride == (uint32_t)W * 4);
 
-    EXPECT(any_ink(fb, 34, 22, 39, 27));   /* circle top edge        */
-    EXPECT(any_ink(fb, 70, 70, 80, 80));   /* handle diagonal        */
-    EXPECT(!any_ink(fb, 44, 44, 49, 49));  /* circle interior empty  */
+    EXPECT(any_ink(fb, 34, 22, 39, 27));  /* circle top edge        */
+    EXPECT(any_ink(fb, 70, 70, 80, 80));  /* handle diagonal        */
+    EXPECT(!any_ink(fb, 44, 44, 49, 49)); /* circle interior empty  */
 
     flux_canvas_destroy(c);
     flux_arena_destroy(&arena);

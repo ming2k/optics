@@ -67,12 +67,11 @@ void lensi_skin_image(lens *ui, lens_node *n, const lens_widget_record *rec) {
                                                 .radius = rs->corner_radius});
             lensi_drawlist_push(
                 ui, n,
-                (lens_draw_cmd){
-                    .kind = LENS_DRAW_BORDER,
-                    .rel = {ix, iy, s, s},
-                    .color = lensi_lerp_color(rs->border, rs->accent, feedback * 0.75f),
-                    .radius = rs->corner_radius,
-                    .width = rs->border_width > 1.5f ? rs->border_width : 1.5f});
+                (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
+                                .rel = {ix, iy, s, s},
+                                .color = lensi_lerp_color(rs->border, rs->accent, feedback * 0.75f),
+                                .radius = rs->corner_radius,
+                                .width = rs->border_width > 1.5f ? rs->border_width : 1.5f});
         }
     }
 }

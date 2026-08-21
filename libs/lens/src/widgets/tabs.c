@@ -78,7 +78,7 @@ bool lens_tabs_begin_ex(lens *ui, const char *id, int *active_tab, lens_tabs_opt
 bool lens_tab(lens *ui, const char *label) {
     bool disabled = ui->next_disabled;
     ui->next_disabled = false;
-    ui->next_error = false; /* drain so it never leaks to a later widget */
+    ui->next_error = false;          /* drain so it never leaks to a later widget */
     (void)lensi_style_effective(ui); /* per-tab staged styles are not read:
                                         style the strip (lens_tabs_begin_ex
                                         or a scope around it), not the tab */
@@ -195,8 +195,7 @@ void lens_tabs_end(lens *ui) {
 
         /* emit — one record per strip, through the replaceable skin
          * (ADR-0059/0061). */
-        lens_style_resolved rs =
-            lensi_style_resolve(ts ? &ts->eff : NULL, &ui->theme, 0);
+        lens_style_resolved rs = lensi_style_resolve(ts ? &ts->eff : NULL, &ui->theme, 0);
         lensi_skin_emit(ui, tabs,
                         &(lens_widget_record){
                             .kind = LENS_WIDGET_TABS,

@@ -20,8 +20,8 @@
  * lives in src/canvas/dmabuf_acquire.c.
  */
 
-#include "internal.h"
 #include "image_internal.h"
+#include "internal.h"
 #include <flux/dmabuf.h>
 
 #include <errno.h>

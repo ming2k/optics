@@ -32,9 +32,8 @@
 #define H 512u
 /* 21 distinct widths; old code parked 16 (cap) per slot, new code parks 2
  * buckets (300..340 -> 384) per slot. */
-static const uint32_t sweep[] = {300, 302, 304, 306, 308, 310, 312, 314, 316,
-                                 318, 320, 322, 324, 326, 328, 330, 332, 334,
-                                 336, 338, 340};
+static const uint32_t sweep[] = {300, 302, 304, 306, 308, 310, 312, 314, 316, 318, 320,
+                                 322, 324, 326, 328, 330, 332, 334, 336, 338, 340};
 #define SWEEP_LEN (sizeof(sweep) / sizeof(sweep[0]))
 #define SLOTS 3u
 
@@ -42,17 +41,16 @@ static void run_sweep(flux_device *d, flux_surface *s, flux_canvas *canvas,
                       flux_format target_fmt) {
     for (size_t i = 0; i < SWEEP_LEN; ++i) {
         flux_image *target = nullptr;
-        EXPECT(flux_image_create_render_target(d, sweep[i], 384, target_fmt, &target) ==
-               FLUX_OK);
+        EXPECT(flux_image_create_render_target(d, sweep[i], 384, target_fmt, &target) == FLUX_OK);
         for (uint32_t slot = 0; slot < SLOTS; ++slot) {
             flux_frame *frame = nullptr;
             EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
             flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
-            flux_color clear = {0.1f, 0.2f, 0.3f, 1.0f};
+            flux_color clear = flux_color_rgba(26, 51, 77, 255);
             pd.clear_color = &clear;
             EXPECT(flux_canvas_begin_target_pass(canvas, frame, target, &pd) == FLUX_OK);
             flux_canvas_fill_rect_color(canvas, (flux_rect){0, 0, (float)sweep[i], 384.0f},
-                                        (flux_color){0.9f, 0.5f, 0.2f, 1.0f});
+                                        flux_color_rgba(230, 128, 51, 255));
             flux_canvas_end_target(canvas);
             EXPECT(flux_frame_submit(frame) == FLUX_OK);
             EXPECT(flux_frame_present(frame) == FLUX_OK);

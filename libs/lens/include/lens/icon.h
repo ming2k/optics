@@ -331,7 +331,7 @@ extern const lens_icon_desc lens_icon_table[LENS_ICON_COUNT];
 
 /* Failure sentinel of lens_icon_register_svg; also usable as a "no icon"
  * value wherever a lens_icon_id is optional. */
-#define LENS_ICON_INVALID ((lens_icon_id)-1)
+#define LENS_ICON_INVALID ((lens_icon_id) - 1)
 
 /* Register an SVG string as a runtime icon. Returns its id (>= LENS_ICON_COUNT)
  * or LENS_ICON_INVALID on parse failure. Ids are process-global, never reclaimed;

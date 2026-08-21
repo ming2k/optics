@@ -295,8 +295,7 @@ static bool icc_chad_tag(const uint8_t *data, size_t size, flux_mat3 *out) {
 
 /* Match adapted-D65 colorants against the named primaries; returns the
  * named tag or FLUX_PRIMARIES_CUSTOM (xy filled). */
-static flux_color_primaries icc_match_primaries(flux_mat3 rgb_to_xyz_d65,
-                                                float out_xy[8]) {
+static flux_color_primaries icc_match_primaries(flux_mat3 rgb_to_xyz_d65, float out_xy[8]) {
     /* Columns -> xy chromaticities. */
     float xy[8];
     for (int col = 0; col < 3; ++col) {
@@ -342,8 +341,8 @@ static flux_color_primaries icc_match_primaries(flux_mat3 rgb_to_xyz_d65,
 /* ------------------------------------------------------------------ */
 
 typedef struct icc_lut {
-    uint32_t grid;      /* CLUT points per dimension */
-    uint32_t in_ents;   /* input/output table entries (mft1/2) */
+    uint32_t grid;    /* CLUT points per dimension */
+    uint32_t in_ents; /* input/output table entries (mft1/2) */
     uint32_t out_ents;
     icc_trc in_curves[3];
     icc_trc out_curves[3];
@@ -641,8 +640,8 @@ static float *icc_bake_lut(flux_mat3 pcs2work, const icc_lut *lut_pipeline, cons
                 }
                 flux_vec3 w =
                     flux_mat3_transform_vec3(pcs2work, (flux_vec3){pcs[0], pcs[1], pcs[2]});
-                size_t at = ((size_t)bi * ICC_LUT_SIZE * ICC_LUT_SIZE +
-                             (size_t)gi * ICC_LUT_SIZE + ri) * 3;
+                size_t at =
+                    ((size_t)bi * ICC_LUT_SIZE * ICC_LUT_SIZE + (size_t)gi * ICC_LUT_SIZE + ri) * 3;
                 lut[at + 0] = w.x;
                 lut[at + 1] = w.y;
                 lut[at + 2] = w.z;
@@ -731,8 +730,10 @@ FLUX_API flux_result flux_icc_profile_create(const void *data, size_t size,
     /* Matrix + TRC path. */
     flux_vec3 r_xyz, g_xyz, b_xyz;
     icc_tag_view trc_tags[3];
-    static const uint32_t xyz_sigs[3] = {0x7258595Au, 0x6758595Au, 0x6258595Au}; /* rXYZ gXYZ bXYZ */
-    static const uint32_t trc_sigs[3] = {0x72545243u, 0x67545243u, 0x62545243u}; /* rTRC gTRC bTRC */
+    static const uint32_t xyz_sigs[3] = {0x7258595Au, 0x6758595Au,
+                                         0x6258595Au}; /* rXYZ gXYZ bXYZ */
+    static const uint32_t trc_sigs[3] = {0x72545243u, 0x67545243u,
+                                         0x62545243u}; /* rTRC gTRC bTRC */
     flux_vec3 *xyz_out[3] = {&r_xyz, &g_xyz, &b_xyz};
     icc_trc *trcs = calloc(3, sizeof(*trcs)); /* 16 KB table each: heap, not stack */
     if (!trcs) {
@@ -766,7 +767,15 @@ FLUX_API flux_result flux_icc_profile_create(const void *data, size_t size,
      * Bradford D50 -> D65 adaptation. A singular chad inverts to the
      * identity and degrades to the same fallback. */
     flux_mat3 colorants = {{
-        r_xyz.x, r_xyz.y, r_xyz.z, g_xyz.x, g_xyz.y, g_xyz.z, b_xyz.x, b_xyz.y, b_xyz.z,
+        r_xyz.x,
+        r_xyz.y,
+        r_xyz.z,
+        g_xyz.x,
+        g_xyz.y,
+        g_xyz.z,
+        b_xyz.x,
+        b_xyz.y,
+        b_xyz.z,
     }};
     flux_vec3 d65 = {0.95047f, 1.0f, 1.08883f};
     flux_mat3 chad;

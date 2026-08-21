@@ -1,5 +1,6 @@
 /* test_stress.c — boundary conditions and load: many nodes, deep nesting,
- * arena pressure, store growth. */
+ * arena pressure, store growth. Deterministic boundary tests (no timing,
+ * no randomised soak — that shape lives in test_store_spike.c). */
 
 #include "test_helpers.h"
 #include <lens/lens.h>
@@ -118,12 +119,19 @@ static void test_arena_pressure(void) {
     lens_close(ui);
     lens_end(ui);
 
-    /* With a 4 KiB arena and 200 buttons, overflow is expected.
-     * The library must not crash; it should report overflow. */
-    bool overflowed = lens_overflowed(ui);
-    /* We don't assert overflowed==true because the exact threshold depends
-     * on command sizes; we merely assert survival. */
-    (void)overflowed;
+    /* With a 4 KiB arena and 200 buttons, overflow is certain: each
+     * button arena-copies its label plus at least one draw command, far
+     * past 4 KiB. The contract is a REPORTED overflow (never a crash,
+     * never silent truncation) — assert the flag, and that a follow-up
+     * frame on a fresh arena resets it. */
+    CHECK(lens_overflowed(ui) == true);
+
+    lens_begin(ui, &IN0);
+    lens_column(ui);
+    (void)lens_button(ui, "one");
+    lens_close(ui);
+    lens_end(ui);
+    CHECK(lens_overflowed(ui) == false); /* flag is per frame */
 
     lens_destroy(ui);
 }
@@ -191,9 +199,13 @@ static void test_id_collision_reuses_node(void) {
     lens_node *root = lens_root(ui);
     lens_node *first = lens_node_first_child(root);
     lens_node *second = lens_node_next_sibling(first);
-    /* Because they have the same id, the reconciler should see only ONE
-     * node in the tree (the second call updates the same slot). */
+    /* Same label in the same scope derives the same lens_id (ADR-0026),
+     * so the second call re-touched the SAME node instead of creating a
+     * sibling — the tree holds one child. NOTE: this pins the
+     * reconciler's merge behaviour as contract; a caller wanting two
+     * buttons must disambiguate the id (lens_push_id). */
     CHECK(second == NULL);
+    CHECK(first != NULL);
 
     lens_destroy(ui);
 }

@@ -252,8 +252,7 @@ static void test_scrolled_dropdown_stays_in_owner_and_closes_on_wheel(void) {
      * near the owner's bottom edge — inside the viewport, clear of the
      * flipped popup. */
     in = IN0;
-    in.cursor = (flux_point){scroll_bounds.x + 20.0f,
-                             scroll_bounds.y + scroll_bounds.h - 10.0f};
+    in.cursor = (flux_point){scroll_bounds.x + 20.0f, scroll_bounds.y + scroll_bounds.h - 10.0f};
     in.scroll_y = -1.0f;
     lens_begin(ui, &in);
     build_scroll_dropdown(ui, &sel);
@@ -269,7 +268,7 @@ static void test_scrolled_dropdown_stays_in_owner_and_closes_on_wheel(void) {
 
 /* ---- popup geometry: cap, flip, and list scrolling ----------------- */
 
-static const char *LONG_ITEMS[] = {"I0", "I1", "I2", "I3", "I4", "I5",
+static const char *LONG_ITEMS[] = {"I0", "I1", "I2", "I3", "I4",  "I5",
                                    "I6", "I7", "I8", "I9", "I10", "I11"};
 static const int LONG_COUNT = 12;
 
@@ -424,8 +423,7 @@ static void test_dropdown_flips_above_without_covering_trigger(void) {
     CHECK(trigger_bounds.y > scroll_bounds.y + scroll_bounds.h * 0.4f);
 
     in = IN0;
-    in.cursor = (flux_point){trigger_bounds.x + 10.0f,
-                             trigger_bounds.y + trigger_bounds.h * 0.5f};
+    in.cursor = (flux_point){trigger_bounds.x + 10.0f, trigger_bounds.y + trigger_bounds.h * 0.5f};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
@@ -451,8 +449,7 @@ static void test_dropdown_flips_above_without_covering_trigger(void) {
     for (int i = 0; i < probe.scroll_areas; i++) {
         flux_rect a = probe.areas[i];
         bool is_owner = fabsf(a.x - scroll_bounds.x) < 0.5f &&
-                        fabsf(a.y - scroll_bounds.y) < 0.5f &&
-                        fabsf(a.h - scroll_bounds.h) < 0.5f;
+                        fabsf(a.y - scroll_bounds.y) < 0.5f && fabsf(a.h - scroll_bounds.h) < 0.5f;
         if (!is_owner) {
             list = a;
             found = true;
@@ -510,8 +507,7 @@ static void test_dropdown_wheel_over_popup_scrolls_and_stays_open(void) {
     bool found = false;
     for (int i = 0; i < areas.scroll_areas; i++) {
         flux_rect a = areas.areas[i];
-        bool is_owner = fabsf(a.x - owner_bounds.x) < 0.5f &&
-                        fabsf(a.y - owner_bounds.y) < 0.5f &&
+        bool is_owner = fabsf(a.x - owner_bounds.x) < 0.5f && fabsf(a.y - owner_bounds.y) < 0.5f &&
                         fabsf(a.h - owner_bounds.h) < 0.5f;
         if (!is_owner) {
             list = a;
@@ -587,8 +583,7 @@ static void test_dropdown_popup_scroll_clamps_at_bounds(void) {
     flux_rect list = {0};
     for (int i = 0; i < areas.scroll_areas; i++) {
         flux_rect a = areas.areas[i];
-        bool is_owner = fabsf(a.x - owner_bounds.x) < 0.5f &&
-                        fabsf(a.y - owner_bounds.y) < 0.5f &&
+        bool is_owner = fabsf(a.x - owner_bounds.x) < 0.5f && fabsf(a.y - owner_bounds.y) < 0.5f &&
                         fabsf(a.h - owner_bounds.h) < 0.5f;
         if (!is_owner)
             list = a;

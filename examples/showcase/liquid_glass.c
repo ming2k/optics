@@ -318,7 +318,8 @@ int main(void) {
             break;
         }
         prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
-        body.shapes[0] = (prism_liquid_glass_shape){.bounds = {gx, gy, gw, gh}, .corner_radius = gr};
+        body.shapes[0] =
+            (prism_liquid_glass_shape){.bounds = {gx, gy, gw, gh}, .corner_radius = gr};
         body.shapes[1] = (prism_liquid_glass_shape){
             .bounds = {gx + gw - 22.0f + droplet_position * 84.0f, gy + 11.0f, 78.0f, 78.0f},
             .corner_radius = 39.0f,

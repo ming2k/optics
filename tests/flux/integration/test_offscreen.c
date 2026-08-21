@@ -325,8 +325,7 @@ int main(void) {
         flux_readback_get_region(snapshot, &full_region);
         EXPECT(full_region.x == 0 && full_region.y == 0);
         EXPECT(full_region.width == W && full_region.height == H);
-        EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) ==
-               FLUX_ERROR_UNSUPPORTED);
+        EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) == FLUX_ERROR_UNSUPPORTED);
         memset(px, 0xCD, BYTES);
         EXPECT(flux_readback_read_pixels(snapshot, px, BYTES) == FLUX_OK);
         EXPECT(near8(px_at(px, 1, 1)[0], 220));
@@ -381,8 +380,7 @@ int main(void) {
         memset(crop, 0xCD, sizeof(crop));
         EXPECT(flux_readback_read_pixels(snapshot, crop, sizeof(crop)) == FLUX_OK);
         const uint8_t *clear = px_at_width(crop, wanted.width, 0, 0); /* surface 50,2 */
-        EXPECT(near8(clear[0], CLEAR_R) && near8(clear[1], CLEAR_G) &&
-               near8(clear[2], CLEAR_B));
+        EXPECT(near8(clear[0], CLEAR_R) && near8(clear[1], CLEAR_G) && near8(clear[2], CLEAR_B));
         const uint8_t *blue = px_at_width(crop, wanted.width, 2, 2); /* surface 52,4 */
         EXPECT(blue[0] < 5 && near8(blue[1], 64) && blue[2] > 250 && blue[3] == 255);
         const uint8_t *outside = px_at_width(crop, wanted.width, 10, 10); /* surface 60,12 */

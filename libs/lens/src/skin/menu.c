@@ -16,23 +16,22 @@ void lensi_skin_menu_item(lens *ui, lens_node *n, const lens_widget_record *rec)
     float padding = rs->padding;
 
     if (c->menu_separator) {
-        lensi_drawlist_push(
-            ui, n,
-            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                            .rel = {padding, padding * 0.5f, -padding * 2.0f, 1.0f},
-                            .color = rs->border,
-                            .radius = 0.0f});
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                            .rel = {padding, padding * 0.5f, -padding * 2.0f, 1.0f},
+                                            .color = rs->border,
+                                            .radius = 0.0f});
         return;
     }
 
     if (c->menu_trigger) {
-        flux_color bg = c->popup_open
-                            ? rs->bg_hover
-                            : lensi_lerp_color(rs->bg, rs->bg_hover, rec->hover_t);
-        lensi_drawlist_push(
-            ui, n,
-            (lens_draw_cmd){
-                .kind = LENS_DRAW_RECT, .rel = {0, 0, 0, 0}, .color = bg, .radius = rs->corner_radius});
+        flux_color bg =
+            c->popup_open ? rs->bg_hover : lensi_lerp_color(rs->bg, rs->bg_hover, rec->hover_t);
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                            .rel = {0, 0, 0, 0},
+                                            .color = bg,
+                                            .radius = rs->corner_radius});
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
                                             .rel = {padding, (h - tm_h) * 0.5f, 0, 0},

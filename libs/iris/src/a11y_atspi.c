@@ -432,9 +432,8 @@ static int m_get_locale(sd_bus_message *m, void *u, sd_bus_error *e) {
 /* org.a11y.atspi.Application: Id property — AT clients use this to identify
  * the application. We return the toolkit name; the bus unique name is also
  * commonly used. The data pointer is unused (the value is constant). */
-static int p_get_app_id(sd_bus *bus, const char *path, const char *interface,
-                        const char *property, sd_bus_message *reply, void *u,
-                        sd_bus_error *e) {
+static int p_get_app_id(sd_bus *bus, const char *path, const char *interface, const char *property,
+                        sd_bus_message *reply, void *u, sd_bus_error *e) {
     (void)bus;
     (void)path;
     (void)interface;
@@ -842,17 +841,9 @@ IRIS_API int iris_a11y_init(void) {
     char addr_buf[1024] = {0};
     char *addr_owned = NULL;
     sd_bus_error err = SD_BUS_ERROR_NULL;
-    rc = sd_bus_get_property_string(
-        session,
-        "org.a11y.Bus",
-        "/org/a11y/bus",
-        "org.a11y.Bus",
-        "BusAddress",
-        &err,
-        &addr_owned
-    );
-    if (rc >= 0 && addr_owned && addr_owned[0] != '\0'
-        && strlen(addr_owned) < sizeof addr_buf) {
+    rc = sd_bus_get_property_string(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
+                                    "BusAddress", &err, &addr_owned);
+    if (rc >= 0 && addr_owned && addr_owned[0] != '\0' && strlen(addr_owned) < sizeof addr_buf) {
         memcpy(addr_buf, addr_owned, strlen(addr_owned) + 1);
     } else {
         /* Some setups expose it via GetAddress method instead. */
@@ -870,8 +861,7 @@ IRIS_API int iris_a11y_init(void) {
         const char *reply_addr = NULL;
         rc = sd_bus_message_read(reply, "s", &reply_addr);
         bool valid =
-            rc >= 0 && reply_addr && reply_addr[0] != '\0'
-            && strlen(reply_addr) < sizeof addr_buf;
+            rc >= 0 && reply_addr && reply_addr[0] != '\0' && strlen(reply_addr) < sizeof addr_buf;
         if (valid)
             memcpy(addr_buf, reply_addr, strlen(reply_addr) + 1);
         sd_bus_message_unref(reply);
@@ -1037,8 +1027,8 @@ static void emit_object_event(lens_id path_id, const char *member, const char *d
     format_path(path, sizeof path, path_id);
 
     sd_bus_message *sig = NULL;
-    int rc = sd_bus_message_new_signal(g_a11y_bus, &sig, path, "org.a11y.atspi.Event.Object",
-                                       member);
+    int rc =
+        sd_bus_message_new_signal(g_a11y_bus, &sig, path, "org.a11y.atspi.Event.Object", member);
     if (rc < 0)
         return;
     rc = sd_bus_message_append(sig, "sii", detail, detail1, detail2);
@@ -1088,8 +1078,8 @@ static void emit_diff_event(const iris_a11y__event *ev) {
         break;
     }
     case IRIS_A11Y__EV_NAME:
-        emit_object_event(ev->id, "PropertyChange", "accessible-name", 0, 0, "s",
-                          ev->node->name, NULL, 0);
+        emit_object_event(ev->id, "PropertyChange", "accessible-name", 0, 0, "s", ev->node->name,
+                          NULL, 0);
         break;
     case IRIS_A11Y__EV_VALUE:
         /* at-spi2-atk sends an int-0 payload here too; clients re-query
@@ -1102,10 +1092,10 @@ static void emit_diff_event(const iris_a11y__event *ev) {
         break;
     case IRIS_A11Y__EV_STATE_ON:
     case IRIS_A11Y__EV_STATE_OFF: {
-        const char *name = ev->state == IRIS_ATSPI_STATE_CHECKED     ? "checked"
-                           : ev->state == IRIS_ATSPI_STATE_EXPANDED  ? "expanded"
-                           : ev->state == IRIS_ATSPI_STATE_SELECTED  ? "selected"
-                                                                     : "unknown";
+        const char *name = ev->state == IRIS_ATSPI_STATE_CHECKED    ? "checked"
+                           : ev->state == IRIS_ATSPI_STATE_EXPANDED ? "expanded"
+                           : ev->state == IRIS_ATSPI_STATE_SELECTED ? "selected"
+                                                                    : "unknown";
         emit_state_changed(ev->id, name, ev->kind == IRIS_A11Y__EV_STATE_ON ? 1 : 0);
         break;
     }

@@ -21,6 +21,8 @@
 #include FT_OUTLINE_H
 #include FT_SIZES_H
 
+#include <fribidi/fribidi.h>
+
 #include <hb-ft.h>
 #include <hb.h>
 
@@ -328,6 +330,19 @@ struct flux_text {
     int8_t *run_levels_buf;
     int runs_cap;
 
+    /* Itemizer codepoint scratch (itemize.c): the four per-call arrays
+     * — codepoints, byte offsets, bidi types, embedding levels — used
+     * to be malloc/free per call past a 256-codepoint stack fallback,
+     * with an 8-branch manual cleanup at every early exit. They now
+     * share the same high-water policy as runs_buf: grow to the
+     * largest text ever itemised, reuse thereafter, release on
+     * shutdown or flux_text_compact. Not reentrant, same contract. */
+    FriBidiChar *cp_buf;     /* codepoints + sentinel slot           */
+    uint32_t *bo_buf;        /* per-codepoint source byte offsets    */
+    FriBidiCharType *bt_buf; /* bidi type per codepoint              */
+    FriBidiLevel *lv_buf;    /* embedding level per codepoint        */
+    int cp_cap;              /* entries in each of the four buffers  */
+
     /* Layout cache: an open-addressing hash table of recently shaped
      * strings (see layout.c). Avoids rebuilding the glyph list on every
      * frame for static UI elements. The key is a content fingerprint
@@ -570,6 +585,11 @@ void txt_atlas_flush(flux_text *t);
  * bounds the source string (no NUL assumption). There is no MAX_RUNS cap —
  * the buffers grow with the input. */
 int txt_itemize(flux_text *t, int slot_idx, const char *utf8, size_t len);
+
+/* Release the itemizer codepoint scratch (shutdown + flux_text_compact).
+ * Idempotent; part of the one high-water reclamation surface shared by
+ * runs_buf/layout_buf (see flux_text_compact). */
+void txt_itemize_release_scratch(flux_text *t);
 
 /* layout.c — builds the placed-glyph list into t->layout_buf. `len` bounds
  * the source string. `family` is resolved to a concrete family by the caller

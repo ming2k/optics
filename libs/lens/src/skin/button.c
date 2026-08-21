@@ -56,13 +56,12 @@ void lensi_skin_button(lens *ui, lens_node *n, const lens_widget_record *rec) {
      * the MEASURED box, so a button stretched taller than its intrinsic
      * height (a cross-stretched row sibling, an explicit min_height) would
      * show high-riding text. */
-    lensi_drawlist_push(
-        ui, n,
-        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                        .rel = {rs->padding, 0, -1.0f, -1.0f},
-                        .color = disabled ? rs->fg : lensi_button_text_color(bg),
-                        .text = rec->content.label,
-                        .text_size = rs->font_size});
+    lensi_drawlist_push(ui, n,
+                        (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
+                                        .rel = {rs->padding, 0, -1.0f, -1.0f},
+                                        .color = disabled ? rs->fg : lensi_button_text_color(bg),
+                                        .text = rec->content.label,
+                                        .text_size = rs->font_size});
 
     if (rec->state & LENS_STATE_FOCUSED)
         lensi_drawlist_push(ui, n,
