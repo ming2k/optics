@@ -232,7 +232,18 @@ typedef struct lens_store {
     lens_store_slot *slots;
     uint32_t cap; /* power of two */
     uint32_t count;
+    /* Frames the load has stayed under the shrink threshold (1/8 of cap).
+     * Sustained dwell triggers a halving rehash; see lensi_store_reap. */
+    uint32_t idle_frames;
 } lens_store;
+
+/* Shrink hysteresis (see lensi_store_reap): the load must stay under 1/8
+ * of capacity for this many consecutive frames before the table halves,
+ * so a frame-to-frame population wobble never rehashes. */
+#define LENSI_STORE_SHRINK_FRAMES 300
+/* Floor for shrinkage: below this the table stays put (the initial
+ * capacity is small; rehash churn would outweigh the scan savings). */
+#define LENSI_STORE_MIN_CAP 64
 
 /* ------------------------------------------------------------------ */
 /*  Context (ADR-0024, ADR-0032)                                      */

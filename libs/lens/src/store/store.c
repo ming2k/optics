@@ -42,6 +42,7 @@ flux_result lensi_store_init(lens *ui, uint32_t cap) {
     memset(ui->store.slots, 0, c * sizeof(lens_store_slot));
     ui->store.cap = c;
     ui->store.count = 0;
+    ui->store.idle_frames = 0;
     return FLUX_OK;
 }
 
@@ -61,6 +62,7 @@ void lensi_store_destroy(lens *ui) {
     }
     s->slots = NULL;
     s->cap = s->count = 0;
+    s->idle_frames = 0;
 }
 
 lens_node *lensi_store_find(const lens *ui, lens_id id) {
@@ -158,6 +160,27 @@ void lensi_store_reap(lens *ui) {
             store_insert(ui, moved.node);
             j = (j + 1) & (s->cap - 1);
         }
+    }
+
+    /* Shrink after a sustained population collapse. A transient spike (a
+     * long list or a notification burst) previously left the slot table at
+     * its high-water capacity for the process lifetime — and the reap scan
+     * above is O(cap) every frame, so the spike also permanently raised the
+     * per-frame cost. Hysteresis: only shrink once the load has stayed
+     * under 1/8 of capacity for LENSI_STORE_SHRINK_FRAMES consecutive
+     * frames, and never below the initial capacity. The shrink itself is
+     * the same full-rehash path as growth (amortised away by the long
+     * dwell time before it can trigger again). */
+    if (s->cap > LENSI_STORE_MIN_CAP && s->count * 8 <= s->cap) {
+        if (++s->idle_frames >= LENSI_STORE_SHRINK_FRAMES) {
+            uint32_t want = s->cap / 2;
+            while (want > LENSI_STORE_MIN_CAP && s->count * 8 > want)
+                want /= 2;
+            if (want < s->cap && store_grow(ui, want) == FLUX_OK)
+                s->idle_frames = 0;
+        }
+    } else {
+        s->idle_frames = 0;
     }
 
     /* Liveness reconciliation for the interaction-owned ids: a node that

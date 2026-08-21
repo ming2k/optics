@@ -38,8 +38,16 @@ void lensi_node_reset_frame(lens_node *n) {
 
     n->last_cmd_hash = n->cmd_hash;
     n->cmd_hash = 0;
+    /* The command list is arena memory: the arena is reset wholesale each
+     * frame, so the pointer must drop. `cmd_cap` deliberately survives:
+     * lensi_node_push_cmd sizes the fresh allocation from it in one step
+     * instead of re-walking the 8->16->32 doubling chain every frame
+     * (each step is an arena alloc plus a memcpy of everything emitted
+     * so far). A node that emitted 32 commands last frame allocates
+     * exactly once this frame; the retained cap is bounded by the node's
+     * own high-water mark and dies with the node. */
     n->cmds = NULL;
-    n->cmd_count = n->cmd_cap = 0;
+    n->cmd_count = 0;
 
     n->semantics = (lens_semantics){0};
 }

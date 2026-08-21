@@ -90,14 +90,21 @@ void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd) {
         }
     }
 
-    if (n->cmd_count == n->cmd_cap) {
-        uint32_t nc = n->cmd_cap ? n->cmd_cap * 2 : 8;
+    if (!n->cmds || n->cmd_count == n->cmd_cap) {
+        /* The frame reset cleared n->cmds while cmd_cap retained last
+         * frame's high-water mark, so the first push of a frame sizes the
+         * allocation from it in one step — one arena alloc, no doubling
+         * chain, no memcpy of previously emitted commands. Growth beyond
+         * the retained cap keeps the doubling policy. */
+        uint32_t nc = n->cmd_cap ? n->cmd_cap : 8;
+        if (n->cmds && n->cmd_count == nc)
+            nc = nc * 2;
         lens_draw_cmd *na = flux_arena_alloc(&ui->arena, nc * sizeof *na);
         if (!na) {
             lensi_set_overflow(ui);
             return;
         }
-        if (n->cmds)
+        if (n->cmds && n->cmd_count)
             memcpy(na, n->cmds, n->cmd_count * sizeof *na);
         n->cmds = na;
         n->cmd_cap = nc;

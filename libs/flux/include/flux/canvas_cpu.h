@@ -41,9 +41,27 @@ extern "C" {
 /* Create a headless CPU canvas with a `width`x`height` (physical pixels)
  * framebuffer. `scale` is the content/device-pixel ratio applied by the base
  * transform (pass 1.0 for logical == physical). Destroy with
- * flux_canvas_destroy. */
+ * flux_canvas_destroy.
+ *
+ * Antialiasing: the CPU rasterizer supersamples 2x per axis (4 samples per
+ * pixel) by default, mirroring the GPU backend's 4x MSAA — that is what the
+ * cross-platform consistency oracle relies on. The convenience entry point
+ * keeps that default; pass FLUX_CANVAS_ANTIALIAS_NONE to
+ * flux_canvas_create_cpu_aa for a 1-sample-per-pixel buffer when aliasing
+ * is acceptable — one quarter of the sample-buffer memory and raster work
+ * (a 4K canvas drops from ~531 MiB of float framebuffer to ~133 MiB). The
+ * factor is fixed at create time. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_create_cpu(uint32_t width, uint32_t height,
                                                            float scale, flux_canvas **out);
+
+/* flux_canvas_create_cpu with an explicit antialiasing request. AUTO and
+ * MSAA_4X both select the supersampled default; NONE selects the aliased
+ * 1-sample buffer. flux_canvas_create with backend CPU honours the
+ * descriptor's antialias the same way. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_create_cpu_aa(uint32_t width, uint32_t height,
+                                                              float scale,
+                                                              flux_canvas_antialias antialias,
+                                                              flux_canvas **out);
 
 /* Begin a recording pass, clearing to `clear` (premultiplied; NULL = fully
  * transparent). The CPU analogue of flux_canvas_begin — no frame needed. */

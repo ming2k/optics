@@ -125,11 +125,13 @@ test_scene_camera = executable('test_scene_camera',
 )
 test('scene_camera', test_scene_camera, suite : 'unit')
 
-# glyph_cache compiles its single source file directly (matching the
+# glyph_cache compiles its source files directly (matching the
 # test_canvas_tess pattern). The cache is a pure data structure with no
-# Vulkan / FreeType / Fontconfig dependencies, so this test runs on any
-# build host and gates the "candidates lag after a while" regression
-# described in CHANGELOG-TEXT.md.
+# Vulkan / Fontconfig dependencies, so the cache half runs on any build
+# host and gates the "candidates lag after a while" regression described
+# in CHANGELOG-TEXT.md. The atlas half drives the shelf packer's page
+# state machine, which needs the FreeType headers text_internal.h
+# includes (no FreeType calls execute on these paths).
 test_glyph_cache = executable('test_glyph_cache',
   'test_glyph_cache.c',
 )

@@ -657,6 +657,7 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
 
     uint32_t n = 0;
     uint64_t clears = t->atlas_clears;
+    uint8_t run_page = 0; /* page the pending batch's UVs were minted on */
     for (int i = 0; i < L->count; i++) {
         const txt_placed_glyph *g = &L->glyphs[i];
 
@@ -685,11 +686,12 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
         /* txt_glyph_get may have triggered atlas_clear, which rearranges
          * the atlas wholesale; the quads pending in this batch carry
          * pre-clear UVs and must be flushed before post-clear blits spread
-         * further. GPU path: the clear swapped t->atlas after completing
-         * the old image's uploads, so flush against the retired image and
-         * follow the fresh one. Host path: texels are rearranged in place,
-         * so flush immediately — at most the single cell the triggering
-         * glyph just re-blitted can mis-sample for this frame. */
+         * further. GPU path: the clear swapped the page images after
+         * completing the old pages' uploads, so flush against the retired
+         * images and follow the fresh page 0. Host path: texels are
+         * rearranged in place, so flush immediately — at most the single
+         * cell the triggering glyph just re-blitted can mis-sample for
+         * this frame. */
         if (t->atlas_clears != clears) {
             clears = t->atlas_clears;
             if (n > 0) {
@@ -698,7 +700,7 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
                 n = 0;
             }
             if (run.atlas)
-                run.atlas = t->atlas;
+                run.atlas = t->atlas_pages[t->atlas_page];
             else
                 /* Post-clear quads carry new-era UVs: tag them with the new
                  * generation so recorded segments validate against the
@@ -707,6 +709,21 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
         }
         if (!e || e->w <= 0 || e->h <= 0)
             continue;
+
+        /* Multi-page atlas: a batch's quads must all reference one page's
+         * image, so a page change mid-run flushes the pending batch first
+         * and retargets the run at the entry's page. Cache hits keep the
+         * run on one page for whole spans; page changes cluster where the
+         * packer rolled over. */
+        if (t->atlas && e->atlas_page != run_page) {
+            if (n > 0) {
+                run.quad_count = n;
+                flux_canvas_draw_glyph_run(canvas, &run);
+                n = 0;
+            }
+            run_page = e->atlas_page;
+            run.atlas = t->atlas_pages[e->atlas_page];
+        }
 
         float dst_x_dev = origin + (float)e->left;
         float dst_y_dev = baseline_dev - roundf(g->y_off * scale) - (float)e->top;

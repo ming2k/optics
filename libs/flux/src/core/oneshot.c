@@ -120,14 +120,18 @@ bool flux_vk_prefer_transfer_queue(const flux_device *d) {
 /*  One-shot submissions used to pay a vkCreateCommandPool +           */
 /*  vkDestroyCommandPool pair apiece; the text atlas flush hits this   */
 /*  path every frame a new glyph appears. Idle pools are parked on the */
-/*  device — reset, not destroyed — and handed out by queue family.    */
-/*  Mirrors the staging-buffer cache below: a checked-out pool is      */
-/*  owned by the caller and comes back only once the GPU provably      */
-/*  retired every batch recorded from it (the pending-upload fence,    */
-/*  or never-submitted failure paths), so the reset on return can      */
-/*  never clobber in-flight commands. The idle list shares             */
-/*  staging_lock (a leaf lock taken by the same recycle paths) and is  */
-/*  drained at device teardown by flux_vk_staging_pool_destroy.        */
+/*  device — with their command buffers freed, then reset — and       */
+/*  handed out by queue family. Mirrors the staging-buffer cache        */
+/*  below: a checked-out pool is owned by the caller and comes back    */
+/*  only once the GPU provably retired every batch recorded from it    */
+/*  (the pending-upload fence, or never-submitted failure paths), so   */
+/*  the reset on return can never clobber in-flight commands. The      */
+/*  idle list shares staging_lock (a leaf lock taken by the same       */
+/*  recycle paths) and is drained at device teardown by               */
+/*  flux_vk_staging_pool_destroy. Command buffers allocated from a     */
+/*  cached pool are freed before the pool is parked: a reset pool      */
+/*  keeps its allocated buffers alive, and re-allocating on re-acquire */
+/*  then grows per-buffer driver state without bound on Intel ANV.     */
 /* ------------------------------------------------------------------ */
 
 /* Most pools parked idle before returns destroy instead of caching.
@@ -138,10 +142,26 @@ bool flux_vk_prefer_transfer_queue(const flux_device *d) {
 /* Return a pool to the cache (family known) or destroy it (family
  * unknown — pools parked by callers of the plain park API, e.g. the
  * dma-buf import path). The caller must guarantee no batch recorded
- * from the pool is still in flight. */
-static void transient_pool_release(flux_device *d, VkCommandPool pool, uint32_t family) {
+ * from the pool is still in flight. cmd/cmd2 are command buffers still
+ * allocated from the pool; they are freed (not reset) so the pool
+ * returns to the cache with zero allocated command buffers. Keeping
+ * them allocated across a reset+re-acquire cycle leaks driver-side
+ * per-command-buffer state cumulatively on Intel ANV (~72 KiB per
+ * cycle), which is why the cache cannot rely on vkResetCommandPool
+ * alone. */
+static void transient_pool_release(flux_device *d, VkCommandPool pool, uint32_t family,
+                                   VkCommandBuffer cmd, VkCommandBuffer cmd2) {
     if (!pool)
         return;
+    if (cmd || cmd2) {
+        VkCommandBuffer bufs[2];
+        uint32_t n = 0;
+        if (cmd)
+            bufs[n++] = cmd;
+        if (cmd2)
+            bufs[n++] = cmd2;
+        vkFreeCommandBuffers(d->device, pool, n, bufs);
+    }
     if (family == UINT32_MAX) {
         vkDestroyCommandPool(d->device, pool, nullptr);
         return;
@@ -353,14 +373,17 @@ void flux_vk_staging_pool_destroy(flux_device *d) {
 /* Recycle the resources of one upload batch whose fence has signaled
  * (or that was never submitted). fence may be VK_NULL_HANDLE. Pools
  * with a known queue family return to the transient pool cache (the
- * fence proves their batches retired); the rest are destroyed. */
+ * fence proves their batches retired); the rest are destroyed. The
+ * command buffers are freed first — see transient_pool_release. */
 static void upload_pending_recycle(flux_device *d, VkFence fence, VkCommandPool pool,
-                                   uint32_t pool_family, VkCommandPool pool2, uint32_t pool2_family,
-                                   VkSemaphore sem, flux_staging_buf *stagings) {
+                                   uint32_t pool_family, VkCommandBuffer pool_cmd,
+                                   VkCommandPool pool2, uint32_t pool2_family,
+                                   VkCommandBuffer pool2_cmd, VkSemaphore sem,
+                                   flux_staging_buf *stagings) {
     if (fence)
         vkDestroyFence(d->device, fence, nullptr);
-    transient_pool_release(d, pool, pool_family);
-    transient_pool_release(d, pool2, pool2_family);
+    transient_pool_release(d, pool, pool_family, pool_cmd, VK_NULL_HANDLE);
+    transient_pool_release(d, pool2, pool2_family, pool2_cmd, VK_NULL_HANDLE);
     if (sem)
         vkDestroySemaphore(d->device, sem, nullptr);
     while (stagings) {
@@ -388,8 +411,8 @@ static void upload_pending_sweep(flux_device *d) {
             p->next = NULL;
             if (p->serial)
                 flux_vk_note_graphics_completed(d, p->serial);
-            upload_pending_recycle(d, p->fence, p->pool, p->pool_family, p->pool2, p->pool2_family,
-                                   p->sem, p->stagings);
+            upload_pending_recycle(d, p->fence, p->pool, p->pool_family, p->pool_cmd, p->pool2,
+                                   p->pool2_family, p->pool2_cmd, p->sem, p->stagings);
             flux_internal_free(d, p);
         } else {
             pp = &p->next;
@@ -411,8 +434,8 @@ void flux_vk_upload_pending_drain(flux_device *d) {
         vkWaitForFences(d->device, 1, &p->fence, VK_TRUE, UINT64_MAX);
         if (p->serial)
             flux_vk_note_graphics_completed(d, p->serial);
-        upload_pending_recycle(d, p->fence, p->pool, p->pool_family, p->pool2, p->pool2_family,
-                               p->sem, p->stagings);
+        upload_pending_recycle(d, p->fence, p->pool, p->pool_family, p->pool_cmd, p->pool2,
+                               p->pool2_family, p->pool2_cmd, p->sem, p->stagings);
         flux_internal_free(d, p);
     }
 }
@@ -425,15 +448,17 @@ void flux_vk_upload_pending_drain(flux_device *d) {
  * the slow path the old code had everywhere, taken only when a small
  * allocation fails. */
 void flux_vk_upload_pending_park_families(flux_device *d, VkFence fence, VkCommandPool pool,
-                                          uint32_t pool_family, VkCommandPool pool2,
-                                          uint32_t pool2_family, VkSemaphore sem,
+                                          uint32_t pool_family, VkCommandBuffer pool_cmd,
+                                          VkCommandPool pool2, uint32_t pool2_family,
+                                          VkCommandBuffer pool2_cmd, VkSemaphore sem,
                                           flux_staging_buf *stagings, uint64_t serial) {
     flux_upload_pending *p = flux_internal_alloc(d, sizeof(*p));
     if (!p) {
         vkWaitForFences(d->device, 1, &fence, VK_TRUE, UINT64_MAX);
         if (serial)
             flux_vk_note_graphics_completed(d, serial);
-        upload_pending_recycle(d, fence, pool, pool_family, pool2, pool2_family, sem, stagings);
+        upload_pending_recycle(d, fence, pool, pool_family, pool_cmd, pool2, pool2_family, pool2_cmd,
+                               sem, stagings);
         return;
     }
     *p = (flux_upload_pending){
@@ -442,6 +467,8 @@ void flux_vk_upload_pending_park_families(flux_device *d, VkFence fence, VkComma
         .pool2 = pool2,
         .pool_family = pool_family,
         .pool2_family = pool2_family,
+        .pool_cmd = pool_cmd,
+        .pool2_cmd = pool2_cmd,
         .sem = sem,
         .stagings = stagings,
         .serial = serial,
@@ -456,9 +483,11 @@ void flux_vk_upload_pending_park(flux_device *d, VkFence fence, VkCommandPool po
                                  VkCommandPool pool2, VkSemaphore sem, flux_staging_buf *stagings,
                                  uint64_t serial) {
     /* Callers of the plain API (dma-buf import) don't tag pool
-     * families; their pools are destroyed on recycle, not cached. */
-    flux_vk_upload_pending_park_families(d, fence, pool, UINT32_MAX, pool2, UINT32_MAX, sem,
-                                         stagings, serial);
+     * families; their pools are destroyed on recycle, not cached, so
+     * the command buffers die with the pool and need no explicit free
+     * here. */
+    flux_vk_upload_pending_park_families(d, fence, pool, UINT32_MAX, VK_NULL_HANDLE, pool2,
+                                         UINT32_MAX, VK_NULL_HANDLE, sem, stagings, serial);
 }
 
 /* Fence + queue submission shared by every deferred upload path. On
@@ -601,14 +630,15 @@ flux_result flux_uploads_flush(flux_device *d) {
         vr = flux_vk_submit_upload(d, d->graphics_queue, cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0,
                                    &fence, &serial);
     if (vr == VK_SUCCESS) {
-        flux_vk_upload_pending_park_families(d, fence, pool, d->graphics_family, VK_NULL_HANDLE, 0,
-                                             VK_NULL_HANDLE, stagings, serial);
+        flux_vk_upload_pending_park_families(d, fence, pool, d->graphics_family, cmd,
+                                             VK_NULL_HANDLE, 0, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                             stagings, serial);
         return FLUX_OK;
     }
     /* End/submit failure: nothing reached the GPU, so the batch's
      * resources are safe to recycle inline. */
-    upload_pending_recycle(d, VK_NULL_HANDLE, pool, d->graphics_family, VK_NULL_HANDLE, 0,
-                           VK_NULL_HANDLE, stagings);
+    upload_pending_recycle(d, VK_NULL_HANDLE, pool, d->graphics_family, cmd, VK_NULL_HANDLE, 0,
+                           VK_NULL_HANDLE, VK_NULL_HANDLE, stagings);
     flux_result r = submit_result(vr);
     FLUX_FAIL_VK(r, "upload batch submit failed", vr);
     return r;
@@ -786,8 +816,9 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
                                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, &gfence,
                                    &gserial);
         if (vr == VK_SUCCESS) {
-            flux_vk_upload_pending_park_families(d, gfence, xfer_pool, d->transfer_family, gfx_pool,
-                                                 d->graphics_family, handoff, staging, gserial);
+            flux_vk_upload_pending_park_families(d, gfence, xfer_pool, d->transfer_family,
+                                                 xfer_cmd, gfx_pool, d->graphics_family, gfx_cmd,
+                                                 handoff, staging, gserial);
             return FLUX_OK;
         }
         /* The transfer batch is in flight and references the staging
@@ -805,8 +836,8 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
                                    VK_NULL_HANDLE, 0, &fence, &serial);
         if (vr == VK_SUCCESS) {
             flux_vk_upload_pending_park_families(d, fence, xfer_pool, d->graphics_family,
-                                                 VK_NULL_HANDLE, 0, VK_NULL_HANDLE, staging,
-                                                 serial);
+                                                 xfer_cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE,
+                                                 VK_NULL_HANDLE, staging, serial);
             return FLUX_OK;
         }
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "upload submit failed", vr);
@@ -819,8 +850,9 @@ fail:
     /* Failure paths only (the success paths parked everything and
      * returned above): no submission is pending, so pools and the
      * staging buffer go straight back to their caches. */
-    transient_pool_release(d, gfx_pool, d->graphics_family);
-    transient_pool_release(d, xfer_pool, use_xfer ? d->transfer_family : d->graphics_family);
+    transient_pool_release(d, gfx_pool, d->graphics_family, gfx_cmd, VK_NULL_HANDLE);
+    transient_pool_release(d, xfer_pool, use_xfer ? d->transfer_family : d->graphics_family,
+                           xfer_cmd, VK_NULL_HANDLE);
     flux_vk_staging_release(d, staging);
     return submit_result(vr);
 }
@@ -1078,8 +1110,9 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
                                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, &gfence,
                                    &gserial);
         if (vr == VK_SUCCESS) {
-            flux_vk_upload_pending_park_families(d, gfence, xfer_pool, d->transfer_family, gfx_pool,
-                                                 d->graphics_family, handoff, staging, gserial);
+            flux_vk_upload_pending_park_families(d, gfence, xfer_pool, d->transfer_family,
+                                                 xfer_cmd, gfx_pool, d->graphics_family, gfx_cmd,
+                                                 handoff, staging, gserial);
             return FLUX_OK;
         }
         /* The transfer batch is in flight and still reads the staging
@@ -1096,8 +1129,8 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
                                    VK_NULL_HANDLE, 0, &fence, &serial);
         if (vr == VK_SUCCESS) {
             flux_vk_upload_pending_park_families(d, fence, xfer_pool, d->graphics_family,
-                                                 VK_NULL_HANDLE, 0, VK_NULL_HANDLE, staging,
-                                                 serial);
+                                                 xfer_cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE,
+                                                 VK_NULL_HANDLE, staging, serial);
             return FLUX_OK;
         }
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "image upload submit failed", vr);
@@ -1110,8 +1143,9 @@ fail:
     /* Failure paths only: no submission is pending (any successful
      * transfer submit was drained above), so pools and the staging
      * buffer go straight back to their caches. */
-    transient_pool_release(d, gfx_pool, d->graphics_family);
-    transient_pool_release(d, xfer_pool, use_xfer ? d->transfer_family : d->graphics_family);
+    transient_pool_release(d, gfx_pool, d->graphics_family, gfx_cmd, VK_NULL_HANDLE);
+    transient_pool_release(d, xfer_pool, use_xfer ? d->transfer_family : d->graphics_family,
+                           xfer_cmd, VK_NULL_HANDLE);
     flux_vk_staging_release(d, staging);
     return submit_result(vr);
 }
@@ -1184,8 +1218,9 @@ flux_result flux_vk_transition_image_layout(flux_device *d, VkImage img, VkImage
         vr = flux_vk_submit_upload(d, d->graphics_queue, cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0,
                                    &fence, &serial);
         if (vr == VK_SUCCESS) {
-            flux_vk_upload_pending_park_families(d, fence, pool, d->graphics_family, VK_NULL_HANDLE,
-                                                 0, VK_NULL_HANDLE, NULL, serial);
+            flux_vk_upload_pending_park_families(d, fence, pool, d->graphics_family, cmd,
+                                                 VK_NULL_HANDLE, 0, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                                 NULL, serial);
             return FLUX_OK;
         }
     }
@@ -1193,7 +1228,7 @@ flux_result flux_vk_transition_image_layout(flux_device *d, VkImage img, VkImage
 fail:
     /* Nothing from the pool was submitted (or the submit failed), so
      * it goes straight back to the transient pool cache. */
-    transient_pool_release(d, pool, d->graphics_family);
+    transient_pool_release(d, pool, d->graphics_family, cmd, VK_NULL_HANDLE);
     if (vr != VK_SUCCESS) {
         flux_result r = submit_result(vr);
         FLUX_FAIL_VK(r, "image layout transition failed", vr);

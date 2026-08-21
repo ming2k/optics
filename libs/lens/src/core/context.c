@@ -296,14 +296,17 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->scroll_hot_id = 0;
     ui->cursor_hint = LENS_CURSOR_DEFAULT;
     ui->tab_order = NULL;
-    ui->tab_count = ui->tab_cap = 0;
+    ui->tab_count = 0; /* tab_cap retained: see the node cmd_cap note */
     ui->last_response = (lens_response){0};
     ui->last_node = NULL;
     /* Band buckets are arena-backed; they reset with the arena and are
-     * rebuilt by lensi_place_bucket at lens_end. */
+     * rebuilt by lensi_place_bucket at lens_end. The per-band caps are
+     * retained across the reset for the same reason as cmd_cap: the
+     * rebuild allocates at last frame's high-water size in one step
+     * instead of re-walking the doubling chain. */
     for (uint32_t b = 0; b < (uint32_t)LENS_BAND_COUNT; b++) {
         ui->bands[b] = NULL;
-        ui->band_counts[b] = ui->band_caps[b] = 0;
+        ui->band_counts[b] = 0;
     }
     ui->prev_tooltip_active = ui->tooltip.active;
     ui->tooltip.active = false;

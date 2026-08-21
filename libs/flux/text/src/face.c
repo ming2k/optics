@@ -76,6 +76,14 @@ static bool face_load(flux_text *t, int slot_idx, int face_idx, uint32_t req_px)
         f->face = NULL;
         return false;
     }
+    /* The initial size enters the retained-size LRU as its front entry so
+     * ownership is uniform: the LRU slots own every hb_font/FT_Size,
+     * f->hb_font aliases the front slot (see txt_face_set_px and the
+     * destroy path). The face's own implicit size object backs slot 0
+     * here (no FT_New_Size yet); a later miss recycles it normally. */
+    f->size_px[0] = req_px;
+    f->sizes[0] = NULL; /* the face's implicit size: no explicit handle */
+    f->size_fonts[0] = f->hb_font;
     /* hb-ft sets scale/ppem from the face's current size; keep its default so
      * advances track the pixel size (see txt_face_set_px). */
     f->valid = true;
@@ -405,6 +413,7 @@ void txt_engine_shutdown(flux_text *t) {
     t->cache = NULL;
     txt_layout_cache_reset(t);
     free(t->layout_buf);
+    free(t->atlas_upload_scratch);
     free(t->runs_buf);
     free(t->run_levels_buf);
     if (t->nearest_sampler)
@@ -415,8 +424,24 @@ void txt_engine_shutdown(flux_text *t) {
         txt_face_slot *slot = &t->slots[s];
         for (int i = 0; i < slot->count; i++) {
             txt_face *f = &slot->faces[i];
-            if (f->hb_font)
-                hb_font_destroy(f->hb_font);
+            /* Retained size LRU: each slot owns an FT_Size and an hb_font
+             * (hb-ft bakes the ppem into the font object, so one hb_font
+             * per size). f->hb_font is only an alias for slot 0 and is
+             * never destroyed here. */
+            for (int k = 0; k < TXT_FACE_SIZE_LRU; k++) {
+                if (f->size_fonts[k]) {
+                    hb_font_destroy(f->size_fonts[k]);
+                    f->size_fonts[k] = NULL;
+                }
+                if (f->sizes[k]) {
+                    /* FT_Done_Size deactivates if current; safe while the
+                     * face is still alive. */
+                    FT_Done_Size(f->sizes[k]);
+                    f->sizes[k] = NULL;
+                }
+                f->size_px[k] = 0;
+            }
+            f->hb_font = NULL; /* alias only; ownership was in the slots */
             if (f->face)
                 FT_Done_Face(f->face);
             if (f->charset)
@@ -488,4 +513,5 @@ void flux_text_get_stats(const flux_text *t, flux_text_stats *out) {
         out->glyph_grows = gs.grows;
     }
     out->atlas_clears = t->atlas_clears;
+    out->atlas_pages = t->atlas_page_count;
 }

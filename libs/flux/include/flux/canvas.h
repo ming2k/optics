@@ -220,6 +220,26 @@ typedef struct flux_canvas_no_stencil_desc {
 
 #define FLUX_CANVAS_NO_STENCIL_DESC_INIT {.type = FLUX_TYPE_CANVAS_NO_STENCIL_DESC}
 
+/* Optional pNext extension on flux_canvas_desc: the create-time
+ * antialiasing request for the software backend. NONE allocates a
+ * 1-sample-per-pixel sample buffer (one quarter of the memory and raster
+ * work of the supersampled default) at the cost of aliased coverage edges;
+ * AUTO (or the absence of this extension) keeps the 4-samples-per-pixel
+ * oracle default that mirrors the GPU backend's 4x MSAA. The GPU backend
+ * ignores this extension: its antialiasing policy is per pass
+ * (flux_canvas_pass_desc::antialias).
+ *
+ * Tagged-extension form for the same reason as
+ * flux_canvas_no_stencil_desc: flux_canvas_desc keeps its stable size and
+ * layout for callers built against older headers. */
+typedef struct flux_canvas_antialias_desc {
+    flux_struct_type type; /* FLUX_TYPE_CANVAS_ANTIALIAS_DESC */
+    const void *next;
+    flux_canvas_antialias antialias; /* AUTO / NONE / MSAA_4X */
+} flux_canvas_antialias_desc;
+
+#define FLUX_CANVAS_ANTIALIAS_DESC_INIT {.type = FLUX_TYPE_CANVAS_ANTIALIAS_DESC}
+
 /* Create a canvas on the selected backend. GPU canvases need desc->surface;
  * CPU canvases need desc->width/height (see flux/canvas_cpu.h for a convenience
  * wrapper and pixel readback). Destroy with flux_canvas_destroy. */

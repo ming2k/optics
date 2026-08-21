@@ -19,6 +19,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_OUTLINE_H
+#include FT_SIZES_H
 
 #include <hb-ft.h>
 #include <hb.h>
@@ -80,6 +81,17 @@ void txt_logf(flux_text *t, flux_log_level level, const char *fmt, ...)
 #define ATLAS_W 4096
 #define ATLAS_H 4096
 #define ATLAS_PAD 1 /* transparent gutter between glyphs */
+/* Multi-page atlas ceiling. When the shelf packer exhausts a page the
+ * allocator first opens a fresh page (a new R8 image with its own cursor
+ * and dirty box) instead of clearing the atlas wholesale; a working set
+ * that transiently exceeds one page therefore keeps every cached glyph
+ * alive instead of forcing the next frame to re-rasterise everything
+ * visible. The ceiling bounds device memory (pages x 16 MiB); reaching it
+ * falls back to the legacy O(1) full reclaim. The CPU (device-less)
+ * canvas keeps the single shared host buffer, so paging applies to the
+ * GPU path only. */
+#define TXT_ATLAS_MAX_PAGES 4
+#define TXT_ATLAS_ALL_PAGES 0xFF /* sentinel: flush every page */
 #define GLYPH_HASH_CAP 16384
 #define GLYPH_HASH_INIT 256
 #define TXT_STYLE_SLOTS 4
@@ -102,6 +114,13 @@ void txt_logf(flux_text *t, flux_log_level level, const char *fmt, ...)
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
+/* Number of recent pixel sizes retained per face as explicit FT_Size
+ * objects. UI text interleaves sizes within one family (clock, titles,
+ * labels, tooltips); without retained sizes every interleaved glyph paid
+ * an FT_Set_Pixel_Sizes resize (which invalidates hb-ft's caches too).
+ * 3 covers body + heading + caption on screen at once. */
+#define TXT_FACE_SIZE_LRU 3
+
 typedef struct txt_face {
     FT_Face face;
     hb_font_t *hb_font;
@@ -115,6 +134,15 @@ typedef struct txt_face {
      * CJK faces. */
     FT_Long index;
     uint32_t face_px;
+    /* Retained sizes (LRU, most recent first): mixed-size UI text switches
+     * sizes per glyph span; activating a retained FT_Size is far cheaper
+     * than re-issuing FT_Set_Pixel_Sizes (which also rebuilds hb-ft's
+     * scale caches through hb_ft_font_changed). Each size owns its own
+     * hb_font because hb-ft bakes the ppem into the font object. Entries
+     * with size_px == 0 are unused slots. */
+    uint32_t size_px[TXT_FACE_SIZE_LRU];
+    FT_Size sizes[TXT_FACE_SIZE_LRU];
+    hb_font_t *size_fonts[TXT_FACE_SIZE_LRU];
     float units_per_em;
     float ascent_em;
     float descent_em;
@@ -234,6 +262,28 @@ struct flux_text {
      * the count, so the table reported permanent saturation. */
     glyph_cache *cache;
 
+    /* Multi-page GPU atlas. Page 0 is created lazily on first use exactly
+     * as the single image was; pages 1..n appear only when page n-1 is
+     * full and the cap allows another. `atlas` stays an alias for the
+     * current page so measure-only and CPU-canvas callers are unaffected.
+     * The host coverage buffer (`atlas_pixels`) is shared by all pages:
+     * only one page's dirty box is ever pending at a time because the
+     * rasteriser always blits into the current page. */
+    flux_image *atlas_pages[TXT_ATLAS_MAX_PAGES];
+    uint8_t atlas_page_count; /* pages in use; 0 until first allocation */
+    uint8_t atlas_page;       /* current packing page index */
+    uint32_t atlas_page_cursor_x[TXT_ATLAS_MAX_PAGES];
+    uint32_t atlas_page_cursor_y[TXT_ATLAS_MAX_PAGES];
+    uint32_t atlas_page_row_height[TXT_ATLAS_MAX_PAGES];
+    /* Per-page dirty boxes (exclusive max); TXT_ATLAS_ALL_PAGES flushes
+     * them all. Only the current page accumulates new marks. */
+    bool atlas_page_dirty[TXT_ATLAS_MAX_PAGES];
+    uint16_t atlas_page_dirty_x0[TXT_ATLAS_MAX_PAGES];
+    uint16_t atlas_page_dirty_y0[TXT_ATLAS_MAX_PAGES];
+    uint16_t atlas_page_dirty_x1[TXT_ATLAS_MAX_PAGES];
+    uint16_t atlas_page_dirty_y1[TXT_ATLAS_MAX_PAGES];
+    /* Compatibility view: the current page's image. Kept in sync by the
+     * atlas module (NULL while no page exists / CPU canvas). */
     flux_image *atlas;
     uint8_t *atlas_pixels;
     uint32_t atlas_cursor_x;
@@ -244,12 +294,12 @@ struct flux_text {
      * txt_atlas_mark_dirty() on each cache-miss blit. Flushed by
      * txt_atlas_flush() as a single GPU upload before the next
      * draw_glyph_run — replaces the per-glyph submit-and-wait that
-     * caused one GPU pipeline stall per new glyph. */
+     * caused one GPU pipeline stall per each new glyph. */
     uint16_t atlas_dirty_x0, atlas_dirty_y0;
     uint16_t atlas_dirty_x1, atlas_dirty_y1;
     /* Count of atlas_clear() calls (full-texture reclaims). Climbs when
-     * the working set exceeds ATLAS_W*ATLAS_H; each clear forces the
-     * next frame to re-rasterise every visible glyph. Exposed via
+     * the working set exceeds every page; each clear forces the next
+     * frame to re-rasterise every visible glyph. Exposed via
      * flux_text_get_stats for long-session diagnostics. */
     uint64_t atlas_clears;
 
@@ -258,6 +308,12 @@ struct flux_text {
     /* Reused per-call scratch for the placed-glyph list (grows, never per
      * call alloc). Not reentrant — the UI runs single-threaded. */
     txt_placed_glyph *layout_buf;
+    /* Tight-row staging for non-full-width atlas uploads (see
+     * atlas_upload_rect): retained so the hot flush path does not pay a
+     * malloc/free pair per flush. Not reentrant, same contract as
+     * layout_buf. */
+    uint8_t *atlas_upload_scratch;
+    size_t atlas_upload_scratch_cap;
     int layout_cap;
 
     /* Reused per-call scratch for the itemised run list + BiDi levels.
@@ -386,13 +442,101 @@ static inline flux_text_family txt_resolve_family(flux_text *t, flux_text_family
  * ppem/scale, so without hb_ft_font_changed() shaped advances would stay
  * frozen at the size the hb_font was created with — making text spacing
  * independent of point size. With it, advances come back in 26.6 px at the
- * new size (advance/64 == pixels). */
+ * new size (advance/64 == pixels).
+ *
+ * Size LRU: mixed-size UI text (clock / title / labels in one family)
+ * interleaves sizes per glyph span. A retained FT_Size is activated
+ * instead of re-resizing; each retained size keeps its own hb_font
+ * because hb-ft bakes ppem into the font object. Only a genuinely new
+ * size pays the FT_Set_Pixel_Sizes + hb_ft_font_changed cost, and the
+ * least-recently-used retained size is recycled. */
 static inline bool txt_face_set_px(txt_face *f, uint32_t px) {
+    if (f->face_px == px)
+        return true;
+
+    /* LRU hit: activate the retained size and its pre-synced hb_font. */
+    for (int i = 0; i < TXT_FACE_SIZE_LRU; i++) {
+        if (f->size_px[i] == px && f->sizes[i]) {
+            if (FT_Activate_Size(f->sizes[i]) != 0)
+                return false;
+            /* Move the hit to the front (slot 0 = most recent). */
+            uint32_t sp = f->size_px[i];
+            FT_Size sz = f->sizes[i];
+            hb_font_t *hb = f->size_fonts[i];
+            for (int j = i; j > 0; j--) {
+                f->size_px[j] = f->size_px[j - 1];
+                f->sizes[j] = f->sizes[j - 1];
+                f->size_fonts[j] = f->size_fonts[j - 1];
+            }
+            f->size_px[0] = sp;
+            f->sizes[0] = sz;
+            f->size_fonts[0] = hb;
+            f->face_px = px;
+            f->hb_font = hb;
+            return true;
+        }
+    }
+
+    /* Miss: resize the face, then retain the resulting FT_Size. Recycle
+     * the LRU tail (destroying its hb_font) when the cache is full.
+     * FT_New_Size + FT_Activate_Size gives the resized face its own
+     * FT_SizeRec; the face's current metrics already reflect `px`. */
     if (FT_Set_Pixel_Sizes(f->face, 0, px) != 0)
         return false;
     f->face_px = px;
-    if (f->hb_font)
-        hb_ft_font_changed(f->hb_font);
+
+    FT_Size sz = NULL;
+    if (FT_New_Size(f->face, &sz) == 0 && sz) {
+        /* The new FT_Size must carry the resized metrics: FreeType
+         * snapshots metrics per size object, so re-issue the pixel size
+         * while the new object is active. */
+        if (FT_Activate_Size(sz) == 0) {
+            if (FT_Set_Pixel_Sizes(f->face, 0, px) != 0) {
+                FT_Done_Size(sz);
+                sz = NULL;
+                /* Reactivate a live size object so the face is usable. */
+                for (int j = 0; j < TXT_FACE_SIZE_LRU; j++) {
+                    if (f->sizes[j]) {
+                        FT_Activate_Size(f->sizes[j]);
+                        break;
+                    }
+                }
+            }
+        } else {
+            FT_Done_Size(sz);
+            sz = NULL;
+        }
+    }
+
+    hb_font_t *hb = NULL;
+    if (f->face)
+        hb = hb_ft_font_create_referenced(f->face);
+
+    /* Shift the LRU right, evicting the tail. The LRU slots are the sole
+     * owners of the retained hb_fonts (f->hb_font aliases slot 0). */
+    int tail = TXT_FACE_SIZE_LRU - 1;
+    if (f->size_fonts[tail])
+        hb_font_destroy(f->size_fonts[tail]);
+    if (f->sizes[tail])
+        FT_Done_Size(f->sizes[tail]);
+    for (int j = tail; j > 0; j--) {
+        f->size_px[j] = f->size_px[j - 1];
+        f->sizes[j] = f->sizes[j - 1];
+        f->size_fonts[j] = f->size_fonts[j - 1];
+    }
+    f->size_px[0] = px;
+    f->sizes[0] = sz; /* NULL when retention failed: resize still valid */
+    f->size_fonts[0] = hb;
+
+    /* Alias update: prefer the fresh hb_font; when its creation failed,
+     * keep aliasing whatever the front slot holds (possibly NULL), and
+     * resync a surviving legacy font as the degraded fallback. */
+    f->hb_font = hb;
+    if (!f->hb_font) {
+        f->hb_font = f->size_fonts[0];
+        if (!f->hb_font)
+            return true; /* shaping degrades; rasterisation still works */
+    }
     return true;
 }
 

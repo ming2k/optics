@@ -2,10 +2,15 @@
 
 #include "../internal.h"
 
-/* Append a focusable id to this frame's tab order (arena-backed). */
+/* Append a focusable id to this frame's tab order (arena-backed).
+ * tab_cap survives the per-frame reset (see lens_begin), so the first
+ * push of a frame sizes the allocation at last frame's high-water in one
+ * step instead of re-walking the doubling chain. */
 static void tab_push(lens *ui, lens_id id) {
-    if (ui->tab_count == ui->tab_cap) {
-        uint32_t nc = ui->tab_cap ? ui->tab_cap * 2 : 16;
+    if (!ui->tab_order || ui->tab_count == ui->tab_cap) {
+        uint32_t nc = ui->tab_cap ? ui->tab_cap : 16;
+        if (ui->tab_order && ui->tab_count == nc)
+            nc = nc * 2;
         lens_id *na = flux_arena_alloc(&ui->arena, nc * sizeof *na);
         if (!na) {
             lensi_set_overflow(ui);

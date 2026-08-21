@@ -16,6 +16,7 @@
 #include <flux/vulkan.h>
 
 #include <string.h>
+#include <sys/resource.h>
 
 #define W 64u
 #define H 64u
@@ -176,6 +177,77 @@ int main(void) {
         EXPECT(s2.live_allocations == s1.live_allocations);
         EXPECT(s2.bytes_in_use == s1.bytes_in_use);
         flux_image_release(b);
+    }
+
+    /* --- host-memory steady state: recycling a transient command pool
+     *     must not grow driver-side command-buffer state without bound.
+     *     Each begin/flush pair parks the batch pool for fence-gated
+     *     recycle; the recycle used to vkResetCommandPool while keeping
+     *     the command buffer allocated, and the next round allocated a
+     *     new buffer from the reset pool — a pattern that accumulates
+     *     ~72 KiB of driver state per cycle on Intel ANV. Two windows of
+     *     many rounds must show the same MaxRSS to within a small
+     *     allowance. --- */
+    {
+        struct rusage ru0, ru1, ru2;
+        static uint8_t churn[16 * 16 * 4];
+        memset(churn, 0x42, sizeof(churn));
+
+        const int warmup = 512;
+        for (int i = 0; i < warmup; i++) {
+            EXPECT(flux_uploads_begin(d) == FLUX_OK);
+            flux_image_desc desc = {
+                .type = FLUX_TYPE_IMAGE_DESC,
+                .width = 16,
+                .height = 16,
+                .format = FLUX_FORMAT_RGBA8_UNORM,
+                .initial_data = churn,
+            };
+            flux_image *img = NULL;
+            EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK && img);
+            EXPECT(flux_uploads_flush(d) == FLUX_OK);
+            flux_image_release(img);
+        }
+        EXPECT(getrusage(RUSAGE_SELF, &ru0) == 0);
+
+        for (int i = 0; i < warmup; i++) {
+            EXPECT(flux_uploads_begin(d) == FLUX_OK);
+            flux_image_desc desc = {
+                .type = FLUX_TYPE_IMAGE_DESC,
+                .width = 16,
+                .height = 16,
+                .format = FLUX_FORMAT_RGBA8_UNORM,
+                .initial_data = churn,
+            };
+            flux_image *img = NULL;
+            EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK && img);
+            EXPECT(flux_uploads_flush(d) == FLUX_OK);
+            flux_image_release(img);
+        }
+        EXPECT(getrusage(RUSAGE_SELF, &ru1) == 0);
+        for (int i = 0; i < warmup; i++) {
+            EXPECT(flux_uploads_begin(d) == FLUX_OK);
+            flux_image_desc desc = {
+                .type = FLUX_TYPE_IMAGE_DESC,
+                .width = 16,
+                .height = 16,
+                .format = FLUX_FORMAT_RGBA8_UNORM,
+                .initial_data = churn,
+            };
+            flux_image *img = NULL;
+            EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK && img);
+            EXPECT(flux_uploads_flush(d) == FLUX_OK);
+            flux_image_release(img);
+        }
+        EXPECT(getrusage(RUSAGE_SELF, &ru2) == 0);
+
+        long w0 = ru0.ru_maxrss, w1 = ru1.ru_maxrss, w2 = ru2.ru_maxrss;
+        /* MaxRSS is monotonic; growth between the settled windows is
+         * what detects the unbounded driver-state accumulation. The
+         * pre-fix ANV behaviour grew ~72 KiB per round; the allowance
+         * is a few pages per round at most. */
+        EXPECT(w1 - w0 < warmup * 64);
+        EXPECT(w2 - w1 < warmup * 64);
     }
 
     flux_image_release(red);

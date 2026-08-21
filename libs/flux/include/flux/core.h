@@ -256,6 +256,7 @@ typedef enum flux_struct_type {
     FLUX_TYPE_IMAGE_COLOR_SPACE_DESC = 30,
     FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC = 31,
     FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC = 32,
+    FLUX_TYPE_CANVAS_ANTIALIAS_DESC = 33,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 

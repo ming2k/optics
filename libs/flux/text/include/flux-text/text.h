@@ -178,7 +178,8 @@ typedef struct flux_text_stats {
     uint64_t glyph_evictions;     /* entries dropped by put() at cap     */
     uint64_t glyph_invalidations; /* entries dropped by clear()          */
     uint64_t glyph_grows;         /* table doublings                     */
-    uint64_t atlas_clears;        /* full-atlas reclaims (texture full)  */
+    uint64_t atlas_clears;        /* full-atlas reclaims (all pages full) */
+    uint32_t atlas_pages;         /* atlas pages in use (multi-page packer) */
 } flux_text_stats;
 
 FLUX_API void flux_text_get_stats(const flux_text *t, flux_text_stats *out);

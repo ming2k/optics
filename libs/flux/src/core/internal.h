@@ -230,6 +230,20 @@ typedef struct flux_transient_pool {
     struct flux_transient_pool *next;
 } flux_transient_pool;
 
+/* Command buffers recorded from a transient pool that must be freed
+ * (not merely reset) once the batch that submitted them retires.
+ * Drivers keep per-command-buffer driver-side state alive until the
+ * buffer is explicitly freed or its pool destroyed; resetting the pool
+ * returns the buffers to the initial state but keeps them allocated,
+ * so a reset-and-reallocate cycle grows driver memory without bound
+ * (observed on Intel ANV: ~72 KiB per cycle). Callers therefore pass
+ * each submitted command buffer here so the recycle path can free it
+ * before the pool returns to (and is re-acquired from) the cache. */
+typedef struct flux_transient_cmdbufs {
+    VkCommandBuffer cmd;  /* primary; VK_NULL_HANDLE allowed */
+    VkCommandBuffer cmd2; /* QFOT graphics-side buffer; usually NULL */
+} flux_transient_cmdbufs;
+
 /* One submitted-but-not-yet-retired upload batch. Upload submissions are
  * deferred: the one-shot helpers and flux_uploads_flush hand the graphics
  * (or transfer) queue their copy commands and return without a fence wait,
@@ -247,6 +261,9 @@ typedef struct flux_upload_pending {
     uint32_t pool_family;       /* queue family of pool; UINT32_MAX when
                                  * unknown (destroy instead of caching) */
     uint32_t pool2_family;      /* same for pool2 */
+    VkCommandBuffer pool_cmd;   /* command buffer allocated from `pool`;
+                                 * freed on recycle (see flux_transient_cmdbufs) */
+    VkCommandBuffer pool2_cmd;  /* same for `pool2` */
     VkSemaphore sem;            /* QFOT handoff semaphore; usually NULL */
     flux_staging_buf *stagings; /* returned to the staging cache on recycle */
     uint64_t serial;            /* graphics submission serial; 0 for non-graphics batches */
@@ -518,10 +535,16 @@ void flux_vk_upload_pending_park(flux_device *d, VkFence fence, VkCommandPool po
                                  uint64_t serial);
 /* Same as flux_vk_upload_pending_park but tags each pool with its queue
  * family so the recycle path can return it to the transient pool cache
- * instead of destroying it. Pass UINT32_MAX for an unknown family. */
+ * instead of destroying it. Pass UINT32_MAX for an unknown family.
+ * pool_cmd/pool2_cmd are the command buffers allocated from the pools
+ * (VK_NULL_HANDLE when none); the recycle path frees them before the
+ * pools return to the cache, because a reset pool keeps its allocated
+ * command buffers alive and re-allocation then grows driver memory
+ * without bound on some drivers (see flux_transient_cmdbufs). */
 void flux_vk_upload_pending_park_families(flux_device *d, VkFence fence, VkCommandPool pool,
-                                          uint32_t pool_family, VkCommandPool pool2,
-                                          uint32_t pool2_family, VkSemaphore sem,
+                                          uint32_t pool_family, VkCommandBuffer pool_cmd,
+                                          VkCommandPool pool2, uint32_t pool2_family,
+                                          VkCommandBuffer pool2_cmd, VkSemaphore sem,
                                           flux_staging_buf *stagings, uint64_t serial);
 
 /* Upload batch internals (public entry points are flux_uploads_begin /

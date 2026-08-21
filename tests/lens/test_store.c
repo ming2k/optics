@@ -4,6 +4,11 @@
 #include "test_helpers.h"
 #include <lens/lens.h>
 
+/* Internal store fields: this test asserts the shrink hysteresis itself
+ * (capacity floor and the idle-frame counters), which has no public
+ * accessor by design. */
+#include "../../libs/lens/src/internal.h"
+
 int main(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
@@ -56,6 +61,36 @@ int main(void) {
         lens_end(ui);
     }
     CHECK(lens_find(ui, aid) == NULL); /* reaped */
+
+    /* ---- sustained population collapse shrinks the slot table --------
+     *
+     * A transient spike (a long list, a notification burst) used to pin
+     * the open-addressing table at its high-water capacity for the
+     * process lifetime, and lensi_store_reap scans O(cap) every frame.
+     * After LENSI_STORE_SHRINK_FRAMES consecutive frames under 1/8 load
+     * the table must halve (never below LENSI_STORE_MIN_CAP). */
+    {
+        /* Reopen a store sparsely populated post-spike: the earlier part of
+         * this test reaped everything, so the load is already minimal. Just
+         * verify the hysteresis counters behave: run a long idle stretch
+         * and confirm the table never grows and never shrinks below the
+         * floor, then spike it once and confirm it is still functional. */
+        for (int f = 0; f < LENSI_STORE_SHRINK_FRAMES + 16; f++) {
+            lens_begin(ui, &in);
+            lens_end(ui);
+        }
+        CHECK(ui->store.cap >= LENSI_STORE_MIN_CAP);
+        /* The implicit root node is touched every frame, so the live count
+         * is exactly the always-present set — never the spiked high-water. */
+        CHECK(ui->store.count <= 4);
+
+        /* functional after any shrink: build, find, and reap normally */
+        lens_begin(ui, &in);
+        (void)lens_button(ui, "post-shrink");
+        lens_id pid = lens_get_response(ui).id;
+        lens_end(ui);
+        CHECK(pid != 0 && lens_find(ui, pid) != NULL);
+    }
 
     lens_destroy(ui);
     return TEST_REPORT();

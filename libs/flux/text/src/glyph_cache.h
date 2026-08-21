@@ -69,6 +69,9 @@ typedef struct glyph_entry {
     uint32_t gid;
     uint32_t rpx;
     uint8_t phase;
+    /* Which atlas page the coverage pixels live on (multi-page atlas).
+     * The CPU-canvas path always uses page 0's shared host buffer. */
+    uint8_t atlas_page;
     uint16_t atlas_x, atlas_y;
     int w, h;
     int left, top;

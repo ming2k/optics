@@ -33,24 +33,35 @@
 /*  Lifecycle                                                          */
 /* ------------------------------------------------------------------ */
 
-bool txt_atlas_init(flux_text *t) {
-    t->atlas_pixels = calloc((size_t)ATLAS_W * ATLAS_H, 1);
-    if (!t->atlas_pixels)
+/* Create page `page` (its own R8 image) and make it current. Returns
+ * false on allocation failure with no state changed. Page 0 carries the
+ * initial_data upload; later pages start empty (their texels arrive via
+ * the dirty-box path as glyphs are blitted). */
+static bool atlas_page_create(flux_text *t, uint8_t page) {
+    flux_image_desc d = {
+        .type = FLUX_TYPE_IMAGE_DESC,
+        .width = ATLAS_W,
+        .height = ATLAS_H,
+        .format = FLUX_FORMAT_R8_UNORM,
+        .initial_data = (page == 0) ? t->atlas_pixels : NULL,
+    };
+    flux_image *img = NULL;
+    if (flux_image_create(t->dev, &d, &img) != FLUX_OK || !img) {
+        txt_logf(t, FLUX_LOG_ERROR, "atlas page %u create failed", (unsigned)page);
         return false;
-
-    if (t->dev) {
-        flux_image_desc d = {
-            .type = FLUX_TYPE_IMAGE_DESC,
-            .width = ATLAS_W,
-            .height = ATLAS_H,
-            .format = FLUX_FORMAT_R8_UNORM,
-            .initial_data = t->atlas_pixels,
-        };
-        if (flux_image_create(t->dev, &d, &t->atlas) != FLUX_OK) {
-            txt_logf(t, FLUX_LOG_ERROR, "atlas image create failed");
-            t->atlas = NULL;
-        }
     }
+    t->atlas_pages[page] = img;
+    if (page >= t->atlas_page_count)
+        t->atlas_page_count = (uint8_t)(page + 1);
+    t->atlas_page = page;
+    t->atlas = img; /* compatibility alias */
+    t->atlas_page_cursor_x[page] = 0;
+    t->atlas_page_cursor_y[page] = 0;
+    t->atlas_page_row_height[page] = 0;
+    t->atlas_page_dirty[page] = false;
+    /* Mirror into the legacy single-view fields so paths that still read
+     * them (and the mark-dirty compatibility view) observe page 0 state
+     * on first use. */
     t->atlas_cursor_x = 0;
     t->atlas_cursor_y = 0;
     t->atlas_row_height = 0;
@@ -58,11 +69,34 @@ bool txt_atlas_init(flux_text *t) {
     return true;
 }
 
-void txt_atlas_destroy(flux_text *t) {
-    if (t->atlas) {
-        flux_image_release(t->atlas);
+bool txt_atlas_init(flux_text *t) {
+    t->atlas_pixels = calloc((size_t)ATLAS_W * ATLAS_H, 1);
+    if (!t->atlas_pixels)
+        return false;
+
+    memset(t->atlas_pages, 0, sizeof(t->atlas_pages));
+    t->atlas_page_count = 0;
+    t->atlas_page = 0;
+    t->atlas = NULL;
+    if (t->dev && !atlas_page_create(t, 0)) {
+        /* Measure-only degradation: no GPU pages; the host buffer still
+         * serves the CPU canvas path. */
         t->atlas = NULL;
+        t->atlas_page_count = 0;
     }
+    return true;
+}
+
+void txt_atlas_destroy(flux_text *t) {
+    for (uint8_t p = 0; p < TXT_ATLAS_MAX_PAGES; p++) {
+        if (t->atlas_pages[p]) {
+            flux_image_release(t->atlas_pages[p]);
+            t->atlas_pages[p] = NULL;
+        }
+    }
+    t->atlas = NULL;
+    t->atlas_page_count = 0;
+    t->atlas_page = 0;
     free(t->atlas_pixels);
     t->atlas_pixels = NULL;
 }
@@ -71,7 +105,10 @@ void txt_atlas_destroy(flux_text *t) {
 /*  Shelf allocation                                                   */
 /* ------------------------------------------------------------------ */
 
-/* Reserve a w x h cell plus a 1px gutter on the right/bottom. */
+/* Reserve a w x h cell plus a 1px gutter on the right/bottom on the
+ * current page. Mirrors the pack state into the legacy single-view fields
+ * so mark_dirty/flush observe the current page without every caller
+ * caring about paging. */
 static bool atlas_alloc(flux_text *t, int w, int h, uint16_t *out_x, uint16_t *out_y) {
     if (w <= 0 || h <= 0) {
         *out_x = 0;
@@ -84,9 +121,10 @@ static bool atlas_alloc(flux_text *t, int w, int h, uint16_t *out_x, uint16_t *o
     if (aw > ATLAS_W || ah > ATLAS_H)
         return false;
 
-    uint32_t cx = t->atlas_cursor_x;
-    uint32_t cy = t->atlas_cursor_y;
-    uint32_t rh = t->atlas_row_height;
+    uint8_t page = t->atlas_page;
+    uint32_t cx = t->atlas_page_cursor_x[page];
+    uint32_t cy = t->atlas_page_cursor_y[page];
+    uint32_t rh = t->atlas_page_row_height[page];
 
     if (cx + aw > ATLAS_W) {
         cx = 0;
@@ -103,32 +141,60 @@ static bool atlas_alloc(flux_text *t, int w, int h, uint16_t *out_x, uint16_t *o
     if (ah > rh)
         rh = ah;
 
+    t->atlas_page_cursor_x[page] = cx;
+    t->atlas_page_cursor_y[page] = cy;
+    t->atlas_page_row_height[page] = rh;
     t->atlas_cursor_x = cx;
     t->atlas_cursor_y = cy;
     t->atlas_row_height = rh;
     return true;
 }
 
-static void atlas_upload_rect(flux_text *t, uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
-    if (!t->atlas || !t->dev)
+/* The current page is full. Open the next page when the cap allows;
+ * otherwise report failure so the caller performs the legacy full
+ * reclaim. Returns true when a fresh page became current. */
+static bool atlas_advance_page(flux_text *t) {
+    if (t->atlas_page_count >= TXT_ATLAS_MAX_PAGES)
+        return false;
+    /* GPU path only: the CPU canvas samples the single shared host
+     * buffer, so extra pages have nothing to upload into. */
+    if (!t->dev)
+        return false;
+    return atlas_page_create(t, t->atlas_page_count);
+}
+
+static void atlas_upload_rect(flux_text *t, uint8_t page, uint32_t x, uint32_t y, uint32_t w,
+                              uint32_t h) {
+    flux_image *img = (page < TXT_ATLAS_MAX_PAGES) ? t->atlas_pages[page] : NULL;
+    if (!img || !t->dev)
         return;
 
     size_t row_bytes = (size_t)w;
     size_t upload_bytes = row_bytes * h;
 
     if (row_bytes == (size_t)ATLAS_W && x == 0) {
-        (void)flux_image_update_region(t->atlas, x, y, w, h,
+        (void)flux_image_update_region(img, x, y, w, h,
                                        t->atlas_pixels + (size_t)y * ATLAS_W + x, upload_bytes);
     } else {
-        uint8_t *tmp = malloc(upload_bytes);
-        if (!tmp)
-            return;
+        /* Tight-row staging. This sits on the hottest text path (every
+         * atlas flush whose dirty box is narrower than the full texture),
+         * so the scratch buffer is retained on the context and reused
+         * across flushes rather than paying malloc/free per flush. */
+        if (!t->atlas_upload_scratch || t->atlas_upload_scratch_cap < upload_bytes) {
+            free(t->atlas_upload_scratch);
+            t->atlas_upload_scratch = malloc(upload_bytes);
+            if (!t->atlas_upload_scratch) {
+                t->atlas_upload_scratch_cap = 0;
+                return;
+            }
+            t->atlas_upload_scratch_cap = upload_bytes;
+        }
+        uint8_t *tmp = t->atlas_upload_scratch;
         for (uint32_t row = 0; row < h; row++) {
             memcpy(tmp + row * row_bytes, t->atlas_pixels + (size_t)(y + row) * ATLAS_W + x,
                    row_bytes);
         }
-        (void)flux_image_update_region(t->atlas, x, y, w, h, tmp, upload_bytes);
-        free(tmp);
+        (void)flux_image_update_region(img, x, y, w, h, tmp, upload_bytes);
     }
 }
 
@@ -197,32 +263,53 @@ static void blit_glyph(flux_text *t, glyph_entry *e, FT_GlyphSlot g) {
  * check (flux_glyph_run_host_atlas_desc). */
 static void atlas_clear(flux_text *t) {
     t->atlas_clears++;
-    if (t->atlas) {
-        /* Complete the old image's pending uploads before the swap so the
-         * quads already emitted against it sample finished texels. */
-        txt_atlas_flush(t);
+    /* Flush every page's pending dirty box first so quads already emitted
+     * against any page sample finished texels (see the invalidation
+     * contract below — it now spans every page). */
+    txt_atlas_flush(t);
 
-        flux_image *old = t->atlas;
+    /* The clear must invalidate every page's texels wholesale: cache
+     * entries carry (page, x, y) and any page's contents may be
+     * rearranged by subsequent packing. Retire every page image, then
+     * recreate only page 0. flux_image_release parks each old image on
+     * the device retire queue (recorded segments hold their own retain),
+     * so old UVs stay self-consistent with old contents until every
+     * referencing batch has retired. */
+    for (uint8_t p = 0; p < t->atlas_page_count && p < TXT_ATLAS_MAX_PAGES; p++) {
+        flux_image *old = t->atlas_pages[p];
+        t->atlas_pages[p] = NULL;
+        if (p > 0 && old)
+            flux_image_release(old);
+    }
+    if (t->atlas_page_count > 0 && t->atlas_pages[0] == NULL && t->dev) {
         flux_image_desc d = {
             .type = FLUX_TYPE_IMAGE_DESC,
             .width = ATLAS_W,
             .height = ATLAS_H,
             .format = FLUX_FORMAT_R8_UNORM,
         };
-        if (flux_image_create(t->dev, &d, &t->atlas) != FLUX_OK) {
-            /* Allocation failure: keep the old image and accept the legacy
-             * rearrangement hazard rather than losing the atlas outright. */
-            t->atlas = old;
-            txt_logf(t, FLUX_LOG_ERROR, "atlas image recreate failed; reusing stale image");
-        } else {
-            flux_image_release(old);
+        if (flux_image_create(t->dev, &d, &t->atlas_pages[0]) != FLUX_OK) {
+            /* Allocation failure: keep no atlas image and accept the
+             * degraded (blank glyph) hazard rather than reusing stale
+             * texels under rearranged UVs. */
+            t->atlas_pages[0] = NULL;
+            txt_logf(t, FLUX_LOG_ERROR, "atlas image recreate failed; glyphs will re-rasterise");
         }
+    }
+    t->atlas_page_count = t->atlas_pages[0] ? 1 : 0;
+    t->atlas_page = 0;
+    t->atlas = t->atlas_pages[0];
+    for (uint8_t p = 0; p < TXT_ATLAS_MAX_PAGES; p++) {
+        t->atlas_page_cursor_x[p] = 0;
+        t->atlas_page_cursor_y[p] = 0;
+        t->atlas_page_row_height[p] = 0;
+        t->atlas_page_dirty[p] = false;
     }
     t->atlas_cursor_x = 0;
     t->atlas_cursor_y = 0;
     t->atlas_row_height = 0;
-    glyph_cache_clear(t->cache);
     t->atlas_dirty = false;
+    glyph_cache_clear(t->cache);
 }
 
 /* ------------------------------------------------------------------ */
@@ -240,31 +327,43 @@ void txt_atlas_mark_dirty(flux_text *t, uint16_t x, uint16_t y, uint16_t w, uint
         return;
     uint16_t x1 = x + w;
     uint16_t y1 = y + h;
-    if (!t->atlas_dirty) {
-        t->atlas_dirty_x0 = x;
-        t->atlas_dirty_y0 = y;
-        t->atlas_dirty_x1 = x1;
-        t->atlas_dirty_y1 = y1;
-        t->atlas_dirty = true;
+    uint8_t page = t->atlas_page;
+    if (!t->atlas_page_dirty[page]) {
+        t->atlas_page_dirty_x0[page] = x;
+        t->atlas_page_dirty_y0[page] = y;
+        t->atlas_page_dirty_x1[page] = x1;
+        t->atlas_page_dirty_y1[page] = y1;
+        t->atlas_page_dirty[page] = true;
     } else {
-        if (x < t->atlas_dirty_x0)
-            t->atlas_dirty_x0 = x;
-        if (y < t->atlas_dirty_y0)
-            t->atlas_dirty_y0 = y;
-        if (x1 > t->atlas_dirty_x1)
-            t->atlas_dirty_x1 = x1;
-        if (y1 > t->atlas_dirty_y1)
-            t->atlas_dirty_y1 = y1;
+        if (x < t->atlas_page_dirty_x0[page])
+            t->atlas_page_dirty_x0[page] = x;
+        if (y < t->atlas_page_dirty_y0[page])
+            t->atlas_page_dirty_y0[page] = y;
+        if (x1 > t->atlas_page_dirty_x1[page])
+            t->atlas_page_dirty_x1[page] = x1;
+        if (y1 > t->atlas_page_dirty_y1[page])
+            t->atlas_page_dirty_y1[page] = y1;
     }
+    /* Compatibility view: the legacy single dirty box follows the current
+     * page so external readers (stats) see something coherent. */
+    t->atlas_dirty = t->atlas_page_dirty[page];
+    t->atlas_dirty_x0 = t->atlas_page_dirty_x0[page];
+    t->atlas_dirty_y0 = t->atlas_page_dirty_y0[page];
+    t->atlas_dirty_x1 = t->atlas_page_dirty_x1[page];
+    t->atlas_dirty_y1 = t->atlas_page_dirty_y1[page];
 }
 
 void txt_atlas_flush(flux_text *t) {
-    if (!t->atlas_dirty)
-        return;
-    uint32_t w = (uint32_t)t->atlas_dirty_x1 - t->atlas_dirty_x0;
-    uint32_t h = (uint32_t)t->atlas_dirty_y1 - t->atlas_dirty_y0;
-    atlas_upload_rect(t, t->atlas_dirty_x0, t->atlas_dirty_y0, w, h);
-    t->atlas_dirty = false;
+    for (uint8_t p = 0; p < t->atlas_page_count && p < TXT_ATLAS_MAX_PAGES; p++) {
+        if (!t->atlas_page_dirty[p])
+            continue;
+        uint32_t w = (uint32_t)t->atlas_page_dirty_x1[p] - t->atlas_page_dirty_x0[p];
+        uint32_t h = (uint32_t)t->atlas_page_dirty_y1[p] - t->atlas_page_dirty_y0[p];
+        atlas_upload_rect(t, p, t->atlas_page_dirty_x0[p], t->atlas_page_dirty_y0[p], w, h);
+        t->atlas_page_dirty[p] = false;
+        if (p == t->atlas_page)
+            t->atlas_dirty = false;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -303,6 +402,7 @@ glyph_entry *txt_glyph_get(flux_text *t, int face_id, uint32_t gid, uint32_t rpx
     e->h = gh;
     e->left = g->bitmap_left;
     e->top = g->bitmap_top;
+    e->atlas_page = t->atlas_page;
 
     if (gw == 0 || gh == 0) {
         e->atlas_x = 0;
@@ -312,19 +412,27 @@ glyph_entry *txt_glyph_get(flux_text *t, int face_id, uint32_t gid, uint32_t rpx
 
     uint16_t ax, ay;
     if (!atlas_alloc(t, gw, gh, &ax, &ay)) {
-        /* Atlas texture full. Clear everything (O(1) — no
-         * re-rasterisation) and retry on the empty atlas. The clear
-         * invalidated the entry we just put, so re-add it. */
-        atlas_clear(t);
-        e = glyph_cache_put(t->cache, face_id, gid, rpx, phase);
-        if (!e)
-            return NULL;
-        e->w = gw;
-        e->h = gh;
-        e->left = g->bitmap_left;
-        e->top = g->bitmap_top;
-        if (!atlas_alloc(t, gw, gh, &ax, &ay))
-            return NULL; /* glyph larger than the entire atlas */
+        /* Current page full. Prefer opening a fresh page (keeps every
+         * cached glyph alive) over the wholesale clear; fall back to the
+         * clear only at the page cap. */
+        if (atlas_advance_page(t) && atlas_alloc(t, gw, gh, &ax, &ay)) {
+            e->atlas_page = t->atlas_page;
+        } else {
+            /* Page cap reached (or new-page allocation failed): legacy
+             * O(1) full reclaim. The clear invalidated the entry we just
+             * put, so re-add it. */
+            atlas_clear(t);
+            e = glyph_cache_put(t->cache, face_id, gid, rpx, phase);
+            if (!e)
+                return NULL;
+            e->w = gw;
+            e->h = gh;
+            e->left = g->bitmap_left;
+            e->top = g->bitmap_top;
+            e->atlas_page = t->atlas_page;
+            if (!atlas_alloc(t, gw, gh, &ax, &ay))
+                return NULL; /* glyph larger than the entire atlas */
+        }
     }
 
     e->atlas_x = ax;

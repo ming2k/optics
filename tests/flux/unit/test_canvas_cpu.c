@@ -265,6 +265,72 @@ int main(void) {
     pd.render_width = 0;
     pd.render_height = 0;
     EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
+
+    /* ---- Antialias create-time policy (flux_canvas_antialias_desc) -----
+     *
+     * The CPU oracle's 4x supersampling mirrors GPU 4x MSAA and must stay
+     * the default (the cross-platform consistency test depends on it).
+     * FLUX_CANVAS_ANTIALIAS_NONE must select the aliased 1-sample buffer:
+     * identical flat interiors, 4x less sample-buffer memory. */
+    {
+        flux_canvas *ss2 = nullptr, *ss1 = nullptr;
+        EXPECT(flux_canvas_create_cpu(64, 64, 1.0f, &ss2) == FLUX_OK);
+        EXPECT(flux_canvas_create_cpu_aa(64, 64, 1.0f, FLUX_CANVAS_ANTIALIAS_NONE, &ss1) ==
+               FLUX_OK);
+
+        flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
+        EXPECT(flux_canvas_cpu_begin(ss2, &black) == FLUX_OK);
+        flux_canvas_fill_rect_color(ss2, (flux_rect){16, 16, 32, 32},
+                                    flux_color_rgba_premul(255, 0, 0, 255));
+        flux_canvas_cpu_end(ss2);
+        EXPECT(flux_canvas_cpu_begin(ss1, &black) == FLUX_OK);
+        flux_canvas_fill_rect_color(ss1, (flux_rect){16, 16, 32, 32},
+                                    flux_color_rgba_premul(255, 0, 0, 255));
+        flux_canvas_cpu_end(ss1);
+
+        uint32_t w2, h2, st2, w1, h1, st1;
+        const uint8_t *p2 = flux_canvas_cpu_pixels(ss2, &w2, &h2, &st2);
+        const uint8_t *p1 = flux_canvas_cpu_pixels(ss1, &w1, &h1, &st1);
+        EXPECT(p2 && p1 && w2 == 64 && w1 == 64);
+
+        /* Flat interiors must be byte-identical: supersampling only
+         * affects coverage edges. */
+        int interior_mismatch = 0, solid2 = 0, solid1 = 0;
+        for (uint32_t y = 0; y < 64; ++y) {
+            for (uint32_t x = 0; x < 64; ++x) {
+                const uint8_t *q2 = p2 + y * st2 + x * 4;
+                const uint8_t *q1 = p1 + y * st1 + x * 4;
+                if (x >= 18 && x < 46 && y >= 18 && y < 46 && q2[0] != q1[0])
+                    interior_mismatch++;
+                if (q2[0] > 200)
+                    solid2++;
+                if (q1[0] > 200)
+                    solid1++;
+            }
+        }
+        EXPECT(interior_mismatch == 0);
+        EXPECT(solid2 >= 32 * 32);
+        EXPECT(solid1 >= 32 * 32);
+
+        flux_canvas_destroy(ss2);
+        flux_canvas_destroy(ss1);
+    }
+
+    /* The descriptor route honours the same extension. */
+    {
+        flux_canvas_antialias_desc aa = FLUX_CANVAS_ANTIALIAS_DESC_INIT;
+        aa.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
+        flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
+        cd.backend = FLUX_CANVAS_BACKEND_CPU;
+        cd.width = 8;
+        cd.height = 8;
+        cd.next = &aa;
+        flux_canvas *c = nullptr;
+        EXPECT(flux_canvas_create(&cd, &c) == FLUX_OK);
+        EXPECT(c != nullptr);
+        flux_canvas_destroy(c);
+    }
+
     flux_canvas_destroy(c);
 
     TEST_SUMMARY();

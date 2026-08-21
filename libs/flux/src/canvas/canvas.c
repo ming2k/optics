@@ -72,8 +72,32 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
     flux_canvas_backend_kind kind = desc->backend;
     if (kind == FLUX_CANVAS_BACKEND_AUTO)
         kind = desc->surface ? FLUX_CANVAS_BACKEND_GPU : FLUX_CANVAS_BACKEND_CPU;
-    if (kind == FLUX_CANVAS_BACKEND_CPU)
-        return flux_canvas_create_cpu(desc->width, desc->height, desc->scale, out);
+    if (kind == FLUX_CANVAS_BACKEND_CPU) {
+        /* Parse the optional antialias extension so an explicit NONE can
+         * select the aliased 1-sample buffer at create time. Absent
+         * extension (or AUTO/MSAA_4X) keeps the supersampled oracle
+         * default, so existing callers are unchanged. */
+        flux_canvas_antialias aa = FLUX_CANVAS_ANTIALIAS_AUTO;
+        const struct {
+            flux_struct_type type;
+            const void *next;
+        } *ext = desc->next;
+        while (ext) {
+            if (ext->type == FLUX_TYPE_CANVAS_ANTIALIAS_DESC) {
+                const flux_canvas_antialias_desc *aa_desc = (const void *)ext;
+                if (aa_desc->antialias != FLUX_CANVAS_ANTIALIAS_AUTO &&
+                    aa_desc->antialias != FLUX_CANVAS_ANTIALIAS_NONE &&
+                    aa_desc->antialias != FLUX_CANVAS_ANTIALIAS_MSAA_4X) {
+                    FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                              "invalid Canvas antialias extension value");
+                    return FLUX_ERROR_INVALID_ARGUMENT;
+                }
+                aa = aa_desc->antialias;
+            }
+            ext = ext->next;
+        }
+        return flux_canvas_create_cpu_aa(desc->width, desc->height, desc->scale, aa, out);
+    }
 
     if (!desc->surface) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "GPU canvas requires a surface");

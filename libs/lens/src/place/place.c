@@ -217,8 +217,10 @@ void lens_place_end(lens *ui) {
 /* ---- band bucketing: the single emission-order choke point -------- */
 
 static void band_push(lens *ui, lens_band band, lens_node *n) {
-    if (ui->band_counts[band] == ui->band_caps[band]) {
-        uint32_t nc = ui->band_caps[band] ? ui->band_caps[band] * 2 : 4;
+    if (!ui->bands[band] || ui->band_counts[band] == ui->band_caps[band]) {
+        uint32_t nc = ui->band_caps[band] ? ui->band_caps[band] : 4;
+        if (ui->bands[band] && ui->band_counts[band] == nc)
+            nc = nc * 2;
         lens_node **na = flux_arena_alloc(&ui->arena, nc * sizeof *na);
         if (!na) {
             lensi_set_overflow(ui);

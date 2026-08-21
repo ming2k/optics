@@ -196,6 +196,14 @@ struct flux_canvas {
      * needs no surface handle while recording (the CPU backend has none). */
     uint32_t fb_width, fb_height;
 
+    /* Create-time antialiasing request (from flux_canvas_desc::antialias).
+     * Per-pass policy stays in canvas_pass_config; this field exists so the
+     * CPU backend can size its sample buffer once, at create time: NONE
+     * allocates a 1-sample-per-pixel buffer (4x less memory and raster
+     * work), AUTO/MSAA_4X keep the supersampled oracle default. The GPU
+     * backend ignores it (its MSAA choice is per pass). */
+    flux_canvas_antialias create_antialias;
+
     /* Content scale (device-pixel ratio). The base transform at index 0 is
      * this scale, so callers draw in logical units; 1.0 means logical ==
      * physical. flux_text reads it via flux_canvas_get_scale. */
