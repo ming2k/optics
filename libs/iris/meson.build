@@ -96,9 +96,14 @@ if host_system == 'linux'
       wl.find_protocol('text-input', state : 'unstable', version : 3),
       wl.find_protocol('fractional-scale', state : 'staging', version : 1),
       wl.find_protocol('primary-selection', state : 'unstable', version : 1),
+      # Pen/tablet input (tablet_wayland.c): pressure, eraser end, barrel
+      # buttons. Compositors without tablets simply don't advertise the
+      # global; the bridge stays inert.
+      wl.find_protocol('tablet', state : 'unstable', version : 2),
       'protocol/cursor-shape-v1.xml',
     )
     iris_sources += iris_proto_src
+    iris_sources += files('src/tablet_wayland.c')
   else
     warning('Wayland backend skipped: wayland-client / xkbcommon / vulkan not found')
     iris_c_args += '-DIRIS_BUILD_NO_BACKEND=1'

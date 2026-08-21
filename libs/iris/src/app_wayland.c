@@ -12,6 +12,7 @@
 #include "platform_internal.h"
 #include "platform_text.h"
 #include "platform_wakeup.h"
+#include "tablet_wayland.h"
 #include "theme_watch_internal.h"
 
 #include <iris/a11y.h>
@@ -25,6 +26,7 @@
 #include <vulkan/vulkan_wayland.h>
 
 #include "primary-selection-unstable-v1-client-protocol.h"
+#include "tablet-unstable-v2-client-protocol.h"
 #include "text-input-unstable-v3-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-foreign-unstable-v2-client-protocol.h"
@@ -1840,6 +1842,36 @@ static void wp_maybe_create_text_input(wp_platform *pl) {
         zwp_text_input_v3_add_listener(pl->text_input, &text_input_listener, pl);
 }
 
+/* Tablet bridge (tablet_wayland.c): pen events land in the same
+ * accumulator the mouse uses — motion → cursor, tip → LEFT, barrel →
+ * RIGHT/MIDDLE — so every existing widget works with a pen unchanged. */
+static void tablet_motion(void *user, double x, double y) {
+    wp_platform *pl = user;
+    pl->acc.cx = x;
+    pl->acc.cy = y;
+}
+static void tablet_button(void *user, int i, bool down) {
+    wp_platform *pl = user;
+    if (down && !pl->acc.down[i])
+        pl->acc.pressed[i] = true;
+    if (!down && pl->acc.down[i])
+        pl->acc.released[i] = true;
+    pl->acc.down[i] = down;
+}
+static void tablet_serial(void *user, uint32_t serial) {
+    wp_platform *pl = user;
+    pl->last_serial = serial;
+}
+static const iris_tablet_host tablet_host_bridge = {
+    /* The platform is a stack object inside iris_app_run_wayland; the
+     * registry (and thus tablet globals) can only arrive during that
+     * call, where this pointer is set before dispatch starts. */
+    .user = NULL,
+    .motion = tablet_motion,
+    .button = tablet_button,
+    .serial = tablet_serial,
+};
+
 static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
     wp_platform *pl = data;
     bool has_ptr = caps & WL_SEAT_CAPABILITY_POINTER;
@@ -2127,6 +2159,10 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
         pl->seat = wl_registry_bind(reg, name, &wl_seat_interface, version < 5 ? version : 5);
         pl->seat_name = name;
         wl_seat_add_listener(pl->seat, &seat_listener, pl);
+        iris_wayland__tablet_attach_seat(pl->seat);
+    } else if (strcmp(iface, zwp_tablet_manager_v2_interface.name) == 0) {
+        /* Pen input (see tablet_wayland.c); no tablet → inert no-ops. */
+        iris_wayland__tablet_bind_manager(reg, name, version, &tablet_host_bridge);
     } else if (strcmp(iface, wl_output_interface.name) == 0) {
         if (pl->n_outputs < WP_MAX_OUTPUTS) {
             /* version 2 introduces .scale; ask for it if available. */
@@ -2305,6 +2341,7 @@ static void drain_input(wp_platform *pl, lens_input *in, float dt) {
         in->ime_delete_before = pl->ime.delete_before;
         in->ime_delete_after = pl->ime.delete_after;
     }
+    iris_wayland__tablet_fill_input(in);
 
     /* clear per-frame edges; keep level state (down/cursor/mods) */
     for (int i = 0; i < LENS_MOUSE_COUNT; i++)
@@ -2577,6 +2614,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
      * iris_set_cursor() can reach it. Cleared on the way out (success
      * or fail). */
     g_active_pl = &pl;
+    /* Tablet bridge needs the (stack) platform for its host callbacks. */
+    *(wp_platform **)&tablet_host_bridge.user = &pl;
 
     /* --- Wayland connection + globals ---------------------------- */
     pl.display = wl_display_connect(NULL);

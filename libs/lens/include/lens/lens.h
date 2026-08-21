@@ -161,6 +161,19 @@ typedef struct lens_input {
      * preedit_utf8; zero means no deletion requested this frame. */
     uint32_t ime_delete_before;
     uint32_t ime_delete_after;
+
+    /* Tablet / pen state this frame (size-guarded append; hosts built
+     * against older headers keep working — lens reads these only when
+     * `size` covers them). `pen_active` is true while a tool is in
+     * proximity AND down; `pen_pressure` is normalised 0..1 (hosts should
+     * pass 1.0 for tools without pressure so opacity math degrades to
+     * full). `pen_tool` distinguishes eraser-end from tip. Mouse input
+     * arrives exactly as before; a frame can carry both (a user mixing
+     * devices), and widgets that only read the mouse fields are
+     * unaffected. */
+    bool pen_active;
+    float pen_pressure;
+    bool pen_eraser;
 } lens_input;
 
 /* Host clipboard interface (ADR-0036). Supplied in lens_desc; optional.
