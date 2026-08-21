@@ -295,9 +295,43 @@ static void test_icon_button_requests_pointer_cursor(void) {
     lens_destroy(ui);
 }
 
+
+static void test_button_mouse_secondary(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    /* Establish geometry. */
+    lens_begin(ui, &IN0);
+    lens_button(ui, "sw");
+    lens_end(ui);
+
+    /* Right-press then right-release inside: lens_button_mouse(RIGHT)
+     * reports it; lens_button (left) does not. */
+    lens_input in = IN0;
+    in.cursor = (flux_point){20, 20};
+    in.mouse_down[LENS_MOUSE_RIGHT] = true;
+    in.mouse_pressed[LENS_MOUSE_RIGHT] = true;
+    lens_begin(ui, &in);
+    lens_button(ui, "sw");
+    lens_end(ui);
+
+    in = IN0;
+    in.cursor = (flux_point){20, 20};
+    in.mouse_released[LENS_MOUSE_RIGHT] = true;
+    lens_begin(ui, &in);
+    bool right = lens_button_mouse(ui, "sw", LENS_MOUSE_RIGHT);
+    bool left = lens_button(ui, "sw");
+    lens_end(ui);
+    CHECK(right);
+    CHECK(!left);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_link_click_and_intrinsic_size();
     test_button_click();
+    test_button_mouse_secondary();
     test_button_no_click_when_disabled();
     test_badged_icon_button_respects_tile_size();
     test_material_rounded_star_pair_uses_filled_svg_paths();

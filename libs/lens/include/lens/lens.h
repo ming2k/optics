@@ -513,6 +513,15 @@ LENS_API lens_text_metrics lens_text_measure(lens *ui, lens_font *font, const ch
 LENS_API lens_text_metrics lens_text_measure_ex(lens *ui, lens_font *font, const char *utf8,
                                                 float size_px, float weight);
 
+/* Release the text engine's high-water scratch and shaping cache (the
+ * shared engine's `flux_text_compact`). The engine grows layout/run/
+ * codepoint scratch to the largest text ever shaped and keeps it; for a
+ * one-off megabyte paste that peak lingers for the session. Call this
+ * from the host's idle path (iris does, on the low-power frame cadence)
+ * — cheap enough to call every frame, and the next measure/draw
+ * reallocates to whatever it actually needs. Null-safe. */
+LENS_API void lens_text_compact(lens *ui);
+
 /* ================================================================== */
 /*  Widget skins (ADR-0059)                                           */
 /*                                                                    */
@@ -915,6 +924,12 @@ LENS_API void lens_spacer(lens *ui, float size);     /* fixed empty main-axis ga
  * row or an explicit min_height arranges the button taller than its
  * intrinsic padded height. */
 LENS_API bool lens_button(lens *ui, const char *label);
+
+/* Same widget with an explicit mouse button: true when that button was
+ * pressed and released inside it this frame. Use for slots where the
+ * secondary buttons carry meaning (palette swatches, tree rows);
+ * everything else should stay with lens_button. */
+LENS_API bool lens_button_mouse(lens *ui, const char *label, int button);
 /* Inline text action for breadcrumbs and secondary navigation. It has no
  * surface at rest and indicates hover/focus with an accent underline without
  * changing the text's size or weight. */

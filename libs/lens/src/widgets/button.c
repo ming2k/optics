@@ -10,7 +10,7 @@
  * The style is the cascade-effective one (ADR-0061: per-call box.style >
  * scope > theme); with nothing set anywhere the built-in default skin
  * renders the themed default, pixel-identical. */
-static bool button_impl(lens *ui, const char *label) {
+static bool button_ex_impl(lens *ui, const char *label, lens_response *out) {
     const lens_theme *t = &ui->theme;
     bool disabled = ui->next_disabled;
     ui->next_disabled = false;
@@ -61,11 +61,31 @@ static bool button_impl(lens *ui, const char *label) {
                     });
 
     ui->last_response = r;
+    if (out)
+        *out = r;
     return r.clicked;
+}
+
+static bool button_impl(lens *ui, const char *label) {
+    return button_ex_impl(ui, label, NULL);
 }
 
 bool lens_button(lens *ui, const char *label) {
     return button_impl(ui, label);
+}
+
+bool lens_button_mouse(lens *ui, const char *label, int button) {
+    /* Click variants for widgets where secondary buttons carry meaning
+     * (palette slots: right-click re-colours). The interaction layer has
+     * always tracked them (lens_response); only the button wrapper
+     * forced them to LEFT. */
+    lens_response r;
+    button_ex_impl(ui, label, &r);
+    switch (button) {
+    case LENS_MOUSE_RIGHT: return r.right_clicked;
+    case LENS_MOUSE_MIDDLE: return r.middle_clicked;
+    default: return r.clicked;
+    }
 }
 
 bool lens_link(lens *ui, const char *label) {

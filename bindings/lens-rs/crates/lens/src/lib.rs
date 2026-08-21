@@ -1242,6 +1242,21 @@ impl Frame {
         unsafe { sys::lens_button(self.ui, c.as_ptr()) }
     }
 
+    /// [`Self::button`] with an explicit mouse button — true when *that*
+    /// button was pressed and released inside the widget this frame. For
+    /// slots where secondary clicks carry meaning (palette swatches);
+    /// ordinary buttons should keep [`Self::button`].
+    pub fn button_mouse(&mut self, label: &str, button: MouseButton) -> bool {
+        let c = cstr(label);
+        let raw = match button {
+            MouseButton::Left => sys::lens_mouse_button::LENS_MOUSE_LEFT,
+            MouseButton::Right => sys::lens_mouse_button::LENS_MOUSE_RIGHT,
+            MouseButton::Middle => sys::lens_mouse_button::LENS_MOUSE_MIDDLE,
+        };
+        // SAFETY: ui is live; c outlives the call; raw is the lens index.
+        unsafe { sys::lens_button_mouse(self.ui, c.as_ptr(), raw as i32) }
+    }
+
     /// A lightweight inline text action for breadcrumbs and secondary
     /// navigation. It remains plain text at rest and gains an accent
     /// underline on hover/focus without changing size or weight.
