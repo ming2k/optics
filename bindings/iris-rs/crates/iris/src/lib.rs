@@ -713,7 +713,7 @@ pub fn file_uri_to_path(uri: &str) -> Option<String> {
     String::from_utf8(buf).ok()
 }
 
-/// Library version string ("0.0.23" at the time of writing).
+/// Library version string ("0.0.24" at the time of writing).
 pub fn version() -> &'static str {
     unsafe {
         std::ffi::CStr::from_ptr(sys::iris_version_string())
