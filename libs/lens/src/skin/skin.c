@@ -62,12 +62,78 @@ lens_skin_fn lens_default_skin(lens_widget_kind kind) {
 }
 
 void lens_set_skin(lens *ui, lens_widget_kind kind, lens_skin_fn fn) {
-    if (!ui || kind >= LENS_WIDGET_KIND_COUNT)
+    if (!ui)
+        return;
+    /* Host-reserved range (ADR-0073): routed to the side table, never the
+     * count-sized library arrays. */
+    if ((uint32_t)kind >= (uint32_t)LENS_WIDGET_KIND_USER_BASE) {
+        uint32_t i = (uint32_t)kind - (uint32_t)LENS_WIDGET_KIND_USER_BASE;
+        if (i >= LENSI_USER_SKIN_MAX)
+            return;
+        ui->user_skins[i] = fn;
+        if (fn) {
+            ui->user_skins_userdata[i] = NULL;
+            ui->user_skins_user[i] = NULL;
+        }
+        return;
+    }
+    if (kind >= LENS_WIDGET_KIND_COUNT)
         return;
     ui->skins[kind] = fn; /* NULL restores the built-in default */
+    if (fn) {
+        /* The plain form supersedes a userdata registration for this kind;
+         * clearing it keeps "last registration wins" predictable. */
+        ui->skins_userdata[kind] = NULL;
+        ui->skins_user[kind] = NULL;
+    }
+}
+
+void lens_set_skin_userdata(lens *ui, lens_widget_kind kind, lens_skin_userdata_fn fn,
+                            void *user) {
+    if (!ui)
+        return;
+    if ((uint32_t)kind >= (uint32_t)LENS_WIDGET_KIND_USER_BASE) {
+        uint32_t i = (uint32_t)kind - (uint32_t)LENS_WIDGET_KIND_USER_BASE;
+        if (i >= LENSI_USER_SKIN_MAX)
+            return;
+        ui->user_skins_userdata[i] = fn;
+        ui->user_skins_user[i] = user;
+        if (fn)
+            ui->user_skins[i] = NULL;
+        return;
+    }
+    if (kind >= LENS_WIDGET_KIND_COUNT)
+        return;
+    ui->skins_userdata[kind] = fn;
+    ui->skins_user[kind] = user;
+    if (fn)
+        ui->skins[kind] = NULL; /* userdata form wins; see internal.h */
 }
 
 void lensi_skin_emit(lens *ui, lens_node *n, const lens_widget_record *rec) {
+    /* User-kind lookup first (ADR-0073): no built-in default exists there,
+     * so a missing host skin means no emission — by design. */
+    if ((uint32_t)rec->kind >= (uint32_t)LENS_WIDGET_KIND_USER_BASE) {
+        uint32_t i = (uint32_t)rec->kind - (uint32_t)LENS_WIDGET_KIND_USER_BASE;
+        if (i >= LENSI_USER_SKIN_MAX)
+            return;
+        lens_skin_userdata_fn ufn = ui->user_skins_userdata[i];
+        if (ufn) {
+            ufn(ui, n, rec, ui->user_skins_user[i]);
+            return;
+        }
+        lens_skin_fn fn = ui->user_skins[i];
+        if (fn)
+            fn(ui, n, rec);
+        return;
+    }
+    if (rec->kind < LENS_WIDGET_KIND_COUNT) {
+        lens_skin_userdata_fn ufn = ui->skins_userdata[rec->kind];
+        if (ufn) {
+            ufn(ui, n, rec, ui->skins_user[rec->kind]);
+            return;
+        }
+    }
     lens_skin_fn fn = NULL;
     if (rec->kind < LENS_WIDGET_KIND_COUNT)
         fn = ui->skins[rec->kind];
@@ -75,6 +141,16 @@ void lensi_skin_emit(lens *ui, lens_node *n, const lens_widget_record *rec) {
         fn = lens_default_skin(rec->kind);
     if (fn)
         fn(ui, n, rec);
+}
+
+void lens_skin_emit_user(lens *ui, lens_node *node, lens_widget_kind kind,
+                         lens_widget_record rec) {
+    if (!ui || !node)
+        return;
+    if ((uint32_t)kind < (uint32_t)LENS_WIDGET_KIND_USER_BASE)
+        return; /* built-ins own their emission; see lens.h */
+    rec.kind = kind;
+    lensi_skin_emit(ui, node, &rec);
 }
 
 /* ---- per-node scratch (ADR-0061 item 9) ---------------------------- */

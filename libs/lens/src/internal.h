@@ -277,6 +277,7 @@ struct lens {
 
     lens_input input;    /* copy for the frame */
     bool overflow;       /* arena overflowed this frame */
+    bool duplicate_ids;  /* a parent received the same child id twice */
     bool anim_pending;   /* an eased value is still in transit this
                           * frame; the host should schedule another
                           * frame so the animation can settle even
@@ -407,6 +408,18 @@ struct lens {
     /* skin overrides (ADR-0059): per-kind replacement emission functions;
      * NULL entries use the built-in default. */
     lens_skin_fn skins[LENS_WIDGET_KIND_COUNT];
+    /* Userdata-skin overrides (lens_set_skin_userdata). A kind has either
+     * a plain skin or a userdata skin — the userdata form wins if both
+     * were registered, matching "the most specific registration". */
+    lens_skin_userdata_fn skins_userdata[LENS_WIDGET_KIND_COUNT];
+    void *skins_user[LENS_WIDGET_KIND_COUNT];
+    /* Host-reserved kinds (>= LENS_WIDGET_KIND_USER_BASE, ADR-0073) keyed
+     * by offset from the base; the side table keeps the count-sized
+     * library arrays untouched. */
+#define LENSI_USER_SKIN_MAX 64
+    lens_skin_userdata_fn user_skins_userdata[LENSI_USER_SKIN_MAX];
+    void *user_skins_user[LENSI_USER_SKIN_MAX];
+    lens_skin_fn user_skins[LENSI_USER_SKIN_MAX];
 
     /* display-list records (render/replay.c). record_canvas owns the
      * per-node segments (borrowed; refreshed every lensi_render_tree —
