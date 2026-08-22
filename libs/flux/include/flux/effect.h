@@ -13,10 +13,9 @@
  *   epoch. The returned flux_image * remains valid until
  *   flux_effect_reset(device) or device destruction.
  *
- *   To take a long-lived copy, run the effect and then copy the
- *   result into a caller-owned flux_image via the canvas/image
- *   surface (a dedicated "promote to owned" helper may land
- *   later if a real consumer needs it).
+ *   To take a long-lived copy, run the effect and then
+ *   flux_effect_promote() the leased image into a caller-owned,
+ *   refcounted flux_image (see below).
  *
  * Threading
  *   Effects are not thread-safe per device. Serialize calls per

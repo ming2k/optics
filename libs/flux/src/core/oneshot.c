@@ -1235,3 +1235,135 @@ fail:
     }
     return FLUX_OK;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Public one-shot submission (flux_oneshot_*, vulkan.h)             */
+/* ------------------------------------------------------------------ */
+/* Thin, safe publication of the sequence this file already implements:
+ * transient pool -> ONE_TIME_SUBMIT begin -> graphics-queue submit with
+ * a finite fence wait -> recycle. Headless effect users previously had
+ * no flux path for this at all (effect.h demanded a caller-supplied
+ * one-shot command buffer and a prior vkQueueWaitIdle while owning the
+ * only queues). */
+
+FLUX_API flux_result flux_oneshot_begin(flux_device *d, VkCommandBuffer *out_cmd) {
+    if (!d || !out_cmd)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_cmd = VK_NULL_HANDLE;
+
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkResult vr = flux_vk_new_transient_cmd(d, d->graphics_family, &pool, &cmd);
+    if (vr != VK_SUCCESS) {
+        flux_result r = submit_result(vr);
+        FLUX_FAIL_VK(r, "flux_oneshot_begin: transient command buffer failed", vr);
+        return r;
+    }
+
+    /* The pool must outlive the caller's recording and come back to the
+     * cache only after submit; park it on the handle the caller passes
+     * back. VkCommandBuffer is an opaque pointer, so we cannot attach
+     * state to it — instead remember the (cmd -> pool) pair in a small
+     * side table guarded by staging_lock, mirroring how upload batches
+     * track theirs. */
+    flux_platform_mutex_lock(&d->staging_lock);
+    /* Grow-on-demand open-addressed table; slots freed at recycle. */
+    if (!d->oneshot_slots) {
+        d->oneshot_slots = flux_internal_alloc(d, sizeof(*d->oneshot_slots) * 8);
+        if (!d->oneshot_slots) {
+            flux_platform_mutex_unlock(&d->staging_lock);
+            transient_pool_release(d, pool, d->graphics_family, cmd, VK_NULL_HANDLE);
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        }
+        d->oneshot_slot_count = 8;
+        memset(d->oneshot_slots, 0, sizeof(*d->oneshot_slots) * d->oneshot_slot_count);
+    }
+    uint32_t slot = UINT32_MAX;
+    for (uint32_t i = 0; i < d->oneshot_slot_count; ++i) {
+        if (!d->oneshot_slots[i].cmd) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == UINT32_MAX) {
+        uint32_t new_count = d->oneshot_slot_count * 2;
+        __typeof__(d->oneshot_slots) grown =
+            flux_internal_alloc(d, sizeof(*grown) * new_count);
+        if (!grown) {
+            flux_platform_mutex_unlock(&d->staging_lock);
+            transient_pool_release(d, pool, d->graphics_family, cmd, VK_NULL_HANDLE);
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        }
+        memset(grown, 0, sizeof(*grown) * new_count);
+        memcpy(grown, d->oneshot_slots, sizeof(*grown) * d->oneshot_slot_count);
+        flux_internal_free(d, d->oneshot_slots);
+        d->oneshot_slots = grown;
+        slot = d->oneshot_slot_count;
+        d->oneshot_slot_count = new_count;
+    }
+    d->oneshot_slots[slot].pool = pool;
+    d->oneshot_slots[slot].cmd = cmd;
+    flux_platform_mutex_unlock(&d->staging_lock);
+
+    *out_cmd = cmd;
+    return FLUX_OK;
+}
+
+static flux_result fluxi_oneshot_take(flux_device *d, VkCommandBuffer cmd,
+                                      VkCommandPool *out_pool) {
+    *out_pool = VK_NULL_HANDLE;
+    if (!d || cmd == VK_NULL_HANDLE)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_platform_mutex_lock(&d->staging_lock);
+    for (uint32_t i = 0; i < d->oneshot_slot_count; ++i) {
+        if (d->oneshot_slots && d->oneshot_slots[i].cmd == cmd) {
+            *out_pool = d->oneshot_slots[i].pool;
+            d->oneshot_slots[i].cmd = VK_NULL_HANDLE;
+            d->oneshot_slots[i].pool = VK_NULL_HANDLE;
+            flux_platform_mutex_unlock(&d->staging_lock);
+            return FLUX_OK;
+        }
+    }
+    flux_platform_mutex_unlock(&d->staging_lock);
+    return FLUX_ERROR_INVALID_ARGUMENT; /* not from flux_oneshot_begin */
+}
+
+FLUX_API flux_result flux_oneshot_submit_and_end(flux_device *d, VkCommandBuffer cmd) {
+    VkCommandPool pool = VK_NULL_HANDLE;
+    flux_result take = fluxi_oneshot_take(d, cmd, &pool);
+    if (take != FLUX_OK) {
+        FLUX_FAIL(take, "flux_oneshot_submit_and_end: cmd not from flux_oneshot_begin");
+        return take;
+    }
+
+    VkResult vr = vkEndCommandBuffer(cmd);
+    if (vr != VK_SUCCESS) {
+        transient_pool_release(d, pool, d->graphics_family, cmd, VK_NULL_HANDLE);
+        flux_result r = submit_result(vr);
+        FLUX_FAIL_VK(r, "flux_oneshot_submit_and_end: vkEndCommandBuffer failed", vr);
+        return r;
+    }
+
+    vr = flux_vk_submit_and_wait(d, d->graphics_queue, cmd, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0);
+    /* submit_and_wait guarantees the batch completed (or timed out with a
+     * queue-idle fallback), so the pool is safe to recycle either way. */
+    transient_pool_release(d, pool, d->graphics_family, cmd, VK_NULL_HANDLE);
+    if (vr != VK_SUCCESS) {
+        flux_result r = submit_result(vr);
+        FLUX_FAIL_VK(r, "flux_oneshot_submit_and_end: submit/wait failed", vr);
+        return r;
+    }
+    return FLUX_OK;
+}
+
+FLUX_API flux_result flux_oneshot_run(flux_device *d, flux_oneshot_record_fn record,
+                                      void *userdata) {
+    if (!record)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    flux_result r = flux_oneshot_begin(d, &cmd);
+    if (r != FLUX_OK)
+        return r;
+    record(cmd, userdata);
+    return flux_oneshot_submit_and_end(d, cmd);
+}

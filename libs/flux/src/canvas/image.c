@@ -422,6 +422,48 @@ void flux_image_release(flux_image *im) {
         flux_device_release(d);
 }
 
+bool flux_device_supports_image_usage(const flux_device *d, flux_format format,
+                                      flux_image_usage_query usage) {
+    if (!d)
+        return false;
+
+    /* The flux format set maps 1:1 onto these Vulkan formats; the switch
+     * doubles as the "format exists at all" check. */
+    VkFormat vk;
+    switch (format) {
+    case FLUX_FORMAT_R8_UNORM:      vk = VK_FORMAT_R8_UNORM; break;
+    case FLUX_FORMAT_RGBA8_UNORM:   vk = VK_FORMAT_R8G8B8A8_UNORM; break;
+    case FLUX_FORMAT_BGRA8_UNORM:   vk = VK_FORMAT_B8G8R8A8_UNORM; break;
+    case FLUX_FORMAT_RGBA8_SRGB:    vk = VK_FORMAT_R8G8B8A8_SRGB; break;
+    case FLUX_FORMAT_BGRA8_SRGB:    vk = VK_FORMAT_B8G8R8A8_SRGB; break;
+    case FLUX_FORMAT_RGB10A2_UNORM: vk = VK_FORMAT_A2B10G10R10_UNORM_PACK32; break;
+    case FLUX_FORMAT_RGBA16_SFLOAT: vk = VK_FORMAT_R16G16B16A16_SFLOAT; break;
+    case FLUX_FORMAT_D32_SFLOAT:    vk = VK_FORMAT_D32_SFLOAT; break;
+    case FLUX_FORMAT_D24_UNORM_S8:  vk = VK_FORMAT_D24_UNORM_S8_UINT; break;
+    case FLUX_FORMAT_D32_SFLOAT_S8: vk = VK_FORMAT_D32_SFLOAT_S8_UINT; break;
+    case FLUX_FORMAT_R32_SFLOAT:    vk = VK_FORMAT_R32_SFLOAT; break;
+    case FLUX_FORMAT_RG32_SFLOAT:   vk = VK_FORMAT_R32G32_SFLOAT; break;
+    case FLUX_FORMAT_RGB32_SFLOAT:  vk = VK_FORMAT_R32G32B32_SFLOAT; break;
+    case FLUX_FORMAT_RGBA32_SFLOAT: vk = VK_FORMAT_R32G32B32A32_SFLOAT; break;
+    default: return false;
+    }
+
+    VkFormatProperties props;
+    vkGetPhysicalDeviceFormatProperties(d->physical_device, vk, &props);
+
+    switch (usage) {
+    case FLUX_IMAGE_USAGE_SAMPLED:
+        return (props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
+    case FLUX_IMAGE_USAGE_COMPUTE_WRITE:
+        /* Mirrors flux_image_create_compute_writable's policy exactly:
+         * storage access, with the sRGB-view portability carve-out. */
+        if (format == FLUX_FORMAT_RGBA8_SRGB || format == FLUX_FORMAT_BGRA8_SRGB)
+            return false;
+        return (props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
+    }
+    return false;
+}
+
 flux_result flux_image_create_compute_writable(flux_device *d, uint32_t width, uint32_t height,
                                                flux_format fmt, flux_image **out) {
     if (!d || !out)

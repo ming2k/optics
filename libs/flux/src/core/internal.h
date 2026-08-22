@@ -200,6 +200,8 @@ typedef struct flux_retire_zombie {
     VkImage image;
     VkBuffer buffer;
     VkSampler sampler;
+    VkPipeline pipeline; /* destroy-inline resources (pipelines) parked by
+                          * flux_pipeline_release_deferred */
     flux_vk_alloc alloc;
     VkDeviceMemory imported_memory;
     VkDeviceSize imported_size; /* bytes to uncount from allocator stats
@@ -331,6 +333,7 @@ struct flux_device {
     flux_drm_device_identity drm_identity;
 
     uint32_t graphics_family;
+    uint32_t graphics_queue_timestamp_valid_bits; /* 0 = timestamps unsupported */
     VkQueue graphics_queue;
 
     /* Transfer queue family — separate if available, else same as graphics. */
@@ -427,6 +430,16 @@ struct flux_device {
     bool staging_lock_initialized;
     flux_staging_buf *staging_idle;
     uint64_t staging_idle_bytes;
+
+    /* Open one-shot recordings started by the public flux_oneshot_begin
+     * (oneshot.c). Maps the handed-out VkCommandBuffer back to its
+     * transient pool so submit_and_end can recycle it. Guarded by
+     * staging_lock (a leaf lock, same as the pool cache below). */
+    struct {
+        VkCommandPool pool;
+        VkCommandBuffer cmd;
+    } *oneshot_slots;
+    uint32_t oneshot_slot_count;
 
     /* Transient command pool cache (oneshot.c). One-shot submissions
      * (uploads, layout transitions, readback) used to create + destroy
@@ -624,6 +637,11 @@ void flux_device_retire_image(flux_device *d, VkImageView view, VkImage image,
                               const flux_vk_alloc *alloc, VkDeviceMemory imported_memory,
                               VkDeviceSize imported_size, uint32_t bindless,
                               uint32_t bindless_storage);
+
+/* Park a VkPipeline for deferred destruction (flux_pipeline_release_deferred
+ * and flux_graphics_pipeline_release_deferred). Destroys it once every
+ * submitted graphics batch has completed. Thread-safe. */
+void flux_vk_retire_pipeline(flux_device *d, VkPipeline pipeline);
 /* Park a released buffer's Vulkan pieces for deferred destruction. Takes
  * ownership of buffer/alloc. Thread-safe. */
 void flux_device_retire_buffer(flux_device *d, VkBuffer buffer, const flux_vk_alloc *alloc);

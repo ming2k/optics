@@ -41,12 +41,23 @@ FLUX_NODISCARD FLUX_API flux_result flux_compute_pipeline_create(
 
 FLUX_NODISCARD FLUX_API flux_compute_pipeline *
 flux_compute_pipeline_retain(flux_compute_pipeline *p);
-/* Pipelines do NOT go through the device retire queue: release destroys
- * the VkPipeline inline. Only release once all GPU work recorded with the
- * pipeline has completed (its frame-slot fence has signalled, or after
- * flux_device_wait_idle); destroying a pipeline a batch in flight still
- * executes is a VUID-vkDestroyPipeline-pipeline-00765 violation. */
+/* DESTROY-INLINE SEMANTICS — different from every retire-queued resource
+ * (image/buffer/mesh/sampler/target), where *_release is safe at any
+ * time. Pipelines are NOT deferred: release destroys the VkPipeline
+ * inline, and destroying a pipeline a batch in flight still executes is
+ * a VUID-vkDestroyPipeline-pipeline-00765 violation. Use
+ * flux_pipeline_release_deferred() (below) to express "retire this once
+ * in-flight use completes" with the same safety the retire queue gives
+ * images — the recommended spelling whenever the pipeline was ever
+ * recorded into a frame. */
 FLUX_API void flux_compute_pipeline_release(flux_compute_pipeline *p);
+
+/* Deferred-release counterpart: parks the pipeline on the device retire
+ * queue and destroys it once every submitted batch has completed. Safe
+ * at any time, exactly like flux_image_release. Takes a reference (so
+ * caller-owned copies stay valid); the release happens on the device's
+ * timeline. `d` must be the owning device. */
+FLUX_API void flux_pipeline_release_deferred(flux_device *d, flux_compute_pipeline *p);
 
 FLUX_API VkPipeline flux_compute_pipeline_vk_pipeline(flux_compute_pipeline *p);
 FLUX_API VkPipelineLayout flux_compute_pipeline_vk_layout(flux_compute_pipeline *p);

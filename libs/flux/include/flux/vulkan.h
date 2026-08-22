@@ -110,6 +110,58 @@ FLUX_API VkDescriptorSetLayout flux_device_bindless_layout(flux_device *d);
  * thread-safe. Compute effects use it to sample their inputs. */
 FLUX_API flux_bindless_handle flux_device_default_sampler_handle(flux_device *d);
 
+/* ================================================================== */
+/*  One-shot submission (public)                                      */
+/* ================================================================== */
+/* flux owns the queues, the transient command pools, and the submit/wait
+ * plumbing — but before these existed, every headless use of the effect
+ * runtime had to either run inside a frame or hand-roll raw Vulkan for
+ * exactly the sequence the library already implements internally
+ * (effect.h asked callers to "supply a one-shot command buffer" and to
+ * have already completed a vkQueueWaitIdle, while exposing no way to do
+ * either through flux).
+ *
+ * The two-step form covers multi-pass recording (record several operators,
+ * submit once, wait once):
+ *
+ *   flux_oneshot_begin(device, &cmd);          // begin recording
+ *     flux_effect_blur_record(...)             // record effects/compute
+ *     flux_compute_pipeline_record(...)        //   into cmd
+ *   flux_oneshot_submit_and_end(device, cmd);  // submit + wait + recycle
+ *
+ * flux_oneshot_run() is the single-recording convenience that wraps the
+ * same three steps around a caller callback. All three serialize on the
+ * device's queue lock exactly like internal submissions, so they are safe
+ * to interleave with frame rendering on the same thread; they are NOT
+ * thread-safe against concurrent flux use of the same device (the normal
+ * per-device serialization rule).
+ *
+ * After submit-and-end returns, everything recorded into `cmd` has
+ * completed on the GPU; the command buffer and its pool are recycled by
+ * the library. Never submit a cmd buffer obtained here through any other
+ * path, and never use it after flux_oneshot_submit_and_end. */
+
+typedef void (*flux_oneshot_record_fn)(VkCommandBuffer cmd, void *userdata);
+
+/* Begin a one-shot recording. The returned command buffer is already in
+ * VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT begin state, on a transient
+ * pool owned by the library. Fails with FLUX_ERROR_INVALID_ARGUMENT on
+ * null args, FLUX_ERROR_BACKEND_FAILURE if the pool/buffer cannot be
+ * allocated. */
+FLUX_NODISCARD FLUX_API flux_result flux_oneshot_begin(flux_device *d, VkCommandBuffer *out_cmd);
+
+/* Submit `cmd` on the device's graphics queue and WAIT for completion
+ * (fence with a finite timeout, queue-idle fallback), then recycle the
+ * buffer. On return, nothing recorded into `cmd` is pending. Preserves
+ * a VK_TIMEOUT as FLUX_ERROR_TIMEOUT for the caller. */
+FLUX_NODISCARD FLUX_API flux_result flux_oneshot_submit_and_end(flux_device *d, VkCommandBuffer cmd);
+
+/* Single-recording convenience: begin, call `record` (non-NULL), submit,
+ * wait, recycle. */
+FLUX_NODISCARD FLUX_API flux_result flux_oneshot_run(flux_device *d,
+                                                     flux_oneshot_record_fn record,
+                                                     void *userdata);
+
 /* The sampled bindless handle the image was registered into at
  * create time. FLUX_BINDLESS_INVALID if the image was created
  * without bindless registration (currently always set). */
@@ -158,8 +210,7 @@ typedef enum flux_depth_test {
 
 typedef struct flux_vertex_attribute {
     uint32_t location;
-    flux_format
-        format; /* per-attribute format (e.g. RGBA8_UNORM, R32_SFLOAT not currently in enum) */
+    flux_format format; /* per-attribute format (e.g. RGBA8_UNORM, R32_SFLOAT) */
     uint32_t offset;
 } flux_vertex_attribute;
 
@@ -209,12 +260,18 @@ FLUX_NODISCARD FLUX_API flux_result flux_graphics_pipeline_create(
 
 FLUX_NODISCARD FLUX_API flux_graphics_pipeline *
 flux_graphics_pipeline_retain(flux_graphics_pipeline *p);
-/* Pipelines do NOT go through the device retire queue: release destroys
- * the VkPipeline inline. Only release once all GPU work recorded with the
- * pipeline has completed (its frame-slot fence has signalled, or after
- * flux_device_wait_idle); destroying a pipeline a batch in flight still
- * executes is a VUID-vkDestroyPipeline-pipeline-00765 violation. */
+/* DESTROY-INLINE SEMANTICS — see the fuller note on
+ * flux_compute_pipeline_release in <flux/compute.h>. release destroys the
+ * VkPipeline inline and requires the caller to prove GPU quiescence; the
+ * safe-any-time spelling is flux_pipeline_release_deferred(). */
 FLUX_API void flux_graphics_pipeline_release(flux_graphics_pipeline *p);
+
+/* Deferred-release counterpart for graphics pipelines: parks on the
+ * device retire queue, destroyed once in-flight batches complete. Safe
+ * at any time. (Declared in <flux/compute.h> for the compute flavour;
+ * one implementation serves both.) */
+FLUX_API void flux_graphics_pipeline_release_deferred(flux_device *d,
+                                                      flux_graphics_pipeline *p);
 
 FLUX_API VkPipeline flux_graphics_pipeline_vk_pipeline(const flux_graphics_pipeline *p);
 FLUX_API VkPipelineLayout flux_graphics_pipeline_vk_layout(const flux_graphics_pipeline *p);
