@@ -58,7 +58,7 @@ extern "C" {
 
 #define IRIS_VERSION_MAJOR 0
 #define IRIS_VERSION_MINOR 0
-#define IRIS_VERSION_PATCH 24
+#define IRIS_VERSION_PATCH 25
 
 IRIS_API const char *iris_version_string(void);
 

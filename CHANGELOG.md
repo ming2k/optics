@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.25] - 2026-08-22
+
 ### Changed — compatibility machinery (policy now enforced)
 
 - **Soname now encodes the compatibility boundary, not the release
