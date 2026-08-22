@@ -12,7 +12,8 @@
  *      to dark is safer than defaulting to light (dark is the lower-glare
  *      choice when the user's preference is unknown).
  *
- * All queries are read at startup; live updates are not implemented.
+ * Startup queries only; live watching is provided by theme_watch_portal.c
+ * (see theme_watch_internal.h).
  */
 
 /* _GNU_SOURCE is provided by the build system (add_project_arguments). */

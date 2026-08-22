@@ -7,6 +7,8 @@
  *     release across thread-safe boundary, exhaustion handling
  *   - Compute pipeline create + dispatch into a one-shot command
  *     buffer (mirrors compute_fill but as a unit assertion)
+ *   - Capability queries: flux_device_get_limits and
+ *     flux_device_supports_image_usage agree with what creation accepts
  *
  * Runs on a Vulkan host; gracefully skips (with PASS) when the
  * device cannot be created so CI without a driver stays green.
@@ -120,6 +122,51 @@ int main(void) {
         vkGetPhysicalDeviceFeatures(flux_device_vk_physical_device(d), &physical_features);
         EXPECT(flux_device_supports_large_points(d) == (bool)physical_features.largePoints);
         EXPECT(!flux_device_supports_large_points(nullptr));
+    }
+
+    /* --- capability queries: discovery by query, not by failure --- */
+    {
+        /* Argument validation. */
+        flux_device_limits zero = {0};
+        EXPECT(flux_device_get_limits(d, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_device_get_limits(nullptr, &zero) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_device_supports_image_usage(nullptr, FLUX_FORMAT_RGBA8_UNORM,
+                                                FLUX_IMAGE_USAGE_SAMPLED) == false);
+        EXPECT(flux_device_supports_image_usage(d, FLUX_FORMAT_UNDEFINED,
+                                                FLUX_IMAGE_USAGE_SAMPLED) == false);
+
+        /* Limits are populated and sane on any conformant device. */
+        flux_device_limits lim = FLUX_DEVICE_LIMITS_INIT;
+        EXPECT(flux_device_get_limits(d, &lim) == FLUX_OK);
+        EXPECT(lim.struct_size == sizeof(flux_device_limits));
+        EXPECT(lim.max_image_dimension2d >= 4096);
+        EXPECT(lim.max_color_attachments >= 4);
+        EXPECT(lim.max_frames_in_flight >= 1);
+        EXPECT(lim.timestamp_period_ns > 0.0f);
+        EXPECT(lim.min_uniform_buffer_offset_alignment > 0);
+
+        /* Usage query must AGREE with what creation accepts — a query that
+         * could disagree with the create path would be worse than none. */
+        EXPECT(flux_device_supports_image_usage(d, FLUX_FORMAT_RGBA8_UNORM,
+                                                FLUX_IMAGE_USAGE_SAMPLED) == true);
+        /* Spec-guaranteed storage formats. */
+        EXPECT(flux_device_supports_image_usage(d, FLUX_FORMAT_RGBA8_UNORM,
+                                                FLUX_IMAGE_USAGE_COMPUTE_WRITE) == true);
+        EXPECT(flux_device_supports_image_usage(d, FLUX_FORMAT_BGRA8_UNORM,
+                                                FLUX_IMAGE_USAGE_COMPUTE_WRITE) == true);
+        /* sRGB storage is carved out by policy: never reported writable. */
+        EXPECT(flux_device_supports_image_usage(d, FLUX_FORMAT_RGBA8_SRGB,
+                                                FLUX_IMAGE_USAGE_COMPUTE_WRITE) == false);
+        /* RGBA16_SFLOAT: whatever the query says must match a real create
+         * attempt, so apps can branch on the query alone. */
+        bool q16 = flux_device_supports_image_usage(d, FLUX_FORMAT_RGBA16_SFLOAT,
+                                                    FLUX_IMAGE_USAGE_COMPUTE_WRITE);
+        flux_image *im16 = nullptr;
+        flux_result r16 = flux_image_create_compute_writable(d, 4, 4, FLUX_FORMAT_RGBA16_SFLOAT,
+                                                             &im16);
+        EXPECT((r16 == FLUX_OK) == q16);
+        if (r16 == FLUX_OK)
+            flux_image_release(im16);
     }
 
     flux_device_release(d);

@@ -54,7 +54,14 @@ extern "C" {
 
 /* prism descriptors open with `prism_struct_type type; const void *next;`
  * following the same extension-chain pattern as flux. The registry is
- * prism-local: values are not shared with flux_struct_type. */
+ * prism-local: values are not shared with flux_struct_type.
+ *
+ * Honest status of `next`: the field is part of the layout contract so
+ * chained descriptors are ABI-safe the day they are consumed, but the
+ * current implementation does NOT dereference it — there are no chained
+ * extension structs defined yet. A caller chaining a future extension
+ * against this version gets it silently ignored, not an error. When the
+ * first extension lands, its reader goes here and this note shrinks. */
 typedef enum prism_struct_type {
     PRISM_TYPE_UNKNOWN = 0,
     PRISM_TYPE_LIQUID_GLASS_DESC = 1,

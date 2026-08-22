@@ -79,6 +79,14 @@
  *       flag), so a backend without repeat support may leave it false.
  *   (d) Committed text still carries the SHIFTED characters (the xkb UTF-8
  *       string / WM_CHAR / insertText:) — only the key id is normalised.
+ *   (e) Control characters never travel as committed text: the backends
+ *       agree via the shared iris_cp_is_text predicate (platform_text.h),
+ *       which rejects the C0 range AND U+007F DEL. DEL is the trap: the
+ *       Delete keysym's xkb UTF-8 mapping and Win32's WM_CHAR for
+ *       Ctrl+Backspace are both exactly 0x7f, so a plain ">= 0x20" test
+ *       leaks an invisible "\x7f" into text_utf8 alongside the key event.
+ *       The intent rides the lens_key_event (LENS_KEY_DELETE); editors
+ *       would otherwise insert garbage on every Delete press.
  *
  * IME truncation contract: every string funneled into lens_input's
  * fixed-size buffers (text_utf8[256] / preedit_utf8[LENS_PREEDIT_MAX=256])
@@ -104,12 +112,12 @@ int iris_app_run_wayland(const iris_app_config *cfg);
 void iris_request_animation_frame_wayland(void);
 void iris_paint_mark_static_wayland(void);
 
-/* Win32 — implemented by app_win32.c (to be added). */
+/* Win32 — implemented by app_win32.c (ADR-0056). */
 int iris_app_run_win32(const iris_app_config *cfg);
 void iris_request_animation_frame_win32(void);
 void iris_paint_mark_static_win32(void);
 
-/* Cocoa — implemented by app_cocoa.m (to be added). */
+/* Cocoa — implemented by app_cocoa.m (ADR-0056). */
 int iris_app_run_cocoa(const iris_app_config *cfg);
 void iris_request_animation_frame_cocoa(void);
 void iris_paint_mark_static_cocoa(void);

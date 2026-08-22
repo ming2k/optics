@@ -54,7 +54,7 @@ Forces:
 5. **Clipboard interface on `lens_desc`.** `lens_clipboard {
    request_text, set_text, user }` is optional. `lens_copy` /
    `lens_request_paste` call the callbacks; `lens_paste` queues delivered
-   text into a staging buffer (`LENSI_PASTE_MAX`, 1024) for the focused
+   text into a staging buffer (`LENSI_PASTE_MAX`, 1 MiB) for the focused
    text widget to drain via `lensi_take_paste` next frame.
 6. **Caret rect host-readable.** The focused text widget sets the caret
    rect; the host reads `lens_caret_rect` to position the IME candidate

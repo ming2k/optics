@@ -236,8 +236,9 @@ and render identities without requiring raw Vulkan access.
 
 ## dma-buf Import
 
-`<flux/dmabuf.h>` is available when the canvas module is enabled. It imports
-a Linux dma-buf file descriptor as a sampled `flux_image` for canvas draws.
+`<flux/dmabuf.h>` ships with core (unconditionally installed; ADR-0052
+moved it out from behind the canvas gate). It imports a Linux dma-buf
+file descriptor as a sampled `flux_image` for canvas draws.
 
 | Symbol | Purpose |
 |--------|---------|
@@ -342,8 +343,9 @@ major version bump:
 When a public symbol is on the way out, the preferred path is:
 
 1. Mark deprecated at minor `0.N`. The header carries a
-   `[[deprecated("use X")]]` attribute and the release notes name the
-   replacement.
+   `FLUX_DEPRECATED("use X")` attribute (C23/C++/GNU-fallback spelling,
+   defined next to the affected declaration) and the release notes name
+   the replacement. Live example: `flux_canvas_begin`/`_end`/`_end_checked`.
 2. Remove at minor `0.N+1` or later.
 
 A one-cycle deprecation is the floor, not the ceiling. Symbols with
@@ -359,6 +361,38 @@ called out in the release notes.
 return raw Vulkan types. These follow Vulkan's own stability rules,
 not flux's. A Vulkan 1.3 program built against today's loader
 continues to work; flux does not abstract this away.
+
+## Capability queries
+
+Feature discovery is by query, not by failure.
+
+| Query | Answers |
+|-------|---------|
+| `flux_device_get_limits` | Image/framebuffer maxima, alignment requirements, timestamp period and validity, the applied frames-in-flight cap. |
+| `flux_device_supports_image_usage` | Whether a format supports sampled / compute-write use — mirrors `flux_image_create_compute_writable`'s acceptance policy exactly (pinned by an integration test asserting query/create agreement). |
+| `flux_device_enabled_features` | Semantic features enabled on the logical device. |
+| `flux_dmabuf_supported` / `flux_dmabuf_sync_supported` | dma-buf import capability. |
+
+## One-shot submission
+
+`flux_oneshot_begin` / `flux_oneshot_submit_and_end` / `flux_oneshot_run`
+(in `<flux/vulkan.h>`) publish the headless submission path the effect
+runtime always assumed: transient pool → one-time-submit begin →
+graphics-queue submit with a finite fence wait → recycle. On return from
+submit-and-end, nothing recorded is pending. Required reading for
+`flux_effect_promote`, which expects prior GPU quiescence.
+
+## Pipeline release semantics
+
+`*_release` is NOT uniform across resource kinds:
+
+- Retire-queued (safe at any time): images, buffers, meshes, samplers,
+  targets — destruction is deferred until in-flight batches complete.
+- Destroy-inline (caller proves quiescence): `flux_compute_pipeline_release`,
+  `flux_graphics_pipeline_release`, `flux_material_release` destroy the
+  underlying Vulkan objects immediately (VUID-vkDestroyPipeline-00765).
+  The safe-at-any-time spelling for pipelines is
+  `flux_pipeline_release_deferred` / `flux_graphics_pipeline_release_deferred`.
 
 ## Library versioning
 
