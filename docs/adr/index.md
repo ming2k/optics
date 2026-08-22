@@ -82,3 +82,4 @@ a decision, write a new ADR and update the old one's status to
 | 0071 | [Pass-scoped canvas antialiasing policy](0071-pass-scoped-canvas-antialiasing.md) | Accepted |
 | 0072 | [Long-session resource governance — bounded queues, O(1) eviction, live-list GC](0072-long-session-resource-governance.md) | Accepted |
 | 0073 | [Widget-kind extension range and the user-widget contract](0073-lens-user-widget-kind-range.md) | Accepted |
+| 0074 | [Effect intake path — new visual operators and where choreography never enters](0074-effect-intake-path.md) | Proposed |
