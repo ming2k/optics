@@ -492,40 +492,31 @@ static inline bool txt_face_set_px(txt_face *f, uint32_t px) {
         }
     }
 
-    /* Miss: resize the face, then retain the resulting FT_Size. Recycle
-     * the LRU tail (destroying its hb_font) when the cache is full.
-     * FT_New_Size + FT_Activate_Size gives the resized face its own
-     * FT_SizeRec; the face's current metrics already reflect `px`. */
-    if (FT_Set_Pixel_Sizes(f->face, 0, px) != 0)
-        return false;
-    f->face_px = px;
-
+    /* Miss: configure a fresh FT_Size without touching the active retained
+     * size. FT_Set_Pixel_Sizes always mutates face->size; calling it before
+     * FT_New_Size would silently rewrite the current LRU entry while leaving
+     * its size_px key and hb_font unchanged. A later hit would then shape at
+     * the keyed size but rasterise at the rewritten size. */
+    FT_Size previous = f->face->size;
     FT_Size sz = NULL;
-    if (FT_New_Size(f->face, &sz) == 0 && sz) {
-        /* The new FT_Size must carry the resized metrics: FreeType
-         * snapshots metrics per size object, so re-issue the pixel size
-         * while the new object is active. */
-        if (FT_Activate_Size(sz) == 0) {
-            if (FT_Set_Pixel_Sizes(f->face, 0, px) != 0) {
-                FT_Done_Size(sz);
-                sz = NULL;
-                /* Reactivate a live size object so the face is usable. */
-                for (int j = 0; j < TXT_FACE_SIZE_LRU; j++) {
-                    if (f->sizes[j]) {
-                        FT_Activate_Size(f->sizes[j]);
-                        break;
-                    }
-                }
-            }
-        } else {
-            FT_Done_Size(sz);
-            sz = NULL;
-        }
+    if (FT_New_Size(f->face, &sz) != 0 || !sz)
+        return false;
+    if (FT_Activate_Size(sz) != 0) {
+        FT_Done_Size(sz);
+        return false;
+    }
+    if (FT_Set_Pixel_Sizes(f->face, 0, px) != 0) {
+        (void)FT_Activate_Size(previous);
+        FT_Done_Size(sz);
+        return false;
     }
 
-    hb_font_t *hb = NULL;
-    if (f->face)
-        hb = hb_ft_font_create_referenced(f->face);
+    hb_font_t *hb = hb_ft_font_create_referenced(f->face);
+    if (!hb) {
+        (void)FT_Activate_Size(previous);
+        FT_Done_Size(sz);
+        return false;
+    }
 
     /* Shift the LRU right, evicting the tail. The LRU slots are the sole
      * owners of the retained hb_fonts (f->hb_font aliases slot 0). */
@@ -540,18 +531,10 @@ static inline bool txt_face_set_px(txt_face *f, uint32_t px) {
         f->size_fonts[j] = f->size_fonts[j - 1];
     }
     f->size_px[0] = px;
-    f->sizes[0] = sz; /* NULL when retention failed: resize still valid */
+    f->sizes[0] = sz;
     f->size_fonts[0] = hb;
-
-    /* Alias update: prefer the fresh hb_font; when its creation failed,
-     * keep aliasing whatever the front slot holds (possibly NULL), and
-     * resync a surviving legacy font as the degraded fallback. */
     f->hb_font = hb;
-    if (!f->hb_font) {
-        f->hb_font = f->size_fonts[0];
-        if (!f->hb_font)
-            return true; /* shaping degrades; rasterisation still works */
-    }
+    f->face_px = px;
     return true;
 }
 

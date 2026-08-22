@@ -12,10 +12,58 @@
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <flux/math.h>
+#include <string.h>
+
+#define W 128
+#define H 64
+
+/* Render a 17px probe either cold or after interleaving a 33px layout. The
+ * two images must be identical: measuring another size may change which
+ * FT_Size is active, but never the bitmap stored under the 17px glyph-cache
+ * key. This regresses the retained-size LRU corruption found by a real editor
+ * that lays out all heading sizes before painting its body text. */
+static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
+    flux_text *text = nullptr;
+    if (flux_text_create(&(flux_text_desc){.device = nullptr, .scale = 1.0f}, &text) != FLUX_OK ||
+        !text)
+        return false;
+
+    flux_text_style small = {.size_px = 17.0f, .color = flux_color_rgba_premul(255, 255, 255, 255)};
+    flux_text_style large = {.size_px = 33.0f, .color = flux_color_rgba_premul(255, 255, 255, 255)};
+    if (flux_text_measure(text, "sf", 2, &small).width <= 0.0f) {
+        flux_text_destroy(text);
+        return false;
+    }
+    if (interleaved) {
+        (void)flux_text_measure(text, "sf", 2, &large);
+        (void)flux_text_measure(text, "sf", 2, &small);
+    }
+
+    flux_canvas *canvas = nullptr;
+    if (flux_canvas_create_cpu(W, H, 1.0f, &canvas) != FLUX_OK || !canvas) {
+        flux_text_destroy(text);
+        return false;
+    }
+    flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
+    if (flux_canvas_cpu_begin(canvas, &black) != FLUX_OK) {
+        flux_canvas_destroy(canvas);
+        flux_text_destroy(text);
+        return false;
+    }
+    flux_text_draw(text, canvas, nullptr, 4.0f, 4.0f, "sf", 2, &small);
+    flux_canvas_cpu_end(canvas);
+
+    uint32_t w = 0, h = 0, stride = 0;
+    const uint8_t *pixels = flux_canvas_cpu_pixels(canvas, &w, &h, &stride);
+    bool ok = pixels && w == W && h == H && stride == W * 4;
+    if (ok)
+        memcpy(out, pixels, sizeof(uint8_t[W * H * 4]));
+    flux_canvas_destroy(canvas);
+    flux_text_destroy(text);
+    return ok;
+}
 
 int main(void) {
-    const uint32_t W = 128, H = 64;
-
     flux_text *t = nullptr;
     EXPECT(flux_text_create(&(flux_text_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
     EXPECT(t != nullptr);
@@ -66,6 +114,11 @@ int main(void) {
     /* The outlined run must retain visible contour pixels after its opaque
      * white foreground is painted over the centre. */
     EXPECT(outline > 20);
+
+    uint8_t cold[W * H * 4], interleaved[W * H * 4];
+    EXPECT(render_size_probe(false, cold));
+    EXPECT(render_size_probe(true, interleaved));
+    EXPECT(memcmp(cold, interleaved, sizeof cold) == 0);
 
     flux_canvas_destroy(c);
     flux_text_destroy(t);
