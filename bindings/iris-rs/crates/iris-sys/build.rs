@@ -181,10 +181,12 @@ fn main() {
         for h in [
             "iris.h",
             "app.h",
+            "capability.h",
             "cursor.h",
             "theme.h",
             "file_dialog.h",
             "a11y.h",
+            "window.h",
         ] {
             println!(
                 "cargo:rerun-if-changed={}",

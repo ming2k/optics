@@ -63,11 +63,11 @@ fn cursor_enum_round_trips() {
 }
 
 #[test]
-fn run_with_null_config_returns_error_not_crash() {
-    // We cannot actually run an app from a unit test (no Wayland), but the
-    // outermost entry point should at minimum reject a null config pointer
-    // gracefully rather than dereferencing it. The builder API produces a
-    // valid Config; we don't try to call Application::run.
+fn config_roundtrip_is_panic_free() {
+    // Honest name for what this checks: constructing and dropping a Config
+    // (it cannot call Application::run from a unit test — no compositor).
+    // The null-config rejection path of iris_app_run is covered by the C
+    // test suite (tests/iris/test_app_api.c), not here.
     let cfg = iris::Config::new("noop").unwrap();
     drop(cfg); // no panic on drop
 }

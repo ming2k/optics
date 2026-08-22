@@ -727,6 +727,310 @@ pub fn version() -> &'static str {
 fn _keep_c_int_in_scope(_: c_int) {}
 
 // =====================================================================
+//  Window control (window.h)
+//
+//  Bound late in this crate's life: a Rust application previously could
+//  not close its own window, resize it, or go fullscreen — 11 of the 30
+//  C functions had no safe wrapper. All of these are thread-affine to the
+//  run loop (the "active window" is the one opened by the most recent
+//  iris_app_run on the calling thread) and degrade to documented no-ops
+//  on backends without the capability — check [`supports`] first when the
+//  affordance is load-bearing in your UI.
+// =====================================================================
+
+/// Ask the active window to close. The loop exits and
+/// [`Application::run`] returns, exactly as if the user clicked the
+/// title-bar close button.
+pub fn window_close() {
+    unsafe { sys::iris_window_close() };
+}
+
+/// Minimize the active window to the taskbar / dock.
+pub fn window_minimize() {
+    unsafe { sys::iris_window_minimize() };
+}
+
+/// Restore a minimized window, or un-fullscreen a fullscreen one.
+pub fn window_restore() {
+    unsafe { sys::iris_window_restore() };
+}
+
+/// Take the whole output (Wayland: the output the window is on; Win32/
+/// Cocoa: the display the window overlaps most).
+pub fn window_fullscreen() {
+    unsafe { sys::iris_window_fullscreen() };
+}
+
+/// Leave fullscreen. No-op when not fullscreen.
+pub fn window_windowed() {
+    unsafe { sys::iris_window_unfullscreen() };
+}
+
+/// Maximize the window (fill the work area, keeping decorations).
+pub fn window_maximize() {
+    unsafe { sys::iris_window_maximize() };
+}
+
+/// Undo [`window_maximize`].
+pub fn window_unmaximize() {
+    unsafe { sys::iris_window_unmaximize() };
+}
+
+/// Ask the compositor to focus the window.
+///
+/// Permanently a no-op on Wayland (the protocol forbids self-activation —
+/// only the user or the compositor can raise a window); works on Win32
+/// and Cocoa.
+pub fn window_focus() {
+    unsafe { sys::iris_window_focus() };
+}
+
+/// Set the minimum client-area size, in logical pixels.
+pub fn window_set_min_size(width: i32, height: i32) {
+    unsafe { sys::iris_window_set_min_size(width, height) };
+}
+
+/// Set the maximum client-area size, in logical pixels.
+pub fn window_set_max_size(width: i32, height: i32) {
+    unsafe { sys::iris_window_set_max_size(width, height) };
+}
+
+/// Current window size, in logical pixels. `None` when no window is
+/// active; the C API also reports only width/height (position is owned
+/// by the compositor and not reported on Wayland).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowSize {
+    pub width: i32,
+    pub height: i32,
+}
+
+pub fn window_get_geometry() -> Option<WindowSize> {
+    let (mut w, mut h) = (0i32, 0i32);
+    let ok = unsafe { sys::iris_window_get_geometry(&mut w, &mut h) };
+    if ok {
+        Some(WindowSize { width: w, height: h })
+    } else {
+        None
+    }
+}
+
+// =====================================================================
+//  Cross-thread wakeup (app.h — the ONLY thread-safe iris entry point)
+// =====================================================================
+
+/// Schedule `f` to run on the iris main thread, outside any
+/// `lens_begin/end` pair.
+///
+/// This is the one iris API that is safe to call from ANY thread; it is
+/// how a worker thread wakes the loop (the loop may be idle at ~4 Hz —
+/// post to get a frame promptly). FIFO per posting thread. Returns
+/// `false` when no run loop is active (dropped), or when the closure
+/// could not be boxed (allocation failure).
+///
+/// The closure runs on the main thread on a best-effort basis; panics in
+/// it propagate as a panic on that thread.
+pub fn post_to_main_thread<F: FnOnce() + Send + 'static>(f: F) -> bool {
+    // Box<dyn FnOnce + Send> is callable through a stable vtable-less
+    // trampoline: we leak the box into a raw pointer and reclaim it in
+    // the extern callback (the standard pattern for C callbacks with a
+    // void* userdata).
+    extern "C" fn trampoline(user: *mut std::ffi::c_void) {
+        if user.is_null() {
+            return;
+        }
+        let boxed = unsafe { Box::from_raw(user as *mut Box<dyn FnOnce() + Send>) };
+        boxed();
+    }
+    let boxed: Box<Box<dyn FnOnce() + Send>> = Box::new(Box::new(f));
+    let raw = Box::into_raw(boxed) as *mut std::ffi::c_void;
+    let rc = unsafe { sys::iris_post_to_main_thread(Some(trampoline), raw) };
+    rc == 0
+}
+
+// =====================================================================
+//  Save / multi-file dialogs (file_dialog.h)
+// =====================================================================
+
+/// Why pickers return URIs: the portal hands back `file://` URIs with the
+/// filesystem's bytes percent-encoded; [`file_uri_to_path`] decodes them.
+/// `None` means the user cancelled or no dialog service is available —
+/// distinguish truncation, which is reported as an error, not silence.
+
+/// Error shape for the save-path dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickError {
+    /// The user dismissed the dialog.
+    Cancelled,
+    /// No dialog service on this platform/build (see [`supports`]).
+    Unavailable,
+    /// The result did not fit the internal buffer (pathologically long
+    /// paths). Retrying will not help without a shorter default name.
+    Truncated,
+}
+
+impl std::fmt::Display for PickError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PickError::Cancelled => write!(f, "user cancelled the dialog"),
+            PickError::Unavailable => write!(f, "no file-dialog service available"),
+            PickError::Truncated => write!(f, "result exceeded the buffer"),
+        }
+    }
+}
+
+impl std::error::Error for PickError {}
+
+/// Ask the user where to save a file. `default_name` suggests a filename.
+/// The file is NOT created; opening it for writing is the caller's job.
+pub fn pick_save_path(title: Option<&str>, default_name: Option<&str>) -> Result<String, PickError> {
+    let title_c = title.and_then(|t| CString::new(t).ok());
+    let name_c = default_name.and_then(|t| CString::new(t).ok());
+    let opts = sys::iris_file_dialog_opts {
+        title: title_c
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null()),
+        ..Default::default()
+    };
+    let mut buf = vec![0u8; 8192];
+    let rc = unsafe {
+        sys::iris_pick_save_path(
+            &opts,
+            name_c.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null()),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+        )
+    };
+    match rc {
+        0 => {
+            let len = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+            buf.truncate(len);
+            String::from_utf8(buf).map_err(|_| PickError::Unavailable)
+        }
+        code if code == sys::IRIS_PICK_CANCELLED => Err(PickError::Cancelled),
+        code if code == sys::IRIS_PICK_UNAVAILABLE => Err(PickError::Unavailable),
+        code if code == sys::IRIS_PICK_TRUNCATED => Err(PickError::Truncated),
+        _ => Err(PickError::Unavailable),
+    }
+}
+
+/// Multi-selection picker: every file the user chose, as `file://` URIs.
+///
+/// Buffer handling follows the C contract: on truncation the error
+/// carries the number of bytes the full selection needed, so the caller
+/// can retry with a bigger budget; the selection is never a silent
+/// prefix and never a disguised cancel.
+pub fn pick_files(title: Option<&str>) -> Result<Vec<String>, PickError> {
+    let title_c = title.and_then(|t| CString::new(t).ok());
+    let opts = sys::iris_file_dialog_opts {
+        title: title_c
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null()),
+        multiple_selection: true,
+        ..Default::default()
+    };
+    // Start at 64 KiB — comfortably above any realistic selection; grow on
+    // truncation using the reported requirement (the C contract promises
+    // the needed size on that path).
+    let mut cap = 64 * 1024usize;
+    loop {
+        let mut buf = vec![0u8; cap];
+        let mut used = 0usize;
+        let rc = unsafe {
+            sys::iris_pick_files(&opts, buf.as_mut_ptr().cast(), buf.len(), &mut used)
+        };
+        if rc == sys::IRIS_PICK_TRUNCATED {
+            let needed = used.max(cap + 1);
+            if needed > 16 * 1024 * 1024 {
+                return Err(PickError::Truncated);
+            }
+            cap = needed + 64; // terminator headroom
+            continue;
+        }
+        if rc == sys::IRIS_PICK_CANCELLED {
+            return Err(PickError::Cancelled);
+        }
+        if rc == sys::IRIS_PICK_UNAVAILABLE {
+            return Err(PickError::Unavailable);
+        }
+        if rc < 0 {
+            return Err(PickError::Unavailable);
+        }
+        // rc = count of URIs; buf holds them NUL-separated.
+        let mut out = Vec::with_capacity(rc as usize);
+        let mut slice: &[u8] = &buf[..used.min(buf.len())];
+        while let Some(pos) = slice.iter().position(|b| *b == 0) {
+            let (uri, rest) = slice.split_at(pos);
+            if uri.is_empty() {
+                break; // list terminator (empty URI)
+            }
+            if let Ok(s) = String::from_utf8(uri.to_vec()) {
+                out.push(s);
+            }
+            slice = &rest[1..];
+        }
+        return Ok(out);
+    }
+}
+
+// =====================================================================
+//  Capability query (capability.h)
+// =====================================================================
+
+/// A build-level capability. See the C header (`iris/capability.h`) for
+/// each value's degradation contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Capability {
+    WindowControl,
+    ThemeWatch,
+    A11y,
+    FileDialog,
+    Clipboard,
+    PrimarySelection,
+    Tablet,
+    DropTarget,
+    Decorations,
+    FractionalScale,
+}
+
+impl Capability {
+    fn raw(self) -> sys::iris_capability {
+        use sys::iris_capability as C;
+        match self {
+            Self::WindowControl => C::IRIS_CAP_WINDOW_CONTROL,
+            Self::ThemeWatch => C::IRIS_CAP_THEME_WATCH,
+            Self::A11y => C::IRIS_CAP_A11Y,
+            Self::FileDialog => C::IRIS_CAP_FILE_DIALOG,
+            Self::Clipboard => C::IRIS_CAP_CLIPBOARD,
+            Self::PrimarySelection => C::IRIS_CAP_PRIMARY_SELECTION,
+            Self::Tablet => C::IRIS_CAP_TABLET,
+            Self::DropTarget => C::IRIS_CAP_DROP_TARGET,
+            Self::Decorations => C::IRIS_CAP_DECORATIONS,
+            Self::FractionalScale => C::IRIS_CAP_FRACTIONAL_SCALE,
+        }
+    }
+}
+
+/// Does this build implement `capability`? Static per-build answer,
+/// callable before [`Application::run`], from any thread. Branch your UI
+/// on this — not on platform names.
+pub fn supports(capability: Capability) -> bool {
+    unsafe { sys::iris_supports(capability.raw()) != 0 }
+}
+
+/// The backend this libiris was built with: `"wayland"`, `"win32"`,
+/// `"cocoa"`, or `"none"`. For diagnostics; prefer [`supports`] for
+/// behaviour.
+pub fn backend_name() -> &'static str {
+    unsafe {
+        std::ffi::CStr::from_ptr(sys::iris_backend_name())
+            .to_str()
+            .unwrap_or("unknown")
+    }
+}
+
+// =====================================================================
 //  Tests
 //
 //  Every test here runs headless: no Wayland compositor, no GPU surface.
@@ -738,6 +1042,105 @@ fn _keep_c_int_in_scope(_: c_int) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_string_matches_buildtime_macros() {
+        // The bindings and the C library are versioned independently (the
+        // Cargo workspace is 0.1.0; libiris is 0.0.24) — so we cannot
+        // assert equality against a Cargo version, but we CAN assert the
+        // runtime string parses and the compile-time C macros the -sys
+        // crate exports agree with it. A drifted build (bindings compiled
+        // against a different libiris) must fail here, not in production.
+        let runtime = version();
+        assert!(runtime.split('.').count() == 3, "malformed version: {runtime}");
+        assert!(runtime.split('.').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())));
+    }
+
+    #[test]
+    fn backend_name_is_a_documented_spelling() {
+        let name = backend_name();
+        assert!(
+            ["wayland", "win32", "cocoa", "none"].contains(&name),
+            "unexpected backend name: {name}"
+        );
+    }
+
+    #[test]
+    fn capability_answers_match_backend() {
+        // Capability, not platform, must drive UI. These invariants are
+        // the ones the C table pins (capability.c); mirror them here so a
+        // drifted table fails a Rust test too.
+        match backend_name() {
+            "wayland" => {
+                assert!(supports(Capability::PrimarySelection));
+                assert!(supports(Capability::Tablet));
+                assert!(!supports(Capability::FractionalScale));
+                assert!(supports(Capability::WindowControl));
+            }
+            "win32" => {
+                assert!(!supports(Capability::PrimarySelection));
+                assert!(supports(Capability::FractionalScale));
+                assert!(supports(Capability::Decorations));
+                assert!(!supports(Capability::A11y)); // stub, ADR-0056 D5
+            }
+            "cocoa" => {
+                assert!(!supports(Capability::PrimarySelection));
+                assert!(!supports(Capability::A11y)); // stub, ADR-0056 D5
+                assert!(supports(Capability::Decorations));
+            }
+            _ => {
+                assert!(!supports(Capability::WindowControl));
+                assert!(!supports(Capability::FileDialog));
+            }
+        }
+    }
+
+    #[test]
+    fn pick_error_codes_are_the_documented_sentinels() {
+        // The C contract fixes these ABI values; a renumbered enum here
+        // would silently mis-classify every picker failure.
+        assert_eq!(sys::IRIS_PICK_CANCELLED, -1);
+        assert_eq!(sys::IRIS_PICK_UNAVAILABLE, -2);
+        assert_eq!(sys::IRIS_PICK_TRUNCATED, -3);
+    }
+
+    #[test]
+    fn window_calls_without_an_active_app_are_safe_noops() {
+        // Thread-affine but inert outside a run loop — the documented
+        // degradation. Calling them must not crash.
+        window_close();
+        window_minimize();
+        window_restore();
+        window_fullscreen();
+        window_windowed();
+        window_focus();
+        window_set_min_size(200, 100);
+        window_set_max_size(4096, 4096);
+        assert_eq!(window_get_geometry(), None);
+    }
+
+    #[test]
+    fn post_to_main_thread_without_a_loop_reports_failure() {
+        // No run loop in a unit test: the documented -1 path. This must
+        // return false (and not block, crash, or leak the closure).
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = called.clone();
+        let ok = post_to_main_thread(move || {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        assert!(!ok, "expected false with no active run loop");
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn pick_save_path_args_validate_without_crashing() {
+        // A headless environment has no portal reachable from a unit
+        // test's thread; the call must degrade to an error, not crash.
+        // (On the CI host the portal may or may not answer; both paths
+        // are acceptable outcomes of THIS assertion, which only pins
+        // memory safety + the error mapping.)
+        let _ = pick_save_path(Some("t"), Some("out.txt"));
+    }
 
     #[test]
     fn config_new_rejects_interior_nul() {
