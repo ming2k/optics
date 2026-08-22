@@ -67,6 +67,8 @@ flux_text_lib = library('flux_text',
   c_args              : flux_text_c_args,
   dependencies        : [flux_dep, m_dep] + text_backend_deps,
   gnu_symbol_visibility : 'hidden',
+  soversion           : optics_soname,
+  version             : meson.project_version(),
   install             : true,
 )
 

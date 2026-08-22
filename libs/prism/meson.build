@@ -88,6 +88,7 @@ prism_lib = library('prism',
   c_args                : prism_c_args,
   dependencies          : [flux_dep, m_dep],
   gnu_symbol_visibility : 'hidden',
+  soversion             : optics_soname,
   version               : meson.project_version(),
   install               : true,
 )

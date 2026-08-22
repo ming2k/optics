@@ -24,6 +24,7 @@ iris_inc = include_directories('include')
 iris_sources = files(
   'src/version.c',
   'src/app.c',
+  'src/capability.c',
   'src/a11y_util.c',
   'src/platform_text.c',
   'src/uri.c',
@@ -111,9 +112,9 @@ if host_system == 'linux'
 
 elif host_system == 'windows'
   # ---- Windows: Win32 backend -------------------------------------------
-  # The listed files are written by a follow-up task; the contract they
-  # implement is documented in src/platform_internal.h (+ the Win32 recipe
-  # in src/platform_wakeup.h). theme_win32.c supplies the theme.h API
+  # The contract these files implement is documented in
+  # src/platform_internal.h (+ the Win32 recipe in
+  # src/platform_wakeup.h). theme_win32.c supplies the theme.h API
   # (query + callback-based watch); file_dialog_win32.c the file_dialog.h
   # API; a11y_stub.c keeps the bridge inert until a UI Automation bridge
   # lands. platform_wakeup.c uses a portable lock (SRWLOCK on _WIN32).
@@ -172,12 +173,14 @@ iris_lib = library('iris',
   objc_args             : iris_objc_args,
   dependencies          : [lens_dep, m_dep] + iris_extra_deps,
   gnu_symbol_visibility : 'hidden',
+  soversion             : optics_soname,
   version               : meson.project_version(),
   install               : true,
 )
 install_headers(
   'include/iris/iris.h',
   'include/iris/app.h',
+  'include/iris/capability.h',
   'include/iris/cursor.h',
   'include/iris/theme.h',
   'include/iris/file_dialog.h',

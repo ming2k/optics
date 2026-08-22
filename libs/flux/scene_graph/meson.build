@@ -19,6 +19,8 @@ flux_sg_lib = library('flux_scene_graph',
   c_args              : ['-DFLUX_SG_BUILDING=1'],
   dependencies        : [flux_dep, m_dep],
   gnu_symbol_visibility : 'hidden',
+  soversion           : optics_soname,
+  version             : meson.project_version(),
   install             : true,
 )
 

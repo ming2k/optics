@@ -321,10 +321,16 @@ endif
 # depends on Vulkan + threads only. The glyph-blit primitive
 # flux_canvas_draw_glyph_run remains in the canvas module — flux-text feeds it.
 
-# SO version is the numeric X.Y.Z core of the project version. The
-# project version string (which may include pre-release suffixes)
-# lives on the .pc file and in flux_version_string().
-flux_so_version = meson.project_version()
+# SO versioning (libtool semantics, per docs/reference/api.md):
+#   - `soversion` (the SONAME) encodes the *compatibility boundary*. The
+#     policy table says pre-1.0 patch releases are binary compatible and
+#     minor releases may break; therefore the SONAME is "major.minor"
+#     (optics_soname, derived once in the top-level meson.build).
+#   - `version` (the real-name suffix) is the full X.Y.Z so each release
+#     is a distinct file on disk while ld.so still resolves to the same
+#     SONAME across patches.
+# Carrying the full X.Y.Z in the SONAME (as this file once did) changes
+# the link name on every patch release and contradicts the policy table.
 
 flux_lib = library('flux',
   flux_sources,
@@ -333,7 +339,8 @@ flux_lib = library('flux',
   c_args                : flux_c_args,
   dependencies          : [vulkan_dep, threads_dep, m_dep],
   gnu_symbol_visibility : 'hidden',
-  version               : flux_so_version,
+  soversion             : optics_soname,
+  version               : meson.project_version(),
   install               : true,
 )
 

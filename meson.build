@@ -14,6 +14,14 @@ cc = meson.get_compiler('c')
 m_dep = cc.find_library('m', required : false)
 pkg = import('pkgconfig')
 
+# Soname policy shared by every library in this tree (see
+# docs/reference/api.md): the SONAME encodes the compatibility boundary
+# (major.minor while pre-1.0 — patches are binary compatible, minors may
+# break), while the real-name suffix carries the full X.Y.Z. Deriving it
+# once here keeps all six libraries consistent by construction.
+optics_version_parts = meson.project_version().split('.')
+optics_soname = '@0@.@1@'.format(optics_version_parts[0], optics_version_parts[1])
+
 # _GNU_SOURCE is a glibc feature-test macro; defining it on Windows /
 # macOS toolchains is at best meaningless and at worst an error.
 if host_machine.system() == 'linux'
