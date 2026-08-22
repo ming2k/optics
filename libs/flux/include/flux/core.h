@@ -90,7 +90,7 @@ typedef enum flux_result {
     FLUX_ERROR_TIMEOUT = 9,
 } flux_result;
 
-FLUX_API const char *flux_result_string(flux_result r);
+FLUX_NODISCARD FLUX_API const char *flux_result_string(flux_result r);
 
 /* Structured diagnostic for the most recent error on this thread.
  *
@@ -257,8 +257,22 @@ typedef enum flux_struct_type {
     FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC = 31,
     FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC = 32,
     FLUX_TYPE_CANVAS_ANTIALIAS_DESC = 33,
+    FLUX_TYPE_PAINT_EXT_BASE = 34, /* reserved block: FLUX_TYPE_PAINT_*_DESC
+                                    * extension tags for flux_paint.next
+                                    * chains start at 35; none defined yet.
+                                    * Append only. Never repurpose. */
     /* Append only. Never repurpose. */
 } flux_struct_type;
+
+/* Compile-time ABI drift guards. These values are wire/ABI identifiers:
+ * renumbering one silently mis-routes every chained descriptor, and
+ * nothing else would catch it (the library validates `type` at runtime,
+ * so a drifted header fails far from the cause). If any of these asserts
+ * fires, a value was inserted or reordered instead of appended — see
+ * docs/reference/api.md before changing them. */
+static_assert(FLUX_TYPE_DEVICE_DESC == 1, "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_CANVAS_ANTIALIAS_DESC == 33, "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_PAINT_EXT_BASE == 34, "flux_struct_type: append only — never renumber");
 
 /* ================================================================== */
 /*  Allocator & logger (caller-supplied)                              */
@@ -394,6 +408,20 @@ FLUX_NODISCARD FLUX_API flux_result flux_frame_finish_image_target(flux_frame *f
  * retains the device satisfies this). Release with flux_image_release. */
 FLUX_NODISCARD FLUX_API flux_result flux_image_create_compute_writable(
     flux_device *d, uint32_t width, uint32_t height, flux_format format, flux_image **out);
+
+/* Image usage support query — discover capabilities instead of failing
+ * on them. flux_image_create_compute_writable documents
+ * FLUX_ERROR_UNSUPPORTED for RGBA16_SFLOAT on devices without rgba16f
+ * storage; this query answers the question BEFORE the attempt. Returns
+ * false (never an error) for unknown formats, NULL devices, or
+ * unsupported usage combinations on this device. */
+typedef enum flux_image_usage_query {
+    FLUX_IMAGE_USAGE_SAMPLED = 0,     /* shader sampling (all flux images)   */
+    FLUX_IMAGE_USAGE_COMPUTE_WRITE = 1, /* storage write (compute_writable)  */
+} flux_image_usage_query;
+
+FLUX_API bool flux_device_supports_image_usage(const flux_device *d, flux_format format,
+                                               flux_image_usage_query usage);
 
 /* Upload tightly packed pixels into an in-bounds sub-region. The image view
  * and bindless handle remain valid across the update. Requires the image to
@@ -546,6 +574,38 @@ FLUX_NODISCARD FLUX_API flux_result flux_device_create(const flux_device_desc *d
  * capabilities requested through flux_device_features_desc and capabilities
  * implied by a complete legacy required-device-extension bundle. */
 FLUX_API flux_device_feature_flags flux_device_enabled_features(const flux_device *d);
+
+/* Device limits relevant to flux callers — the query the API previously
+ * lacked (feature discovery was "try it and watch it fail"). Values come
+ * from the Vulkan physical device; every field is zeroed when `d` is
+ * NULL. Out-param form so the struct can grow: zero-init, fill what you
+ * know, pass a pointer; unknown-to-the-caller trailing fields are simply
+ * not written by older headers' expectations (the library writes the
+ * whole struct as it knows it, so link against matching headers or rely
+ * on the documented pre-1.0 rebuild rule). */
+typedef struct flux_device_limits {
+    uint32_t struct_size;          /* sizeof(flux_device_limits)             */
+    uint32_t max_image_dimension1d;/* max flux_image_create width            */
+    uint32_t max_image_dimension2d;/* max width/height of 2D images/surfaces */
+    uint32_t max_image_dimension3d;/* max extent of 3D images (0 = none)     */
+    uint32_t max_color_attachments;/* per-pass color attachment count        */
+    uint32_t max_framebuffer_width;
+    uint32_t max_framebuffer_height;
+    uint32_t max_frames_in_flight; /* library cap actually applied (see
+                                    * FLUX_MAX_FRAMES_IN_FLIGHT)             */
+    uint64_t min_uniform_buffer_offset_alignment;
+    uint64_t min_storage_buffer_offset_alignment;
+    uint64_t buffer_image_granularity;
+    float timestamp_period_ns;     /* ns per timestamp tick; 0 if unsupported */
+    uint32_t timestamp_valid_bits; /* 0 = timestamps unavailable             */
+} flux_device_limits;
+
+#define FLUX_DEVICE_LIMITS_INIT {.struct_size = sizeof(flux_device_limits)}
+
+/* Fill `out` with the device's limits. Returns FLUX_ERROR_INVALID_ARGUMENT
+ * if `out` is NULL; never fails otherwise. */
+FLUX_NODISCARD FLUX_API flux_result flux_device_get_limits(const flux_device *d,
+                                                           flux_device_limits *out);
 
 /* Returns the DRM primary/render identities of the selected Vulkan physical
  * device. The output is zeroed and false is returned when
@@ -928,7 +988,7 @@ FLUX_API void flux_surface_release(flux_surface *s);
  * and the next flux_surface_begin_frame returns the first frame of the
  * new chain. Safe to call from the window resize callback. Returns
  * FLUX_ERROR_INVALID_ARGUMENT if w or h is 0. */
-FLUX_API flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h);
+FLUX_NODISCARD FLUX_API flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h);
 FLUX_API void flux_surface_get_info(const flux_surface *s, flux_surface_info *out);
 
 /* Read back a captured frame as tightly packed RGBA8, row-major, top-left
@@ -1133,7 +1193,7 @@ typedef struct flux_timestamp_result {
 /* Returns timestamps from the most recent COMPLETED frame at this
  * frame's slot. Caller-supplied buffer; out_count receives the actual
  * number written. */
-FLUX_API flux_result flux_frame_collect_timestamps(flux_frame *f, flux_timestamp_result *out,
+FLUX_NODISCARD FLUX_API flux_result flux_frame_collect_timestamps(flux_frame *f, flux_timestamp_result *out,
                                                    uint32_t *inout_count);
 
 #ifdef __cplusplus

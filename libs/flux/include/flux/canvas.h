@@ -78,10 +78,28 @@ typedef struct flux_gradient_stops {
 
 /* Discriminated by `kind`. The `gradient` union is meaningful only
  * for LINEAR/RADIAL — read it via flux_paint_linear_gradient /
- * flux_paint_radial_gradient (defined below) or directly. */
+ * flux_paint_radial_gradient (defined below) or directly.
+ *
+ * Extension chain (the same sType/pNext pattern every flux descriptor
+ * uses — see flux_struct_type in <flux/core.h>). `next` is a linked list
+ * of typed extension structs; unrecognized tags are ignored by every
+ * backend, so a host can chain a new paint extension without waiting
+ * for canvas support and older binaries keep working against newer
+ * libraries. This is the designated growth path for paint kinds:
+ * instead of widening this struct (a restructure = ABI break per
+ * docs/reference/api.md) or adding union arms, add
+ *   typedef struct flux_paint_<thing>_desc { flux_struct_type type;
+ *   const void *next; ... } with a new FLUX_TYPE_PAINT_<THING>_DESC tag.
+ * `next` must remain NULL while zero-initialized (compound literals
+ * with FLUX_PAINT_INIT / the constructors below guarantee this).
+ * Callers never read `next` back; the canvas consumes it during draw. */
 typedef struct flux_paint {
     flux_paint_kind kind;
     flux_color color; /* SOLID: fill colour; gradient kinds: ignored */
+
+    /* Extension chain head; FLUX_TYPE-tagged (flux_struct_type). NULL for
+     * every paint produced by the constructors below and by zero-init. */
+    const void *next;
 
     /* Stroke parameters — apply to every stroke_path regardless of kind. */
     float stroke_width;
@@ -278,11 +296,28 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_frame_checked(flux_canvas *c
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_pass(flux_canvas *c, flux_frame *f,
                                                            const flux_canvas_pass_desc *desc);
 
-/* GPU-specific spelling of begin_frame/end_frame (f is required). Kept for
- * source compatibility; equivalent to flux_canvas_begin_frame with a frame. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin(flux_canvas *c, flux_frame *f,
-                                                      const flux_color *clear_color);
-FLUX_API void flux_canvas_end(flux_canvas *c);
+/* GPU-specific spelling of begin_frame/end_frame (f is required). Superseded
+ * by the backend-agnostic flux_canvas_begin_frame/end_frame_checked pair;
+ * these remain for source compatibility only — see docs/reference/api.md
+ * for the two-step deprecation policy. */
+#if defined(__cplusplus)
+#  if __cplusplus >= 201402L
+#    define FLUX_DEPRECATED(msg) [[deprecated(msg)]]
+#  else
+#    define FLUX_DEPRECATED(msg)
+#  endif
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#  define FLUX_DEPRECATED(msg) [[deprecated(msg)]]
+#elif defined(__GNUC__) || defined(__clang__)
+#  define FLUX_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#else
+#  define FLUX_DEPRECATED(msg)
+#endif
+
+FLUX_DEPRECATED("use flux_canvas_begin_frame") FLUX_NODISCARD FLUX_API flux_result
+flux_canvas_begin(flux_canvas *c, flux_frame *f, const flux_color *clear_color);
+FLUX_DEPRECATED("use flux_canvas_end_frame") FLUX_API void flux_canvas_end(flux_canvas *c);
+FLUX_DEPRECATED("use flux_canvas_end_frame_checked")
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_checked(flux_canvas *c);
 
 /* Snapshot the canvas' pixels as premultiplied RGBA8 (row-major; *stride is
