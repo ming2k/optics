@@ -53,14 +53,35 @@ extern "C" {
 #endif
 
 /* ================================================================== */
-/*  Visibility — unified with libflux (FLUX_API from <flux/core.h>).  */
+/*  Visibility                                                        */
 /* ================================================================== */
+/* flux-text exports through its own macro, NOT through FLUX_API.       */
+/*                                                                       */
+/* Root-cause note: this library links libflux but is a distinct binary   */
+/* with its own build define (FLUX_TEXT_BUILDING, see meson). Reusing    */
+/* FLUX_TEXT_API here meant that on _WIN32 the library's own translation      */
+/* units compiled every exported symbol as __declspec(dllimport) — a      */
+/* definition declared dllimport — because FLUX_BUILDING (libflux's      */
+/* build define) is never set while building libflux_text. A sibling     */
+/* library must own its export macro the same way it owns its prefix.    */
+
+#if defined(_WIN32) && !defined(FLUX_TEXT_STATIC)
+#ifdef FLUX_TEXT_BUILDING
+#define FLUX_TEXT_API __declspec(dllexport)
+#else
+#define FLUX_TEXT_API __declspec(dllimport)
+#endif
+#elif defined(__GNUC__) || defined(__clang__)
+#define FLUX_TEXT_API __attribute__((visibility("default")))
+#else
+#define FLUX_TEXT_API
+#endif
 
 #define FLUX_TEXT_VERSION_MAJOR 0
 #define FLUX_TEXT_VERSION_MINOR 0
 #define FLUX_TEXT_VERSION_PATCH 24
 
-FLUX_API const char *flux_text_version_string(void);
+FLUX_TEXT_API const char *flux_text_version_string(void);
 
 /* ================================================================== */
 /*  Types                                                             */
@@ -128,8 +149,8 @@ typedef struct flux_text_desc {
  * A non-NULL `desc->device` is retained by the context (released at
  * flux_text_destroy), so the caller may drop its own reference right after
  * creation. */
-FLUX_NODISCARD FLUX_API flux_result flux_text_create(const flux_text_desc *desc, flux_text **out);
-FLUX_API void flux_text_destroy(flux_text *t);
+FLUX_NODISCARD FLUX_TEXT_API flux_result flux_text_create(const flux_text_desc *desc, flux_text **out);
+FLUX_TEXT_API void flux_text_destroy(flux_text *t);
 
 /* Scale contract (single source of truth):
  *   - flux_text_draw rasterises at the *canvas's* effective scale
@@ -143,14 +164,14 @@ FLUX_API void flux_text_destroy(flux_text *t);
  * The shared layout cache is keyed by the resolved scale, so a matched
  * pair also means each visible string is shaped once per frame, not
  * twice. */
-FLUX_API void flux_text_set_scale(flux_text *t, float scale);
-FLUX_API float flux_text_scale(const flux_text *t);
+FLUX_TEXT_API void flux_text_set_scale(flux_text *t, float scale);
+FLUX_TEXT_API float flux_text_scale(const flux_text *t);
 
 /* Get/set the context's default typeface family — the family a style with
  * FLUX_TEXT_FAMILY_DEFAULT resolves to. Sans-serif at creation. Setting it
  * loads the family's faces lazily on first use. */
-FLUX_API flux_text_family flux_text_default_family(const flux_text *t);
-FLUX_API void flux_text_set_default_family(flux_text *t, flux_text_family family);
+FLUX_TEXT_API flux_text_family flux_text_default_family(const flux_text *t);
+FLUX_TEXT_API void flux_text_set_default_family(flux_text *t, flux_text_family family);
 
 /* Release the per-context scratch high-water marks (the placed-glyph buffer,
  * the run list, and the layout cache). They grow to fit the largest input
@@ -158,7 +179,7 @@ FLUX_API void flux_text_set_default_family(flux_text *t, flux_text_family family
  * (or whenever the host goes idle) returns that peak memory to the system.
  * Cheap to call every frame. The next measure/draw/caret call simply
  * reallocates to whatever size it needs. */
-FLUX_API void flux_text_compact(flux_text *t);
+FLUX_TEXT_API void flux_text_compact(flux_text *t);
 
 /* ================================================================== */
 /*  Diagnostics                                                       */
@@ -182,7 +203,7 @@ typedef struct flux_text_stats {
     uint32_t atlas_pages;         /* atlas pages in use (multi-page packer) */
 } flux_text_stats;
 
-FLUX_API void flux_text_get_stats(const flux_text *t, flux_text_stats *out);
+FLUX_TEXT_API void flux_text_get_stats(const flux_text *t, flux_text_stats *out);
 
 /* ================================================================== */
 /*  Measure                                                          */
@@ -190,7 +211,7 @@ FLUX_API void flux_text_get_stats(const flux_text *t, flux_text_stats *out);
 
 /* Shape `len` bytes of `utf8` in `style` and report the extent. Returns a
  * zeroed metric for empty input. `style` NULL uses context defaults. */
-FLUX_API flux_text_metrics flux_text_measure(flux_text *t, const char *utf8, size_t len,
+FLUX_TEXT_API flux_text_metrics flux_text_measure(flux_text *t, const char *utf8, size_t len,
                                              const flux_text_style *style);
 
 /* ================================================================== */
@@ -200,7 +221,7 @@ FLUX_API flux_text_metrics flux_text_measure(flux_text *t, const char *utf8, siz
 /* Shape `len` bytes of `utf8` and paint them as a single batched glyph
  * run with the top-left at (x, y) in logical pixels, using `style`
  * (including its colour). No-op for a measure-only context. */
-FLUX_API void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
+FLUX_TEXT_API void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
                              const char *utf8, size_t len, const flux_text_style *style);
 
 /* Draw a run with a contour behind the foreground glyphs. `outline_width`
@@ -209,7 +230,7 @@ FLUX_API void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *aren
  * does not duplicate glyph storage. Keep the treatment opt-in: it is meant
  * for text floating over variable imagery or translucent material, not as a
  * replacement for choosing a legible foreground/background pair. */
-FLUX_API void flux_text_draw_outlined(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x,
+FLUX_TEXT_API void flux_text_draw_outlined(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x,
                                       float y, const char *utf8, size_t len,
                                       const flux_text_style *style, flux_color outline_color,
                                       float outline_width);
@@ -221,22 +242,22 @@ FLUX_API void flux_text_draw_outlined(flux_text *t, flux_canvas *canvas, flux_ar
 /* Logical x of the glyph boundary before byte `byte`. Under BiDi the
  * prefix width is not the caret x, so use this rather than measuring a
  * substring. */
-FLUX_API float flux_text_x_for_byte(flux_text *t, const char *utf8, size_t len, size_t byte,
+FLUX_TEXT_API float flux_text_x_for_byte(flux_text *t, const char *utf8, size_t len, size_t byte,
                                     const flux_text_style *style);
 
 /* Source byte offset of the glyph boundary nearest logical x `local_x`. */
-FLUX_API size_t flux_text_byte_for_x(flux_text *t, const char *utf8, size_t len, float local_x,
+FLUX_TEXT_API size_t flux_text_byte_for_x(flux_text *t, const char *utf8, size_t len, float local_x,
                                      const flux_text_style *style);
 
 /* Fill `out` (capacity `max`) with the on-screen spans covering byte
  * range [lo, hi). Returns the number written. */
-FLUX_API int flux_text_selection_rects(flux_text *t, const char *utf8, size_t len, size_t lo,
+FLUX_TEXT_API int flux_text_selection_rects(flux_text *t, const char *utf8, size_t len, size_t lo,
                                        size_t hi, const flux_text_style *style,
                                        flux_text_xrange *out, int max);
 
 /* Move the caret one glyph in visual order (forward = rightward on
  * screen) and return the resulting source byte offset. */
-FLUX_API size_t flux_text_visual_move(flux_text *t, const char *utf8, size_t len, size_t byte,
+FLUX_TEXT_API size_t flux_text_visual_move(flux_text *t, const char *utf8, size_t len, size_t byte,
                                       bool forward, const flux_text_style *style);
 
 #ifdef __cplusplus

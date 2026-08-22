@@ -3,22 +3,8 @@
 
 #include <stdint.h>
 
-/* lens.h includes this header before defining its export macro, and the
- * header is also included on its own — provide the same spelling when the
- * macro has not been seen yet. */
-#ifndef LENS_API
-#if defined(_WIN32) && !defined(LENS_STATIC)
-#ifdef LENS_BUILDING
-#define LENS_API __declspec(dllexport)
-#else
-#define LENS_API __declspec(dllimport)
-#endif
-#elif defined(__GNUC__) || defined(__clang__)
-#define LENS_API __attribute__((visibility("default")))
-#else
-#define LENS_API
-#endif
-#endif /* LENS_API */
+/* Single source of truth for LENS_API — never restate it here. */
+#include <lens/export.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -327,7 +313,10 @@ typedef struct lens_icon_desc {
     uint32_t count;
 } lens_icon_desc;
 
-extern const lens_icon_desc lens_icon_table[LENS_ICON_COUNT];
+/* Exported: consuming the built-in table from another link unit (a DLL
+ * boundary on Windows, or any -fvisibility=hidden consumer) requires the
+ * same visibility treatment as the functions. */
+LENS_API extern const lens_icon_desc lens_icon_table[LENS_ICON_COUNT];
 
 /* Failure sentinel of lens_icon_register_svg; also usable as a "no icon"
  * value wherever a lens_icon_id is optional. */

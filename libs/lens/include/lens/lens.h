@@ -21,9 +21,16 @@
 #ifndef LENS_H
 #define LENS_H
 
+/* Self-contained: lens.h uses bool, uint32_t, size_t directly and must
+ * not rely on flux headers happening to provide them first. */
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <flux/canvas.h>
 #include <flux/core.h>
 #include <flux/math.h>
+#include <lens/export.h> /* LENS_API — single source of truth */
 #include <lens/icon.h>
 
 #ifdef __cplusplus
@@ -33,18 +40,8 @@ extern "C" {
 /* ================================================================== */
 /*  Visibility                                                        */
 /* ================================================================== */
-
-#if defined(_WIN32) && !defined(LENS_STATIC)
-#ifdef LENS_BUILDING
-#define LENS_API __declspec(dllexport)
-#else
-#define LENS_API __declspec(dllimport)
-#endif
-#elif defined(__GNUC__) || defined(__clang__)
-#define LENS_API __attribute__((visibility("default")))
-#else
-#define LENS_API
-#endif
+/* LENS_API is defined in <lens/export.h>, included above. Do not define */
+/* it here: two spellings of one export macro drift apart.              */
 
 #define LENS_VERSION_MAJOR 0
 #define LENS_VERSION_MINOR 0
@@ -507,7 +504,7 @@ typedef struct lens_text_metrics {
 } lens_text_metrics;
 
 /* The only text entry point layout (ADR-0028 pass 1) may call. Backed
- * by a monospace metrics stub until flux core ships canvas text. */
+ * by flux_text_measure via the text seam (ADR-0033). */
 LENS_API lens_text_metrics lens_text_measure(lens *ui, lens_font *font, const char *utf8,
                                              float size_px);
 LENS_API lens_text_metrics lens_text_measure_ex(lens *ui, lens_font *font, const char *utf8,
@@ -557,8 +554,24 @@ typedef enum lens_widget_kind : uint32_t {
     LENS_WIDGET_MENU_ITEM = 19, /* bar trigger, item, submenu, separator */
     LENS_WIDGET_DROPDOWN = 20,  /* the trigger; the popup is place+cascade */
     LENS_WIDGET_LINK = 21,
-    LENS_WIDGET_KIND_COUNT
+    LENS_WIDGET_KIND_COUNT,
+
+    /* ---- Host-reserved range (ADR-0073) --------------------------- */
+    /* Kinds from here to 0xFFFFFFFF are never assigned by lens; hosts use
+     * them to give composite widgets a stable identity for skin selection
+     * (lens_set_skin / lens_set_skin_userdata). The library's own
+     * count-sized tables stop at LENS_WIDGET_KIND_COUNT; user-range
+     * registrations live in a host-sized side table. The built-in default
+     * skin for a user kind is NULL — the host's skin IS the default. */
+    LENS_WIDGET_KIND_USER_BASE = 0x40000000u,
 } lens_widget_kind;
+
+/* The boundary is ABI: a future library version must keep the reserved
+ * range reserved (hosts bake these values into their own enums). */
+static_assert((uint32_t)LENS_WIDGET_KIND_USER_BASE == 0x40000000u,
+              "user widget-kind base is an ABI boundary (ADR-0073)");
+static_assert((uint32_t)LENS_WIDGET_KIND_COUNT <= (uint32_t)LENS_WIDGET_KIND_USER_BASE,
+              "built-in kinds must never enter the host-reserved range");
 
 /* One wrapped line of text for a LENS_WIDGET_LABEL record (and the visible
  * body lines of a LENS_WIDGET_TEXTAREA record): the widget owns wrapping /
@@ -714,11 +727,26 @@ typedef struct lens_widget_record {
  * accessors (e.g. lens_node_bounds), nothing more. */
 typedef void (*lens_skin_fn)(lens *ui, lens_node *node, const lens_widget_record *rec);
 
+/* Skin + caller context. The plain lens_skin_fn signature has no closure
+ * slot, which forced any stateful skin (a spring indicator carrying its
+ * own physics) to reach the state through a process global — the exact
+ * hazard ADR-0059 flagged as future work. This form passes `user` back on
+ * every emission; register it with lens_set_skin_userdata. */
+typedef void (*lens_skin_userdata_fn)(lens *ui, lens_node *node,
+                                      const lens_widget_record *rec, void *user);
+
 /* Replace the skin for a widget kind context-wide; NULL restores the
  * built-in default. The context is the single override granularity
  * (ADR-0061 retired the per-call *_skinned forms): for a one-off override,
  * set the skin, build the widget, restore NULL. */
 LENS_API void lens_set_skin(lens *ui, lens_widget_kind kind, lens_skin_fn fn);
+/* Same, with a closure pointer delivered to the skin on every emission.
+ * `user` is stored verbatim and passed back unmodified; the library never
+ * dereferences it. NULL fn restores the default (user is then ignored).
+ * Registered userdata skins also receive first-touch zeroes from
+ * lens_skin_scratch like any other skin. */
+LENS_API void lens_set_skin_userdata(lens *ui, lens_widget_kind kind,
+                                     lens_skin_userdata_fn fn, void *user);
 /* The built-in default skin for a kind — for wrapping: call it from a
  * custom skin to keep the stock chrome, then add your own. */
 LENS_API lens_skin_fn lens_default_skin(lens_widget_kind kind);
@@ -751,11 +779,33 @@ LENS_API void lens_skin_icon(lens *ui, lens_node *node, flux_rect rel, flux_colo
 LENS_API void lens_skin_clip_push(lens *ui, lens_node *node, flux_rect rel);
 LENS_API void lens_skin_clip_pop(lens *ui, lens_node *node);
 
+/* Emit a skin record for a HOST-RESERVED widget kind (ADR-0073).
+ *
+ * This is the emission half of the user-widget contract: a composite
+ * built from lens_pressable_begin + children calls this with its own
+ * user-range kind and the skin registered for that kind fires — identity
+ * and re-skinning parity with built-ins, with no library-side
+ * measure/interact behavior implied. `kind` outside the reserved range is
+ * rejected (built-in kinds emit through their own widget entry points,
+ * with their own records; going around them here would bypass their
+ * semantics). Content fields default as in lens_widget_record; set what
+ * the skin needs via `content`. No-op (not an error) when the node is
+ * NULL or no skin is registered for the kind. */
+LENS_API void lens_skin_emit_user(lens *ui, lens_node *node, lens_widget_kind kind,
+                                  lens_widget_record rec);
+
 /* ================================================================== */
 /*  Context lifecycle (ADR-0032)                                      */
 /* ================================================================== */
 
 typedef struct lens_desc {
+    /* Size guard, same pattern as lens_input/lens_theme (ADR-0032): set
+     * to sizeof(lens_desc). 0 = legacy caller (pre-guard layout trusted
+     * whole). The library copies only min(caller, library) bytes, so a
+     * caller built against an older or newer header degrades cleanly
+     * instead of over-reading. Future fields append after `clipboard`. */
+    uint32_t size;
+
     flux_device *device;      /* retained; persistent allocator source.
                                  NULL = use libc malloc (headless/tests,
                                  render unavailable). */
@@ -767,6 +817,13 @@ typedef struct lens_desc {
 } lens_desc;
 
 FLUX_NODISCARD LENS_API flux_result lens_create(const lens_desc *desc, lens **out);
+
+/* Zero-init + append-safe descriptor preset (matches the FLUX_*_DESC_INIT
+ * convention). New code should prefer this over a bare {0}: it pins the
+ * size guard so a future field append can't silently leave it stale. */
+#define LENS_DESC_INIT /* clang-format off */ \
+    { .size = sizeof(lens_desc) } /* clang-format on */
+
 LENS_API void lens_destroy(lens *ui);
 LENS_API void lens_set_theme(lens *ui, lens_theme theme);
 LENS_API lens_theme lens_get_theme(const lens *ui);
@@ -802,6 +859,12 @@ FLUX_NODISCARD LENS_API flux_result lens_render(lens *ui, flux_canvas *canvas);
 
 /* True if the per-frame arena overflowed during the frame just built. */
 LENS_API bool lens_overflowed(const lens *ui);
+
+/* True if the same widget id was linked more than once under one parent in
+ * the frame just built. The later occurrence is omitted because retained ids
+ * name nodes one-to-one; callers building repeated labels must scope them
+ * with lens_push_id[_int] or pass an explicit lens_box.id. */
+LENS_API bool lens_has_duplicate_ids(const lens *ui);
 
 /* True if an eased value (hover/active fade, …) was still in transit during
  * the frame just built. An input-driven host that only paints on events should

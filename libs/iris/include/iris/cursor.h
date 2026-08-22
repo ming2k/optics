@@ -16,6 +16,12 @@
 
 #include <stdint.h>
 
+/* IRIS_API lives in <iris/app.h>. Every declaring iris header includes
+ * it so each header is self-contained: including any single one, alone,
+ * must compile (a header that only works when another header happened to
+ * be included first is a latent consumer break). */
+#include <iris/app.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

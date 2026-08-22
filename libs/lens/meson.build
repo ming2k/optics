@@ -80,11 +80,17 @@ lens_lib = library('lens',
   c_args                : ['-DLENS_BUILDING=1'],
   dependencies          : [flux_dep, flux_text_dep, m_dep],
   gnu_symbol_visibility : 'hidden',
+  soversion             : optics_soname,
   version               : meson.project_version(),
   install               : true,
 )
 
-install_headers('include/lens/lens.h', 'include/lens/icon.h', subdir : 'lens')
+install_headers(
+  'include/lens/lens.h',
+  'include/lens/icon.h',
+  'include/lens/export.h',
+  subdir : 'lens',
+)
 
 lens_dep = declare_dependency(
   link_with           : lens_lib,
