@@ -125,5 +125,27 @@ int main(void) {
     CHECK(iris_text_memento_update(&mem, &mem_len, &mem_cursor, "", 0, 0) == true);
     iris_text_memento_clear(&mem, &mem_len, &mem_cursor);
 
+    /* --- iris_cp_is_text: what the backends deliver as committed text ---
+     *
+     * C0 controls are not text (the key event carries them), and neither
+     * is DEL 0x7f — the Delete keysym's xkb UTF-8 mapping and Win32's
+     * WM_CHAR for Ctrl+Backspace are both exactly 0x7f. This is the
+     * regression pin for the "Delete inserts garbage" bug. */
+    CHECK(iris_cp_is_text(0x00) == false);   /* NUL */
+    CHECK(iris_cp_is_text(0x08) == false);   /* BS — BackSpace key */
+    CHECK(iris_cp_is_text(0x09) == false);   /* HT — Tab key */
+    CHECK(iris_cp_is_text(0x0a) == false);   /* LF */
+    CHECK(iris_cp_is_text(0x0d) == false);   /* CR — Return key */
+    CHECK(iris_cp_is_text(0x1b) == false);   /* ESC */
+    CHECK(iris_cp_is_text(0x1f) == false);   /* US — last C0 */
+    CHECK(iris_cp_is_text(0x7f) == false);   /* DEL — Delete key / Ctrl+BS */
+    CHECK(iris_cp_is_text(0x20) == true);    /* space is text */
+    CHECK(iris_cp_is_text(0x41) == true);    /* 'A' */
+    CHECK(iris_cp_is_text(0x7e) == true);    /* '~' — last printable ASCII */
+    CHECK(iris_cp_is_text(0x80) == true);    /* C1 stays text (IME/WM_CHAR) */
+    CHECK(iris_cp_is_text(0x00e9) == true);  /* é */
+    CHECK(iris_cp_is_text(0x4e2d) == true);  /* 中 */
+    CHECK(iris_cp_is_text(0x1f600) == true); /* 😀 */
+
     return TEST_REPORT();
 }

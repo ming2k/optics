@@ -658,14 +658,15 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
     /* Committed text, only when the input context did not already deliver
      * it and no Command / Control chord is down (otherwise Cmd+C would
      * insert "c"). Control characters (Return "\r", Tab "\t", DEL 0x7f)
-     * are not text. */
+     * are not text — the shared iris_cp_is_text predicate, so all three
+     * backends agree. */
     NSEventModifierFlags mods = [event modifierFlags];
     if (skipText || (mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl)))
         return;
     NSString *chars = [event characters];
     if ([chars length] > 0) {
         unichar c0 = [chars characterAtIndex:0];
-        if (c0 >= 0x20 && c0 != 0x7f) {
+        if (iris_cp_is_text(c0)) {
             const char *utf8 = [chars UTF8String];
             if (utf8)
                 acc_append_text(pl->acc.text, sizeof pl->acc.text, utf8);
