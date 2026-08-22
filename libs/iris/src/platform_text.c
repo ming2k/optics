@@ -56,3 +56,11 @@ void iris_text_memento_clear(char **saved, size_t *saved_len, uint32_t *saved_cu
     *saved_len = 0;
     *saved_cursor = 0;
 }
+
+bool iris_cp_is_text(uint32_t cp) {
+    /* C0 controls and DEL never travel as committed text; the key event
+     * carries the intent instead (LENS_KEY_RETURN / _BACKSPACE / _DELETE).
+     * See the header comment for why 0x7f must not fall through the
+     * plain >= 0x20 test. */
+    return cp >= 0x20 && cp != 0x7f;
+}

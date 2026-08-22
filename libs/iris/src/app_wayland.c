@@ -813,7 +813,10 @@ static void wp_repeat_arm(wp_platform *pl) {
 static void kb_emit_text(wp_platform *pl, xkb_keycode_t code) {
     char buf[8];
     int n = xkb_state_key_get_utf8(pl->xkb_state, code, buf, sizeof buf);
-    if (n > 0 && (unsigned char)buf[0] >= 0x20)
+    /* iris_cp_is_text, not a bare >= 0x20: the Delete keysym's xkb UTF-8
+     * mapping is exactly U+007F, so the plain test let every Delete press
+     * leak "\x7f" into text_utf8 alongside the (correct) key event. */
+    if (n > 0 && iris_cp_is_text((unsigned char)buf[0]))
         iris_utf8_append(pl->acc.text, sizeof pl->acc.text, buf, (size_t)n);
 }
 
@@ -1854,10 +1857,14 @@ static void tablet_serial(void *user, uint32_t serial) {
     wp_platform *pl = user;
     pl->last_serial = serial;
 }
-static const iris_tablet_host tablet_host_bridge = {
+static iris_tablet_host tablet_host_bridge = {
     /* The platform is a stack object inside iris_app_run_wayland; the
      * registry (and thus tablet globals) can only arrive during that
-     * call, where this pointer is set before dispatch starts. */
+     * call, where this pointer is set before dispatch starts. Writable
+     * on purpose: the vtable is copied (g_host = *host) at bind time,
+     * so user must be populated before the first registry dispatch —
+     * and .rodata (static const) is not writable, which is why this is
+     * not const. */
     .user = NULL,
     .motion = tablet_motion,
     .button = tablet_button,
@@ -2606,8 +2613,10 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
      * iris_set_cursor() can reach it. Cleared on the way out (success
      * or fail). */
     g_active_pl = &pl;
-    /* Tablet bridge needs the (stack) platform for its host callbacks. */
-    *(wp_platform **)&tablet_host_bridge.user = &pl;
+    /* Tablet bridge needs the (stack) platform for its host callbacks; the
+     * bridge is a writable static (see its initializer) so this store is
+     * legal and lands in .data, not .rodata. */
+    tablet_host_bridge.user = &pl;
 
     /* --- Wayland connection + globals ---------------------------- */
     pl.display = wl_display_connect(NULL);

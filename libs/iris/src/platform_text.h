@@ -44,4 +44,22 @@ bool iris_text_memento_update(char **saved, size_t *saved_len, uint32_t *saved_c
  * session ends, so the next session re-reports even identical text. */
 void iris_text_memento_clear(char **saved, size_t *saved_len, uint32_t *saved_cursor);
 
+/* Is `cp` a code point the backends must deliver as COMMITTED TEXT
+ * (lens_input.text_utf8)? False for control characters: the C0 range
+ * (Return \r, Tab \t, Backspace \b, …) AND the DEL character 0x7f.
+ *
+ * DEL is the subtle one: xkb maps the Delete keysym (0xffff) and Win32
+ * maps Ctrl+Backspace's WM_CHAR to exactly U+007F, so without the second
+ * half of the test every Delete press would ALSO deliver "\x7f" as text —
+ * the key event already carries the intent (LENS_KEY_DELETE), and the
+ * invisible byte would corrupt editor buffers. Cocoa's characters filter
+ * has always excluded it ("Control characters (Return "\r", Tab "\t",
+ * DEL 0x7f) are not text"); this predicate pins the same rule for all
+ * three backends. C1 controls (0x80..0x9f) arrive as text via IME/WM_CHAR
+ * in good faith (e.g. U+0085 NEL from a paste), so they stay text.
+ *
+ * One predicate, three backends: the keyboard contract
+ * (platform_internal.h) requires them to agree on what is text. */
+bool iris_cp_is_text(uint32_t cp);
+
 #endif /* IRIS_PLATFORM_TEXT_H */
