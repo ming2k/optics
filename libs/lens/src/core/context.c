@@ -21,6 +21,46 @@ void lensi_free(lens *ui, void *ptr) {
 
 static void lensi_theme_normalize(lens_theme *t);
 
+/* Size-aware theme copy (ADR-0032 decision 1 — previously documented but
+ * not implemented, which made it an over-read on input and an over-write
+ * on output for callers built against different lens_theme layouts).
+ * Semantics match the implemented lens_input guard in lens_begin():
+ *   size == 0        -> legacy caller: trust the full struct (pre-guard ABI)
+ *   0 < size < lib   -> copy only the caller's prefix, default the rest
+ *   size > lib size  -> copy only the library's prefix (caller is newer)
+ * In every case the stored theme ends with size = sizeof(lens_theme) as
+ * the library now sees it. */
+static lens_theme lensi_theme_copy_in(const lens_theme *src) {
+    lens_theme t = lens_theme_default();
+    if (!src)
+        return t;
+    size_t n = src->size ? src->size : sizeof(lens_theme);
+    if (n > sizeof(lens_theme))
+        n = sizeof(lens_theme);
+    memcpy(&t, src, n);
+    /* The library's notion of the layout wins from here on. */
+    t.size = sizeof(lens_theme);
+    return t;
+}
+
+/* Size-aware lens_desc read (mirrors the lens_input guard in lens_begin):
+ * read only min(caller, library) bytes so a caller compiled against a
+ * different lens_desc layout — older or newer — cannot make the library
+ * read past its own struct. Returns a fully library-local copy. */
+static lens_desc lensi_desc_copy_in(const lens_desc *desc) {
+    lens_desc d;
+    memset(&d, 0, sizeof d);
+    if (!desc)
+        return d;
+    size_t n = desc->size ? desc->size : sizeof(lens_desc);
+    if (n > sizeof(lens_desc))
+        n = sizeof(lens_desc);
+    memcpy(&d, desc, n);
+    /* Sanitize: the guard itself is the library's, never the caller's. */
+    d.size = sizeof(lens_desc);
+    return d;
+}
+
 flux_result lens_create(const lens_desc *desc, lens **out) {
     if (!out)
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -30,27 +70,32 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
     if (!ui)
         return FLUX_ERROR_OUT_OF_MEMORY;
 
-    ui->device = desc ? desc->device : NULL;
+    /* Read the caller's descriptor through the size guard: a caller built
+     * against a different lens_desc layout never makes the library read
+     * past its own struct. All field reads below come from this local
+     * copy, never from `desc` directly. */
+    const lens_desc d = lensi_desc_copy_in(desc);
+    desc = &d;
+
+    ui->device = d.device;
     if (ui->device) {
-        flux_device *d = flux_device_retain(ui->device);
-        (void)d;
+        flux_device *dev = flux_device_retain(ui->device);
+        (void)dev;
     }
 
-    ui->theme = (desc && desc->theme.size) ? desc->theme : lens_theme_default();
+    ui->theme = d.theme.size ? lensi_theme_copy_in(&d.theme) : lens_theme_default();
     lensi_theme_normalize(&ui->theme);
-    ui->scale = (desc && desc->scale > 0.0f) ? desc->scale : 1.0f;
+    ui->scale = (d.scale > 0.0f) ? d.scale : 1.0f;
     ui->opacity = 1.0f;
     ui->tooltip.opacity = 1.0f;
-    if (desc)
-        ui->clipboard = desc->clipboard;
+    ui->clipboard = d.clipboard;
 
-    size_t arena_bytes =
-        (desc && desc->arena_bytes) ? desc->arena_bytes : LENSI_DEFAULT_ARENA_BYTES;
+    size_t arena_bytes = d.arena_bytes ? d.arena_bytes : LENSI_DEFAULT_ARENA_BYTES;
     flux_result r = flux_arena_init(&ui->arena, arena_bytes, NULL);
     if (r != FLUX_OK)
         goto fail_arena;
 
-    uint32_t cap = (desc && desc->store_capacity) ? desc->store_capacity : LENSI_DEFAULT_STORE_CAP;
+    uint32_t cap = d.store_capacity ? d.store_capacity : LENSI_DEFAULT_STORE_CAP;
     r = lensi_store_init(ui, cap);
     if (r != FLUX_OK)
         goto fail_store;
@@ -130,14 +175,19 @@ lens_text_family lens_get_text_family(const lens *ui) {
 void lens_set_theme(lens *ui, lens_theme theme) {
     if (!ui)
         return;
-    if (!theme.size)
-        theme = lens_theme_default();
-    ui->theme = theme;
+    ui->theme = theme.size ? lensi_theme_copy_in(&theme) : lens_theme_default();
     lensi_theme_normalize(&ui->theme);
 }
 
 lens_theme lens_get_theme(const lens *ui) {
-    return ui ? ui->theme : lens_theme_default();
+    /* By-value return cannot clamp against the caller's layout (the
+     * library cannot know it), so the guard works the other way: the
+     * caller copies the prefix it knows and must consult .size. The
+     * returned struct always carries the library's current
+     * sizeof(lens_theme) so a mismatch is detectable rather than silent. */
+    lens_theme t = ui ? ui->theme : lens_theme_default();
+    t.size = sizeof(lens_theme);
+    return t;
 }
 
 void lens_set_opacity(lens *ui, float opacity) {
@@ -169,6 +219,9 @@ float lens_dt(const lens *ui) {
 
 bool lens_overflowed(const lens *ui) {
     return ui && ui->overflow;
+}
+bool lens_has_duplicate_ids(const lens *ui) {
+    return ui && ui->duplicate_ids;
 }
 bool lens_anim_pending(const lens *ui) {
     return ui && ui->anim_pending;
@@ -249,6 +302,7 @@ void lens_pop_style(lens *ui) {
 void lens_begin(lens *ui, const lens_input *input) {
     ui->frame++;
     ui->overflow = false;
+    ui->duplicate_ids = false;
     ui->anim_pending = false; /* set true by any eased value still in transit */
     /* Carry last frame's band buckets across the arena reset as per-band
      * prev id lists, so this frame's occlusion checks use the placed nodes
