@@ -13,7 +13,7 @@
 
 src_inc = include_directories('../../libs/iris/src')
 
-tests = ['test_version', 'test_app_api', 'test_theme', 'test_uri']
+tests = ['test_version', 'test_app_api', 'test_theme', 'test_uri', 'test_capability']
 
 foreach t : tests
   exe = executable(t, t + '.c',
