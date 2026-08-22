@@ -92,6 +92,14 @@ impl Ui {
         unsafe { sys::lens_overflowed(self.raw as *const sys::lens) }
     }
 
+    /// Whether one parent received the same retained widget id twice in the
+    /// last frame. Repeated data rows should use an explicit widget id or an
+    /// id scope; otherwise Lens can only retain one of the duplicate nodes.
+    pub fn has_duplicate_ids(&self) -> bool {
+        // SAFETY: self.raw is live; the call only reads frame diagnostics.
+        unsafe { sys::lens_has_duplicate_ids(self.raw as *const sys::lens) }
+    }
+
     /// Run one immediate-mode frame. The closure receives a [`Frame`] that
     /// borrows the context; widget calls on it build the tree, which is
     /// reconciled and laid out when the closure returns.
@@ -427,7 +435,12 @@ impl Frame {
     /// axis, and a matched pair of flexible spacers shares the remaining
     /// main-axis space equally around it. Use it for button labels, icons,
     /// and any fixed-size tile whose content must sit at the optical centre.
-    pub fn centered<R>(&mut self, width: f32, height: f32, body: impl FnOnce(&mut Frame) -> R) -> R {
+    pub fn centered<R>(
+        &mut self,
+        width: f32,
+        height: f32,
+        body: impl FnOnce(&mut Frame) -> R,
+    ) -> R {
         self.row_ex(
             &LayoutOpts {
                 width,
@@ -502,6 +515,13 @@ impl Frame {
         let c = cstr(seed);
         // SAFETY: ui is live for the frame.
         unsafe { sys::lens_push_id(self.ui, c.as_ptr()) };
+    }
+
+    /// Push an allocation-free integer scope for repeated data rows. Use a
+    /// model id, not the row index, so retained state follows reordering.
+    pub fn push_id_int(&mut self, seed: i64) {
+        // SAFETY: ui is live and the integer is copied by value.
+        unsafe { sys::lens_push_id_int(self.ui, seed) };
     }
 
     /// Pop the most recent [`Self::push_id`]. Every `push_id` must be paired
@@ -595,6 +615,52 @@ impl Frame {
     ) {
         // SAFETY: ui is live for the frame; image outlives render (caller's contract).
         unsafe { sys::lens_image_tinted(self.ui, image, w, h, tint.raw()) };
+    }
+
+    /// Draw a vector icon glyph at `size` logical pixels, by **raw
+    /// `sys::lens_icon_id`** — the escape hatch for runtime-registered
+    /// SVG glyphs ([`register_svg_icon`]), which the typed [`Icon`] enum
+    /// cannot hold. Everything else matches [`Frame::icon`].
+    pub fn icon_raw(&mut self, id: sys::lens_icon_id, size: f32) {
+        // SAFETY: ui is live for the frame; the id may be any registered
+        // glyph (built-in or runtime), which is exactly the C contract.
+        unsafe { sys::lens_icon(self.ui, id, size) };
+    }
+
+    /// Flat icon-only button by raw `sys::lens_icon_id` — the
+    /// runtime-registered-glyph counterpart of [`Frame::icon_button`].
+    pub fn icon_button_raw(&mut self, id: sys::lens_icon_id) -> bool {
+        // SAFETY: ui is live for the frame.
+        unsafe { sys::lens_icon_button(self.ui, id) }
+    }
+
+    /// [`Frame::icon_button_raw`] with the steady selected tint of
+    /// [`Frame::icon_button_active`].
+    pub fn icon_button_raw_active(&mut self, id: sys::lens_icon_id, active: bool) -> bool {
+        // SAFETY: ui is live for the frame.
+        unsafe { sys::lens_icon_button_active(self.ui, id, active) }
+    }
+
+    /// Checkable rounded icon tile by raw ids: swaps glyphs instead of
+    /// painting a persistent surface; the checked glyph uses the accent
+    /// colour. The raw-id counterpart of [`Frame::icon_toggle_button`].
+    pub fn icon_toggle_button_raw(
+        &mut self,
+        unchecked: sys::lens_icon_id,
+        checked: sys::lens_icon_id,
+        glyph_size: f32,
+        checked_state: bool,
+    ) -> bool {
+        // SAFETY: ui is live; both ids may be runtime-registered glyphs.
+        unsafe {
+            sys::lens_icon_toggle_button(
+                self.ui,
+                unchecked,
+                checked,
+                glyph_size.max(1.0),
+                checked_state,
+            )
+        }
     }
 
     /// A flat icon-only button for navigation strips and toolbars: transparent
@@ -695,6 +761,18 @@ impl Frame {
         // SAFETY: matched scroll begin/end.
         unsafe { sys::lens_scroll_end(self.ui) };
         r
+    }
+
+    /// A scroll viewport whose content is one explicit vertical layout.
+    /// This is the preferred form for lists: `opts.gap` applies between data
+    /// rows instead of inheriting the scroll widget's theme-wide default.
+    pub fn scroll_column<R>(
+        &mut self,
+        id: &str,
+        opts: &LayoutOpts,
+        body: impl FnOnce(&mut Frame) -> R,
+    ) -> R {
+        self.scroll(id, |frame| frame.column_ex(opts, body))
     }
 
     /// Set the retained offset of a scroll area in the current id scope.
@@ -1078,6 +1156,142 @@ impl Frame {
         }
     }
 
+    // ---- menus (ADR-0040) ---------------------------------------------------
+
+    /// Open a horizontal menu bar (a row of [`Frame::menu`] triggers) keyed
+    /// by `id`, run `body`, then close it. Inside `body`, each
+    /// [`Frame::menu`] declares one trigger + dropdown popup; the bar owns
+    /// click-then-drag switching between open siblings and closes the whole
+    /// stack automatically when an item fires. The C begin always returns
+    /// true, so the body always runs.
+    pub fn menubar(&mut self, id: &str, body: impl FnOnce(&mut Frame)) {
+        let c = cstr(id);
+        // SAFETY: ui is live for the frame; c outlives the call; the begin's
+        // return value is unconditionally true (menu.c: `lens_row` + a
+        // container id), so an unbalanced end is impossible.
+        let _ = unsafe { sys::lens_menubar_begin(self.ui, c.as_ptr()) };
+        body(self);
+        // SAFETY: matched lens_menubar_begin.
+        unsafe { sys::lens_menubar_end(self.ui) };
+    }
+
+    /// One menu in a [`Frame::menubar`]: the trigger row plus, while the
+    /// popup is open, its body. `body` runs only on frames the popup is
+    /// open; build [`Frame::menu_item`] rows (and
+    /// [`Frame::menu_separator`]) inside.
+    pub fn menu(&mut self, label: &str, body: impl FnOnce(&mut Frame)) {
+        let c = cstr(label);
+        // SAFETY: ui is live; c outlives the call; on true the C side has
+        // already entered its place container, which lens_menu_end closes.
+        let open = unsafe { sys::lens_menu_begin(self.ui, c.as_ptr()) };
+        if open {
+            body(self);
+            // SAFETY: only paired with a true return from lens_menu_begin.
+            unsafe { sys::lens_menu_end(self.ui) };
+        }
+    }
+
+    /// A row in the open body of a [`Frame::menu`], [`Frame::submenu`], or
+    /// [`Frame::context_menu`]. `shortcut` is drawn right-aligned and
+    /// dimmed; pass `""` for none. Returns `true` on the frame it is
+    /// clicked (the menu stack closes itself).
+    pub fn menu_item(&mut self, label: &str, shortcut: &str) -> bool {
+        let l = cstr(label);
+        let s = cstr(shortcut);
+        // SAFETY: ui is live; both strings outlive the call; a NULL shortcut
+        // is the documented "none", and lens copies visible text into its
+        // frame arena, so the empty string is passed as NULL.
+        unsafe {
+            sys::lens_menu_item(
+                self.ui,
+                l.as_ptr(),
+                if s.is_empty() {
+                    ptr::null()
+                } else {
+                    s.as_ptr()
+                },
+            )
+        }
+    }
+
+    /// [`Frame::menu_item`] with a trailing check glyph when `checked` —
+    /// the toggle presentation for options like "Onion Skin".
+    pub fn menu_item_checked(&mut self, label: &str, shortcut: &str, checked: bool) -> bool {
+        let l = cstr(label);
+        let s = cstr(shortcut);
+        // SAFETY: same contract as menu_item; LENS_MENU_CHECKED is 1u << 1
+        // (lens.h) and the C side accepts the OR'd bitset as u32. `checked`
+        // only decides whether the flag is set this frame.
+        unsafe {
+            sys::lens_menu_item_flags(
+                self.ui,
+                l.as_ptr(),
+                if s.is_empty() {
+                    ptr::null()
+                } else {
+                    s.as_ptr()
+                },
+                if checked {
+                    sys::LENS_MENU_CHECKED as u32
+                } else {
+                    0
+                },
+            )
+        }
+    }
+
+    /// A thin non-interactive divider between groups of menu items.
+    pub fn menu_separator(&mut self) {
+        // SAFETY: ui is live for the frame.
+        unsafe { sys::lens_menu_separator(self.ui) };
+    }
+
+    /// A submenu nested inside an open menu body: same trigger + popup
+    /// contract as [`Frame::menu`], anchored to the right of the parent
+    /// item and opening on hover dwell. `body` runs only while open.
+    pub fn submenu(&mut self, label: &str, body: impl FnOnce(&mut Frame)) {
+        let c = cstr(label);
+        // SAFETY: ui is live; on true the C side entered its place
+        // container, which lens_submenu_end closes.
+        let open = unsafe { sys::lens_submenu_begin(self.ui, c.as_ptr()) };
+        if open {
+            body(self);
+            // SAFETY: only paired with a true return from lens_submenu_begin.
+            unsafe { sys::lens_submenu_end(self.ui) };
+        }
+    }
+
+    /// Open the context menu keyed by `id` at `owner_rect` (typically the
+    /// right-clicked row's [`Response::rect`]). Call on the frame the
+    /// right-click happens; the menu then stays open until dismissed.
+    pub fn context_menu_open(&mut self, id: &str, owner_rect: Rect) {
+        let c = cstr(id);
+        // SAFETY: ui is live; c outlives the call; rect is a value type.
+        unsafe { sys::lens_context_menu_open(self.ui, c.as_ptr(), owner_rect.to_raw()) };
+    }
+
+    /// Build the body of the context menu `id` while it is open (see
+    /// [`Frame::context_menu_open`]); fill it with [`Frame::menu_item`]
+    /// rows. Returns whether the body ran.
+    pub fn context_menu(&mut self, id: &str, body: impl FnOnce(&mut Frame)) {
+        let c = cstr(id);
+        // SAFETY: ui is live; on true the C side entered its place
+        // container, which lens_context_menu_end closes.
+        let open = unsafe { sys::lens_context_menu_begin(self.ui, c.as_ptr()) };
+        if open {
+            body(self);
+            // SAFETY: only paired with a true return from lens_context_menu_begin.
+            unsafe { sys::lens_context_menu_end(self.ui) };
+        }
+    }
+
+    /// Programmatically dismiss every open menu owned by a menu bar (the
+    /// same call the library makes when an item fires).
+    pub fn menubar_close_all_open(&mut self) {
+        // SAFETY: ui is live for the frame.
+        unsafe { sys::lens_menubar_close_all_open(self.ui) };
+    }
+
     // ---- queries & placement ------------------------------------------------
 
     /// Bounds of a widget or placed subtree from a previous frame, resolved
@@ -1129,6 +1343,12 @@ impl Frame {
     pub fn overflowed(&self) -> bool {
         // SAFETY: ui is live for the duration of the build closure.
         unsafe { sys::lens_overflowed(self.ui as *const sys::lens) }
+    }
+
+    /// Build-time mirror of [`Ui::has_duplicate_ids`].
+    pub fn has_duplicate_ids(&self) -> bool {
+        // SAFETY: ui is live for the duration of the build closure.
+        unsafe { sys::lens_has_duplicate_ids(self.ui as *const sys::lens) }
     }
 
     /// Cursor intent accumulated from hovered widgets built so far. Read this
@@ -1279,6 +1499,29 @@ impl Frame {
         let c = cstr(label);
         // SAFETY: ui is live; c outlives the call.
         unsafe { sys::lens_selectable(self.ui, c.as_ptr(), selected) }
+    }
+
+    /// A selectable with identity independent of its visible label. Use this
+    /// for model-backed lists where labels may repeat or change.
+    pub fn selectable_with_id(&mut self, id: &str, label: &str, selected: bool) -> Response {
+        let id = cstr(id);
+        let label = cstr(label);
+        let opts = sys::lens_selectable_opts {
+            box_: sys::lens_box {
+                id: id.as_ptr(),
+                flex: 0.0,
+                width: 0.0,
+                height: 0.0,
+                disabled: false,
+                error: false,
+                tooltip: ptr::null(),
+                style: sys::lens_style::default(),
+            },
+            label: label.as_ptr(),
+            selected,
+        };
+        // SAFETY: ui is live and both strings outlive the synchronous call.
+        Response::from_raw(unsafe { sys::lens_selectable_ex(self.ui, opts) })
     }
 
     /// A selectable row with a leading icon. It has one full-row hit target

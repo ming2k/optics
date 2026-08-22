@@ -7,6 +7,29 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Stable identities and explicit scroll-list layout.** New
+  `Frame::selectable_with_id` and `Frame::push_id_int` APIs keep retained
+  state attached to model ids when visible labels repeat or rows reorder.
+  `Ui::has_duplicate_ids` / `Frame::has_duplicate_ids` expose the C frame
+  diagnostic instead of letting duplicate sibling ids fail silently, and
+  `Frame::scroll_column` makes a list's padding and row gap explicit.
+- **Menu bar, menus, and menu items (ADR-0040).** New safe wrappers for
+  the C menu family: `Frame::menubar` (bar of triggers; the C begin is
+  unconditionally true so the body always runs), `Frame::menu` (trigger
+  + popup; body runs only while open), `Frame::menu_item`,
+  `Frame::menu_item_checked` (LENS_MENU_CHECKED presentation), and
+  `Frame::menu_separator`, plus `Frame::menubar_close_all_open` for
+  programmatic dismiss. Items close the whole stack automatically on
+  click; an empty `shortcut` string maps to C's NULL (draws no hint).
+  `Frame::submenu` (nested, hover-dwell), `Frame::context_menu_open` /
+  `Frame::context_menu` (right-click menus anchored at a row rect) cover
+  the rest of ADR-0040's surface.
+- **Raw-id icon call forms.** `Frame::icon_raw`, `icon_button_raw`,
+  `icon_button_raw_active`, and `icon_toggle_button_raw` take
+  `sys::lens_icon_id` directly, so runtime-registered SVG glyphs
+  ([`register_svg_icon`]) work in the same widget slots as the typed
+  [`Icon`] enum (whose variants are compile-time built-ins only).
+
 - **Initial extraction from the lens monorepo.** The two Rust crates
   (`lens-sys`, `lens`) previously lived under `crates/` in the
   [lens][lens] C source tree. They are now a separate repository,

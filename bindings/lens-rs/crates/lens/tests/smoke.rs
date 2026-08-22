@@ -572,3 +572,41 @@ fn textfield_host_caret_and_selection() {
         f.pop_id();
     });
 }
+
+#[test]
+fn menubar_menu_items_build_headlessly() {
+    let mut ui = Ui::headless().expect("headless lens");
+    let input = lens::Input::new((640.0, 480.0), 1.0 / 60.0);
+    let mut fired = false;
+    ui.frame(&input, |f| {
+        f.menubar("bar", |f| {
+            f.menu("File", |f| {
+                if f.menu_item("New", "Ctrl-N") {
+                    fired = true;
+                }
+                f.menu_separator();
+                if f.menu_item_checked("Onion Skin", "", false) {
+                    fired = true;
+                }
+            });
+        });
+    });
+    assert!(!fired, "menus only fire on real input");
+}
+
+#[test]
+fn explicit_selectable_ids_keep_repeated_labels_distinct() {
+    let mut ui = Ui::headless().expect("headless lens");
+    let input = lens::Input::new((320.0, 200.0), 1.0 / 60.0);
+    ui.frame(&input, |f| {
+        let _ = f.selectable_with_id("doc-41", "Untitled", false);
+        let _ = f.selectable_with_id("doc-42", "Untitled", false);
+    });
+    assert!(!ui.has_duplicate_ids());
+
+    ui.frame(&input, |f| {
+        let _ = f.selectable("Untitled", false);
+        let _ = f.selectable("Untitled", false);
+    });
+    assert!(ui.has_duplicate_ids());
+}

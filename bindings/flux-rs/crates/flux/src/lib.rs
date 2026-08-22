@@ -1103,8 +1103,15 @@ impl Surface {
         height: u32,
         options: SurfaceColorOptions<'_>,
     ) -> Result<Surface, Error> {
-        Self::create_with_color_options(device, std::ptr::null_mut(), width, height, false, options,
-                                        None)
+        Self::create_with_color_options(
+            device,
+            std::ptr::null_mut(),
+            width,
+            height,
+            false,
+            options,
+            None,
+        )
     }
 
     /// Like [`Surface::offscreen_dmabuf`], plus color-management extensions
@@ -1121,9 +1128,15 @@ impl Surface {
         if modifiers.is_empty() {
             return Err(Error(sys::flux_result::FLUX_ERROR_INVALID_ARGUMENT));
         }
-        let surface =
-            Self::create_with_color_options(device, std::ptr::null_mut(), width, height, false,
-                                            options, Some(modifiers))?;
+        let surface = Self::create_with_color_options(
+            device,
+            std::ptr::null_mut(),
+            width,
+            height,
+            false,
+            options,
+            Some(modifiers),
+        )?;
         if !surface.is_exportable() {
             return Err(Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED));
         }
