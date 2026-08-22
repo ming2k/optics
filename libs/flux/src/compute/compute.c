@@ -143,6 +143,35 @@ void flux_compute_pipeline_release(flux_compute_pipeline *p) {
         flux_device_release(d);
 }
 
+/* Deferred flavour (compute.h): same refcount handshake, but the
+ * VkPipeline itself goes to the retire queue and is destroyed once every
+ * submitted batch has completed — safe at any time, like image release.
+ * The wrapper struct and layout still die now (nothing references them
+ * on the GPU), and we must keep the device alive until the zombie is
+ * destroyed: retain it here, release from zombie sweep via the wrapper's
+ * weak flag trick — simplest correct form is to retain and let the
+ * zombie destruction path drop our extra reference. */
+void flux_pipeline_release_deferred(flux_device *d, flux_compute_pipeline *p) {
+    if (!d || !p)
+        return;
+    if (atomic_fetch_sub_explicit(&p->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return; /* other owners keep it alive; nothing to retire */
+
+    if (p->pipeline) {
+        /* Ownership of the VkPipeline moves to the retire queue; the
+         * wrapper is freed below, so nothing else will destroy it. */
+        flux_vk_retire_pipeline(d, p->pipeline);
+        p->pipeline = VK_NULL_HANDLE;
+    }
+    flux_device *pd = p->device;
+    bool weak = p->device_weak;
+    if (p->layout)
+        vkDestroyPipelineLayout(pd->device, p->layout, nullptr);
+    flux_internal_free(pd, p);
+    if (!weak)
+        flux_device_release(pd);
+}
+
 void flux_compute_pipeline_make_device_weak(flux_compute_pipeline *p) {
     if (!p || p->device_weak)
         return;

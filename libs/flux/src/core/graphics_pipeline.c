@@ -302,6 +302,26 @@ void flux_graphics_pipeline_release(flux_graphics_pipeline *p) {
     flux_device_release(d);
 }
 
+/* Deferred flavour (vulkan.h): mirror of flux_pipeline_release_deferred
+ * for graphics pipelines — the VkPipeline is parked on the retire queue
+ * and destroyed once in-flight batches complete. Safe at any time. */
+void flux_graphics_pipeline_release_deferred(flux_device *d, flux_graphics_pipeline *p) {
+    if (!d || !p)
+        return;
+    if (atomic_fetch_sub_explicit(&p->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return;
+
+    if (p->pipeline) {
+        flux_vk_retire_pipeline(d, p->pipeline);
+        p->pipeline = VK_NULL_HANDLE;
+    }
+    flux_device *pd = p->device;
+    if (p->layout)
+        vkDestroyPipelineLayout(pd->device, p->layout, nullptr);
+    flux_internal_free(pd, p);
+    flux_device_release(pd);
+}
+
 VkPipeline flux_graphics_pipeline_vk_pipeline(const flux_graphics_pipeline *p) {
     return p ? p->pipeline : VK_NULL_HANDLE;
 }

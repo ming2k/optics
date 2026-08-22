@@ -564,6 +564,10 @@ static flux_result pick_queue_families(flux_device *d) {
     for (uint32_t i = 0; i < count; ++i) {
         if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
             d->graphics_family = i;
+            /* Timestamp support is a per-queue-family property; capture it
+             * for flux_device_get_limits (feature discovery by query, not
+             * by watching timestamp collection come back empty). */
+            d->graphics_queue_timestamp_valid_bits = families[i].timestampValidBits;
             break;
         }
     }
@@ -1159,6 +1163,33 @@ flux_device_feature_flags flux_device_enabled_features(const flux_device *d) {
     return d ? d->enabled_features : 0;
 }
 
+flux_result flux_device_get_limits(const flux_device *d, flux_device_limits *out) {
+    if (!out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = (flux_device_limits){0};
+    out->struct_size = sizeof(flux_device_limits);
+    if (!d)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+
+    const VkPhysicalDeviceLimits *l = &d->props.limits;
+    out->max_image_dimension1d = l->maxImageDimension1D;
+    out->max_image_dimension2d = l->maxImageDimension2D;
+    out->max_image_dimension3d = l->maxImageDimension3D;
+    out->max_color_attachments = l->maxColorAttachments;
+    out->max_framebuffer_width = l->maxFramebufferWidth;
+    out->max_framebuffer_height = l->maxFramebufferHeight;
+    out->max_frames_in_flight = d->frames_in_flight;
+    out->min_uniform_buffer_offset_alignment = l->minUniformBufferOffsetAlignment;
+    out->min_storage_buffer_offset_alignment = l->minStorageBufferOffsetAlignment;
+    out->buffer_image_granularity = l->bufferImageGranularity;
+    out->timestamp_period_ns = d->props.limits.timestampPeriod;
+    /* Queue-family timestamp support: 0 bits = timestamps unavailable on
+     * the graphics queue (timestampValidBits lives on the QUEUE family,
+     * not on device limits). */
+    out->timestamp_valid_bits = d->graphics_queue_timestamp_valid_bits;
+    return FLUX_OK;
+}
+
 bool flux_device_get_drm_identity(const flux_device *d, flux_drm_device_identity *out_identity) {
     if (!out_identity)
         return false;
@@ -1356,6 +1387,21 @@ static void zombie_park(flux_device *d, flux_retire_zombie *z) {
         flux_device_wait_idle(d); /* full drain: see comment above */
 }
 
+void flux_vk_retire_pipeline(flux_device *d, VkPipeline pipeline) {
+    if (!d || pipeline == VK_NULL_HANDLE)
+        return;
+    flux_retire_zombie *z = flux_internal_alloc(d, sizeof(*z));
+    if (!z) {
+        /* OOM fallback mirrors the image path: block, then destroy. */
+        flux_vk_wait_idle(d);
+        vkDestroyPipeline(d->device, pipeline, nullptr);
+        return;
+    }
+    memset(z, 0, sizeof *z);
+    z->pipeline = pipeline;
+    zombie_park(d, z);
+}
+
 void flux_device_retire_image(flux_device *d, VkImageView view, VkImage image,
                               const flux_vk_alloc *alloc, VkDeviceMemory imported_memory,
                               VkDeviceSize imported_size, uint32_t bindless,
@@ -1447,6 +1493,8 @@ static void zombie_destroy(flux_device *d, flux_retire_zombie *z) {
         vkDestroyBuffer(d->device, z->buffer, nullptr);
     if (z->sampler)
         vkDestroySampler(d->device, z->sampler, nullptr);
+    if (z->pipeline)
+        vkDestroyPipeline(d->device, z->pipeline, nullptr);
     if (z->alloc.memory)
         flux_vk_deallocate(d, &z->alloc);
     if (z->imported_memory) {
