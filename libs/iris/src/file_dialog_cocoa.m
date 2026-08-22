@@ -87,15 +87,16 @@ static void apply_opts(NSSavePanel *panel, const iris_file_dialog_opts *opts) {
 /*  Result copying                                                     */
 /* ------------------------------------------------------------------ */
 
+/* 0 = copied, IRIS_PICK_TRUNCATED = buffer too small. */
 static int copy_uri(NSURL *url, char *out_path, size_t out_cap) {
     if (!out_path || out_cap == 0)
-        return 1;
+        return IRIS_PICK_UNAVAILABLE;
     const char *utf8 = [[url absoluteString] UTF8String];
     if (!utf8)
-        return 1;
+        return IRIS_PICK_UNAVAILABLE;
     size_t n = strlen(utf8);
     if (n + 1 > out_cap)
-        return 1;
+        return IRIS_PICK_TRUNCATED;
     memcpy(out_path, utf8, n + 1);
     return 0;
 }
@@ -112,7 +113,7 @@ IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, s
         [panel setAllowsMultipleSelection:NO];
         apply_opts(panel, opts);
         if ([panel runModal] != NSModalResponseOK)
-            return 1;
+            return IRIS_PICK_CANCELLED;
         return copy_uri([panel URL], out_path, out_cap);
     }
 }
@@ -125,7 +126,7 @@ IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path,
         [panel setAllowsMultipleSelection:NO];
         apply_opts(panel, opts);
         if ([panel runModal] != NSModalResponseOK)
-            return 1;
+            return IRIS_PICK_CANCELLED;
         return copy_uri([panel URL], out_path, out_cap);
     }
 }
@@ -141,7 +142,7 @@ IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *
         }
         apply_opts(panel, opts);
         if ([panel runModal] != NSModalResponseOK)
-            return 1;
+            return IRIS_PICK_CANCELLED;
         return copy_uri([panel URL], out_path, out_cap);
     }
 }
@@ -157,26 +158,36 @@ IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths,
         [panel setAllowsMultipleSelection:YES];
         apply_opts(panel, opts);
         if ([panel runModal] != NSModalResponseOK)
-            return 0;
+            return IRIS_PICK_CANCELLED;
 
         /* NUL-separated URIs; out_bytes_used excludes the trailing NUL. */
         size_t used = 0;
+        size_t required = 0; /* full-selection requirement for retry sizing */
         int count = 0;
+        int truncated = 0;
         for (NSURL *url in [panel URLs]) {
             const char *utf8 = [[url absoluteString] UTF8String];
             if (!utf8)
                 continue;
             size_t n = strlen(utf8);
-            if (used + n + 1 > out_cap)
-                return 0; /* buffer too small: fail rather than truncate */
+            required += n + 1;
+            if (used + n + 1 > out_cap) {
+                /* Uniform contract (file_dialog.h): visible truncation,
+                 * never a silent prefix and never a disguised cancel. Stop
+                 * copying; keep accounting so the retry is sizeable. */
+                truncated = 1;
+                continue;
+            }
             memcpy(out_paths + used, utf8, n + 1);
             used += n + 1;
             count++;
         }
-        if (count == 0)
-            return 0;
         if (out_bytes_used)
-            *out_bytes_used = used - 1; /* exclude the trailing terminator */
+            *out_bytes_used = truncated ? required : (used ? used - 1 : 0);
+        if (truncated)
+            return IRIS_PICK_TRUNCATED;
+        if (count == 0)
+            return IRIS_PICK_CANCELLED;
         return count;
     }
 }

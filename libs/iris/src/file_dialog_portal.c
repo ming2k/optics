@@ -53,10 +53,12 @@ const char *iris_wayland__foreign_handle(void);
 typedef struct iris_picker_response {
     char *out; /* single-URI buffer or NUL-separated multi-URI buffer */
     size_t cap;
-    size_t used; /* bytes written (excluding the final NUL terminator)   */
-    int count;   /* URIs received                                       */
+    size_t used;   /* bytes written (excluding the final NUL) — on overflow,
+                      the FULL selection's requirement for retry sizing   */
+    int count;     /* URIs received                                       */
     int done;
     int result;
+    int overflow;  /* set once the cap is hit; stops copying, keeps counting */
 } iris_picker_response;
 
 static int append_string_option(sd_bus_message *message, const char *key, const char *value) {
@@ -154,19 +156,19 @@ static int on_picker_response(sd_bus_message *message, void *userdata, sd_bus_er
     uint32_t portal_result = 2;
     if (sd_bus_message_read(message, "u", &portal_result) < 0) {
         response->done = 1;
-        response->result = 7;
+        response->result = IRIS_PICK_UNAVAILABLE; /* malformed portal reply */
         return 0;
     }
     if (portal_result != 0) {
         response->done = 1;
-        response->result = 4;
+        response->result = IRIS_PICK_CANCELLED; /* portal reports non-zero = user dismissed */
         return 0;
     }
 
     int rc = sd_bus_message_enter_container(message, SD_BUS_TYPE_ARRAY, "{sv}");
     if (rc < 0) {
         response->done = 1;
-        response->result = 7;
+        response->result = IRIS_PICK_UNAVAILABLE; /* malformed portal reply */
         return 0;
     }
     while ((rc = sd_bus_message_enter_container(message, SD_BUS_TYPE_DICT_ENTRY, "sv")) > 0) {
@@ -181,13 +183,24 @@ static int on_picker_response(sd_bus_message *message, void *userdata, sd_bus_er
                     size_t len = strlen(uri);
                     /* +1 for the NUL terminator (single) or separator (multi). */
                     if (response->used + len + 1 > response->cap) {
-                        response->result = 8;
-                        break;
+                        /* Contract (file_dialog.h): truncation is a visible,
+                         * uniform failure across backends — never a silent
+                         * prefix, never a disguised cancel. Keep counting so
+                         * *out_bytes_used can report the FULL requirement
+                         * and the caller can size the retry exactly. */
+                        response->result = IRIS_PICK_TRUNCATED;
+                        response->overflow = 1;
                     }
-                    memcpy(response->out + response->used, uri, len + 1);
-                    response->used += len + 1;
-                    response->count++;
-                    if (response->result != 0 && response->result != 8)
+                    if (!response->overflow) {
+                        memcpy(response->out + response->used, uri, len + 1);
+                        response->used += len + 1;
+                        response->count++;
+                    } else {
+                        /* Still accounting for the retry-size report. */
+                        response->used += len + 1;
+                        response->count++;
+                    }
+                    if (!response->overflow && response->result != 0)
                         response->result = 0;
                     /* Continue for multi-select; single-select stops at one. */
                 }
@@ -207,7 +220,7 @@ static int on_picker_response(sd_bus_message *message, void *userdata, sd_bus_er
 static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const char *default_name,
                     char *out_path, size_t out_cap, size_t *out_used, int *out_count) {
     if (!out_path || out_cap == 0)
-        return 1;
+        return IRIS_PICK_UNAVAILABLE; /* invalid arguments: no dialog can run */
     out_path[0] = '\0';
 
     const char *title;
@@ -237,7 +250,7 @@ static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const cha
     sd_bus_message *reply = NULL;
     sd_bus_slot *slot = NULL;
     sd_bus_error error = SD_BUS_ERROR_NULL;
-    int result = 6;
+    int result = IRIS_PICK_UNAVAILABLE; /* bus/portal setup failures */
 
     int rc = sd_bus_open_user(&bus);
     if (rc < 0)
@@ -410,24 +423,39 @@ static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const cha
 
 #endif
 
+/* Uniform wrapper policy (file_dialog.h contract): a single-file picker
+ * never widens into a multi-select because the caller happened to leave
+ * multiple_selection set — the option belongs to iris_pick_files. */
+static iris_file_dialog_opts irisi_single_opts(const iris_file_dialog_opts *opts) {
+    iris_file_dialog_opts o = opts ? *opts : (iris_file_dialog_opts){0};
+    o.multiple_selection = false;
+    return o;
+}
+
 IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
-    return pick_uri(opts, PICK_OPEN, NULL, out_path, out_cap, NULL, NULL);
+    iris_file_dialog_opts o = irisi_single_opts(opts);
+    return pick_uri(&o, PICK_OPEN, NULL, out_path, out_cap, NULL, NULL);
 }
 
 IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
-    return pick_uri(opts, PICK_FOLDER, NULL, out_path, out_cap, NULL, NULL);
+    iris_file_dialog_opts o = irisi_single_opts(opts);
+    return pick_uri(&o, PICK_FOLDER, NULL, out_path, out_cap, NULL, NULL);
 }
 
 IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *default_name,
                                  char *out_path, size_t out_cap) {
-    return pick_uri(opts, PICK_SAVE, default_name, out_path, out_cap, NULL, NULL);
+    iris_file_dialog_opts o = irisi_single_opts(opts);
+    return pick_uri(&o, PICK_SAVE, default_name, out_path, out_cap, NULL, NULL);
 }
 
+/* Success path returns the count; every documented failure propagates its
+ * code (IRIS_PICK_*). The old wrapper folded every non-zero rc into 0,
+ * which made buffer-overflow indistinguishable from a user cancel. */
 IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths, size_t out_cap,
                              size_t *out_bytes_used) {
     int count = 0;
     int rc = pick_uri(opts, PICK_OPEN_MULTI, NULL, out_paths, out_cap, out_bytes_used, &count);
     if (rc != 0)
-        return 0;
+        return rc;
     return count;
 }

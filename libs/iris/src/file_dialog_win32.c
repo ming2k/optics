@@ -270,13 +270,19 @@ static WCHAR *shell_item_path(IShellItem *item) {
 /* ------------------------------------------------------------------ */
 
 /* Open-mode implementation shared by pick_file / pick_folder / pick_files.
- * Returns the number of URIs written (>= 1), 0 on cancel/failure. On
- * single-selection success out_path holds one NUL-terminated URI; on
+ * Returns the number of URIs written (>= 1) on success; 0 on cancel.
+ * On single-selection success out_path holds one NUL-terminated URI; on
  * multi-selection out_paths holds a NUL-separated list and *out_bytes_used
- * (optional) the total bytes written including each URI's NUL separator —
- * matching the portal backend's accounting. */
+ * (optional) the total bytes written EXCLUDING the trailing list
+ * terminator — one accounting rule across all three backends
+ * (file_dialog.h). Buffer-too-small is a visible IRIS_PICK_TRUNCATED via
+ * *out_truncated: the walk stops, the partial list is NOT reported as a
+ * success, and *out_bytes_used reports the full requirement so far so
+ * the caller can size the retry. */
 static int pick_open(const iris_file_dialog_opts *opts, bool multiple, bool folder, char *out_paths,
-                     size_t out_cap, size_t *out_bytes_used) {
+                     size_t out_cap, size_t *out_bytes_used, int *out_truncated) {
+    if (out_truncated)
+        *out_truncated = 0;
     if (!out_paths || out_cap == 0)
         return 0;
     out_paths[0] = '\0';
@@ -335,12 +341,16 @@ static int pick_open(const iris_file_dialog_opts *opts, bool multiple, bool fold
                 CoTaskMemFree(path);
                 if (uri) {
                     size_t len = strlen(uri);
-                    /* Buffer-full stops the walk: the result is the
-                     * selection's prefix, still a valid NUL-separated list. */
                     if (used + len + 1 > out_cap) {
+                        /* Uniform contract (file_dialog.h): never a silent
+                         * prefix. Flag truncation; keep counting the rest so
+                         * *out_bytes_used reports the full requirement. */
+                        if (out_truncated)
+                            *out_truncated = 1;
+                        used += len + 1;
                         free(uri);
                         item->lpVtbl->Release(item);
-                        break;
+                        continue;
                     }
                     memcpy(out_paths + used, uri, len + 1);
                     used += len + 1;
@@ -371,19 +381,24 @@ done:
         dlg->lpVtbl->Release(dlg);
     CoUninitialize();
     if (out_bytes_used)
-        *out_bytes_used = used;
+        *out_bytes_used = used; /* excludes the trailing list terminator NUL */
     return count;
 }
 
 IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
-    /* opts->multiple_selection is honoured for parity with the portal
-     * backend (the dialog allows it; the first result wins). */
-    bool multiple = opts && opts->multiple_selection;
-    return pick_open(opts, multiple, false, out_path, out_cap, NULL) == 1 ? 0 : 1;
+    /* Contract (file_dialog.h): a single-file picker never widens into a
+     * multi-select. multiple_selection belongs to iris_pick_files. */
+    (void)opts;
+    return pick_open(&(iris_file_dialog_opts){0}, false, false, out_path, out_cap, NULL, NULL) == 1
+               ? 0
+               : IRIS_PICK_CANCELLED;
 }
 
 IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
-    return pick_open(opts, false, true, out_path, out_cap, NULL) == 1 ? 0 : 1;
+    iris_file_dialog_opts o = opts ? *opts : (iris_file_dialog_opts){0};
+    o.multiple_selection = false;
+    return pick_open(&o, false, true, out_path, out_cap, NULL, NULL) == 1 ? 0
+                                                                           : IRIS_PICK_CANCELLED;
 }
 
 IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *default_name,
@@ -448,5 +463,9 @@ done:
 
 IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths, size_t out_cap,
                              size_t *out_bytes_used) {
-    return pick_open(opts, true, false, out_paths, out_cap, out_bytes_used);
+    int truncated = 0;
+    int count = pick_open(opts, true, false, out_paths, out_cap, out_bytes_used, &truncated);
+    if (truncated)
+        return IRIS_PICK_TRUNCATED; /* never a silent prefix (file_dialog.h) */
+    return count;
 }

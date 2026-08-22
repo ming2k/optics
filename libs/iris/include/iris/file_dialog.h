@@ -36,10 +36,20 @@ typedef struct iris_file_dialog_opts {
     bool directory_only;             /* restrict to directories               */
 } iris_file_dialog_opts;
 
+/* Result codes shared by every picker. Non-zero means "no selection".
+ * The specific negative values let a host distinguish "the user changed
+ * their mind" from "your buffer was too small" — which previously
+ * behaved differently per backend (portal reported a cancel, Win32
+ * silently truncated, Cocoa failed) with none of it documented. */
+#define IRIS_PICK_CANCELLED (-1)    /* user dismissed the dialog              */
+#define IRIS_PICK_UNAVAILABLE (-2)  /* no dialog service on this platform     */
+#define IRIS_PICK_TRUNCATED (-3)    /* out buffer too small: retry with more  */
+
 /* Open a single-file picker. On success, writes a NUL-terminated UTF-8
  * file URI (e.g. "file:///home/user/foo.txt") into out_path and returns 0.
- * Returns non-zero if the user cancels, the portal is unavailable, or
- * out_path is too small (out_cap must be >= the full URI length + 1). */
+ * `multiple_selection` is ignored here (it belongs to iris_pick_files);
+ * passing it does not widen this dialog on any backend. Returns
+ * IRIS_PICK_CANCELLED / IRIS_PICK_UNAVAILABLE / IRIS_PICK_TRUNCATED. */
 IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap);
 
 /* Open a single-folder picker. The return convention and URI encoding match
@@ -54,9 +64,16 @@ IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *
                                  char *out_path, size_t out_cap);
 
 /* Multi-selection picker. On success, writes NUL-separated UTF-8 file URIs
- * into out_paths and returns the number of URIs (>= 1); 0 on cancel or
- * failure. *out_bytes_used (optional) receives the total bytes written
- * (excluding the trailing NUL terminator). */
+ * into out_paths (the list is terminated by an empty URI: one extra NUL
+ * after the last entry) and returns the number of URIs (>= 1).
+ *
+ * Buffer-too-small is IRIS_PICK_TRUNCATED on EVERY backend: the result is
+ * never a silent prefix and never indistinguishable from a cancel. The
+ * complete selection is not recoverable after truncation — reopen the
+ * dialog with a larger buffer. *out_bytes_used (optional) receives the
+ * total bytes written excluding the trailing list terminator NUL; on
+ * IRIS_PICK_TRUNCATED it receives the number of bytes the FULL selection
+ * would have required, so the retry size is directly computable. */
 IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths, size_t out_cap,
                              size_t *out_bytes_used);
 
