@@ -58,8 +58,13 @@
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
-#include <imm.h>
+/* windows.h MUST precede imm.h: imm.h uses the base handle macros
+ * (DECLARE_HANDLE, HKL, UINT, DWORD, POINT, RECT) without defining them.
+ * MinGW-w64 headers tolerate the reverse order by accident; zig cc's
+ * bundled MinGW headers do not — this include order was the reason the
+ * CI cross-compile gate could not build this TU. */
 #include <windows.h>
+#include <imm.h>
 #include <windowsx.h>
 
 /* Win32 platform surface glue: included as the platform child header (the
@@ -231,8 +236,10 @@ static void accum_text_append(w32_platform *pl, const char *utf8, size_t n) {
 
 static void accum_text_cp(w32_platform *pl, uint32_t cp) {
     /* Control characters (Tab / Return / Backspace) travel on the key path,
-     * matching the Wayland backend's xkb filter (buf[0] >= 0x20). */
-    if (cp < 0x20)
+     * matching the other backends. iris_cp_is_text also rejects 0x7f:
+     * TranslateMessage delivers WM_CHAR 0x7f for Ctrl+Backspace, and the
+     * plain < 0x20 test let it through as "text". */
+    if (!iris_cp_is_text(cp))
         return;
     char buf[4];
     int n = utf8_encode(cp, buf);
