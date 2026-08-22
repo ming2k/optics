@@ -43,6 +43,26 @@ int main(void) {
     lens_end(ui);
     CHECK(row0 != row1);
 
+    /* Repeated visible labels under one parent are a caller error and must be
+     * diagnosable instead of silently looking like missing layout nodes. */
+    lens_begin(ui, &in);
+    lens_label(ui, "duplicate");
+    lens_label(ui, "duplicate");
+    lens_end(ui);
+    CHECK(lens_has_duplicate_ids(ui));
+
+    /* Stable data scopes make identical labels distinct. The diagnostic is
+     * frame-local, so a clean frame clears the previous report. */
+    lens_begin(ui, &in);
+    lens_push_id_int(ui, 41);
+    lens_label(ui, "duplicate");
+    lens_pop_id(ui);
+    lens_push_id_int(ui, 42);
+    lens_label(ui, "duplicate");
+    lens_pop_id(ui);
+    lens_end(ui);
+    CHECK(!lens_has_duplicate_ids(ui));
+
     /* "##" splits the visible label from the id seed */
     lens_begin(ui, &in);
     lens_id ok_save = lens_current_id(ui, "OK##save");

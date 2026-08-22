@@ -11,8 +11,14 @@ void lensi_link_child(lens *ui, lens_node *n) {
     if (!parent || !n || n == parent)
         return;
     ui->last_node = n; /* lens_a11y target */
-    if (n->parent == parent && n->last_seen == ui->frame)
-        return; /* already linked this frame */
+    if (n->parent == parent && n->last_seen == ui->frame) {
+        /* Reusing one retained id for two siblings makes the latter silently
+         * disappear: there is only one node to link and one draw list to
+         * retain. Surface the caller error for frame diagnostics instead of
+         * making a broken list look like a layout-solver failure. */
+        ui->duplicate_ids = true;
+        return;
+    }
     n->parent = parent;
     n->next_sibling = NULL;
     if (parent->last_child)
