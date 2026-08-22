@@ -75,7 +75,7 @@ typedef struct flux_sg_animation flux_sg_animation;
  *   FLUX_ERROR_UNSUPPORTED       — parsed, but no loadable primitive found.
  *   FLUX_ERROR_INVALID_ARGUMENT  — not a .glb, or malformed container/JSON.
  *   FLUX_ERROR_OUT_OF_MEMORY.                                    */
-FLUX_SG_API flux_result flux_sg_load_glb(flux_device *device, const void *glb_bytes,
+FLUX_NODISCARD FLUX_SG_API flux_result flux_sg_load_glb(flux_device *device, const void *glb_bytes,
                                          size_t byte_count, flux_sg_scene **out);
 
 FLUX_SG_API flux_sg_scene *flux_sg_scene_retain(flux_sg_scene *scene);
@@ -85,7 +85,7 @@ FLUX_SG_API void flux_sg_scene_release(flux_sg_scene *scene);
  * fallback material. Every non-NULL material is retained. Primitive material
  * indices come directly from glTF; missing/out-of-range entries use fallback.
  * Passing an empty table and NULL fallback clears installed materials. */
-FLUX_SG_API flux_result flux_sg_scene_set_materials(flux_sg_scene *scene,
+FLUX_NODISCARD FLUX_SG_API flux_result flux_sg_scene_set_materials(flux_sg_scene *scene,
                                                     flux_material *const *materials,
                                                     uint32_t material_count,
                                                     flux_material *fallback);
@@ -112,7 +112,7 @@ FLUX_SG_API bool flux_sg_scene_humanoid_bone_position(const flux_sg_scene *scene
  * identity, including VRM 0.x thumb-name compatibility and rest-pose rotation
  * conversion. Ordinary glTF clips fall back to node-name matching. The clip
  * retains `target` and remains permanently bound to that exact scene. */
-FLUX_SG_API flux_result flux_sg_load_animation_glb(const flux_sg_scene *target,
+FLUX_NODISCARD FLUX_SG_API flux_result flux_sg_load_animation_glb(const flux_sg_scene *target,
                                                    const void *glb_bytes, size_t byte_count,
                                                    flux_sg_animation **out);
 FLUX_SG_API flux_sg_animation *flux_sg_animation_retain(flux_sg_animation *animation);
@@ -122,7 +122,7 @@ FLUX_SG_API uint32_t flux_sg_animation_channel_count(const flux_sg_animation *an
 
 /* Reset to the model rest pose, then sample and apply the clip. When `loop` is
  * true, time wraps by duration; otherwise it clamps to the last key. */
-FLUX_SG_API flux_result flux_sg_scene_apply_animation(flux_sg_scene *scene,
+FLUX_NODISCARD FLUX_SG_API flux_result flux_sg_scene_apply_animation(flux_sg_scene *scene,
                                                       const flux_sg_animation *animation,
                                                       float time_seconds, bool loop);
 FLUX_SG_API void flux_sg_scene_reset_pose(flux_sg_scene *scene);

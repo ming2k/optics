@@ -65,7 +65,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_create_cpu_aa(uint32_t width, ui
 
 /* Begin a recording pass, clearing to `clear` (premultiplied; NULL = fully
  * transparent). The CPU analogue of flux_canvas_begin — no frame needed. */
-FLUX_API flux_result flux_canvas_cpu_begin(flux_canvas *c, const flux_color *clear);
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_cpu_begin(flux_canvas *c, const flux_color *clear);
 
 /* End the recording pass. Pixels are already resolved in the framebuffer. */
 FLUX_API void flux_canvas_cpu_end(flux_canvas *c);
