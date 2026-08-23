@@ -2,7 +2,7 @@
 
 All notable, user-visible changes to the C libraries in this monorepo
 (`libflux`, `libflux-text`, `libflux-scene-graph`, `liblens`, `libiris`,
-`libprism`) are documented in this file. The Rust bindings under
+`libprism`, `libanim`) are documented in this file. The Rust bindings under
 `bindings/` carry their own per-crate changelogs.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
@@ -12,6 +12,47 @@ releases are source- and binary-compatible, minor releases may break
 either.
 
 ## [Unreleased]
+
+### Added — anim (new sibling library, ADR-0077)
+
+- **`libanim`** (`-Danim=true`, on by default): the shared motion vocabulary
+  as pure math on caller-owned state — closed-form analytic spring
+  (non-divergent by construction for any accepted `dt`), exponential
+  approach/decay, the standard easing curves, a dead-band + dwell
+  **hysteresis latch** for binary decisions fed by noisy measurements, and a
+  **motion-adaptive smoother** for temporally lagged continuous signals. No
+  clock, no timeline, no allocation; `dt` is a parameter clamped once at the
+  boundary to `[0, 1/30]` s, and `reduced_motion` resolves every primitive in
+  one step. Property tests pin boundedness under adversarial `dt`, energy
+  monotonicity, and endpoint/clamp behaviour (`tests/anim/test_anim.c`).
+  Consumers stop copying integrators out of the showcase recipes.
+
+### Added — lens (ghost replay, ADR-0078)
+
+- **`lens_set_ghost(ui, subtree_root, alpha)`**: the leave-animation render
+  surface ADR-0038 deferred. Pinning a live subtree arms capture; at its last
+  live `lens_end` the subtree's draw commands and geometry are deep-copied
+  out of the per-frame arena, and each subsequent `lens_set_ghost` call
+  repaints the frozen snapshot at `alpha` through the same command emitter
+  and ADR-0068 colour bake the live tree uses (byte-identical to fading the
+  same subtree with `lens_set_opacity` — pinned by test). Hosts delete their
+  keep-building-dead-content scaffolding: an exit animation is now
+  `lens_set_ghost(ui, id, ease(1 - t))`. Snapshots are bounded (16
+  concurrent, 64-frame unrefreshed lifetime), never hit-test/focus/a11y,
+  and never create canvas display-list records.
+- **`LENS_SKIN_SCRATCH_FLOATS`**: the inline scratch size is now a named
+  public constant; the header documents the graduation path
+  (`lens_skin_scratch` → `lens_node_state`) instead of leaving "more than
+  one spring" callers to invent an external hashtable.
+
+### Docs
+
+- `docs/reference/prism.md`: the backdrop-stats caller example now shows the
+  correct de-jitter consumers for the 3-frame-stale read — a hysteresis
+  latch (dead band + dwell) for the binary `plate_polarity` and a
+  motion-adaptive smoother for `backdrop_energy` — replacing the bare
+  threshold that oscillated at every bright/dark boundary crossing.
+
 
 ### Added — flux (image upload)
 

@@ -17,6 +17,7 @@ lens_sources = files(
   'src/input/clipboard.c',
   'src/render/drawlist.c',
   'src/render/replay.c',
+  'src/render/ghost.c',
   'src/style/style.c',
   'src/skin/skin.c',
   'src/skin/button.c',

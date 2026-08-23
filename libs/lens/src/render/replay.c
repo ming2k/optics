@@ -96,38 +96,21 @@ static inline flux_rect rect_intersect(flux_rect a, flux_rect b) {
     return (flux_rect){x1, y1, x2 - x1, y2 - y1};
 }
 
-/* Walk a node and replay its draw list. ABS children are skipped: they are
- * emitted separately in band order by lensi_render_tree (ADR-0060), clipped
- * by their own place_bounds rather than by any ancestor clip. */
-void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect clip) {
-    flux_rect box = n->final_rect;
+/* ------------------------------------------------------------------ */
+/*  Shared draw-command emitter (ADR-0078)                             */
+/*                                                                    */
+/*  The single translation from lens_draw_cmd to canvas calls. The     */
+/*  live tree path (lensi_render_node) and the ghost replay path       */
+/*  (ghost.c) both go through it, so a ghost's frozen commands paint    */
+/*  with identical geometry resolution and text/icon/image behaviour.  */
+/*  alpha == 1.0 is the identity (the live path, bit-identical); a     */
+/*  ghost passes its fade so one bake tints the whole snapshot         */
+/*  (ADR-0068 semantics). `box` is the node's final_rect (live or      */
+/*  snapshotted).                                                      */
+/* ------------------------------------------------------------------ */
+void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect clip,
+                         const lens_draw_cmd *cmds, uint32_t cmd_count, float alpha) {
     float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
-    /* The clip as seen by this node's own commands; `clip` is narrowed
-     * below for scroll children, but the record validates against the
-     * entry value. */
-    const flux_rect entry_clip = clip;
-
-    /* Cull nodes that are completely outside the clip region. */
-    if (!rect_overlaps(box, clip))
-        return;
-
-    /* Replay path: skip re-emitting an unchanged subtree. The canvas
-     * does its own anchor validation inside flux_canvas_replay; a false
-     * return means the segment went stale (move/scale/clip/extent), so
-     * fall through, re-emit and re-record below. */
-    if (!n->subtree_changed && n->record.slot && rect_equal(n->record_clip, clip) &&
-        n->record_text_gen == ui->record_text_gen && flux_canvas_replay(canvas, n->record))
-        return;
-
-    /* Re-emit + re-record. The segment belongs to the live render
-     * canvas (a canvas switch drops every handle up front), so it is
-     * safe to release here. */
-    if (n->record.slot) {
-        flux_canvas_record_release(canvas, n->record);
-        n->record = (flux_canvas_record)FLUX_CANVAS_RECORD_INIT;
-    }
-    bool recording = flux_canvas_begin_record(canvas);
-
     /* Draw commands can nest logical clips (table viewport -> body -> cell).
      * Flux's clip_rect sets an absolute scissor rather than intersecting it,
      * so replay owns the intersection stack and always submits the effective
@@ -135,8 +118,8 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
     flux_rect command_clip = clip;
     flux_rect command_clip_stack[16];
     uint32_t command_clip_depth = 0;
-    for (uint32_t i = 0; i < n->cmd_count; i++) {
-        const lens_draw_cmd *c = &n->cmds[i];
+    for (uint32_t i = 0; i < cmd_count; i++) {
+        const lens_draw_cmd *c = &cmds[i];
         flux_rect r = offset_rel(box, c->rel);
         r = snap_rect(r, scale);
 
@@ -170,6 +153,18 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
             r.y += (r.h - side) * 0.5f;
             r.w = side;
             r.h = side;
+        }
+
+        /* Ghost fade: one bake per command, after the squaring pass so the
+         * alpha applies to the same resolved colours the live path paints.
+         * alpha == 1.0 is the identity: the pointer stays on the original
+         * command and this path is bit-identical to the live tree's. */
+        lens_draw_cmd faded;
+        if (alpha < 1.0f) {
+            faded = *c;
+            faded.color = lensi_opacity_color(faded.color, alpha);
+            faded.outline_color = lensi_opacity_color(faded.outline_color, alpha);
+            c = &faded;
         }
 
         switch (c->kind) {
@@ -486,6 +481,40 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
         flux_canvas_restore(canvas);
         command_clip_depth--;
     }
+}
+
+/* Walk a node and replay its draw list. ABS children are skipped: they are
+ * emitted separately in band order by lensi_render_tree (ADR-0060), clipped
+ * by their own place_bounds rather than by any ancestor clip. */
+void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect clip) {
+    flux_rect box = n->final_rect;
+    /* The clip as seen by this node's own commands; `clip` is narrowed
+     * below for scroll children, but the record validates against the
+     * entry value. */
+    const flux_rect entry_clip = clip;
+
+    /* Cull nodes that are completely outside the clip region. */
+    if (!rect_overlaps(box, clip))
+        return;
+
+    /* Replay path: skip re-emitting an unchanged subtree. The canvas
+     * does its own anchor validation inside flux_canvas_replay; a false
+     * return means the segment went stale (move/scale/clip/extent), so
+     * fall through, re-emit and re-record below. */
+    if (!n->subtree_changed && n->record.slot && rect_equal(n->record_clip, clip) &&
+        n->record_text_gen == ui->record_text_gen && flux_canvas_replay(canvas, n->record))
+        return;
+
+    /* Re-emit + re-record. The segment belongs to the live render
+     * canvas (a canvas switch drops every handle up front), so it is
+     * safe to release here. */
+    if (n->record.slot) {
+        flux_canvas_record_release(canvas, n->record);
+        n->record = (flux_canvas_record)FLUX_CANVAS_RECORD_INIT;
+    }
+    bool recording = flux_canvas_begin_record(canvas);
+
+    lensi_emit_commands(ui, canvas, box, clip, n->cmds, n->cmd_count, 1.0f);
 
     bool pushed_canvas_clip = false;
     if (n->is_scroll && n->first_child) {
@@ -645,6 +674,9 @@ flux_result lensi_render_tree(lens *ui, flux_canvas *canvas) {
             lensi_render_node(ui, canvas, n, n->has_place_bounds ? n->place_bounds : no_clip);
         }
     }
+    /* Ghosts paint after every live band (ADR-0078): a leaving subtree is
+     * decoration over the frame the host already rebuilt without it. */
+    lensi_ghost_render(ui, canvas);
     if (scaled)
         flux_canvas_restore(canvas);
     /* One tree now: the commit walk reaches placed subtrees through their

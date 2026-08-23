@@ -124,6 +124,7 @@ fail_arena:
 void lens_destroy(lens *ui) {
     if (!ui)
         return;
+    lensi_ghost_destroy(ui);
     flux_text_destroy(ui->text); /* null-safe */
     lensi_store_destroy(ui);
     flux_arena_destroy(&ui->arena);
@@ -199,6 +200,11 @@ void lens_set_opacity(lens *ui, float opacity) {
     if (opacity > 1.0f)
         opacity = 1.0f;
     ui->opacity = opacity;
+}
+
+/* Ghost replay (ADR-0078): the public pin. */
+void lens_set_ghost(lens *ui, lens_id subtree_root, float alpha) {
+    lensi_ghost_pin(ui, subtree_root, alpha);
 }
 
 float lens_opacity(const lens *ui) {
@@ -327,6 +333,7 @@ void lens_begin(lens *ui, const lens_input *input) {
      * truncation it flags stays flagged. */
     lensi_place_snapshot_prev(ui);
     flux_arena_reset(&ui->arena);
+    lensi_ghost_begin_frame(ui); /* ghosts survive the reset; clear refresh marks */
 
     /* Size-aware copy (ADR-0036): zero = legacy/trust full struct; >0
      * clamps to min(caller, lib) so apps compiled against older or newer
@@ -420,6 +427,8 @@ void lens_end(lens *ui) {
     lensi_scrollbars_emit(ui);
 
     lensi_mark_dirty(ui); /* compute subtree_changed for culling */
+    lensi_ghost_capture(ui); /* freeze leaving subtrees (ADR-0078) */
+    lensi_ghost_end_frame(ui); /* expire unrefreshed ghosts */
 
     /* An AT activation that no widget consumed this frame (the node
      * vanished, is not focusable, or is disabled) is dropped: requests

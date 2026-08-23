@@ -118,15 +118,37 @@ fields consume. prism only measures: mapping statistics onto group fields,
 clamping, and temporal smoothing are caller policy (ADR-0065), which keeps
 the material free of frame-to-frame state.
 
+**The read is exactly 3 frames stale, so the consumer must de-jitter before
+deciding.** `plate_polarity` is a *binary* choice — interpolating it is
+meaningless, and a bare threshold (`mean_luminance < 0.4`) oscillates
+frame-to-frame while a body straddles a bright/dark boundary. The correct
+primitives are a **hysteresis latch** (flip only after the input has held
+the other side for a dwell) for the binary decision, and a
+**motion-adaptive smoother** for the continuous one (long τ while the body
+moves fast, absorbing the lag and the noise; short τ at rest). Both ship
+in `libanim` (`<anim/anim.h>`, ADR-0077) as `anim_hysteresis_step` and
+`anim_smoother_step`:
+
 ```c
 prism_backdrop_stat stats[8];
 uint32_t stat_count = 0;
 if (prism_liquid_glass_filter_stats(filter, frame, stats, 8, &stat_count) == FLUX_OK) {
+    static anim_hysteresis latch[8];   /* zeroed = starts low; tune per body */
+    static anim_smoother energy[8];    /* per-body filter state, host-owned */
     for (uint32_t i = 0; i < stat_count; ++i) {
-        /* Caller policy: pin the plate against the measured backdrop tone;
-         * surfaces with a fixed text tone pin a constant polarity instead. */
-        groups[i].plate_polarity = stats[i].mean_luminance < 0.4f ? 1.0f : 0.0f;
-        groups[i].backdrop_energy = stats[i].high_freq_energy;
+        /* Binary polarity: dead band 0.36..0.44, 150 ms dwell. The latch
+         * output is stable under boundary jitter; surfaces with a fixed
+         * text tone pin a constant polarity instead (no latch needed). */
+        bool pearl = anim_hysteresis_step(&latch[i], false, 0.36f, 0.44f,
+                                          stats[i].mean_luminance, 0.150f,
+                                          lens_dt(ui));
+        groups[i].plate_polarity = pearl ? 1.0f : 0.0f;
+
+        /* Continuous energy: τ 60 ms at rest, ×8 (≈0.5 s) while the body
+         * is crossing content — fast to settle, slow to flicker. */
+        groups[i].backdrop_energy =
+            anim_smoother_step(&energy[i], stats[i].high_freq_energy,
+                               0.060f, 8.0f, 0.05f, lens_dt(ui));
     }
 }
 ```

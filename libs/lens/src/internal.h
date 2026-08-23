@@ -200,7 +200,8 @@ struct lens_node {
      * deliberately NOT cleared by lensi_node_reset_frame, and freed with the
      * node by the ADR-0038 GC. Mechanism, not animation — the library stores
      * but never integrates. */
-    float skin_scratch[4];
+    float skin_scratch[LENS_SKIN_SCRATCH_FLOATS];
+
 };
 
 /* ------------------------------------------------------------------ */
@@ -257,6 +258,13 @@ typedef struct lens_store {
 /* ------------------------------------------------------------------ */
 /*  Context (ADR-0024, ADR-0032)                                      */
 /* ------------------------------------------------------------------ */
+
+/* Ghost replay bounds (ADR-0078): concurrent snapshots and the hard
+ * unrefreshed lifetime. Structural ceilings — a UI does not legitimately
+ * have more simultaneous exits, and a forgotten ghost must not pin memory
+ * forever. */
+#define LENSI_GHOST_MAX 16
+#define LENSI_GHOST_MAX_FRAMES 64
 
 struct lens {
     flux_device *device; /* may be NULL (headless) */
@@ -437,7 +445,88 @@ struct lens {
      * flux-text atlas clear count for the frame. */
     flux_canvas *record_canvas;
     uint64_t record_text_gen;
+
+    /* Ghost snapshots (ADR-0078): deep copies of leaving subtrees' draw
+     * commands + geometry, captured at their last live lens_end, kept
+     * alive by per-frame lens_set_ghost calls, painted at the host's
+     * alpha through the shared command emitter. Bounded: LENSI_GHOST_MAX
+     * entries, LENSI_GHOST_MAX_FRAMES without a refresh. */
+    struct lens_ghost *ghosts[LENSI_GHOST_MAX];
+    uint32_t ghost_count;
+    /* Per-frame capture arming (lens_set_ghost on a still-live subtree):
+     * cleared at lens_begin, consumed by lensi_ghost_capture at lens_end.
+     * A pin on an already-captured ghost refreshes it instead (ghost.c). */
+    lens_id ghost_pins[LENSI_GHOST_MAX];
+    float ghost_pin_alphas[LENSI_GHOST_MAX];
+    uint32_t ghost_pin_count;
 };
+
+/* ------------------------------------------------------------------ */
+/*  Ghost replay (ADR-0078)                                           */
+/*                                                                    */
+/*  A leaving subtree's pixels come from a deep snapshot taken at its  */
+/*  last live lens_end (cmds + geometry, copied out of the per-frame   */
+/*  arena into lensi_alloc memory so it survives the reset). The host  */
+/*  re-pins it each frame with lens_set_ghost(id, alpha); unrefreshed  */
+/*  ghosts count down and expire. Ghosts paint after live content in   */
+/*  their band, never hit-test/focus/a11y, and never create canvas     */
+/*  display-list records.                                              */
+/* ------------------------------------------------------------------ */
+
+typedef struct lens_ghost_cmd {
+    lens_draw_cmd cmd; /* text pointer, if any, points into lensi_alloc mem */
+} lens_ghost_cmd;
+
+typedef struct lens_ghost_node {
+    flux_rect final_rect;
+    bool is_scroll;
+    float pad;
+    float scroll_gutter;
+    flux_rect place_bounds;
+    bool has_place_bounds;
+    lens_ghost_cmd *cmds;
+    uint32_t cmd_count;
+    struct lens_ghost_node *first_child;
+    struct lens_ghost_node *next_sibling;
+} lens_ghost_node;
+
+typedef struct lens_ghost {
+    lens_id root_id;
+    lens_band band;
+    uint32_t frames_left;
+    float alpha;
+    bool refreshed_this_frame;
+    bool wants_alive; /* the host asked for it this frame (lens_set_ghost) */
+    lens_ghost_node *root; /* NULL = slot unused */
+} lens_ghost;
+
+/* lens_end (after mark_dirty): capture leaving subtrees. Called with the
+ * store walk complete; snapshots roots whose subtree had commands. */
+void lensi_ghost_capture(lens *ui);
+
+/* True when the host pinned `id` this frame (capture arming). */
+bool ghost_wants(const lens *ui, lens_id id);
+
+/* lens_begin: clear the per-frame refresh marks (ghosts survive the arena
+ * reset; the countdown/expiry runs at lens_end). */
+void lensi_ghost_begin_frame(lens *ui);
+
+/* lens_end tail: expire ghosts the host did not refresh this frame. */
+void lensi_ghost_end_frame(lens *ui);
+
+/* lens_set_ghost — public entry; also the capture-intent signal during a
+ * live frame (a node still alive this frame that the host asks to ghost
+ * is pinned for capture when it leaves). */
+void lensi_ghost_pin(lens *ui, lens_id id, float alpha);
+
+/* render: paint ghosts in band order after the live tree. */
+void lensi_ghost_render(lens *ui, flux_canvas *canvas);
+
+/* destroy: free every snapshot. */
+void lensi_ghost_destroy(lens *ui);
+
+/* True while any ghost exists — repaint-pending for hosts. */
+bool lensi_ghost_active(const lens *ui);
 
 /* ------------------------------------------------------------------ */
 /*  Style resolution (ADR-0058)                                       */
@@ -639,6 +728,8 @@ bool lensi_point_clipped_by_scroll(const lens_node *n, flux_point p);
 /* render (drawlist.c, replay.c) */
 void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd);
 flux_result lensi_render_tree(lens *ui, flux_canvas *canvas);
+void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect clip,
+                         const lens_draw_cmd *cmds, uint32_t cmd_count, float alpha);
 void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect clip);
 void lensi_mark_dirty(lens *ui); /* per-frame subtree change detection */
 /* Bottom-up change detection rooted at `n` (replay.c). ABS descendants are

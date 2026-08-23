@@ -758,13 +758,17 @@ LENS_API void lens_set_skin_userdata(lens *ui, lens_widget_kind kind, lens_skin_
  * custom skin to keep the stock chrome, then add your own. */
 LENS_API lens_skin_fn lens_default_skin(lens_widget_kind kind);
 
-/* Per-node scratch storage for skins (ADR-0061 item 9): four retained
- * floats, zeroed on the node's first touch, living and dying with the
+/* Per-node scratch storage for skins (ADR-0061 item 9): LENS_SKIN_SCRATCH_FLOATS
+ * retained floats, zeroed on the node's first touch, living and dying with the
  * node (ADR-0038's GC reclaims the node and the scratch goes with it).
- * This is mechanism, not animation: the library provides storage so a
- * caller-owned skin can carry its own state (a spring indicator's
- * position/velocity) with no library-side allocation or lifetime hazard;
- * the library never animates anything itself. */
+ * This is the inline fast path for the common case (one 1-D spring:
+ * position/velocity/target/stamp). Need more — an X/Y pair of springs, a
+ * scale+opacity+rotation bundle? Graduate to lens_node_state(node, bytes):
+ * arbitrary size, same zero-on-first-touch, same GC lifetime, no external
+ * hashtable required. This is mechanism, not animation: the library stores
+ * state; it never integrates anything. See libs/anim (ADR-0077) for the
+ * math to run on it. */
+#define LENS_SKIN_SCRATCH_FLOATS 4
 LENS_API float *lens_skin_scratch(lens *ui, lens_node *node);
 
 /* Skin emission seam — the skin's pen. Rects are node-local, same space
@@ -848,6 +852,19 @@ LENS_API lens_theme lens_get_theme(const lens *ui);
 LENS_API void lens_set_opacity(lens *ui, float opacity);
 LENS_API float lens_opacity(const lens *ui);
 LENS_API float lens_dt(const lens *ui); /* frame delta, seconds */
+
+/* Ghost replay — the leave-animation render surface (ADR-0078).
+ *
+ * Call this every frame while an exit animation runs for a subtree the
+ * build no longer produces: it re-pins the subtree's snapshot (captured
+ * at its last live lens_end) and paints it at `alpha` through the same
+ * command emitter and alpha bake as a live subtree (ADR-0068 semantics).
+ * No call → the snapshot counts down and expires after
+ * LENSI_GHOST_MAX_FRAMES frames. Unknown or never-seen ids are ignored
+ * (advisory, never a host crash). Ghosts never hit-test, focus, or enter
+ * the accessibility tree; they render after live content in their band.
+ * Mechanism, not animation: the host owns the clock and the easing. */
+LENS_API void lens_set_ghost(lens *ui, lens_id subtree_root, float alpha);
 
 /* Device-pixel scale (HiDPI). The application reports the compositor /
  * window-system scale here; layout, input, and `lens_input.display_size`
