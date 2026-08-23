@@ -386,6 +386,46 @@ int main(void) {
         }
     }
 
+    /* --- Case 6: the reusable frame-slot filter drives without pool
+     * leases: repeated applies on one filter reuse the slot's own images,
+     * and validation/state errors leave no output. --- */
+    {
+        flux_shadow_filter *filter = nullptr;
+        EXPECT(flux_shadow_filter_create(nullptr, &filter) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_shadow_filter_create(d, &filter) == FLUX_OK);
+
+        /* No frame: null-pass validation. */
+        flux_image *out = nullptr;
+        flux_effect_shadow_desc sd = FLUX_EFFECT_SHADOW_DESC_INIT;
+        sd.input = mask;
+        sd.blur = 2.0f;
+        sd.tint_red = 1.0f;
+        sd.tint_green = 1.0f;
+        sd.tint_blue = 1.0f;
+        sd.alpha = 1.0f;
+        EXPECT(flux_shadow_filter_apply(filter, nullptr, &sd, &out) ==
+               FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(out == nullptr);
+
+        /* Wrong descriptor type is rejected. */
+        flux_effect_shadow_desc wrong = sd;
+        wrong.type = FLUX_TYPE_EFFECT_BLUR_DESC;
+        EXPECT(flux_shadow_filter_apply(filter, (flux_frame *)1, &wrong, &out) ==
+               FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(out == nullptr);
+
+        /* Non-finite parameters are rejected before any dispatch. */
+        flux_effect_shadow_desc nan_desc = sd;
+        nan_desc.offset_y = (0.0f / 0.0f);
+        EXPECT(flux_shadow_filter_apply(filter, (flux_frame *)1, &nan_desc, &out) ==
+               FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(out == nullptr);
+
+        flux_shadow_filter_retain(filter);
+        flux_shadow_filter_release(filter);
+        flux_shadow_filter_release(filter);
+    }
+
     vkUnmapMemory(flux_device_vk_device(d), dst_mem);
     vkDestroyBuffer(flux_device_vk_device(d), dst, nullptr);
     vkFreeMemory(flux_device_vk_device(d), dst_mem, nullptr);

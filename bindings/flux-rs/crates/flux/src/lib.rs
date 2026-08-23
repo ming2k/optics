@@ -3545,6 +3545,19 @@ impl EffectImage {
         self.raw
     }
 
+    /// Draw the leased effect output through the Canvas image pipeline.
+    /// Same borrowed-lifetime rules as [`Self::as_raw`]: the pool owns the
+    /// image until the next `effect_reset` on the device.
+    pub fn draw(&self, canvas: &Canvas, x: f32, y: f32, width: f32, height: f32) {
+        let destination = sys::flux_rect {
+            x,
+            y,
+            w: width,
+            h: height,
+        };
+        unsafe { sys::flux_canvas_draw_image(canvas.raw, self.raw, destination, std::ptr::null()) };
+    }
+
     /// Promote the leased output into a caller-owned, refcounted image
     /// unaffected by `effect_reset`. Synchronous: submits a one-shot
     /// command buffer and waits. The caller must have synchronised any
@@ -3553,6 +3566,84 @@ impl EffectImage {
         let mut out: *mut sys::flux_image = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_effect_promote(self.raw, &mut out) })?;
         Ok(Image { raw: out })
+    }
+}
+
+/// Reusable, frame-slot-safe realtime drop shadow (ADR-0074) — the filter
+/// counterpart of [`effect_shadow`], mirroring [`BlurFilter`]'s ownership
+/// model. The exact operator leases intermediates from the device's
+/// transient pool per call, which a per-frame compositor would accumulate
+/// until `flux_effect_reset`; this filter instead owns its intermediates and
+/// output per frame-in-flight slot, so driving it every frame grows nothing.
+///
+/// Use one filter per surface/frame stream. Blur, offset, tint, and alpha
+/// vary per call without pipeline churn; the dispatch shape is fixed per
+/// input extent.
+pub struct ShadowFilter {
+    raw: *mut sys::flux_shadow_filter,
+}
+
+impl ShadowFilter {
+    pub fn new(device: &Device) -> Result<ShadowFilter, Error> {
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_shadow_filter_create(device.raw, &mut raw) })?;
+        Ok(ShadowFilter { raw })
+    }
+
+    /// Record the shadow for this frame's reusable slot. The returned image
+    /// borrows the filter, preventing that slot's storage from being
+    /// replaced while it is composed into the frame.
+    pub fn apply<'filter>(
+        &'filter mut self,
+        frame: &Frame<'_>,
+        input: &Image,
+        params: ShadowParams,
+    ) -> Result<ShadowedImage<'filter>, Error> {
+        let desc = params.into_desc(input);
+        let mut raw: *mut sys::flux_image = std::ptr::null_mut();
+        // SAFETY: the filter, frame, and input all belong to one device (the
+        // C side verifies); the frame is at a pass boundary and recording.
+        Error::check(unsafe { sys::flux_shadow_filter_apply(self.raw, frame.raw, &desc, &mut raw) })?;
+        Ok(ShadowedImage {
+            raw,
+            _filter: PhantomData,
+        })
+    }
+}
+
+impl Drop for ShadowFilter {
+    fn drop(&mut self) {
+        unsafe { sys::flux_shadow_filter_release(self.raw) };
+    }
+}
+
+/// Borrowed output of a [`ShadowFilter`] application: a premultiplied,
+/// tinted shadow image valid until the same slot is applied again or the
+/// filter is released.
+pub struct ShadowedImage<'filter> {
+    raw: *mut sys::flux_image,
+    _filter: PhantomData<&'filter mut ShadowFilter>,
+}
+
+impl ShadowedImage<'_> {
+    /// Draw the shadow output through the Canvas image pipeline. Draw it
+    /// beneath the window/chrome it belongs to; the image is premultiplied
+    /// (rgb = tint * a), so straight `draw_image` blending composites
+    /// correctly.
+    pub fn draw(&self, canvas: &Canvas, x: f32, y: f32, width: f32, height: f32) {
+        let destination = sys::flux_rect {
+            x,
+            y,
+            w: width,
+            h: height,
+        };
+        unsafe { sys::flux_canvas_draw_image(canvas.raw, self.raw, destination, std::ptr::null()) };
+    }
+
+    /// Raw `flux_image` pointer of the borrowed shadow output, for sibling
+    /// binding crates that compose it themselves.
+    pub fn as_raw(&self) -> *mut sys::flux_image {
+        self.raw
     }
 }
 

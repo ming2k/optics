@@ -192,6 +192,33 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_shadow(VkCommandBuffer cmd,
                                                        const flux_effect_shadow_desc *desc,
                                                        flux_image **out);
 
+/* Reusable, frame-slot-safe realtime shadow. The exact flux_effect_shadow
+ * leases its intermediates from the per-device transient pool, so a caller
+ * driving it every frame would hold one lease per dispatch until
+ * flux_effect_reset — wrong for a live compositor that never resets. This
+ * filter instead owns its two intermediates and output per frame-in-flight
+ * slot (the same ownership model as flux_blur_filter): begin_frame has
+ * already waited for the selected slot before that slot is reused, so no
+ * transient-pool growth, lease accumulation, or device-wide wait occurs.
+ * Dispatch shape is fixed per extent; blur/offset/tint/alpha vary per frame
+ * without pipeline churn (ADR-0074).
+ *
+ * Accepts the same flux_effect_shadow_desc as flux_effect_shadow (its `next`
+ * must be NULL). The image returned by apply is borrowed from the filter and
+ * remains valid until the same slot is applied again, the filter is
+ * released, or its input extent/format changes. Do not release it. */
+typedef struct flux_shadow_filter flux_shadow_filter;
+
+FLUX_NODISCARD FLUX_API flux_result flux_shadow_filter_create(flux_device *device,
+                                                              flux_shadow_filter **out);
+FLUX_NODISCARD FLUX_API flux_shadow_filter *flux_shadow_filter_retain(
+    flux_shadow_filter *filter);
+FLUX_API void flux_shadow_filter_release(flux_shadow_filter *filter);
+FLUX_NODISCARD FLUX_API flux_result flux_shadow_filter_apply(flux_shadow_filter *filter,
+                                                             flux_frame *frame,
+                                                             const flux_effect_shadow_desc *desc,
+                                                             flux_image **out);
+
 /* ------------------------------------------------------------------ */
 /*  Promote a transient output to a caller-owned image                */
 /* ------------------------------------------------------------------ */

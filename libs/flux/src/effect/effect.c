@@ -223,6 +223,21 @@ struct flux_blur_filter {
     blur_filter_slot slots[FLUX_MAX_FRAMES_IN_FLIGHT];
 };
 
+typedef struct shadow_filter_slot {
+    uint32_t width;
+    uint32_t height;
+    flux_format format;
+    flux_image *ping;
+    flux_image *pong;
+    flux_image *output;
+} shadow_filter_slot;
+
+struct flux_shadow_filter {
+    atomic_uint ref_count;
+    flux_device *device; /* retained; slot images hold weak device refs */
+    shadow_filter_slot slots[FLUX_MAX_FRAMES_IN_FLIGHT];
+};
+
 static void effect_state_destroy(flux_device *d) {
     effect_state *st = d->effect_state;
     if (!st)
@@ -1121,6 +1136,157 @@ flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
     blur_filter_slot *slot = &filter->slots[index];
     record_backdrop_filter(st, filter->device, flux_frame_vk_command_buffer(frame), input, slot,
                            desc->sigma, regions, region_count, is16f);
+    *out = slot->output;
+    return FLUX_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reusable frame-slot realtime shadow                               */
+/* ------------------------------------------------------------------ */
+
+flux_result flux_shadow_filter_create(flux_device *device, flux_shadow_filter **out) {
+    if (!device || !out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = nullptr;
+    flux_shadow_filter *filter = flux_internal_alloc(device, sizeof(*filter));
+    if (!filter)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    atomic_init(&filter->ref_count, 1u);
+    filter->device = flux_device_retain(device);
+    *out = filter;
+    return FLUX_OK;
+}
+
+flux_shadow_filter *flux_shadow_filter_retain(flux_shadow_filter *filter) {
+    if (filter)
+        atomic_fetch_add_explicit(&filter->ref_count, 1u, memory_order_relaxed);
+    return filter;
+}
+
+void flux_shadow_filter_release(flux_shadow_filter *filter) {
+    if (!filter)
+        return;
+    if (atomic_fetch_sub_explicit(&filter->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return;
+    flux_device *device = filter->device;
+    for (uint32_t i = 0; i < FLUX_MAX_FRAMES_IN_FLIGHT; ++i) {
+        if (filter->slots[i].output)
+            flux_image_release(filter->slots[i].output);
+        if (filter->slots[i].pong)
+            flux_image_release(filter->slots[i].pong);
+        if (filter->slots[i].ping)
+            flux_image_release(filter->slots[i].ping);
+    }
+    flux_internal_free(device, filter);
+    flux_device_release(device);
+}
+
+static flux_result shadow_filter_ensure_slot(flux_shadow_filter *filter, uint32_t index,
+                                             const flux_image *input, flux_format storage_format) {
+    shadow_filter_slot *slot = &filter->slots[index];
+    if (slot->ping && slot->pong && slot->output && slot->width == input->width &&
+        slot->height == input->height && slot->format == storage_format)
+        return FLUX_OK;
+
+    if (slot->output)
+        flux_image_release(slot->output);
+    if (slot->pong)
+        flux_image_release(slot->pong);
+    if (slot->ping)
+        flux_image_release(slot->ping);
+    *slot = (shadow_filter_slot){0};
+
+    flux_result r = flux_image_create_compute_writable(filter->device, input->width,
+                                                       input->height, storage_format, &slot->ping);
+    if (r != FLUX_OK)
+        return r;
+    r = flux_image_create_compute_writable(filter->device, input->width, input->height,
+                                           storage_format, &slot->pong);
+    if (r != FLUX_OK)
+        goto fail;
+    r = flux_image_create_compute_writable(filter->device, input->width, input->height,
+                                           storage_format, &slot->output);
+    if (r != FLUX_OK)
+        goto fail;
+    slot->width = input->width;
+    slot->height = input->height;
+    slot->format = storage_format;
+    return FLUX_OK;
+
+fail:
+    if (slot->pong)
+        flux_image_release(slot->pong);
+    if (slot->ping)
+        flux_image_release(slot->ping);
+    *slot = (shadow_filter_slot){0};
+    return r;
+}
+
+flux_result flux_shadow_filter_apply(flux_shadow_filter *filter, flux_frame *frame,
+                                     const flux_effect_shadow_desc *desc, flux_image **out) {
+    if (!filter || !frame || !desc || !out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = nullptr;
+    if (desc->type != FLUX_TYPE_EFFECT_SHADOW_DESC || !desc->input) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid reusable shadow descriptor");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->next) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "reusable shadow does not accept extensions");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    /* Finite check before the frame dereference: callers validating against
+     * a not-yet-started frame (null or placeholder) must fail cleanly, not
+     * crash. Mirrors the exact operator's ordering. */
+    if (!effect_finite(desc->offset_x) || !effect_finite(desc->offset_y) ||
+        !effect_finite(desc->tint_red) || !effect_finite(desc->tint_green) ||
+        !effect_finite(desc->tint_blue) || !effect_finite(desc->alpha) ||
+        !effect_finite(desc->blur)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "shadow parameters must be finite");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING || frame->pass_active) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "reusable shadow requires a recording frame pass boundary");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    flux_image *input = desc->input;
+    if (frame->surface->device != filter->device || input->device != filter->device) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                  "shadow filter, frame, and input use different devices");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (input->bindless == FLUX_BINDLESS_INVALID) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "reusable shadow input lacks a sampled handle");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    effect_state *st = effect_state_get_or_init(filter->device);
+    if (!st)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    flux_format storage_format;
+    bool is16f;
+    flux_result rr = effect_resolve_storage(st, input, &storage_format, &is16f);
+    if (rr != FLUX_OK)
+        return rr;
+    uint32_t index = flux_frame_index(frame);
+    if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
+        return FLUX_ERROR_OUT_OF_RANGE;
+
+    flux_result r = shadow_filter_ensure_slot(filter, index, input, storage_format);
+    if (r != FLUX_OK)
+        return r;
+
+    flux_platform_mutex_lock(&st->lock);
+    r = ensure_shadow_pipeline(filter->device, st, is16f);
+    flux_platform_mutex_unlock(&st->lock);
+    if (r != FLUX_OK)
+        return r;
+
+    shadow_filter_slot *slot = &filter->slots[index];
+    r = record_shadow_dispatch(st, filter->device, flux_frame_vk_command_buffer(frame), input,
+                               slot->ping, slot->pong, slot->output, desc, is16f);
+    if (r != FLUX_OK)
+        return r;
     *out = slot->output;
     return FLUX_OK;
 }

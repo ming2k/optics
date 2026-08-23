@@ -153,6 +153,36 @@ transient pool's normal lease path (ADR-0074 animation safety).
 - The leased intermediates are covered by the same barriers inside the
   recorded command buffer; callers never see them.
 
+## Reusable frame-slot shadow
+
+`flux_shadow_filter_apply` — the realtime counterpart of
+`flux_effect_shadow`, mirroring `flux_blur_filter_apply`'s ownership model.
+
+| Symbol | Role |
+|--------|------|
+| `flux_shadow_filter_create` | Create a filter (retains the device). One filter per surface/frame stream. |
+| `flux_shadow_filter_retain` / `_release` | Refcounting; release frees per-slot images. |
+| `flux_shadow_filter_apply` | Record the three shadow passes into the frame's command buffer using the frame slot's own ping/pong/output images. |
+
+The exact operator leases intermediates from the per-device transient pool
+per call — correct for occasional use, but a per-frame compositor would
+accumulate one lease per dispatch until `flux_effect_reset`. The filter
+instead owns its two intermediates and output per frame-in-flight slot:
+`begin_frame` has already waited for the selected slot before that slot is
+reused, so driving it every frame grows nothing and never needs a
+device-wide wait.
+
+Accepts the same descriptor as `flux_effect_shadow` (`next` must be NULL).
+Requires a recording frame at a pass boundary
+(`FLUX_ERROR_INVALID_STATE` otherwise). The returned image is borrowed from
+the filter: valid until the same slot is applied again, the filter is
+released, or its input extent/format changes. Do not release it.
+
+Parameter validation (finite floats, descriptor type, input handle)
+happens before the frame is dereferenced, so callers validating against a
+not-yet-started frame fail cleanly with `FLUX_ERROR_INVALID_ARGUMENT`
+rather than undefined behaviour.
+
 ## Reusable frame-slot blur
 
 `flux_blur_filter` is the fixed-cost animated compositor path. It records a

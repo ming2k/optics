@@ -240,6 +240,62 @@ int main(void) {
         EXPECT(px[(H / 2 * W + W / 2) * 4] >= red - 2u);
     }
 
+    /* --- reusable frame-slot shadow: capture a shape, shadow it, composite,
+     * and cycle frame slots without transient-pool leases --- */
+    {
+        flux_shadow_filter *shadow_filter = nullptr;
+        EXPECT(flux_shadow_filter_create(d, &shadow_filter) == FLUX_OK);
+
+        for (uint32_t iteration = 0; iteration < 5; ++iteration) {
+            flux_frame *frame = nullptr;
+            EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+
+            /* Capture an opaque white square on transparent: the mask. */
+            flux_color transparent = flux_color_rgba(0, 0, 0, 0);
+            EXPECT(flux_canvas_begin_target(canvas, frame, target, &transparent) == FLUX_OK);
+            flux_canvas_fill_rect_color(canvas, (flux_rect){(float)(W / 4), (float)(H / 4),
+                                                            (float)(W / 2), (float)(H / 2)},
+                                        flux_color_rgba_premul(255, 255, 255, 255));
+            flux_canvas_end_target(canvas);
+
+            flux_effect_shadow_desc sd = FLUX_EFFECT_SHADOW_DESC_INIT;
+            sd.input = target;
+            sd.blur = 4.0f;
+            sd.offset_y = 4.0f;
+            sd.tint_red = 0.0f;
+            sd.tint_green = 0.0f;
+            sd.tint_blue = 0.0f;
+            sd.alpha = 1.0f;
+            flux_image *shadow = nullptr;
+            EXPECT(flux_shadow_filter_apply(shadow_filter, frame, &sd, &shadow) == FLUX_OK);
+            EXPECT(shadow != nullptr);
+
+            /* White background so the black shadow is actually visible:
+             * inside the offset square the coverage is near-opaque (colour
+             * collapses toward black); the far corner keeps near-white. */
+            flux_color white = flux_color_rgba(255, 255, 255, 255);
+            EXPECT(flux_canvas_begin(canvas, frame, &white) == FLUX_OK);
+            flux_canvas_draw_image(canvas, shadow, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+            flux_canvas_end(canvas);
+            EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            EXPECT(flux_frame_present(frame) == FLUX_OK);
+
+            memset(px, 0, BYTES);
+            EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+            /* The composite target is opaque, so the alpha channel is
+             * always 255 — the shadow is visible through the colour
+             * channels (black shadow over white mask). Inside the offset
+             * square the colour is near-black; the far corner stays
+             * near-white. */
+            uint8_t centre_r = px[((H / 2 + 4) * W + W / 2) * 4 + 0];
+            uint8_t corner_r = px[(2 * W + 2) * 4 + 0];
+            EXPECT(centre_r < 55u);
+            EXPECT(corner_r > 235u);
+        }
+        flux_device_wait_idle(d);
+        flux_shadow_filter_release(shadow_filter);
+    }
+
     /* --- nesting rejected: begin_target inside an active frame pass --- */
     {
         flux_frame *frame = nullptr;

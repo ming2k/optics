@@ -15,6 +15,24 @@ either.
 
 ### Added — flux (effect module)
 
+- **`flux_shadow_filter`: the realtime frame-slot shadow path** (ADR-0074
+  follow-through). The exact `flux_effect_shadow` leases intermediates
+  from the per-device transient pool per call — a compositor driving it
+  every frame would hold one lease per dispatch until
+  `flux_effect_reset`. The filter instead owns its ping/pong/output
+  images per frame-in-flight slot (the `flux_blur_filter` ownership
+  model): no pool growth, no lease accumulation, no device-wide wait,
+  and blur/offset/tint/alpha vary per call without pipeline churn.
+  Accepts the same descriptor (`next` must be NULL); requires a
+  recording frame at a pass boundary; the output is borrowed from the
+  filter's slot. Parameter validation now happens before the frame is
+  dereferenced, so validation calls against a not-yet-started frame
+  return `FLUX_ERROR_INVALID_ARGUMENT` instead of undefined behaviour.
+  Rust binding: `ShadowFilter` + `ShadowedImage` (with `draw`) in
+  `flux-rs`, and `EffectImage` gained the missing `draw()`. GPU
+  coverage: five-slot cycling in `test_canvas_target.c` plus validation
+  cases in `test_effect_shadow.c` (43 checks total).
+
 - **`flux_effect_shadow`: drop shadows as a first-class image operator**
   (ADR-0074's first intake). A shape mask in (the input's alpha channel),
   a premultiplied tinted shadow out: two separable Gaussian passes over

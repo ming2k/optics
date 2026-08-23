@@ -21,6 +21,14 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `ShadowFilter` + `ShadowedImage` wrap the new `flux_shadow_filter` —
+  the realtime frame-slot shadow path (ADR-0074). `apply(frame, input,
+  params)` borrows the filter's per-slot output; `ShadowedImage::draw`
+  composites it (premultiplied, so straight image blending is correct).
+  Mirrors `BlurFilter`'s ownership model: driving it every frame grows
+  nothing.
+- `EffectImage::draw` — the exact operator's leased output can now be
+  composited directly through the Canvas, matching `BlurredImage`.
 - `ShadowParams`, `effect_shadow`, and `EffectImage` wrap the new
   `flux_effect_shadow` operator (ADR-0074): drop shadow from a shape
   mask's alpha — Gaussian `blur`, pixel `offset_x`/`offset_y`, straight
