@@ -46,6 +46,16 @@ test_state_style = executable('test_state_style',
 )
 test('state_style', test_state_style)
 
+# Same pattern as test_state_style: test_text_scale asserts the resolved
+# font_size carries the accessibility text factor, so it links style.c too.
+test_text_scale = executable('test_text_scale',
+  'test_text_scale.c',
+  '../../libs/lens/src/style/style.c',
+  dependencies        : [lens_dep, m_dep],
+  include_directories : lens_inc,
+)
+test('text_scale', test_text_scale)
+
 # Same pattern as test_state_style: the cascade helpers (merge/effective)
 # are hidden symbols, so the test links its own copy of style.c.
 test_style_cascade = executable('test_style_cascade',

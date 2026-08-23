@@ -34,6 +34,16 @@ exe_a11y = executable('test_a11y_util',
 )
 test('test_a11y_util', exe_a11y)
 
+# test_a11y_prefs: the public preference API against libiris (query always
+# links; watch may be the stub on libsystemd-less builds — both paths are
+# contract-valid, the test pins both).
+exe_prefs = executable('test_a11y_prefs',
+  'test_a11y_prefs.c',
+  include_directories : [iris_inc, src_inc],
+  dependencies        : [iris_dep, lens_dep, m_dep],
+)
+test('test_a11y_prefs', exe_prefs)
+
 # test_platform_text also pins the lens_input buffer sizes the backends
 # stage into (text_utf8/preedit_utf8), so it needs the lens headers.
 exe_ptext = executable('test_platform_text',

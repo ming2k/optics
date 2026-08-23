@@ -144,6 +144,25 @@ impl Ui {
         unsafe { sys::lens_set_scale(self.raw, scale) };
     }
 
+    /// Accessibility text scale — the OS "make text bigger" preference. A
+    /// pure multiplier on every font-size token: glyphs, caret metrics, and
+    /// every widget height derived from a font token grow together, so text
+    /// scales without clipping. Orthogonal to [`Ui::set_scale`] (device
+    /// pixels): a 1.25 text scale at 2x DPI renders 1.25x taller glyphs at
+    /// the same 2x raster density. Pure-px geometry (padding, stroke widths)
+    /// stays put. Non-finite and non-positive values are ignored. Default
+    /// 1.0.
+    pub fn set_text_scale(&mut self, factor: f32) {
+        // SAFETY: raw is live.
+        unsafe { sys::lens_set_text_scale(self.raw, factor) };
+    }
+
+    /// The current accessibility text-scale factor (default 1.0).
+    pub fn text_scale(&self) -> f32 {
+        // SAFETY: raw is a live context; the call only reads state.
+        unsafe { sys::lens_text_scale(self.raw as *const sys::lens) }
+    }
+
     /// Replace the active theme token set (e.g. light/dark) live.
     pub fn set_theme(&mut self, theme: Theme) {
         // SAFETY: raw is live; theme is a value type.

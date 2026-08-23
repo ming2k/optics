@@ -6,9 +6,9 @@
 
 void lens_progress(lens *ui, const char *label, float value) {
     lens_style eff = lensi_style_effective(ui);
-    float font_size = lensi_style_font_size(&eff, &ui->theme);
+    float font_size = lensi_style_font_size(ui, &eff, &ui->theme);
     float padding = lensi_style_padding(&eff, &ui->theme);
-    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)

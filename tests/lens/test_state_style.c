@@ -152,11 +152,13 @@ static void test_widget_owned_bits(void) {
 /* ---- resolver: fallback, override, derivation, dim order ------------ */
 
 static void test_resolver_null_instance_is_verbatim_theme(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_theme t = lens_theme_dark();
     /* Even with every interactive state bit set, the theme path must come
      * through untouched — this is what keeps migrated widgets
      * pixel-identical. */
-    lens_style_resolved r = lensi_style_resolve(NULL, &t,
+    lens_style_resolved r = lensi_style_resolve(ui, NULL, &t,
                                                 LENS_STATE_HOVERED | LENS_STATE_PRESSED |
                                                     LENS_STATE_FOCUSED | LENS_STATE_DISABLED);
     CHECK(r.bg == t.color_bg);
@@ -170,10 +172,14 @@ static void test_resolver_null_instance_is_verbatim_theme(void) {
     CHECK_NEAR(r.border_width, t.border_width, 0.0f);
     CHECK_NEAR(r.padding, t.padding, 0.0f);
     CHECK_NEAR(r.gap, t.gap, 0.0f);
-    CHECK_NEAR(r.font_size, t.font_size, 0.0f);
+    CHECK_NEAR(r.font_size, t.font_size, 0.0f); /* text_scale 1.0 by default */
+
+    lens_destroy(ui);
 }
 
 static void test_resolver_override_and_derivation(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_theme t = lens_theme_dark();
     flux_color red = flux_color_rgba(0xc0, 0x20, 0x20, 0xff);
 
@@ -182,7 +188,7 @@ static void test_resolver_override_and_derivation(void) {
     inst.bg = red;
     inst.padding = 3.0f;
 
-    lens_style_resolved r = lensi_style_resolve(&inst, &t, LENS_STATE_HOVERED);
+    lens_style_resolved r = lensi_style_resolve(ui, &inst, &t, LENS_STATE_HOVERED);
     CHECK(r.bg == red);        /* set field wins           */
     CHECK(r.fg == t.color_fg); /* unset field falls back   */
     CHECK(r.accent == t.color_accent);
@@ -198,12 +204,16 @@ static void test_resolver_override_and_derivation(void) {
     flux_color green = flux_color_rgba(0x20, 0xc0, 0x20, 0xff);
     inst.fields |= LENS_STYLE_BG_HOVER;
     inst.bg_hover = green;
-    r = lensi_style_resolve(&inst, &t, LENS_STATE_HOVERED);
+    r = lensi_style_resolve(ui, &inst, &t, LENS_STATE_HOVERED);
     CHECK(r.bg_hover == green);
     CHECK(r.bg_pressed == lensi_lerp_color(red, t.color_fg, LENSI_STYLE_PRESSED_DEPTH));
+
+    lens_destroy(ui);
 }
 
 static void test_resolver_disabled_dims_last(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_theme t = lens_theme_dark();
     flux_color red = flux_color_rgba(0xc0, 0x20, 0x20, 0xff);
 
@@ -211,9 +221,9 @@ static void test_resolver_disabled_dims_last(void) {
     inst.fields = LENS_STYLE_BG;
     inst.bg = red;
 
-    lens_style_resolved en = lensi_style_resolve(&inst, &t, 0);
+    lens_style_resolved en = lensi_style_resolve(ui, &inst, &t, 0);
     lens_style_resolved dis = lensi_style_resolve(
-        &inst, &t, LENS_STATE_DISABLED | LENS_STATE_HOVERED | LENS_STATE_PRESSED);
+        ui, &inst, &t, LENS_STATE_DISABLED | LENS_STATE_HOVERED | LENS_STATE_PRESSED);
 
     /* The dim applies on top of the hover/pressed adjustments: the derived
      * hover/pressed values are what get dimmed, not the raw base. */
@@ -228,11 +238,13 @@ static void test_resolver_disabled_dims_last(void) {
     CHECK(dis.accent == t.color_accent);
 
     /* Purity: same inputs, same output; the instance style is untouched. */
-    lens_style_resolved a = lensi_style_resolve(&inst, &t, LENS_STATE_HOVERED);
-    lens_style_resolved b = lensi_style_resolve(&inst, &t, LENS_STATE_HOVERED);
+    lens_style_resolved a = lensi_style_resolve(ui, &inst, &t, LENS_STATE_HOVERED);
+    lens_style_resolved b = lensi_style_resolve(ui, &inst, &t, LENS_STATE_HOVERED);
     CHECK(memcmp(&a, &b, sizeof a) == 0);
     CHECK(inst.fields == LENS_STYLE_BG);
     CHECK(inst.bg == red);
+
+    lens_destroy(ui);
 }
 
 /* ---- NULL-style pixel identity ---------------------------------------- */

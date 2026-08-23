@@ -88,7 +88,7 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float h = lensi_style_font_size(&eff, t) + 2.0f * padding;
+    float h = lensi_style_font_size(ui, &eff, t) + 2.0f * padding;
     float w = (n->fixed_w > 0) ? n->fixed_w : LENS_SLIDER_DEFAULT_W;
     if (n->fixed_h > 0)
         h = n->fixed_h;
@@ -141,7 +141,7 @@ bool lens_slider(lens *ui, const char *label, float *value, float min, float max
                         .state = r.state,
                         .bounds = {0, 0, w, h},
                         .last_bounds = n->prev_rect,
-                        .style = lensi_style_resolve(&eff, t, r.state),
+                        .style = lensi_style_resolve(ui, &eff, t, r.state),
                         .style_fields = eff.fields,
                         .hover_t = n->hover_t,
                         .active_t = n->active_t,
@@ -168,7 +168,7 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float w = lensi_style_font_size(&eff, t) + 2.0f * padding;
+    float w = lensi_style_font_size(ui, &eff, t) + 2.0f * padding;
     float h = LENS_SLIDER_DEFAULT_H;
     if (n->fixed_w > 0.0f)
         w = n->fixed_w;
@@ -224,7 +224,7 @@ bool lens_slider_vertical(lens *ui, const char *label, float *value, float min, 
             .state = r.state,
             .bounds = {0, 0, w, h},
             .last_bounds = n->prev_rect,
-            .style = lensi_style_resolve(&eff, t, r.state),
+            .style = lensi_style_resolve(ui, &eff, t, r.state),
             .style_fields = eff.fields,
             .hover_t = n->hover_t,
             .active_t = n->active_t,

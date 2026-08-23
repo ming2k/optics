@@ -113,8 +113,9 @@ typedef struct iris_a11y__node {
     lens_role role;
     char name[IRIS_A11Y__NODE_NAME_MAX];
     char value[IRIS_A11Y__NODE_VALUE_MAX];
-    uint32_t flags; /* LENS_A11Y_*                        */
-    int32_t index;  /* index among same-parent siblings    */
+    uint32_t flags;   /* LENS_A11Y_*                        */
+    int32_t index;    /* index among same-parent siblings    */
+    flux_rect bounds; /* solved bounds this frame (Component / BoundsChanged) */
 } iris_a11y__node;
 
 /* Copy one walked lens node into snapshot storage (deep string copies,

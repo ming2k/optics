@@ -23,7 +23,7 @@ static void icon_impl(lens *ui, lens_icon_id id, float size) {
     /* `size` is the glyph size. A pending size_next only reserves the layout
      * box — it must not silently rescale the glyph; the glyph is centered
      * inside the box instead. */
-    float glyph = size > 0 ? size : lensi_style_font_size(&eff, t);
+    float glyph = size > 0 ? size : lensi_style_font_size(ui, &eff, t);
     float bw = n->fixed_w > 0 ? n->fixed_w : glyph;
     float bh = n->fixed_h > 0 ? n->fixed_h : glyph;
     n->measured = (flux_point){bw, bh};
@@ -32,7 +32,7 @@ static void icon_impl(lens *ui, lens_icon_id id, float size) {
     /* Non-interactive: resolve with an empty state. The outline atoms make
      * the old *_outlined variant reachable through any box.style or scope
      * (ADR-0061 item 6). Emission is the skin's (ADR-0059). */
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, 0);
     (void)s; /* glyph clamping to the box happens in the skin */
     lensi_skin_emit(ui, n,
                     &(lens_widget_record){
@@ -84,7 +84,7 @@ static bool icon_button_impl(lens *ui, icon_button_spec spec) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
     float icon_size = font_size;
     float w = icon_size + 2.0f * padding;
@@ -113,7 +113,7 @@ static bool icon_button_impl(lens *ui, icon_button_spec spec) {
                         .state = r.state,
                         .bounds = {0, 0, w, h},
                         .last_bounds = n->prev_rect,
-                        .style = lensi_style_resolve(&eff, t, r.state),
+                        .style = lensi_style_resolve(ui, &eff, t, r.state),
                         .style_fields = eff.fields,
                         .hover_t = n->hover_t,
                         .active_t = n->active_t,

@@ -25,7 +25,7 @@ static bool button_ex_impl(lens *ui, const char *label, lens_response *out) {
 
     /* measure — geometry slots are state-independent, so they come straight
      * from the shared fallback (cascade wins, else theme). */
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
     lens_text_metrics tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
     float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * padding;
@@ -44,7 +44,7 @@ static bool button_ex_impl(lens *ui, const char *label, lens_response *out) {
     }
 
     /* resolve */
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
 
     /* emit — through the replaceable skin */
     lensi_skin_emit(ui, n,
@@ -104,7 +104,7 @@ bool lens_link(lens *ui, const char *label) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     lens_text_metrics tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
     float w = n->fixed_w > 0.0f ? n->fixed_w : tm.width;
     float h = n->fixed_h > 0.0f ? n->fixed_h : tm.height + 6.0f;
@@ -118,7 +118,7 @@ bool lens_link(lens *ui, const char *label) {
         n->hover_t = lensi_approach(ui, n->hover_t, (r.hovered || r.focused) ? 1.0f : 0.0f,
                                     ui->input.dt_seconds, 18.0f);
 
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
 
     /* emit — through the replaceable skin (ADR-0059) */
     lensi_skin_emit(ui, n,

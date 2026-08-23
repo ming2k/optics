@@ -108,7 +108,7 @@ lens_style lensi_style_effective(lens *ui) {
     return lensi_style_merge(&scope, &inst);
 }
 
-lens_style_resolved lensi_style_resolve(const lens_style *eff, const lens_theme *theme,
+lens_style_resolved lensi_style_resolve(lens *ui, const lens_style *eff, const lens_theme *theme,
                                         uint32_t state) {
     uint32_t f = eff ? eff->fields : 0;
     lens_style_resolved r;
@@ -125,7 +125,8 @@ lens_style_resolved lensi_style_resolve(const lens_style *eff, const lens_theme 
     r.border_width = (f & LENS_STYLE_BORDER_WIDTH) ? eff->border_width : theme->border_width;
     r.padding = lensi_style_padding(eff, theme);
     r.gap = (f & LENS_STYLE_GAP) ? eff->gap : theme->gap;
-    r.font_size = lensi_style_font_size(eff, theme);
+    r.font_size = lensi_style_font_size(ui, eff, theme); /* folds in text_scale */
+
     /* No theme tokens exist for the outline atoms: unset means none. */
     r.outline_color = (f & LENS_STYLE_OUTLINE_COLOR) ? eff->outline_color : 0;
     r.outline_width = (f & LENS_STYLE_OUTLINE_WIDTH) ? eff->outline_width : 0.0f;

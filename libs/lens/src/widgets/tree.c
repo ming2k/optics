@@ -39,7 +39,7 @@ bool lens_tree_node(lens *ui, const char *label, bool leaf) {
 
     /* Header measure: label height plus a little vertical breathing room.
      * The chevron / dot leads the label by the resolved padding. */
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, 0);
     float label_size = rs.font_size;
     lens_text_metrics tm = lensi_text_measure_label(ui, label, label_size, 400.0f);
     float icon = tm.height * 0.7f;

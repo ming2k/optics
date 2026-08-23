@@ -58,9 +58,9 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
     result.cursor = -1;
     result.clicked_row = -1;
     lens_style eff = lensi_style_effective(ui);
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, 0);
 
     lens_id fid = lensi_gen_widget_id(ui, id);
     lens_node *n = lensi_store_touch(ui, fid);

@@ -60,7 +60,7 @@
 /*  Per-frame snapshot of the semantic tree                            */
 /* ------------------------------------------------------------------ */
 
-#define IRIS_A11Y_MAX_NODES 256
+#define IRIS_A11Y_MAX_NODES 1024
 
 typedef struct {
     iris_a11y__node nodes[IRIS_A11Y_MAX_NODES];
@@ -92,6 +92,15 @@ static iris_a11y__node *find_node(lens_id id) {
     for (size_t i = 0; i < g_state.n; i++) {
         if (g_state.nodes[i].id == id)
             return &g_state.nodes[i];
+    }
+    return NULL;
+}
+
+/* find_prev: same lookup against the previous frame's snapshot. */
+static const iris_a11y__node *find_prev(lens_id id) {
+    for (size_t i = 0; i < g_state.n_prev; i++) {
+        if (g_state.prev[i].id == id)
+            return &g_state.prev[i];
     }
     return NULL;
 }
@@ -1000,7 +1009,6 @@ IRIS_API void iris_a11y_shutdown(void) {
 static void visit_fn(const lens_semantics *s, flux_rect bounds, lens_id id, lens_id parent,
                      void *user) {
     (void)user;
-    (void)bounds; /* no consumer yet (a future Component interface will) */
     if (g_state.n >= IRIS_A11Y_MAX_NODES) {
         g_state.truncated = true;
         return;
@@ -1010,6 +1018,7 @@ static void visit_fn(const lens_semantics *s, flux_rect bounds, lens_id id, lens
      * so AT-SPI method handlers (which run whenever the bus is pumped)
      * never read reclaimed arena memory. */
     iris_a11y__node_fill(&g_state.nodes[g_state.n], s, id, parent, g_state.nodes, g_state.n);
+    g_state.nodes[g_state.n].bounds = bounds; /* for BoundsChanged (below) */
     g_state.n++;
 }
 
@@ -1177,6 +1186,31 @@ IRIS_API int iris_a11y_update(lens *ui) {
         if (now_focused)
             emit_state_changed(now_focused, "focused", 1);
         g_state.focused = now_focused;
+    }
+
+    /* Bounds-changed: screen readers magnify/highlight around widgets, so
+     * a node whose solved rect moved or resized must announce it. Emitted
+     * only on an actual geometry change (a same-bounds re-walk is the
+     * common steady state — one scroll frame moves many nodes, a static
+     * frame moves none). Bounds are UI-logical pixels; the AT maps them
+     * with the window position, same as GetApplicationBusAddress clients
+     * do for the focus highlight. */
+    for (size_t i = 0; i < g_state.n; i++) {
+        const iris_a11y__node *cur = &g_state.nodes[i];
+        const iris_a11y__node *was = find_prev(cur->id);
+        if (!was)
+            continue; /* new node — ChildrenChanged already announced it */
+        if (was->bounds.x != cur->bounds.x || was->bounds.y != cur->bounds.y ||
+            was->bounds.w != cur->bounds.w || was->bounds.h != cur->bounds.h) {
+            /* BoundsChanged detail1/2 carry (x + w, y + h) per at-spi2's
+             * Component convention; the payload variant carries the same
+             * as "ii" packed into any_i is unavailable — the siiva{sv}
+             * shape only has the two int slots, which the reference
+             * bridges use for the right/bottom edges. */
+            emit_object_event(cur->id, "BoundsChanged", "",
+                              (int32_t)(cur->bounds.x + cur->bounds.w),
+                              (int32_t)(cur->bounds.y + cur->bounds.h), "i", NULL, NULL, 0);
+        }
     }
 
     return 0;

@@ -93,6 +93,14 @@ platform code must preserve them:
    `preedit_utf8[LENS_PREEDIT_MAX=256]`) go through the shared
    boundary-aware helpers (`src/platform_text.h`) — never a raw byte cap
    that could split a multi-byte UTF-8 sequence.
+6. **Accessibility-preference contract (ADR-0075).** Every backend
+   queries the OS accessibility preference set at startup
+   (`iris_a11y_prefs_query`) and applies it to lens unconditionally —
+   `lens_set_reduced_motion`, `lens_set_text_scale`, and the
+   high-contrast theme mutation — then watches for changes through its
+   backend slot with main-thread delivery. A platform with no readable
+   source for a field reports the library default (false / false / 1.0);
+   it never invents a value and never fails.
 6. **Thread-to-main delivery.** Platform watchers (theme changes, a11y
    pumps) never touch lens/flux state directly; they post to the backend
    event loop through the wakeup seam and run on the main thread. Hosts
@@ -124,7 +132,17 @@ elsewhere:
   Cocoa have no native equivalent.
 - **Live theme watching** on Linux requires libsystemd at build time
   (portal watcher thread); without it the startup query still works and
-  `iris_color_scheme_watch` reports unavailable.
+  `iris_color_scheme_watch` reports unavailable. The same applies to live
+  accessibility-preference watching (`iris_a11y_prefs_watch`); the
+  startup query itself shells gsettings/kreadconfig and needs no
+  D-Bus client library.
+- **Accessibility preference coverage** (ADR-0075): the macOS
+  `text_scale` field reports 1.0 — macOS has no global text-size knob
+  (Dynamic Type is per-app); "Large text" changes the display resolution,
+  which arrives as a scale change instead. The Win32 and macOS a11y-pref
+  watchers share their platform's verification ceiling
+  (`theme_win32.c` / `theme_cocoa.m` caveats: compile-checked
+  cross-platform, not yet exercised on real hardware).
 - **File dialogs** on Linux keep the app responsive while the modal
   picker is open (the wait loop pumps the Wayland display fd and the
   AT-SPI bus fd alongside the portal bus) and pass the window's

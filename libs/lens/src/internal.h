@@ -262,6 +262,15 @@ struct lens {
     flux_device *device; /* may be NULL (headless) */
     lens_theme theme;
     float scale;      /* device-pixel scale (HiDPI); 1.0 by default */
+    float text_scale; /* user text-scale factor (accessibility);
+                       * multiplies every font-size token when the resolved
+                       * style is built (lensi_resolve + lensi_font_px), so
+                       * glyphs, caret metrics, and every widget height
+                       * derived from a font token scale together. Geometry
+                       * that is a pure px constant (padding, stroke widths,
+                       * icon glyph boxes) stays put. 1.0 = default. Not
+                       * frame-scoped: survives lens_begin (same contract as
+                       * scale/reduced_motion). See lens_set_text_scale. */
     flux_arena arena; /* per-frame; reset each lens_begin */
     flux_text *text;  /* shared text engine (flux-text); never NULL
                        * after create — degrades to mono internally */
@@ -452,12 +461,32 @@ struct lens {
 /* Pre-measure geometry access. Geometry slots are state-independent, so
  * the measure phase reads them through the same fallback rule the
  * resolver applies — instance wins, else theme — without waiting for the
- * interaction state bits. */
-static inline float lensi_style_font_size(const lens_style *inst, const lens_theme *theme) {
-    return (inst && (inst->fields & LENS_STYLE_FONT_SIZE)) ? inst->font_size : theme->font_size;
+ * interaction state bits.
+ *
+ * lensi_style_font_size is the ONE font-size funnel: it folds in the
+ * accessibility text scale (lens_set_text_scale) so every consumer —
+ * widget measure paths and the style resolver alike — sees the same
+ * scaled value. Raw semantic size tokens that never pass through a
+ * lens_style (title headings, tabs, tooltip) must use lensi_font_px. */
+static inline float lensi_style_font_size(const lens *ui, const lens_style *inst,
+                                          const lens_theme *theme) {
+    float token =
+        (inst && (inst->fields & LENS_STYLE_FONT_SIZE)) ? inst->font_size : theme->font_size;
+    return token * (ui && ui->text_scale > 0.0f ? ui->text_scale : 1.0f);
 }
 static inline float lensi_style_padding(const lens_style *inst, const lens_theme *theme) {
     return (inst && (inst->fields & LENS_STYLE_PADDING)) ? inst->padding : theme->padding;
+}
+
+/* Accessibility text scale applied to a raw font-size token (see
+ * lens_set_text_scale). lensi_style_resolve multiplies the resolved
+ * font_size by this; sites that read a semantic size token straight off
+ * the theme (title headings, tabs) must go through this helper so every
+ * font in the frame scales by the same factor. Pure-px geometry tokens
+ * (padding, stroke widths, icon glyph boxes) are deliberately NOT
+ * scaled — only text and text-derived metrics grow. */
+static inline float lensi_font_px(const lens *ui, float token_px) {
+    return token_px * (ui && ui->text_scale > 0.0f ? ui->text_scale : 1.0f);
 }
 
 /* ================================================================== */
@@ -522,7 +551,7 @@ void lensi_focus_tab(lens *ui);
  * cascade itself: per-call (lens_box.style, staged as ui->next_style) over
  * the folded scope stack. Pure: no globals, no side effects beyond draining
  * next_style. */
-lens_style_resolved lensi_style_resolve(const lens_style *eff, const lens_theme *theme,
+lens_style_resolved lensi_style_resolve(lens *ui, const lens_style *eff, const lens_theme *theme,
                                         uint32_t state);
 lens_style lensi_style_merge(const lens_style *base, const lens_style *over);
 lens_style lensi_style_scope_merged(const lens *ui);

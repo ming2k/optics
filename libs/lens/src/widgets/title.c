@@ -6,23 +6,27 @@
 
 #include "../internal.h"
 
-static float heading_size(const lens_theme *t, int level) {
+static float heading_size(const lens *ui, const lens_theme *t, int level) {
+    float token;
     switch (level) {
     case 1:
-        return t->font_size_h1;
+        token = t->font_size_h1;
+        break;
     case 2:
-        return t->font_size_h2;
+        token = t->font_size_h2;
+        break;
     case 3:
-        return t->font_size_h3;
     default:
-        return t->font_size_h3;
+        token = t->font_size_h3;
+        break;
     }
+    return lensi_font_px(ui, token);
 }
 
 void lens_title(lens *ui, const char *text) {
     const lens_theme *t = &ui->theme;
     lens_style eff = lensi_style_effective(ui);
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, 0);
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -30,7 +34,7 @@ void lens_title(lens *ui, const char *text) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float size = t->font_size_title;
+    float size = lensi_font_px(ui, t->font_size_title);
     float weight = t->font_weight_bold;
     lens_text_metrics tm = lensi_text_measure_label(ui, text, size, weight);
     float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * rs.padding;
@@ -60,7 +64,7 @@ void lens_title(lens *ui, const char *text) {
 void lens_heading(lens *ui, const char *text, int level) {
     const lens_theme *t = &ui->theme;
     lens_style eff = lensi_style_effective(ui);
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, 0);
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -68,7 +72,7 @@ void lens_heading(lens *ui, const char *text, int level) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float size = heading_size(t, level);
+    float size = heading_size(ui, t, level);
     float weight = t->font_weight_bold;
     lens_text_metrics tm = lensi_text_measure_label(ui, text, size, weight);
     float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * rs.padding;

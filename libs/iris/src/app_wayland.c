@@ -8,6 +8,7 @@
  */
 
 #include "a11y_internal.h"
+#include "a11y_prefs_internal.h"
 #include "platform_input.h"
 #include "platform_internal.h"
 #include "platform_text.h"
@@ -65,18 +66,18 @@ typedef struct wp_accum {
     bool down[LENS_MOUSE_COUNT];    /* held state (persists)          */
     bool pressed[LENS_MOUSE_COUNT]; /* edges this frame               */
     bool released[LENS_MOUSE_COUNT];
-    double scroll_x, scroll_y;      /* wheel steps (notches) this frame */
+    double scroll_x, scroll_y;       /* wheel steps (notches) this frame */
     double scroll_px_x, scroll_px_y; /* continuous (touchpad) distance,
                                         logical px (see ADR-0036)      */
-    uint32_t axis_source;           /* this event group's axis source
-                                        (WL_POINTER_AXIS_SOURCE_*),
-                                        scoped by wl_pointer.frame     */
-    uint32_t mods;                  /* level state (persists)         */
-    char text[256];                 /* committed text this frame; sized
-                                       like lens_input.text_utf8       */
-    char preedit[LENS_PREEDIT_MAX]; /* IME preedit string             */
-    uint32_t preedit_cursor;        /* caret byte offset in preedit   */
-    uint32_t preedit_sel_lo;        /* active clause, byte range      */
+    uint32_t axis_source;            /* this event group's axis source
+                                         (WL_POINTER_AXIS_SOURCE_*),
+                                         scoped by wl_pointer.frame     */
+    uint32_t mods;                   /* level state (persists)         */
+    char text[256];                  /* committed text this frame; sized
+                                        like lens_input.text_utf8       */
+    char preedit[LENS_PREEDIT_MAX];  /* IME preedit string             */
+    uint32_t preedit_cursor;         /* caret byte offset in preedit   */
+    uint32_t preedit_sel_lo;         /* active clause, byte range      */
     uint32_t preedit_sel_hi;
     lens_key_event keys[LENS_INPUT_MAX_KEYS];
     uint32_t key_count;
@@ -259,6 +260,7 @@ typedef struct wp_platform {
 
     /* Live colour-scheme watching + AT-SPI bridge: optional, fail-soft. */
     bool theme_watching;
+    bool a11y_prefs_watching;
     int a11y_fd;
 
     /* Cross-thread wakeup seam (platform_wakeup.h): an eventfd in the
@@ -279,6 +281,40 @@ static void wp_on_color_scheme_changed(iris_color_scheme scheme, void *user) {
     lens_theme th =
         (scheme == IRIS_COLOR_SCHEME_PREFER_LIGHT) ? lens_theme_default() : lens_theme_dark();
     lens_set_theme(pl->ui, th);
+}
+
+/* Accessibility-preference watcher callback (ADR-0075): same delivery path
+ * as the theme watcher. Applies the three OS accessibility preferences to
+ * lens directly — this is the "last mile" that lens cannot own: lens is
+ * headless and policy-free, iris is the layer that can see the OS. */
+static void wp_on_a11y_prefs(const iris_a11y_prefs *prefs, void *user) {
+    wp_platform *pl = user;
+    if (!pl || !pl->ui)
+        return;
+    lens_set_reduced_motion(pl->ui, prefs->reduced_motion);
+    lens_set_text_scale(pl->ui, prefs->text_scale);
+    if (prefs->high_contrast) {
+        /* Raised-contrast variant of the current token set: pure black on
+         * pure white both directions, full-strength borders. Applied as a
+         * theme mutation rather than a separate preset so the app's own
+         * theme customisations (if any) are overridden deliberately, not
+         * silently. */
+        lens_theme th = lens_get_theme(pl->ui);
+        th.color_bg = flux_color_rgba(0x00, 0x00, 0x00, 0xff);
+        th.color_fg = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
+        th.color_hover = flux_color_rgba(0x2a, 0x2a, 0x2a, 0xff);
+        th.color_active = flux_color_rgba(0x55, 0x55, 0x55, 0xff);
+        th.color_border = th.color_fg;
+        th.color_disabled = flux_color_rgba(0xaa, 0xaa, 0xaa, 0xff);
+        lens_set_theme(pl->ui, th);
+    } else {
+        /* Restore the scheme-appropriate preset; the theme callback keeps
+         * light/dark in sync from here on. */
+        wp_on_color_scheme_changed(iris_query_system_color_scheme(), pl);
+    }
+    /* Force a frame so the new preferences reach the screen even while the
+     * loop is idle-parked (the watcher itself does not schedule one). */
+    pl->animation_frame_requested = true;
 }
 
 /* Recompute the scale we should use: max integer scale across the outputs
@@ -2536,8 +2572,8 @@ static bool acc_has_user_input(wp_platform *pl, double *pcx, double *pcy) {
     *pcx = pl->acc.cx;
     *pcy = pl->acc.cy;
     bool edge = pl->acc.key_count != 0 || pl->acc.text[0] != '\0' || pl->acc.preedit[0] != '\0' ||
-                pl->acc.scroll_x != 0.0 || pl->acc.scroll_y != 0.0 ||
-                pl->acc.scroll_px_x != 0.0 || pl->acc.scroll_px_y != 0.0;
+                pl->acc.scroll_x != 0.0 || pl->acc.scroll_y != 0.0 || pl->acc.scroll_px_x != 0.0 ||
+                pl->acc.scroll_px_y != 0.0;
     for (int i = 0; i < LENS_MOUSE_COUNT; i++)
         edge = edge || pl->acc.pressed[i] || pl->acc.released[i] || pl->acc.down[i];
     return moved || edge;
@@ -2900,9 +2936,24 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
      * internal slot (theme_watch_internal.h), never the host's public
      * iris_color_scheme_watch registration. */
     pl.theme_watching = false;
+    pl.a11y_prefs_watching = false;
     pl.a11y_fd = -1;
     if (!cfg->dark)
         pl.theme_watching = (iris_theme__watch_backend(wp_on_color_scheme_changed, &pl) == 0);
+
+    /* Accessibility preferences (ADR-0075): apply the OS's
+     * reduced-motion / high-contrast / text-scale preferences to lens at
+     * startup, then watch for live changes through the same shared portal
+     * pump as the theme (backend slot, a11y_prefs_internal.h). Applied
+     * unconditionally — accessibility is not opt-in. */
+    {
+        iris_a11y_prefs prefs = iris_a11y_prefs_query();
+        lens_set_reduced_motion(ui, prefs.reduced_motion);
+        lens_set_text_scale(ui, prefs.text_scale);
+        if (prefs.high_contrast)
+            wp_on_a11y_prefs(&prefs, &pl);
+    }
+    pl.a11y_prefs_watching = (iris_a11y_prefs__watch_backend(wp_on_a11y_prefs, &pl) == 0);
 
     /* AT-SPI bridge: register the app on the a11y session bus so screen
      * readers (orca, etc.) can read the widget tree. Fail-soft: if the
@@ -3188,6 +3239,8 @@ fail:
     pl.ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
     if (pl.theme_watching)
         iris_theme__unwatch_backend();
+    if (pl.a11y_prefs_watching)
+        iris_a11y_prefs__unwatch_backend();
     if (pl.a11y_fd >= 0)
         iris_a11y_shutdown();
     /* Wakeup seam teardown: unregister the kick FIRST so a detached

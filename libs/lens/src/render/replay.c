@@ -598,7 +598,7 @@ flux_result lens_render(lens *ui, flux_canvas *canvas) {
     if (ui->tooltip.active) {
         const lens_theme *t = &ui->theme;
         float pad = 4.0f;
-        float size = t->font_size * 0.85f;
+        float size = lensi_font_px(ui, t->font_size * 0.85f);
         float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
 
         bool scaled = scale != 1.0f;

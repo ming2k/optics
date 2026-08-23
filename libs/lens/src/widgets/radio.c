@@ -16,7 +16,7 @@ bool lens_radio(lens *ui, const char *label, int *value, int option_value) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
     lens_text_metrics tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
     float circle = roundf(font_size);
@@ -53,7 +53,7 @@ bool lens_radio(lens *ui, const char *label, int *value, int option_value) {
                         .state = r.state,
                         .bounds = {0, 0, w, h},
                         .last_bounds = n->prev_rect,
-                        .style = lensi_style_resolve(&eff, t, r.state),
+                        .style = lensi_style_resolve(ui, &eff, t, r.state),
                         .style_fields = eff.fields,
                         .hover_t = n->hover_t,
                         .active_t = n->active_t,

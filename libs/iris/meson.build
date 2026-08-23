@@ -61,9 +61,12 @@ if host_system == 'linux'
     iris_c_args += ['-DIRIS_HAVE_PORTAL_WATCH=1', '-DIRIS_HAVE_ATSPI=1']
     iris_sources += files('src/theme_watch_portal.c', 'src/a11y_atspi.c')
   else
-    iris_sources += files('src/theme_watch_stub.c', 'src/a11y_stub.c')
+    iris_sources += files('src/theme_watch_stub.c', 'src/a11y_stub.c', 'src/a11y_prefs_stub.c')
     message('libsystemd not found; live theme watching + AT-SPI bridge disabled')
   endif
+  # The a11y preference query shells gsettings/kreadconfig (no D-Bus client
+  # dependency) and compiles on every Linux build, portal or not.
+  iris_sources += files('src/a11y_prefs_linux.c')
 
   wl_client_dep = dependency('wayland-client', required : false)
   xkb_dep       = dependency('xkbcommon',      required : false)
@@ -123,6 +126,7 @@ elif host_system == 'windows'
     'src/theme_win32.c',
     'src/file_dialog_win32.c',
     'src/a11y_stub.c',
+    'src/a11y_prefs_win32.c',
     'src/platform_wakeup.c',
   )
   iris_c_args += '-DIRIS_BACKEND_WIN32=1'
@@ -143,6 +147,7 @@ elif host_system == 'darwin'
     'src/theme_cocoa.m',
     'src/file_dialog_cocoa.m',
     'src/a11y_stub.c',
+    'src/a11y_prefs_cocoa.m',
     'src/platform_wakeup.c',
   )
   iris_c_args += '-DIRIS_BACKEND_COCOA=1'
@@ -163,6 +168,8 @@ else
     'src/file_dialog_portal.c',
     'src/theme_watch_stub.c',
     'src/a11y_stub.c',
+    'src/a11y_prefs_linux.c',
+    'src/a11y_prefs_stub.c',
   )
 endif
 
@@ -185,6 +192,7 @@ install_headers(
   'include/iris/theme.h',
   'include/iris/file_dialog.h',
   'include/iris/a11y.h',
+  'include/iris/a11y_prefs.h',
   'include/iris/window.h',
   subdir : 'iris',
 )

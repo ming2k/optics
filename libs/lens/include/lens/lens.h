@@ -732,8 +732,8 @@ typedef void (*lens_skin_fn)(lens *ui, lens_node *node, const lens_widget_record
  * own physics) to reach the state through a process global — the exact
  * hazard ADR-0059 flagged as future work. This form passes `user` back on
  * every emission; register it with lens_set_skin_userdata. */
-typedef void (*lens_skin_userdata_fn)(lens *ui, lens_node *node,
-                                      const lens_widget_record *rec, void *user);
+typedef void (*lens_skin_userdata_fn)(lens *ui, lens_node *node, const lens_widget_record *rec,
+                                      void *user);
 
 /* Replace the skin for a widget kind context-wide; NULL restores the
  * built-in default. The context is the single override granularity
@@ -745,8 +745,8 @@ LENS_API void lens_set_skin(lens *ui, lens_widget_kind kind, lens_skin_fn fn);
  * dereferences it. NULL fn restores the default (user is then ignored).
  * Registered userdata skins also receive first-touch zeroes from
  * lens_skin_scratch like any other skin. */
-LENS_API void lens_set_skin_userdata(lens *ui, lens_widget_kind kind,
-                                     lens_skin_userdata_fn fn, void *user);
+LENS_API void lens_set_skin_userdata(lens *ui, lens_widget_kind kind, lens_skin_userdata_fn fn,
+                                     void *user);
 /* The built-in default skin for a kind — for wrapping: call it from a
  * custom skin to keep the stock chrome, then add your own. */
 LENS_API lens_skin_fn lens_default_skin(lens_widget_kind kind);
@@ -813,6 +813,7 @@ typedef struct lens_desc {
     size_t arena_bytes;       /* per-frame arena capacity; 0 = default */
     uint32_t store_capacity;  /* initial node-store slots; 0 = default */
     float scale;              /* device-pixel scale; 0 = 1.0          */
+    float text_scale;         /* accessibility text scale; 0/1 = 1.0  */
     lens_clipboard clipboard; /* optional host clipboard (ADR-0036)   */
 } lens_desc;
 
@@ -848,6 +849,20 @@ LENS_API float lens_dt(const lens *ui); /* frame delta, seconds */
  * pixels. Default 1.0. */
 LENS_API void lens_set_scale(lens *ui, float scale);
 LENS_API float lens_scale(const lens *ui);
+
+/* Accessibility text scale — the OS "make text bigger" preference. A pure
+ * multiplier on every font-size token (body, headings, explicit label
+ * point sizes) applied at the resolved-style funnel, so glyphs, caret
+ * metrics, and every widget height derived from a font token grow
+ * together: text scales, boxes follow, nothing clips. Orthogonal to
+ * lens_set_scale (device pixels): a 1.25 text scale at 2x DPI renders
+ * 1.25x taller glyphs at the same 2x raster density. Pure-px geometry
+ * (padding, stroke widths) deliberately stays put. Lens executes the
+ * factor; the host owns the policy (iris reads the system preference on
+ * all backends). Non-finite and <= 0 are ignored. Default 1.0. Not
+ * frame-scoped — persists like scale/reduced_motion. */
+LENS_API void lens_set_text_scale(lens *ui, float factor);
+LENS_API float lens_text_scale(const lens *ui);
 
 /* ================================================================== */
 /*  Frame lifecycle (ADR-0024, frame-lifecycle.md)                    */

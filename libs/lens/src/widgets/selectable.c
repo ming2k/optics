@@ -29,7 +29,7 @@ static bool selectable_impl(lens *ui, lens_icon_id icon, const char *label, bool
     n->is_container = false;
 
     /* measure */
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
     lens_text_metrics tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
     bool has_icon = lensi_icon_valid((int32_t)icon);
@@ -52,7 +52,7 @@ static bool selectable_impl(lens *ui, lens_icon_id icon, const char *label, bool
         n->hover_t = r.hovered ? 1.f : 0.f;
 
     /* resolve */
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
 
     /* emit — through the replaceable skin */
     lensi_skin_emit(ui, n,

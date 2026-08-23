@@ -122,9 +122,9 @@ bool lens_menu_item_flags(lens *ui, const char *label, const char *shortcut, uin
     ui->next_disabled = false;
     ui->next_error = false;
     lens_style eff = lensi_style_effective(ui);
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, disabled ? LENS_STATE_DISABLED : 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, disabled ? LENS_STATE_DISABLED : 0);
 
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
@@ -190,7 +190,7 @@ bool lens_menu_item_flags(lens *ui, const char *label, const char *shortcut, uin
 /* A thin separator line, one row tall, non-interactive. */
 void lens_menu_separator(lens *ui) {
     lens_style eff = lensi_style_effective(ui);
-    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     lens_id id = lensi_gen_container_id(ui, "sep");
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -264,9 +264,9 @@ static lens_id menu_popup_id(lens *ui, const char *label, char *buf, size_t cap)
 bool lens_menu_begin(lens *ui, const char *label) {
     const lens_theme *t = &ui->theme;
     lens_style eff = lensi_style_effective(ui);
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, 0);
     lens_id trig_id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, trig_id);
     if (!n)
@@ -341,9 +341,9 @@ void lens_menu_end(lens *ui) {
 bool lens_submenu_begin(lens *ui, const char *label) {
     const lens_theme *t = &ui->theme;
     lens_style eff = lensi_style_effective(ui);
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, 0);
     lens_node *parent = ui->last_node; /* the item row this submenu hangs off */
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
@@ -438,7 +438,7 @@ bool lens_context_menu_begin(lens *ui, const char *id) {
     if (!ui || !id)
         return false;
     lens_style eff = lensi_style_effective(ui);
-    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     lens_id lid = lensi_gen_widget_id(ui, id);
     if (!lensi_place_is_open_id(ui, lid))
         return false;

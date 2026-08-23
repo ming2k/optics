@@ -45,6 +45,7 @@
 #define IRIS_BUILDING 1
 #endif
 
+#include "a11y_prefs_internal.h"
 #include "platform_input.h"
 #include "platform_internal.h"
 #include "platform_text.h"
@@ -52,6 +53,7 @@
 #include "theme_watch_internal.h"
 
 #include <iris/a11y.h>
+#include <iris/a11y_prefs.h>
 #include <iris/cursor.h>
 #include <iris/theme.h>
 
@@ -83,6 +85,12 @@
  * invoked directly (theme.h's main-thread delivery guarantee) without
  * detouring through the wakeup seam. */
 void iris_theme_win32__notify_setting_change(void);
+
+/* Internal seam with a11y_prefs_win32.c: same delivery as above, for the
+ * accessibility preference set (reduced motion / high contrast / text
+ * scale). Declared in a11y_prefs_internal.h when _WIN32 is defined; this
+ * forward declaration keeps the WndProc's call site self-describing. */
+void iris_a11y_prefs_win32__notify_setting_change(void);
 
 /* Backend-reserved thread/window messages (WM_APP band). WM_IRIS_WAKEUP is
  * the wakeup-seam kick (PostThreadMessage; hwnd == NULL). WM_IRIS_PASTE_DELIVER
@@ -140,6 +148,7 @@ typedef struct w32_platform {
     bool animation_frame_requested; /* host asked for active-rate follow-up */
     bool paint_static;              /* host declared this frame's canvas static */
     bool theme_watching;            /* backend theme watch registered       */
+    bool a11y_prefs_watching;       /* backend a11y-pref watch registered   */
     bool a11y_running;              /* a11y bridge initialised (inert stub) */
     lens *ui;                       /* for caret/hint/paste on the loop thread */
 
@@ -196,6 +205,33 @@ static void w32_on_color_scheme_changed(iris_color_scheme scheme, void *user) {
     lens_theme th =
         (scheme == IRIS_COLOR_SCHEME_PREFER_LIGHT) ? lens_theme_default() : lens_theme_dark();
     lens_set_theme(pl->ui, th);
+}
+
+/* Accessibility-preference watcher callback (ADR-0075): delivered from the
+ * WndProc's WM_SETTINGCHANGE via a11y_prefs_win32.c's notify hook — already
+ * on the iris main thread. Applies the OS accessibility preferences to
+ * lens directly (lens is headless and cannot see them itself). */
+static void w32_on_a11y_prefs(const iris_a11y_prefs *prefs, void *user) {
+    w32_platform *pl = user;
+    if (!pl || !pl->ui)
+        return;
+    lens_set_reduced_motion(pl->ui, prefs->reduced_motion);
+    lens_set_text_scale(pl->ui, prefs->text_scale);
+    if (prefs->high_contrast) {
+        lens_theme th = lens_get_theme(pl->ui);
+        th.color_bg = flux_color_rgba(0x00, 0x00, 0x00, 0xff);
+        th.color_fg = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
+        th.color_hover = flux_color_rgba(0x2a, 0x2a, 0x2a, 0xff);
+        th.color_active = flux_color_rgba(0x55, 0x55, 0x55, 0xff);
+        th.color_border = th.color_fg;
+        th.color_disabled = flux_color_rgba(0xaa, 0xaa, 0xaa, 0xff);
+        lens_set_theme(pl->ui, th);
+    } else {
+        w32_on_color_scheme_changed(iris_query_system_color_scheme(), pl);
+    }
+    /* Force a frame so the new preferences reach the screen even while the
+     * loop is idle-parked. */
+    pl->animation_frame_requested = true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -963,6 +999,11 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
          * callback on change (theme_win32.c owns the compare). Already on
          * the loop thread — no wakeup-seam detour needed. */
         iris_theme_win32__notify_setting_change();
+        /* Accessibility preferences: same broadcast, same thread —
+         * SPI_GETCLIENTAREAANIMATION / SPI_GETHIGHCONTRASTW / text metrics
+         * re-read and fired on change (a11y_prefs_win32.c owns the
+         * compare). */
+        iris_a11y_prefs_win32__notify_setting_change();
         break;
 
     case WM_IRIS_PASTE_DELIVER: {
@@ -1349,6 +1390,19 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     if (!cfg->dark)
         pl.theme_watching = (iris_theme__watch_backend(w32_on_color_scheme_changed, &pl) == 0);
 
+    /* Accessibility preferences (ADR-0075): apply the OS's reduced-motion /
+     * high-contrast / text-scale preferences to lens at startup, then watch
+     * via WM_SETTINGCHANGE (backend slot, a11y_prefs_internal.h). Applied
+     * unconditionally — accessibility is not opt-in. */
+    {
+        iris_a11y_prefs prefs = iris_a11y_prefs_query();
+        lens_set_reduced_motion(ui, prefs.reduced_motion);
+        lens_set_text_scale(ui, prefs.text_scale);
+        if (prefs.high_contrast)
+            w32_on_a11y_prefs(&prefs, &pl);
+    }
+    pl.a11y_prefs_watching = (iris_a11y_prefs__watch_backend(w32_on_a11y_prefs, &pl) == 0);
+
     /* Accessibility: the Win32 build links a11y_stub.c today, so all three
      * calls are inert no-ops (iris_a11y_init reports the bridge unavailable
      * and a11y_running stays false). The call sites deliberately mirror
@@ -1633,6 +1687,8 @@ fail:
      * is untouched). */
     if (pl.theme_watching)
         iris_theme__unwatch_backend();
+    if (pl.a11y_prefs_watching)
+        iris_a11y_prefs__unwatch_backend();
     /* Inert with a11y_stub.c; mirrors app_cocoa.m. */
     if (pl.a11y_running)
         iris_a11y_shutdown();

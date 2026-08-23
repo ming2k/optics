@@ -27,6 +27,7 @@
 #define IRIS_H
 
 #include <iris/a11y.h>
+#include <iris/a11y_prefs.h>
 #include <iris/app.h>
 #include <iris/capability.h>
 #include <iris/cursor.h>

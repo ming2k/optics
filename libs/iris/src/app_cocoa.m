@@ -63,6 +63,7 @@
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/CAMetalLayer.h>
 
+#include "a11y_prefs_internal.h"
 #include "platform_input.h"
 #include "platform_internal.h"
 #include "platform_text.h"
@@ -70,6 +71,7 @@
 #include "theme_watch_internal.h"
 
 #include <iris/a11y.h>
+#include <iris/a11y_prefs.h>
 #include <iris/cursor.h>
 #include <iris/theme.h>
 
@@ -139,6 +141,7 @@ typedef struct cp_accum {
     bool animation_frame_requested; /* host asked for active-rate follow-up */
     bool paint_static;              /* host declared this frame's canvas static */
     bool theme_watching;
+    bool a11y_prefs_watching;
     bool a11y_running;
 
     iris_cursor host_cursor;      /* last explicit iris_set_cursor value    */
@@ -1122,6 +1125,33 @@ static void on_color_scheme_changed(iris_color_scheme scheme, void *user) {
     lens_set_theme(pl->ui, th);
 }
 
+/* Accessibility-preference watcher callback (ADR-0075): delivered on the
+ * iris main thread by the NSWorkspace accessibility-display-options
+ * notification (a11y_prefs_cocoa.m). Applies the OS accessibility
+ * preferences to lens directly (lens is headless and cannot see them). */
+static void on_a11y_prefs(const iris_a11y_prefs *prefs, void *user) {
+    IrisPlatform *pl = user;
+    if (!pl || !pl->ui)
+        return;
+    lens_set_reduced_motion(pl->ui, prefs->reduced_motion);
+    lens_set_text_scale(pl->ui, prefs->text_scale);
+    if (prefs->high_contrast) {
+        lens_theme th = lens_get_theme(pl->ui);
+        th.color_bg = flux_color_rgba(0x00, 0x00, 0x00, 0xff);
+        th.color_fg = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
+        th.color_hover = flux_color_rgba(0x2a, 0x2a, 0x2a, 0xff);
+        th.color_active = flux_color_rgba(0x55, 0x55, 0x55, 0xff);
+        th.color_border = th.color_fg;
+        th.color_disabled = flux_color_rgba(0xaa, 0xaa, 0xaa, 0xff);
+        lens_set_theme(pl->ui, th);
+    } else {
+        on_color_scheme_changed(iris_query_system_color_scheme(), pl);
+    }
+    /* Force a frame so the new preferences reach the screen even while the
+     * loop is idle-parked. */
+    pl->animation_frame_requested = true;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Vulkan surface helpers (platform-specific)                         */
 /* ------------------------------------------------------------------ */
@@ -1365,6 +1395,20 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         pl->theme_watching = false;
         if (!cfg->dark)
             pl->theme_watching = (iris_theme__watch_backend(on_color_scheme_changed, pl) == 0);
+
+        /* Accessibility preferences (ADR-0075): apply the OS's
+         * reduced-motion / high-contrast / text-scale preferences to lens
+         * at startup, then watch via NSWorkspace's accessibility-display
+         * options notification (backend slot, a11y_prefs_internal.h).
+         * Applied unconditionally — accessibility is not opt-in. */
+        {
+            iris_a11y_prefs prefs = iris_a11y_prefs_query();
+            lens_set_reduced_motion(ui, prefs.reduced_motion);
+            lens_set_text_scale(ui, prefs.text_scale);
+            if (prefs.high_contrast)
+                on_a11y_prefs(&prefs, pl);
+        }
+        pl->a11y_prefs_watching = (iris_a11y_prefs__watch_backend(on_a11y_prefs, pl) == 0);
 
         /* Accessibility bridge: the darwin build ships a11y_stub.c, so this
          * is inert today; the call sites stay so a future NSAccessibility
@@ -1625,6 +1669,8 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         pl->ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
         if (pl->theme_watching)
             iris_theme__unwatch_backend();
+        if (pl->a11y_prefs_watching)
+            iris_a11y_prefs__unwatch_backend();
         if (pl->a11y_running)
             iris_a11y_shutdown();
         /* Wakeup seam teardown: unwatch above removed the KVO observer, so

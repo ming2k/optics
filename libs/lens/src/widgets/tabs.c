@@ -96,7 +96,8 @@ bool lens_tab(lens *ui, const char *label) {
     n->is_container = false;
 
     /* measure — geometry slots from the strip's effective style */
-    float font_size = ts ? lensi_style_font_size(&ts->eff, &ui->theme) : ui->theme.font_size;
+    float font_size = ts ? lensi_style_font_size(ui, &ts->eff, &ui->theme)
+                         : lensi_font_px(ui, ui->theme.font_size);
     float padding = ts ? lensi_style_padding(&ts->eff, &ui->theme) : ui->theme.padding;
     lens_text_metrics tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
     float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * padding;
@@ -195,7 +196,7 @@ void lens_tabs_end(lens *ui) {
 
         /* emit — one record per strip, through the replaceable skin
          * (ADR-0059/0061). */
-        lens_style_resolved rs = lensi_style_resolve(ts ? &ts->eff : NULL, &ui->theme, 0);
+        lens_style_resolved rs = lensi_style_resolve(ui, ts ? &ts->eff : NULL, &ui->theme, 0);
         lensi_skin_emit(ui, tabs,
                         &(lens_widget_record){
                             .kind = LENS_WIDGET_TABS,

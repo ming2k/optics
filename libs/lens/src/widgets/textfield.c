@@ -113,7 +113,7 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
     ui->next_error = false;
     ui->next_placeholder = NULL;
     lens_style eff = lensi_style_effective(ui);
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
@@ -153,7 +153,7 @@ bool lens_textfield(lens *ui, const char *label, char *buf, size_t buf_cap) {
 
     /* ---- Interaction ----------------------------------------------- */
     lens_response r = lensi_interact(ui, n, true, disabled);
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
     if (r.hovered)
         ui->cursor_hint = LENS_CURSOR_TEXT;
     bool changed = false;

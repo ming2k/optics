@@ -85,7 +85,7 @@ bool lens_modal_begin(lens *ui, const char *id_str, lens_modal_opts opts) {
     /* The dialog surface follows the cascade (ADR-0061): a scope wrapping
      * the modal retints it like any other widget. */
     lens_style eff = lensi_style_effective(ui);
-    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     float min_w = opts.min_width > 0 ? opts.min_width : 240.0f;
     if (!lens_place_begin(ui, id_str,
                           (lens_place_opts){

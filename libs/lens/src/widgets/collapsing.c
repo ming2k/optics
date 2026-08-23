@@ -14,7 +14,7 @@ bool lens_collapsing(lens *ui, const char *label) {
         return false;
     lensi_link_child(ui, n);
 
-    float label_size = lensi_style_font_size(&eff, t) * 0.86f;
+    float label_size = lensi_style_font_size(ui, &eff, t) * 0.86f;
     lens_text_metrics tm = lensi_text_measure_label(ui, label, label_size, 400.0f);
     float arrow = tm.height * 0.82f;
     float icon_gap = 6.0f;
@@ -49,7 +49,7 @@ bool lens_collapsing(lens *ui, const char *label) {
         n->active_t = lensi_approach(ui, n->active_t, (ui->active_id == id) ? 1.f : 0.f, dt, 18.f);
     }
 
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
 
     /* emit — through the replaceable skin (ADR-0059) */
     lensi_skin_emit(ui, n,

@@ -104,7 +104,7 @@ bool lens_split_pane(lens *ui) {
 void lens_split_end(lens *ui) {
     const lens_theme *t = &ui->theme;
     lens_style eff = lensi_style_effective(ui);
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, 0);
 
     /* Close the second pane (the current open container). */
     lensi_open_container_pop(ui);

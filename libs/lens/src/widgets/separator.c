@@ -4,7 +4,7 @@
 
 void lens_separator(lens *ui) {
     lens_style eff = lensi_style_effective(ui);
-    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, "##sep");
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)

@@ -48,7 +48,10 @@
  * What's NOT covered yet:
  *   - Setting slider values / text selection programmatically from the AT
  *     (SetCurrentValue needs per-widget write paths; ADR-0062 defers it).
- *   - Live region announcements, bounds-changed events.
+ *   - Live region announcements.
+ *
+ * Covered since ADR-0075:
+ *   - BoundsChanged events on geometry changes (scroll, layout, resize).
  */
 #ifndef IRIS_A11Y_H
 #define IRIS_A11Y_H

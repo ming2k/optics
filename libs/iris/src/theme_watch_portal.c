@@ -1,20 +1,27 @@
-/* theme_watch_portal.c — live system colour-scheme watching via sd-bus.
+/* theme_watch_portal.c — live portal-settings watching via sd-bus.
  *
  * Strategy: open a user sd-bus connection and add a match rule for the
- * org.freedesktop.portal.Settings.SettingChanged signal filtered to the
- * "org.freedesktop.appearance" namespace + "color-scheme" key. A dedicated
+ * org.freedesktop.portal.Settings.SettingChanged signal. A dedicated
  * thread blocks in poll(2) on the bus fd (plus a stop pipe) and pumps the
- * bus; when the signal arrives it does NOT call the user callback directly
+ * bus; when a signal arrives it does NOT call the user callback directly
  * (wrong thread — the callback contract is main-thread delivery). Instead
- * it posts the new scheme through iris_platform_wakeup_post, and the
- * backend's event loop runs the delivery shim on the iris main thread.
+ * it posts the change through iris_platform_wakeup_post, and the backend's
+ * event loop runs the delivery shim on the iris main thread.
  *
- * The portal encodes the colour scheme as a uint32 variant:
- *   0  no preference
- *   1  prefer dark
- *   2  prefer light
+ * This is the ONE portal-settings watcher for the whole library: both the
+ * colour-scheme keys (org.freedesktop.appearance / color-scheme, uint32
+ * 0/1/2 mapping onto iris_color_scheme) and the accessibility-preference
+ * keys (a11y_prefs_internal.h; contrast flag under
+ * org.freedesktop.appearance, GNOME's text-scaling-factor /
+ * enable-animations under org.gnome.desktop.interface — the portal proxies
+ * any gsettings namespace) ride the same connection, thread, and match
+ * rule. A second watcher would mean a second D-Bus connection and a second
+ * poll thread for the same desktop service; sharing the pump keeps one fd
+ * and one delivery path.
  *
- * which maps directly onto iris_color_scheme.
+ * The a11y keys are handled by topic: key_filter lists the keys this file
+ * demuxes; anything else is skipped (message fully drained) so future
+ * topics can be added without touching the pump.
  *
  * Build gate: this translation unit is only compiled when libsystemd is
  * available (meson defines IRIS_HAVE_PORTAL_WATCH). When absent, the
@@ -28,6 +35,8 @@
 
 /* _GNU_SOURCE is provided by the build system (add_project_arguments). */
 #include "platform_wakeup.h"
+
+#include "a11y_prefs_internal.h"
 
 #include <iris/theme.h>
 #include <poll.h>
@@ -59,6 +68,14 @@ typedef struct theme_change {
     iris_color_scheme scheme;
 } theme_change;
 
+/* The a11y-preference registrations share the same watcher thread; their
+ * slots live here (not in a11y_prefs_portal.c) because the pump, the
+ * match rule, and the delivery shim are one mechanism. */
+static iris_a11y_prefs_changed_fn g_a11y_cb = NULL;
+static void *g_a11y_user = NULL;
+static iris_a11y_prefs_changed_fn g_a11y_backend_cb = NULL;
+static void *g_a11y_backend_user = NULL;
+
 /* Runs on the iris main thread (via iris_platform_wakeup_drain). */
 static void deliver_change(void *user) {
     theme_change *change = user;
@@ -68,6 +85,13 @@ static void deliver_change(void *user) {
         g_cb(scheme, g_user);
     if (g_backend_cb)
         g_backend_cb(scheme, g_backend_user);
+    if (g_a11y_cb || g_a11y_backend_cb) {
+        iris_a11y_prefs prefs = iris_a11y_prefs_query();
+        if (g_a11y_cb)
+            g_a11y_cb(&prefs, g_a11y_user);
+        if (g_a11y_backend_cb)
+            g_a11y_backend_cb(&prefs, g_a11y_backend_user);
+    }
 }
 
 /* SettingChanged signal signature:
@@ -85,9 +109,19 @@ static int on_setting_changed(sd_bus_message *m, void *userdata, sd_bus_error *r
     if (sd_bus_message_read(m, "ss", &ns, &key) < 0)
         return 0;
 
-    if (strcmp(ns, "org.freedesktop.appearance") != 0 || strcmp(key, "color-scheme") != 0) {
-        /* Not the property we care about; skip. Still need to skip the
-         * variant body so the message is fully parsed. */
+    /* Topics this watcher demuxes. A a11y-relevant key fires the a11y
+     * delivery (deliver_change re-queries the full preference set on the
+     * main thread, so no variant parsing is needed here); the colour
+     * scheme additionally parses its uint32. Everything else is skipped
+     * with the variant drained so the message stream stays in sync. */
+    bool a11y_key =
+        (strcmp(ns, "org.freedesktop.appearance") == 0 && strcmp(key, "contrast") == 0) ||
+        (strcmp(ns, "org.gnome.desktop.interface") == 0 &&
+         (strcmp(key, "text-scaling-factor") == 0 || strcmp(key, "enable-animations") == 0));
+    bool scheme_key =
+        strcmp(ns, "org.freedesktop.appearance") == 0 && strcmp(key, "color-scheme") == 0;
+
+    if (!a11y_key && !scheme_key) {
         (void)sd_bus_message_skip(m, "v");
         return 0;
     }
@@ -224,8 +258,8 @@ IRIS_API void iris_color_scheme_unwatch(void) {
      * is serialized with delivery). */
     g_cb = NULL;
     g_user = NULL;
-    /* The watcher thread keeps running while the backend slot is live. */
-    if (!g_backend_cb)
+    /* The watcher thread keeps running while any other slot is live. */
+    if (!g_backend_cb && !g_a11y_cb && !g_a11y_backend_cb)
         watch_stop();
 }
 
@@ -243,6 +277,42 @@ void iris_theme__unwatch_backend(void) {
     g_backend_cb = NULL;
     g_backend_user = NULL;
     if (!g_cb)
+        watch_stop();
+}
+
+/* ---- a11y preferences (same pump, same match rule) ------------------- */
+
+IRIS_API int iris_a11y_prefs_watch(iris_a11y_prefs_changed_fn cb, void *user) {
+    if (!cb)
+        return -1;
+    if (watch_start() != 0)
+        return -1;
+    g_a11y_cb = cb;
+    g_a11y_user = user;
+    return 0;
+}
+
+IRIS_API void iris_a11y_prefs_unwatch(void) {
+    g_a11y_cb = NULL;
+    g_a11y_user = NULL;
+    if (!g_cb && !g_backend_cb && !g_a11y_backend_cb)
+        watch_stop();
+}
+
+int iris_a11y_prefs__watch_backend(iris_a11y_prefs_changed_fn cb, void *user) {
+    if (!cb)
+        return -1;
+    if (watch_start() != 0)
+        return -1;
+    g_a11y_backend_cb = cb;
+    g_a11y_backend_user = user;
+    return 0;
+}
+
+void iris_a11y_prefs__unwatch_backend(void) {
+    g_a11y_backend_cb = NULL;
+    g_a11y_backend_user = NULL;
+    if (!g_cb && !g_backend_cb && !g_a11y_cb)
         watch_stop();
 }
 

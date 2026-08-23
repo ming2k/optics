@@ -86,6 +86,7 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
     ui->theme = d.theme.size ? lensi_theme_copy_in(&d.theme) : lens_theme_default();
     lensi_theme_normalize(&ui->theme);
     ui->scale = (d.scale > 0.0f) ? d.scale : 1.0f;
+    ui->text_scale = (d.text_scale > 0.0f && isfinite(d.text_scale)) ? d.text_scale : 1.0f;
     ui->opacity = 1.0f;
     ui->tooltip.opacity = 1.0f;
     ui->clipboard = d.clipboard;
@@ -210,6 +211,21 @@ void lens_set_scale(lens *ui, float scale) {
         flux_text_set_scale(ui->text, scale); /* null-safe */
     }
 }
+
+/* Accessibility text scale — see lens.h for the contract. Applied at the
+ * resolved-style funnel (style.c) and the explicit-size entry points, so
+ * measure/paint/caret stay in agreement with no further invalidation
+ * plumbing: font sizes already ride the draw-command hash (drawlist.c),
+ * so a factor change re-keys records automatically. */
+void lens_set_text_scale(lens *ui, float factor) {
+    if (ui && factor > 0.0f && isfinite(factor))
+        ui->text_scale = factor;
+}
+
+float lens_text_scale(const lens *ui) {
+    return ui ? ui->text_scale : 1.0f;
+}
+
 float lens_scale(const lens *ui) {
     return ui ? ui->scale : 1.0f;
 }

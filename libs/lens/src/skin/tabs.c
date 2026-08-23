@@ -47,6 +47,10 @@ void lensi_skin_tabs(lens *ui, lens_node *strip, const lens_widget_record *rec) 
                                             .rel = {rs->padding, text_y, -1.0f, 0},
                                             .color = disabled ? rs->disabled : rs->fg,
                                             .text = tab->label,
+                                            /* rs->font_size arrives already
+                                             * multiplied by ui->text_scale (style.c); the
+                                             * matching measure site is tabs.c, which scales
+                                             * the raw token itself via lensi_font_px */
                                             .text_size = rs->font_size});
     }
 

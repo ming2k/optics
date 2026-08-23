@@ -22,7 +22,7 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
     ui->next_disabled = false;
     ui->next_error = false; /* drain so it never leaks to a later widget */
     lens_style eff = lensi_style_effective(ui);
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
 
     lens_id id = lensi_gen_widget_id(ui, label);
@@ -60,7 +60,7 @@ bool lens_dropdown(lens *ui, const char *label, int *selected, const char **item
         }
     }
     lens_response r = lensi_interact(ui, n, true, disabled);
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
     bool just_opened = false;
     if (r.clicked) {
         if (open) {

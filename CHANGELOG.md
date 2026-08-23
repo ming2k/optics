@@ -13,6 +13,43 @@ either.
 
 ## [Unreleased]
 
+### Added — lens (accessibility)
+
+- **`lens_set_text_scale` / `lens_text_scale` / `lens_desc.text_scale`**
+  (ADR-0075): the OS "make text bigger" preference as a pure multiplier
+  on every font-size token. Applied at the single font-size funnel
+  (`lensi_style_font_size`) so measurement, intrinsic widget heights,
+  caret metrics, and paint scale together — text grows, boxes follow,
+  nothing clips. Orthogonal to the DPI scale (raster density untouched);
+  explicit point sizes scale too; pure-px geometry (padding, strokes)
+  deliberately does not. Non-finite and non-positive factors are ignored.
+  Rust binding: `Ui::set_text_scale` / `Ui::text_scale`.
+
+### Added — iris (accessibility)
+
+- **`<iris/a11y_prefs.h>`** (ADR-0075): `iris_a11y_prefs_query()` and
+  `iris_a11y_prefs_watch()` — the OS accessibility preference set
+  (reduced motion, high contrast, text scale) on all three backends.
+  Linux reads gsettings/kreadconfig at startup and rides the shared
+  portal `SettingChanged` pump for live changes; Windows reads
+  `SPI_GETCLIENTAREAANIMATION` / `SPI_GETHIGHCONTRAST` /
+  `SPI_GETNONCLIENTMETRICS` with `WM_SETTINGCHANGE` delivery; macOS reads
+  `NSWorkspace` accessibility display options with the corresponding
+  notification. Never fails — unreadable fields report the library
+  defaults.
+- **All backends now apply the preferences to lens unconditionally at
+  startup and on every change** (backend watcher slot; the host's public
+  slot is untouched): `lens_set_reduced_motion`, `lens_set_text_scale`,
+  and a raised-contrast theme mutation for high contrast. This wires the
+  previously dead `lens_set_reduced_motion` switch to the OS preference
+  that was meant to drive it.
+
+### Changed — iris (a11y bridge)
+
+- AT-SPI semantic-tree cap raised 256 → 1024 nodes; the walk now records
+  solved bounds and emits `BoundsChanged` events on geometry changes, so
+  magnifier tracking survives scrolling and relayout.
+
 ## [0.0.26] - 2026-08-23
 
 ### Added — flux (effect module)

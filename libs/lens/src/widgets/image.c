@@ -24,7 +24,7 @@ static void image_impl(lens *ui, flux_image *image, float w, float h, flux_color
     if (h <= 0.0f && w > 0.0f)
         h = w;
     if (w <= 0.0f) {
-        w = lensi_style_font_size(&eff, &ui->theme);
+        w = lensi_style_font_size(ui, &eff, &ui->theme);
         h = w;
     }
     if (n->fixed_w > 0.0f)
@@ -36,7 +36,7 @@ static void image_impl(lens *ui, flux_image *image, float w, float h, flux_color
     /* Non-interactive: resolve with an empty state. The outline atoms are
      * the old *_outlined variant's effect, reachable through any box.style
      * or scope (ADR-0061 item 6). Emission is the skin's (ADR-0059). */
-    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     lensi_skin_emit(ui, n,
                     &(lens_widget_record){
                         .kind = LENS_WIDGET_IMAGE,
@@ -81,7 +81,7 @@ static bool image_button_impl(lens *ui, flux_image *image, bool active) {
     n->is_container = false;
 
     float padding = lensi_style_padding(&eff, t);
-    float icon_size = lensi_style_font_size(&eff, t);
+    float icon_size = lensi_style_font_size(ui, &eff, t);
     float w = icon_size + 2.0f * padding;
     float h = icon_size + 2.0f * padding;
     if (n->fixed_w > 0.0f)
@@ -105,7 +105,7 @@ static bool image_button_impl(lens *ui, flux_image *image, bool active) {
     if (!disabled)
         n->hover_t = lensi_approach(ui, n->hover_t, r.hovered ? 1.f : 0.f, dt, 12.f);
 
-    lens_style_resolved rs = lensi_style_resolve(&eff, t, r.state);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
 
     /* emit — through the replaceable skin (ADR-0059) */
     lensi_skin_emit(ui, n,

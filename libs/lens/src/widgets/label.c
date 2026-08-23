@@ -139,9 +139,11 @@ static void push_line_slice(lens *ui, lens_text_line **lines, int *count, int *c
 static void label_wrapped(lens *ui, const char *text, float size, float max_width) {
     lens_style eff = lensi_style_effective(ui);
     float padding = lensi_style_padding(&eff, &ui->theme);
-    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     if (size <= 0.0f)
         size = rs.font_size; /* cascade default for the terse form */
+    else
+        size = lensi_font_px(ui, size); /* explicit sizes scale (see lens_label_ex) */
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -203,9 +205,9 @@ static void label_wrapped(lens *ui, const char *text, float size, float max_widt
 
 void lens_label(lens *ui, const char *text) {
     lens_style eff = lensi_style_effective(ui);
-    float font_size = lensi_style_font_size(&eff, &ui->theme);
+    float font_size = lensi_style_font_size(ui, &eff, &ui->theme);
     float padding = lensi_style_padding(&eff, &ui->theme);
-    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -238,7 +240,7 @@ void lens_label(lens *ui, const char *text) {
 void lens_label_ex(lens *ui, const char *text, float size) {
     lens_style eff = lensi_style_effective(ui);
     float padding = lensi_style_padding(&eff, &ui->theme);
-    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -246,6 +248,10 @@ void lens_label_ex(lens *ui, const char *text, float size) {
     lensi_link_child(ui, n);
     n->is_container = false;
 
+    /* Explicit point size scales with the accessibility text factor too —
+     * an explicit size is a design intent ("twice body text"), not an
+     * absolute accessibility exemption. */
+    size = lensi_font_px(ui, size);
     lens_text_metrics tm = lensi_text_measure_label(ui, text, size, 0.0f);
     float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * padding;
     float h = (n->fixed_h > 0) ? n->fixed_h : tm.height + 2.0f * padding;
@@ -282,7 +288,7 @@ void lens_label_compact_ex(lens *ui, const char *text, float size) {
 
 void lens_label_compact_ex2(lens *ui, const char *text, float size, float weight) {
     lens_style eff = lensi_style_effective(ui);
-    lens_style_resolved rs = lensi_style_resolve(&eff, &ui->theme, 0);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
@@ -290,6 +296,7 @@ void lens_label_compact_ex2(lens *ui, const char *text, float size, float weight
     lensi_link_child(ui, n);
     n->is_container = false;
 
+    size = lensi_font_px(ui, size); /* explicit sizes scale (see lens_label_ex) */
     lens_text_metrics tm = lensi_text_measure_label(ui, text, size, weight);
     float w = (n->fixed_w > 0) ? n->fixed_w : tm.width;
     float h = (n->fixed_h > 0) ? n->fixed_h : tm.height;

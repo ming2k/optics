@@ -18,7 +18,7 @@ static bool switch_impl(lens *ui, const char *label, const char *description, bo
 
     const float track_w = 38.0f;
     const float track_h = 22.0f;
-    float font_size = lensi_style_font_size(&eff, t);
+    float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
     const float desc_size = font_size * 0.84f;
     const float text_gap = 3.0f;
@@ -66,7 +66,7 @@ static bool switch_impl(lens *ui, const char *label, const char *description, bo
                         .state = r.state,
                         .bounds = {0, 0, w, h},
                         .last_bounds = n->prev_rect,
-                        .style = lensi_style_resolve(&eff, t, r.state),
+                        .style = lensi_style_resolve(ui, &eff, t, r.state),
                         .style_fields = eff.fields,
                         .hover_t = n->hover_t,
                         .active_t = n->active_t,
