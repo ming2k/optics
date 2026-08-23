@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.26] - 2026-08-23
+
 ### Added — flux (effect module)
 
 - **`flux_shadow_filter`: the realtime frame-slot shadow path** (ADR-0074

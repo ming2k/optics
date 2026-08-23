@@ -713,7 +713,7 @@ pub fn file_uri_to_path(uri: &str) -> Option<String> {
     String::from_utf8(buf).ok()
 }
 
-/// Library version string ("0.0.25" at the time of writing).
+/// Library version string ("0.0.26" at the time of writing).
 pub fn version() -> &'static str {
     unsafe {
         std::ffi::CStr::from_ptr(sys::iris_version_string())
@@ -1054,7 +1054,7 @@ mod tests {
     #[test]
     fn version_string_matches_buildtime_macros() {
         // The bindings and the C library are versioned independently (the
-        // Cargo workspace is 0.1.0; libiris is 0.0.25) — so we cannot
+        // Cargo workspace is 0.1.0; libiris is 0.0.26) — so we cannot
         // assert equality against a Cargo version, but we CAN assert the
         // runtime string parses and the compile-time C macros the -sys
         // crate exports agree with it. A drifted build (bindings compiled
