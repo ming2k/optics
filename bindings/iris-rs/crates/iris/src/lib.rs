@@ -808,7 +808,10 @@ pub fn window_get_geometry() -> Option<WindowSize> {
     let (mut w, mut h) = (0i32, 0i32);
     let ok = unsafe { sys::iris_window_get_geometry(&mut w, &mut h) };
     if ok {
-        Some(WindowSize { width: w, height: h })
+        Some(WindowSize {
+            width: w,
+            height: h,
+        })
     } else {
         None
     }
@@ -882,7 +885,10 @@ impl std::error::Error for PickError {}
 
 /// Ask the user where to save a file. `default_name` suggests a filename.
 /// The file is NOT created; opening it for writing is the caller's job.
-pub fn pick_save_path(title: Option<&str>, default_name: Option<&str>) -> Result<String, PickError> {
+pub fn pick_save_path(
+    title: Option<&str>,
+    default_name: Option<&str>,
+) -> Result<String, PickError> {
     let title_c = title.and_then(|t| CString::new(t).ok());
     let name_c = default_name.and_then(|t| CString::new(t).ok());
     let opts = sys::iris_file_dialog_opts {
@@ -896,7 +902,10 @@ pub fn pick_save_path(title: Option<&str>, default_name: Option<&str>) -> Result
     let rc = unsafe {
         sys::iris_pick_save_path(
             &opts,
-            name_c.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null()),
+            name_c
+                .as_ref()
+                .map(|c| c.as_ptr())
+                .unwrap_or(std::ptr::null()),
             buf.as_mut_ptr().cast(),
             buf.len(),
         )
@@ -937,9 +946,8 @@ pub fn pick_files(title: Option<&str>) -> Result<Vec<String>, PickError> {
     loop {
         let mut buf = vec![0u8; cap];
         let mut used = 0usize;
-        let rc = unsafe {
-            sys::iris_pick_files(&opts, buf.as_mut_ptr().cast(), buf.len(), &mut used)
-        };
+        let rc =
+            unsafe { sys::iris_pick_files(&opts, buf.as_mut_ptr().cast(), buf.len(), &mut used) };
         if rc == sys::IRIS_PICK_TRUNCATED {
             let needed = used.max(cap + 1);
             if needed > 16 * 1024 * 1024 {
@@ -1052,8 +1060,15 @@ mod tests {
         // crate exports agree with it. A drifted build (bindings compiled
         // against a different libiris) must fail here, not in production.
         let runtime = version();
-        assert!(runtime.split('.').count() == 3, "malformed version: {runtime}");
-        assert!(runtime.split('.').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())));
+        assert!(
+            runtime.split('.').count() == 3,
+            "malformed version: {runtime}"
+        );
+        assert!(
+            runtime
+                .split('.')
+                .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+        );
     }
 
     #[test]

@@ -52,6 +52,35 @@ either.
   (35 checks: validation, identity copy, exact 6 px offset, analytic
   σ=4 Gaussian centre, alpha 0, lease reuse).
 
+### Fixed — flux (canvas hot path)
+
+- **Per-submit canvas pipeline lookups no longer take the device-wide
+  lock.** `vk_bind_program` runs for every single canvas submit; routing
+  each one through `get_canvas_pipeline_id` took the device-wide
+  canvas-state mutex twice (canvas_state_get_or_init) plus an 8-slot
+  linear probe, even on a cache hit. Point-field style workloads issue
+  thousands of submits per frame (a 48x32 dot field is 1536), and that
+  lock traffic was measurable as the top CPU cost of a frame. The
+  canvas now memoises the last (program, blend) → (layout, pipeline)
+  resolution for the current pass — reset at pass begin and at the
+  output blit, since the pass-fixed key parts (linear colour format,
+  sample count, stencil availability) are captured by the memo's scope.
+  The same pass now resolves repeats without touching the pipeline
+  cache lock.
+- **`flux_device_default_sampler_handle` is now a lock-free read.** The
+  handle is immutable once published (the single writer never changes it
+  afterwards — teardown destroys the device), so it is stored as an
+  atomic: readers load-acquire and skip the bindless lock entirely once
+  populated; the single writer stores-release inside the lock. Every
+  glyph run and image draw lands here, so the uncontended atomic load
+  replaces the bindless lock round-trip that used to dominate
+  text-heavy frames. The handle slot is now explicitly initialised to
+  the `FLUX_BINDLESS_INVALID` sentinel at device creation (the previous
+  calloc zero was, in principle, a valid handle value).
+- GPU coverage: `test_canvas_render.c` gains the point-field batching
+  case — 256 small dots in one draw (the wavora visual-stage workload)
+  — pinning that a 1536-dot field collapses to a single `vkCmdDraw`.
+
 ### Fixed — iris (Wayland)
 
 - **Continuous (touchpad) scroll now reaches `lens_input.scroll_pixels_*` on

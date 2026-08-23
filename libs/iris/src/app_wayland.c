@@ -65,7 +65,12 @@ typedef struct wp_accum {
     bool down[LENS_MOUSE_COUNT];    /* held state (persists)          */
     bool pressed[LENS_MOUSE_COUNT]; /* edges this frame               */
     bool released[LENS_MOUSE_COUNT];
-    double scroll_x, scroll_y;      /* wheel this frame               */
+    double scroll_x, scroll_y;      /* wheel steps (notches) this frame */
+    double scroll_px_x, scroll_px_y; /* continuous (touchpad) distance,
+                                        logical px (see ADR-0036)      */
+    uint32_t axis_source;           /* this event group's axis source
+                                        (WL_POINTER_AXIS_SOURCE_*),
+                                        scoped by wl_pointer.frame     */
     uint32_t mods;                  /* level state (persists)         */
     char text[256];                 /* committed text this frame; sized
                                        like lens_input.text_utf8       */
@@ -380,32 +385,65 @@ static void ptr_button(void *data, struct wl_pointer *p, uint32_t serial, uint32
     if (down && button == BTN_MIDDLE)
         primsel_paste(pl);
 }
+/* Wheel vs. touchpad is a *source* property (wl_pointer.axis_source),
+ * not a property of the event type: a two-finger touchpad scroll arrives
+ * as plain wl_pointer.axis / value120 deltas, exactly like a notched
+ * wheel — only axis_source (FINGER/CONTINUOUS vs. WHEEL) distinguishes
+ * them. iris_scroll_source_is_continuous() is the shared policy. The
+ * source is delivered at the head of each frame group (see ptr_frame). */
+static void wp_axis_accum(wp_platform *pl, uint32_t axis, double delta, bool continuous) {
+    if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL) {
+        if (continuous)
+            pl->acc.scroll_px_y -= delta; /* px; sign as ptr_axis */
+        else
+            pl->acc.scroll_y -= delta; /* notches */
+    } else if (axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL) {
+        if (continuous)
+            pl->acc.scroll_px_x -= delta;
+        else
+            pl->acc.scroll_x -= delta;
+    }
+}
+
 static void ptr_axis(void *data, struct wl_pointer *p, uint32_t t, uint32_t axis,
                      wl_fixed_t value) {
     (void)p;
     (void)t;
     wp_platform *pl = data;
-    /* Legacy wl_pointer.axis: ~10 units per notch, positive is a physical
-     * wheel-down gesture. Lens uses the conventional UI delta contract in
-     * which wheel-down is negative (content offset increases), so invert at
-     * this platform boundary. Modern
+    /* Legacy wl_pointer.axis: wheel notches are ~10 units each, positive
+     * is a physical wheel-down gesture. Lens uses the conventional UI
+     * delta contract in which wheel-down is negative (content offset
+     * increases), so invert at this platform boundary. A touchpad in
+     * two-finger-scroll mode delivers the *same* event shape with pixel
+     * units — routed by source onto the continuous channel, where the
+     * delta is already in logical px and needs no scaling. Modern
      * compositors deliver via value120 instead — see ptr_axis_value120 —
      * but the legacy event still fires on older compositors, so we keep
      * handling it. */
-    double v = wl_fixed_to_double(value) / 10.0;
-    if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-        pl->acc.scroll_y -= v;
-    else if (axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL)
-        pl->acc.scroll_x -= v;
+    bool continuous = iris_scroll_source_is_continuous(pl->acc.axis_source);
+    double raw = wl_fixed_to_double(value);
+    /* Notches: ~10 units each. Continuous: `raw` is already logical px. */
+    wp_axis_accum(pl, axis, continuous ? raw : raw / 10.0, continuous);
 }
 static void ptr_frame(void *d, struct wl_pointer *p) {
-    (void)d;
     (void)p;
+    /* wl_pointer.frame terminates an event group. The axis source is
+     * scoped to that group (axis_source precedes the group's axis events
+     * and "carries the source information for all events within that
+     * frame"), so reset it here: the next group must present its own
+     * source before its axis events, and a group that omits it falls
+     * back to the conservative wheel default instead of inheriting a
+     * stale touchpad classification. */
+    wp_platform *pl = d;
+    pl->acc.axis_source = 0; /* WL_POINTER_AXIS_SOURCE_WHEEL */
 }
 static void ptr_axis_source(void *d, struct wl_pointer *p, uint32_t s) {
-    (void)d;
     (void)p;
-    (void)s;
+    wp_platform *pl = d;
+    /* Delivered once at the head of each axis-event group, before the
+     * axis/value120/discrete events it describes (Wayland pointer
+     * protocol ordering) — record it so those handlers can classify. */
+    pl->acc.axis_source = s;
 }
 static void ptr_axis_stop(void *d, struct wl_pointer *p, uint32_t t, uint32_t a) {
     (void)d;
@@ -432,10 +470,13 @@ static void ptr_axis_value120(void *d, struct wl_pointer *p, uint32_t a, int32_t
     (void)p;
     wp_platform *pl = d;
     double norm = (double)v / 120.0;
-    if (a == WL_POINTER_AXIS_VERTICAL_SCROLL)
-        pl->acc.scroll_y -= norm;
-    else if (a == WL_POINTER_AXIS_HORIZONTAL_SCROLL)
-        pl->acc.scroll_x -= norm;
+    /* value120 is specified for wheel sources, but classify by axis_source
+     * regardless: a compositor that reports a continuous source here would
+     * otherwise deliver sub-notch wheel-sized deltas as whole notches. The
+     * 40 px/notch equivalence keeps the two channels commensurable for
+     * consumers that fold them together (IRIS_SCROLL_PIXELS_PER_NOTCH). */
+    bool continuous = iris_scroll_source_is_continuous(pl->acc.axis_source);
+    wp_axis_accum(pl, a, continuous ? norm * IRIS_SCROLL_PIXELS_PER_NOTCH : norm, continuous);
 }
 static void ptr_axis_relative_direction(void *d, struct wl_pointer *p, uint32_t a, uint32_t dir) {
     (void)d;
@@ -2319,6 +2360,8 @@ static void drain_input(wp_platform *pl, lens_input *in, float dt) {
     in->mods = pl->acc.mods;
     in->scroll_x = (float)pl->acc.scroll_x;
     in->scroll_y = (float)pl->acc.scroll_y;
+    in->scroll_pixels_x = (float)pl->acc.scroll_px_x;
+    in->scroll_pixels_y = (float)pl->acc.scroll_px_y;
     for (int i = 0; i < LENS_MOUSE_COUNT; i++) {
         in->mouse_down[i] = pl->acc.down[i];
         in->mouse_pressed[i] = pl->acc.pressed[i];
@@ -2342,10 +2385,15 @@ static void drain_input(wp_platform *pl, lens_input *in, float dt) {
     }
     iris_wayland__tablet_fill_input(in);
 
-    /* clear per-frame edges; keep level state (down/cursor/mods) */
+    /* clear per-frame edges; keep level state (down/cursor/mods). The
+     * axis source is per frame-group and reset at wl_pointer.frame
+     * (ptr_frame); resetting again here is defense in depth for a
+     * compositor that ends a group without a frame event. */
     for (int i = 0; i < LENS_MOUSE_COUNT; i++)
         pl->acc.pressed[i] = pl->acc.released[i] = false;
     pl->acc.scroll_x = pl->acc.scroll_y = 0.0;
+    pl->acc.scroll_px_x = pl->acc.scroll_px_y = 0.0;
+    pl->acc.axis_source = 0; /* WL_POINTER_AXIS_SOURCE_WHEEL */
     pl->acc.key_count = 0;
     pl->acc.text[0] = '\0';
     pl->ime.delete_before = pl->ime.delete_after = 0;
@@ -2362,8 +2410,10 @@ static void log_raw(const lens_input *in) {
         if (in->mouse_released[b])
             fprintf(stderr, "[raw] mouse release %s\n", names[b]);
     }
-    if (in->scroll_x != 0.0f || in->scroll_y != 0.0f)
-        fprintf(stderr, "[raw] scroll dx=%.2f dy=%.2f\n", in->scroll_x, in->scroll_y);
+    if (in->scroll_x != 0.0f || in->scroll_y != 0.0f || in->scroll_pixels_x != 0.0f ||
+        in->scroll_pixels_y != 0.0f)
+        fprintf(stderr, "[raw] scroll dx=%.2f dy=%.2f px dx=%.2f dy=%.2f\n", in->scroll_x,
+                in->scroll_y, in->scroll_pixels_x, in->scroll_pixels_y);
     for (uint32_t k = 0; k < in->key_count; k++)
         fprintf(stderr, "[raw] key %d %s%s\n", in->keys[k].key,
                 in->keys[k].pressed ? "down" : "up  ", in->keys[k].repeat ? " (repeat)" : "");
@@ -2486,7 +2536,8 @@ static bool acc_has_user_input(wp_platform *pl, double *pcx, double *pcy) {
     *pcx = pl->acc.cx;
     *pcy = pl->acc.cy;
     bool edge = pl->acc.key_count != 0 || pl->acc.text[0] != '\0' || pl->acc.preedit[0] != '\0' ||
-                pl->acc.scroll_x != 0.0 || pl->acc.scroll_y != 0.0;
+                pl->acc.scroll_x != 0.0 || pl->acc.scroll_y != 0.0 ||
+                pl->acc.scroll_px_x != 0.0 || pl->acc.scroll_px_y != 0.0;
     for (int i = 0; i < LENS_MOUSE_COUNT; i++)
         edge = edge || pl->acc.pressed[i] || pl->acc.released[i] || pl->acc.down[i];
     return moved || edge;

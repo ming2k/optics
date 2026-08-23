@@ -130,6 +130,22 @@ static void draw_batchable_rects(flux_canvas *canvas, void *user) {
     }
 }
 
+/* Point-field shape: many small solid-colour dots (the wavora visual stage
+ * workload). Every dot's draw-visible state except its vertices is
+ * identical, so the whole field must collapse to a single vkCmdDraw — this
+ * is the batching contract that keeps a 1536-dot field from costing 1536
+ * draws and stalling the desktop compositor. */
+static void draw_point_field(flux_canvas *canvas, void *user) {
+    (void)user;
+    for (uint32_t i = 0; i < 256; ++i) {
+        float x = (float)(i % 16u) * 8.0f + 4.0f;
+        float y = (float)(i / 16u) * 8.0f + 4.0f;
+        flux_color color =
+            (i & 1u) ? flux_color_rgba(200, 60, 60, 255) : flux_color_rgba(60, 200, 120, 255);
+        flux_canvas_fill_rect_color(canvas, (flux_rect){x - 2, y - 2, 4, 4}, color);
+    }
+}
+
 typedef struct image_transform_case {
     flux_image *image;
     flux_sampler *sampler;
@@ -252,6 +268,23 @@ int main(void) {
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         EXPECT(px_at(px, 4, 4)[2] > 180);   /* first blue tile */
         EXPECT(px_at(px, 60, 60)[0] > 180); /* last red tile */
+    }
+
+    /* --- point-field batching (the wavora stage workload): 256 small dots
+     * in one draw, pixels land, and alternating colours resolve. ADR-0069's
+     * output blit adds the usual +1. --- */
+    {
+        uint64_t submits = flux_canvas_submit_calls(canvas);
+        uint64_t draws = flux_canvas_recorded_draws(canvas);
+        EXPECT(render_frame(s, canvas, draw_point_field, nullptr) == FLUX_OK);
+        EXPECT(flux_canvas_submit_calls(canvas) - submits == 256);
+        EXPECT(flux_canvas_recorded_draws(canvas) - draws == 2);
+
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, 4, 4)[1] > 150);     /* i=0 green: centre (4,4)  */
+        EXPECT(px_at(px, 12, 4)[0] > 150);    /* i=1 red: centre (12,4)   */
+        EXPECT(px_at(px, 4, H - 4)[1] > 150); /* i=240 green: centre(4,124)*/
     }
 
     /* --- true no-stencil pass: normal solid pipelines remain valid while

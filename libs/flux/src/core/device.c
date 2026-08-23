@@ -984,6 +984,10 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
         return FLUX_ERROR_OUT_OF_MEMORY;
     }
     atomic_init(&d->ref_count, 1u);
+    /* Zeroed by calloc, but the bindless sentinel is all-ones — the
+     * lock-free fast path in flux_device_default_sampler_handle treats
+     * anything else as a published handle. */
+    atomic_init(&d->default_sampler_handle, FLUX_BINDLESS_INVALID);
     d->allocator = desc->allocator;
     d->log = desc->log;
     d->log_user = desc->log_user;
@@ -1895,9 +1899,19 @@ VkDescriptorSetLayout flux_device_bindless_layout(flux_device *d) {
 flux_bindless_handle flux_device_default_sampler_handle(flux_device *d) {
     if (!d)
         return FLUX_BINDLESS_INVALID;
+    /* Fast path: the handle is immutable once published (the single writer
+     * below never changes it afterwards — teardown destroys the device).
+     * Every glyph run and image draw lands here, so an uncontended atomic
+     * load replaces the bindless lock round-trip that used to dominate
+     * text-heavy frames. */
+    flux_bindless_handle published =
+        atomic_load_explicit(&d->default_sampler_handle, memory_order_acquire);
+    if (published != FLUX_BINDLESS_INVALID)
+        return published;
     flux_platform_mutex_lock(&d->bindless.lock);
     if (d->default_sampler != VK_NULL_HANDLE) {
-        flux_bindless_handle h = d->default_sampler_handle;
+        flux_bindless_handle h =
+            atomic_load_explicit(&d->default_sampler_handle, memory_order_relaxed);
         flux_platform_mutex_unlock(&d->bindless.lock);
         return h;
     }
@@ -1931,12 +1945,14 @@ flux_bindless_handle flux_device_default_sampler_handle(flux_device *d) {
         flux_bindless_release(d, h);
         vkDestroySampler(d->device, s, nullptr);
         flux_platform_mutex_lock(&d->bindless.lock);
-        h = d->default_sampler_handle;
+        h = atomic_load_explicit(&d->default_sampler_handle, memory_order_relaxed);
         flux_platform_mutex_unlock(&d->bindless.lock);
         return h;
     }
     d->default_sampler = s;
-    d->default_sampler_handle = h;
+    /* Publish after `default_sampler` and the heap registration are both
+     * visible; readers on the fast path acquire-sync against this store. */
+    atomic_store_explicit(&d->default_sampler_handle, h, memory_order_release);
     flux_platform_mutex_unlock(&d->bindless.lock);
     return h;
 }

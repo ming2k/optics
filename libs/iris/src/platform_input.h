@@ -15,6 +15,10 @@
  * Unknown/native-only buttons (X1/X2, buttonNumber ≥ 3, …) translate to
  * IRIS_POINTER_BUTTON_UNKNOWN and map to -1; backends must ignore those
  * events, as app_wayland.c does today.
+ *
+ * It is also the shared home for the scroll-channel classification
+ * (below): pure, dependency-free, unit-testable headlessly
+ * (tests/iris/test_platform_input.c).
  */
 #ifndef IRIS_PLATFORM_INPUT_H
 #define IRIS_PLATFORM_INPUT_H
@@ -42,6 +46,40 @@ static inline int iris_pointer_button_to_lens(iris_pointer_button button) {
     default:
         return -1;
     }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Scroll-channel classification                                      */
+/* ------------------------------------------------------------------ */
+
+/* A wheel notch, expressed on the continuous (scroll_pixels_*) channel,
+ * matching the lens-side consumer convention (slider.c divides
+ * scroll_pixels_y by 40; win32 routes sub-notch deltas at 40 px/notch).
+ * Consumers that fold both channels into one distance can multiply wheel
+ * steps by this constant. */
+#define IRIS_SCROLL_PIXELS_PER_NOTCH 40.0
+
+/* Which lens_input channel a scroll delta belongs on (ADR-0036): wheel
+ * steps (scroll_x/y — discrete notches, widgets scale them by their line
+ * factor) or continuous pixels (scroll_pixels_x/y — touchpad finger
+ * motion, widgets consume unscaled). */
+typedef enum iris_scroll_channel {
+    IRIS_SCROLL_WHEEL_STEPS = 0,
+    IRIS_SCROLL_PIXELS,
+} iris_scroll_channel;
+
+/* True when `source` is a continuous/finger-driven axis source whose
+ * deltas are pixel distances, not wheel notches. This is a policy
+ * question every backend must answer the same way (Wayland axis_source,
+ * Win32 high-resolution wheels, Cocoa hasPreciseScrollingDeltas), so it
+ * lives here rather than being re-decided per backend. */
+static inline bool iris_scroll_source_is_continuous(uint32_t source) {
+    /* Mirrors the WL_POINTER_AXIS_SOURCE_* enum: 0 wheel, 1 finger, 2
+     * continuous, 3 wheel tilt. Numeric on purpose — this header must
+     * stay compilable where wayland-client headers are unavailable
+     * (win32/cocoa backends, headless tests). */
+    return source == 1 /* WL_POINTER_AXIS_SOURCE_FINGER      */
+           || source == 2; /* WL_POINTER_AXIS_SOURCE_CONTINUOUS */
 }
 
 #endif /* IRIS_PLATFORM_INPUT_H */

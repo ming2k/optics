@@ -486,9 +486,13 @@ struct flux_device {
     /* Default sampler (linear filtering, clamp-to-edge). Lazily
      * created on first image registration. Registered into the
      * bindless heap at SAMPLER binding slot 0; that handle is
-     * accessible via flux_device_default_sampler_handle. */
+     * accessible via flux_device_default_sampler_handle.
+     * `default_sampler_handle` is read on every glyph-run / image draw
+     * (the hot text path), so it is stored as an atomic: readers load
+     * acquire and skip the bindless lock entirely once populated; the
+     * single writer stores release inside the lock. */
     VkSampler default_sampler;
-    flux_bindless_handle default_sampler_handle;
+    _Atomic flux_bindless_handle default_sampler_handle;
 
     /* Per-module state slot. Modules attach a private struct here
      * lazily on first use; the device frees it via the per-module

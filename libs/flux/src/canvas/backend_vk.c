@@ -66,6 +66,25 @@ typedef struct flux_vk_canvas {
     VkSampleCountFlagBits active_samples;
     bool active_stencil; /* active pass really binds a stencil attachment */
 
+    /* Per-pass pipeline lookup memo. vk_bind_program runs for every single
+     * canvas submit; routing each one through get_canvas_pipeline_id takes
+     * the device-wide canvas-state mutex twice (canvas_state_get_or_init)
+     * plus an 8-slot linear probe, even on a cache hit. Point-field style
+     * workloads issue thousands of submits per frame (a 48x32 dot field is
+     * 1536), and that lock traffic was measurable as the top CPU cost of a
+     * frame. The memo caches the last (id, blend) -> (layout, pipeline)
+     * resolution for the current pass; the pass-fixed key parts (linear
+     * colour format, sample count, stencil availability) are captured by
+     * resetting the memo in begin_pass, so a hit is exact. Falls through
+     * to the locked slow path on a miss or a first-use build. */
+    struct {
+        canvas_pipe_id id;
+        flux_blend_mode blend;
+        VkPipelineLayout layout;
+        VkPipeline pipeline;
+        bool valid;
+    } pipeline_memo;
+
     /* Open draw batch. Consecutive submits whose entire draw-visible
      * state (pipeline, scissor, every push-constant byte except the
      * vertex base address) matches — and whose transient slices land
@@ -599,6 +618,7 @@ static void record_output_blit(flux_canvas *c, VkImageView dest_view, VkFormat d
     c->recorded_draws++;
     flux_frame_end_pass(c->frame);
     v->bound_pipeline = VK_NULL_HANDLE; /* the blit clobbered the canvas binding */
+    v->pipeline_memo.valid = false;
 }
 
 static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c, flux_frame *f,
@@ -884,8 +904,11 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     vkCmdSetViewport(cmd, 0, 1, &vp);
     vkCmdSetScissor(cmd, 0, 1, &sc);
     /* Don't pre-bind a pipeline — each draw picks the right one. Bind the
-     * bindless set now; it's pipeline-layout-scoped and shared. */
+     * bindless set now; it's pipeline-layout-scoped and shared. The memo
+     * is keyed by the pass-fixed state (samples/stencil), so a new pass
+     * must not reuse the previous pass's resolution. */
     v->bound_pipeline = VK_NULL_HANDLE;
+    v->pipeline_memo.valid = false;
     /* end_pass drains the batch; reset defensively so a pass that failed
      * mid-begin never inherits a stale open batch. */
     v->batch.pipeline = VK_NULL_HANDLE;
@@ -989,10 +1012,24 @@ static bool vk_bind_program(const flux_canvas_backend *self, flux_canvas *c, can
     VkPipelineLayout layout;
     VkPipeline pipeline;
     /* ADR-0069: draws always render into the working-space intermediate,
-     * so pipelines are keyed by its format — never the destination's. */
-    if (get_canvas_pipeline_id(c->device, FLUX_CANVAS_LINEAR_FORMAT, v->active_samples, id,
-                               c->pending_blend, v->active_stencil, &layout, &pipeline) != FLUX_OK)
+     * so pipelines are keyed by its format — never the destination's.
+     * The memo answers repeats of the current pass's last resolution
+     * without touching the device-wide pipeline cache lock. */
+    if (v->pipeline_memo.valid && v->pipeline_memo.id == id &&
+        v->pipeline_memo.blend == c->pending_blend) {
+        layout = v->pipeline_memo.layout;
+        pipeline = v->pipeline_memo.pipeline;
+    } else if (get_canvas_pipeline_id(c->device, FLUX_CANVAS_LINEAR_FORMAT, v->active_samples, id,
+                                      c->pending_blend, v->active_stencil, &layout,
+                                      &pipeline) != FLUX_OK) {
         return false;
+    } else {
+        v->pipeline_memo.id = id;
+        v->pipeline_memo.blend = c->pending_blend;
+        v->pipeline_memo.layout = layout;
+        v->pipeline_memo.pipeline = pipeline;
+        v->pipeline_memo.valid = true;
+    }
     if (v->bound_pipeline != pipeline) {
         /* A pipeline change ends the open batch: its draw must be
          * recorded before the new vkCmdBindPipeline, so batched

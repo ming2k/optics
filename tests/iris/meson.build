@@ -7,6 +7,7 @@
 #   - test_uri           file:// URI → path decoding for dialog results
 #   - test_a11y_util     AT-SPI role/state maps, value parser, tree diff
 #   - test_platform_text UTF-8 boundary-aware truncation helpers
+#   - test_platform_input pointer button mapping + scroll-channel policy
 #
 # The windowed path (iris_app_run with a real build callback) is exercised
 # by the examples, not here — it owns an event loop and needs a live session.
@@ -41,3 +42,13 @@ exe_ptext = executable('test_platform_text',
   dependencies        : [lens_dep, m_dep],
 )
 test('test_platform_text', exe_ptext)
+
+# test_platform_input pins the shared pointer-button mapping and the
+# scroll-channel classification policy (header-only, so nothing to compile
+# in beyond the test itself).
+exe_pinput = executable('test_platform_input',
+  ['test_platform_input.c'],
+  include_directories : [iris_inc, src_inc],
+  dependencies        : [lens_dep, m_dep],
+)
+test('test_platform_input', exe_pinput)
