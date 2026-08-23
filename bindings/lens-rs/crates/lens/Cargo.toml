@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+links = "lens_rs"
 
 [dependencies]
 lens-sys = { path = "../lens-sys", version = "0.1.0" }

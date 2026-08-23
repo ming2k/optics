@@ -84,3 +84,4 @@ a decision, write a new ADR and update the old one's status to
 | 0073 | [Widget-kind extension range and the user-widget contract](0073-lens-user-widget-kind-range.md) | Accepted |
 | 0074 | [Effect intake path — new visual operators and where choreography never enters](0074-effect-intake-path.md) | Accepted |
 | 0075 | [System accessibility preferences — lens executes, iris observes, the OS owns](0075-system-accessibility-preferences.md) | Accepted |
+| 0076 | [Per-shape paint runs for runtime SVG icons](0076-lens-icon-paint-runs.md) | Accepted |

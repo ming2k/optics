@@ -71,6 +71,10 @@ impl PaintHost {
     /// The raw `flux_canvas*`. Hand it to `flux`-aware code that expects
     /// a borrowed canvas pointer (e.g. cast to `*mut flux_sys::flux_canvas`
     /// and wrap in your own borrowed handle).
+    ///
+    /// Prefer the typed accessors [`PaintHost::flux_canvas`] /
+    /// [`PaintHost::flux_device`], which return safe borrowed handles from
+    /// the `flux` crate directly — no pointer casting at the call site.
     pub fn canvas(&self) -> *mut std::ffi::c_void {
         self.canvas
     }
@@ -78,8 +82,43 @@ impl PaintHost {
     /// The raw `flux_device*` iris owns. Use this to construct any
     /// device-dependent context (text shaper, image uploader, …) rather
     /// than creating a second `flux::Device`.
+    ///
+    /// Prefer the typed accessors [`PaintHost::flux_canvas`] /
+    /// [`PaintHost::flux_device`].
     pub fn device(&self) -> *mut std::ffi::c_void {
         self.device
+    }
+
+    /// The canvas iris is handing the paint callback, as a borrowed
+    /// (non-owning) `flux::Canvas`. It is already inside its
+    /// begin/end pair for this frame; draw through it directly. The borrow
+    /// lives for the callback only — iris owns and destroys the canvas.
+    ///
+    /// The pointer came straight from iris's `iris_paint_fn` C callback,
+    /// which types it `flux_canvas*`; the `flux` and `iris-sys` bindgen
+    /// views are layout-identical opaque pointers, so the cast mirrors
+    /// [`flux::Canvas::borrow_raw`]'s documented contract for
+    /// sibling-binding pointers.
+    pub fn flux_canvas(&self) -> flux::Canvas {
+        // SAFETY: iris handed us a live `flux_canvas*` for the duration of
+        // the paint callback. The returned handle does not destroy on drop.
+        unsafe { flux::Canvas::borrow_raw(self.canvas as *mut flux::sys::flux_canvas) }
+    }
+
+    /// The single flux device iris owns, as a borrowed (non-owning)
+    /// `flux::Device`. Use it for any device-dependent context (samplers,
+    /// textures, a `flux_text::Text` shaper, …) instead of opening a
+    /// second device — two devices in one process is unsupported. The
+    /// borrow is valid for the app's lifetime; iris releases the device at
+    /// shutdown.
+    ///
+    /// Same pointer contract as [`PaintHost::flux_canvas`]: the typed
+    /// `flux_device*` from iris's C callback, reinterpreted through the
+    /// `flux` crate's layout-identical bindgen view.
+    pub fn flux_device(&self) -> flux::Device {
+        // SAFETY: see the doc comment; mirrors `Device::borrow_raw`'s
+        // contract for sibling-binding pointers.
+        unsafe { flux::Device::borrow_raw(self.device as *mut flux::sys::flux_device) }
     }
 
     /// The current device-pixel ratio (Wayland
@@ -858,7 +897,7 @@ pub fn post_to_main_thread<F: FnOnce() + Send + 'static>(f: F) -> bool {
 /// filesystem's bytes percent-encoded; [`file_uri_to_path`] decodes them.
 /// `None` means the user cancelled or no dialog service is available —
 /// distinguish truncation, which is reported as an error, not silence.
-
+///
 /// Error shape for the save-path dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickError {
@@ -869,6 +908,9 @@ pub enum PickError {
     /// The result did not fit the internal buffer (pathologically long
     /// paths). Retrying will not help without a shorter default name.
     Truncated,
+    /// The platform returned bytes that are not valid UTF-8. This is a
+    /// backend defect, not user input — the raw bytes were lost.
+    InvalidUtf8,
 }
 
 impl std::fmt::Display for PickError {
@@ -877,6 +919,7 @@ impl std::fmt::Display for PickError {
             PickError::Cancelled => write!(f, "user cancelled the dialog"),
             PickError::Unavailable => write!(f, "no file-dialog service available"),
             PickError::Truncated => write!(f, "result exceeded the buffer"),
+            PickError::InvalidUtf8 => write!(f, "dialog returned invalid UTF-8"),
         }
     }
 }
@@ -914,7 +957,7 @@ pub fn pick_save_path(
         0 => {
             let len = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
             buf.truncate(len);
-            String::from_utf8(buf).map_err(|_| PickError::Unavailable)
+            String::from_utf8(buf).map_err(|_| PickError::InvalidUtf8)
         }
         code if code == sys::IRIS_PICK_CANCELLED => Err(PickError::Cancelled),
         code if code == sys::IRIS_PICK_UNAVAILABLE => Err(PickError::Unavailable),
@@ -979,6 +1022,267 @@ pub fn pick_files(title: Option<&str>) -> Result<Vec<String>, PickError> {
             slice = &rest[1..];
         }
         return Ok(out);
+    }
+}
+
+/// A name + glob pair limiting what the file dialogs offer.
+///
+/// `pattern` is a single glob (`"*.txt"`) or a semicolon-separated list
+/// (`"*.txt;*.md"`). Mirrors `iris_file_filter` (all three backends
+/// implement it: portal `a(sa(us))`, Win32 `COMDLG_FILTERSPEC`, Cocoa
+/// `allowedFileTypes`).
+#[derive(Debug, Clone, Copy)]
+pub struct FileFilter<'a> {
+    /// Human label shown by the platform dialog, e.g. `"Aseprite Sprite"`.
+    pub name: Option<&'a str>,
+    /// Glob expression(s), e.g. `"*.ase;*.aseprite"`.
+    pub pattern: &'a str,
+}
+
+impl<'a> FileFilter<'a> {
+    /// A filter with just a pattern (the platform synthesizes a label).
+    pub const fn pattern(pattern: &'a str) -> Self {
+        FileFilter {
+            name: None,
+            pattern,
+        }
+    }
+}
+
+/// Builder over `iris_file_dialog_opts`, exposing everything the C struct
+/// carries that the convenience functions don't: filters, the starting
+/// folder, and multi-select. Build one with [`FileDialog::new`], then call
+/// [`FileDialog::pick_path`] / [`FileDialog::pick_paths`] /
+/// [`FileDialog::pick_save_path`].
+///
+/// ```
+/// use iris::{FileDialog, FileFilter};
+///
+/// let chosen = FileDialog::new()
+///     .title("Open Sprite")
+///     .filter(FileFilter::pattern("*.ase;*.aseprite"))
+///     .pick_path();
+/// ```
+#[derive(Debug, Clone)]
+pub struct FileDialog<'a> {
+    title: Option<&'a str>,
+    initial_uri: Option<&'a str>,
+    filters: Vec<FileFilter<'a>>,
+    multiple: bool,
+    directory_only: bool,
+}
+
+/// Everything the C call borrows: CStrings and the NULL-terminated filter
+/// array must outlive the `iris_pick_*` call, so they are held here next
+/// to the ready-to-pass `opts`. Dropping the holder drops them — after
+/// the call has returned.
+struct Prepared {
+    _title: Option<std::ffi::CString>,
+    _uri: Option<std::ffi::CString>,
+    _names: Vec<std::ffi::CString>,
+    _pats: Vec<std::ffi::CString>,
+    _filters: Vec<sys::iris_file_filter>,
+    opts: sys::iris_file_dialog_opts,
+}
+
+impl<'a> FileDialog<'a> {
+    pub fn new() -> Self {
+        FileDialog {
+            title: None,
+            initial_uri: None,
+            filters: Vec::new(),
+            multiple: false,
+            directory_only: false,
+        }
+    }
+
+    /// Dialog title (UTF-8, optional).
+    pub fn title(mut self, title: &'a str) -> Self {
+        self.title = Some(title);
+        self
+    }
+
+    /// `file://` URI the dialog opens at (optional).
+    pub fn initial_uri(mut self, uri: &'a str) -> Self {
+        self.initial_uri = Some(uri);
+        self
+    }
+
+    /// Append a filter. Order is preserved; the first entry is what the
+    /// dialog selects by default on most platforms.
+    pub fn filter(mut self, filter: FileFilter<'a>) -> Self {
+        self.filters.push(filter);
+        self
+    }
+
+    /// Allow more than one selection (open modes only).
+    pub fn multiple(mut self, enable: bool) -> Self {
+        self.multiple = enable;
+        self
+    }
+
+    /// Restrict the picker to directories (implies the folder dialog).
+    pub fn directory_only(mut self, enable: bool) -> Self {
+        self.directory_only = enable;
+        self
+    }
+
+    fn prepare(&self) -> Prepared {
+        let title = self.title.and_then(|t| std::ffi::CString::new(t).ok());
+        let uri = self
+            .initial_uri
+            .and_then(|t| std::ffi::CString::new(t).ok());
+        let mut names = Vec::with_capacity(self.filters.len());
+        let mut pats = Vec::with_capacity(self.filters.len());
+        let mut filters = Vec::with_capacity(self.filters.len() + 1);
+        for f in &self.filters {
+            // Skip filters whose strings cannot be CStrings (interior NUL);
+            // a partially-applied filter list is better than failing the
+            // whole dialog.
+            let Ok(p) = std::ffi::CString::new(f.pattern) else {
+                continue;
+            };
+            let n = match f.name {
+                Some(label) => match std::ffi::CString::new(label) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                },
+                None => std::ffi::CString::new("").unwrap(),
+            };
+            filters.push(sys::iris_file_filter {
+                name: if n.to_bytes().is_empty() {
+                    std::ptr::null()
+                } else {
+                    n.as_ptr()
+                },
+                pattern: p.as_ptr(),
+            });
+            names.push(n);
+            pats.push(p);
+        }
+        // NULL-terminated array (name == NULL terminates per the C contract).
+        filters.push(sys::iris_file_filter {
+            name: std::ptr::null(),
+            pattern: std::ptr::null(),
+        });
+        let opts = sys::iris_file_dialog_opts {
+            title: title
+                .as_ref()
+                .map(|c| c.as_ptr())
+                .unwrap_or(std::ptr::null()),
+            initial_uri: uri.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null()),
+            filters: if self.filters.is_empty() {
+                std::ptr::null()
+            } else {
+                filters.as_ptr()
+            },
+            multiple_selection: self.multiple,
+            directory_only: self.directory_only,
+        };
+        Prepared {
+            _title: title,
+            _uri: uri,
+            _names: names,
+            _pats: pats,
+            _filters: filters,
+            opts,
+        }
+    }
+
+    fn map_single_rc(buf: &mut Vec<u8>, rc: i32) -> Result<String, PickError> {
+        match rc {
+            0 => {
+                let len = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+                buf.truncate(len);
+                String::from_utf8(std::mem::take(buf)).map_err(|_| PickError::InvalidUtf8)
+            }
+            code if code == sys::IRIS_PICK_CANCELLED => Err(PickError::Cancelled),
+            code if code == sys::IRIS_PICK_UNAVAILABLE => Err(PickError::Unavailable),
+            code if code == sys::IRIS_PICK_TRUNCATED => Err(PickError::Truncated),
+            _ => Err(PickError::Unavailable),
+        }
+    }
+
+    /// Single-selection open. Returns the chosen `file://` URI; convert
+    /// with [`file_uri_to_path`] for a filesystem path.
+    pub fn pick_path(&self) -> Result<String, PickError> {
+        let p = self.prepare();
+        let mut buf = vec![0u8; 8192];
+        let rc = unsafe {
+            if self.directory_only {
+                sys::iris_pick_folder(&p.opts, buf.as_mut_ptr().cast(), buf.len())
+            } else {
+                sys::iris_pick_file(&p.opts, buf.as_mut_ptr().cast(), buf.len())
+            }
+        };
+        Self::map_single_rc(&mut buf, rc)
+    }
+
+    /// Multi-selection open: every chosen `file://` URI. Grows the buffer
+    /// on truncation exactly like [`pick_files`].
+    pub fn pick_paths(&self) -> Result<Vec<String>, PickError> {
+        let p = self.prepare();
+        let mut cap = 64 * 1024usize;
+        loop {
+            let mut buf = vec![0u8; cap];
+            let mut used = 0usize;
+            let rc = unsafe {
+                sys::iris_pick_files(&p.opts, buf.as_mut_ptr().cast(), buf.len(), &mut used)
+            };
+            if rc == sys::IRIS_PICK_TRUNCATED {
+                let needed = used.max(cap + 1);
+                if needed > 16 * 1024 * 1024 {
+                    return Err(PickError::Truncated);
+                }
+                cap = needed + 64;
+                continue;
+            }
+            if rc == sys::IRIS_PICK_CANCELLED {
+                return Err(PickError::Cancelled);
+            }
+            if rc == sys::IRIS_PICK_UNAVAILABLE || rc < 0 {
+                return Err(PickError::Unavailable);
+            }
+            let mut out = Vec::with_capacity(rc as usize);
+            let mut slice: &[u8] = &buf[..used.min(buf.len())];
+            while let Some(pos) = slice.iter().position(|b| *b == 0) {
+                let (uri, rest) = slice.split_at(pos);
+                if uri.is_empty() {
+                    break;
+                }
+                if let Ok(s) = String::from_utf8(uri.to_vec()) {
+                    out.push(s);
+                }
+                slice = &rest[1..];
+            }
+            return Ok(out);
+        }
+    }
+
+    /// Save dialog with filters and a suggested default name. The file is
+    /// NOT created; opening it for writing is the caller's job.
+    pub fn pick_save_path(&self, default_name: Option<&str>) -> Result<String, PickError> {
+        let p = self.prepare();
+        let name_c = default_name.and_then(|t| std::ffi::CString::new(t).ok());
+        let mut buf = vec![0u8; 8192];
+        let rc = unsafe {
+            sys::iris_pick_save_path(
+                &p.opts,
+                name_c
+                    .as_ref()
+                    .map(|c| c.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+            )
+        };
+        Self::map_single_rc(&mut buf, rc)
+    }
+}
+
+impl Default for FileDialog<'_> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

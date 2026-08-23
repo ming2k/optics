@@ -308,9 +308,26 @@ typedef struct lens_icon_cmd {
     float params[6];
 } lens_icon_cmd;
 
+/* A contiguous sub-range of a lens_icon_desc's cmd stream painted with its
+ * own colour and mode. `color` is a straight (non-premultiplied)
+ * 0xRRGGBBAA value; `fill` selects fill_path vs stroke_path for the range.
+ * Runtime SVG registration (lens_icon_register_svg) produces one run per
+ * source shape, preserving the SVG's paint colours; `runs == NULL` on a
+ * desc means "single paint for the whole stream" (every built-in icon) and
+ * the draw colour comes from the widget/theme as before. */
+typedef struct lens_icon_run {
+    uint32_t first_cmd; /* index into cmds */
+    uint32_t count;     /* number of cmds in this run */
+    uint32_t color;     /* 0xRRGGBBAA, straight alpha */
+    uint8_t fill;       /* 1 = fill, 0 = stroke */
+    uint8_t reserved[3];
+} lens_icon_run;
+
 typedef struct lens_icon_desc {
     const lens_icon_cmd *cmds;
     uint32_t count;
+    const lens_icon_run *runs;     /* NULL = whole stream, one theme paint */
+    uint32_t run_count;            /* 0 unless runs != NULL */
 } lens_icon_desc;
 
 /* Exported: consuming the built-in table from another link unit (a DLL
@@ -325,9 +342,15 @@ LENS_API extern const lens_icon_desc lens_icon_table[LENS_ICON_COUNT];
 /* Register an SVG string as a runtime icon. Returns its id (>= LENS_ICON_COUNT)
  * or LENS_ICON_INVALID on parse failure. Ids are process-global, never reclaimed;
  * call from the UI thread (registration is not thread-safe, like the rest of lens).
- * The SVG's own paint colours are ignored — glyphs draw in the theme colour like
- * built-ins. Stroke icons (no filled shapes) render with the same 2/24 stroke
- * convention as the feather set; any filled shape switches the icon to fill mode. */
+ *
+ * Shapes painted `currentColor` (or with no paint attribute) follow the theme
+ * colour exactly like built-ins. Shapes carrying an explicit colour keep it:
+ * registration records one paint run per shape with its fill/stroke colour
+ * (0xRRGGBBAA). Gradients degrade to the gradient's first stop colour.
+ * The source strokeWidth is still not honoured — one weight keeps runtime
+ * icons visually interchangeable with the built-in set; a shape with both
+ * fill and stroke contributes its fill run (stroke-on-fill outlines can be
+ * expressed by duplicating the shape). */
 LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8);
 
 #ifdef __cplusplus

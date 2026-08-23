@@ -437,6 +437,32 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_update_region(flux_image *image, 
                                                              uint32_t height, const void *data,
                                                              size_t bytes);
 
+/* `flux_image_update_region` for source rows that are wider than the
+ * uploaded region: row `i` of `data` starts at `i * row_bytes`. Pass
+ * `row_bytes == width * bytes_per_pixel(format)` and this is exactly the
+ * packed entry point above. The same validation contract applies, with the
+ * minimum buffer size derived from the stride: at least
+ * `(height - 1) * row_bytes + width * bpp` bytes; larger buffers are
+ * accepted (trailing bytes ignored), matching the packed variant. */
+FLUX_NODISCARD FLUX_API flux_result flux_image_update_region_strided(flux_image *image, uint32_t x,
+                                                                     uint32_t y, uint32_t width,
+                                                                     uint32_t height,
+                                                                     const void *data,
+                                                                     size_t row_bytes,
+                                                                     size_t bytes);
+
+/* `flux_image_update_region_strided` that takes straight (non-premultiplied)
+ * RGBA8 and premultiplies during the upload, so callers never replicate the
+ * canvas premultiplied-alpha convention themselves. Only
+ * FLUX_FORMAT_RGBA8_UNORM is supported (byte order R,G,B,A; anything else
+ * returns FLUX_ERROR_UNSUPPORTED). Each pixel is converted with the exact
+ * integer math of flux_color_rgba_premul — (c * a + 127) / 255, with the
+ * a == 255 and a == 0 fast paths — so the uploaded texels are bit-identical
+ * to what that function produces. The source buffer is never modified. */
+FLUX_NODISCARD FLUX_API flux_result flux_image_update_region_premultiply(
+    flux_image *image, uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+    const void *data, size_t row_bytes, size_t bytes);
+
 /* Emit a printf-style diagnostic through a device's logger (if any).
  * No-op when the device has no logger wired. Modules that treat
  * `flux_device` as opaque (and consumers) use this instead of

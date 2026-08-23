@@ -37,6 +37,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=FLUX_USE_INSTALLED");
     println!("cargo:rerun-if-env-changed=FLUX_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=FLUX_SOURCE_DIR");
+    println!("cargo:rerun-if-env-changed=OPTICS_SOURCE_DIR");
+    println!("cargo:rerun-if-env-changed=OPTICS_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 
     let use_installed = env::var_os("FLUX_USE_INSTALLED").is_some();
@@ -46,6 +48,7 @@ fn main() {
     let os = target_os();
     let checkout_root = discover_optics_checkout();
     let build_dir = env::var_os("FLUX_BUILD_DIR")
+        .or_else(|| env::var_os("OPTICS_BUILD_DIR"))
         .map(PathBuf::from)
         .or_else(|| checkout_root.as_ref().map(|root| root.join("build")))
         .filter(|dir| dir.join("meson-uninstalled/flux-uninstalled.pc").exists());
@@ -123,18 +126,19 @@ fn main() {
             )
         });
 
-    // 3. Runtime library discovery (dev mode only — installed libraries
-    //    resolve via the loader / ldconfig). `rustc-link-arg` applies to
-    //    this crate's own targets only; publish the dirs as `links`
-    //    metadata so dependents re-emit them (DEP_FLUX_RPATHS).
-    let rpaths: Vec<String> = if dev_mode {
-        lib.link_paths
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect()
-    } else {
-        Vec::new()
-    };
+    // 3. Runtime library discovery. `rustc-link-arg` applies to this
+    //    crate's own targets only; publish the dirs as `links` metadata so
+    //    dependents re-emit them (DEP_FLUX_RPATHS). Unconditional (not just
+    //    dev mode): a `meson install` into a custom prefix is invisible to
+    //    the default loader search, so its link dirs need an rpath exactly
+    //    like a build tree. System libdirs are filtered out.
+    let rpaths: Vec<String> = lib
+        .link_paths
+        .iter()
+        .filter(|p| !is_system_libdir(p, &os))
+        .map(|p| p.display().to_string())
+        .collect();
+    let _ = dev_mode;
     if os == "windows" {
         // Windows has no rpath: stage the DLLs next to the cargo profile
         // output so test/example binaries find them. Runs in installed
@@ -214,12 +218,42 @@ fn main() {
 
 fn discover_optics_checkout() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
+    // Explicit OPTICS_SOURCE_DIR wins: out-of-tree consumers (git deps,
+    // registry builds) are not inside the monorepo, so the upward walk
+    // below cannot find the checkout — one variable points at it.
+    if let Some(root) = env::var_os("OPTICS_SOURCE_DIR") {
+        let root = PathBuf::from(root);
+        if root.join("libs/flux/include/flux").exists() {
+            return Some(root);
+        }
+    }
     for ancestor in manifest_dir.ancestors() {
         if ancestor.join("libs/flux/include/flux").exists() {
             return Some(ancestor.to_path_buf());
         }
     }
     None
+}
+
+/// True for loader-default library directories (/usr/lib, /lib64, …) that
+/// never need an rpath. Homebrew's /usr/local/lib is deliberately NOT
+/// filtered: it is not on the default loader path on Linux.
+fn is_system_libdir(path: &std::path::Path, os: &str) -> bool {
+    if os == "windows" {
+        return false;
+    }
+    let text = path.to_string_lossy();
+    let parts: Vec<&str> = text.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.len() >= 2
+        && (parts[0] == "usr" || parts[0] == "lib")
+        && (parts[1] == "lib" || parts[1] == "lib64" || parts[1] == "lib32")
+    {
+        return true;
+    }
+    if parts.len() == 1 && parts[0].starts_with("lib") {
+        return true; // /lib, /lib64, /lib32
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------

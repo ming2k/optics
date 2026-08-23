@@ -2532,6 +2532,58 @@ impl Canvas {
         unsafe { sys::flux_canvas_draw_image(self.raw, image.raw, dst, std::ptr::null()) };
     }
 
+    /// Draw an image sampled with `sampler` instead of the canvas default.
+    ///
+    /// This is the pixel-art / atlas path: pass a `NEAREST`/`NEAREST`
+    /// sampler (see [`SamplerDesc`]) so pixel-aligned blits stay crisp —
+    /// the default bilinear filter blurs sub-pixel positions. `sampler` is
+    /// borrowed for the call only; the caller keeps ownership.
+    pub fn draw_image_sampled(
+        &self,
+        image: &Image,
+        sampler: &Sampler,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    ) {
+        let dst = sys::flux_rect { x, y, w, h };
+        unsafe {
+            sys::flux_canvas_draw_image_sampled(
+                self.raw,
+                image.raw,
+                sampler.raw,
+                dst,
+                std::ptr::null(),
+            )
+        };
+    }
+
+    /// [`Canvas::draw_image_sampled`] with a tint / fixed-function blend
+    /// mode from `paint`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_image_sampled_with_paint(
+        &self,
+        image: &Image,
+        sampler: &Sampler,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        paint: &Paint,
+    ) {
+        let dst = sys::flux_rect { x, y, w, h };
+        unsafe {
+            sys::flux_canvas_draw_image_sampled(
+                self.raw,
+                image.raw,
+                sampler.raw,
+                dst,
+                paint.as_raw(),
+            )
+        };
+    }
+
     /// Draw an alpha-free RGB image, forcing opaque output and replacing the
     /// destination. This is the correct path for XRGB/XBGR DMA-BUF imports.
     pub fn draw_image_opaque(&self, image: &Image, x: f32, y: f32, w: f32, h: f32) {
@@ -3318,6 +3370,70 @@ impl Image {
             )
         })
     }
+
+    /// [`Image::update_region`] for source rows wider than the region:
+    /// row `i` of `data` starts at `i * row_bytes`.
+    ///
+    /// `row_bytes` must be at least `w * bytes_per_pixel`; the buffer must
+    /// hold at least `(h - 1) * row_bytes + w * bpp` bytes (larger buffers
+    /// are fine — trailing bytes are ignored).
+    pub fn update_region_strided(
+        &self,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+        row_bytes: usize,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        Error::check(unsafe {
+            sys::flux_image_update_region_strided(
+                self.raw,
+                x,
+                y,
+                w,
+                h,
+                data.as_ptr() as *const _,
+                row_bytes,
+                data.len(),
+            )
+        })
+    }
+
+    /// Upload straight (non-premultiplied) RGBA8 pixels, premultiplying
+    /// during the upload with the exact integer math of
+    /// `flux_color_rgba_premul` — `(c * a + 127) / 255` and the
+    /// `a == 255` / `a == 0` fast paths.
+    ///
+    /// The canvas samples premultiplied texels, so this is the correct
+    /// entry point whenever the source buffer holds straight alpha (the
+    /// common case for editor framebuffers): callers never replicate the
+    /// premultiply convention themselves. Row `i` of `data` starts at
+    /// `i * row_bytes` (pass `w * 4` for a packed buffer, or `0` — both
+    /// mean packed).
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_region_premultiply(
+        &self,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+        row_bytes: usize,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        Error::check(unsafe {
+            sys::flux_image_update_region_premultiply(
+                self.raw,
+                x,
+                y,
+                w,
+                h,
+                data.as_ptr() as *const _,
+                row_bytes,
+                data.len(),
+            )
+        })
+    }
 }
 
 impl Drop for Image {
@@ -3603,7 +3719,9 @@ impl ShadowFilter {
         let mut raw: *mut sys::flux_image = std::ptr::null_mut();
         // SAFETY: the filter, frame, and input all belong to one device (the
         // C side verifies); the frame is at a pass boundary and recording.
-        Error::check(unsafe { sys::flux_shadow_filter_apply(self.raw, frame.raw, &desc, &mut raw) })?;
+        Error::check(unsafe {
+            sys::flux_shadow_filter_apply(self.raw, frame.raw, &desc, &mut raw)
+        })?;
         Ok(ShadowedImage {
             raw,
             _filter: PhantomData,
@@ -3646,7 +3764,6 @@ impl ShadowedImage<'_> {
         self.raw
     }
 }
-
 
 /// Whether `device` supports dma-buf import (was created with the required
 /// Vulkan extensions). A compositor checks this before advertising

@@ -41,6 +41,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IRIS_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=LENS_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=FLUX_BUILD_DIR");
+    println!("cargo:rerun-if-env-changed=OPTICS_SOURCE_DIR");
+    println!("cargo:rerun-if-env-changed=OPTICS_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 
     let use_installed = env::var_os("IRIS_USE_INSTALLED").is_some();
@@ -49,6 +51,7 @@ fn main() {
     let os = target_os();
     let checkout_root = discover_optics_checkout("iris");
     let build_dir = env::var_os("IRIS_BUILD_DIR")
+        .or_else(|| env::var_os("OPTICS_BUILD_DIR"))
         .map(PathBuf::from)
         .or_else(|| checkout_root.as_ref().map(|root| root.join("build")))
         .filter(|dir| dir.join("meson-uninstalled/iris-uninstalled.pc").exists());
@@ -225,6 +228,18 @@ fn is_system_libdir(p: &std::path::Path, target_os: &str) -> bool {
 
 fn discover_optics_checkout(component: &str) -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
+    // Explicit OPTICS_SOURCE_DIR wins: out-of-tree consumers (git deps,
+    // registry builds) are not inside the monorepo, so the upward walk
+    // below cannot find the checkout — one variable points at it.
+    if let Some(root) = env::var_os("OPTICS_SOURCE_DIR") {
+        let root = PathBuf::from(root);
+        if root
+            .join(format!("libs/{component}/include/{component}"))
+            .exists()
+        {
+            return Some(root);
+        }
+    }
     for ancestor in manifest_dir.ancestors() {
         if ancestor
             .join(format!("libs/{component}/include/{component}"))

@@ -88,7 +88,14 @@ typedef enum lens_node_phase {
 
 /* Portable key sentinels. The application maps platform keycodes to
  * these when filling lens_key_event.key. Codes outside this range pass
- * through untouched (custom shortcuts). */
+ * through untouched (custom shortcuts).
+ *
+ * Printable ASCII (0x20-0x7E) arrives as key events carrying the ASCII
+ * codepoint itself (unshifted: 'a' not 'A') — the iris backends
+ * guarantee this on every platform, so character shortcuts ('z', ',',
+ * space) can be matched straight off lens_key_event.key. Non-ASCII
+ * printable input never arrives as a key event; it only enters
+ * text_utf8 through the IME/layout commit path. */
 #define LENS_KEY_ESCAPE 256
 #define LENS_KEY_TAB 258
 #define LENS_KEY_RETURN 259

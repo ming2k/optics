@@ -79,6 +79,18 @@ test_icon_runtime_content = executable('test_icon_runtime_content',
 )
 test('icon_runtime_content', test_icon_runtime_content)
 
+# Per-shape colour runs recorded by runtime SVG registration. Same
+# direct-link pattern as test_icon_runtime_content.
+test_icon_runtime_runs = executable('test_icon_runtime_runs',
+  'test_icon_runtime_runs.c',
+  '../../libs/lens/src/icon_runtime.c',
+  '../../libs/lens/src/icon_data.c',
+  '../../libs/lens/src/vendor/nanosvg.c',
+  dependencies        : [lens_dep, m_dep],
+  include_directories : lens_inc,
+)
+test('icon_runtime_runs', test_icon_runtime_runs)
+
 if get_option('fuzz')
   subdir('fuzz')
 endif

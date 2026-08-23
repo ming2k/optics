@@ -38,6 +38,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LENS_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=LENS_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=FLUX_BUILD_DIR");
+    println!("cargo:rerun-if-env-changed=OPTICS_SOURCE_DIR");
+    println!("cargo:rerun-if-env-changed=OPTICS_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 
     let use_installed = env::var_os("LENS_USE_INSTALLED").is_some();
@@ -46,6 +48,7 @@ fn main() {
     let os = target_os();
     let checkout_root = discover_optics_checkout("lens");
     let build_dir = env::var_os("LENS_BUILD_DIR")
+        .or_else(|| env::var_os("OPTICS_BUILD_DIR"))
         .map(PathBuf::from)
         .or_else(|| checkout_root.as_ref().map(|root| root.join("build")))
         .filter(|dir| dir.join("meson-uninstalled/lens-uninstalled.pc").exists());
@@ -113,25 +116,28 @@ fn main() {
             )
         });
 
-    // 3. Runtime library discovery (dev mode only — installed libraries
-    //    resolve via the loader / ldconfig). `cargo:rustc-link-arg` applies
-    //    to this crate's own targets only; publish the dirs as `links`
-    //    metadata so dependents re-emit them (DEP_LENS_RPATHS).
+    // 3. Runtime library discovery. `cargo:rustc-link-arg` applies to this
+    //    crate's own targets only; publish the dirs as `links` metadata so
+    //    dependents re-emit them (DEP_LENS_RPATHS). Unconditional (not just
+    //    dev mode): a custom `meson install` prefix needs an rpath exactly
+    //    like a build tree; system libdirs are filtered out.
     if os == "windows" {
         // Windows has no rpath: stage the DLLs (lens + its flux
         // dependency) next to the cargo profile output instead. Runs in
         // installed mode too — an installed prefix's bin/ is not on PATH
         // by default.
         stage_windows_dlls(&lens.link_paths, &["lens", "flux"]);
-    } else if dev_mode {
+    } else {
         let rpaths: Vec<String> = lens
             .link_paths
             .iter()
+            .filter(|p| !is_system_libdir(p, &os))
             .map(|p| p.display().to_string())
             .collect();
         emit_rpath_link_args(&rpaths);
         println!("cargo:rpaths={}", rpaths.join(";"));
     }
+    let _ = dev_mode;
 
     // 4. Bindgen over the header. Include paths come from pkg-config; if
     //    LENS_SOURCE_DIR is set, prepend its `libs/lens/include` so the
@@ -188,6 +194,18 @@ fn main() {
 
 fn discover_optics_checkout(component: &str) -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
+    // Explicit OPTICS_SOURCE_DIR wins: out-of-tree consumers (git deps,
+    // registry builds) are not inside the monorepo, so the upward walk
+    // below cannot find the checkout — one variable points at it.
+    if let Some(root) = env::var_os("OPTICS_SOURCE_DIR") {
+        let root = PathBuf::from(root);
+        if root
+            .join(format!("libs/{component}/include/{component}"))
+            .exists()
+        {
+            return Some(root);
+        }
+    }
     for ancestor in manifest_dir.ancestors() {
         if ancestor
             .join(format!("libs/{component}/include/{component}"))
@@ -297,4 +315,25 @@ fn stage_windows_dlls(link_dirs: &[PathBuf], stems: &[&str]) {
             }
         }
     }
+}
+
+/// True for loader-default library directories (/usr/lib, /lib64, …) that
+/// never need an rpath. Homebrew's /usr/local/lib is deliberately NOT
+/// filtered: it is not on the default loader path on Linux.
+fn is_system_libdir(path: &std::path::Path, os: &str) -> bool {
+    if os == "windows" {
+        return false;
+    }
+    let text = path.to_string_lossy();
+    let parts: Vec<&str> = text.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.len() >= 2
+        && (parts[0] == "usr" || parts[0] == "lib")
+        && (parts[1] == "lib" || parts[1] == "lib64" || parts[1] == "lib32")
+    {
+        return true;
+    }
+    if parts.len() == 1 && parts[0].starts_with("lib") {
+        return true; // /lib, /lib64, /lib32
+    }
+    false
 }

@@ -245,3 +245,9 @@ if opt_effect
   )
   test('canvas_target_pool', test_canvas_target_pool, suite : 'integration')
 endif
+
+test_image_update_strided = executable('test_image_update_strided',
+  'test_image_update_strided.c',
+  dependencies : [test_helpers_dep],
+)
+test('image_update_strided', test_image_update_strided, suite : 'integration')

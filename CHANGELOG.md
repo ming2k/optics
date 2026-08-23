@@ -13,6 +13,100 @@ either.
 
 ## [Unreleased]
 
+### Added — flux (image upload)
+
+- **`flux_image_update_region_strided`**: the update-region upload for
+  source buffers whose rows are wider than the uploaded region — row `i`
+  starts at `i * row_bytes`. The same validation contract as the packed
+  entry point, with the minimum size derived from the stride
+  (`(height - 1) * row_bytes + width * bpp`; larger buffers accepted).
+  Rows are repacked internally into the tightly packed staging copy, so
+  callers no longer upload row-by-row just to express a stride.
+- **`flux_image_update_region_premultiply`**: takes straight
+  (non-premultiplied) RGBA8 and premultiplies during the upload using the
+  exact integer math of `flux_color_rgba_premul` — `(c * a + 127) / 255`
+  with the `a == 255` / `a == 0` fast paths — so uploaded texels are
+  bit-identical to that function's output. Also accepts a row stride.
+  This closes the seam where every canvas-fed client had to replicate the
+  premultiply convention client-side (and pin it with parity tests):
+  straight-alpha sources now name their semantics at the upload call.
+  Integration test `image_update_strided` verifies both: stride repack
+  offsets and premultiply parity against `flux_color_rgba_premul` over
+  all alpha buckets, read back through an offscreen NEAREST blit.
+
+### Added — lens (icons)
+
+- **`lens_icon_run` / `lens_icon_desc.runs`** (ADR-0076): per-shape paint
+  runs for runtime-registered SVG icons. `lens_icon_register_svg` now
+  records one run per source shape with its explicit fill/stroke colour
+  (straight 0xRRGGBBAA; gradients degrade to the first stop) and mode,
+  and replay paints one flux paint per run — runtime icons can finally
+  be multicoloured or solid-filled instead of theme-stroke-only.
+  Shapes painted `currentColor` (or with no explicit colour) record
+  `color == 0`, "follow the theme"; an icon whose every shape is
+  theme-coloured collapses to `runs == NULL` and replays byte-identically
+  to a built-in. Built-in icons are unchanged (`runs == NULL` everywhere).
+  Test: `tests/lens/test_icon_runtime_runs.c`.
+
+### Added — iris (input)
+
+- **`iris_scroll_accum`** (platform_input.h): the shared, sign-pinned
+  scroll accumulator both channels flow through. Documents and tests the
+  direction contract — platform events arrive positive = physical
+  wheel-down/finger-down, lens consumes the opposite on BOTH channels —
+  and performs that single inversion at the platform boundary. The
+  Wayland backend now routes through it (one implementation instead of a
+  private copy), and `test_platform_input.c` pins the signs for
+  vertical/horizontal × step/pixel × up/down.
+
+### Fixed — bindings (all `-rs` workspaces)
+
+- **rpath metadata is now published unconditionally and filtered**: every
+  `-sys` build script (flux, flux-text, flux-scene-graph, lens, iris,
+  prism) publishes its link dirs as `cargo:rpaths` in installed mode too
+  — a `meson install` into a custom prefix needs an rpath exactly like a
+  build tree — and system libdirs (`/usr/lib*`, `/lib*`) are filtered out
+  so they no longer add DT_RPATH noise. Previously flux-sys/lens-sys
+  published an empty list outside dev mode and lens-sys published nothing
+  at all, so downstream test binaries silently bound the *installed*
+  (stale) libraries.
+- **`flux` and `lens` re-publish their rpaths through their own `links`
+  metadata** (`flux_rs` / `lens_rs`), mirroring what `iris` already did:
+  a downstream that depends on `flux` alone now gets the full transitive
+  rpath list via `DEP_FLUX_RS_RPATHS` (same for `DEP_LENS_RS_RPATHS`)
+  and can delete its hand-rolled relay build scripts.
+- **`OPTICS_BUILD_DIR` / `OPTICS_SOURCE_DIR`**: one variable pair points
+  every `-sys` crate at the monorepo for out-of-tree consumers (git
+  dependencies, registry builds) whose upward auto-discovery cannot find
+  a checkout they are not inside of. The per-library `FLUX_/LENS_/IRIS_`
+  variables keep working and still win.
+
+### Added — iris-rs / flux-rs (Rust bindings)
+
+- **`flux::Canvas::draw_image_sampled` / `draw_image_sampled_with_paint`**:
+  the NEAREST-sampler blit path finally has a safe wrapper (previously
+  C-only — pixel-art clients had to drop to `flux-sys` and hand-build
+  `flux_rect`s). `Image::update_region_strided` and
+  `Image::update_region_premultiply` wrap the new C entry points.
+- **`iris::PaintHost::flux_canvas` / `flux_device`**: typed, borrowed
+  `flux::Canvas` / `flux::Device` handles straight from the paint
+  callback — no more `*mut c_void` casting at every call site (the C
+  callback was always typed; only the Rust seam erased it).
+- **`iris::FileDialog`** builder with `FileFilter` (name + glob), title,
+  initial folder and multi-select — exposing `iris_file_dialog_opts`
+  filters that all three C backends implement but no safe API reached.
+  `PickError::InvalidUtf8` now distinguishes backend UTF-8 defects from
+  "unavailable" instead of folding them together.
+
+### Changed — docs
+
+- The keyboard contract (`platform_internal.h`, `lens.h`) now states the
+  printable-ASCII key-event guarantee explicitly: every printable ASCII
+  codepoint (0x20–0x7E, unshifted) arrives as a key event on all three
+  backends; non-ASCII printable input is text-only. Downstream shortcut
+  documentation had drifted into believing NO printable key produced key
+  events.
+
 ### Added — lens (accessibility)
 
 - **`lens_set_text_scale` / `lens_text_scale` / `lens_desc.text_scale`**

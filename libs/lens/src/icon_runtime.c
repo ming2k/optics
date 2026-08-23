@@ -9,30 +9,44 @@
  * replay path applies verbatim. Runtime ids continue where the enum ends
  * (LENS_ICON_COUNT + index) and are never reclaimed.
  *
+ * Paint model: registration records one lens_icon_run per source shape —
+ * its colour (explicit fill/stroke colours are preserved; currentColor and
+ * unpainted shapes record color == 0, "follow the theme") and its mode
+ * (fill vs stroke). Icons whose every run is theme-coloured collapse to
+ * runs == NULL, which replays exactly like a built-in: one theme paint.
  * Two deliberate simplifications, both matching the built-in conventions:
- *  - Render mode is per icon, not per shape: any visible shape with a fill
- *    switches the whole icon to fill mode (like the material built-ins);
- *    stroke-only icons keep the feather 2/24 stroke convention. The
- *    source strokeWidth is not honoured — one weight keeps runtime icons
- *    visually interchangeable with the built-in set.
- *  - All shapes merge into a single flattened stream and replay paints it
- *    with one flux paint, so a per-shape fill rule cannot be expressed:
- *    fills always use nonzero winding (flux_paint_solid's default). The
- *    feather/material conventions this mirrors are nonzero-compatible;
- *    source SVGs that rely on even-odd holes will render with the holes
- *    filled. */
+ *  - The source strokeWidth is not honoured — one weight keeps runtime
+ *    icons visually interchangeable with the built-in set.
+ *  - A per-shape fill *rule* cannot be expressed: fills always use
+ *    nonzero winding (flux_paint_solid's default). The feather/material
+ *    conventions this mirrors are nonzero-compatible; source SVGs that
+ *    rely on even-odd holes will render with the holes filled. */
 
 #include "internal.h"
 #include "vendor/nanosvg.h"
+#include <lens/icon.h>
+#include <string.h>
+
+/* "currentColor" has no nanosvg representation (it parses as a named
+ * colour and lands on fallback grey). lens rewrites the token to this
+ * sentinel hex before parsing; a paint that comes back as exactly this
+ * colour means "follow the theme colour" and the run is recorded with
+ * color == 0 (see lens_icon_run). nanosvg packs colours 0xBBGGRR
+ * (NSVG_RGB), so #010203 arrives as 0x030201. The same hex appearing
+ * verbatim in a source SVG would degrade to a near-black paint — the cost
+ * of a text-level rewrite; the alternative is forking the parser. */
+#define LENSI_CURRENTCOLOR_SENTINEL_BGR 0x030201u
+#define LENSI_CURRENTCOLOR_HEX "#010203"
 
 enum {
     LENSI_ICON_MAX_CMDS = 8192u,         /* per-icon verb cap — bounds pathological assets */
     LENSI_ICON_MAX_RUNTIME = 4096u,      /* registry slot cap */
     LENSI_ICON_MAX_SVG_BYTES = 1u << 20, /* input sanity bound */
+    LENSI_ICON_MAX_RUNS = 256u,          /* per-icon paint-run cap */
 };
 
 typedef struct lensi_runtime_icon {
-    lens_icon_desc desc; /* cmds owned by the entry, never freed */
+    lens_icon_desc desc; /* cmds and runs owned by the entry, never freed */
     uint8_t mode;        /* LENSI_ICON_RENDER_* */
 } lensi_runtime_icon;
 
@@ -69,6 +83,62 @@ uint8_t lensi_icon_mode(int32_t id) {
     return LENSI_ICON_RENDER_STROKE;
 }
 
+/* Rewrite every `currentColor` token (as a fill/stroke attribute value) in
+ * the private copy to the sentinel hex so nanosvg can carry it through as
+ * a colour we recognise afterwards. The replacement is shorter than the
+ * token, so the tail shifts left in one pass. Operates on the
+ * NUL-terminated copy only — the caller's string is never touched. */
+static void rewrite_currentcolor(char *svg) {
+    static const char token[] = "currentColor";
+    const size_t token_len = sizeof token - 1;
+    static const char hex[] = LENSI_CURRENTCOLOR_HEX;
+    const size_t hex_len = sizeof hex - 1;
+    char *at = svg;
+    while ((at = strstr(at, token)) != NULL) {
+        bool quoted_before = at > svg && (at[-1] == '"' || at[-1] == '\'');
+        char after = at[token_len];
+        bool quoted_after = after == '"' || after == '\'';
+        if (quoted_before && quoted_after) {
+            /* exact attribute value: replace and shift the tail left */
+            memmove(at + hex_len, at + token_len, strlen(at + token_len) + 1);
+            memcpy(at, hex, hex_len);
+            at += hex_len;
+        } else {
+            at += token_len;
+        }
+    }
+}
+
+/* Straight 0xRRGGBBAA run colour from an NSVGpaint (nanosvg packs colours
+ * as 0xBBGGRR with alpha in the top byte), or 0 when the paint carries no
+ * explicit colour (none / currentColor sentinel -> theme colour). */
+static uint32_t paint_run_color(const NSVGpaint *p) {
+    if (p->type == NSVG_PAINT_COLOR) {
+        uint32_t c = p->color;
+        if ((c & 0xFFFFFFu) == LENSI_CURRENTCOLOR_SENTINEL_BGR)
+            return 0; /* theme colour */
+        uint32_t r = c & 0xFFu;
+        uint32_t g = (c >> 8) & 0xFFu;
+        uint32_t b = (c >> 16) & 0xFFu;
+        uint32_t a = (c >> 24) & 0xFFu;
+        return (r << 16) | (g << 8) | b | (a << 24);
+    }
+    if (p->type == NSVG_PAINT_LINEAR_GRADIENT || p->type == NSVG_PAINT_RADIAL_GRADIENT) {
+        /* Degrade a gradient to its first stop colour; nanosvg guarantees
+         * nstops >= 1 on parsed gradients. */
+        const NSVGgradient *g = p->gradient;
+        if (g && g->nstops > 0) {
+            uint32_t s = g->stops[0].color;
+            uint32_t r = s & 0xFFu;
+            uint32_t gg = (s >> 8) & 0xFFu;
+            uint32_t b = (s >> 16) & 0xFFu;
+            uint32_t a = (s >> 24) & 0xFFu;
+            return (r << 16) | (gg << 8) | b | (a << 24);
+        }
+    }
+    return 0; /* NSVG_PAINT_NONE / UNDEF: theme colour */
+}
+
 LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8) {
     if (!svg_utf8 || g_runtime_count >= LENSI_ICON_MAX_RUNTIME)
         return LENS_ICON_INVALID;
@@ -76,11 +146,13 @@ LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8) {
     if (bytes > LENSI_ICON_MAX_SVG_BYTES)
         return LENS_ICON_INVALID;
 
-    /* nsvgParse edits the input in place — hand it a private copy. */
+    /* nsvgParse edits the input in place — hand it a private copy, with
+     * currentColor already rewritten to the sentinel hex. */
     char *buf = (char *)malloc(bytes);
     if (!buf)
         return LENS_ICON_INVALID;
     memcpy(buf, svg_utf8, bytes);
+    rewrite_currentcolor(buf);
     NSVGimage *img = nsvgParse(buf, "px", 96.0f);
     free(buf);
     /* nanosvg returns an empty image (not NULL) for non-SVG input; both
@@ -90,29 +162,56 @@ LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8) {
         return LENS_ICON_INVALID;
     }
 
-    /* Pass 1: count the flattened verbs and pick the render mode. */
+    /* Pass 1: count the flattened verbs and the paint runs. A shape with
+     * both fill and stroke contributes one fill run (documented contract);
+     * a stroke-only shape contributes one stroke run. Shapes with no
+     * geometry after flattening contribute nothing. */
     uint32_t count = 0;
+    uint32_t run_count = 0;
     bool has_fill = false;
+    bool any_explicit_color = false;
     for (const NSVGshape *s = img->shapes; s; s = s->next) {
         if (!(s->flags & NSVG_FLAGS_VISIBLE))
             continue;
-        if (s->fill.type != NSVG_PAINT_NONE)
-            has_fill = true;
+        bool shape_filled = s->fill.type != NSVG_PAINT_NONE;
+        bool shape_stroked = s->stroke.type != NSVG_PAINT_NONE;
+        uint32_t shape_cmds = 0;
         for (const NSVGpath *p = s->paths; p; p = p->next) {
             if (p->npts < 4)
                 continue; /* degenerate: fewer points than one cubic segment */
             uint32_t segs = (uint32_t)(p->npts - 1) / 3u;
-            count += 1u + segs + (p->closed ? 1u : 0u);
-            if (count > LENSI_ICON_MAX_CMDS) {
+            shape_cmds += 1u + segs + (p->closed ? 1u : 0u);
+            if (shape_cmds > LENSI_ICON_MAX_CMDS) {
                 nsvgDelete(img);
                 return LENS_ICON_INVALID;
             }
+        }
+        if (shape_cmds == 0)
+            continue;
+        count += shape_cmds;
+        if (shape_filled || shape_stroked) {
+            if (run_count >= LENSI_ICON_MAX_RUNS) {
+                nsvgDelete(img);
+                return LENS_ICON_INVALID;
+            }
+            uint32_t color =
+                paint_run_color(shape_filled ? &s->fill : &s->stroke);
+            if (color != 0)
+                any_explicit_color = true;
+            if (shape_filled)
+                has_fill = true;
+            run_count++;
         }
     }
     if (count == 0) {
         nsvgDelete(img);
         return LENS_ICON_INVALID;
     }
+    /* No explicit colours anywhere: collapse to the built-in single-paint
+     * representation (runs == NULL), so replay and hashing behave exactly
+     * like a built-in icon. */
+    if (!any_explicit_color)
+        run_count = 0;
 
     /* Normalize into the shared 24x24 icon box: uniform scale from the
      * longer axis, centred on the shorter one. */
@@ -125,14 +224,30 @@ LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8) {
         nsvgDelete(img);
         return LENS_ICON_INVALID;
     }
+    lens_icon_run *runs = NULL;
+    if (run_count > 0) {
+        runs = (lens_icon_run *)malloc(run_count * sizeof *runs);
+        if (!runs) {
+            free(cmds);
+            nsvgDelete(img);
+            return LENS_ICON_INVALID;
+        }
+    }
 
     /* Pass 2: emit. nanosvg yields cubic segments only — lines arrive as
-     * degenerate cubics, which tessellate identically. */
+     * degenerate cubics, which tessellate identically. One run per shape
+     * brackets the shape's verbs; consecutive shapes with identical
+     * (color, fill) merge into a single run so the replay path flushes as
+     * few paints as possible. */
     uint32_t n = 0;
+    uint32_t nruns = 0;
     bool bad = false;
     for (const NSVGshape *s = img->shapes; s && !bad; s = s->next) {
         if (!(s->flags & NSVG_FLAGS_VISIBLE))
             continue;
+        bool shape_filled = s->fill.type != NSVG_PAINT_NONE;
+        bool shape_stroked = s->stroke.type != NSVG_PAINT_NONE;
+        uint32_t shape_first = n;
         for (const NSVGpath *p = s->paths; p && !bad; p = p->next) {
             if (p->npts < 4)
                 continue;
@@ -174,11 +289,35 @@ LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8) {
             if (p->closed)
                 cmds[n++] = (lens_icon_cmd){.type = 4};
         }
+        if (bad || n == shape_first)
+            continue; /* no geometry survived for this shape */
+        if (runs && (shape_filled || shape_stroked)) {
+            bool fill = shape_filled;
+            uint32_t color = paint_run_color(shape_filled ? &s->fill : &s->stroke);
+            if (nruns > 0 && runs[nruns - 1].color == color &&
+                runs[nruns - 1].fill == (uint8_t)fill &&
+                runs[nruns - 1].first_cmd + runs[nruns - 1].count == shape_first) {
+                /* Extend the previous run to cover this shape too. */
+                runs[nruns - 1].count = n - runs[nruns - 1].first_cmd;
+            } else {
+                runs[nruns++] = (lens_icon_run){
+                    .first_cmd = shape_first,
+                    .count = n - shape_first,
+                    .color = color,
+                    .fill = (uint8_t)fill,
+                };
+            }
+        }
     }
     nsvgDelete(img);
     if (bad || n == 0) {
         free(cmds);
+        free(runs);
         return LENS_ICON_INVALID;
+    }
+    if (nruns == 0) {
+        free(runs); /* every shape theme-coloured after all */
+        runs = NULL;
     }
 
     if (g_runtime_count == g_runtime_cap) {
@@ -187,13 +326,14 @@ LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8) {
             (lensi_runtime_icon *)realloc(g_runtime_icons, cap * sizeof *grown);
         if (!grown) {
             free(cmds);
+            free(runs);
             return LENS_ICON_INVALID;
         }
         g_runtime_icons = grown;
         g_runtime_cap = cap;
     }
     g_runtime_icons[g_runtime_count] = (lensi_runtime_icon){
-        .desc = {.cmds = cmds, .count = n},
+        .desc = {.cmds = cmds, .count = n, .runs = runs, .run_count = nruns},
         .mode = has_fill ? LENSI_ICON_RENDER_FILL : LENSI_ICON_RENDER_STROKE,
     };
     return (lens_icon_id)((int32_t)LENS_ICON_COUNT + (int32_t)g_runtime_count++);

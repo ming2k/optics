@@ -427,18 +427,18 @@ static void ptr_button(void *data, struct wl_pointer *p, uint32_t serial, uint32
  * wheel — only axis_source (FINGER/CONTINUOUS vs. WHEEL) distinguishes
  * them. iris_scroll_source_is_continuous() is the shared policy. The
  * source is delivered at the head of each frame group (see ptr_frame). */
+/* Scroll deltas funnel through iris_scroll_accum (platform_input.h):
+ * the platform-sign -> lens-sign inversion and the step/pixel channel
+ * split live in exactly one place, shared with the win32/cocoa backends
+ * and pinned by test_platform_input.c. A two-finger touchpad scroll
+ * arrives as plain wl_pointer.axis / value120 deltas, exactly like a
+ * notched wheel — only axis_source (FINGER/CONTINUOUS vs. WHEEL)
+ * distinguishes them; iris_scroll_source_is_continuous() is the shared
+ * policy. The source is delivered at the head of each frame group (see
+ * ptr_frame). */
 static void wp_axis_accum(wp_platform *pl, uint32_t axis, double delta, bool continuous) {
-    if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL) {
-        if (continuous)
-            pl->acc.scroll_px_y -= delta; /* px; sign as ptr_axis */
-        else
-            pl->acc.scroll_y -= delta; /* notches */
-    } else if (axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL) {
-        if (continuous)
-            pl->acc.scroll_px_x -= delta;
-        else
-            pl->acc.scroll_x -= delta;
-    }
+    iris_scroll_accum(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                      &pl->acc.scroll_px_x, axis, delta, continuous);
 }
 
 static void ptr_axis(void *data, struct wl_pointer *p, uint32_t t, uint32_t axis,

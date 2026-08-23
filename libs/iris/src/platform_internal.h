@@ -70,6 +70,15 @@
  *       the virtual-key code, Cocoa from charactersIgnoringModifiers.
  *       Deriving press and release from the same unshifted source also
  *       guarantees the two edges always carry the same key id.
+ *       Scope: ALL printable ASCII (0x20–0x7E) produces a key event on
+ *       every backend — letters, digits, punctuation and space alike —
+ *       so host shortcuts can match characters directly (e.g. 'z', ',',
+ *       ' '). The split is therefore: printable-ASCII key events carry
+ *       the ASCII codepoint as the key id; NON-ASCII printable input
+ *       (accented letters, CJK, other scripts) never produces a key event
+ *       on any backend — it arrives as committed text only (IME or
+ *       layout), which is the channel editors must consume for content.
+ *       Shortcut matching should never rely on non-ASCII key events.
  *   (c) lens_key_event.repeat marks synthesised auto-repeat presses:
  *       Wayland implements client-side repeat from the compositor's
  *       wl_keyboard.repeat_info (a timerfd in the event loop re-emits the

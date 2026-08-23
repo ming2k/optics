@@ -17,6 +17,11 @@ iris-sys = { path = "../iris-sys", version = "0.1.0" }
 # `lens` / `flux` are published.
 lens = { path = "../../../lens-rs/crates/lens", version = "0.1.0" }
 lens-sys = { path = "../../../lens-rs/crates/lens-sys", version = "0.1.0" }
+# flux directly: PaintHost::flux_canvas/flux_device hand back typed borrowed
+# handles, which requires the flux crate (not just its transitive presence
+# through lens). flux-rs depends on nothing from iris-rs, so this adds no
+# cycle — the same layout lens-rs and prism-rs already use.
+flux = { path = "../../../flux-rs/crates/flux", version = "0.1.1" }
 
 [[example]]
 name = "hello"

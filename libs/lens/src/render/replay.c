@@ -351,6 +351,72 @@ void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect cl
             float ox = r.x;
             float oy = r.y;
 
+            /* Paint-run path (runtime icons with explicit SVG colours):
+             * one flux paint per run; theme-coloured runs (color == 0)
+             * take the widget colour. The run table brackets the stream,
+             * so gaps between runs (if any) carry no ink. */
+            if (desc->runs && desc->run_count > 0) {
+                for (uint32_t run = 0; run < desc->run_count; run++) {
+                    const lens_icon_run *ri = &desc->runs[run];
+                    uint32_t end = ri->first_cmd + ri->count;
+                    if (end > desc->count)
+                        break; /* malformed run table: stop drawing */
+                    flux_path *p = NULL;
+                    if (flux_path_create(&p, &ui->arena) != FLUX_OK)
+                        break;
+                    for (uint32_t i = ri->first_cmd; i < end; i++) {
+                        const lens_icon_cmd *cmd = &desc->cmds[i];
+                        const float *pp = cmd->params;
+                        switch (cmd->type) {
+                        case 0:
+                            flux_path_move_to(p, pp[0] * s + ox, pp[1] * s + oy);
+                            break;
+                        case 1:
+                            flux_path_line_to(p, pp[0] * s + ox, pp[1] * s + oy);
+                            break;
+                        case 2:
+                            flux_path_cubic_to(p, pp[0] * s + ox, pp[1] * s + oy,
+                                               pp[2] * s + ox, pp[3] * s + oy, pp[4] * s + ox,
+                                               pp[5] * s + oy);
+                            break;
+                        case 3:
+                            flux_path_quad_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox,
+                                              pp[3] * s + oy);
+                            break;
+                        case 4:
+                            flux_path_close(p);
+                            break;
+                        case 5:
+                            flux_path_add_circle(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s);
+                            break;
+                        case 6: {
+                            flux_rect ir = {pp[0] * s + ox, pp[1] * s + oy, pp[2] * s,
+                                            pp[3] * s};
+                            flux_path_add_rect(p, ir);
+                            break;
+                        }
+                        }
+                    }
+                    /* Straight 0xRRGGBBAA run colour -> flux_color
+                     * 0xAARRGGBB premultiplied. */
+                    uint32_t rc = ri->color;
+                    uint8_t rr = (uint8_t)(rc >> 16), rg = (uint8_t)(rc >> 8),
+                            rb = (uint8_t)rc, ra = (uint8_t)(rc >> 24);
+                    flux_color color =
+                        rc == 0 ? c->color : flux_color_rgba_premul(rr, rg, rb, ra);
+                    flux_paint paint = flux_paint_solid(color);
+                    if (ri->fill) {
+                        flux_canvas_fill_path(canvas, p, &paint);
+                    } else {
+                        paint.stroke_width = c->width > 0 ? c->width : 2.0f * s;
+                        paint.cap = FLUX_CAP_ROUND;
+                        paint.join = FLUX_JOIN_ROUND;
+                        flux_canvas_stroke_path(canvas, p, &paint);
+                    }
+                }
+                break;
+            }
+
             flux_path *p = NULL;
             if (flux_path_create(&p, &ui->arena) != FLUX_OK)
                 break;

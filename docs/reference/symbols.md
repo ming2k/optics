@@ -71,6 +71,8 @@ or report through `flux_get_last_error` as noted.
 | `flux_image_height` | Returns the image height. |
 | `flux_image_format` | Returns the image's `flux_format`. |
 | `flux_image_update_region` | Synchronously uploads pixels into an in-bounds sub-region. The bindless handle and view stay valid across the update. |
+| `flux_image_update_region_strided` | `flux_image_update_region` for source rows wider than the region: row `i` of `data` starts at `i * row_bytes`. Rows are repacked into the packed staging copy internally. |
+| `flux_image_update_region_premultiply` | `flux_image_update_region_strided` taking straight (non-premultiplied) RGBA8; premultiplies during the upload with the exact `flux_color_rgba_premul` integer math. |
 | `flux_frame_prepare_image_target` | Transitions a new or sampleable render-target image to color-attachment layout for a caller-recorded pass. |
 | `flux_frame_finish_image_target` | Restores a caller-recorded image target to sampleable layout after its pass. |
 

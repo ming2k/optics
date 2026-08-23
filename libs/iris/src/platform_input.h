@@ -82,4 +82,41 @@ static inline bool iris_scroll_source_is_continuous(uint32_t source) {
            || source == 2; /* WL_POINTER_AXIS_SOURCE_CONTINUOUS */
 }
 
+/* ------------------------------------------------------------------ */
+/*  Scroll sign convention                                             */
+/* ------------------------------------------------------------------ */
+
+/* Direction contract for BOTH channels (ADR-0036 established the two
+ * channels; this documents the sign they share): positive = the user's
+ * gesture pushes content up (wheel rolled away from the palm / finger
+ * moved up); negative = content moves up under a down gesture. Lens
+ * consumers pin the same convention (tests/lens/test_scroll.c,
+ * test_slider.c): negative scroll_y scrolls the viewport DOWN the
+ * document.
+ *
+ * Platform events arrive with the OPPOSITE sign on every backend this
+ * wayland-first stack targets (wl_pointer.axis positive = physical
+ * wheel-down; WM_MOUSEWHEEL positive = wheel rotated away = content
+ * scrolls up — see each backend's caller for its exact note). The
+ * inversion happens exactly once, at the platform boundary, through this
+ * helper — never again downstream.
+ *
+ * `axis` is 0 for vertical, 1 for horizontal (the WL_POINTER_AXIS_*
+ * values; passed numerically so the header stays wayland-free). */
+static inline void iris_scroll_accum(double *steps_y, double *pixels_y, double *steps_x,
+                                     double *pixels_x, uint32_t axis, double delta,
+                                     bool continuous) {
+    if (axis == 0) { /* WL_POINTER_AXIS_VERTICAL_SCROLL */
+        if (continuous)
+            *pixels_y -= delta;
+        else
+            *steps_y -= delta;
+    } else { /* WL_POINTER_AXIS_HORIZONTAL_SCROLL */
+        if (continuous)
+            *pixels_x -= delta;
+        else
+            *steps_x -= delta;
+    }
+}
+
 #endif /* IRIS_PLATFORM_INPUT_H */

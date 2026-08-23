@@ -108,7 +108,13 @@ fn stats_method_signature_and_stat_layout() {
     }
     let _ = accepts;
     let stat = prism::BackdropStats::default();
-    assert_eq!(stat, prism::BackdropStats { mean_luminance: 0.0, high_freq_energy: 0.0 });
+    assert_eq!(
+        stat,
+        prism::BackdropStats {
+            mean_luminance: 0.0,
+            high_freq_energy: 0.0
+        }
+    );
 }
 
 #[test]

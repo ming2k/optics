@@ -331,8 +331,14 @@ flux_image *flux_image_retain(flux_image *im) {
     return im;
 }
 
-flux_result flux_image_update_region(flux_image *im, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                                     const void *data, size_t bytes) {
+/* Shared validation for the update-region family. On success writes the
+ * packed byte count the upload needs to `*packed_bytes` and returns FLUX_OK;
+ * on failure reports through FLUX_FAIL and returns the error code.
+ * `row_bytes` == 0 means the packed variant (stride derived from width);
+ * otherwise it is the source row pitch and must be at least width * bpp. */
+static flux_result update_region_validate(const flux_image *im, uint32_t x, uint32_t y, uint32_t w,
+                                           uint32_t h, const void *data, size_t row_bytes,
+                                           size_t bytes, size_t *packed_bytes) {
     if (!im || !data)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (w == 0 || h == 0)
@@ -346,9 +352,15 @@ flux_result flux_image_update_region(flux_image *im, uint32_t x, uint32_t y, uin
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "image has no known bytes-per-pixel");
         return FLUX_ERROR_UNSUPPORTED;
     }
-    size_t needed = (size_t)w * h * bpp;
+    size_t row_min = (size_t)w * bpp;
+    size_t stride = row_bytes ? row_bytes : row_min;
+    if (stride < row_min) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "update row_bytes is smaller than width * bpp");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    size_t needed = (h - 1) * stride + row_min;
     if (bytes < needed) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "update data too small for w*h*bpp");
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "update data too small for the row stride");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
     /* The upload is recorded with old_layout = SHADER_READ_ONLY_OPTIMAL
@@ -361,9 +373,93 @@ flux_result flux_image_update_region(flux_image *im, uint32_t x, uint32_t y, uin
                   "image update requires SHADER_READ_ONLY_OPTIMAL current layout");
         return FLUX_ERROR_INVALID_STATE;
     }
+    *packed_bytes = row_min * h;
+    return FLUX_OK;
+}
+
+flux_result flux_image_update_region(flux_image *im, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                                     const void *data, size_t bytes) {
+    size_t needed;
+    flux_result v = update_region_validate(im, x, y, w, h, data, 0, bytes, &needed);
+    if (v != FLUX_OK)
+        return v;
 
     return flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, data, needed);
+}
+
+flux_result flux_image_update_region_strided(flux_image *im, uint32_t x, uint32_t y, uint32_t w,
+                                             uint32_t h, const void *data, size_t row_bytes,
+                                             size_t bytes) {
+    size_t packed;
+    flux_result v = update_region_validate(im, x, y, w, h, data, row_bytes, bytes, &packed);
+    if (v != FLUX_OK)
+        return v;
+
+    size_t row_min = (size_t)w * bytes_per_pixel(im->format);
+    if (row_bytes == 0 || row_bytes == row_min)
+        return flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
+                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, data, packed);
+
+    /* Strided source: repack rows into a scratch buffer, then upload packed.
+     * The scratch is sized to the tightly packed extent (not the strided
+     * span) so the staging copy stays minimal. */
+    void *scratch = flux_internal_alloc(im->device, packed);
+    if (!scratch)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    const uint8_t *src = data;
+    uint8_t *dst = scratch;
+    for (uint32_t row = 0; row < h; ++row) {
+        memcpy(dst, src, row_min);
+        src += row_bytes;
+        dst += row_min;
+    }
+    flux_result r = flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
+                                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, scratch,
+                                            packed);
+    flux_internal_free(im->device, scratch);
+    return r;
+}
+
+flux_result flux_image_update_region_premultiply(flux_image *im, uint32_t x, uint32_t y,
+                                                 uint32_t w, uint32_t h, const void *data,
+                                                 size_t row_bytes, size_t bytes) {
+    if (im && im->format != FLUX_FORMAT_RGBA8_UNORM) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "premultiply upload requires FLUX_FORMAT_RGBA8_UNORM");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    size_t packed;
+    flux_result v = update_region_validate(im, x, y, w, h, data, row_bytes, bytes, &packed);
+    if (v != FLUX_OK)
+        return v;
+
+    size_t stride = row_bytes ? row_bytes : (size_t)w * 4u;
+    uint8_t *scratch = flux_internal_alloc(im->device, packed);
+    if (!scratch)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    const uint8_t *src = data;
+    uint8_t *dst = scratch;
+    for (uint32_t row = 0; row < h; ++row) {
+        for (uint32_t px = 0; px < w; ++px) {
+            const uint8_t *s = src + (size_t)px * 4u;
+            uint8_t a = s[3];
+            if (a == 255u || a == 0u) {
+                memcpy(dst, s, 4); /* fast paths, identical to flux_color_rgba_premul */
+            } else {
+                dst[0] = (uint8_t)((s[0] * a + 127u) / 255u);
+                dst[1] = (uint8_t)((s[1] * a + 127u) / 255u);
+                dst[2] = (uint8_t)((s[2] * a + 127u) / 255u);
+                dst[3] = a;
+            }
+            dst += 4u;
+        }
+        src += stride;
+    }
+    flux_result r = flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
+                                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, scratch,
+                                            packed);
+    flux_internal_free(im->device, scratch);
+    return r;
 }
 
 VkImage flux_image_vk_image(const flux_image *im) {

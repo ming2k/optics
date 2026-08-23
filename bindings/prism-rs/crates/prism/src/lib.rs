@@ -203,8 +203,9 @@ pub struct BackdropStats {
 // The stats readback memcpy's the C array into `&mut [BackdropStats]`, so
 // the two types must stay layout-identical (bindgen's own layout tests pin
 // the C side).
-const _: () =
-    assert!(std::mem::size_of::<BackdropStats>() == std::mem::size_of::<sys::prism_backdrop_stat>());
+const _: () = assert!(
+    std::mem::size_of::<BackdropStats>() == std::mem::size_of::<sys::prism_backdrop_stat>()
+);
 const _: () = assert!(
     std::mem::align_of::<BackdropStats>() == std::mem::align_of::<sys::prism_backdrop_stat>()
 );
