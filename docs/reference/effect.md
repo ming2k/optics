@@ -87,6 +87,72 @@ light.
 - The effect emits a `COMPUTE_SHADER STORAGE_WRITE → COMPUTE_SHADER | FRAGMENT_SHADER SAMPLED_READ | STORAGE_READ` image barrier on the output before returning. Callers can sample the output in any subsequent shader stage without additional synchronisation.
 - The effect does **not** transition the input image. The input must already be in `SHADER_READ_ONLY_OPTIMAL` or `GENERAL` and its prior writes must be visible to compute reads.
 
+## `flux_effect_shadow`
+
+Drop shadow from a shape mask (ADR-0074): the input's alpha channel is the
+shape coverage; the output is a premultiplied tinted shadow (`rgb = tint * a`)
+of the same extent. Geometry-neutral — building the mask is the caller's job
+(the canvas already draws rounded rects; prism owns its own SDF path).
+
+```c
+FLUX_NODISCARD FLUX_API flux_result flux_effect_shadow(
+    VkCommandBuffer cmd,
+    const flux_effect_shadow_desc *desc,
+    flux_image **out);
+```
+
+### `flux_effect_shadow_desc`
+
+| Field       | Type             | Required | Notes                                                                 |
+|-------------|------------------|----------|-----------------------------------------------------------------------|
+| `type`      | `flux_struct_type` | yes    | Must be `FLUX_TYPE_EFFECT_SHADOW_DESC`. `FLUX_EFFECT_SHADOW_DESC_INIT` sets it. |
+| `next`      | `const void *`   | no       | Must be `NULL` (no chained extensions yet).                           |
+| `input`     | `flux_image *`   | yes      | Mask image; same format rules as blur. Only the alpha channel is read. |
+| `blur`      | `float`          | yes      | Gaussian sigma in pixels, clamped to `[0, FLUX_EFFECT_SHADOW_BLUR_MAX]`. |
+| `offset_x`  | `float`          | yes      | Shadow offset in pixels; `+x` right. Sampled at `p - offset`.        |
+| `offset_y`  | `float`          | yes      | Shadow offset in pixels; `+y` down.                                  |
+| `tint_red` / `tint_green` / `tint_blue` | `float` | yes | Straight (unpremultiplied) colour in the input's colour space. |
+| `alpha`     | `float`          | yes      | Shadow opacity, clamped to `[0, 1]`.                                  |
+
+All float parameters must be finite; non-finite values are
+`FLUX_ERROR_INVALID_ARGUMENT`.
+
+### Returns
+
+| Code                          | Meaning                                                                          |
+|-------------------------------|----------------------------------------------------------------------------------|
+| `FLUX_OK`                     | Output image written to `*out`. Three dispatches recorded into `cmd`.            |
+| `FLUX_ERROR_INVALID_ARGUMENT` | Null `cmd` / `desc` / `out`, wrong `desc->type`, non-null `next`, null `desc->input`, non-finite parameters, or input lacks a sampled bindless handle. |
+| `FLUX_ERROR_UNSUPPORTED`      | Input format is not RGBA8/BGRA8_UNORM or RGBA16_SFLOAT, or the device lacks rgba16f storage for a 16F input. |
+| `FLUX_ERROR_OUT_OF_MEMORY`    | Transient image allocation failed.                                               |
+| `FLUX_ERROR_BACKEND_FAILURE`  | Compute pipeline or image creation rejected by the driver.                        |
+
+### Constants
+
+| Symbol                          | Value | Meaning                                        |
+|---------------------------------|-------|------------------------------------------------|
+| `FLUX_TYPE_EFFECT_SHADOW_DESC`  | 40    | Descriptor tag; appended after the reserved paint block (35–39). |
+| `FLUX_EFFECT_SHADOW_BLUR_MAX`   | 64.0f | Upper clamp on `desc->blur`.                   |
+
+### Behaviour
+
+| `blur` | Effect                                                                 |
+|--------|------------------------------------------------------------------------|
+| `0.0`  | Hard offset copy of the mask alpha, tinted and premultiplied.           |
+| `> 0`  | Separable two-pass Gaussian over the mask (radius `ceil(3 * blur)`), then a combine pass that samples the blurred mask at `p - offset`, tints, and premultiplies. |
+
+Three passes of one shader (`mode` 0/1/2) over two leased intermediates and
+one leased output. Dispatch shape is fixed per extent: sigma, offset, tint,
+and alpha vary per frame without pipeline or allocation churn beyond the
+transient pool's normal lease path (ADR-0074 animation safety).
+
+### Synchronisation
+
+- Same barrier contract as `flux_effect_blur`: the output carries a
+  compute-write → read barrier; the input must already be sampleable.
+- The leased intermediates are covered by the same barriers inside the
+  recorded command buffer; callers never see them.
+
 ## Reusable frame-slot blur
 
 `flux_blur_filter` is the fixed-cost animated compositor path. It records a

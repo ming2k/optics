@@ -13,6 +13,44 @@ either.
 
 ## [Unreleased]
 
+### Added — flux (effect module)
+
+- **`flux_effect_shadow`: drop shadows as a first-class image operator**
+  (ADR-0074's first intake). A shape mask in (the input's alpha channel),
+  a premultiplied tinted shadow out: two separable Gaussian passes over
+  the mask (the same kernel as `flux_effect_blur`, `blur` clamped to
+  `[0, FLUX_EFFECT_SHADOW_BLUR_MAX]`), then a combine pass sampling the
+  blurred mask at `p - offset`, applying tint, opacity, and
+  premultiplication in one shader (`mode` 0/1/2). Geometry-neutral per
+  ADR-0047: shape geometry arrives only through the mask; the canvas
+  already draws rounded rects and prism owns its own SDF path.
+  Animation-safe per ADR-0074: fixed dispatch shape per extent — blur,
+  offset, tint, and alpha vary per frame without pipeline churn, leasing
+  intermediates through the existing transient pool with reset epochs.
+  `FLUX_TYPE_EFFECT_SHADOW_DESC = 40` appended after the reserved paint
+  block (35–39) with a new ABI drift guard. Rust binding:
+  `ShadowParams` + `effect_shadow` + `EffectImage` (with `promote`) in
+  `flux-rs`. GPU coverage in `tests/flux/integration/test_effect_shadow.c`
+  (35 checks: validation, identity copy, exact 6 px offset, analytic
+  σ=4 Gaussian centre, alpha 0, lease reuse).
+
+### Fixed — iris (Wayland)
+
+- **Continuous (touchpad) scroll now reaches `lens_input.scroll_pixels_*` on
+  Wayland.** The backend folded *all* `wl_pointer.axis` / `axis_value120`
+  deltas — notched wheels *and* two-finger touchpad scrolls — into the
+  wheel-step channel (`scroll_x/y`) and left the continuous pixel channel
+  (`scroll_pixels_x/y`, ADR-0036) permanently zero. Widgets that read both
+  channels (scroll views, sliders) still worked, but any host gesture keyed
+  to the pixel channel alone (e.g. aphrodite's cursor-anchored wheel zoom)
+  was dead code on the only platform it targeted. `axis_source` is now
+  recorded per frame group (it precedes its axis events) and
+  FINGER/CONTINUOUS sources accumulate — inverted, like the wheel channel —
+  into `scroll_pixels_*`; `drain_input` forwards and clears them. The
+  routing policy lives in `platform_input.h`
+  (`iris_scroll_source_is_continuous`) so every backend decides it the same
+  way, with a headless pin in `tests/iris/test_platform_input.c`.
+
 ## [0.0.25] - 2026-08-22
 
 ### Changed — compatibility machinery (policy now enforced)

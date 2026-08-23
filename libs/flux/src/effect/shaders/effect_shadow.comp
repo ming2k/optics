@@ -1,0 +1,126 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+/*
+ * Drop shadow for a caller-supplied shape mask. Host code records three
+ * passes of this one shader in order, selected via `mode`:
+ *
+ *   mode 0 — horizontal Gaussian over the mask alpha, into ping target
+ *   mode 1 — vertical Gaussian over the ping target, into pong target
+ *   mode 2 — combine: sample the blurred mask at (p - offset), tint,
+ *            premultiply, store the final shadow image
+ *
+ * Design notes (ADR-0074):
+ *   - Fixed dispatch shape: workgroup count never changes with sigma,
+ *     only the loop bound (radius) does. An animated compositor driving
+ *     shadow_blur per frame cannot create an unbounded dispatch.
+ *   - Product-neutral: shape geometry arrives as a mask image, never as
+ *     rectangle/rounded-rect/SDF parameters. Building the mask is the
+ *     caller's job (the canvas already draws rounded rects; prism owns
+ *     its own SDF path).
+ *
+ * Bindless layout (matches the device-wide heap):
+ *   set 0, binding 0 — SAMPLED_IMAGE[]
+ *   set 0, binding 1 — STORAGE_IMAGE[]
+ *   set 0, binding 2 — SAMPLER[]
+ */
+
+layout(set = 0, binding = 0) uniform texture2D u_sampled[];
+/* Storage qualifier must match the intermediate format (ADR-0069). */
+#ifdef EFFECT_STORAGE_RGBA16F
+layout(set = 0, binding = 1, rgba16f) uniform image2D u_storage[];
+#else
+layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+#endif
+layout(set = 0, binding = 2) uniform sampler   u_samplers[];
+
+layout(push_constant) uniform PC {
+    uint  in_handle;      /* sampled: mask (pass 0) or ping-pong (1/2)       */
+    uint  sampler_handle; /* sampler bindless slot                           */
+    uint  out_handle;     /* storage: ping-pong (0/1) or final output (2)    */
+    uint  width;          /* extent in pixels                                */
+    uint  height;         /* extent in pixels                                */
+    int   radius;         /* kernel half-width in pixels                     */
+    float sigma;          /* Gaussian sigma in pixels                        */
+    uint  mode;           /* 0 = horizontal, 1 = vertical, 2 = combine       */
+    float offset_x;       /* shadow offset, pixels, +x right, +y down        */
+    float offset_y;       /* shadow offset, pixels                           */
+    float tint_r;         /* shadow colour, straight (unpremultiplied)       */
+    float tint_g;
+    float tint_b;
+    float alpha;          /* shadow opacity 0..1, applied at combine         */
+} pc;
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+/* Gaussian weights: positive half only, cached per workgroup.
+ * EFFECT_SHADOW_RADIUS_MAX is 64 on the host. */
+shared float kernel_weights[65];
+
+void main()
+{
+    if (pc.mode <= 1u) {
+        /* Gaussian pass. Weight cache mirrors effect_blur.comp. */
+        uint local_index = gl_LocalInvocationIndex;
+        if (local_index <= uint(pc.radius)) {
+            float i = float(local_index);
+            float two_sigma_sq = 2.0 * pc.sigma * pc.sigma;
+            kernel_weights[local_index] = exp(-(i * i) / two_sigma_sq);
+            if (pc.radius == 0) kernel_weights[0] = 1.0;
+        }
+        barrier();
+
+        uvec2 p = gl_GlobalInvocationID.xy;
+        if (p.x >= pc.width || p.y >= pc.height) return;
+
+        uint ih = pc.in_handle      & 0x0FFFFFFFu;
+        uint sh = pc.sampler_handle & 0x0FFFFFFFu;
+        uint oh = pc.out_handle     & 0x0FFFFFFFu;
+        vec2 inv_size = 1.0 / vec2(pc.width, pc.height);
+        vec2 base_uv  = (vec2(p) + 0.5) * inv_size;
+
+        /* radius==0 collapses to a copy (matches blur's sigma-0 no-op). */
+        if (pc.radius == 0) {
+            vec4 c = texture(
+                sampler2D(u_sampled[nonuniformEXT(ih)],
+                          u_samplers[nonuniformEXT(sh)]), base_uv);
+            imageStore(u_storage[nonuniformEXT(oh)], ivec2(p), c);
+            return;
+        }
+
+        float weight_sum = 0.0;
+        vec4  colour_sum = vec4(0.0);
+        for (int i = -pc.radius; i <= pc.radius; ++i) {
+            vec2 off = (pc.mode == 0u) ? vec2(float(i), 0.0) : vec2(0.0, float(i));
+            vec2 uv  = base_uv + off * inv_size;
+            float w  = kernel_weights[abs(i)];
+            vec4  c  = texture(
+                sampler2D(u_sampled[nonuniformEXT(ih)],
+                          u_samplers[nonuniformEXT(sh)]), uv);
+            colour_sum += c * w;
+            weight_sum += w;
+        }
+        vec4 result = colour_sum / weight_sum;
+        imageStore(u_storage[nonuniformEXT(oh)], ivec2(p), result);
+        return;
+    }
+
+    /* mode 2: combine — sample the blurred mask at (p - offset), tint,
+     * premultiply, store the final shadow image. */
+    uvec2 p = gl_GlobalInvocationID.xy;
+    if (p.x >= pc.width || p.y >= pc.height) return;
+
+    uint ih = pc.in_handle      & 0x0FFFFFFFu;
+    uint sh = pc.sampler_handle & 0x0FFFFFFFu;
+    uint oh = pc.out_handle     & 0x0FFFFFFFu;
+    vec2 inv_size = 1.0 / vec2(pc.width, pc.height);
+    vec2 base_uv  = (vec2(p) + 0.5) * inv_size;
+    vec2 offset_uv = vec2(pc.offset_x, pc.offset_y) * inv_size;
+
+    float m = texture(
+        sampler2D(u_sampled[nonuniformEXT(ih)],
+                  u_samplers[nonuniformEXT(sh)]), base_uv - offset_uv).a;
+    vec4 tinted = vec4(pc.tint_r, pc.tint_g, pc.tint_b, m * pc.alpha);
+    imageStore(u_storage[nonuniformEXT(oh)], ivec2(p),
+              vec4(tinted.rgb * tinted.a, tinted.a));
+}

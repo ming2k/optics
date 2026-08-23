@@ -224,6 +224,13 @@ if opt_effect
   )
   test('effect_blur', test_effect_blur, suite : 'integration')
 
+  # ADR-0074: drop-shadow operator.
+  test_effect_shadow = executable('test_effect_shadow',
+    'test_effect_shadow.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('effect_shadow', test_effect_shadow, suite : 'integration')
+
   # Render-target capture (ADR-0017): capture -> blur -> composite.
   test_canvas_target = executable('test_canvas_target',
     'test_canvas_target.c',

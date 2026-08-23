@@ -21,6 +21,13 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `ShadowParams`, `effect_shadow`, and `EffectImage` wrap the new
+  `flux_effect_shadow` operator (ADR-0074): drop shadow from a shape
+  mask's alpha — Gaussian `blur`, pixel `offset_x`/`offset_y`, straight
+  `tint_*`, and `alpha` opacity — producing a leased, premultiplied
+  transient output with `promote()` for a caller-owned copy. Mirrors the
+  C descriptor 1:1; compile-level test pins the field mapping and the
+  56-byte ABI size.
 - `SurfaceColorOptions::offscreen_formats` constrains an offscreen
   surface's pixel container (most preferred first), and offscreen color
   spaces now negotiate deep containers by transfer function — RGB10A2 or

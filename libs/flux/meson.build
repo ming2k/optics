@@ -283,12 +283,30 @@ if opt_effect
                '-I' + meson.current_source_dir() / 'src/canvas/shaders',
                '@INPUT@', '-o', '@OUTPUT@'],
   )
+  # ADR-0074: drop-shadow operator (mask in, tinted premultiplied shadow out).
+  effect_shadow_comp_spv = custom_target('effect_shadow.comp.spv',
+    input   : 'src/effect/shaders/effect_shadow.comp',
+    output  : 'effect_shadow.comp.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+               '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  effect_shadow_16f_comp_spv = custom_target('effect_shadow_16f.comp.spv',
+    input   : 'src/effect/shaders/effect_shadow.comp',
+    output  : 'effect_shadow_16f.comp.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3', '-DEFFECT_STORAGE_RGBA16F',
+               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+               '@INPUT@', '-o', '@OUTPUT@'],
+  )
   flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
-                        effect_blur_16f_comp_spv, effect_backdrop_16f_comp_spv]
+                        effect_blur_16f_comp_spv, effect_backdrop_16f_comp_spv,
+                        effect_shadow_comp_spv, effect_shadow_16f_comp_spv]
   flux_shader_spvs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
-                       effect_blur_16f_comp_spv, effect_backdrop_16f_comp_spv]
+                       effect_blur_16f_comp_spv, effect_backdrop_16f_comp_spv,
+                       effect_shadow_comp_spv, effect_shadow_16f_comp_spv]
   flux_shader_names += ['effect_blur_spv', 'effect_backdrop_spv',
-                        'effect_blur_16f_spv', 'effect_backdrop_16f_spv']
+                        'effect_blur_16f_spv', 'effect_backdrop_16f_spv',
+                        'effect_shadow_spv', 'effect_shadow_16f_spv']
 endif
 
 # Generated shader headers for the no-#embed fallback (MSVC cl / Apple

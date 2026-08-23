@@ -460,6 +460,7 @@ transient-output lifetime rules.
 | Symbol | Description |
 |--------|-------------|
 | `flux_effect_blur` | Records a separable two-pass Gaussian blur into `cmd`. Sigma is clamped to `[0, FLUX_EFFECT_BLUR_SIGMA_MAX]`; sigma 0 degenerates to a copy. The output image is effect-owned and transient. |
+| `flux_effect_shadow` | Records a drop shadow from a shape mask (ADR-0074): two-pass Gaussian over the mask alpha, then a tint + offset + premultiply combine. Output is a premultiplied transient image of the input's extent. |
 | `flux_blur_filter_create` | Creates a reusable fixed-cost Dual-Kawase blur with pyramid/output images isolated per frame-in-flight slot. |
 | `flux_blur_filter_retain` | Increments the reusable blur refcount. |
 | `flux_blur_filter_release` | Decrements the reusable blur refcount and destroys it at zero. |

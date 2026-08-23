@@ -1,6 +1,7 @@
 # ADR-0074: Effect intake path — new visual operators and where choreography never enters
 
-- Status: Proposed
+- Status: Accepted (with `flux_effect_shadow`, the first operator taken
+  through this path)
 - Date: 2026-08-22
 - Scope: flux `effect` module, prism; consumes the placement rule the Aegis
   compositor records as its ADR-0139
@@ -97,8 +98,8 @@ operator and what it will permanently refuse.
 - Bindings, reference docs, and tests grow with every operator — the
   checklist makes that cost visible at proposal time rather than after
   review.
-- This ADR is recorded as Proposed until the first operator lands under
-  it; acceptance rides with that implementation.
+- This ADR was recorded as Proposed until the first operator landed under
+  it; acceptance rode with `flux_effect_shadow` (August 2026).
 
 ## References
 

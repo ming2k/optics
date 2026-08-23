@@ -3454,6 +3454,109 @@ impl BlurredImage<'_> {
     }
 }
 
+/// Parameters of the [`effect_shadow`] drop-shadow operator (ADR-0074):
+/// a shape mask in, a premultiplied tinted shadow out. The mask's alpha
+/// channel is the shape coverage; a canvas capture of an opaque shape on
+/// transparent is the typical source.
+#[derive(Debug, Clone, Copy)]
+pub struct ShadowParams {
+    /// Gaussian sigma in pixels, clamped to `[0, 64]`. `0.0` is a hard
+    /// (unblurred) offset copy of the mask.
+    pub blur: f32,
+    /// Shadow offset in input pixels: `+x` right, `+y` down.
+    pub offset_x: f32,
+    pub offset_y: f32,
+    /// Straight (unpremultiplied) tint colour in the input's colour space.
+    pub tint_red: f32,
+    pub tint_green: f32,
+    pub tint_blue: f32,
+    /// Shadow opacity, clamped to `[0, 1]`.
+    pub alpha: f32,
+}
+
+impl Default for ShadowParams {
+    fn default() -> Self {
+        ShadowParams {
+            blur: 0.0,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            tint_red: 0.0,
+            tint_green: 0.0,
+            tint_blue: 0.0,
+            alpha: 1.0,
+        }
+    }
+}
+
+impl ShadowParams {
+    fn into_desc(self, input: &Image) -> sys::flux_effect_shadow_desc {
+        // Keep the struct update even though all current fields are set:
+        // it future-proofs against flux_effect_shadow_desc growing fields.
+        #[allow(clippy::needless_update)]
+        let desc = sys::flux_effect_shadow_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_EFFECT_SHADOW_DESC,
+            next: std::ptr::null(),
+            input: input.raw,
+            blur: self.blur,
+            offset_x: self.offset_x,
+            offset_y: self.offset_y,
+            tint_red: self.tint_red,
+            tint_green: self.tint_green,
+            tint_blue: self.tint_blue,
+            alpha: self.alpha,
+            ..Default::default()
+        };
+        desc
+    }
+}
+
+/// Record the drop-shadow operator into `cmd` (ADR-0074). The output is
+/// leased from the device's transient effect pool and stays valid until
+/// the next `effect_reset` on the same device — mirror the C lifetime
+/// contract of `flux_effect_shadow` (see `docs/reference/effect.md`).
+///
+/// # Safety
+///
+/// `cmd` must be a valid, recording `VkCommandBuffer` on the device that
+/// created `input`. The caller must serialize effect calls per device.
+pub unsafe fn effect_shadow(
+    cmd: sys::VkCommandBuffer,
+    input: &Image,
+    params: ShadowParams,
+) -> Result<EffectImage, Error> {
+    let desc = params.into_desc(input);
+    let mut raw: *mut sys::flux_image = std::ptr::null_mut();
+    // SAFETY: caller guarantees `cmd` is a valid recording command buffer on
+    // input's device and effect calls are serialized per device.
+    Error::check(unsafe { sys::flux_effect_shadow(cmd, &desc, &mut raw) })?;
+    Ok(EffectImage { raw })
+}
+
+/// Transient effect output (from [`effect_shadow`]). Borrowed from the
+/// per-device pool: valid until `effect_reset` on that device. It is not
+/// released on drop — the pool owns it for the whole lease epoch.
+pub struct EffectImage {
+    raw: *mut sys::flux_image,
+}
+
+impl EffectImage {
+    /// Raw `flux_image` pointer of the leased effect output.
+    pub fn as_raw(&self) -> *mut sys::flux_image {
+        self.raw
+    }
+
+    /// Promote the leased output into a caller-owned, refcounted image
+    /// unaffected by `effect_reset`. Synchronous: submits a one-shot
+    /// command buffer and waits. The caller must have synchronised any
+    /// prior submission that wrote this image.
+    pub fn promote(&self) -> Result<Image, Error> {
+        let mut out: *mut sys::flux_image = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_effect_promote(self.raw, &mut out) })?;
+        Ok(Image { raw: out })
+    }
+}
+
+
 /// Whether `device` supports dma-buf import (was created with the required
 /// Vulkan extensions). A compositor checks this before advertising
 /// `zwp_linux_dmabuf_v1` to clients.
@@ -3519,6 +3622,40 @@ pub const DMABUF_SYNC_DEVICE_EXTENSIONS: [&std::ffi::CStr; 1] = [c"VK_KHR_extern
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shadow_params_map_to_descriptor_fields() {
+        let params = ShadowParams {
+            blur: 8.0,
+            offset_x: 3.0,
+            offset_y: 5.0,
+            tint_red: 0.1,
+            tint_green: 0.2,
+            tint_blue: 0.3,
+            alpha: 0.5,
+        };
+        let raw = std::mem::MaybeUninit::<sys::flux_image>::zeroed();
+        // SAFETY: flux_image is an opaque type; a zeroed value is never
+        // dereferenced, only its address is carried in the descriptor.
+        let image = unsafe { raw.assume_init() };
+        let image_ref = Image {
+            raw: &image as *const _ as *mut _,
+        };
+        let desc = params.into_desc(&image_ref);
+        assert_eq!(
+            desc.type_,
+            sys::flux_struct_type::FLUX_TYPE_EFFECT_SHADOW_DESC
+        );
+        assert!(desc.next.is_null());
+        assert_eq!(desc.blur, 8.0);
+        assert_eq!(desc.offset_x, 3.0);
+        assert_eq!(desc.offset_y, 5.0);
+        assert_eq!(desc.tint_red, 0.1);
+        assert_eq!(desc.tint_green, 0.2);
+        assert_eq!(desc.tint_blue, 0.3);
+        assert_eq!(desc.alpha, 0.5);
+        assert_eq!(core::mem::size_of::<sys::flux_effect_shadow_desc>(), 56);
+    }
 
     #[test]
     fn drm_node_maps_to_strict_device_extension() {

@@ -17,7 +17,7 @@ lookup surfaces for this checkout.
 | `<flux/dmabuf.h>`     | Iff `-Dcanvas=true`  | Linux dma-buf import into sampled `flux_image` objects.            |
 | `<flux/scene.h>`      | Iff `-Dscene=true`   | 3D primitives: camera, mesh, material, draw.                       |
 | `<flux/compute.h>`    | Iff `-Dcompute=true` | Compute pipeline + dispatch.                                       |
-| `<flux/effect.h>`     | Iff `-Deffect=true`  | Image-domain effects (blur). See [effect reference](effect.md).    |
+| `<flux/effect.h>`     | Iff `-Deffect=true`  | Image-domain effects (blur, shadow). See [effect reference](effect.md). |
 | `<flux-text/text.h>`  | Iff `-Dtext=true`    | Sibling library: shaping, glyph atlas, text measure/draw. See [symbols](symbols.md#flux-texth-sibling-library). |
 | `<flux-scene-graph/scene-graph.h>` | Iff `-Dscene-graph=true` | Sibling library: glTF/GLB loading, animation, materials. |
 

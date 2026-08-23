@@ -1,6 +1,5 @@
 /*
- * flux/effect.h — image-domain effects (blur, shadow, tone-map).
- *
+ * flux/effect.h — image-domain effects (blur, shadow, tone-map). *
  * Effects read flux_image inputs, write a flux_image output, and
  * are recordable into any VkCommandBuffer. Inside a frame, pull
  * the cmd buffer from flux_frame_vk_command_buffer(); outside a
@@ -129,6 +128,69 @@ FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_apply(flux_blur_filter *fil
                                                            flux_frame *frame,
                                                            const flux_effect_blur_desc *desc,
                                                            flux_image **out);
+
+/* ------------------------------------------------------------------ */
+/*  Drop shadow                                                       */
+/* ------------------------------------------------------------------ */
+
+/* Drop shadow from a shape mask. The input is a mask image: an RGBA8/
+ * BGRA8 image whose alpha channel is the shape coverage (a colour
+ * image works — only alpha is read; an opaque-on-transparent canvas
+ * capture is the typical source), or an RGBA16_SFLOAT image (ADR-0069
+ * path, requires rgba16f storage support). The output is a
+ * premultiplied tinted shadow of the same extent: rgb = tint * a.
+ *
+ * The operator is geometry-neutral (ADR-0074): shape geometry arrives
+ * only through the mask. Building the mask is the caller's job — the
+ * canvas already draws rounded rects, and prism owns its own SDF path.
+ *
+ * The blur is the same separable two-pass Gaussian as flux_effect_blur;
+ * FLUX_EFFECT_SHADOW_BLUR_MAX bounds it. A sigma of 0 produces a hard
+ * (unblurred) offset copy of the mask. `offset_x`/`offset_y` are in
+ * input pixels, +x right, +y down; the shadow is sampled at
+ * (p - offset), so positive y moves the shadow down. `tint_red`/
+ * `tint_green`/`tint_blue` are straight (unpremultiplied) colour in the
+ * input's space; `alpha` scales coverage and is clamped to [0,1].
+ *
+ * Animation safety (ADR-0074): dispatch shape is fixed per extent;
+ * sigma/offset/tint/alpha vary per frame without pipeline or
+ * allocation churn beyond the transient pool's normal lease path.
+ *
+ * Errors:
+ *   FLUX_ERROR_INVALID_ARGUMENT — null cmd/desc/out, wrong type, null
+ *     or handle-less input, or non-finite offset/tint/alpha/blur.
+ *   FLUX_ERROR_OUT_OF_MEMORY    — transient pool exhausted.
+ *   FLUX_ERROR_BACKEND_FAILURE  — pipeline or image creation failed.
+ *   FLUX_ERROR_UNSUPPORTED      — 16F input on a device without
+ *     rgba16f storage, or an unsupported input format. */
+#define FLUX_EFFECT_SHADOW_BLUR_MAX 64.0f
+
+typedef struct flux_effect_shadow_desc {
+    flux_struct_type type; /* FLUX_TYPE_EFFECT_SHADOW_DESC */
+    const void *next;      /* must be NULL (no extensions yet) */
+    flux_image *input;     /* borrowed, not retained; safe to release right
+                            * after the call — destruction defers through the
+                            * device retire queue past the recorded dispatch */
+    float blur;            /* Gaussian sigma in pixels, [0,
+                            * FLUX_EFFECT_SHADOW_BLUR_MAX] */
+    float offset_x;        /* shadow offset, pixels, +x right */
+    float offset_y;        /* shadow offset, pixels, +y down */
+    float tint_red;        /* straight colour, input colour space */
+    float tint_green;
+    float tint_blue;
+    float alpha;           /* shadow opacity, clamped to [0,1] */
+} flux_effect_shadow_desc;
+
+#define FLUX_EFFECT_SHADOW_DESC_INIT {.type = FLUX_TYPE_EFFECT_SHADOW_DESC}
+
+/* Record the shadow into `cmd`. The pipeline is created lazily on first
+ * use per device and cached for the device's lifetime. Output follows
+ * the input's storage class (RGBA8_UNORM or RGBA16_SFLOAT) at the
+ * input's extent, leased from the per-device transient pool like any
+ * other effect output (see "Output ownership and lifetime" above). */
+FLUX_NODISCARD FLUX_API flux_result flux_effect_shadow(VkCommandBuffer cmd,
+                                                       const flux_effect_shadow_desc *desc,
+                                                       flux_image **out);
 
 /* ------------------------------------------------------------------ */
 /*  Promote a transient output to a caller-owned image                */

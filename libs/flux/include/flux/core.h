@@ -261,6 +261,9 @@ typedef enum flux_struct_type {
                                     * extension tags for flux_paint.next
                                     * chains start at 35; none defined yet.
                                     * Append only. Never repurpose. */
+    /* ADR-0074's first operator lands after the reserved paint block;
+     * 35–39 stay reserved for paint extensions. */
+    FLUX_TYPE_EFFECT_SHADOW_DESC = 40,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -273,6 +276,7 @@ typedef enum flux_struct_type {
 static_assert(FLUX_TYPE_DEVICE_DESC == 1, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_CANVAS_ANTIALIAS_DESC == 33, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_PAINT_EXT_BASE == 34, "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_EFFECT_SHADOW_DESC == 40, "flux_struct_type: append only — never renumber");
 
 /* ================================================================== */
 /*  Allocator & logger (caller-supplied)                              */
