@@ -10,7 +10,7 @@ The stack consists of four closely integrated libraries located in `libs/`:
 2. **lens**: An immediate-mode UI engine built on top of `flux`. It is headless by design and purely focuses on layout, state (retained trees), and emitting draw calls.
 3. **iris**: The application L3 toolkit. It handles OS integration, window management, event loops, and feeds OS inputs into `lens`. Backends: Wayland (Linux), Win32 (Windows), Cocoa (macOS).
 4. **prism**: The material library. Named materials (currently liquid glass) built on flux's public effect runtime; flux owns rendering mechanism, prism owns material identity ([ADR-0063](docs/adr/0063-liquid-glass-material-library.md)).
-
+5. **anim**: The motion vocabulary library. Pure math on caller-owned state — a closed-form analytic spring (non-divergent by construction), easing curves, a hysteresis latch and a motion-adaptive smoother for de-jittering lagged measurements. No clock, no timeline, no allocation ([ADR-0077](docs/adr/0077-anim-motion-vocabulary-library.md)).
 Rust bindings for these libraries are located in `bindings/`.
 
 ## Platforms

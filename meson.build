@@ -36,6 +36,14 @@ add_project_arguments(
 
 subdir('libs/flux')
 
+if get_option('anim')
+  subdir('libs/anim')
+else
+  # Always defined so tests/examples can reference it unconditionally; empty
+  # when the library is off.
+  anim_dep = declare_dependency()
+endif
+
 if get_option('prism')
   subdir('libs/prism')
 else
@@ -73,6 +81,7 @@ endif
 if get_option('tests')
   subdir('tests/flux')
   subdir('tests/prism')
+  subdir('tests/anim')
   subdir('tests/lens')
   subdir('tests/iris')
 endif

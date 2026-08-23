@@ -85,3 +85,5 @@ a decision, write a new ADR and update the old one's status to
 | 0074 | [Effect intake path — new visual operators and where choreography never enters](0074-effect-intake-path.md) | Accepted |
 | 0075 | [System accessibility preferences — lens executes, iris observes, the OS owns](0075-system-accessibility-preferences.md) | Accepted |
 | 0076 | [Per-shape paint runs for runtime SVG icons](0076-lens-icon-paint-runs.md) | Accepted |
+| 0077 | [The `anim` motion vocabulary library — provable math, host-owned clocks](0077-anim-motion-vocabulary-library.md) | Proposed |
+| 0078 | [Ghost replay — the render surface for leave animations](0078-lens-ghost-replay-leave-surface.md) | Proposed |

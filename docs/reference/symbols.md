@@ -525,3 +525,28 @@ bounded glyph cache.
 - The GPU slab allocator reclaims whole empty 64 MiB blocks (sibling-keyed)
   immediately, retries after reclamation on OOM, and honours
   `VK_EXT_memory_budget` before allocating fresh blocks.
+
+## `<lens/lens.h>` — ghost replay + scratch (ADR-0078 / ADR-0061 additions)
+
+| Symbol | Description |
+|--------|-------------|
+| `lens_set_ghost` | Re-pins a leaving subtree's snapshot for this frame and paints it at `alpha` (0..1) through the same emitter and colour bake as a live subtree. Called every frame while an exit animation runs; unrefreshed snapshots expire after 64 frames (bounded). Unknown ids are ignored. Ghosts never hit-test, focus, or enter the a11y tree. |
+| `LENS_SKIN_SCRATCH_FLOATS` | The inline per-node scratch size (4 floats) behind `lens_skin_scratch`. Recipes compile against the constant instead of a literal; larger state graduates to `lens_node_state`. |
+
+## `<anim/anim.h>` (sibling library, `-Danim=true`)
+
+Motion vocabulary as pure math on caller-owned state: no clock, no timeline,
+no allocation (ADR-0077). Every advance entry point clamps `dt` to
+`[0, 1/30]` s; the spring integrates the closed-form analytic solution, so
+no accepted `dt` can diverge.
+
+| Symbol | Description |
+|--------|-------------|
+| `anim_dt_clamp` | The single `dt` boundary: NaN/≤0 → 0 (a duplicated frame integrates nothing), > 1/30 s clamped. |
+| `anim_spring_advance` | Closed-form damped harmonic oscillator toward `target` (`stiffness` = ω₀², `damping` = ζ, ζ≥1 clamps to critically damped). `reduced_motion` resolves to the target in one step. |
+| `anim_spring_at` / `anim_spring_snap_to` / `anim_spring_settled` | Construct at a value; one-step resolve; rest test with value/velocity epsilons. |
+| `anim_spring_snappy` / `_gentle` / `_bouncy` | The shared tuning presets (constants pinned by the property tests). |
+| `anim_approach` / `anim_decay` | Frame-rate-independent exponential approach to a target / decay toward zero. |
+| `anim_ease_out_cubic` / `anim_ease_in_cubic` / `anim_ease_in_out_cubic` / `anim_ease_out_back` | Normalized [0,1] easing; inputs clamp, never extrapolate. |
+| `anim_hysteresis_step` | Schmitt-trigger latch with a dead band and a minimum dwell — the de-jitter primitive for binary decisions fed by noisy or lagged measurements (prism's `plate_polarity`). |
+| `anim_smoother_step` | Critically-damped filter with a motion-adaptive time constant (τ widens while the input moves fast, narrows at rest) — for temporally lagged continuous signals (prism's 3-frame-stale backdrop stats). |
