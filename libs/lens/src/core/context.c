@@ -283,6 +283,15 @@ bool lens_frame_needs_repaint(const lens *ui) {
     if (ui->anim_pending)
         return true;
 
+    /* Ghosts are time-driven by contract (ADR-0078 decision 6): a fade
+     * host re-pins alpha every frame and the countdown ticks every
+     * lens_end, so while any ghost exists the next frame differs from the
+     * last painted one even when no other damage source is live. Without
+     * this term a ghost-only fade stalls the moment the base tree is
+     * clean — the leaving surface freezes mid-fade. */
+    if (lensi_ghost_active(ui))
+        return true;
+
     /* A focused text widget keeps the caret clock alive: the host paces
      * low-frequency frames for the blink, and each of those frames must
      * actually paint. */
