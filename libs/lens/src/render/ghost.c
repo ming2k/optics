@@ -46,6 +46,15 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
             lensi_free(ui, g);
             return NULL;
         }
+        /* The count is the full command list unless OOM truncates it at the
+         * failing text command (0..i-1 are owned; slot i was not re-alloc'd
+         * out of the per-frame arena). Publishing a smaller count
+         * unconditionally — as the previous `g->cmd_count = n->cmd_count`
+         * rewrite after the loop did in reverse — either frees arena
+         * pointers (full count after truncation: heap corruption under
+         * OOM) or drops trailing non-text commands (count of text commands
+         * only: the ghost fades without them). */
+        uint32_t copied = n->cmd_count;
         for (uint32_t i = 0; i < n->cmd_count; i++) {
             g->cmds[i].cmd = n->cmds[i];
             const lens_draw_cmd *c = &n->cmds[i];
@@ -53,14 +62,20 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
                 size_t len = strlen(c->text) + 1;
                 char *copy = lensi_alloc(ui, len);
                 if (!copy) {
-                    g->cmd_count = i; /* truncate; still paint what copied */
+                    copied = i; /* OOM: truncate; still paint what copied */
                     break;
                 }
                 memcpy(copy, c->text, len);
                 g->cmds[i].cmd.text = copy;
+            } else if (c->kind == LENS_DRAW_TEXT) {
+                /* Empty/overflow text is not snapshotted: drawlist.c points
+                 * overflows at the static "" literal and lensi_free on it
+                 * would be an invalid free. Text without ink renders as
+                 * nothing; NULL keeps free_snapshot from touching it. */
+                g->cmds[i].cmd.text = NULL;
             }
         }
-        g->cmd_count = n->cmd_count;
+        g->cmd_count = copied;
     }
 
     lens_ghost_node **tail = &g->first_child;
