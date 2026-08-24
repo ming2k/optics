@@ -13,6 +13,18 @@ either.
 
 ## [Unreleased]
 
+### Fixed — flux-text (glyph atlas)
+
+- **`atlas_clear` no longer leaks page 0's image.** The retire loop
+  guarded its release with `p > 0`, but page 0's image is recreated
+  immediately after the loop — its old image is exactly as retired as
+  the auxiliary pages'. Every clear leaked one 16 MiB dedicated
+  `VkDeviceMemory` that never reached the retire queue, so long sessions
+  with recurring glyph churn (browsers, CJK input) grew RSS without
+  bound. Integration test `text_atlas_leak` forces repeated clears with
+  distinct glyph working sets on a real GPU canvas and asserts live
+  allocations return to baseline once the retire queue drains.
+
 ### Added — anim (new sibling library, ADR-0077)
 
 - **`libanim`** (`-Danim=true`, on by default): the shared motion vocabulary

@@ -207,6 +207,16 @@ if opt_canvas
   )
   test('image_retire', test_image_retire, suite : 'integration')
 
+  # Glyph-atlas image governance across atlas_clear: the retire loop once
+  # guarded page 0's release with `p > 0`, leaking a 16 MiB dedicated
+  # VkDeviceMemory per clear. Forces clears and asserts live allocations
+  # return to baseline.
+  test_text_atlas_leak = executable('test_text_atlas_leak',
+    'test_text_atlas_leak.c',
+    dependencies : [test_helpers_dep, flux_text_dep],
+  )
+  test('text_atlas_leak', test_text_atlas_leak, suite : 'integration')
+
   # Retire-FIFO backpressure: releasing past the pending bound with a
   # frozen watermark must force a full drain, not unbounded growth.
   test_retire_backpressure = executable('test_retire_backpressure',

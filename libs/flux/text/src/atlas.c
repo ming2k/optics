@@ -278,7 +278,13 @@ static void atlas_clear(flux_text *t) {
     for (uint8_t p = 0; p < t->atlas_page_count && p < TXT_ATLAS_MAX_PAGES; p++) {
         flux_image *old = t->atlas_pages[p];
         t->atlas_pages[p] = NULL;
-        if (p > 0 && old)
+        /* Page 0 included: its image is recreated below, so the old one is
+         * just as retired as the auxiliary pages'. Guarding this release
+         * with `p > 0` leaked the 16 MiB page-0 image on every clear —
+         * the dedicated VkDeviceMemory was never parked on the retire
+         * queue, so long sessions with recurring glyph churn grew RSS by
+         * one allocation per clear. */
+        if (old)
             flux_image_release(old);
     }
     if (t->atlas_page_count > 0 && t->atlas_pages[0] == NULL && t->dev) {
