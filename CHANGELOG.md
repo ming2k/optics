@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.27] - 2026-08-24
+
 ### Fixed — flux-text (glyph atlas)
 
 - **`atlas_clear` no longer leaks page 0's image.** The retire loop
