@@ -23,50 +23,11 @@
 #ifndef PRISM_LIQUID_GLASS_H
 #define PRISM_LIQUID_GLASS_H
 
-#include <flux/core.h>
-#include <flux/math.h> /* flux_rect, flux_point */
-
-#if defined(_WIN32) && !defined(PRISM_STATIC)
-#ifdef PRISM_BUILDING
-#define PRISM_API __declspec(dllexport)
-#else
-#define PRISM_API __declspec(dllimport)
-#endif
-#elif defined(__GNUC__) || defined(__clang__)
-#define PRISM_API __attribute__((visibility("default")))
-#else
-#define PRISM_API
-#endif
-
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
-#define PRISM_NODISCARD [[nodiscard]]
-#elif defined(__GNUC__) || defined(__clang__)
-#define PRISM_NODISCARD __attribute__((warn_unused_result))
-#elif defined(_MSC_VER)
-#define PRISM_NODISCARD _Check_return_
-#else
-#define PRISM_NODISCARD
-#endif
+#include <prism/types.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* prism descriptors open with `prism_struct_type type; const void *next;`
- * following the same extension-chain pattern as flux. The registry is
- * prism-local: values are not shared with flux_struct_type.
- *
- * Honest status of `next`: the field is part of the layout contract so
- * chained descriptors are ABI-safe the day they are consumed, but the
- * current implementation does NOT dereference it — there are no chained
- * extension structs defined yet. A caller chaining a future extension
- * against this version gets it silently ignored, not an error. When the
- * first extension lands, its reader goes here and this note shrinks. */
-typedef enum prism_struct_type {
-    PRISM_TYPE_UNKNOWN = 0,
-    PRISM_TYPE_LIQUID_GLASS_DESC = 1,
-    /* Append only. Never repurpose. */
-} prism_struct_type;
 
 /* One rounded-rectangle volume in capture-image pixel coordinates. */
 typedef struct prism_liquid_glass_shape {

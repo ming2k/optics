@@ -20,6 +20,7 @@
 #include <flux/compute.h>
 #include <flux/vulkan.h>
 
+#include "glass_dispatch.h"
 #include "regions.h"
 
 #include <math.h>
@@ -68,48 +69,6 @@ alignas(uint32_t) static const unsigned char storage_clear_16f_spv[] = {
 #include "storage_clear_spv.h"
 #endif
 
-/* Push-constant block — must match liquid_glass.comp exactly. The budget is
- * exactly 160 bytes, so two pairs are bit-packed: tint_color_shape_count is
- * the 24-bit 0xRRGGBB tint with shape_count (1 or 2) in the top byte, and
- * size_params is size_reference/size_scale_min as two IEEE-754 binary16
- * halves (the shader unpacks with unpackHalf2x16). */
-typedef struct liquid_glass_push {
-    uint32_t input_handle;
-    uint32_t blurred_handle;
-    uint32_t sampler_handle;
-    uint32_t output_handle;
-    uint32_t width;
-    uint32_t height;
-    uint32_t origin_x;
-    uint32_t origin_y;
-    float shape0[4];
-    float shape1[4];
-    float radius0;
-    float radius1;
-    float blend_radius;
-    float opacity;
-    float refraction;
-    float chromatic_aberration;
-    float saturation;
-    float brightness;
-    float edge_width;
-    float rim_light;
-    float light_x;
-    float light_y;
-    uint32_t group_width;
-    uint32_t group_height;
-    uint32_t tint_color_shape_count;
-    float shadow_alpha;
-    float shadow_blur;
-    float shadow_offset_y;
-    uint32_t size_params;
-    float tint_strength;
-    float frost_strength;
-    float focus_strength;
-    float plate_polarity;
-    float backdrop_energy;
-} liquid_glass_push;
-
 /* Push-constant block — must match storage_clear.comp exactly. */
 typedef struct storage_clear_push {
     uint32_t output_handle;
@@ -141,8 +100,6 @@ typedef struct backdrop_stats_push {
 
 /* flux requires every device to accept 160 push-constant bytes, so the
  * material can rely on that budget on any flux device. */
-static_assert(sizeof(liquid_glass_push) == 160,
-              "liquid_glass_push no longer matches its shader block");
 static_assert(sizeof(storage_clear_push) == 28,
               "storage_clear_push no longer matches its shader block");
 static_assert(sizeof(backdrop_stats_push) == 48,
@@ -150,46 +107,6 @@ static_assert(sizeof(backdrop_stats_push) == 48,
 
 /* Per-slot stats buffer: one prism_backdrop_stat per group. */
 #define PRISM_STATS_BYTES (LIQUID_GLASS_MAX_GROUPS * 2u * sizeof(float))
-
-/* IEEE-754 binary32 → binary16, round-to-nearest-even, for the packed
- * size_reference/size_scale_min push slot. Inputs are validated finite and
- * clamped non-negative by the caller; the full subnormal/overflow rounding
- * is still handled so any finite float converts correctly. */
-static uint16_t liquid_glass_f32_to_f16(float value) {
-    uint32_t bits;
-    memcpy(&bits, &value, sizeof(bits));
-    uint32_t sign = (bits >> 16u) & 0x8000u;
-    uint32_t exponent = (bits >> 23u) & 0xFFu;
-    uint32_t mantissa = bits & 0x7FFFFFu;
-
-    if (exponent == 0xFFu) /* inf/nan (validation rejects nan) → f16 inf */
-        return (uint16_t)(sign | 0x7C00u);
-
-    int half_exp = (int)exponent - 127 + 15;
-    if (half_exp >= 0x1F) /* overflow → f16 inf */
-        return (uint16_t)(sign | 0x7C00u);
-    if (half_exp <= 0) {
-        /* f16 subnormal or signed zero. */
-        if (half_exp < -10)
-            return (uint16_t)sign;
-        mantissa |= 0x800000u;                      /* restore the hidden bit */
-        uint32_t shift = (uint32_t)(14 - half_exp); /* 13..24 */
-        uint32_t half = mantissa >> shift;
-        uint32_t remainder = mantissa & ((1u << shift) - 1u);
-        uint32_t halfway = 1u << (shift - 1u);
-        if (remainder > halfway || (remainder == halfway && (half & 1u)))
-            ++half; /* may carry into the exponent field — correct */
-        return (uint16_t)(sign | half);
-    }
-    /* Normal f16: round the 13 dropped mantissa bits, nearest-even. */
-    uint32_t half = sign | ((uint32_t)half_exp << 10u) | (mantissa >> 13u);
-    uint32_t remainder = mantissa & 0x1FFFu;
-    if (remainder > 0x1000u || (remainder == 0x1000u && (half & 1u)))
-        ++half; /* mantissa overflow carries into the exponent — correct */
-    return (uint16_t)half;
-}
-
-#define PRISM_WG 16u
 
 /* The material output container follows the input (ADR-0069): 8-bit SDR
  * inputs produce the historic RGBA8 output; 16F working-space inputs a
@@ -498,13 +415,6 @@ static bool valid_liquid_glass_desc(const prism_liquid_glass_desc *desc) {
     return true;
 }
 
-static void copy_shape(float out[4], prism_liquid_glass_shape shape) {
-    out[0] = shape.bounds.x;
-    out[1] = shape.bounds.y;
-    out[2] = shape.bounds.w;
-    out[3] = shape.bounds.h;
-}
-
 static void record_storage_clear_regions(prism_liquid_glass_filter *filter, VkCommandBuffer command,
                                          flux_image *output, const liquid_glass_region *regions,
                                          uint32_t region_count, bool is16f) {
@@ -520,8 +430,8 @@ static void record_storage_clear_regions(prism_liquid_glass_filter *filter, VkCo
             .region_width = region.width,
             .region_height = region.height,
         };
-        uint32_t gx = (region.width + PRISM_WG - 1u) / PRISM_WG;
-        uint32_t gy = (region.height + PRISM_WG - 1u) / PRISM_WG;
+        uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+        uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
         flux_compute_dispatch(command, clear_pipeline, &push, sizeof(push), gx, gy, 1u);
     }
 }
@@ -637,66 +547,29 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
     }
 
     bool dispatched = false;
+    const prism_glass_policy policy = {
+        .refraction = desc->refraction,
+        .chromatic_aberration = desc->chromatic_aberration,
+        .saturation = desc->saturation,
+        .brightness = desc->brightness,
+        .edge_width = desc->edge_width,
+        .rim_light = desc->rim_light,
+        .light_x = desc->light_direction.x,
+        .light_y = desc->light_direction.y,
+        .opacity = desc->opacity,
+        .size_reference = desc->size_reference,
+        .size_scale_min = desc->size_scale_min,
+        .tint_strength = desc->tint_strength,
+        .frost_strength = desc->frost_strength,
+    };
     for (uint32_t i = 0; i < current_count; ++i) {
         const prism_liquid_glass_group *group = &desc->groups[current_group_indices[i]];
         liquid_glass_region region = current[i];
         if (dispatched)
             barrier_compute_write_to_read_write(command, output_image);
-        /* Per-group overrides: a negative value inherits the desc knob. */
-        float saturation = liquid_glass_group_or_desc(group->saturation, desc->saturation);
-        float tint_strength = liquid_glass_group_or_desc(group->tint_strength, desc->tint_strength);
-        float frost_strength =
-            liquid_glass_group_or_desc(group->frost_strength, desc->frost_strength);
-        float size_reference = fmaxf(desc->size_reference, 0.0f);
-        float size_scale_min = fminf(fmaxf(desc->size_scale_min, 0.0f), 1.0f);
-        liquid_glass_push push = {
-            .input_handle = flux_image_bindless_handle(input),
-            .blurred_handle = flux_image_bindless_handle(blurred),
-            .sampler_handle = flux_device_default_sampler_handle(filter->device),
-            .output_handle = flux_image_bindless_storage_handle(slot->output),
-            .width = image_width,
-            .height = image_height,
-            .origin_x = region.x,
-            .origin_y = region.y,
-            .radius0 = fmaxf(group->shapes[0].corner_radius, 0.0f),
-            .radius1 = group->focus_strength > 0.0f
-                           ? fmaxf(group->focus.corner_radius, 0.0f)
-                           : (group->shape_count == 2u ? fmaxf(group->shapes[1].corner_radius, 0.0f)
-                                                       : 0.0f),
-            .blend_radius = fmaxf(group->blend_radius, 0.0f),
-            .opacity = fminf(fmaxf(group->opacity * desc->opacity, 0.0f), 1.0f),
-            .refraction = fmaxf(desc->refraction, 0.0f),
-            .chromatic_aberration = fmaxf(desc->chromatic_aberration, 0.0f),
-            .saturation = fmaxf(saturation, 0.0f),
-            .brightness = fmaxf(desc->brightness, 0.0f),
-            .edge_width = fmaxf(desc->edge_width, 1.0f),
-            .rim_light = fmaxf(desc->rim_light, 0.0f),
-            .light_x = desc->light_direction.x,
-            .light_y = desc->light_direction.y,
-            .group_width = region.width,
-            .group_height = region.height,
-            .tint_color_shape_count =
-                (group->tint_color & 0x00FFFFFFu) | (group->shape_count << 24u),
-            .shadow_alpha = fminf(fmaxf(group->shadow_alpha, 0.0f), 1.0f),
-            .shadow_blur = fmaxf(group->shadow_blur, 0.0f),
-            .shadow_offset_y = group->shadow_offset_y,
-            .size_params = (uint32_t)liquid_glass_f32_to_f16(size_reference) |
-                           ((uint32_t)liquid_glass_f32_to_f16(size_scale_min) << 16u),
-            .tint_strength = fmaxf(tint_strength, 0.0f),
-            .frost_strength = fmaxf(frost_strength, 0.0f),
-            .focus_strength = fminf(fmaxf(group->focus_strength, 0.0f), 1.0f),
-            .plate_polarity = group->plate_polarity,
-            .backdrop_energy = group->backdrop_energy,
-        };
-        copy_shape(push.shape0, group->shapes[0]);
-        if (group->focus_strength > 0.0f)
-            copy_shape(push.shape1, group->focus);
-        else if (group->shape_count == 2u)
-            copy_shape(push.shape1, group->shapes[1]);
-        uint32_t gx = (region.width + PRISM_WG - 1u) / PRISM_WG;
-        uint32_t gy = (region.height + PRISM_WG - 1u) / PRISM_WG;
-        flux_compute_dispatch(command, filter->glass_pipelines[is16f ? 1 : 0], &push, sizeof(push),
-                              gx, gy, 1u);
+        prism_glass_record_group(command, filter->glass_pipelines[is16f ? 1 : 0], filter->device,
+                                 input, blurred, slot->output, image_width, image_height, region,
+                                 group, &policy);
         dispatched = true;
     }
     /* Both the transparent region clear and liquid material are compute

@@ -46,8 +46,10 @@ layout(push_constant) uniform PC {
     uint origin_y;
     vec4 shape0;
     vec4 shape1;
+    vec4 focus_shape;
     float radius0;
     float radius1;
+    float focus_radius;
     float blend_radius;
     float opacity;
     float refraction;
@@ -56,26 +58,21 @@ layout(push_constant) uniform PC {
     float brightness;
     float edge_width;
     float rim_light;
-    float light_x;
-    float light_y;
-    uint group_width;
-    uint group_height;
-    uint tint_color_shape_count;
     float shadow_alpha;
-    float shadow_blur;
-    float shadow_offset_y;
+    uint light_dir;
+    uint group_extent;
+    uint tint_color_shape_count;
+    uint shadow_params;
     uint size_params;
-    float tint_strength;
-    float frost_strength;
-    float focus_strength;
-    float plate_polarity;
-    float backdrop_energy;
+    uint strength_params;
+    uint focus_curvature;
+    uint tone_params;
 } pc;
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
 /* Packed push slots: 24-bit 0xRRGGBB tint with shape_count in the top
- * byte, and size_reference/size_scale_min as two binary16 halves. */
+ * byte, and half2x16 packed parameters. */
 uint tint_color()
 {
     return pc.tint_color_shape_count & 0x00FFFFFFu;
@@ -86,9 +83,39 @@ uint shape_count()
     return pc.tint_color_shape_count >> 24;
 }
 
-vec2 size_reference_scale_min()
+vec2 light_direction()
+{
+    return unpackHalf2x16(pc.light_dir);
+}
+
+uvec2 group_extent()
+{
+    return uvec2(pc.group_extent & 0xFFFFu, pc.group_extent >> 16);
+}
+
+vec2 shadow_params()
+{
+    return unpackHalf2x16(pc.shadow_params);
+}
+
+vec2 size_params()
 {
     return unpackHalf2x16(pc.size_params);
+}
+
+vec2 strength_params()
+{
+    return unpackHalf2x16(pc.strength_params);
+}
+
+vec2 focus_curvature()
+{
+    return unpackHalf2x16(pc.focus_curvature);
+}
+
+vec2 tone_params()
+{
+    return unpackHalf2x16(pc.tone_params);
 }
 
 vec4 sample_image(uint handle, vec2 uv)
@@ -117,13 +144,21 @@ void store_source_over(uvec2 pixel, vec4 source)
     );
 }
 
-float rounded_rect_sdf(vec2 p, vec4 bounds, float requested_radius)
+float squircle_sdf(vec2 p, vec4 bounds, float requested_radius, float curvature)
 {
     vec2 half_extent = max(bounds.zw * 0.5, vec2(0.001));
     vec2 centre = bounds.xy + half_extent;
     float radius = clamp(requested_radius, 0.0, min(half_extent.x, half_extent.y));
     vec2 q = abs(p - centre) - half_extent + radius;
-    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+    vec2 q_pos = max(q, vec2(0.0));
+    
+    // Standard Euclidean L2 distance
+    float d_l2 = length(q_pos) + min(max(q.x, q.y), 0.0) - radius;
+    
+    // G2 Superellipse (p = 4 norm) for continuous curvature
+    float d_g2 = pow(pow(q_pos.x, 4.0) + pow(q_pos.y, 4.0), 0.25) + min(max(q.x, q.y), 0.0) - radius;
+    
+    return mix(d_l2, d_g2, clamp(curvature, 0.0, 1.0));
 }
 
 float smooth_union(float a, float b, float radius)
@@ -135,20 +170,23 @@ float smooth_union(float a, float b, float radius)
 
 float glass_sdf(vec2 p)
 {
-    float d = rounded_rect_sdf(p, pc.shape0, pc.radius0);
+    float cur = focus_curvature().y;
+    float d = squircle_sdf(p, pc.shape0, pc.radius0, cur);
     if (shape_count() > 1u) {
-        d = smooth_union(d, rounded_rect_sdf(p, pc.shape1, pc.radius1), pc.blend_radius);
+        d = smooth_union(d, squircle_sdf(p, pc.shape1, pc.radius1, cur), pc.blend_radius);
     }
     return d;
 }
 
 float focus_field(vec2 p)
 {
-    if (pc.focus_strength <= 0.0) return 0.0;
-    float d = rounded_rect_sdf(p, pc.shape1, pc.radius1);
-    float small_side = min(pc.shape1.z, pc.shape1.w);
+    float f_strength = focus_curvature().x;
+    if (f_strength <= 0.0) return 0.0;
+    float cur = focus_curvature().y;
+    float d = squircle_sdf(p, pc.focus_shape, pc.focus_radius, cur);
+    float small_side = min(pc.focus_shape.z, pc.focus_shape.w);
     float feather = clamp(small_side * 0.08, 6.0, 14.0);
-    return (1.0 - smoothstep(-feather, feather, d)) * clamp(pc.focus_strength, 0.0, 1.0);
+    return (1.0 - smoothstep(-feather, feather, d)) * clamp(f_strength, 0.0, 1.0);
 }
 
 vec3 adjust_saturation(vec3 colour, float saturation)
@@ -160,7 +198,8 @@ vec3 adjust_saturation(vec3 colour, float saturation)
 void main()
 {
     uvec2 local = gl_GlobalInvocationID.xy;
-    if (local.x >= pc.group_width || local.y >= pc.group_height) return;
+    uvec2 g_extent = group_extent();
+    if (local.x >= g_extent.x || local.y >= g_extent.y) return;
     uvec2 pixel = local + uvec2(pc.origin_x, pc.origin_y);
     if (pixel.x >= pc.width || pixel.y >= pc.height) return;
 
@@ -175,21 +214,19 @@ void main()
      * soft falloff. It grounds the body and is what separates the glass
      * from uniform bright content. Fades with the body's opacity. */
     float body_min = min(pc.shape0.z, pc.shape0.w);
-    /* Effect geometry scales with body size: small bodies get tighter
-     * rims, lensing and shadows. The caller owns the policy: a body whose
-     * small side reaches size_reference renders at full strength, and
-     * size_reference 0 disables the scaling entirely. */
-    vec2 size_ref_min = size_reference_scale_min();
+    vec2 size_ref_min = size_params();
     float size_scale = 1.0;
     if (size_ref_min.x > 0.0) {
         size_scale = clamp(body_min / size_ref_min.x, size_ref_min.y, 1.0);
     }
-    /* The shadow is cast by the body's own SDF with the group's verbatim
-     * parameters: component-sized shadows are the caller's policy. */
+    
+    vec2 shadow_p = shadow_params();
+    float shadow_blur = shadow_p.x;
+    float shadow_offset_y = shadow_p.y;
     float shadow = 0.0;
     if (pc.shadow_alpha > 0.0) {
-        float sd = glass_sdf(p - vec2(0.0, pc.shadow_offset_y));
-        shadow = (1.0 - smoothstep(0.0, pc.shadow_blur * 2.0, max(sd, 0.0))) * pc.shadow_alpha;
+        float sd = glass_sdf(p - vec2(0.0, shadow_offset_y));
+        shadow = (1.0 - smoothstep(0.0, shadow_blur * 2.0, max(sd, 0.0))) * pc.shadow_alpha;
     }
     shadow *= clamp(pc.opacity, 0.0, 1.0);
     if (coverage <= 0.0) {
@@ -237,8 +274,11 @@ void main()
      * keeps the classic profile (capped at 1.0), so a per-group strength
      * raise fogs the body without over-frosting the silhouette, where
      * refraction legibility lives. */
+    vec2 strengths = strength_params();
+    float tint_strength = strengths.x;
+    float frost_strength = strengths.y;
     float frost_amount =
-        clamp(0.08 * pc.frost_strength + 0.20 * u * u * min(pc.frost_strength, 1.0), 0.0, 1.0);
+        clamp(0.08 * frost_strength + 0.20 * u * u * min(frost_strength, 1.0), 0.0, 1.0);
     frost_amount *= 1.0 - 0.62 * focus;
     vec3 colour = mix(refracted, frost, frost_amount);
     colour = adjust_saturation(colour, max(pc.saturation, 0.0));
@@ -250,20 +290,23 @@ void main()
      * plate_polarity pins the caller-chosen polarity for the whole body
      * (uniform plate tone); negative keeps the legacy per-pixel polarity
      * from the local blurred sample. */
+    vec2 tone = tone_params();
+    float plate_polarity = tone.x;
+    float backdrop_energy = tone.y;
     float backdrop_luminance = dot(frost, vec3(0.2126, 0.7152, 0.0722));
-    float dark_backdrop = pc.plate_polarity >= 0.0
-                              ? pc.plate_polarity
+    float dark_backdrop = plate_polarity >= 0.0
+                              ? plate_polarity
                               : 1.0 - smoothstep(0.20, 0.62, backdrop_luminance);
     vec3 tint_rgb = vec3((tint_color() >> 16) & 0xFFu, (tint_color() >> 8) & 0xFFu,
                          tint_color() & 0xFFu) / 255.0;
     vec3 tint_colour = mix(vec3(0.045, 0.05, 0.065), vec3(1.0), dark_backdrop) * tint_rgb;
     float tint_amount = mix(0.24, 0.10, dark_backdrop) * (0.65 + 0.35 * (1.0 - u)) *
-                        pc.tint_strength;
+                        tint_strength;
     tint_amount *= 1.0 - 0.48 * focus;
     /* Busy backdrops get a stronger tint: the energy boost lifts the body
      * off high-frequency content without changing the quiet-content look. */
-    if (pc.backdrop_energy >= 0.0)
-        tint_amount *= min(1.0 + 1.5 * pc.backdrop_energy, 2.0);
+    if (backdrop_energy >= 0.0)
+        tint_amount *= min(1.0 + 1.5 * backdrop_energy, 2.0);
     colour = mix(colour, tint_colour, tint_amount);
     colour *= max(pc.brightness, 0.0);
 
@@ -271,16 +314,18 @@ void main()
      * body. It becomes clearer and slightly more chromatic, while a restrained
      * directional gain preserves the scene's own hue. There is deliberately
      * no additive white wash or edge ring to read as a nested material. */
-    vec2 focus_uv = clamp((p - pc.shape1.xy) / max(pc.shape1.zw, vec2(1.0)), vec2(0.0), vec2(1.0));
-    float focus_key = clamp(1.05 - dot(focus_uv, vec2(0.35, 0.65)), 0.0, 1.0);
-    float focus_luminance = dot(colour, vec3(0.2126, 0.7152, 0.0722));
-    colour = mix(vec3(focus_luminance), colour, 1.0 + 0.08 * focus);
-    colour *= 1.0 + 0.018 * focus * (0.40 + 0.60 * focus_key);
+    if (focus > 0.0) {
+        vec2 focus_uv = clamp((p - pc.focus_shape.xy) / max(pc.focus_shape.zw, vec2(1.0)), vec2(0.0), vec2(1.0));
+        float focus_key = clamp(1.05 - dot(focus_uv, vec2(0.35, 0.65)), 0.0, 1.0);
+        float focus_luminance = dot(colour, vec3(0.2126, 0.7152, 0.0722));
+        colour = mix(vec3(focus_luminance), colour, 1.0 + 0.08 * focus);
+        colour *= 1.0 + 0.018 * focus * (0.40 + 0.60 * focus_key);
+    }
 
     /* Light. key_dir points from the shape toward the key light. The
      * parameter is the light's position direction (default up-left;
      * y runs downward), so light-facing edges have n·key > 0. */
-    vec2 key_dir = normalize(vec2(pc.light_x, pc.light_y) + vec2(1e-6));
+    vec2 key_dir = normalize(light_direction() + vec2(1e-6));
     float facing = max(dot(rim_normal, key_dir), 0.0);
     float away = max(dot(rim_normal, -key_dir), 0.0);
 

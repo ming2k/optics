@@ -11,7 +11,8 @@ the split; the material model is
 field is [ADR-0050](../adr/0050-single-body-liquid-glass-focus-field.md).
 
 Requires flux built with `-Dcompute=true`. Headers: `<prism/prism.h>`
-(umbrella) and `<prism/liquid_glass.h>`.
+(umbrella), `<prism/liquid_glass.h>`, `<prism/frosted.h>`,
+`<prism/acrylic.h>`, and `<prism/backdrop_layer.h>`.
 
 ## Build flag
 
@@ -182,6 +183,71 @@ because release destroys those pipelines inline. The borrowed output
 image remains valid until the same slot is applied again, the filter is
 released, or its input extent changes.
 
+## Layered backdrop (frost + glass)
+
+`prism_backdrop_layer_filter` composes the two-material chrome stack in
+one ordered dispatch: frosted rectangles beneath analytic liquid-glass
+bodies, all nested into one persistent transparent output per frame slot.
+The glass lens samples the *frosted layer image*, so a glass body bends
+and frosts the frost beneath it instead of looking past it into the sharp
+capture — a relation the standalone liquid-glass filter cannot express,
+because its inputs are the capture and its blur and it never sees another
+material's output.
+
+```c
+#include <prism/backdrop_layer.h>
+
+prism_backdrop_layer_filter *filter = NULL;
+prism_backdrop_layer_filter_create(device, &filter);
+
+prism_backdrop_frost frost = PRISM_BACKDROP_FROST_INIT;
+frost.bounds = (flux_rect){0.0f, 0.0f, (float)W, (float)H};
+
+prism_backdrop_layer_desc layer = PRISM_BACKDROP_LAYER_DESC_INIT;
+layer.input = sharp_capture;          /* the desktop capture */
+layer.blurred_input = blurred_capture; /* flux_blur_filter_apply of it */
+layer.frost = &frost;
+layer.frost_count = 1;
+layer.groups = groups;                /* prism_liquid_glass_group[] */
+layer.group_count = group_count;
+
+flux_image *output = NULL; /* borrowed; do not release */
+prism_backdrop_layer_filter_apply(filter, frame, &layer, &output);
+```
+
+The layer order — every frost rect beneath every glass body — is the
+material's identity, not caller policy; glass group order within the glass
+layer remains the caller's paint order, matching the standalone filter.
+Glass bodies are evaluated by the same reference recipe and the same
+dispatch recorder as the standalone material, so a layered body renders
+identically apart from its sampled backdrop. Descriptor fields carry the
+same dispatch-wide glass policy as `prism_liquid_glass_desc`
+(`PRISM_BACKDROP_LAYER_DESC_INIT` holds the reference values).
+
+`prism_backdrop_frost` is one rounded-rect write of the blurred backdrop
+resolved OVER the sharp capture — the layer image is a complete opaque
+background, so a lens may sample anywhere its bend reaches (including
+outside every frost rect) and always reads a true colour with alpha 1.
+Per-rect `opacity` in `[0, 1]` blends frosted-vs-sharp, never
+frosted-vs-transparent. `tint_color`/`tint_strength` blend a wash INTO the
+frost so veils and scheme-adaptive scrims live beneath the glass instead
+of being painted over it by chrome. A `corner_radius` of 0 is a plain
+rectangle. Input/output contract, extents, and format rules match the
+liquid-glass filter (RGBA8/BGRA8 sharp input + RGBA8 blurred input, or the
+16F pair per ADR-0069). The output is transparent outside every frost
+rect and glass silhouette (including shadow falloff); drawing it over the
+sharp desktop completes the composite. Limits: 16 frost rects and 64 glass
+groups per apply.
+
+Per-group glass statistics are submitted exactly as the standalone filter
+submits them and read back with `prism_backdrop_layer_filter_stats` on the
+same frame-slot cadence. Filter lifetime follows the same rule as
+`prism_liquid_glass_filter`.
+
+See
+[ADR-0079](../adr/0079-layered-backdrop-material.md) for the layer-relation
+rationale.
+
 ## See also
 
 - [Effect module reference](effect.md) — the flux runtime prism builds on: blur, capture, transient outputs.
@@ -189,3 +255,4 @@ released, or its input extent changes.
 - [ADR-0065 — Per-group material overrides and backdrop statistics](../adr/0065-per-group-overrides-and-backdrop-stats.md) — the override/adaptive group fields and the frame-lagged stats readback.
 - [ADR-0046 — Liquid glass as a convex-lens material](../adr/0046-liquid-glass-convex-lens-model.md) — the material model.
 - [ADR-0050 — Single-body liquid-glass focus field](../adr/0050-single-body-liquid-glass-focus-field.md) — the focus field.
+- [ADR-0079 — Layered backdrop material](../adr/0079-layered-backdrop-material.md) — frost beneath glass in one dispatch.

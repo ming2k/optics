@@ -1,0 +1,122 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+/*
+ * Frost layer pass of the layered backdrop compositor
+ * (prism/backdrop_layer.h).
+ *
+ * Writes one frosted rectangle: the blurred backdrop, source-over into the
+ * persistent transparent layer image, gated by an analytic rounded-rect
+ * SDF coverage. This is the sheet the glass pass above it refracts — the
+ * whole point of the layered material is that glass samples *this* image
+ * rather than looking past it into the sharp backdrop.
+ *
+ * Storage layout (rgba8 / rgba16f) follows the input class, exactly like
+ * the other prism materials.
+ */
+
+layout(set = 0, binding = 0) uniform texture2D u_sampled[];
+#ifdef PRISM_STORAGE_RGBA16F
+layout(set = 0, binding = 1, rgba16f) uniform image2D u_storage[];
+#else
+layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+#endif
+layout(set = 0, binding = 2) uniform sampler u_samplers[];
+
+layout(push_constant) uniform PC {
+    uint input_handle; /* sharp capture: the opaque base under the frost */
+    uint blurred_handle;
+    uint sampler_handle;
+    uint output_handle;
+    uint width;
+    uint height;
+    uint origin_x;
+    uint origin_y;
+    vec4 bounds;
+    float corner_radius;
+    float opacity;
+    uint tint_color;
+    float tint_strength;
+    uint region_width;
+    uint region_height;
+} pc;
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+float rounded_rect_sdf(vec2 p, vec4 bounds, float requested_radius)
+{
+    vec2 half_extent = max(bounds.zw * 0.5, vec2(0.001));
+    vec2 centre = bounds.xy + half_extent;
+    float radius = clamp(requested_radius, 0.0, min(half_extent.x, half_extent.y));
+    vec2 q = abs(p - centre) - half_extent + radius;
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+vec3 unpack_rgb(uint c)
+{
+    return vec3(
+        float((c >> 16u) & 0xFFu) / 255.0,
+        float((c >> 8u) & 0xFFu) / 255.0,
+        float(c & 0xFFu) / 255.0
+    );
+}
+
+void main()
+{
+    uvec2 local = gl_GlobalInvocationID.xy;
+    if (local.x >= pc.region_width || local.y >= pc.region_height) return;
+
+    uvec2 pixel = local + uvec2(pc.origin_x, pc.origin_y);
+    if (pixel.x >= pc.width || pixel.y >= pc.height) return;
+
+    vec2 p = vec2(pixel) + vec2(0.5);
+    vec2 uv = p / vec2(float(pc.width), float(pc.height));
+
+    float d = rounded_rect_sdf(p, pc.bounds, pc.corner_radius);
+    float coverage = clamp(0.5 - d, 0.0, 1.0) * clamp(pc.opacity, 0.0, 1.0);
+
+    vec3 sharp = texture(
+        sampler2D(
+            u_sampled[nonuniformEXT(pc.input_handle & 0x0FFFFFFFu)],
+            u_samplers[nonuniformEXT(pc.sampler_handle & 0x0FFFFFFFu)]
+        ),
+        clamp(uv, vec2(0.0), vec2(1.0))
+    ).rgb;
+
+    /* The layer image is a COMPLETE opaque background, not a floating
+     * sheet: every dispatched pixel writes the sharp capture by default,
+     * and the frost rect blends its (optionally tinted) frosted body over
+     * that base inside its coverage. This is what makes the image a valid
+     * lens input for the glass pass — a lens may sample anywhere its bend
+     * reaches, including outside every frost rect, and always reads a true
+     * background colour with alpha 1. No premultiplied half-brightness
+     * fragments, no transparent holes for the lens to fall into.
+     *
+     * The dispatch footprint covers each frost rect's padded bounds plus
+     * every glass body's footprint (the host builds it), so the pass writes
+     * exactly the pixels the layer needs and leaves the rest of the image
+     * untouched for footprint clearing. */
+    vec3 colour = sharp;
+    if (coverage > 0.001) {
+        vec3 blurred = texture(
+            sampler2D(
+                u_sampled[nonuniformEXT(pc.blurred_handle & 0x0FFFFFFFu)],
+                u_samplers[nonuniformEXT(pc.sampler_handle & 0x0FFFFFFFu)]
+            ),
+            clamp(uv, vec2(0.0), vec2(1.0))
+        ).rgb;
+        /* Caller tint: a wash composited INTO the frost (luminance-opposing
+         * veils, scheme-adaptive scrims) so the glass above refracts the
+         * washed frost rather than being painted over by a chrome-layer
+         * wash. Applied before the coverage mix so the tint never widens
+         * the rect's silhouette. */
+        vec3 body = mix(blurred, unpack_rgb(pc.tint_color),
+                        clamp(pc.tint_strength, 0.0, 1.0));
+        colour = mix(sharp, body, coverage);
+    }
+    imageStore(
+        u_storage[nonuniformEXT(pc.output_handle & 0x0FFFFFFFu)],
+        ivec2(pixel),
+        vec4(colour, 1.0)
+    );
+}

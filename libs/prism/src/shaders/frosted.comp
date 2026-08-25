@@ -1,0 +1,144 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+/*
+ * Classic non-distorting frosted glass material shader.
+ *
+ * Evaluates Dual-Kawase blurred backdrop, saturation boost, tinting,
+ * procedural blue-noise grain (dithering against 8-bit banding),
+ * analytic rounded-rectangle SDF coverage, and drop shadow.
+ */
+
+layout(set = 0, binding = 0) uniform texture2D u_sampled[];
+#ifdef PRISM_STORAGE_RGBA16F
+layout(set = 0, binding = 1, rgba16f) uniform image2D u_storage[];
+#else
+layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
+#endif
+layout(set = 0, binding = 2) uniform sampler u_samplers[];
+
+layout(push_constant) uniform PC {
+    uint input_handle;
+    uint blurred_handle;
+    uint sampler_handle;
+    uint output_handle;
+    uint width;
+    uint height;
+    uint origin_x;
+    uint origin_y;
+    vec4 bounds;
+    float corner_radius;
+    float opacity;
+    float saturation;
+    float tint_strength;
+    float noise_intensity;
+    float shadow_alpha;
+    float shadow_blur;
+    float shadow_offset_y;
+    uint tint_color;
+    uint group_width;
+    uint group_height;
+} pc;
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+vec3 unpack_rgb(uint c)
+{
+    return vec3(
+        float((c >> 16u) & 0xFFu) / 255.0,
+        float((c >> 8u) & 0xFFu) / 255.0,
+        float(c & 0xFFu) / 255.0
+    );
+}
+
+float prng_dither(vec2 uv)
+{
+    float n = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453);
+    return (n - 0.5);
+}
+
+vec4 sample_image(uint handle, vec2 uv)
+{
+    return texture(
+        sampler2D(
+            u_sampled[nonuniformEXT(handle & 0x0FFFFFFFu)],
+            u_samplers[nonuniformEXT(pc.sampler_handle & 0x0FFFFFFFu)]
+        ),
+        clamp(uv, vec2(0.0), vec2(1.0))
+    );
+}
+
+void store_source_over(uvec2 pixel, vec4 source)
+{
+    vec4 destination = imageLoad(
+        u_storage[nonuniformEXT(pc.output_handle & 0x0FFFFFFFu)], ivec2(pixel)
+    );
+    imageStore(
+        u_storage[nonuniformEXT(pc.output_handle & 0x0FFFFFFFu)],
+        ivec2(pixel),
+        source + destination * (1.0 - source.a)
+    );
+}
+
+float rounded_rect_sdf(vec2 p, vec4 bounds, float requested_radius)
+{
+    vec2 half_extent = max(bounds.zw * 0.5, vec2(0.001));
+    vec2 centre = bounds.xy + half_extent;
+    float radius = clamp(requested_radius, 0.0, min(half_extent.x, half_extent.y));
+    vec2 q = abs(p - centre) - half_extent + radius;
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+void main()
+{
+    uvec2 local = gl_GlobalInvocationID.xy;
+    if (local.x >= pc.group_width || local.y >= pc.group_height) return;
+
+    uvec2 pixel = local + uvec2(pc.origin_x, pc.origin_y);
+    if (pixel.x >= pc.width || pixel.y >= pc.height) return;
+
+    vec2 p = vec2(pixel) + vec2(0.5);
+    vec2 uv = p / vec2(float(pc.width), float(pc.height));
+
+    float d = rounded_rect_sdf(p, pc.bounds, pc.corner_radius);
+
+    // Drop shadow computation
+    float shadow_cov = 0.0;
+    if (pc.shadow_alpha > 0.001 && pc.shadow_blur > 0.0) {
+        vec2 sp = p - vec2(0.0, pc.shadow_offset_y);
+        float sd = rounded_rect_sdf(sp, pc.bounds, pc.corner_radius);
+        if (sd > 0.0) {
+            float sigma = max(pc.shadow_blur * 0.5, 0.5);
+            shadow_cov = pc.shadow_alpha * exp(-0.5 * (sd * sd) / (sigma * sigma));
+        }
+    }
+
+    if (d > 1.5 && shadow_cov <= 0.001) return;
+
+    // Body coverage with 1px smooth antialiasing
+    float body_cov = clamp(0.5 - d, 0.0, 1.0) * pc.opacity;
+
+    // Sample blurred backdrop
+    vec4 blurred = sample_image(pc.blurred_handle, uv);
+
+    // Boost saturation
+    float lum = dot(blurred.rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 sat_rgb = mix(vec3(lum), blurred.rgb, pc.saturation);
+
+    // Blend tint
+    vec3 tint = unpack_rgb(pc.tint_color);
+    vec3 tinted = mix(sat_rgb, tint, clamp(pc.tint_strength, 0.0, 1.0));
+
+    // Dither against banding
+    float grain = prng_dither(vec2(pixel)) * pc.noise_intensity;
+    vec3 body_rgb = clamp(tinted + vec3(grain), 0.0, 1.0);
+
+    // Combine body and drop shadow
+    vec4 body_out = vec4(body_rgb * body_cov, body_cov);
+    vec4 shadow_out = vec4(vec3(0.0), shadow_cov * (1.0 - body_cov));
+
+    vec4 final_color = body_out + shadow_out;
+    if (final_color.a > 0.001) {
+        store_source_over(pixel, final_color);
+    }
+}

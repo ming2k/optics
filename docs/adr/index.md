@@ -87,3 +87,4 @@ a decision, write a new ADR and update the old one's status to
 | 0076 | [Per-shape paint runs for runtime SVG icons](0076-lens-icon-paint-runs.md) | Accepted |
 | 0077 | [The `anim` motion vocabulary library — provable math, host-owned clocks](0077-anim-motion-vocabulary-library.md) | Proposed |
 | 0078 | [Ghost replay — the render surface for leave animations](0078-lens-ghost-replay-leave-surface.md) | Proposed |
+| 0079 | [Layered backdrop material — frost beneath glass in one dispatch](0079-layered-backdrop-material.md) | Accepted |
