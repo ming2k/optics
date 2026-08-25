@@ -13,6 +13,26 @@ either.
 
 ## [Unreleased]
 
+## [0.0.28] - 2026-08-25
+
+### Added — prism (material library, ADR-0079)
+
+- **`prism_backdrop_layer`** and shader **`backdrop_frost.comp`**: layered
+  backdrop compositor that writes a frosted sheet and evaluates analytic
+  liquid-glass bodies against the frosted layer in a single compute dispatch.
+  The glass refracts the frost underneath rather than bypassing it into the
+  sharp background.
+- **`prism_frosted`** and **`prism_acrylic`**: standard standalone material
+  implementations with uniform structures and dedicated shaders
+  (`frosted.comp`, `acrylic.comp`).
+- Rust bindings for backdrop layer, frosted, and acrylic materials in `prism`.
+
+### Fixed — lens (widgets)
+
+- **Table row click coordinate when scrolled.** `lens_table` row hit testing
+  now correctly computes the body-relative cursor position before applying
+  scroll offset, ensuring rows can be accurately clicked after scrolling.
+
 ## [0.0.27] - 2026-08-24
 
 ### Fixed — flux-text (glyph atlas)
