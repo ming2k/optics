@@ -307,29 +307,28 @@ lens_table_result lens_table(lens *ui, const char *id, const lens_table_column *
      * reacting through the widgets painted over them. */
     bool clipped_out = lensi_point_clipped_by_scroll(n, ui->input.cursor);
     bool clicked_row = false;
-    float hovered_row_y = ui->input.cursor.y - n->prev_rect.y + off - header_h;
+    float body_cursor_y = ui->input.cursor.y - n->prev_rect.y - header_h;
+    bool in_body = body_cursor_y >= 0.0f && body_cursor_y < body_h;
     bool hovering_row = opts.selectable && n->has_prev && !occluded && !clipped_out &&
                         lensi_point_in(ui->input.cursor, n->prev_rect) &&
-                        ui->input.cursor.x < n->prev_rect.x + view_w && hovered_row_y >= 0.0f &&
-                        hovered_row_y < body_h;
+                        ui->input.cursor.x < n->prev_rect.x + view_w && in_body;
     if (hovering_row)
         ui->cursor_hint = LENS_CURSOR_POINTER;
     if (opts.selectable && st && n->has_prev && !occluded && !clipped_out &&
         ui->input.mouse_pressed[LENS_MOUSE_LEFT] &&
-        lensi_point_in(ui->input.cursor, n->prev_rect)) {
-        float ly = ui->input.cursor.y - n->prev_rect.y + off - header_h;
-        if (ly >= 0.0f && ly < body_h) {
-            int r = (int)(ly / row_h);
-            if (r >= 0 && r < row_count) {
-                result.clicked_row = r;
-                clicked_row = true;
-                /* Host-owned selection (ADR-0066): the click is reported
-                 * only; the retained store stays out of it. */
-                if (!opts.selected_fn) {
-                    st->selected = r;
-                    result.selected = r;
-                    result.selection_changed = true;
-                }
+        lensi_point_in(ui->input.cursor, n->prev_rect) &&
+        ui->input.cursor.x < n->prev_rect.x + view_w && in_body) {
+        float ly = body_cursor_y + off;
+        int r = (int)(ly / row_h);
+        if (r >= 0 && r < row_count) {
+            result.clicked_row = r;
+            clicked_row = true;
+            /* Host-owned selection (ADR-0066): the click is reported
+             * only; the retained store stays out of it. */
+            if (!opts.selected_fn) {
+                st->selected = r;
+                result.selected = r;
+                result.selection_changed = true;
             }
         }
     }

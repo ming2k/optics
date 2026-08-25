@@ -298,6 +298,53 @@ static void test_scroll_moves_window(void) {
     lens_destroy(ui);
 }
 
+/* Clicking a row after scrolling down selects the row visible under the cursor. */
+static void test_click_after_scroll_selects_correct_row(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    for (int f = 0; f < 2; f++) {
+        lens_begin(ui, &ZERO_IN);
+        lens_size(ui, 400, 300);
+        lens_table(ui, "scroll_click", COLS, 2, 100, cell_fn, NULL,
+                   (lens_table_opts){.row_height = 28, .show_header = true, .selectable = true});
+        lens_end(ui);
+    }
+
+    /* Scroll down by several wheel events. */
+    for (int i = 0; i < 10; i++) {
+        lens_input w = ZERO_IN;
+        w.cursor = (flux_point){100, 100};
+        w.scroll_y = -10.0f;
+        lens_begin(ui, &w);
+        lens_size(ui, 400, 300);
+        lens_table(ui, "scroll_click", COLS, 2, 100, cell_fn, NULL,
+                   (lens_table_opts){.row_height = 28, .show_header = true, .selectable = true});
+        lens_end(ui);
+    }
+
+    lens_theme theme = lens_get_theme(ui);
+    float header_h = theme.font_size + 2.0f * theme.padding;
+
+    /* Click inside the visible body. */
+    lens_input click = ZERO_IN;
+    click.cursor = (flux_point){20.0f, header_h + 14.0f};
+    click.mouse_pressed[LENS_MOUSE_LEFT] = true;
+    click.mouse_down[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &click);
+    lens_size(ui, 400, 300);
+    lens_table_result r =
+        lens_table(ui, "scroll_click", COLS, 2, 100, cell_fn, NULL,
+                   (lens_table_opts){.row_height = 28, .show_header = true, .selectable = true});
+    lens_end(ui);
+
+    CHECK(r.clicked_row > 0);
+    CHECK(r.selected == r.clicked_row);
+    CHECK(r.selection_changed == true);
+
+    lens_destroy(ui);
+}
+
 /* The fixed header is not part of the scrollbar track. Pressing and dragging
  * at the right edge inside the header must not move the row viewport. */
 static void test_header_does_not_drag_scrollbar(void) {
@@ -836,6 +883,7 @@ int main(void) {
     test_selection_persists();
     test_zero_selection_persists_without_overflow();
     test_scroll_moves_window();
+    test_click_after_scroll_selects_correct_row();
     test_header_does_not_drag_scrollbar();
     test_body_thumb_drag_scrolls();
     test_click_focuses_and_tab_reaches_table();
