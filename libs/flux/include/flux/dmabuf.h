@@ -78,7 +78,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_import_dmabuf(flux_device *d,
  * flux_dmabuf_image_desc.acquire_sync_fd: it avoids rebuilding the VkImage on
  * every client commit.
  *
- * Call after flux_canvas_begin and before drawing `image`. On FLUX_OK flux
+ * Call after flux_canvas_begin_frame and before drawing `image`. On FLUX_OK flux
  * owns and closes acquire_sync_fd; on error the caller keeps it. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_wait_dmabuf_acquire(flux_canvas *canvas,
                                                                     flux_image *image,

@@ -54,6 +54,19 @@ extern "C" {
 #define FLUX_NODISCARD
 #endif
 
+/* FLUX_DEPRECATED(msg): mark a public symbol as scheduled for removal. Expands
+ * to the compiler attribute where available so call sites get a warning; the
+ * fallback is empty so portability is never sacrificed. */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#define FLUX_DEPRECATED(msg) [[deprecated(msg)]]
+#elif defined(_MSC_VER)
+#define FLUX_DEPRECATED(msg) __declspec(deprecated(msg))
+#elif defined(__GNUC__) || defined(__clang__)
+#define FLUX_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#else
+#define FLUX_DEPRECATED(msg)
+#endif
+
 /* ================================================================== */
 /*  Versioning                                                        */
 /* ================================================================== */

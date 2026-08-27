@@ -75,7 +75,7 @@ and recreates it on surface resize. Copy that pattern when you write a
 ## Recording with a module
 
 For 2D content, do not call `flux_frame_begin_pass` yourself —
-`flux_canvas_begin` does it internally. Likewise, `flux_scene_draw_mesh`
+`flux_canvas_begin_frame` does it internally. Likewise, `flux_scene_draw_mesh`
 expects to be called inside an active pass that you began manually
 (or inside a pass that another module opened).
 

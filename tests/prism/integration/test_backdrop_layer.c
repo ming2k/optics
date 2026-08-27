@@ -111,9 +111,9 @@ int main(void) {
 
         /* Draw over a *black* base so unfrosted/un-glassed pixels read black
          * and the frost's own alpha is exercised. */
-        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
         flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);
@@ -180,9 +180,9 @@ int main(void) {
             flux_image *layer = nullptr;
             EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
-            EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+            EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
             flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-            flux_canvas_end(canvas);
+            flux_canvas_end_frame(canvas);
             EXPECT(flux_frame_submit(frame) == FLUX_OK);
             EXPECT(flux_frame_present(frame) == FLUX_OK);
             memset(px, 0xCD, BYTES);
@@ -227,9 +227,9 @@ int main(void) {
             flux_image *layer = nullptr;
             EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
-            EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+            EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
             flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-            flux_canvas_end(canvas);
+            flux_canvas_end_frame(canvas);
             EXPECT(flux_frame_submit(frame) == FLUX_OK);
             EXPECT(flux_frame_present(frame) == FLUX_OK);
             memset(px, 0xCD, BYTES);
@@ -292,9 +292,9 @@ int main(void) {
         flux_image *layer = nullptr;
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
-        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
         flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);
@@ -372,9 +372,9 @@ int main(void) {
         flux_image *layer = nullptr;
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
-        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
         flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);
@@ -435,9 +435,9 @@ int main(void) {
         flux_image *layer = nullptr;
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
-        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
         flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);

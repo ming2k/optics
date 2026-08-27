@@ -365,10 +365,8 @@ are `void`-returning; segments dropped on arena exhaustion are counted.
 |--------|-------------|
 | `flux_canvas_create` | Creates the canvas bound to (and retaining) a surface. One canvas per surface. |
 | `flux_canvas_destroy` | Destroys the canvas and releases the surface reference. |
-| `flux_canvas_begin` | Binds the canvas to a frame; non-`NULL` `clear_color` clears the target, `NULL` loads it. |
-| `flux_canvas_end` | Ends the recording session; the canvas detaches from the frame. |
-| `flux_canvas_begin_frame` | Backend-agnostic pass bracket: binds the canvas to a GPU frame (from `flux_surface_begin_frame`) or, with `NULL`, starts a CPU-canvas pass. Same drawing code runs on either backend between begin/end. |
-| `flux_canvas_end_frame` | Ends a pass opened by `flux_canvas_begin_frame`. |
+| `flux_canvas_begin_frame` | Binds the canvas to a frame; non-`NULL` `clear_color` clears the target, `NULL` loads it. |
+| `flux_canvas_end_frame` | Ends the recording session; the canvas detaches from the frame. |
 | `flux_canvas_set_scale` | Sets the base content (device-pixel) scale of the canvas transform. |
 | `flux_canvas_get_scale` | Returns the effective scale of the active transform (base scale composed with any `flux_canvas_scale` on the stack). |
 | `flux_canvas_begin_target` | Begins an offscreen Canvas pass. The target chooses the render extent and may be smaller than the surface. |
@@ -406,7 +404,7 @@ there is no GPU-resident texture.
 | Symbol | Description |
 |--------|-------------|
 | `flux_canvas_create_cpu` | Creates a headless CPU canvas with a `width`×`height` (physical pixels) framebuffer; `scale` is the content/device-pixel ratio. Destroy with `flux_canvas_destroy`. |
-| `flux_canvas_cpu_begin` | Begins a recording pass, clearing to `clear` (premultiplied; `NULL` = fully transparent). CPU analogue of `flux_canvas_begin` — no frame needed. |
+| `flux_canvas_cpu_begin` | Begins a recording pass, clearing to `clear` (premultiplied; `NULL` = fully transparent). CPU analogue of `flux_canvas_begin_frame` — no frame needed. |
 | `flux_canvas_cpu_end` | Ends the recording pass; pixels are resolved in the framebuffer. |
 | `flux_canvas_cpu_pixels` | Returns the premultiplied-RGBA8 framebuffer (tightly packed, canvas-owned, refreshed per call). `NULL` if the canvas is not a CPU canvas. |
 
@@ -417,7 +415,7 @@ Available iff the library was built with `-Dcanvas=true`. Linux only.
 | Symbol | Description |
 |--------|-------------|
 | `flux_image_import_dmabuf` | Imports a single-plane dma-buf with an explicit DRM format modifier as a sampled `flux_image`. On `FLUX_OK`, flux owns and closes the plane and acquire-sync file descriptors; on error the caller keeps them. `plane_count != 1` returns `FLUX_ERROR_UNSUPPORTED`. |
-| `flux_canvas_wait_dmabuf_acquire` | Adds a Linux sync-file wait for the current canvas frame before it samples an already-imported dma-buf image. Call after `flux_canvas_begin` and before drawing the image. Flux consumes the fd on success; the caller retains it on error. |
+| `flux_canvas_wait_dmabuf_acquire` | Adds a Linux sync-file wait for the current canvas frame before it samples an already-imported dma-buf image. Call after `flux_canvas_begin_frame` and before drawing the image. Flux consumes the fd on success; the caller retains it on error. |
 | `flux_dmabuf_supported` | Returns `true` when the complete `FLUX_DEVICE_FEATURE_DMABUF` capability is enabled. |
 | `flux_dmabuf_sync_supported` | Returns `true` when the complete `FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE` capability is enabled. |
 | `flux_dmabuf_format_modifiers` | Enumerates only single-plane modifiers proven sampleable and externally importable for a `flux_format`; callers must not synthesize unreported fallbacks. |

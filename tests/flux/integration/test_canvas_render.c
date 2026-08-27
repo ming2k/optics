@@ -36,11 +36,11 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas, draw_fn dr
         return r;
 
     flux_color clear = flux_color_rgba(0, 0, 0, 255);
-    r = flux_canvas_begin(canvas, frame, &clear);
+    r = flux_canvas_begin_frame(canvas, frame, &clear);
     if (r != FLUX_OK)
         return r;
     draw(canvas, user);
-    flux_canvas_end(canvas);
+    flux_canvas_end_frame(canvas);
 
     r = flux_frame_submit(frame);
     if (r != FLUX_OK)
@@ -73,7 +73,7 @@ static flux_result render_frame_no_stencil(flux_surface *s, flux_canvas *canvas,
     if (r != FLUX_OK)
         return r;
     draw(canvas, user);
-    flux_result pass_result = flux_canvas_end_checked(canvas);
+    flux_result pass_result = flux_canvas_end_frame_checked(canvas);
 
     r = flux_frame_submit(frame);
     if (r != FLUX_OK)

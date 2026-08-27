@@ -31,6 +31,7 @@
  * from it. Only image draws remain unsupported on CPU. */
 #include "backend.h"
 
+#include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <math.h>
 #include <stdlib.h>

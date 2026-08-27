@@ -46,12 +46,12 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas, flux_color
     flux_result r = flux_surface_begin_frame(s, nullptr, &frame);
     if (r != FLUX_OK)
         return r;
-    r = flux_canvas_begin(canvas, frame, &clear);
+    r = flux_canvas_begin_frame(canvas, frame, &clear);
     if (r != FLUX_OK)
         return r;
     if (draw)
         draw(canvas, user);
-    flux_canvas_end(canvas);
+    flux_canvas_end_frame(canvas);
     r = flux_frame_submit(frame);
     if (r != FLUX_OK)
         return r;
@@ -186,10 +186,10 @@ int main(void) {
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         /* NULL clear colour => LOAD: the pass must seed the intermediate
          * with the destination's current pixels (ADR-0069 seed blit). */
-        EXPECT(flux_canvas_begin(canvas, frame, nullptr) == FLUX_OK);
+        EXPECT(flux_canvas_begin_frame(canvas, frame, nullptr) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas, (flux_rect){0, 0, (float)W / 2, (float)H},
                                     flux_color_rgba(0, 0, 255, 255));
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);

@@ -976,10 +976,6 @@ short iris_a11y__poll_events(void) {
     return ev < 0 ? 0 : (short)ev;
 }
 
-IRIS_API const char *iris_a11y_unique_name(void) {
-    return g_a11y_bus ? g_unique : NULL;
-}
-
 void iris_a11y__pump(void) {
     if (!g_a11y_bus)
         return;

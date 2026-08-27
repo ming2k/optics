@@ -87,6 +87,11 @@ enum {
 /* Generated beside lens_icon_table from the vendored SVG source style. */
 extern const uint8_t lens_icon_render_modes[LENS_ICON_COUNT];
 
+/* The built-in icon table (indexed by lens_icon_id < LENS_ICON_COUNT).
+ * Internal: not part of the installed API surface; lens_icon_info() is the
+ * public read access. */
+extern const lens_icon_desc lens_icon_table[LENS_ICON_COUNT];
+
 /* icon registry (icon_runtime.c) — resolve an icon id, built-in or
  * runtime-registered (lens_icon_register_svg), to its command stream and
  * render mode. lensi_icon_desc returns NULL for unknown ids. */

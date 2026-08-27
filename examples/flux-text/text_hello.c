@@ -122,7 +122,7 @@ int main(void) {
             break;
 
         flux_color clear = flux_color_rgba(0x12, 0x14, 0x1a, 0xff);
-        if (flux_canvas_begin(canvas, frame, &clear) == FLUX_OK) {
+        if (flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK) {
             const char *s = "hello, flux-text \xe4\xbd\xa0\xe5\xa5\xbd"; /* + "你好" */
             flux_text_style style = {
                 .size_px = 40.0f,
@@ -131,7 +131,7 @@ int main(void) {
                 .family = FLUX_TEXT_FAMILY_SANS,
             };
             flux_text_draw(text, canvas, &arena_store, 40.0f, 80.0f, s, strlen(s), &style);
-            flux_canvas_end(canvas);
+            flux_canvas_end_frame(canvas);
         }
 
         r = flux_frame_submit(frame);

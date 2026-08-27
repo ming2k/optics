@@ -128,9 +128,9 @@ int main(void) {
     {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
-        EXPECT(flux_canvas_begin(gpu, frame, &clear) == FLUX_OK);
+        EXPECT(flux_canvas_begin_frame(gpu, frame, &clear) == FLUX_OK);
         draw_scene(gpu, &arena);
-        flux_canvas_end(gpu);
+        flux_canvas_end_frame(gpu);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         EXPECT(flux_surface_read_pixels(s, gpu_px, BYTES) == FLUX_OK);

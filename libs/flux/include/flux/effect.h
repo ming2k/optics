@@ -5,6 +5,14 @@
  * the cmd buffer from flux_frame_vk_command_buffer(); outside a
  * frame, the caller supplies a one-shot command buffer.
  *
+ * Intended consumers: prism (the material library) and end-user
+ * showcases/effects. This header is the seam where flux (rendering
+ * mechanism) meets named materials (ADR-0063): flux owns the effect
+ * runtime, prism owns material identity. It is public by design —
+ * applications may compose custom image-domain effects — but there is
+ * no stable-API commitment beyond the stack's own deprecation policy
+ * (docs/reference/api.md).
+ *
  * Output ownership and lifetime
  *   The effect owns the output image. It is leased exclusively from a
  *   per-device pool keyed by (format, width, height). A writable intermediate

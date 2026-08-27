@@ -6,6 +6,13 @@
  * and every type is a plain struct the caller stores wherever it already
  * stores widget state (lens_skin_scratch, lens_node_state, host-side).
  *
+ * Library position: anim is a standalone leaf with no dependency on — and
+ * no consumer inside — flux, lens, iris, or prism. Applications (and any
+ * Rust host) link it directly for springs/easing; nothing in the stack
+ * below it requires it. A Rust binding is intentionally optional: the API
+ * is pure math over plain structs, trivially re-expressed in Rust without
+ * FFI. Do not add a dependency on this library to another public surface.
+ *
  * Design contract (ADR-0077):
  *   - Public symbols are `anim_*`; internals are private.
  *   - `dt` is clamped once at the boundary to [0, 1/30] s; zero

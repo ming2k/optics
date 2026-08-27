@@ -110,11 +110,11 @@ int main(void) {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
         flux_canvas_draw_image(canvas, red, (flux_rect){0, 0, 16, 16}, NULL);
         flux_canvas_draw_image(canvas, green, (flux_rect){24, 0, 16, 16}, NULL);
         flux_canvas_draw_image(canvas, blue, (flux_rect){48, 0, 16, 16}, NULL);
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
 
@@ -144,9 +144,9 @@ int main(void) {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin(canvas, frame, &black) == FLUX_OK);
+        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
         flux_canvas_draw_image(canvas, yellow, (flux_rect){24, 24, 16, 16}, NULL);
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
 

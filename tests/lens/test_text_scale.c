@@ -144,8 +144,11 @@ static void test_explicit_label_size_scales(void) {
     lens_set_text_scale(ui, 2.0f);
     lens_begin(ui, &IN0);
     lens_label_ex(ui, "Point", 10.0f);
-    lens_label_compact_ex2(ui, "Compact", 8.0f, 0.0f);
-    lens_label_wrapped_ex(ui, "Wrapped text", 9.0f, 200.0f);
+    lens_label_compact_ex(ui, "Compact", 8.0f, 0.0f);
+    /* (wrapped-with-explicit-size was removed with lens_label_wrapped_ex;
+     * the wrapping path's text-scale behaviour is covered via the cascade
+     * size in test_widgets.c.) */
+    lens_label_wrapped(ui, "Wrapped text", 200.0f);
     lens_id pt_id = lens_current_id(ui, "Point");
     lens_id cp_id = lens_current_id(ui, "Compact");
     lens_id wr_id = lens_current_id(ui, "Wrapped text");

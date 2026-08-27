@@ -330,10 +330,9 @@ typedef struct lens_icon_desc {
     uint32_t run_count;            /* 0 unless runs != NULL */
 } lens_icon_desc;
 
-/* Exported: consuming the built-in table from another link unit (a DLL
- * boundary on Windows, or any -fvisibility=hidden consumer) requires the
- * same visibility treatment as the functions. */
-LENS_API extern const lens_icon_desc lens_icon_table[LENS_ICON_COUNT];
+/* The built-in icon table is internal: lens_icon_id values < LENS_ICON_COUNT
+ * index it, and lens_icon_info() is the public read access. It is not part
+ * of the installed API surface. */
 
 /* Failure sentinel of lens_icon_register_svg; also usable as a "no icon"
  * value wherever a lens_icon_id is optional. */

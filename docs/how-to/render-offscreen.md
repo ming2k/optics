@@ -39,11 +39,11 @@ of presenting.
     if (flux_surface_begin_frame(surface, nullptr, &frame) != FLUX_OK) return;
 
     flux_color clear = flux_color_rgba(20, 20, 28, 255);
-    if (flux_canvas_begin(canvas, frame, &clear) != FLUX_OK) return;
+    if (flux_canvas_begin_frame(canvas, frame, &clear) != FLUX_OK) return;
     flux_canvas_fill_rect_color(canvas,
         (flux_rect){ 128, 128, 256, 256 },
         flux_color_rgba(255, 255, 255, 255));
-    flux_canvas_end(canvas);
+    flux_canvas_end_frame(canvas);
 
     if (flux_frame_submit(frame)  != FLUX_OK) return;
     if (flux_frame_present(frame) != FLUX_OK) return;

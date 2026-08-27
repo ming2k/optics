@@ -362,7 +362,7 @@ int main(void) {
             break;
 
         flux_color clear = flux_color_rgba(12, 14, 23, 255);
-        result = flux_canvas_begin(canvas, frame, &clear);
+        result = flux_canvas_begin_frame(canvas, frame, &clear);
         if (result != FLUX_OK)
             break;
 
@@ -448,7 +448,7 @@ int main(void) {
                 canvas, sprites, (flux_rect){x - size * 0.5f, y - size * 0.5f, size, size}, src);
         }
 
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         result = flux_frame_submit(frame);
         if (result != FLUX_OK)
             break;

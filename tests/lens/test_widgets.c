@@ -255,11 +255,11 @@ static void test_compact_outlined_label_preserves_intrinsic_metrics(void) {
     lens_begin(ui, &in);
     lens_row(ui);
     lens_push_id(ui, "plain");
-    lens_label_compact_ex(ui, "12:34", 14.0f);
+    lens_label_compact_ex(ui, "12:34", 14.0f, 0.0f);
     lens_pop_id(ui);
     lens_push_id(ui, "outlined");
     lens_push_style(ui, outline);
-    lens_label_compact_ex(ui, "12:34", 14.0f);
+    lens_label_compact_ex(ui, "12:34", 14.0f, 0.0f);
     lens_pop_style(ui);
     lens_pop_id(ui);
     lens_close(ui);

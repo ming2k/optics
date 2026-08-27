@@ -6,7 +6,7 @@
  * flux_canvas drawing API (<flux/canvas.h>): once created, record with the same
  * flux_canvas_fill_rect / fill_rrect / fill_path / clip_rect / save / restore
  * verbs, bracketed by flux_canvas_cpu_begin / flux_canvas_cpu_end instead of the
- * frame-based flux_canvas_begin / _end.
+ * frame-based flux_canvas_begin_frame / _end.
  *
  * Supported: solid fills, linear/radial gradients, rounded-rect fills and
  * strokes (SDF), arbitrary path fills and strokes, clipping, and glyph runs.
@@ -64,7 +64,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_create_cpu_aa(uint32_t width, ui
                                                               flux_canvas **out);
 
 /* Begin a recording pass, clearing to `clear` (premultiplied; NULL = fully
- * transparent). The CPU analogue of flux_canvas_begin — no frame needed. */
+ * transparent). The CPU analogue of flux_canvas_begin_frame — no frame needed. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_cpu_begin(flux_canvas *c, const flux_color *clear);
 
 /* End the recording pass. Pixels are already resolved in the framebuffer. */

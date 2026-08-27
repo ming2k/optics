@@ -7,9 +7,9 @@
  *   - flux_image is refcounted.
  *   - Per-frame:
  *       flux_surface_begin_frame  ->
- *       flux_canvas_begin (clear or load) ->
+ *       flux_canvas_begin_frame (clear or load) ->
  *       record draws ->
- *       flux_canvas_end ->
+ *       flux_canvas_end_frame ->
  *       flux_frame_submit / flux_frame_present
  */
 
@@ -266,7 +266,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_create(const flux_canvas_desc *d
 FLUX_API void flux_canvas_destroy(flux_canvas *c);
 
 /* Content scale (device-pixel ratio). flux_canvas_set_scale makes each
- * flux_canvas_begin start with this as the base transform, so all drawing is
+ * flux_canvas_begin_frame start with this as the base transform, so all drawing is
  * in logical units mapped onto the physical surface. flux_canvas_get_scale
  * returns the *effective* scale of the active transform (the base content
  * scale composed with any flux_canvas_scale on the stack); flux_text reads it
@@ -289,36 +289,13 @@ FLUX_API void flux_canvas_end_frame(flux_canvas *c);
  * successful termination returns FLUX_OK. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_frame_checked(flux_canvas *c);
 
+
 /* Descriptor form of flux_canvas_begin_frame. This makes attachment load
  * semantics and antialiasing independent: compositor/image-heavy passes can
  * clear a one-sample target without allocating and resolving a 4x attachment,
  * while vector UI keeps the AUTO default. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_pass(flux_canvas *c, flux_frame *f,
                                                            const flux_canvas_pass_desc *desc);
-
-/* GPU-specific spelling of begin_frame/end_frame (f is required). Superseded
- * by the backend-agnostic flux_canvas_begin_frame/end_frame_checked pair;
- * these remain for source compatibility only — see docs/reference/api.md
- * for the two-step deprecation policy. */
-#if defined(__cplusplus)
-#  if __cplusplus >= 201402L
-#    define FLUX_DEPRECATED(msg) [[deprecated(msg)]]
-#  else
-#    define FLUX_DEPRECATED(msg)
-#  endif
-#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
-#  define FLUX_DEPRECATED(msg) [[deprecated(msg)]]
-#elif defined(__GNUC__) || defined(__clang__)
-#  define FLUX_DEPRECATED(msg) __attribute__((deprecated(msg)))
-#else
-#  define FLUX_DEPRECATED(msg)
-#endif
-
-FLUX_DEPRECATED("use flux_canvas_begin_frame") FLUX_NODISCARD FLUX_API flux_result
-flux_canvas_begin(flux_canvas *c, flux_frame *f, const flux_color *clear_color);
-FLUX_DEPRECATED("use flux_canvas_end_frame") FLUX_API void flux_canvas_end(flux_canvas *c);
-FLUX_DEPRECATED("use flux_canvas_end_frame_checked")
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_checked(flux_canvas *c);
 
 /* Snapshot the canvas' pixels as premultiplied RGBA8 (row-major; *stride is
  * bytes/row). Backend-polymorphic: implemented by the CPU backend (returns its
@@ -352,8 +329,8 @@ FLUX_API void flux_canvas_end_target(flux_canvas *c);
 /* Checked target-pass counterpart; see flux_canvas_end_frame_checked. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_target_checked(flux_canvas *c);
 
-/* State stack. All draws and state mutators between flux_canvas_begin
- * and flux_canvas_end record into the bound frame; calls outside that
+/* State stack. All draws and state mutators between flux_canvas_begin_frame
+ * and flux_canvas_end_frame record into the bound frame; calls outside that
  * window are silent no-ops (consult flux_get_last_error). */
 FLUX_API void flux_canvas_save(flux_canvas *c);
 FLUX_API void flux_canvas_restore(flux_canvas *c);
@@ -442,22 +419,6 @@ FLUX_API void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *image,
 
 /* Convenience: fill a rectangle with a solid colour, no paint setup. */
 FLUX_API void flux_canvas_fill_rect_color(flux_canvas *c, flux_rect r, flux_color color);
-
-/* Draw `image` as a single-channel coverage glyph: the texture's R
- * channel is treated as alpha coverage and multiplied by `tint` (a
- * premultiplied flux_color). This lets one colour-independent R8
- * coverage texture be drawn in any colour, so glyph textures need not be
- * duplicated or re-uploaded per text run. */
-FLUX_API void flux_canvas_draw_image_coverage(flux_canvas *c, flux_image *image, flux_rect dst,
-                                              flux_color tint);
-
-/* Coverage glyph from a sub-rectangle of `image` (a glyph atlas). `src` is
- * the sampled region in NORMALISED texture coordinates {u, v, du, dv}; `dst`
- * is the destination pixel rect. Identical to flux_canvas_draw_image_coverage
- * with src = {0,0,1,1}. One persistent atlas texture can thus back every glyph
- * — glyphs are uploaded once and reused, never rebuilt per text run. */
-FLUX_API void flux_canvas_draw_image_coverage_sub(flux_canvas *c, flux_image *image, flux_rect dst,
-                                                  flux_rect src, flux_color tint);
 
 /* ------------------------------------------------------------------ */
 /*  Glyph runs (ADR-0010)                                             */

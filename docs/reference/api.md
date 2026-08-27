@@ -289,7 +289,7 @@ completed writes and must keep the producer from writing concurrently while
 flux samples the image.
 
 For a producer that recommits an already-imported dma-buf with a new acquire
-fence, call `flux_canvas_wait_dmabuf_acquire` after `flux_canvas_begin` and
+fence, call `flux_canvas_wait_dmabuf_acquire` after `flux_canvas_begin_frame` and
 before the first draw that samples that image. The wait is submitted to the
 GPU for the current frame; it does not block the calling CPU thread or require
 rebuilding the `flux_image`. On `FLUX_OK`, flux owns and closes the sync-file
@@ -348,15 +348,18 @@ major version bump:
 When a public symbol is on the way out, the preferred path is:
 
 1. Mark deprecated at minor `0.N`. The header carries a
-   `FLUX_DEPRECATED("use X")` attribute (C23/C++/GNU-fallback spelling,
-   defined next to the affected declaration) and the release notes name
-   the replacement. Live example: `flux_canvas_begin`/`_end`/`_end_checked`.
+   `FLUX_DEPRECATED("use X")` attribute (defined once in `<flux/core.h>`,
+   next to `FLUX_API`) and the release notes name the replacement.
 2. Remove at minor `0.N+1` or later.
 
 A one-cycle deprecation is the floor, not the ceiling. Symbols with
 no plausible replacement (e.g. a misnamed accessor with no remaining
-callers) may be renamed immediately at a minor bump, with the rename
-called out in the release notes.
+callers) may be renamed or removed immediately at a minor bump, with
+the removal called out in the release notes. Recent example: the
+GPU-spelled `flux_canvas_begin`/`_end`/`_end_checked` wrappers were
+removed outright once the backend-agnostic
+`flux_canvas_begin_frame`/`flux_canvas_end_frame`/`_end_frame_checked`
+pair covered every caller, including the CPU backend.
 
 ## Vulkan handle stability
 

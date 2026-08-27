@@ -104,13 +104,13 @@ int main(void) {
         if (flux_surface_begin_frame(s, nullptr, &frame) != FLUX_OK)
             break;
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
-        if (flux_canvas_begin(canvas, frame, &clear) != FLUX_OK) {
+        if (flux_canvas_begin_frame(canvas, frame, &clear) != FLUX_OK) {
             flux_frame_submit(frame);
             flux_frame_present(frame);
             break;
         }
         draw_filler(canvas, &dc);
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         flux_frame_submit(frame);
         flux_frame_present(frame);
 

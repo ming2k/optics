@@ -14,9 +14,6 @@
 IRIS_API int iris_a11y_init(void) {
     return -1;
 }
-IRIS_API const char *iris_a11y_unique_name(void) {
-    return NULL;
-}
 IRIS_API int iris_a11y_update(lens *ui) {
     (void)ui;
     return -1;

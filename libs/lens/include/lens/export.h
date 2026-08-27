@@ -22,4 +22,18 @@
 #define LENS_API
 #endif
 
+/* LENS_DEPRECATED(msg): mark a public symbol as scheduled for removal. Mirrors
+ * FLUX_DEPRECATED in <flux/core.h>; compiles to the compiler attribute where
+ * available so call sites get a warning, and stays empty otherwise so
+ * portability is never sacrificed. */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#define LENS_DEPRECATED(msg) [[deprecated(msg)]]
+#elif defined(_MSC_VER)
+#define LENS_DEPRECATED(msg) __declspec(deprecated(msg))
+#elif defined(__GNUC__) || defined(__clang__)
+#define LENS_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#else
+#define LENS_DEPRECATED(msg)
+#endif
+
 #endif /* LENS_EXPORT_H */

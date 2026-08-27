@@ -278,15 +278,7 @@ void lens_label_wrapped(lens *ui, const char *text, float max_width) {
     label_wrapped(ui, text, 0.0f, max_width); /* 0 = cascade-resolved font size */
 }
 
-void lens_label_wrapped_ex(lens *ui, const char *text, float size, float max_width) {
-    label_wrapped(ui, text, size, max_width);
-}
-
-void lens_label_compact_ex(lens *ui, const char *text, float size) {
-    lens_label_compact_ex2(ui, text, size, 0.0f);
-}
-
-void lens_label_compact_ex2(lens *ui, const char *text, float size, float weight) {
+void lens_label_compact_ex(lens *ui, const char *text, float size, float weight) {
     lens_style eff = lensi_style_effective(ui);
     lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
     lens_id id = lensi_gen_widget_id(ui, text);

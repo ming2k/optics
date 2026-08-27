@@ -3170,11 +3170,11 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             lens_theme th = lens_get_theme(ui);
             flux_color clear = th.color_bg;
             bool drew = false;
-            if (flux_canvas_begin(canvas, frame, &clear) == FLUX_OK) {
+            if (flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK) {
                 if (cfg->paint)
                     cfg->paint(canvas, device, (float)pl.buffer_scale, cfg->user);
                 drew = lens_render(ui, canvas) == FLUX_OK;
-                flux_canvas_end(canvas);
+                flux_canvas_end_frame(canvas);
             }
 
             if (flux_frame_submit(frame) != FLUX_OK)

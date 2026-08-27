@@ -99,15 +99,15 @@ flux_scene_draw_mesh(frame, &camera, world_matrix, mesh, material);
 flux_frame_end_pass(frame);
 
 /* 2D HUD on top of the rendered scene: load instead of clear. */
-flux_canvas_begin(canvas, frame, nullptr);
+flux_canvas_begin_frame(canvas, frame, nullptr);
 flux_canvas_fill_rect_color(canvas, hud_rect, panel_color);
-flux_canvas_end(canvas);
+flux_canvas_end_frame(canvas);
 
 flux_frame_submit(frame);
 flux_frame_present(frame);
 ```
 
-`flux_canvas_begin` with a non-null `clear_color` clears; with `nullptr` it
+`flux_canvas_begin_frame` with a non-null `clear_color` clears; with `nullptr` it
 loads the existing framebuffer content, making the overlay pattern work
 naturally.
 

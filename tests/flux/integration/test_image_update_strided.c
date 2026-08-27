@@ -51,7 +51,7 @@ static flux_result blit_and_read(flux_surface *s, flux_canvas *canvas, blit_case
     if (r != FLUX_OK)
         return r;
     flux_color clear = flux_color_rgba(0, 0, 0, 0);
-    r = flux_canvas_begin(canvas, frame, &clear);
+    r = flux_canvas_begin_frame(canvas, frame, &clear);
     if (r != FLUX_OK)
         return r;
     flux_paint opaque = flux_paint_solid(flux_color_rgba(255, 255, 255, 255));
@@ -59,7 +59,7 @@ static flux_result blit_and_read(flux_surface *s, flux_canvas *canvas, blit_case
     flux_canvas_draw_image_sampled(canvas, bc->image, bc->sampler,
                                    (flux_rect){0.0f, 0.0f, (float)SURF_W, (float)SURF_H},
                                    &opaque);
-    flux_canvas_end(canvas);
+    flux_canvas_end_frame(canvas);
     r = flux_frame_request_readback(frame);
     if (r != FLUX_OK)
         return r;

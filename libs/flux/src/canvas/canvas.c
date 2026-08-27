@@ -292,23 +292,6 @@ void flux_canvas_end_frame(flux_canvas *c) {
     (void)flux_canvas_end_frame_checked(c);
 }
 
-/* GPU-spelled compatibility wrappers. */
-flux_result flux_canvas_begin(flux_canvas *c, flux_frame *f, const flux_color *clear) {
-    if (c && !f) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "flux_canvas_begin requires a frame");
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    }
-    return flux_canvas_begin_frame(c, f, clear);
-}
-
-void flux_canvas_end(flux_canvas *c) {
-    flux_canvas_end_frame(c);
-}
-
-flux_result flux_canvas_end_checked(flux_canvas *c) {
-    return flux_canvas_end_frame_checked(c);
-}
-
 const uint8_t *flux_canvas_read_pixels(flux_canvas *c, uint32_t *width, uint32_t *height,
                                        uint32_t *stride) {
     if (!c || !c->backend->read_pixels)
@@ -778,24 +761,6 @@ void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *img, flux_sample
     flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
     flux_blend_mode blend = paint ? paint->blend : FLUX_BLEND_SRC_OVER;
     draw_image_with_sampler_handle(c, img, sampler, sh, dst, FLUX_SRC_WHOLE, tint, blend, 3u, NULL,
-                                   0.0f);
-}
-
-void flux_canvas_draw_image_coverage(flux_canvas *c, flux_image *img, flux_rect dst,
-                                     flux_color tint) {
-    if (!c || !c->recording || !img)
-        return;
-    flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, FLUX_BLEND_SRC_OVER,
-                                   4u, NULL, 0.0f);
-}
-
-void flux_canvas_draw_image_coverage_sub(flux_canvas *c, flux_image *img, flux_rect dst,
-                                         flux_rect src, flux_color tint) {
-    if (!c || !c->recording || !img)
-        return;
-    flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, src, tint, FLUX_BLEND_SRC_OVER, 4u, NULL,
                                    0.0f);
 }
 

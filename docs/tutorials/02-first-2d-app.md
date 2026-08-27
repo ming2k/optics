@@ -14,7 +14,7 @@ add them back.
 
 ## Step 2 — minimum viable frame
 
-Delete everything between `flux_canvas_begin` and `flux_canvas_end`
+Delete everything between `flux_canvas_begin_frame` and `flux_canvas_end_frame`
 except this:
 
     flux_canvas_fill_rect_color(canvas,
@@ -38,7 +38,7 @@ Before the main loop:
         return 1;
     }
 
-Inside the loop, between `flux_canvas_begin` and `flux_canvas_end`:
+Inside the loop, between `flux_canvas_begin_frame` and `flux_canvas_end_frame`:
 
     flux_arena_reset(&path_arena);
 
@@ -110,7 +110,7 @@ this frame, and try again on the next iteration.
 
 - The three objects: `flux_device`, `flux_surface`, `flux_canvas`.
 - The per-frame envelope: `flux_surface_begin_frame` →
-  `flux_canvas_begin` → draws → `flux_canvas_end` →
+  `flux_canvas_begin_frame` → draws → `flux_canvas_end_frame` →
   `flux_frame_submit` → `flux_frame_present`.
 - The arena pattern for short-lived value types.
 - The transform stack (`save` / `restore` / `translate` / `rotate`).

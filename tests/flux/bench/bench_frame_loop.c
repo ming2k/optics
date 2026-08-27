@@ -76,7 +76,7 @@ int main(void) {
         (void)flux_canvas_begin_pass(canvas, f, &pd);
         flux_canvas_fill_rect_color(canvas, (flux_rect){0, 0, (float)W, (float)H},
                                     flux_color_rgba(64, 64, 77, 255));
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         (void)flux_frame_submit(f);
         (void)flux_frame_present(f);
     }
@@ -111,7 +111,7 @@ int main(void) {
             flux_canvas_draw_image(canvas, targets[t],
                                    (flux_rect){(float)(t * 40), 120.0f, (float)W / 3, (float)H / 3},
                                    nullptr);
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
 
         (void)flux_frame_submit(f);
         (void)flux_frame_present(f);

@@ -237,7 +237,7 @@ int main(int argc, char **argv) {
         return 1;
 
     /* 3. composite */
-    if (flux_canvas_begin(canvas, frame, &clear) != FLUX_OK)
+    if (flux_canvas_begin_frame(canvas, frame, &clear) != FLUX_OK)
         return 1;
     flux_canvas_draw_image(canvas, capture, (flux_rect){0, 0, W, H}, nullptr);
     flux_canvas_draw_image(canvas, glass_out, (flux_rect){0, 0, W, H}, nullptr);
@@ -254,7 +254,7 @@ int main(int argc, char **argv) {
         }
     }
     flux_arena_reset(&arena);
-    flux_canvas_end(canvas);
+    flux_canvas_end_frame(canvas);
 
     if (flux_frame_request_readback(frame) != FLUX_OK)
         return 1;

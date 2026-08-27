@@ -3,7 +3,8 @@
 #include "../internal.h"
 
 const char *lens_version_string(void) {
-    return "0.0.28";
+    return LENS_STRINGIFY_(LENS_VERSION_MAJOR) "." LENS_STRINGIFY_(LENS_VERSION_MINOR) "." LENS_STRINGIFY_(
+        LENS_VERSION_PATCH);
 }
 
 void *lensi_alloc(lens *ui, size_t bytes) {

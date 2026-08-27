@@ -9,7 +9,7 @@
  *   2. build(ui, in) — runs inside an open lens_begin/end pair. The host
  *      builds its chrome (immediate-mode lens widgets) and reads `in`, the
  *      same lens_input snapshot lens is consuming this frame.
- *   3. paint(canvas) — runs inside an open flux_canvas_begin/end pair,
+ *   3. paint(canvas) — runs inside an open flux_canvas_begin_frame/end pair,
  *      *before* lens_render(). Anything the host draws here lands *under*
  *      lens's chrome. Returning without drawing is fine.
  *   4. stop(ui, device) — releases host resources before Iris tears down
@@ -56,6 +56,20 @@ extern "C" {
 #define IRIS_API
 #endif
 
+/* IRIS_DEPRECATED(msg): mark a public symbol as scheduled for removal. Mirrors
+ * FLUX_DEPRECATED in <flux/core.h>; compiles to the compiler attribute where
+ * available so call sites get a warning, and stays empty otherwise so
+ * portability is never sacrificed. */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#define IRIS_DEPRECATED(msg) [[deprecated(msg)]]
+#elif defined(_MSC_VER)
+#define IRIS_DEPRECATED(msg) __declspec(deprecated(msg))
+#elif defined(__GNUC__) || defined(__clang__)
+#define IRIS_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#else
+#define IRIS_DEPRECATED(msg)
+#endif
+
 #define IRIS_VERSION_MAJOR 0
 #define IRIS_VERSION_MINOR 0
 #define IRIS_VERSION_PATCH 28
@@ -78,7 +92,7 @@ IRIS_API const char *iris_version_string(void);
 typedef void (*iris_build_fn)(lens *ui, const lens_input *in, void *user);
 
 /* Per-frame paint callback. `canvas` is live inside an open
- * flux_canvas_begin/end pair, with the frame already cleared to the theme
+ * flux_canvas_begin_frame/end pair, with the frame already cleared to the theme
  * background. `device` is the flux_device iris owns for this app —
  * hosts that need a device (e.g. to create a flux_text context) must
  * borrow this one rather than opening their own, since two flux_devices

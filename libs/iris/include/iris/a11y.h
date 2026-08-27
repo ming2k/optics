@@ -75,11 +75,6 @@ extern "C" {
  * Automation, Cocoa NSAccessibility) can satisfy the same contract. */
 IRIS_API int iris_a11y_init(void);
 
-/* The unique D-Bus name our AT-SPI connection owns (e.g. ":1.50"), or NULL
- * when the bridge is not running. Useful for tests and for ATs that want
- * to address us directly. */
-IRIS_API const char *iris_a11y_unique_name(void);
-
 /* Reconcile the AT-SPI object tree with lens's live semantic tree. Call
  * once per frame, AFTER lens_end (the walk is only valid then), on the
  * iris main thread. Returns 0 on success, -1 if the bridge is not

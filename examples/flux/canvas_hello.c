@@ -2,7 +2,7 @@
  * canvas_hello — the 2D canvas, end to end.
  *
  * A single-file tour of the immediate-mode canvas. Every draw call below
- * runs once per frame between flux_canvas_begin and flux_canvas_end;
+ * runs once per frame between flux_canvas_begin_frame and flux_canvas_end_frame;
  * paths are allocated from a per-frame arena that is reset each frame.
  *
  * Teaches:
@@ -202,7 +202,7 @@ int main(void) {
             break;
 
         flux_color clear = flux_color_rgba(20, 20, 28, 255);
-        r = flux_canvas_begin(canvas, frame, &clear);
+        r = flux_canvas_begin_frame(canvas, frame, &clear);
         if (r != FLUX_OK)
             break;
 
@@ -354,7 +354,7 @@ int main(void) {
         }
 
         flux_arena_reset(&arena);
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
 
         r = flux_frame_submit(frame);
         if (r != FLUX_OK)

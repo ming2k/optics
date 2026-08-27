@@ -52,7 +52,7 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas) {
         return r;
 
     flux_color clear = flux_color_rgba(CLEAR_R, CLEAR_G, CLEAR_B, 255);
-    r = flux_canvas_begin(canvas, frame, &clear);
+    r = flux_canvas_begin_frame(canvas, frame, &clear);
     if (r != FLUX_OK)
         return r;
 
@@ -60,7 +60,7 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas) {
                                 flux_color_rgba(255, 255, 255, 255));
     flux_canvas_fill_rect_color(canvas, (flux_rect){W - 12.0f, 4.0f, 8.0f, 8.0f},
                                 flux_color_rgba(0, 64, 255, 255));
-    flux_canvas_end(canvas);
+    flux_canvas_end_frame(canvas);
 
     r = flux_frame_submit(frame);
     if (r != FLUX_OK)
@@ -74,10 +74,10 @@ static flux_result render_solid_frame(flux_surface *s, flux_canvas *canvas, flux
     flux_result r = flux_surface_begin_frame(s, nullptr, &frame);
     if (r != FLUX_OK)
         return r;
-    r = flux_canvas_begin(canvas, frame, &color);
+    r = flux_canvas_begin_frame(canvas, frame, &color);
     if (r != FLUX_OK)
         return r;
-    flux_canvas_end(canvas);
+    flux_canvas_end_frame(canvas);
     if (capture) {
         r = flux_frame_request_readback(frame);
         if (r != FLUX_OK)
@@ -96,14 +96,14 @@ static flux_result render_pattern_region(flux_surface *s, flux_canvas *canvas,
     if (r != FLUX_OK)
         return r;
     flux_color clear = flux_color_rgba(CLEAR_R, CLEAR_G, CLEAR_B, 255);
-    r = flux_canvas_begin(canvas, frame, &clear);
+    r = flux_canvas_begin_frame(canvas, frame, &clear);
     if (r != FLUX_OK)
         return r;
     flux_canvas_fill_rect_color(canvas, (flux_rect){W / 4.0f, H / 4.0f, W / 2.0f, H / 2.0f},
                                 flux_color_rgba(255, 255, 255, 255));
     flux_canvas_fill_rect_color(canvas, (flux_rect){W - 12.0f, 4.0f, 8.0f, 8.0f},
                                 flux_color_rgba(0, 64, 255, 255));
-    flux_canvas_end(canvas);
+    flux_canvas_end_frame(canvas);
     const flux_readback_region empty = {.x = 1, .y = 1, .width = 0, .height = 1};
     const flux_readback_region outside = {.x = W, .y = 0, .width = 1, .height = 1};
     EXPECT(flux_frame_request_readback_region(frame, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
@@ -197,13 +197,13 @@ int main(void) {
 
         flux_frame *foreign = nullptr;
         EXPECT(flux_surface_begin_frame(s2, nullptr, &foreign) == FLUX_OK);
-        EXPECT(flux_canvas_begin(canvas, foreign, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_canvas_begin_frame(canvas, foreign, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
         /* The canvas must be untouched by the refused begin: a same-surface
          * frame works immediately after. */
         flux_frame *own = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &own) == FLUX_OK);
-        EXPECT(flux_canvas_begin(canvas, own, nullptr) == FLUX_OK);
-        flux_canvas_end(canvas);
+        EXPECT(flux_canvas_begin_frame(canvas, own, nullptr) == FLUX_OK);
+        flux_canvas_end_frame(canvas);
         EXPECT(flux_frame_submit(own) == FLUX_OK);
         EXPECT(flux_frame_present(own) == FLUX_OK);
         /* Finish the foreign frame on its own surface. */
@@ -255,10 +255,10 @@ int main(void) {
 
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
-        EXPECT(flux_canvas_begin(canvas, frame, nullptr) == FLUX_OK);
+        EXPECT(flux_canvas_begin_frame(canvas, frame, nullptr) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas, (flux_rect){2, 2, 8, 8},
                                     flux_color_rgba_premul(0, 255, 0, 255));
-        flux_canvas_end(canvas);
+        flux_canvas_end_frame(canvas);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);

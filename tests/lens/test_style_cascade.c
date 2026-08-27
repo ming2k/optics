@@ -190,7 +190,7 @@ static void test_outline_atoms_reach_draw_commands(void) {
     lens_begin(ui, &IN0);
     lens_label(ui, "plain");
     lens_push_style(ui, s);
-    lens_label_compact_ex(ui, "12:34", 14.0f);
+    lens_label_compact_ex(ui, "12:34", 14.0f, 0.0f);
     lens_pop_style(ui);
     lens_end(ui);
 

@@ -15,7 +15,7 @@
  *       lens_begin(ui, &input) ->
  *       build (lens_row / lens_button / ...) ->
  *       lens_end(ui)            (reconcile, layout, interaction) ->
- *       flux_canvas_begin(...) -> lens_render(ui, canvas) -> flux_canvas_end(...)
+ *       flux_canvas_begin_frame(...) -> lens_render(ui, canvas) -> flux_canvas_end_frame(...)
  */
 
 #ifndef LENS_H
@@ -46,6 +46,11 @@ extern "C" {
 #define LENS_VERSION_MAJOR 0
 #define LENS_VERSION_MINOR 0
 #define LENS_VERSION_PATCH 28
+
+/* Stringify helpers used by lens_version_string(); LENS_STRINGIFY_ adds the
+ * indirection level required for macro-expansion of literal tokens. */
+#define LENS_STRINGIFY_(x) #x
+#define LENS_STRINGIFY(x) LENS_STRINGIFY_(x)
 
 LENS_API const char *lens_version_string(void);
 
@@ -1054,12 +1059,11 @@ LENS_API void lens_label_ex(lens *ui, const char *text, float size);
 /* A label constrained to max_width logical pixels. Text wraps at whitespace
  * when possible and falls back to UTF-8 boundaries for long tokens. */
 LENS_API void lens_label_wrapped(lens *ui, const char *text, float max_width);
-LENS_API void lens_label_wrapped_ex(lens *ui, const char *text, float size, float max_width);
-LENS_API void lens_label_compact_ex(lens *ui, const char *text, float size);
-/* Weight-aware compact form: the run measures AND draws at `weight`
- * (0 = the theme's regular weight, the historic behaviour). Skins that
- * re-stamp the weight see the same value in the record. */
-LENS_API void lens_label_compact_ex2(lens *ui, const char *text, float size, float weight);
+/* Unpadded (compact) form at an explicit point size. `weight` (0 = the
+ * theme's regular weight, the historic behaviour) makes the run measure AND
+ * draw at that weight; skins that re-stamp the weight see the same value in
+ * the record. */
+LENS_API void lens_label_compact_ex(lens *ui, const char *text, float size, float weight);
 LENS_API void lens_title(lens *ui, const char *text);
 LENS_API void lens_heading(lens *ui, const char *text, int level);
 LENS_API bool lens_checkbox(lens *ui, const char *label, bool *value);
