@@ -14,39 +14,15 @@ use flux_scene_graph_sys as sys;
 
 mod materials;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Error(pub sys::flux_result);
+/// A flux result code surfaced as a Rust error — the SAME type as
+/// [`flux::Error`], re-exported so callers need one fewer import. GLB-load
+/// specific context lives in [`LoadError`], not in a second result-code
+/// error type.
+pub use flux::Error;
 
-impl Error {
-    fn check(rc: sys::flux_result) -> Result<(), Error> {
-        if rc == sys::flux_result::FLUX_OK {
-            Ok(())
-        } else {
-            Err(Error(rc))
-        }
-    }
+pub(crate) fn check(rc: sys::flux_result) -> Result<(), Error> {
+    Error::check_raw(rc)
 }
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use sys::flux_result::*;
-        let message = match self.0 {
-            FLUX_OK => "ok",
-            FLUX_ERROR_INVALID_ARGUMENT => "invalid or malformed GLB",
-            FLUX_ERROR_OUT_OF_MEMORY => "out of memory",
-            FLUX_ERROR_OUT_OF_RANGE => "out of range",
-            FLUX_ERROR_INVALID_STATE => "invalid state",
-            FLUX_ERROR_UNSUPPORTED => "GLB contains no supported mesh primitives",
-            FLUX_ERROR_BACKEND_FAILURE => "GPU backend failure",
-            FLUX_ERROR_DEVICE_LOST => "device lost",
-            FLUX_ERROR_SURFACE_LOST => "surface lost",
-            FLUX_ERROR_TIMEOUT => "timeout",
-        };
-        write!(f, "flux scene graph error: {message}")
-    }
-}
-
-impl std::error::Error for Error {}
 
 /// Render-target formats used to construct a GLB's per-primitive materials.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,11 +65,8 @@ impl std::error::Error for LoadError {
     }
 }
 
-impl From<Error> for LoadError {
-    fn from(value: Error) -> Self {
-        Self::Scene(value)
-    }
-}
+// (Error is now a re-export of flux::Error; the From impls below use the
+// concrete crate paths directly.)
 
 impl From<gltf::Error> for LoadError {
     fn from(value: gltf::Error) -> Self {
@@ -143,7 +116,7 @@ pub struct Scene {
 impl Scene {
     pub fn from_glb(device: &Device, bytes: &[u8]) -> Result<Scene, Error> {
         let mut raw = std::ptr::null_mut();
-        Error::check(unsafe {
+        check(unsafe {
             sys::flux_sg_load_glb(
                 device.as_raw() as *mut sys::flux_device,
                 bytes.as_ptr().cast(),
@@ -169,7 +142,7 @@ impl Scene {
             .iter()
             .map(|material| material.as_raw() as *mut sys::flux_material)
             .collect();
-        Error::check(unsafe {
+        check(unsafe {
             sys::flux_sg_scene_set_materials(
                 scene.raw,
                 if raw_materials.is_empty() {
@@ -215,7 +188,7 @@ impl Scene {
     /// clips are retargeted onto this scene's VRM humanoid rig.
     pub fn animation_from_glb(&self, bytes: &[u8]) -> Result<Animation, Error> {
         let mut raw = std::ptr::null_mut();
-        Error::check(unsafe {
+        check(unsafe {
             sys::flux_sg_load_animation_glb(self.raw, bytes.as_ptr().cast(), bytes.len(), &mut raw)
         })?;
         Ok(Animation { raw })
@@ -228,7 +201,7 @@ impl Scene {
         time_seconds: f32,
         looping: bool,
     ) -> Result<(), Error> {
-        Error::check(unsafe {
+        check(unsafe {
             sys::flux_sg_scene_apply_animation(self.raw, animation.raw, time_seconds, looping)
         })
     }

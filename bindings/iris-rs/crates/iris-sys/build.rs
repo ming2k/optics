@@ -10,7 +10,7 @@
 //!          `PKG_CONFIG_PATH`. iris depends on lens (which depends on
 //!          flux), so when dev mode is on we also prepend LENS_BUILD_DIR
 //!          and FLUX_BUILD_DIR's uninstalled dirs — otherwise pkg-config
-//!          resolves `Requires: lens >= 0.1.0` against any stale system
+//!          resolves `Requires: lens >= 0.0.28` against any stale system
 //!          copy. Optionally also set `IRIS_SOURCE_DIR=<iris-source>` so
 //!          bindgen reads headers straight from the source checkout.
 //!   2. Publish non-system link dirs as rpath metadata (`cargo:rpaths`)
@@ -103,8 +103,13 @@ fn main() {
         set_pkg_config_path(&dirs, &os);
     }
 
+    // Enforce the MINIMUM C library version this crate's bindings assume
+    // (a11y surface matches this header set (0.0.28)); pkg-config fails the build loudly when an older flux/lens/
+    // iris/prism is picked up (e.g. a stale system install shadowing the
+    // meson uninstalled dir).
     let iris = pkg_config::Config::new()
         .print_system_libs(false)
+        .atleast_version("0.0.28")
         .probe("iris")
         .unwrap_or_else(|e| {
             panic!(
@@ -166,6 +171,20 @@ fn main() {
         .allowlist_function("iris_.*")
         .allowlist_type("iris_.*")
         .allowlist_var("IRIS_.*")
+        // flux/lens seam types (flux_canvas, flux_device, lens, lens_input)
+        // appear in iris signatures only as pointers. They are blocklisted
+        // and re-exported from their own -sys crates via the raw_line below,
+        // so exactly one Rust definition of each handle exists across the
+        // stack and pointers cross crate seams without casts.
+        .blocklist_type("flux_.*")
+        .blocklist_function("flux_.*")
+        .blocklist_var("FLUX_.*")
+        .blocklist_type("lens")
+        .blocklist_type("lens_.*")
+        .blocklist_function("lens_.*")
+        .blocklist_var("LENS_.*")
+        .raw_line("pub use flux_sys::{flux_canvas, flux_device, flux_point};")
+        .raw_line("pub use lens_sys::{lens, lens_input};")
         .default_enum_style(bindgen::EnumVariation::Rust {
             non_exhaustive: false,
         })

@@ -125,3 +125,13 @@ fn error_is_flux_error_and_displays() {
     let text = err.to_string();
     assert!(text.starts_with("flux error:"), "unexpected: {text}");
 }
+
+#[test]
+fn version_string_is_wellformed() {
+    // The runtime string must parse as three numeric components; a drifted
+    // build (bindings compiled against a different libprism) should fail
+    // loudly. Mirrors the iris binding's version tripwire.
+    let v = prism::version();
+    assert_eq!(v.split('.').count(), 3, "malformed version: {v}");
+    assert!(v.chars().all(|c| c.is_ascii_digit() || c == '.'), "{v}");
+}

@@ -51,8 +51,13 @@ fn main() {
         set_pkg_config_path(&[dir.join("meson-uninstalled")], &os);
     }
 
+    // Enforce the MINIMUM C library version this crate's bindings assume
+    // (the bindings share flux_sys handle types (0.0.28 seam)); pkg-config fails the build loudly when an older flux/lens/
+    // iris/prism is picked up (e.g. a stale system install shadowing the
+    // meson uninstalled dir).
     let lib = pkg_config::Config::new()
         .print_system_libs(false)
+        .atleast_version("0.0.28")
         .probe("flux-scene-graph")
         .unwrap_or_else(|e| {
             panic!(
@@ -99,9 +104,30 @@ fn main() {
         .header("wrapper.h")
         .clang_args(&clang_args)
         .clang_arg("-std=c23")
-        .allowlist_function("flux_.*")
-        .allowlist_type("flux_.*")
-        .allowlist_var("FLUX_.*")
+        .allowlist_function("flux_sg_.*")
+        .allowlist_type("flux_sg_.*")
+        .allowlist_var("FLUX_SG_.*")
+        // All flux types in this header cross as pointers or scalars. The
+        // opaque handles (flux_device, flux_frame, flux_camera, ...) are
+        // blocklisted and re-exported from flux_sys so exactly one Rust
+        // definition of each exists across the stack; flux_result (a scalar
+        // enum return) and flux_vec3-flavored PODs stay local — bindgen
+        // cannot derive on blocklisted references and scalar enums carry no
+        // seam risk.
+        // flux_result is re-exported from flux_sys (see raw_line) so every
+        // crate in the stack shares ONE error-code enum.
+        .allowlist_type("flux_vec3")
+        .blocklist_type("flux_result")
+        .blocklist_type("flux_device")
+        .blocklist_type("flux_frame")
+        .blocklist_type("flux_camera")
+        .blocklist_type("flux_material")
+        .blocklist_type("flux_scene_light")
+        .blocklist_type("flux_mesh")
+        .blocklist_function("flux_(device|frame|camera|material|scene|mesh)_.*")
+        .raw_line(
+            "pub use flux_sys::{flux_camera, flux_device, flux_frame, flux_material, flux_result, flux_scene_light};",
+        )
         .default_enum_style(bindgen::EnumVariation::Rust {
             non_exhaustive: false,
         })

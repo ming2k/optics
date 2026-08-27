@@ -116,7 +116,7 @@ fn main() {
     if dev_mode {
         let dir = build_dir.as_ref().unwrap();
         // prism's own uninstalled tree first, then flux's (if pointed at),
-        // so prism's `Requires: flux >= 0.0.13` resolves to the matching
+        // so prism's `Requires: flux >= 0.0.28` resolves to the matching
         // freshly-built libflux rather than any stale system copy. In the
         // optics monorepo both live in the same build tree, so the two dirs
         // usually coincide.
@@ -138,8 +138,13 @@ fn main() {
 
     // 2. Probe. prism's `Requires: flux` pulls libflux's link directives in
     //    automatically; emits rustc-link-lib / rustc-link-search for both.
+    // Enforce the MINIMUM C library version this crate's bindings assume
+    // (prism_version_string exists (0.0.28)); pkg-config fails the build loudly when an older flux/lens/
+    // iris/prism is picked up (e.g. a stale system install shadowing the
+    // meson uninstalled dir).
     let lib = pkg_config::Config::new()
         .print_system_libs(false)
+        .atleast_version("0.0.28")
         .probe("prism")
         .unwrap_or_else(|e| {
             panic!(

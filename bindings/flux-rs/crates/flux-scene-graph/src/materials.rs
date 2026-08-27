@@ -191,7 +191,7 @@ fn decode_image(
         device,
         rgba.width(),
         rgba.height(),
-        Format::FLUX_FORMAT_RGBA8_SRGB,
+        Format::Rgba8Srgb,
         rgba.as_raw(),
     )
     .map_err(LoadError::from)

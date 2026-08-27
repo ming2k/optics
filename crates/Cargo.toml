@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = [
+  "flux-composition-graph",
+  "flux-text-layout",
+]
+
+[workspace.package]
+version = "0.1.1"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/ming2k/optics"
+rust-version = "1.85"
+
+[profile.dev]
+rpath = true

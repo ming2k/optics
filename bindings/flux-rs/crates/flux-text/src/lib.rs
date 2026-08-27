@@ -25,40 +25,14 @@ use std::fmt;
 
 use flux::{Arena, Canvas, Device};
 
-/// A flux result code surfaced as a Rust error.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Error(pub flux_text_sys::flux_result);
+/// A flux result code surfaced as a Rust error. This is the SAME type as
+/// [`flux::Error`] (the whole stack speaks one `flux_result`); re-exported
+/// here so `flux_text` users need one fewer import.
+pub use flux::Error;
 
-impl Error {
-    fn check(rc: flux_text_sys::flux_result) -> Result<(), Error> {
-        if rc == flux_text_sys::flux_result::FLUX_OK {
-            Ok(())
-        } else {
-            Err(Error(rc))
-        }
-    }
+pub(crate) fn check(rc: flux_text_sys::flux_result) -> Result<(), Error> {
+    Error::check_raw(rc)
 }
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use flux_text_sys::flux_result::*;
-        let s = match self.0 {
-            FLUX_OK => "ok",
-            FLUX_ERROR_INVALID_ARGUMENT => "invalid argument",
-            FLUX_ERROR_OUT_OF_MEMORY => "out of memory",
-            FLUX_ERROR_OUT_OF_RANGE => "out of range",
-            FLUX_ERROR_INVALID_STATE => "invalid state",
-            FLUX_ERROR_UNSUPPORTED => "unsupported",
-            FLUX_ERROR_BACKEND_FAILURE => "backend failure",
-            FLUX_ERROR_DEVICE_LOST => "device lost",
-            FLUX_ERROR_SURFACE_LOST => "surface lost",
-            FLUX_ERROR_TIMEOUT => "timeout",
-        };
-        write!(f, "flux text error: {s}")
-    }
-}
-
-impl std::error::Error for Error {}
 
 /// How a run looks: size, weight, family, and (premultiplied) colour.
 /// `weight == 0.0` selects the regular weight; `color` is ignored by
@@ -168,7 +142,7 @@ impl Text {
     fn create(device: *mut flux_text_sys::flux_device, scale: f32) -> Result<Text, Error> {
         let desc = flux_text_sys::flux_text_desc { device, scale };
         let mut out: *mut flux_text_sys::flux_text = std::ptr::null_mut();
-        Error::check(unsafe { flux_text_sys::flux_text_create(&desc, &mut out) })?;
+        check(unsafe { flux_text_sys::flux_text_create(&desc, &mut out) })?;
         debug_assert!(!out.is_null());
         Ok(Text { raw: out })
     }

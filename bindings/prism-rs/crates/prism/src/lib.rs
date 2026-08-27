@@ -13,11 +13,25 @@
 
 use std::marker::PhantomData;
 
+/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// deliberately as the one documented unsafe escape hatch.
+/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// deliberately as the one documented unsafe escape hatch.
 pub use prism_sys as sys;
 
 /// A prism failure, surfaced through flux's result codes: every fallible
 /// prism call returns `flux_result`, so the error type is flux's own.
 pub use flux::Error;
+
+/// Library version string ("0.0.28" at the time of writing), derived from
+/// the `PRISM_VERSION_*` macros — not a hardcoded literal.
+pub fn version() -> &'static str {
+    unsafe {
+        std::ffi::CStr::from_ptr(sys::prism_version_string())
+            .to_str()
+            .unwrap_or("?")
+    }
+}
 
 /// Map a raw result to `Ok(())` on `FLUX_OK`, else `Err`.
 fn check(rc: sys::flux_result) -> Result<(), Error> {

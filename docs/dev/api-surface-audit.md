@@ -1,5 +1,17 @@
 # Public API Surface Audit (2026-06)
 
+> **Status (2026-06, follow-up): every actionable finding below has been
+> implemented.** Dead symbols removed at C level; version machinery now
+> exists in all four libraries; the `-sys` crates share seam types via
+> blocklist+re-export; `flux::Canvas`/`Format`/error-type cleanups landed;
+> `flux-composition-graph` and `flux-text-layout` moved to `crates/`;
+> `atleast_version("0.0.28")` is enforced in every build.rs. Two audit
+> claims were corrected during implementation: iris **did** already have
+> version macros (only prism was missing them), and
+> `flux_canvas_create_cpu_aa` **does** have C callers (it gained a Rust
+> wrapper instead of removal). See CHANGELOG `[Unreleased]` for the full
+> list.
+
 Goal: keep the externally exposed interface set — C headers and Rust bindings —
 **clean, coarse-grained and properly layered**, because the surface is read by
 humans *and* AI agents; excess, disorder and legacy baggage directly translate

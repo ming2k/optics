@@ -610,3 +610,16 @@ fn explicit_selectable_ids_keep_repeated_labels_distinct() {
     });
     assert!(ui.has_duplicate_ids());
 }
+
+/* Formerly the orphaned `examples/u2.rs` scratch binary (it sat at the
+ * virtual-manifest workspace root and was never compiled); preserved here
+ * as a test so the overflow probe it exercised stays under CI. */
+#[test]
+fn headless_frame_reports_overflow_flag() {
+    let mut ui = lens::Ui::headless().expect("headless ui");
+    let input = lens::Input::new((100.0, 100.0), 1.0 / 60.0);
+    ui.frame(&input, |f| {
+        let _ = f.button("x");
+    });
+    let _ = ui.overflowed();
+}

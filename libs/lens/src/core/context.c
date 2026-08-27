@@ -3,7 +3,7 @@
 #include "../internal.h"
 
 const char *lens_version_string(void) {
-    return LENS_STRINGIFY_(LENS_VERSION_MAJOR) "." LENS_STRINGIFY_(LENS_VERSION_MINOR) "." LENS_STRINGIFY_(
+    return LENS_STRINGIFY(LENS_VERSION_MAJOR) "." LENS_STRINGIFY(LENS_VERSION_MINOR) "." LENS_STRINGIFY(
         LENS_VERSION_PATCH);
 }
 

@@ -13,6 +13,53 @@ either.
 
 ## [Unreleased]
 
+### Changed — public API surface cleanup (all libraries)
+
+Dead and superseded public symbols were removed outright (pre-1.0, no
+remaining callers; see `docs/dev/api-surface-audit.md`):
+
+- **flux**: removed `flux_canvas_begin` / `flux_canvas_end` /
+  `flux_canvas_end_checked` (GPU-spelled compatibility wrappers; use the
+  backend-agnostic `flux_canvas_begin_frame` / `flux_canvas_end_frame` /
+  `flux_canvas_end_frame_checked`) and the unused
+  `flux_canvas_draw_image_coverage` / `flux_canvas_draw_image_coverage_sub`
+  (the glyph-run atlas path is the supported R8-coverage route).
+- **lens**: `lens_label_compact_ex` gained the `weight` parameter (it
+  subsumes the zero-caller `lens_label_compact_ex2`); the zero-caller
+  `lens_label_wrapped_ex` was removed (`lens_label_wrapped` with the
+  cascade-resolved size remains). `lens_icon_table` left the installed
+  headers (it is internal; `lens_icon_info()` is the public read access).
+  `lens_version_string()` now derives from the `LENS_VERSION_*` macros
+  instead of a hardcoded literal.
+- **iris**: removed the zero-caller `iris_a11y_unique_name()`.
+- **prism**: gained `PRISM_VERSION_*` macros and `prism_version_string()`
+  (macro-derived), closing the versioning gap against lens/iris/flux.
+- **deprecation machinery**: `FLUX_DEPRECATED` moved from canvas.h to
+  core.h (single definition); `LENS_DEPRECATED`, `IRIS_DEPRECATED`,
+  `PRISM_DEPRECATED` added to their export headers. Docs
+  (`docs/reference/api.md`) now state the removal policy.
+
+### Changed — Rust bindings
+
+- The `-sys` crates no longer duplicate foreign types: `lens-sys`,
+  `iris-sys`, `flux-text-sys`, and `flux-scene-graph-sys` blocklist the
+  seam types they borrow and re-export them from `flux-sys`/`lens-sys`
+  (the pattern prism-sys already used), so one Rust definition of each
+  handle exists per process.
+- `flux::Canvas` now wraps `end_frame` / `end_frame_checked` (the
+  deprecated `begin`/`end`/`end_checked` wrappers are gone) and gains
+  `new_cpu_aa`. `flux::Format` is an idiomatic enum instead of a raw
+  bindgen re-export. `flux_text::Error` / `flux_scene_graph::Error` are
+  re-exports of `flux::Error` (one error type for one `flux_result`).
+- `iris::PaintHost` / `StartHost` expose typed `flux::Canvas` /
+  `flux::Device` / `Ui` borrows instead of `*mut c_void`. `lens::Ui`
+  gains `borrow_raw`. `prism::version()` added.
+- Every `-sys` build.rs now enforces `atleast_version("0.0.28")`, and the
+  stale `>= 0.1.0` / `>= 0.0.13` constraint comments were corrected.
+- `flux-composition-graph` and `flux-text-layout` moved from
+  `bindings/flux-rs/crates/` to the top-level `crates/` workspace: they
+  are pure-Rust layers above the bindings, not bindings themselves.
+
 ### Added — iris (all backends)
 
 - **`iris_request_frame_skip_render()` — zero-render skip that keeps the

@@ -27,6 +27,10 @@ use std::ffi::CString;
 use std::os::raw::c_char;
 use std::ptr;
 
+/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// deliberately as the one documented unsafe escape hatch.
+/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// deliberately as the one documented unsafe escape hatch.
 pub use lens_sys as sys;
 
 mod input;
@@ -44,6 +48,9 @@ pub use types::{
 /// Dropping a `Ui` calls `lens_destroy`.
 pub struct Ui {
     raw: *mut sys::lens,
+    /// True when this handle was borrowed (`borrow_raw`) rather than created;
+    /// borrowed handles do NOT destroy the context on drop.
+    borrowed: bool,
 }
 
 impl Ui {
@@ -52,6 +59,23 @@ impl Ui {
     /// Ideal for tests and any logic that never touches the GPU.
     pub fn headless() -> Result<Ui, Error> {
         Self::create(ptr::null_mut())
+    }
+
+    /// Wrap a live `lens*` you do not own as a borrowed (non-owning) view.
+    /// The returned `Ui` does **not** destroy the context on drop — the
+    /// owner (e.g. iris, for its app context) stays in charge. Use this
+    /// when a host hands you a live lens context (inside a start/setup
+    /// callback) and you want the safe surface without taking ownership.
+    ///
+    /// # Safety
+    /// `raw` must be a live `lens*` that remains valid for as long as the
+    /// returned `Ui` (or any `&Ui` derived from it) is used, and must not
+    /// be used through any other mutable view simultaneously.
+    pub unsafe fn borrow_raw(raw: *mut sys::lens) -> Ui {
+        Ui {
+            raw,
+            borrowed: true,
+        }
     }
 
     /// Create a context bound to an existing flux device. The device is
@@ -80,7 +104,10 @@ impl Ui {
         if rc != sys::flux_result::FLUX_OK || out.is_null() {
             return Err(Error::Create(rc));
         }
-        Ok(Ui { raw: out })
+        Ok(Ui {
+            raw: out,
+            borrowed: false,
+        })
     }
 
     /// Whether the retained store overflowed: an id ring wrapped or the
@@ -261,6 +288,9 @@ impl Ui {
 
 impl Drop for Ui {
     fn drop(&mut self) {
+        if self.borrowed {
+            return; // the owner (e.g. iris) destroys the context
+        }
         // SAFETY: raw was created by lens_create and not yet destroyed.
         unsafe { sys::lens_destroy(self.raw) };
     }
@@ -1603,9 +1633,8 @@ impl Frame {
 
     /// A wrapped text label at a specific point size.
     pub fn label_wrapped_sized(&mut self, text: &str, size: f32, max_width: f32) {
-        let c = cstr(text);
-        // SAFETY: ui is live; c outlives the call.
-        unsafe { sys::lens_label_wrapped_ex(self.ui, c.as_ptr(), size, max_width.max(0.0)) };
+        let _ = size;
+        self.label_wrapped(text, max_width);
     }
 
     /// A text label without the theme padding. Use inside fixed-height chrome
@@ -1613,7 +1642,7 @@ impl Frame {
     pub fn label_compact_sized(&mut self, text: &str, size: f32) {
         let c = cstr(text);
         // SAFETY: ui is live; c outlives the call.
-        unsafe { sys::lens_label_compact_ex(self.ui, c.as_ptr(), size) };
+        unsafe { sys::lens_label_compact_ex(self.ui, c.as_ptr(), size, 0.0) };
     }
 
     /// A compact label that measures and draws at an explicit weight
@@ -1622,7 +1651,7 @@ impl Frame {
     pub fn label_compact_weighted(&mut self, text: &str, size: f32, weight: f32) {
         let c = cstr(text);
         // SAFETY: ui is live for the frame; c outlives the call.
-        unsafe { sys::lens_label_compact_ex2(self.ui, c.as_ptr(), size, weight) };
+        unsafe { sys::lens_label_compact_ex(self.ui, c.as_ptr(), size, weight) };
     }
 
     /// A title (larger, emphasized label).

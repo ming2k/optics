@@ -9,20 +9,21 @@ library. Eight crates provide the native wrappers and companion layers:
 | [`flux`]           | Safe wrapper: RAII handles, `Result<T, Error>`.              |
 | [`flux-text-sys`]  | Raw bindgen FFI to `libflux-text` (HarfBuzz shaping sibling). |
 | [`flux-text`]      | Safe wrapper over `flux-text-sys`, Layer-0 shaping surface.  |
-| [`flux-text-layout`] | Pure-Rust Layer-1 line wrapping on top of `flux-text`.     |
 | [`flux-scene-graph-sys`] | Raw bindgen FFI to `libflux-scene-graph`.          |
 | [`flux-scene-graph`] | Safe glTF scene, material/texture, animation, bounds, and drawing layer. |
-| [`flux-composition-graph`] | Pure-Rust offscreen DAG, ROI, damage, and target-lifetime planner above Flux operators. |
+
+Two **pure-Rust layers above these bindings** live in the monorepo's
+top-level `crates/` workspace (they are not bindings, so they do not live
+here): `crates/flux-text-layout` (Layer-1 line wrapping) and
+`crates/flux-composition-graph` (offscreen DAG / ROI / damage planning).
 
 [flux]: https://github.com/ming2k/flux
 [`flux-sys`]: crates/flux-sys/
 [`flux`]: crates/flux/
 [`flux-text-sys`]: crates/flux-text-sys/
 [`flux-text`]: crates/flux-text/
-[`flux-text-layout`]: crates/flux-text-layout/
 [`flux-scene-graph-sys`]: crates/flux-scene-graph-sys/
 [`flux-scene-graph`]: crates/flux-scene-graph/
-[`flux-composition-graph`]: crates/flux-composition-graph/
 
 This repository is **separate** from the C library by design — it
 follows the industry convention (openssl, sqlite, curl, gtk all keep

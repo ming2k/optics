@@ -11,3 +11,9 @@ rust-version.workspace = true
 [build-dependencies]
 bindgen = "0.72"
 pkg-config = "0.3"
+
+[dependencies]
+# flux-sys is re-exported so the handle types scene-graph borrows
+# (flux_frame, flux_camera, flux_device, ...) have ONE Rust definition
+# across the stack.
+flux-sys = { path = "../flux-sys" }

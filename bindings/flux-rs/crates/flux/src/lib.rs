@@ -20,10 +20,64 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
+/// Raw-bindings escape hatch, shared with the other safe crates. Kept `pub`
+/// (not `pub(crate)`) deliberately: a thin binding ecosystem needs one
+/// documented way to reach a symbol the safe layer has not wrapped yet, and
+/// every such use is inherently `unsafe`. See docs/dev/api-surface-audit.md
+/// for the exposure rationale.
 pub use flux_sys as sys;
 
 /// Backend-neutral pixel format, re-exported from the raw bindings.
-pub use flux_sys::flux_format as Format;
+/// Image/attachment texel format. The idiomatic mirror of the C
+/// `flux_format` enum; convert with [`Format::raw`] / `From<sys::flux_format>`
+/// at the FFI edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Format {
+    Undefined,
+    R8Unorm,
+    Rgba8Unorm,
+    Bgra8Unorm,
+    Rgba8Srgb,
+    Bgra8Srgb,
+    Rgba16Sfloat,
+    D32Sfloat,
+    D24UnormS8,
+    Rgb10a2Unorm,
+}
+
+impl Format {
+    pub(crate) fn raw(self) -> sys::flux_format {
+        use sys::flux_format as f;
+        match self {
+            Format::Undefined => f::FLUX_FORMAT_UNDEFINED,
+            Format::R8Unorm => f::FLUX_FORMAT_R8_UNORM,
+            Format::Rgba8Unorm => f::FLUX_FORMAT_RGBA8_UNORM,
+            Format::Bgra8Unorm => f::FLUX_FORMAT_BGRA8_UNORM,
+            Format::Rgba8Srgb => f::FLUX_FORMAT_RGBA8_SRGB,
+            Format::Bgra8Srgb => f::FLUX_FORMAT_BGRA8_SRGB,
+            Format::Rgba16Sfloat => f::FLUX_FORMAT_RGBA16_SFLOAT,
+            Format::D32Sfloat => f::FLUX_FORMAT_D32_SFLOAT,
+            Format::D24UnormS8 => f::FLUX_FORMAT_D24_UNORM_S8,
+            Format::Rgb10a2Unorm => f::FLUX_FORMAT_RGB10A2_UNORM,
+        }
+    }
+
+    pub(crate) fn from_raw(raw: sys::flux_format) -> Format {
+        use sys::flux_format as f;
+        match raw {
+            f::FLUX_FORMAT_R8_UNORM => Format::R8Unorm,
+            f::FLUX_FORMAT_RGBA8_UNORM => Format::Rgba8Unorm,
+            f::FLUX_FORMAT_BGRA8_UNORM => Format::Bgra8Unorm,
+            f::FLUX_FORMAT_RGBA8_SRGB => Format::Rgba8Srgb,
+            f::FLUX_FORMAT_BGRA8_SRGB => Format::Bgra8Srgb,
+            f::FLUX_FORMAT_RGBA16_SFLOAT => Format::Rgba16Sfloat,
+            f::FLUX_FORMAT_D32_SFLOAT => Format::D32Sfloat,
+            f::FLUX_FORMAT_D24_UNORM_S8 => Format::D24UnormS8,
+            f::FLUX_FORMAT_RGB10A2_UNORM => Format::Rgb10a2Unorm,
+            _ => Format::Undefined,
+        }
+    }
+}
 
 /// A flux result code surfaced as a Rust error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,12 +85,25 @@ pub struct Error(pub sys::flux_result);
 
 impl Error {
     /// Map a raw result to `Ok(())` on `FLUX_OK`, else `Err`.
-    fn check(rc: sys::flux_result) -> Result<(), Error> {
+    pub(crate) fn check(rc: sys::flux_result) -> Result<(), Error> {
         if rc == sys::flux_result::FLUX_OK {
             Ok(())
         } else {
             Err(Error(rc))
         }
+    }
+
+    /// Wrap a raw `flux_result` as this crate's error. Public so sibling
+    /// crates in the stack (flux-text, flux-scene-graph, …) reuse the one
+    /// error type instead of declaring structurally identical copies.
+    pub fn from_raw(rc: sys::flux_result) -> Error {
+        Error(rc)
+    }
+
+    /// `Ok(())` when `rc` is `FLUX_OK`, else `Err(Self::from_raw(rc))`.
+    /// The public form of the internal check used at every FFI edge.
+    pub fn check_raw(rc: sys::flux_result) -> Result<(), Error> {
+        Error::check(rc)
     }
 }
 
@@ -933,8 +1000,8 @@ pub struct SurfaceColorOptions<'a> {
     /// Offscreen-only: constrain the pixel container, most preferred
     /// first. A format must suit the written space's transfer function:
     /// sRGB/gamma accept any colour format, PQ/HLG require
-    /// [`Format::FLUX_FORMAT_RGB10A2_UNORM`] or
-    /// [`Format::FLUX_FORMAT_RGBA16_SFLOAT`], linear requires
+    /// [`Format::Rgb10a2Unorm`] or
+    /// [`Format::Rgba16Sfloat`], linear requires
     /// `RGBA16_SFLOAT`. Empty keeps the transfer-derived defaults
     /// (BGRA8 for gamma encodings). Ignored on windowed surfaces.
     pub offscreen_formats: &'a [Format],
@@ -1190,7 +1257,7 @@ impl Surface {
                 Ok(sys::flux_surface_offscreen_format_desc {
                     type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC,
                     next: std::ptr::null(),
-                    formats: options.offscreen_formats.as_ptr(),
+                    formats: options.offscreen_formats.iter().map(|f| f.raw()).collect::<Vec<_>>().as_ptr(),
                     format_count: options
                         .offscreen_formats
                         .len()
@@ -1487,13 +1554,13 @@ impl Surface {
             hdr: raw.hdr,
             color_space: ColorSpace::from_raw(raw.color_space),
             content_space: ColorSpace::from_raw(raw.content_space),
-            format: raw.format,
+            format: Format::from_raw(raw.format),
         }
     }
 
     /// Backend-neutral color format selected for this surface.
     pub fn format(&self) -> Format {
-        unsafe { sys::flux_format_from_vk(sys::flux_surface_vk_format(self.raw)) }
+        Format::from_raw(unsafe { sys::flux_format_from_vk(sys::flux_surface_vk_format(self.raw)) })
     }
 
     /// Acquire the next frame. Returns the backend result so callers can handle
@@ -1636,7 +1703,7 @@ impl<'surface> Frame<'surface> {
             } else {
                 unsafe { sys::flux_image_vk_image_view(target) }
             },
-            format: unsafe { sys::flux_format_to_vk(color_format) },
+            format: unsafe { sys::flux_format_to_vk(color_format.raw()) },
             load_op,
             store_op: sys::flux_store_op::FLUX_STORE_STORE,
             clear_color: vec4(clear_color),
@@ -1644,7 +1711,7 @@ impl<'surface> Frame<'surface> {
         };
         let depth_attachment = sys::flux_pass_depth_attachment {
             view: unsafe { sys::flux_target_vk_view(depth.raw) },
-            format: unsafe { sys::flux_format_to_vk(depth.format) },
+            format: unsafe { sys::flux_format_to_vk(depth.format.raw()) },
             load_op: sys::flux_load_op::FLUX_LOAD_CLEAR,
             store_op: sys::flux_store_op::FLUX_STORE_DONT_CARE,
             clear_depth: 1.0,
@@ -1942,8 +2009,8 @@ impl Material {
                 .unwrap_or(std::ptr::null()),
             kind,
             base_color: vec4(desc.base_color),
-            color_format: desc.color_format,
-            depth_format: desc.depth_format,
+            color_format: desc.color_format.raw(),
+            depth_format: desc.depth_format.raw(),
             shininess: desc.shininess,
             specular: desc.specular,
         };
@@ -2028,7 +2095,7 @@ impl Target {
         let desc = sys::flux_target_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_TARGET_DESC,
             usage: sys::flux_target_usage::FLUX_TARGET_DEPTH as u32,
-            format,
+            format: format.raw(),
             width,
             height,
             ..Default::default()
@@ -2148,7 +2215,7 @@ pub struct CanvasPassOptions {
     /// blits). No stencil image is allocated, transitioned, cleared, or bound;
     /// Vulkan uses a separate pipeline variant with an undefined stencil
     /// format. A stencil-dependent path is dropped with an explicit Flux error
-    /// instead of being silently misrendered; use [`Canvas::end_checked`] or
+    /// instead of being silently misrendered; use [`Canvas::end_frame_checked`] or
     /// [`Canvas::end_target_checked`] to receive that error.
     pub skip_stencil: bool,
 }
@@ -2202,8 +2269,8 @@ impl Canvas {
     /// **not** call `flux_canvas_destroy` on drop — the real owner (e.g. iris,
     /// for its window's canvas) stays in charge. Use this when a host hands
     /// you a live `flux_canvas*` that is already inside an open
-    /// `flux_canvas_begin/end` pair and you want to issue draws through the
-    /// safe surface without taking ownership.
+    /// `flux_canvas_begin_frame`/`flux_canvas_end_frame` pair and you want to
+    /// issue draws through the safe surface without taking ownership.
     ///
     /// # Safety
     /// `raw` must be a live `flux_canvas*` obtained from the flux C API (or an
@@ -2237,7 +2304,7 @@ impl Canvas {
     /// framebuffer (physical pixels) and content `scale`. No GPU, device, or
     /// surface required. Record between [`begin_cpu`](Self::begin_cpu) /
     /// [`begin_frame`](Self::begin_frame) (pass `None` for the frame) and
-    /// [`end`](Self::end), then read the result with
+    /// [`end_frame`](Self::end_frame), then read the result with
     /// [`read_pixels`](Self::read_pixels).
     ///
     /// Supported: solid fills, paths, rounded rects, gradients, clipping.
@@ -2252,23 +2319,32 @@ impl Canvas {
         })
     }
 
-    /// Begin recording. `clear` clears the surface to a packed color; `None`
-    /// loads the existing contents.
-    pub fn begin(&self, frame: &Frame<'_>, clear: Option<u32>) -> Result<(), Error> {
-        let color = clear; // flux_color is a packed u32
-        let ptr = color
-            .as_ref()
-            .map(|c| c as *const u32)
-            .unwrap_or(std::ptr::null());
-        Error::check(unsafe { sys::flux_canvas_begin(self.raw, frame.raw, ptr) })
+    /// Create a headless software canvas with an explicit antialiasing policy
+    /// (supersampled by default; [`CanvasAntialias::None`] trades edge quality
+    /// for throughput). The CPU analogue of [`CanvasPassOptions::antialias`].
+    pub fn new_cpu_aa(
+        width: u32,
+        height: u32,
+        scale: f32,
+        antialias: CanvasAntialias,
+    ) -> Result<Canvas, Error> {
+        let mut out: *mut sys::flux_canvas = std::ptr::null_mut();
+        Error::check(unsafe {
+            sys::flux_canvas_create_cpu_aa(width, height, scale, antialias.raw(), &mut out)
+        })?;
+        Ok(Canvas {
+            raw: out,
+            borrowed: false,
+        })
     }
 
     /// Wait a producer sync-file before this frame samples an already
     /// imported dma-buf image.
     ///
-    /// Call between [`Canvas::begin`] and [`Canvas::end`], before drawing the
-    /// image. Flux consumes `acquire_fence` on success; Rust closes it on
-    /// error. The wait is submitted to the GPU and does not block the caller.
+    /// Call between [`Canvas::begin_frame`] and [`Canvas::end_frame`], before
+    /// drawing the image. Flux consumes `acquire_fence` on success; Rust
+    /// closes it on error. The wait is submitted to the GPU and does not
+    /// block the caller.
     pub fn wait_dmabuf_acquire(&self, image: &Image, acquire_fence: OwnedFd) -> Result<(), Error> {
         let result = unsafe {
             sys::flux_canvas_wait_dmabuf_acquire(self.raw, image.raw, acquire_fence.as_raw_fd())
@@ -2341,19 +2417,31 @@ impl Canvas {
         Error::check(unsafe { sys::flux_canvas_begin_frame(self.raw, fptr, ptr) })
     }
 
-    /// Begin recording on a CPU canvas (equivalent to `begin_frame(None, clear)`).
+    /// Begin recording on a CPU canvas. The CPU convenience spelling of
+    /// [`begin_frame`](Self::begin_frame) with one historical difference:
+    /// `None` clears to fully transparent (the C `flux_canvas_cpu_begin`
+    /// contract) rather than loading the previous frame.
     pub fn begin_cpu(&self, clear: Option<u32>) -> Result<(), Error> {
-        self.begin_frame(None, clear)
+        let transparent = 0u32; /* premultiplied RGBA: fully transparent */
+        let ptr = clear
+            .as_ref()
+            .map(|c| c as *const u32)
+            .unwrap_or(&transparent);
+        Error::check(unsafe { sys::flux_canvas_begin_frame(self.raw, std::ptr::null_mut(), ptr) })
     }
 
-    pub fn end(&self) {
-        unsafe { sys::flux_canvas_end(self.raw) };
+    /// End the pass opened by [`begin_frame`](Self::begin_frame) (or its
+    /// descriptor form). The canvas detaches from the frame.
+    pub fn end_frame(&self) {
+        unsafe { sys::flux_canvas_end_frame(self.raw) };
     }
 
-    /// End a surface pass and surface any sticky draw-time contract error.
-    /// No-stencil compositor passes should use this checked form.
-    pub fn end_checked(&self) -> Result<(), Error> {
-        Error::check(unsafe { sys::flux_canvas_end_checked(self.raw) })
+    /// End the pass and surface any sticky draw-time contract error (e.g. a
+    /// stencil-dependent draw attempted inside a no-stencil pass). Prefer this
+    /// over [`end_frame`](Self::end_frame) in compositor-style code so a
+    /// dropped draw cannot pass silently.
+    pub fn end_frame_checked(&self) -> Result<(), Error> {
+        Error::check(unsafe { sys::flux_canvas_end_frame_checked(self.raw) })
     }
 
     /// Snapshot the canvas' pixels as premultiplied RGBA8 (row-major). Returns
@@ -3028,12 +3116,12 @@ impl Path {
 
 fn image_data_len(width: u32, height: u32, format: Format) -> Result<usize, Error> {
     let bytes_per_pixel = match format {
-        Format::FLUX_FORMAT_R8_UNORM => 1usize,
-        Format::FLUX_FORMAT_RGBA8_UNORM
-        | Format::FLUX_FORMAT_BGRA8_UNORM
-        | Format::FLUX_FORMAT_RGBA8_SRGB
-        | Format::FLUX_FORMAT_BGRA8_SRGB => 4usize,
-        Format::FLUX_FORMAT_RGBA16_SFLOAT => 8usize, // ADR-0069 working space
+        Format::R8Unorm => 1usize,
+        Format::Rgba8Unorm
+        | Format::Bgra8Unorm
+        | Format::Rgba8Srgb
+        | Format::Bgra8Srgb => 4usize,
+        Format::Rgba16Sfloat => 8usize, // ADR-0069 working space
         _ => return Err(Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED)),
     };
     (width as usize)
@@ -3076,7 +3164,7 @@ impl Image {
     ) -> Result<Image, Error> {
         let mut out = std::ptr::null_mut();
         Error::check(unsafe {
-            sys::flux_image_create_render_target(device.raw, width, height, format, &mut out)
+            sys::flux_image_create_render_target(device.raw, width, height, format.raw(), &mut out)
         })?;
         Ok(Image { raw: out })
     }
@@ -3102,7 +3190,7 @@ impl Image {
             type_: sys::flux_struct_type::FLUX_TYPE_IMAGE_DESC,
             width,
             height,
-            format,
+            format: format.raw(),
             initial_data: data.as_ptr() as *const std::os::raw::c_void,
             ..unsafe { std::mem::zeroed() }
         };
@@ -3149,7 +3237,7 @@ impl Image {
             },
             width,
             height,
-            format,
+            format: format.raw(),
             initial_data: data.as_ptr() as *const std::os::raw::c_void,
         };
         let mut out: *mut sys::flux_image = std::ptr::null_mut();
@@ -3176,7 +3264,7 @@ impl Image {
     }
 
     pub fn format(&self) -> Format {
-        unsafe { sys::flux_image_format(self.raw) }
+        Format::from_raw(unsafe { sys::flux_image_format(self.raw) })
     }
 }
 
@@ -3330,7 +3418,7 @@ impl Image {
             },
             width,
             height,
-            format,
+            format: format.raw(),
             modifier,
             plane_count: 1,
             // SAFETY: the bindgen descriptor is a C POD type; zero is the
@@ -3790,7 +3878,7 @@ pub fn dmabuf_format_modifiers(device: &Device, format: Format) -> Vec<u64> {
     // Two-pass: probe the required length with count 0, then allocate and fill.
     let mut count: u32 = 0;
     let rc = unsafe {
-        sys::flux_dmabuf_format_modifiers(device.raw, format, std::ptr::null_mut(), &mut count)
+        sys::flux_dmabuf_format_modifiers(device.raw, format.raw(), std::ptr::null_mut(), &mut count)
     };
     // FLUX_OK with count 0 (no qualifiers, or device lacks dma-buf) is the
     // common "nothing to advertise" path. An unsupported format is also mapped
@@ -3803,7 +3891,7 @@ pub fn dmabuf_format_modifiers(device: &Device, format: Format) -> Vec<u64> {
     }
     let mut mods = vec![0u64; count as usize];
     let rc = unsafe {
-        sys::flux_dmabuf_format_modifiers(device.raw, format, mods.as_mut_ptr(), &mut count)
+        sys::flux_dmabuf_format_modifiers(device.raw, format.raw(), mods.as_mut_ptr(), &mut count)
     };
     if rc != sys::flux_result::FLUX_OK {
         return Vec::new();
@@ -3892,19 +3980,19 @@ mod tests {
     #[test]
     fn image_data_len_validates_supported_formats() {
         assert_eq!(
-            image_data_len(3, 2, Format::FLUX_FORMAT_R8_UNORM).unwrap(),
+            image_data_len(3, 2, Format::R8Unorm).unwrap(),
             6
         );
         assert_eq!(
-            image_data_len(3, 2, Format::FLUX_FORMAT_RGBA8_UNORM).unwrap(),
+            image_data_len(3, 2, Format::Rgba8Unorm).unwrap(),
             24
         );
         assert_eq!(
-            image_data_len(3, 2, Format::FLUX_FORMAT_RGBA16_SFLOAT).unwrap(),
+            image_data_len(3, 2, Format::Rgba16Sfloat).unwrap(),
             48
         );
         assert_eq!(
-            image_data_len(1, 1, Format::FLUX_FORMAT_RGB10A2_UNORM).unwrap_err(),
+            image_data_len(1, 1, Format::Rgb10a2Unorm).unwrap_err(),
             Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED)
         );
     }

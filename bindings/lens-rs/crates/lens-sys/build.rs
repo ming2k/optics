@@ -84,7 +84,7 @@ fn main() {
     if dev_mode {
         let dir = build_dir.as_ref().unwrap();
         // lens's own uninstalled tree first, then flux's (if pointed at),
-        // so lens's `Requires: flux >= 0.1.0` resolves to the matching
+        // so lens's `Requires: flux >= 0.0.28` resolves to the matching
         // freshly-built libflux rather than any stale system copy.
         let mut dirs = vec![dir.join("meson-uninstalled")];
         let flux_build_dir = env::var_os("FLUX_BUILD_DIR")
@@ -101,8 +101,13 @@ fn main() {
 
     // 2. Probe lens (and transitively flux) via pkg-config. Emits link
     //    directives for cargo automatically.
+    // Enforce the MINIMUM C library version this crate's bindings assume
+    // (lens_version_string derives from macros; label family collapsed (0.0.28 surface)); pkg-config fails the build loudly when an older flux/lens/
+    // iris/prism is picked up (e.g. a stale system install shadowing the
+    // meson uninstalled dir).
     let lens = pkg_config::Config::new()
         .print_system_libs(false)
+        .atleast_version("0.0.28")
         .probe("lens")
         .unwrap_or_else(|e| {
             panic!(
@@ -160,9 +165,30 @@ fn main() {
         .allowlist_function("lens_.*")
         .allowlist_type("lens_.*")
         .allowlist_var("LENS_.*")
-        .allowlist_function("flux_.*")
-        .allowlist_type("flux_.*")
-        .allowlist_var("FLUX_.*")
+        // flux seam types, split by how they cross the boundary:
+        //  - Opaque HANDLE types (flux_canvas, flux_device, flux_image) are
+        //    blocklisted and re-exported from flux_sys via the raw_line
+        //    below, so exactly one Rust definition of each handle exists
+        //    across the stack — pointers to them cross crate seams without
+        //    casts.
+        //  - VALUE types embedded by-value in lens structs (flux_color,
+        //    flux_point, flux_rect) and the flux_result enum are bound
+        //    locally: bindgen cannot emit derives for structs whose fields
+        //    reference blocklisted types, and duplicating POD value types
+        //    carries no seam risk (both sides are plain repr(C) data).
+        .allowlist_type("flux_color")
+        .allowlist_type("flux_point")
+        .allowlist_type("flux_rect")
+        .allowlist_type("flux_result")
+        .blocklist_type("flux_canvas")
+        .blocklist_type("flux_device")
+        .blocklist_type("flux_image")
+        .blocklist_function("flux_.*")
+        .blocklist_var("FLUX_.*")
+        .raw_line(
+            "pub use flux_sys::{flux_canvas, flux_device, flux_image};",
+        )
+        .raw_line("pub use flux_sys::flux_color_rgba_premul;")
         .default_enum_style(bindgen::EnumVariation::Rust {
             non_exhaustive: false,
         })

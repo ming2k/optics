@@ -105,6 +105,8 @@ name = "iris-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",
+ "flux-sys",
+ "lens-sys",
  "pkg-config",
 ]
 
@@ -130,6 +132,7 @@ name = "lens-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",
+ "flux-sys",
  "pkg-config",
 ]
 

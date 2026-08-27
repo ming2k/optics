@@ -37,6 +37,10 @@
 use std::ffi::CString;
 use std::os::raw::c_int;
 
+/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// deliberately as the one documented unsafe escape hatch.
+/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// deliberately as the one documented unsafe escape hatch.
 pub use iris_sys as sys;
 
 pub use lens::key;
@@ -47,12 +51,13 @@ pub use lens::{
 };
 
 /// A thin wrapper over the raw pointers iris hands to the paint
-/// callback: the canvas (live inside an open `flux_canvas_begin/end`
-/// pair), the device iris owns for this app, and the current device-
-/// pixel ratio. All three borrows are valid only inside the paint call.
+/// callback: the canvas (live inside an open
+/// `flux_canvas_begin_frame`/`flux_canvas_end_frame` pair), the device
+/// iris owns for this app, and the current device-pixel ratio. All three
+/// borrows are valid only inside the paint call.
 ///
 /// Hosts that need a `flux::Device`-shaped handle (e.g. to create a
-/// `flux::text::Text` context) **must** borrow `device()` rather than
+/// `flux::text::Text` context) **must** borrow `flux_device()` rather than
 /// opening their own — two `flux_device`s in one process is unsupported
 /// and crashes.
 ///
@@ -62,47 +67,27 @@ pub use lens::{
 /// lens applies the same scale to its own chrome internally; the host
 /// only scales the document-surface portion.
 pub struct PaintHost {
-    canvas: *mut std::ffi::c_void,
-    device: *mut std::ffi::c_void,
+    canvas: *mut sys::flux_canvas,
+    device: *mut sys::flux_device,
     scale: f32,
 }
 
 impl PaintHost {
-    /// The raw `flux_canvas*`. Hand it to `flux`-aware code that expects
-    /// a borrowed canvas pointer (e.g. cast to `*mut flux_sys::flux_canvas`
-    /// and wrap in your own borrowed handle).
-    ///
-    /// Prefer the typed accessors [`PaintHost::flux_canvas`] /
-    /// [`PaintHost::flux_device`], which return safe borrowed handles from
-    /// the `flux` crate directly — no pointer casting at the call site.
-    pub fn canvas(&self) -> *mut std::ffi::c_void {
-        self.canvas
-    }
-
-    /// The raw `flux_device*` iris owns. Use this to construct any
-    /// device-dependent context (text shaper, image uploader, …) rather
-    /// than creating a second `flux::Device`.
-    ///
-    /// Prefer the typed accessors [`PaintHost::flux_canvas`] /
-    /// [`PaintHost::flux_device`].
-    pub fn device(&self) -> *mut std::ffi::c_void {
-        self.device
-    }
-
     /// The canvas iris is handing the paint callback, as a borrowed
     /// (non-owning) `flux::Canvas`. It is already inside its
     /// begin/end pair for this frame; draw through it directly. The borrow
     /// lives for the callback only — iris owns and destroys the canvas.
     ///
     /// The pointer came straight from iris's `iris_paint_fn` C callback,
-    /// which types it `flux_canvas*`; the `flux` and `iris-sys` bindgen
-    /// views are layout-identical opaque pointers, so the cast mirrors
-    /// [`flux::Canvas::borrow_raw`]'s documented contract for
-    /// sibling-binding pointers.
+    /// which types it `flux_canvas*`; `iris-sys` re-exports the one
+    /// `flux_canvas` definition from `flux-sys`, so the cast to the
+    /// `flux` crate's view is a no-op reinterpretation of an opaque
+    /// handle (see [`flux::Canvas::borrow_raw`]'s contract for
+    /// sibling-binding pointers).
     pub fn flux_canvas(&self) -> flux::Canvas {
         // SAFETY: iris handed us a live `flux_canvas*` for the duration of
         // the paint callback. The returned handle does not destroy on drop.
-        unsafe { flux::Canvas::borrow_raw(self.canvas as *mut flux::sys::flux_canvas) }
+        unsafe { flux::Canvas::borrow_raw(self.canvas) }
     }
 
     /// The single flux device iris owns, as a borrowed (non-owning)
@@ -118,7 +103,7 @@ impl PaintHost {
     pub fn flux_device(&self) -> flux::Device {
         // SAFETY: see the doc comment; mirrors `Device::borrow_raw`'s
         // contract for sibling-binding pointers.
-        unsafe { flux::Device::borrow_raw(self.device as *mut flux::sys::flux_device) }
+        unsafe { flux::Device::borrow_raw(self.device) }
     }
 
     /// The current device-pixel ratio (Wayland
@@ -140,22 +125,29 @@ pub type PaintCanvas = PaintHost;
 /// set up device-dependent resources (text shapers, image uploads) without
 /// installing a per-frame paint callback: a non-NULL `paint` disables the
 /// backend's idle frame-skip, a start hook costs nothing per frame. The same
-/// device-borrow rule as [`PaintHost::device`] applies.
+/// device-borrow rule as [`PaintHost::flux_device`] applies.
 pub struct StartHost {
-    ui: *mut std::ffi::c_void,
-    device: *mut std::ffi::c_void,
+    ui: *mut sys::lens,
+    device: *mut sys::flux_device,
 }
 
 impl StartHost {
-    /// The raw `lens*`, live for the whole run.
-    pub fn ui(&self) -> *mut std::ffi::c_void {
-        self.ui
+    /// The live `lens*`, as the safe crate's borrowed [`Ui`] handle. Valid
+    /// for the app's lifetime; iris destroys the context at shutdown.
+    pub fn ui(&self) -> Ui {
+        // SAFETY: iris keeps `lens*` alive for the whole run; `Ui::borrow`
+        // is the safe non-owning view over it (no destroy on drop).
+        // SAFETY: iris handed us live typed pointers for the callback's duration.
+        unsafe { Ui::borrow_raw(self.ui) }
     }
 
-    /// The raw `flux_device*` iris owns. Borrow it — never open a second
-    /// device in the same process.
-    pub fn device(&self) -> *mut std::ffi::c_void {
-        self.device
+    /// The `flux_device*` iris owns, as a borrowed (non-owning)
+    /// `flux::Device`. Borrow it — never open a second device in the same
+    /// process.
+    pub fn flux_device(&self) -> flux::Device {
+        // SAFETY: see [`PaintHost::flux_device`]; same contract, the start
+        // callback's device pointer lives until shutdown.
+        unsafe { flux::Device::borrow_raw(self.device) }
     }
 }
 
@@ -435,8 +427,8 @@ impl Application {
                 let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
                 if let Some(p) = run.paint.as_mut() {
                     p(PaintHost {
-                        canvas: canvas as *mut std::ffi::c_void,
-                        device: device as *mut std::ffi::c_void,
+                        canvas,
+                        device,
                         scale,
                     });
                 }
@@ -458,8 +450,8 @@ impl Application {
                 let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
                 match run.start.as_mut() {
                     Some(s) => s(StartHost {
-                        ui: ui as *mut std::ffi::c_void,
-                        device: device as *mut std::ffi::c_void,
+                        ui,
+                        device,
                     }),
                     None => true,
                 }
@@ -481,8 +473,8 @@ impl Application {
                 let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
                 if let Some(t) = run.stop.as_mut() {
                     t(StartHost {
-                        ui: ui as *mut std::ffi::c_void,
-                        device: device as *mut std::ffi::c_void,
+                        ui,
+                        device,
                     });
                 }
             }));

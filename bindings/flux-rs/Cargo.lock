@@ -135,10 +135,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flux-composition-graph"
-version = "0.1.1"
-
-[[package]]
 name = "flux-scene-graph"
 version = "0.1.1"
 dependencies = [
@@ -153,6 +149,7 @@ name = "flux-scene-graph-sys"
 version = "0.1.1"
 dependencies = [
  "bindgen",
+ "flux-sys",
  "pkg-config",
 ]
 
@@ -173,19 +170,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "flux-text-layout"
-version = "0.1.1"
-dependencies = [
- "flux-sys",
- "flux-text",
- "flux-text-sys",
-]
-
-[[package]]
 name = "flux-text-sys"
 version = "0.1.1"
 dependencies = [
  "bindgen",
+ "flux-sys",
  "pkg-config",
 ]
 

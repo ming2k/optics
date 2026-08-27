@@ -11,3 +11,10 @@ rust-version.workspace = true
 [build-dependencies]
 bindgen = "0.72"
 pkg-config = "0.3"
+
+[dependencies]
+# flux-sys / lens-sys are re-exported so the seam types iris speaks
+# (flux_canvas, flux_device, lens, lens_input) have ONE Rust definition
+# across the stack.
+flux-sys = { path = "../../../flux-rs/crates/flux-sys" }
+lens-sys = { path = "../../../lens-rs/crates/lens-sys" }

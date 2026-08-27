@@ -12,7 +12,7 @@ fn cpu_canvas_renders_and_reads_back() {
 
     c.begin_cpu(Some(black)).expect("begin");
     c.fill_rrect(8.0, 8.0, 48.0, 48.0, 12.0, red);
-    c.end_checked().expect("end checked CPU pass");
+    c.end_frame_checked().expect("end checked CPU pass");
 
     let (w, h, stride, px) = c.read_pixels().expect("CPU backend exposes pixels");
     assert_eq!((w, h), (64, 64));
@@ -35,7 +35,7 @@ fn unified_factory_selects_cpu() {
     let c = Canvas::new_cpu(32, 32, 1.0).unwrap();
     c.begin_frame(None, Some(rgba(0, 0, 0, 255))).unwrap();
     c.fill_rect(0.0, 0.0, 32.0, 32.0, rgba(0, 0, 255, 255));
-    c.end();
+    c.end_frame();
     let (_, _, stride, px) = c.read_pixels().unwrap();
     let p = 16 * stride as usize + 16 * 4;
     assert!(px[p + 2] > 250 && px[p] < 5); // blue
@@ -46,7 +46,7 @@ fn rgba_premultiplies_translucent_colours_for_src_over() {
     let c = Canvas::new_cpu(1, 1, 1.0).unwrap();
     c.begin_cpu(Some(rgba(0, 0, 0, 255))).unwrap();
     c.fill_rect(0.0, 0.0, 1.0, 1.0, rgba(255, 255, 255, 32));
-    c.end();
+    c.end_frame();
     let (_, _, _, pixels) = c.read_pixels().expect("CPU readback");
     // ADR-0069: blending happens in the linear-light working space, so the
     // result is sRGB-encoded on output: srgb_encode(32/255) * 255 ~= 99,
@@ -74,7 +74,7 @@ fn safe_radial_gradient_reaches_canvas_backend() {
             GradientStop::new(1.0, rgba(255, 64, 32, 0)),
         ],
     );
-    c.end();
+    c.end_frame();
     let (_, _, stride, pixels) = c.read_pixels().expect("CPU readback");
     let center = 16 * stride as usize + 16 * 4;
     let corner = stride as usize + 4;
@@ -102,7 +102,7 @@ fn radial_gradient_follows_canvas_transform() {
         ],
     );
     c.restore();
-    c.end();
+    c.end_frame();
     let (_, _, stride, pixels) = c.read_pixels().expect("CPU readback");
     let scaled_center = 64 * stride as usize + 64 * 4;
     let unscaled_center = 32 * stride as usize + 32 * 4;
@@ -135,7 +135,7 @@ fn linear_gradient_follows_canvas_transform() {
         ],
     );
     c.restore();
-    c.end();
+    c.end_frame();
     let (_, _, stride, pixels) = c.read_pixels().expect("CPU readback");
     let near_start = 64 * stride as usize + 8 * 4;
     let mid = 64 * stride as usize + 64 * 4;

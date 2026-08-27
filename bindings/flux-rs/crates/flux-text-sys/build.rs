@@ -89,8 +89,13 @@ fn main() {
         set_pkg_config_path(&[dir.join("meson-uninstalled")], &os);
     }
 
+    // Enforce the MINIMUM C library version this crate's bindings assume
+    // (the bindings share flux_sys handle types (0.0.28 seam)); pkg-config fails the build loudly when an older flux/lens/
+    // iris/prism is picked up (e.g. a stale system install shadowing the
+    // meson uninstalled dir).
     let lib = pkg_config::Config::new()
         .print_system_libs(false)
+        .atleast_version("0.0.28")
         .probe("flux-text")
         .unwrap_or_else(|e| {
             panic!(
@@ -141,9 +146,23 @@ fn main() {
         .header("wrapper.h")
         .clang_args(&clang_args)
         .clang_arg("-std=c23")
-        .allowlist_function("flux_.*")
-        .allowlist_type("flux_.*")
-        .allowlist_var("FLUX_.*")
+        .allowlist_function("flux_text_.*")
+        .allowlist_type("flux_text_.*")
+        .allowlist_var("FLUX_TEXT_.*")
+        // Flux seam types text's API borrows. Opaque handles (flux_device,
+        // flux_canvas, flux_arena, flux_text itself stays local as it IS
+        // this crate's subject) are re-exported from flux_sys so exactly one
+        // Rust definition of each exists across the stack. The by-value POD
+        // flux_color is bound locally: bindgen cannot derive Copy/Clone on
+        // structs referencing blocklisted types, and duplicating a repr(C)
+        // u32 alias carries no seam risk.
+        .allowlist_type("flux_color")
+        .blocklist_type("flux_device")
+        .blocklist_type("flux_canvas")
+        .blocklist_type("flux_arena")
+        .blocklist_type("flux_result")
+        .blocklist_function("flux_(canvas|device|arena)_.*")
+        .raw_line("pub use flux_sys::{flux_arena, flux_canvas, flux_device, flux_result};")
         .default_enum_style(bindgen::EnumVariation::Rust {
             non_exhaustive: false,
         })
