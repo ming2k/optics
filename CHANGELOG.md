@@ -13,6 +13,21 @@ either.
 
 ## [Unreleased]
 
+### Added — iris (all backends)
+
+- **`iris_request_frame_skip_render()` — zero-render skip that keeps the
+  active cadence.** Hosts streaming content at a media cadence (a 30 fps
+  visualizer on a 60/144 Hz display) had no way to express "skip rendering
+  this frame but keep scheduling at the active rate":
+  `iris_paint_mark_static()` decays the pacing toward the ~4 Hz idle tick,
+  and omitting `iris_request_animation_frame` tears the stream apart. The
+  new per-frame declaration suppresses only this frame's begin → clear →
+  paint → present; an accompanying animation request re-arms the active
+  deadline. Implemented identically across the Wayland, Win32, and Cocoa
+  backends: input, resize/scale changes, lens chrome damage, and
+  not-yet-presented surfaces always force a real paint regardless of the
+  declaration. Rust binding: `iris::request_frame_skip_render()`.
+
 ## [0.0.28] - 2026-08-25
 
 ### Added — prism (material library, ADR-0079)

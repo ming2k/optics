@@ -75,22 +75,27 @@ void main()
     float a = c.a;
     vec3 straight = a > 0.0 ? c.rgb / a : vec3(0.0);
 
+    float sdr_white = pc.sdr_white_nits > 0.0 ? pc.sdr_white_nits : FLUX_SDR_WHITE_NITS_DEFAULT;
     if ((pc.flags & FLUX_OUTPUT_F_DECODE) != 0u) {
         vec3 lin = flux_tf_decode3(int(pc.transfer), pc.gamma, straight);
+        if (pc.transfer == FLUX_TF_PQ)
+            lin *= (10000.0 / sdr_white);
+        else if (pc.transfer == FLUX_TF_HLG)
+            lin *= (1000.0 / sdr_white);
         out_color = vec4(primaries * lin * a, a);
         return;
     }
 
     vec3 linear = primaries * straight;
-    /* HDR destinations: rescale the scRGB working range (1.0 = 80 nits)
+    /* HDR destinations: rescale the scRGB working range (1.0 = SDR white)
      * so SDR white lands on sdr_white_nits, then apply EDR BT.2390 rolloff.
      * SDR destinations: roll off above-1.0 highlights. */
     if (pc.transfer == FLUX_TF_PQ) {
-        vec3 nits = linear * pc.sdr_white_nits;
+        vec3 nits = linear * sdr_white;
         vec3 rolled = flux_tonemap_bt2390_shoulder(nits, 1000.0, 10000.0);
         linear = clamp(rolled / 10000.0, 0.0, 1.0);
     } else if (pc.transfer == FLUX_TF_HLG) {
-        vec3 nits = linear * pc.sdr_white_nits;
+        vec3 nits = linear * sdr_white;
         vec3 rolled = flux_tonemap_bt2390_shoulder(nits, 300.0, 1000.0);
         linear = clamp(rolled / 1000.0, 0.0, 1.0);
     } else if (pc.transfer != FLUX_TF_LINEAR) {

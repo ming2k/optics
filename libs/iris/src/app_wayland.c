@@ -256,6 +256,7 @@ typedef struct wp_platform {
     bool resized;                   /* size or scale changed -> resize swap  */
     bool animation_frame_requested; /* host asked for active-rate follow-up */
     bool paint_static;              /* host declared this frame's canvas content static */
+    bool frame_skip_render;         /* host asked to skip rendering but keep the active cadence */
     lens *ui;                       /* so output/scale callbacks can update  */
 
     /* Live colour-scheme watching + AT-SPI bridge: optional, fail-soft. */
@@ -541,6 +542,12 @@ void iris_paint_mark_static_wayland(void) {
     wp_platform *pl = g_active_pl;
     if (pl)
         pl->paint_static = true;
+}
+
+void iris_request_frame_skip_render_wayland(void) {
+    wp_platform *pl = g_active_pl;
+    if (pl)
+        pl->frame_skip_render = true;
 }
 
 /* Map the public cursor enum to the cursor-shape-v1 shape enum. The
@@ -3110,12 +3117,28 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * static. Resizes and the not-yet-presented latch force a paint
          * too. */
         bool chrome_damaged = lens_frame_needs_repaint(ui);
+        /* Zero-render skip (iris_request_frame_skip_render): the host
+         * promises this frame's canvas content is unchanged while still
+         * streaming at the media cadence. Force-paint conditions mirror
+         * the static path EXCEPT host_animating: the very request that
+         * arms the next active deadline is sampled here as host_animating
+         * from last frame, so letting it veto skips would deadlock the
+         * pattern (every skip follows a request). The skip declaration is
+         * the more specific promise — it wins over the prior request;
+         * chrome damage, resize, and not-yet-presented surfaces still
+         * force a real paint below because they change what is on screen,
+         * which the declaration cannot know about. */
+        bool surface_forced = resized_this_frame || surface_needs_paint;
+        bool host_skip_render =
+            cfg->paint != NULL && pl.frame_skip_render && !surface_forced && !chrome_damaged;
+        pl.frame_skip_render = false;
         bool host_canvas_static = cfg->paint != NULL && pl.paint_static && !host_animating &&
                                   !resized_this_frame && !surface_needs_paint && !chrome_damaged;
         pl.paint_static = false;
         bool must_paint =
-            !host_canvas_static && (cfg->paint != NULL || chrome_damaged || host_animating ||
-                                    resized_this_frame || surface_needs_paint);
+            !host_canvas_static && !host_skip_render &&
+            (cfg->paint != NULL || chrome_damaged || host_animating ||
+             resized_this_frame || surface_needs_paint);
         if (must_paint) {
             surface_needs_paint = true;
             flux_frame *frame = NULL;
@@ -3181,7 +3204,12 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * paint callback keep the always-render pacing unless they declared
          * this frame static: a static declaration is the host's promise
          * that nothing moved, so unscheduling is exactly as safe as for a
-         * host without canvas content. */
+         * host without canvas content. A zero-render skip declaration
+         * (iris_request_frame_skip_render) also keeps the active pacing —
+         * it suppresses only this frame's begin→clear→paint→present, not
+         * the cadence: hosts stream media-cadence content (e.g. 30 fps
+         * visualizers) by declaring skip on in-between frames while a fresh
+         * request keeps the active deadline armed. */
         if (cfg->paint && !host_canvas_static) {
             if (pl.animation_frame_requested)
                 next_deadline = last_render_ns + ACTIVE_PERIOD_NS;

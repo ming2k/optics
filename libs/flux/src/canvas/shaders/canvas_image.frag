@@ -111,7 +111,7 @@ void main()
             straight = sample_lut3d(cp.lut_handle, sh, float(cp.lut_size), straight);
         } else {
             mat3 prim = mat3(cp.primaries[0].xyz, cp.primaries[1].xyz, cp.primaries[2].xyz);
-            straight = prim * flux_tf_decode3(int(cp.transfer), cp.gamma, straight);
+            straight = prim * flux_decode_to_working(int(cp.transfer), cp.gamma, straight);
         }
         texel = vec4(straight * a, a);
     } else if ((pc.kind & FLUX_CANVAS_PUSH_DECODE_SRGB) != 0u) {

@@ -35,6 +35,16 @@ IRIS_API void iris_paint_mark_static(void) {
 #endif
 }
 
+IRIS_API void iris_request_frame_skip_render(void) {
+#if defined(IRIS_BACKEND_WAYLAND)
+    iris_request_frame_skip_render_wayland();
+#elif defined(IRIS_BACKEND_WIN32)
+    iris_request_frame_skip_render_win32();
+#elif defined(IRIS_BACKEND_COCOA)
+    iris_request_frame_skip_render_cocoa();
+#endif
+}
+
 IRIS_API int iris_post_to_main_thread(iris_main_thread_fn fn, void *user) {
 #if defined(IRIS_BACKEND_WAYLAND) || defined(IRIS_BACKEND_WIN32) || defined(IRIS_BACKEND_COCOA)
     /* The backend wakeup seam (platform_wakeup.h) IS the delivery

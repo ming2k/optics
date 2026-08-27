@@ -17,6 +17,18 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`iris_request_frame_skip_render()` — zero-render skip that keeps the
+  active cadence.** Hosts streaming content at a media cadence (a 30 fps
+  visualizer on a 60/144 Hz display) previously had no way to express
+  "skip rendering this frame but keep scheduling at the active rate":
+  `iris_paint_mark_static()` decays the pacing toward the ~4 Hz idle tick,
+  and omitting the request tears the stream apart. The new declaration
+  suppresses only this frame's begin → clear → paint → present; an
+  accompanying `iris_request_animation_frame` re-arms the active deadline.
+  Implemented across the Wayland, Win32, and Cocoa backends with identical
+  force-paint semantics (input, resize, chrome damage always render);
+  Rust binding: `iris::request_frame_skip_render()`.
+
 - **Initial extraction from the iris monorepo.** The two Rust crates
   (`iris-sys`, `iris`) previously lived under `crates/` in the
   [iris][iris] C source tree. They are now a separate repository,

@@ -1,0 +1,10 @@
+[package]
+name = "flux-composition-graph"
+description = "Declarative DAG, ROI, damage, and resource planning above flux image operators"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]

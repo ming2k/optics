@@ -1,9 +1,7 @@
 # flux-rs
 
 Rust bindings to [**flux**][flux] — the C23, Vulkan-first 2D/3D graphics
-library. Seven crates wrap flux's C surface with the standard two-tier
-FFI split (`openssl` / `openssl-sys`, `rusqlite` / `libsqlite3-sys`
-convention):
+library. Eight crates provide the native wrappers and companion layers:
 
 | Crate              | Role                                                          |
 |--------------------|---------------------------------------------------------------|
@@ -14,6 +12,7 @@ convention):
 | [`flux-text-layout`] | Pure-Rust Layer-1 line wrapping on top of `flux-text`.     |
 | [`flux-scene-graph-sys`] | Raw bindgen FFI to `libflux-scene-graph`.          |
 | [`flux-scene-graph`] | Safe glTF scene, material/texture, animation, bounds, and drawing layer. |
+| [`flux-composition-graph`] | Pure-Rust offscreen DAG, ROI, damage, and target-lifetime planner above Flux operators. |
 
 [flux]: https://github.com/ming2k/flux
 [`flux-sys`]: crates/flux-sys/
@@ -23,6 +22,7 @@ convention):
 [`flux-text-layout`]: crates/flux-text-layout/
 [`flux-scene-graph-sys`]: crates/flux-scene-graph-sys/
 [`flux-scene-graph`]: crates/flux-scene-graph/
+[`flux-composition-graph`]: crates/flux-composition-graph/
 
 This repository is **separate** from the C library by design — it
 follows the industry convention (openssl, sqlite, curl, gtk all keep

@@ -13,7 +13,8 @@ Choose a section based on what you are trying to do:
 - [Explanation](explanation/application-architecture.md) — understand the
   stack boundaries, Vulkan backend, and Rust bindings.
 - [Reference](reference/api.md) — look up API contracts, symbols, effects,
-  threading rules, and terminology.
+  the [composition graph](reference/composition-graph.md), threading rules,
+  and terminology.
 - [Architecture decisions](adr/index.md) — review accepted and superseded
   technical decisions.
 - [Developer documentation](dev/index.md) — set up a checkout, run tests,

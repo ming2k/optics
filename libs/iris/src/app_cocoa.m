@@ -140,6 +140,7 @@ typedef struct cp_accum {
     bool resized;                 /* size or scale changed -> resize swap  */
     bool animation_frame_requested; /* host asked for active-rate follow-up */
     bool paint_static;              /* host declared this frame's canvas static */
+    bool frame_skip_render;         /* host asked to skip rendering but keep the active cadence */
     bool theme_watching;
     bool a11y_prefs_watching;
     bool a11y_running;
@@ -172,6 +173,12 @@ void iris_paint_mark_static_cocoa(void) {
     IrisPlatform *pl = g_active_pl;
     if (pl)
         pl->paint_static = true;
+}
+
+void iris_request_frame_skip_render_cocoa(void) {
+    IrisPlatform *pl = g_active_pl;
+    if (pl)
+        pl->frame_skip_render = true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1548,14 +1555,26 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                  * and must be re-issued every frame. It only covers the
                  * host's own pixels — lens chrome damage still forces a
                  * paint, or a hover highlight would freeze mid-transition
-                 * while the host scene is static. */
+                 * while the host scene is static.
+                 *
+                 * Zero-render skip: iris_request_frame_skip_render() makes
+                 * the same unchanged-content promise while a fresh request
+                 * keeps the active cadence armed (media-cadence streaming).
+                 * The prior-frame request does NOT veto it on Wayland, and
+                 * likewise does not here; chrome damage and resizes still
+                 * force a real paint below. */
                 bool chrome_damaged = lens_frame_needs_repaint(ui);
+                bool surface_forced = resized_this_frame || surface_needs_paint;
+                bool host_skip_render =
+                    cfg->paint != NULL && pl->frame_skip_render && !surface_forced &&
+                    !chrome_damaged;
+                pl->frame_skip_render = false;
                 bool host_canvas_static = cfg->paint != NULL && pl->paint_static &&
                                           !host_animating && !resized_this_frame &&
                                           !surface_needs_paint && !chrome_damaged;
                 pl->paint_static = false;
                 bool must_paint =
-                    !host_canvas_static &&
+                    !host_canvas_static && !host_skip_render &&
                     (cfg->paint != NULL || chrome_damaged || host_animating ||
                      resized_this_frame || surface_needs_paint);
                 if (must_paint) {

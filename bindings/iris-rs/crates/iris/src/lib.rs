@@ -287,6 +287,29 @@ pub fn paint_mark_static() {
     unsafe { sys::iris_paint_mark_static() };
 }
 
+/// Skips this frame's render/present while keeping the active-rate cadence.
+///
+/// The host promises the canvas content is unchanged from the last
+/// *presented* frame but is still streaming — the media-cadence pattern:
+/// a 30 fps visualizer on a 60 Hz display renders on its stage ticks and
+/// declares skip on the in-between frames while calling
+/// [`request_animation_frame`] as usual. Only the begin → clear → paint →
+/// present work for this frame is suppressed; the next deadline stays armed
+/// at the active rate (no decay to the ~4 Hz idle tick).
+///
+/// Mutually exclusive per frame with [`paint_mark_static`] (skip wins for
+/// rendering only when the static path would also have skipped; prefer
+/// declaring exactly one). Unlike [`paint_mark_static`], a fresh
+/// [`request_animation_frame`] does **not** veto this declaration — the two
+/// together are precisely the streaming shape. Any user input, a resize or
+/// buffer-scale change, or lens-reported chrome damage still forces a real
+/// paint. Call from the **build** callback; consumed once, re-issue every
+/// frame it applies to. No-op without an active app or without a paint
+/// callback.
+pub fn request_frame_skip_render() {
+    unsafe { sys::iris_request_frame_skip_render() };
+}
+
 impl Application {
     pub fn run<B, P>(config: Config, build: B, paint: Option<P>) -> Result<(), RunError>
     where

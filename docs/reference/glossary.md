@@ -8,6 +8,7 @@
 | Bradford adaptation | The chromatic adaptation transform flux uses to bridge differing white points (e.g. D50 ↔ D65) in color-space conversions. |
 | Canvas              | flux_canvas's immediate-mode recorder: one per surface, has a save/restore stack.     |
 | Command buffer      | Vulkan structure recording GPU commands; flux owns one per frame slot.                |
+| Composition graph   | Explicit DAG of image-producing passes above Flux operators; plans ROI, damage, and target lifetimes without owning GPU resources ([ADR-0080](../adr/0080-explicit-offscreen-composition-graph.md)). |
 | Color space         | A `{ primaries, transfer function }` pair (`flux_color_space`) defining how encoded values map to linear light and which colors are representable. See [ADR-0069](../adr/0069-color-management.md). |
 | Deferred upload     | Texture/buffer copy submitted with a fence without a host wait; resources recycle once the fence signals ([ADR-0022](../adr/0022-deferred-upload-submission.md)). |
 | Descriptor set      | Vulkan binding for textures/samplers/buffers; flux uses one device-wide bindless set at slot 0 instead of per-frame descriptor pools. |

@@ -120,15 +120,18 @@
 int iris_app_run_wayland(const iris_app_config *cfg);
 void iris_request_animation_frame_wayland(void);
 void iris_paint_mark_static_wayland(void);
+void iris_request_frame_skip_render_wayland(void);
 
 /* Win32 — implemented by app_win32.c (ADR-0056). */
 int iris_app_run_win32(const iris_app_config *cfg);
 void iris_request_animation_frame_win32(void);
 void iris_paint_mark_static_win32(void);
+void iris_request_frame_skip_render_win32(void);
 
 /* Cocoa — implemented by app_cocoa.m (ADR-0056). */
 int iris_app_run_cocoa(const iris_app_config *cfg);
 void iris_request_animation_frame_cocoa(void);
 void iris_paint_mark_static_cocoa(void);
+void iris_request_frame_skip_render_cocoa(void);
 
 #endif /* IRIS_PLATFORM_INTERNAL_H */

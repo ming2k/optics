@@ -149,6 +149,31 @@ IRIS_API void iris_request_animation_frame(void);
  * skipped along with the pass. No-op without an active app or without a
  * paint callback. */
 IRIS_API void iris_paint_mark_static(void);
+/* Zero-render skip for hosts with a paint callback: after a build in which
+ * the host knows the canvas content is unchanged *and* it still wants the
+ * active-rate cadence to continue, call this instead of (not in addition
+ * to) iris_paint_mark_static. The frame's begin_frame → clear → paint →
+ * lens_render → present sequence is skipped entirely — no swapchain image
+ * is acquired and the previous buffer stays on screen — but the *scheduling*
+ * branch sees an animation request as usual, so the loop keeps running at
+ * the active rate. This is exactly the "present at the media cadence while
+ * build continues at display cadence" shape: one render per stage tick,
+ * zero-render static in-between frames, no idle-drop to ~4 Hz.
+ *
+ * Semantics per frame, mutually exclusive:
+ *   paint            → render this frame (default when neither is called)
+ *   mark_static      → skip this frame AND decay toward idle pacing
+ *   request+skip     → skip this frame AND keep active pacing
+ *
+ * Precedence note for the request+skip pattern: a fresh
+ * iris_request_animation_frame does NOT veto a same-frame skip — the skip
+ * wins for rendering, while the request re-arms the active deadline. Any
+ * input, resize/scale change, or lens-reported chrome damage forces a real
+ * paint regardless of both declarations; those events invalidate what is on
+ * screen and neither per-frame declaration can have accounted for them.
+ * The flag is consumed once and must be re-issued every frame. No-op
+ * without an active app or without a paint callback. */
+IRIS_API void iris_request_frame_skip_render(void);
 
 /* ================================================================== */
 /*  Cross-thread delivery                                             */

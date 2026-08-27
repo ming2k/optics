@@ -135,6 +135,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "flux-composition-graph"
+version = "0.1.1"
+
+[[package]]
 name = "flux-scene-graph"
 version = "0.1.1"
 dependencies = [

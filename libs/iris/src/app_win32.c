@@ -147,6 +147,7 @@ typedef struct w32_platform {
     bool force_paint;               /* WM_PAINT asked for a real frame      */
     bool animation_frame_requested; /* host asked for active-rate follow-up */
     bool paint_static;              /* host declared this frame's canvas static */
+    bool frame_skip_render;         /* host asked to skip rendering but keep the active cadence */
     bool theme_watching;            /* backend theme watch registered       */
     bool a11y_prefs_watching;       /* backend a11y-pref watch registered   */
     bool a11y_running;              /* a11y bridge initialised (inert stub) */
@@ -194,6 +195,12 @@ void iris_paint_mark_static_win32(void) {
     w32_platform *pl = g_active_pl;
     if (pl)
         pl->paint_static = true;
+}
+
+void iris_request_frame_skip_render_win32(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl)
+        pl->frame_skip_render = true;
 }
 
 /* Theme watcher callback: invoked on the iris main thread (from the WndProc
@@ -1570,13 +1577,27 @@ int iris_app_run_win32(const iris_app_config *cfg) {
          * freeze mid-transition while the host scene is static. Host
          * animation, resizes, and a forced WM_PAINT always paint too. */
         bool chrome_damaged = lens_frame_needs_repaint(ui);
+        /* Zero-render skip (iris_request_frame_skip_render): the host
+         * promises this frame's canvas content is unchanged while still
+         * streaming at the media cadence. Mirrors the Wayland backend:
+         * the prior-frame animation request does NOT veto a skip (the
+         * request that arms the next active deadline would otherwise
+         * kill every streamed skip), but lens chrome damage, resizes,
+         * a forced WM_PAINT, and a never-yet-presented surface all
+         * change what is on screen and force a real paint below. */
+        bool surface_forced =
+            resized_this_frame || surface_needs_paint || pl.force_paint;
+        bool host_skip_render =
+            cfg->paint != NULL && pl.frame_skip_render && !surface_forced && !chrome_damaged;
+        pl.frame_skip_render = false;
         bool host_canvas_static = cfg->paint != NULL && pl.paint_static && !host_animating &&
                                   !resized_this_frame && !surface_needs_paint && !chrome_damaged &&
                                   !pl.force_paint;
         pl.paint_static = false;
         bool must_paint =
-            !host_canvas_static && (cfg->paint != NULL || chrome_damaged || host_animating ||
-                                    resized_this_frame || surface_needs_paint);
+            !host_canvas_static && !host_skip_render &&
+            (cfg->paint != NULL || chrome_damaged || host_animating ||
+             resized_this_frame || surface_needs_paint);
         if (must_paint) {
             surface_needs_paint = true;
             flux_frame *frame = NULL;

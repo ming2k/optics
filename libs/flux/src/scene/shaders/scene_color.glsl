@@ -97,7 +97,7 @@ vec3 scene_decode_tagged(ColorParams cp, uint sh, vec3 rgb)
     if (cp.lut_handle != 0xFFFFFFFFu)
         return sample_lut3d(cp.lut_handle, sh, float(cp.lut_size), rgb);
     mat3 prim = mat3(cp.primaries[0].xyz, cp.primaries[1].xyz, cp.primaries[2].xyz);
-    return prim * flux_tf_decode3(int(cp.transfer), cp.gamma, rgb);
+    return prim * flux_decode_to_working(int(cp.transfer), cp.gamma, rgb);
 }
 
 #endif /* SCENE_COLOR_GLSL */

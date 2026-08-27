@@ -138,6 +138,19 @@ vec3 flux_tf_decode3(int tf, float gamma, vec3 e) {
                 flux_tf_decode(tf, gamma, e.b));
 }
 
+/* Nominal reference white for ITU-R BT.2408 SDR graphics white in HDR (203 cd/m²). */
+#define FLUX_SDR_WHITE_NITS_DEFAULT 203.0
+
+/* Decode straight encoded colour into the linear working space (where 1.0 = SDR white). */
+vec3 flux_decode_to_working(int tf, float gamma, vec3 e) {
+    vec3 lin = flux_tf_decode3(tf, gamma, e);
+    if (tf == FLUX_TF_PQ)
+        lin *= (10000.0 / FLUX_SDR_WHITE_NITS_DEFAULT);
+    else if (tf == FLUX_TF_HLG)
+        lin *= (1000.0 / FLUX_SDR_WHITE_NITS_DEFAULT);
+    return lin;
+}
+
 /* Premultiplied sRGB -> premultiplied linear (working space). */
 vec4 flux_decode_premul_srgb(vec4 c) {
     float a = c.a;

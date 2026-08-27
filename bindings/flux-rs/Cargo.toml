@@ -8,6 +8,7 @@ members = [
   "crates/flux-text-layout",
   "crates/flux-scene-graph-sys",
   "crates/flux-scene-graph",
+  "crates/flux-composition-graph",
 ]
 
 [workspace.package]

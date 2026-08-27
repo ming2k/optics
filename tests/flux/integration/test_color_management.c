@@ -443,6 +443,34 @@ int main(void) {
         flux_icc_profile_release(lut_icc);
     }
 
+    /* --- 9. BT.2020 PQ tagged image rendered onto sRGB surface: 203 nits maps to sRGB 1.0 white --- */
+    {
+        /* 203 nits in ST 2084 PQ is ~0.5807 encoded (148/255). */
+        uint8_t pq_white_203nits = (uint8_t)lrintf(
+            flux_transfer_encode(FLUX_TRANSFER_PQ, 0.0f, 203.0f / 10000.0f) * 255.0f);
+        const uint8_t pq_content[4] = {pq_white_203nits, pq_white_203nits, pq_white_203nits, 255};
+        flux_color_space pq_space = FLUX_COLOR_SPACE_BT2020_PQ;
+        flux_image_color_space_desc csd = FLUX_IMAGE_COLOR_SPACE_DESC_INIT;
+        csd.space = &pq_space;
+        flux_image_desc idesc = FLUX_IMAGE_DESC_INIT;
+        idesc.next = &csd;
+        idesc.width = 1;
+        idesc.height = 1;
+        idesc.format = FLUX_FORMAT_RGBA8_UNORM;
+        idesc.initial_data = pq_content;
+        flux_image *pq_img = nullptr;
+        EXPECT(flux_image_create(d, &idesc, &pq_img) == FLUX_OK);
+
+        flux_color black = flux_color_rgba(0, 0, 0, 255);
+        EXPECT(render_frame(s, canvas, black, draw_image_full, pq_img) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        const uint8_t *centre = px_at(px, W / 2, H / 2);
+        /* Must decode 203 nits to ~1.0 in working space and output as ~255 white, not ~38. */
+        EXPECT(centre[0] >= 250 && centre[1] >= 250 && centre[2] >= 250);
+        flux_image_release(pq_img);
+    }
+
     /* --- 10. BT.2020 PQ offscreen: deep container + PQ output encode --- */
     {
         flux_color_space spaces[] = {(flux_color_space)FLUX_COLOR_SPACE_BT2020_PQ};
