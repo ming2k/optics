@@ -41,3 +41,21 @@ fn stale_diagnostic_is_not_attached_to_unrelated_code() {
     let unrelated = Error::from_raw(unrelated.0);
     let _ = unrelated;
 }
+
+#[test]
+fn version_wrappers_agree_with_linked_library() {
+    let v = flux::version();
+    assert_eq!(v.split('.').count(), 3, "malformed: {v}");
+    assert!(v.chars().all(|c| c.is_ascii_digit() || c == '.'), "{v}");
+    // The packed number and the string describe the same library.
+    let n = flux::version_number();
+    let major = n >> 22;
+    let minor = (n >> 12) & 0x3FF;
+    let patch = n & 0xFFF;
+    let from_string: Vec<u32> = v.split('.').map(|p| p.parse().unwrap()).collect();
+    assert_eq!((major, minor, patch),
+               (from_string[0], from_string[1], from_string[2]),
+               "packed number must match version string");
+    assert!(flux::version_check(major, minor, patch));
+    assert!(!flux::version_check(major, minor, patch + 1));
+}

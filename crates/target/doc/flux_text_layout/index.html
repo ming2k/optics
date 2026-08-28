@@ -1,0 +1,51 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Layer-1 text layout (line wrapping) on top of the flux-text Layer-0 shaper."><title>flux_text_layout - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="flux_text_layout" data-themes="" data-resource-suffix="" data-rustdoc-version="1.97.1 (8bab26f4f 2026-07-14)" data-channel="1.97.1" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate flux_text_layout</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../flux_text_layout/index.html">flux_<wbr>text_<wbr>layout</a><span class="version">0.1.1</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#structs">Crate Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>flux_<wbr>text_<wbr>layout</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/flux_text_layout/lib.rs.html#1-1289">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Layer-1 text layout (line wrapping) on top of the flux-text Layer-0 shaper.</p>
+<p>The <strong>flux-text</strong> sibling — mirrored by [<code>flux_text</code>] — deliberately stops
+at single-run shaping. The “API layers” note in <code>&lt;flux-text/text.h&gt;</code>
+draws the line explicitly:</p>
+<ul>
+<li><strong>Layer 0</strong> (implemented): shape / measure / draw one contiguous run of
+one style. “Sufficient for labels and for callers that do their own
+line/paragraph composition.”</li>
+<li><strong>Layer 1</strong> (reserved <code>flux_text_layout</code>, “Not yet defined”): a
+retained, cached layout object built from multiple styled runs with
+line wrapping.</li>
+</ul>
+<p>This crate is a pure-Rust Layer-1 helper: it builds greedy word-wrap on
+top of [<code>flux_text::Text::measure</code>], so the engine boundary stays clean
+while consumers (and a future C <code>flux_text_layout</code>) have something to use
+today. Keeping it out of the <code>flux-text</code> crate means the sibling’s Rust
+surface mirrors only Layer-0 — paragraph composition does not become part
+of flux-text’s API contract until the engine actually defines Layer-1.</p>
+<p>Scope: single-style line wrapping with <code>\n</code> hard breaks and CJK
+per-character break opportunities. No UAX#14 break iteration, no multi-run
+paragraphs, no justification — those belong in a fuller layout engine
+(lens, or the future <code>flux_text_layout</code>).</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.WrappedLine.html" title="struct flux_text_layout::WrappedLine">Wrapped<wbr>Line</a></dt><dd>One visual line produced by <a href="fn.wrap.html" title="fn flux_text_layout::wrap"><code>wrap</code></a>. The byte range <code>[lo, hi)</code> is in the
+original input’s coordinates; <code>metrics</code> is the shaped extent of that
+substring under the style passed to <code>wrap</code>. Lines tile the input exactly
+once: <code>lines[i].hi == lines[i+1].lo</code> and the final <code>hi</code> is the input
+length (or the end of the last non-whitespace run).</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.wrap.html" title="fn flux_text_layout::wrap">wrap</a></dt><dd>Greedy word-wrap <code>input</code> to fit <code>max_width</code> (logical pixels), returning
+one <a href="struct.WrappedLine.html" title="struct flux_text_layout::WrappedLine"><code>WrappedLine</code></a> per visual line. Each atom is measured as <strong>raw
+source</strong> at <code>style</code> — the convenience for callers whose drawn
+representation <em>is</em> the raw bytes (labels, plain text). Callers whose
+drawn representation differs from the raw source (hidden inline markup,
+per-run weight/family) should use <a href="fn.wrap_with.html" title="fn flux_text_layout::wrap_with"><code>wrap_with</code></a> and supply the drawn-width
+measure themselves.</dd><dt><a class="fn" href="fn.wrap_optimal.html" title="fn flux_text_layout::wrap_optimal">wrap_<wbr>optimal</a></dt><dd>Knuth-Plass optimal wrap — like <a href="fn.wrap_with.html" title="fn flux_text_layout::wrap_with"><code>wrap_with</code></a> but choosing break points
+to minimise whole-paragraph demerit (badness + fitness-class evenness)
+rather than filling each line greedily. Same <code>measure</code> contract, same
+<a href="struct.WrappedLine.html" title="struct flux_text_layout::WrappedLine"><code>WrappedLine</code></a> output, so it is a drop-in replacement for <a href="fn.wrap_with.html" title="fn flux_text_layout::wrap_with"><code>wrap_with</code></a>.
+See the “Knuth-Plass optimal line breaking” notes above for when it pays
+off. Each atom is measured as raw source at <code>style</code>; callers whose drawn
+representation differs from the raw bytes should use
+<a href="fn.wrap_optimal_with.html" title="fn flux_text_layout::wrap_optimal_with"><code>wrap_optimal_with</code></a>.</dd><dt><a class="fn" href="fn.wrap_optimal_with.html" title="fn flux_text_layout::wrap_optimal_with">wrap_<wbr>optimal_<wbr>with</a></dt><dd>Knuth-Plass optimal wrap with a caller-supplied measure. See
+<a href="fn.wrap_with.html" title="fn flux_text_layout::wrap_with"><code>wrap_with</code></a> for the <code>measure</code> contract and <a href="fn.wrap_optimal.html" title="fn flux_text_layout::wrap_optimal"><code>wrap_optimal</code></a> for the
+strategy. Falls back to <a href="fn.wrap_with.html" title="fn flux_text_layout::wrap_with"><code>wrap_with</code></a> (greedy) for inputs above
+<code>KP_GREEDY_FALLBACK_ATOMS</code> atoms, where the O(n²·C) DP would risk
+dropping a frame on a megabyte paste.</dd><dt><a class="fn" href="fn.wrap_with.html" title="fn flux_text_layout::wrap_with">wrap_<wbr>with</a></dt><dd>Like <a href="fn.wrap.html" title="fn flux_text_layout::wrap"><code>wrap</code></a>, but each atom’s width is supplied by <code>measure</code> rather than
+shaped from the raw source. <code>measure(byte_range)</code> returns the drawn width
+of <code>&amp;input[byte_range]</code>, letting the caller account for a representation
+that differs from the raw bytes — inline markup whose markers are hidden,
+marks that change weight or family, … This keeps the Layer-1 crate free of
+any markup model: it stays a pure line-breaker, and all width-affecting
+representation choices live in the caller. It is also the per-atom cost
+hook a future optimal-breaker (Knuth-Plass) will consume.</dd></dl></section></div></main></body></html>

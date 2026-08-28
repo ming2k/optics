@@ -21,8 +21,6 @@
 
 #![deny(rust_2018_idioms)]
 
-use std::fmt;
-
 use flux::{Arena, Canvas, Device};
 
 /// A flux result code surfaced as a Rust error. This is the SAME type as

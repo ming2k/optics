@@ -1,0 +1,1290 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `flux-text-layout/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="flux_text_layout" data-themes="" data-resource-suffix="" data-rustdoc-version="1.97.1 (8bab26f4f 2026-07-14)" data-channel="1.97.1" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">flux_text_layout/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Layer-1 text layout (line wrapping) on top of the flux-text Layer-0 shaper.
+<a href=#2 id=2 data-nosnippet>2</a>//!
+<a href=#3 id=3 data-nosnippet>3</a>//! The **flux-text** sibling — mirrored by [`flux_text`] — deliberately stops
+<a href=#4 id=4 data-nosnippet>4</a>//! at single-run shaping. The "API layers" note in `&lt;flux-text/text.h&gt;`
+<a href=#5 id=5 data-nosnippet>5</a>//! draws the line explicitly:
+<a href=#6 id=6 data-nosnippet>6</a>//!
+<a href=#7 id=7 data-nosnippet>7</a>//! - **Layer 0** (implemented): shape / measure / draw one contiguous run of
+<a href=#8 id=8 data-nosnippet>8</a>//!   one style. "Sufficient for labels and for callers that do their own
+<a href=#9 id=9 data-nosnippet>9</a>//!   line/paragraph composition."
+<a href=#10 id=10 data-nosnippet>10</a>//! - **Layer 1** (reserved `flux_text_layout`, "Not yet defined"): a
+<a href=#11 id=11 data-nosnippet>11</a>//!   retained, cached layout object built from multiple styled runs with
+<a href=#12 id=12 data-nosnippet>12</a>//!   line wrapping.
+<a href=#13 id=13 data-nosnippet>13</a>//!
+<a href=#14 id=14 data-nosnippet>14</a>//! This crate is a pure-Rust Layer-1 helper: it builds greedy word-wrap on
+<a href=#15 id=15 data-nosnippet>15</a>//! top of [`flux_text::Text::measure`], so the engine boundary stays clean
+<a href=#16 id=16 data-nosnippet>16</a>//! while consumers (and a future C `flux_text_layout`) have something to use
+<a href=#17 id=17 data-nosnippet>17</a>//! today. Keeping it out of the `flux-text` crate means the sibling's Rust
+<a href=#18 id=18 data-nosnippet>18</a>//! surface mirrors only Layer-0 — paragraph composition does not become part
+<a href=#19 id=19 data-nosnippet>19</a>//! of flux-text's API contract until the engine actually defines Layer-1.
+<a href=#20 id=20 data-nosnippet>20</a>//!
+<a href=#21 id=21 data-nosnippet>21</a>//! Scope: single-style line wrapping with `\n` hard breaks and CJK
+<a href=#22 id=22 data-nosnippet>22</a>//! per-character break opportunities. No UAX#14 break iteration, no multi-run
+<a href=#23 id=23 data-nosnippet>23</a>//! paragraphs, no justification — those belong in a fuller layout engine
+<a href=#24 id=24 data-nosnippet>24</a>//! (lens, or the future `flux_text_layout`).
+<a href=#25 id=25 data-nosnippet>25</a>
+<a href=#26 id=26 data-nosnippet>26</a></span><span class="attr">#![deny(rust_2018_idioms)]
+<a href=#27 id=27 data-nosnippet>27</a>
+<a href=#28 id=28 data-nosnippet>28</a></span><span class="kw">use </span>flux_text::{Metrics, Style, Text};
+<a href=#29 id=29 data-nosnippet>29</a>
+<a href=#30 id=30 data-nosnippet>30</a><span class="doccomment">/// Inter-script auto-space, in EM units. Mirrors the same gap the flux-text
+<a href=#31 id=31 data-nosnippet>31</a>/// shaper inserts at CJK↔non-CJK run boundaries (see `txt_run_autospace_em`
+<a href=#32 id=32 data-nosnippet>32</a>/// in libflux's `text/layout.c`): a ¼-em breath so "你好hello" does not render
+<a href=#33 id=33 data-nosnippet>33</a>/// glued. Standard CJK typography (CSS `text-autospace`, ctex/xeCJK) treats
+<a href=#34 id=34 data-nosnippet>34</a>/// this as the default. `wrap` accounts for it so its line widths match what
+<a href=#35 id=35 data-nosnippet>35</a>/// the shaper actually produces when the line is later drawn.
+<a href=#36 id=36 data-nosnippet>36</a></span><span class="kw">const </span>INTERSCRIPT_GAP_EM: f32 = <span class="number">0.25</span>;
+<a href=#37 id=37 data-nosnippet>37</a>
+<a href=#38 id=38 data-nosnippet>38</a><span class="doccomment">/// One visual line produced by [`wrap`]. The byte range `[lo, hi)` is in the
+<a href=#39 id=39 data-nosnippet>39</a>/// original input's coordinates; `metrics` is the shaped extent of that
+<a href=#40 id=40 data-nosnippet>40</a>/// substring under the style passed to `wrap`. Lines tile the input exactly
+<a href=#41 id=41 data-nosnippet>41</a>/// once: `lines[i].hi == lines[i+1].lo` and the final `hi` is the input
+<a href=#42 id=42 data-nosnippet>42</a>/// length (or the end of the last non-whitespace run).
+<a href=#43 id=43 data-nosnippet>43</a>///
+<a href=#44 id=44 data-nosnippet>44</a>/// Callers draw each line with [`Text::draw`] using `&amp;text[line.lo..line.hi]`
+<a href=#45 id=45 data-nosnippet>45</a>/// and the original style, advancing `y` by their chosen line stride between
+<a href=#46 id=46 data-nosnippet>46</a>/// lines. Caret / hit-test mapping uses [`Text::x_for_byte`] /
+<a href=#47 id=47 data-nosnippet>47</a>/// [`Text::byte_for_x`] on the same substring, with the byte offset first
+<a href=#48 id=48 data-nosnippet>48</a>/// rebased into the line's local coordinates.
+<a href=#49 id=49 data-nosnippet>49</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq)]
+<a href=#50 id=50 data-nosnippet>50</a></span><span class="kw">pub struct </span>WrappedLine {
+<a href=#51 id=51 data-nosnippet>51</a>    <span class="kw">pub </span>lo: usize,
+<a href=#52 id=52 data-nosnippet>52</a>    <span class="kw">pub </span>hi: usize,
+<a href=#53 id=53 data-nosnippet>53</a>    <span class="kw">pub </span>metrics: Metrics,
+<a href=#54 id=54 data-nosnippet>54</a>}
+<a href=#55 id=55 data-nosnippet>55</a>
+<a href=#56 id=56 data-nosnippet>56</a><span class="doccomment">/// Greedy word-wrap `input` to fit `max_width` (logical pixels), returning
+<a href=#57 id=57 data-nosnippet>57</a>/// one [`WrappedLine`] per visual line. Each atom is measured as **raw
+<a href=#58 id=58 data-nosnippet>58</a>/// source** at `style` — the convenience for callers whose drawn
+<a href=#59 id=59 data-nosnippet>59</a>/// representation *is* the raw bytes (labels, plain text). Callers whose
+<a href=#60 id=60 data-nosnippet>60</a>/// drawn representation differs from the raw source (hidden inline markup,
+<a href=#61 id=61 data-nosnippet>61</a>/// per-run weight/family) should use [`wrap_with`] and supply the drawn-width
+<a href=#62 id=62 data-nosnippet>62</a>/// measure themselves.
+<a href=#63 id=63 data-nosnippet>63</a></span><span class="kw">pub fn </span>wrap(text: <span class="kw-2">&amp;</span>Text, input: <span class="kw-2">&amp;</span>str, style: <span class="kw-2">&amp;</span>Style, max_width: f32) -&gt; Vec&lt;WrappedLine&gt; {
+<a href=#64 id=64 data-nosnippet>64</a>    wrap_with(text, input, style, max_width, |r| {
+<a href=#65 id=65 data-nosnippet>65</a>        text.measure(<span class="kw-2">&amp;</span>input[r], style).width
+<a href=#66 id=66 data-nosnippet>66</a>    })
+<a href=#67 id=67 data-nosnippet>67</a>}
+<a href=#68 id=68 data-nosnippet>68</a>
+<a href=#69 id=69 data-nosnippet>69</a><span class="doccomment">/// Like [`wrap`], but each atom's width is supplied by `measure` rather than
+<a href=#70 id=70 data-nosnippet>70</a>/// shaped from the raw source. `measure(byte_range)` returns the drawn width
+<a href=#71 id=71 data-nosnippet>71</a>/// of `&amp;input[byte_range]`, letting the caller account for a representation
+<a href=#72 id=72 data-nosnippet>72</a>/// that differs from the raw bytes — inline markup whose markers are hidden,
+<a href=#73 id=73 data-nosnippet>73</a>/// marks that change weight or family, … This keeps the Layer-1 crate free of
+<a href=#74 id=74 data-nosnippet>74</a>/// any markup model: it stays a pure line-breaker, and all width-affecting
+<a href=#75 id=75 data-nosnippet>75</a>/// representation choices live in the caller. It is also the per-atom cost
+<a href=#76 id=76 data-nosnippet>76</a>/// hook a future optimal-breaker (Knuth-Plass) will consume.
+<a href=#77 id=77 data-nosnippet>77</a>///
+<a href=#78 id=78 data-nosnippet>78</a>/// The algorithm is greedy first-fit, built **on top of** the Layer-0 shaper
+<a href=#79 id=79 data-nosnippet>79</a>/// `text`: `measure` is invoked once per atom (O(n)), and per-line widths are
+<a href=#80 id=80 data-nosnippet>80</a>/// arithmetic over those widths. (An earlier prefix-remeasure implementation
+<a href=#81 id=81 data-nosnippet>81</a>/// was O(n²) in atoms per line; the shaper's glyph cache let it survive, but
+<a href=#82 id=82 data-nosnippet>82</a>/// a few-thousand-atom line made it visibly laggy.)
+<a href=#83 id=83 data-nosnippet>83</a>///
+<a href=#84 id=84 data-nosnippet>84</a>/// There is no UAX#14 break-iterator; break opportunities are:
+<a href=#85 id=85 data-nosnippet>85</a>///
+<a href=#86 id=86 data-nosnippet>86</a>/// - after each whitespace run (the whitespace attaches to the preceding
+<a href=#87 id=87 data-nosnippet>87</a>///   line and is dropped when starting a new line),
+<a href=#88 id=88 data-nosnippet>88</a>/// - between adjacent CJK ideographs (CJK text wraps without spaces),
+<a href=#89 id=89 data-nosnippet>89</a>/// - at every `\n` (treated as a forced hard break),
+<a href=#90 id=90 data-nosnippet>90</a>/// - **last resort:** if a single atom is wider than `max_width`, it is
+<a href=#91 id=91 data-nosnippet>91</a>///   placed on its own line and overflows — the shaper cannot split a single
+<a href=#92 id=92 data-nosnippet>92</a>///   glyph cluster. Long URLs / unbreakable strings will visually extend
+<a href=#93 id=93 data-nosnippet>93</a>///   past `max_width`.
+<a href=#94 id=94 data-nosnippet>94</a>///
+<a href=#95 id=95 data-nosnippet>95</a>/// Empty input returns a single line at `(0, 0)` so callers can still
+<a href=#96 id=96 data-nosnippet>96</a>/// position a caret. Whitespace-only / newline-only input likewise returns
+<a href=#97 id=97 data-nosnippet>97</a>/// one empty line covering `[0, 0)`.
+<a href=#98 id=98 data-nosnippet>98</a>///
+<a href=#99 id=99 data-nosnippet>99</a>/// Width approximation: each inter-atom whitespace byte contributes the
+<a href=#100 id=100 data-nosnippet>100</a>/// measured width of a single ASCII space (`base`). Tab and multi-space runs
+<a href=#101 id=101 data-nosnippet>101</a>/// are therefore treated as N spaces. This matches typical editor behaviour
+<a href=#102 id=102 data-nosnippet>102</a>/// (where tabs already render as a fixed number of spaces) and stays inside
+<a href=#103 id=103 data-nosnippet>103</a>/// the Layer-1 "no full BiDi across the whole line" budget.
+<a href=#104 id=104 data-nosnippet>104</a>///
+<a href=#105 id=105 data-nosnippet>105</a>/// Inter-script auto-space: at a CJK↔non-CJK atom boundary with no
+<a href=#106 id=106 data-nosnippet>106</a>/// separator, a ¼-em gap (`INTERSCRIPT_GAP_EM`) is added to mirror the
+<a href=#107 id=107 data-nosnippet>107</a>/// flux-text shaper, which inserts the same gap when the line is drawn.
+<a href=#108 id=108 data-nosnippet>108</a>/// Without it wrap would under-count and pack a line that overflows on
+<a href=#109 id=109 data-nosnippet>109</a>/// screen. A boundary already covered by whitespace is left alone (no
+<a href=#110 id=110 data-nosnippet>110</a>/// doubling).
+<a href=#111 id=111 data-nosnippet>111</a></span><span class="kw">pub fn </span>wrap_with(
+<a href=#112 id=112 data-nosnippet>112</a>    text: <span class="kw-2">&amp;</span>Text,
+<a href=#113 id=113 data-nosnippet>113</a>    input: <span class="kw-2">&amp;</span>str,
+<a href=#114 id=114 data-nosnippet>114</a>    base: <span class="kw-2">&amp;</span>Style,
+<a href=#115 id=115 data-nosnippet>115</a>    max_width: f32,
+<a href=#116 id=116 data-nosnippet>116</a>    measure: <span class="kw">impl </span>Fn(std::ops::Range&lt;usize&gt;) -&gt; f32,
+<a href=#117 id=117 data-nosnippet>117</a>) -&gt; Vec&lt;WrappedLine&gt; {
+<a href=#118 id=118 data-nosnippet>118</a>    <span class="kw">if </span>input.is_empty() {
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">return </span><span class="macro">vec!</span>[WrappedLine {
+<a href=#120 id=120 data-nosnippet>120</a>            lo: <span class="number">0</span>,
+<a href=#121 id=121 data-nosnippet>121</a>            hi: <span class="number">0</span>,
+<a href=#122 id=122 data-nosnippet>122</a>            metrics: text.measure(<span class="string">""</span>, base),
+<a href=#123 id=123 data-nosnippet>123</a>        }];
+<a href=#124 id=124 data-nosnippet>124</a>    }
+<a href=#125 id=125 data-nosnippet>125</a>
+<a href=#126 id=126 data-nosnippet>126</a>    <span class="kw">let </span>atoms = split_atoms(input);
+<a href=#127 id=127 data-nosnippet>127</a>    <span class="kw">if </span>atoms.is_empty() {
+<a href=#128 id=128 data-nosnippet>128</a>        <span class="kw">return </span><span class="macro">vec!</span>[WrappedLine {
+<a href=#129 id=129 data-nosnippet>129</a>            lo: <span class="number">0</span>,
+<a href=#130 id=130 data-nosnippet>130</a>            hi: <span class="number">0</span>,
+<a href=#131 id=131 data-nosnippet>131</a>            metrics: text.measure(<span class="string">""</span>, base),
+<a href=#132 id=132 data-nosnippet>132</a>        }];
+<a href=#133 id=133 data-nosnippet>133</a>    }
+<a href=#134 id=134 data-nosnippet>134</a>
+<a href=#135 id=135 data-nosnippet>135</a>    <span class="comment">// Pre-measure every atom once via the caller-supplied measure. This is
+<a href=#136 id=136 data-nosnippet>136</a>    // the only per-atom shaping the algorithm does; everything below is
+<a href=#137 id=137 data-nosnippet>137</a>    // arithmetic over those widths.
+<a href=#138 id=138 data-nosnippet>138</a>    </span><span class="kw">let </span>atom_w: Vec&lt;f32&gt; = atoms.iter().map(|a| measure(a.start..a.end)).collect();
+<a href=#139 id=139 data-nosnippet>139</a>
+<a href=#140 id=140 data-nosnippet>140</a>    <span class="comment">// Kinsoku classes per atom: whether it must not begin a line (no_start)
+<a href=#141 id=141 data-nosnippet>141</a>    // or must not end one (no_end). A soft break between atoms idx-1 and idx
+<a href=#142 id=142 data-nosnippet>142</a>    // is legal only when atoms[idx] may begin a line and atoms[idx-1] may
+<a href=#143 id=143 data-nosnippet>143</a>    // end one; otherwise the break is forbidden and the atom is force-fitted.
+<a href=#144 id=144 data-nosnippet>144</a>    </span><span class="kw">let </span>no_start: Vec&lt;bool&gt; = atoms.iter().map(|<span class="kw-2">&amp;</span>a| atom_no_start(input, a)).collect();
+<a href=#145 id=145 data-nosnippet>145</a>    <span class="kw">let </span>no_end: Vec&lt;bool&gt; = atoms.iter().map(|<span class="kw-2">&amp;</span>a| atom_no_end(input, a)).collect();
+<a href=#146 id=146 data-nosnippet>146</a>
+<a href=#147 id=147 data-nosnippet>147</a>    <span class="comment">// Width of one ASCII space — used to approximate the cost of the
+<a href=#148 id=148 data-nosnippet>148</a>    // whitespace run between two adjacent atoms. Measuring each actual
+<a href=#149 id=149 data-nosnippet>149</a>    // inter-atom whitespace run separately would re-introduce O(n²).
+<a href=#150 id=150 data-nosnippet>150</a>    // Tab and multi-space runs collapse to N spaces, which matches how
+<a href=#151 id=151 data-nosnippet>151</a>    // most editors and Layer-1 widgets render them anyway.
+<a href=#152 id=152 data-nosnippet>152</a>    </span><span class="kw">let </span>space_w = text.measure(<span class="string">" "</span>, base).width.max(<span class="number">0.0</span>);
+<a href=#153 id=153 data-nosnippet>153</a>
+<a href=#154 id=154 data-nosnippet>154</a>    <span class="comment">// Line metrics: height/baseline come from a base-style shape (font
+<a href=#155 id=155 data-nosnippet>155</a>    // metrics, unaffected by marks); width is the caller's drawn width for
+<a href=#156 id=156 data-nosnippet>156</a>    // the line's source range, so the returned metric matches what gets
+<a href=#157 id=157 data-nosnippet>157</a>    // painted.
+<a href=#158 id=158 data-nosnippet>158</a>    </span><span class="kw">let </span>line_metrics = |lo: usize, hi: usize| {
+<a href=#159 id=159 data-nosnippet>159</a>        <span class="kw">let </span><span class="kw-2">mut </span>m = text.measure(<span class="kw-2">&amp;</span>input[lo..hi], base);
+<a href=#160 id=160 data-nosnippet>160</a>        m.width = measure(lo..hi);
+<a href=#161 id=161 data-nosnippet>161</a>        m
+<a href=#162 id=162 data-nosnippet>162</a>    };
+<a href=#163 id=163 data-nosnippet>163</a>
+<a href=#164 id=164 data-nosnippet>164</a>    <span class="kw">let </span><span class="kw-2">mut </span>lines: Vec&lt;WrappedLine&gt; = Vec::new();
+<a href=#165 id=165 data-nosnippet>165</a>
+<a href=#166 id=166 data-nosnippet>166</a>    <span class="comment">// Index of the first atom on the current line, plus the byte end of
+<a href=#167 id=167 data-nosnippet>167</a>    // the last atom that fit. The first atom on a line is always placed
+<a href=#168 id=168 data-nosnippet>168</a>    // unconditionally (even if it overflows) so the loop terminates on a
+<a href=#169 id=169 data-nosnippet>169</a>    // single atom wider than max_width.
+<a href=#170 id=170 data-nosnippet>170</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>line_first = <span class="number">0usize</span>;
+<a href=#171 id=171 data-nosnippet>171</a>    <span class="kw">let </span><span class="kw-2">mut </span>line_w = atom_w[<span class="number">0</span>];
+<a href=#172 id=172 data-nosnippet>172</a>    <span class="kw">let </span><span class="kw-2">mut </span>line_last_end = atoms[<span class="number">0</span>].end;
+<a href=#173 id=173 data-nosnippet>173</a>
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="kw">let </span><span class="kw-2">mut </span>idx = <span class="number">1usize</span>;
+<a href=#175 id=175 data-nosnippet>175</a>    <span class="kw">while </span>idx &lt; atoms.len() {
+<a href=#176 id=176 data-nosnippet>176</a>        <span class="comment">// The gap between atoms idx-1 and idx (whitespace width + the
+<a href=#177 id=177 data-nosnippet>177</a>        // shaper-mirrored inter-script auto-space), and whether it is a
+<a href=#178 id=178 data-nosnippet>178</a>        // forced `\n` break. Shared with the optimal strategy via
+<a href=#179 id=179 data-nosnippet>179</a>        // `gap_cost` so the inter-script rule has one source of truth.
+<a href=#180 id=180 data-nosnippet>180</a>        </span><span class="kw">let </span>(gap_w, hard_break) = gap_cost(input, <span class="kw-2">&amp;</span>atoms, idx, space_w, base.size_px);
+<a href=#181 id=181 data-nosnippet>181</a>
+<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">if </span>hard_break {
+<a href=#183 id=183 data-nosnippet>183</a>            <span class="comment">// `\n` forces a line break regardless of width.
+<a href=#184 id=184 data-nosnippet>184</a>            </span><span class="kw">let </span>lo = atoms[line_first].start;
+<a href=#185 id=185 data-nosnippet>185</a>            <span class="kw">let </span>hi = line_last_end;
+<a href=#186 id=186 data-nosnippet>186</a>            lines.push(WrappedLine {
+<a href=#187 id=187 data-nosnippet>187</a>                lo,
+<a href=#188 id=188 data-nosnippet>188</a>                hi,
+<a href=#189 id=189 data-nosnippet>189</a>                metrics: line_metrics(lo, hi),
+<a href=#190 id=190 data-nosnippet>190</a>            });
+<a href=#191 id=191 data-nosnippet>191</a>            line_first = idx;
+<a href=#192 id=192 data-nosnippet>192</a>            line_w = atom_w[idx];
+<a href=#193 id=193 data-nosnippet>193</a>            line_last_end = atoms[idx].end;
+<a href=#194 id=194 data-nosnippet>194</a>        } <span class="kw">else if </span>line_w + gap_w + atom_w[idx] &lt;= max_width || no_start[idx] || no_end[idx - <span class="number">1</span>] {
+<a href=#195 id=195 data-nosnippet>195</a>            <span class="comment">// Extend the line — either the atom fits, or kinsoku forbids
+<a href=#196 id=196 data-nosnippet>196</a>            // breaking here: atoms[idx] is a no-start char (。，、）》」…)
+<a href=#197 id=197 data-nosnippet>197</a>            // that must not begin a line, or atoms[idx-1] is a no-end
+<a href=#198 id=198 data-nosnippet>198</a>            // opening bracket that must not end one. In the kinsoku case
+<a href=#199 id=199 data-nosnippet>199</a>            // the line overflows rather than stranding punctuation at a
+<a href=#200 id=200 data-nosnippet>200</a>            // line edge.
+<a href=#201 id=201 data-nosnippet>201</a>            </span>line_w += gap_w + atom_w[idx];
+<a href=#202 id=202 data-nosnippet>202</a>            line_last_end = atoms[idx].end;
+<a href=#203 id=203 data-nosnippet>203</a>        } <span class="kw">else </span>{
+<a href=#204 id=204 data-nosnippet>204</a>            <span class="comment">// Overflow, and breaking here is kinsoku-legal — close the
+<a href=#205 id=205 data-nosnippet>205</a>            // current line and start a new one at this atom. Whitespace
+<a href=#206 id=206 data-nosnippet>206</a>            // before the new line is dropped.
+<a href=#207 id=207 data-nosnippet>207</a>            </span><span class="kw">let </span>lo = atoms[line_first].start;
+<a href=#208 id=208 data-nosnippet>208</a>            <span class="kw">let </span>hi = line_last_end;
+<a href=#209 id=209 data-nosnippet>209</a>            lines.push(WrappedLine {
+<a href=#210 id=210 data-nosnippet>210</a>                lo,
+<a href=#211 id=211 data-nosnippet>211</a>                hi,
+<a href=#212 id=212 data-nosnippet>212</a>                metrics: line_metrics(lo, hi),
+<a href=#213 id=213 data-nosnippet>213</a>            });
+<a href=#214 id=214 data-nosnippet>214</a>            line_first = idx;
+<a href=#215 id=215 data-nosnippet>215</a>            line_w = atom_w[idx];
+<a href=#216 id=216 data-nosnippet>216</a>            line_last_end = atoms[idx].end;
+<a href=#217 id=217 data-nosnippet>217</a>        }
+<a href=#218 id=218 data-nosnippet>218</a>        idx += <span class="number">1</span>;
+<a href=#219 id=219 data-nosnippet>219</a>    }
+<a href=#220 id=220 data-nosnippet>220</a>
+<a href=#221 id=221 data-nosnippet>221</a>    <span class="comment">// Finalize the trailing line.
+<a href=#222 id=222 data-nosnippet>222</a>    </span><span class="kw">let </span>lo = atoms[line_first].start;
+<a href=#223 id=223 data-nosnippet>223</a>    <span class="kw">let </span>hi = line_last_end;
+<a href=#224 id=224 data-nosnippet>224</a>    lines.push(WrappedLine {
+<a href=#225 id=225 data-nosnippet>225</a>        lo,
+<a href=#226 id=226 data-nosnippet>226</a>        hi,
+<a href=#227 id=227 data-nosnippet>227</a>        metrics: line_metrics(lo, hi),
+<a href=#228 id=228 data-nosnippet>228</a>    });
+<a href=#229 id=229 data-nosnippet>229</a>
+<a href=#230 id=230 data-nosnippet>230</a>    lines
+<a href=#231 id=231 data-nosnippet>231</a>}
+<a href=#232 id=232 data-nosnippet>232</a>
+<a href=#233 id=233 data-nosnippet>233</a><span class="comment">// ----------------------------------------------------------------------
+<a href=#234 id=234 data-nosnippet>234</a>// Knuth-Plass optimal line breaking
+<a href=#235 id=235 data-nosnippet>235</a>// ----------------------------------------------------------------------
+<a href=#236 id=236 data-nosnippet>236</a>//
+<a href=#237 id=237 data-nosnippet>237</a>// The full paragraph-level DP from Knuth &amp; Plass (*Digital Typography*):
+<a href=#238 id=238 data-nosnippet>238</a>// minimise total demerit = Σ badness(line) + Σ adjacent-class demerit,
+<a href=#239 id=239 data-nosnippet>239</a>// where each line is classified into a fitness class by how far it falls
+<a href=#240 id=240 data-nosnippet>240</a>// short of `max_width`. The class term is what makes a K-P paragraph look
+<a href=#241 id=241 data-nosnippet>241</a>// *even* — it penalises a tight line sitting next to a loose one — and is
+<a href=#242 id=242 data-nosnippet>242</a>// the part a plain sum-of-shortfalls DP (which collapses to "fill each
+<a href=#243 id=243 data-nosnippet>243</a>// line", ≈ greedy) misses.
+<a href=#244 id=244 data-nosnippet>244</a>//
+<a href=#245 id=245 data-nosnippet>245</a>// It consumes the same caller-supplied `measure` and the same `gap_cost`
+<a href=#246 id=246 data-nosnippet>246</a>// rule as the greedy path, so it stays consistent with the shaper and with
+<a href=#247 id=247 data-nosnippet>247</a>// the drawn representation. For ragged-right body text its edge over greedy
+<a href=#248 id=248 data-nosnippet>248</a>// is real but subtle (most visible on dense CJK, where per-character break
+<a href=#249 id=249 data-nosnippet>249</a>// opportunities multiply, and where greedy would strand a short final
+<a href=#250 id=250 data-nosnippet>250</a>// line); it pays off fully once justification is in scope.
+<a href=#251 id=251 data-nosnippet>251</a>
+<a href=#252 id=252 data-nosnippet>252</a></span><span class="doccomment">/// Knuth-Plass optimal wrap — like [`wrap_with`] but choosing break points
+<a href=#253 id=253 data-nosnippet>253</a>/// to minimise whole-paragraph demerit (badness + fitness-class evenness)
+<a href=#254 id=254 data-nosnippet>254</a>/// rather than filling each line greedily. Same `measure` contract, same
+<a href=#255 id=255 data-nosnippet>255</a>/// [`WrappedLine`] output, so it is a drop-in replacement for [`wrap_with`].
+<a href=#256 id=256 data-nosnippet>256</a>/// See the "Knuth-Plass optimal line breaking" notes above for when it pays
+<a href=#257 id=257 data-nosnippet>257</a>/// off. Each atom is measured as raw source at `style`; callers whose drawn
+<a href=#258 id=258 data-nosnippet>258</a>/// representation differs from the raw bytes should use
+<a href=#259 id=259 data-nosnippet>259</a>/// [`wrap_optimal_with`].
+<a href=#260 id=260 data-nosnippet>260</a></span><span class="kw">pub fn </span>wrap_optimal(text: <span class="kw-2">&amp;</span>Text, input: <span class="kw-2">&amp;</span>str, style: <span class="kw-2">&amp;</span>Style, max_width: f32) -&gt; Vec&lt;WrappedLine&gt; {
+<a href=#261 id=261 data-nosnippet>261</a>    wrap_optimal_with(text, input, style, max_width, |r| {
+<a href=#262 id=262 data-nosnippet>262</a>        text.measure(<span class="kw-2">&amp;</span>input[r], style).width
+<a href=#263 id=263 data-nosnippet>263</a>    })
+<a href=#264 id=264 data-nosnippet>264</a>}
+<a href=#265 id=265 data-nosnippet>265</a>
+<a href=#266 id=266 data-nosnippet>266</a><span class="doccomment">/// Knuth-Plass optimal wrap with a caller-supplied measure. See
+<a href=#267 id=267 data-nosnippet>267</a>/// [`wrap_with`] for the `measure` contract and [`wrap_optimal`] for the
+<a href=#268 id=268 data-nosnippet>268</a>/// strategy. Falls back to [`wrap_with`] (greedy) for inputs above
+<a href=#269 id=269 data-nosnippet>269</a>/// `KP_GREEDY_FALLBACK_ATOMS` atoms, where the O(n²·C) DP would risk
+<a href=#270 id=270 data-nosnippet>270</a>/// dropping a frame on a megabyte paste.
+<a href=#271 id=271 data-nosnippet>271</a></span><span class="kw">pub fn </span>wrap_optimal_with(
+<a href=#272 id=272 data-nosnippet>272</a>    text: <span class="kw-2">&amp;</span>Text,
+<a href=#273 id=273 data-nosnippet>273</a>    input: <span class="kw-2">&amp;</span>str,
+<a href=#274 id=274 data-nosnippet>274</a>    base: <span class="kw-2">&amp;</span>Style,
+<a href=#275 id=275 data-nosnippet>275</a>    max_width: f32,
+<a href=#276 id=276 data-nosnippet>276</a>    measure: <span class="kw">impl </span>Fn(std::ops::Range&lt;usize&gt;) -&gt; f32,
+<a href=#277 id=277 data-nosnippet>277</a>) -&gt; Vec&lt;WrappedLine&gt; {
+<a href=#278 id=278 data-nosnippet>278</a>    <span class="kw">if </span>input.is_empty() {
+<a href=#279 id=279 data-nosnippet>279</a>        <span class="kw">return </span><span class="macro">vec!</span>[WrappedLine {
+<a href=#280 id=280 data-nosnippet>280</a>            lo: <span class="number">0</span>,
+<a href=#281 id=281 data-nosnippet>281</a>            hi: <span class="number">0</span>,
+<a href=#282 id=282 data-nosnippet>282</a>            metrics: text.measure(<span class="string">""</span>, base),
+<a href=#283 id=283 data-nosnippet>283</a>        }];
+<a href=#284 id=284 data-nosnippet>284</a>    }
+<a href=#285 id=285 data-nosnippet>285</a>    <span class="kw">let </span>atoms = split_atoms(input);
+<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">if </span>atoms.is_empty() {
+<a href=#287 id=287 data-nosnippet>287</a>        <span class="kw">return </span><span class="macro">vec!</span>[WrappedLine {
+<a href=#288 id=288 data-nosnippet>288</a>            lo: <span class="number">0</span>,
+<a href=#289 id=289 data-nosnippet>289</a>            hi: <span class="number">0</span>,
+<a href=#290 id=290 data-nosnippet>290</a>            metrics: text.measure(<span class="string">""</span>, base),
+<a href=#291 id=291 data-nosnippet>291</a>        }];
+<a href=#292 id=292 data-nosnippet>292</a>    }
+<a href=#293 id=293 data-nosnippet>293</a>    <span class="kw">if </span>atoms.len() &gt; KP_GREEDY_FALLBACK_ATOMS {
+<a href=#294 id=294 data-nosnippet>294</a>        <span class="kw">return </span>wrap_with(text, input, base, max_width, measure);
+<a href=#295 id=295 data-nosnippet>295</a>    }
+<a href=#296 id=296 data-nosnippet>296</a>
+<a href=#297 id=297 data-nosnippet>297</a>    <span class="kw">let </span>em = base.size_px.max(<span class="number">1.0</span>);
+<a href=#298 id=298 data-nosnippet>298</a>    <span class="kw">let </span>space_w = text.measure(<span class="string">" "</span>, base).width.max(<span class="number">0.0</span>);
+<a href=#299 id=299 data-nosnippet>299</a>
+<a href=#300 id=300 data-nosnippet>300</a>    <span class="kw">let </span>atom_w: Vec&lt;f32&gt; = atoms.iter().map(|a| measure(a.start..a.end)).collect();
+<a href=#301 id=301 data-nosnippet>301</a>    <span class="comment">// Kinsoku classes (see `wrap_with`). The DP only places line-ends at
+<a href=#302 id=302 data-nosnippet>302</a>    // break points kinsoku allows, so an optimal solution never strands a
+<a href=#303 id=303 data-nosnippet>303</a>    // no-start char at a line start or a no-end bracket at a line end.
+<a href=#304 id=304 data-nosnippet>304</a>    </span><span class="kw">let </span>no_start: Vec&lt;bool&gt; = atoms.iter().map(|<span class="kw-2">&amp;</span>a| atom_no_start(input, a)).collect();
+<a href=#305 id=305 data-nosnippet>305</a>    <span class="kw">let </span>no_end: Vec&lt;bool&gt; = atoms.iter().map(|<span class="kw-2">&amp;</span>a| atom_no_end(input, a)).collect();
+<a href=#306 id=306 data-nosnippet>306</a>    <span class="kw">let </span><span class="kw-2">mut </span>gap_w = Vec::with_capacity(atoms.len() - <span class="number">1</span>);
+<a href=#307 id=307 data-nosnippet>307</a>    <span class="kw">let </span><span class="kw-2">mut </span>gap_hard = Vec::with_capacity(atoms.len() - <span class="number">1</span>);
+<a href=#308 id=308 data-nosnippet>308</a>    <span class="kw">for </span>k <span class="kw">in </span><span class="number">0</span>..atoms.len() - <span class="number">1 </span>{
+<a href=#309 id=309 data-nosnippet>309</a>        <span class="kw">let </span>(w, hard) = gap_cost(input, <span class="kw-2">&amp;</span>atoms, k + <span class="number">1</span>, space_w, base.size_px);
+<a href=#310 id=310 data-nosnippet>310</a>        gap_w.push(w);
+<a href=#311 id=311 data-nosnippet>311</a>        gap_hard.push(hard);
+<a href=#312 id=312 data-nosnippet>312</a>    }
+<a href=#313 id=313 data-nosnippet>313</a>
+<a href=#314 id=314 data-nosnippet>314</a>    <span class="comment">// Prefix sums for O(1) line-width lookups. PA[k] = Σ atom_w[0..k];
+<a href=#315 id=315 data-nosnippet>315</a>    // PG[k] = Σ gap_w[0..k] (gap_w[k] sits between atom k and k+1, so it
+<a href=#316 id=316 data-nosnippet>316</a>    // belongs to any line containing both). natural(i,j) for atoms i..j and
+<a href=#317 id=317 data-nosnippet>317</a>    // the gaps between them = (PA[j]-PA[i]) + (PG[j-1]-PG[i]).
+<a href=#318 id=318 data-nosnippet>318</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>pa = <span class="macro">vec!</span>[<span class="number">0.0f32</span>; atoms.len() + <span class="number">1</span>];
+<a href=#319 id=319 data-nosnippet>319</a>    <span class="kw">for </span>k <span class="kw">in </span><span class="number">0</span>..atoms.len() {
+<a href=#320 id=320 data-nosnippet>320</a>        pa[k + <span class="number">1</span>] = pa[k] + atom_w[k];
+<a href=#321 id=321 data-nosnippet>321</a>    }
+<a href=#322 id=322 data-nosnippet>322</a>    <span class="kw">let </span><span class="kw-2">mut </span>pg = <span class="macro">vec!</span>[<span class="number">0.0f32</span>; atoms.len()];
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="kw">for </span>k <span class="kw">in </span><span class="number">0</span>..gap_w.len() {
+<a href=#324 id=324 data-nosnippet>324</a>        pg[k + <span class="number">1</span>] = pg[k] + gap_w[k];
+<a href=#325 id=325 data-nosnippet>325</a>    }
+<a href=#326 id=326 data-nosnippet>326</a>    <span class="kw">let </span>natural = |i: usize, j: usize| -&gt; f32 {
+<a href=#327 id=327 data-nosnippet>327</a>        <span class="kw">let </span>g = <span class="kw">if </span>j &gt; <span class="number">0 </span>{ pg[j - <span class="number">1</span>] - pg[i] } <span class="kw">else </span>{ <span class="number">0.0 </span>};
+<a href=#328 id=328 data-nosnippet>328</a>        (pa[j] - pa[i]) + g
+<a href=#329 id=329 data-nosnippet>329</a>    };
+<a href=#330 id=330 data-nosnippet>330</a>
+<a href=#331 id=331 data-nosnippet>331</a>    <span class="kw">let </span>line_metrics = |lo: usize, hi: usize| {
+<a href=#332 id=332 data-nosnippet>332</a>        <span class="kw">let </span><span class="kw-2">mut </span>m = text.measure(<span class="kw-2">&amp;</span>input[lo..hi], base);
+<a href=#333 id=333 data-nosnippet>333</a>        m.width = measure(lo..hi);
+<a href=#334 id=334 data-nosnippet>334</a>        m
+<a href=#335 id=335 data-nosnippet>335</a>    };
+<a href=#336 id=336 data-nosnippet>336</a>
+<a href=#337 id=337 data-nosnippet>337</a>    <span class="comment">// Run the DP independently over each run of atoms between forced (`\n`)
+<a href=#338 id=338 data-nosnippet>338</a>    // breaks; each segment's final line gets the \parfillskip exemption.
+<a href=#339 id=339 data-nosnippet>339</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>out: Vec&lt;WrappedLine&gt; = Vec::new();
+<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">let </span><span class="kw-2">mut </span>seg_start = <span class="number">0usize</span>;
+<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">while </span>seg_start &lt; atoms.len() {
+<a href=#342 id=342 data-nosnippet>342</a>        <span class="kw">let </span><span class="kw-2">mut </span>seg_end = seg_start;
+<a href=#343 id=343 data-nosnippet>343</a>        <span class="kw">while </span>seg_end + <span class="number">1 </span>&lt; atoms.len() &amp;&amp; !gap_hard[seg_end] {
+<a href=#344 id=344 data-nosnippet>344</a>            seg_end += <span class="number">1</span>;
+<a href=#345 id=345 data-nosnippet>345</a>        }
+<a href=#346 id=346 data-nosnippet>346</a>        <span class="comment">// Segment = atoms[seg_start..=seg_end]; `na` atoms, local idx 0..=na-1.
+<a href=#347 id=347 data-nosnippet>347</a>        </span><span class="kw">let </span>na = seg_end - seg_start + <span class="number">1</span>;
+<a href=#348 id=348 data-nosnippet>348</a>        knuth_plass_segment(
+<a href=#349 id=349 data-nosnippet>349</a>            seg_start,
+<a href=#350 id=350 data-nosnippet>350</a>            na,
+<a href=#351 id=351 data-nosnippet>351</a>            <span class="kw-2">&amp;</span>atoms,
+<a href=#352 id=352 data-nosnippet>352</a>            <span class="kw-2">&amp;</span>natural,
+<a href=#353 id=353 data-nosnippet>353</a>            <span class="kw-2">&amp;</span>no_start,
+<a href=#354 id=354 data-nosnippet>354</a>            <span class="kw-2">&amp;</span>no_end,
+<a href=#355 id=355 data-nosnippet>355</a>            em,
+<a href=#356 id=356 data-nosnippet>356</a>            max_width,
+<a href=#357 id=357 data-nosnippet>357</a>            <span class="kw-2">&amp;</span>line_metrics,
+<a href=#358 id=358 data-nosnippet>358</a>            <span class="kw-2">&amp;mut </span>out,
+<a href=#359 id=359 data-nosnippet>359</a>        );
+<a href=#360 id=360 data-nosnippet>360</a>        seg_start = seg_end + <span class="number">1</span>;
+<a href=#361 id=361 data-nosnippet>361</a>    }
+<a href=#362 id=362 data-nosnippet>362</a>
+<a href=#363 id=363 data-nosnippet>363</a>    out
+<a href=#364 id=364 data-nosnippet>364</a>}
+<a href=#365 id=365 data-nosnippet>365</a>
+<a href=#366 id=366 data-nosnippet>366</a><span class="doccomment">/// Run the K-P DP over one hard-break-free segment of `na` atoms starting at
+<a href=#367 id=367 data-nosnippet>367</a>/// global atom index `seg_start`, appending the resulting lines to `out`.
+<a href=#368 id=368 data-nosnippet>368</a>///
+<a href=#369 id=369 data-nosnippet>369</a>/// State `dp[j][c]` = best (cost, back_i, back_c) to lay out the first `j`
+<a href=#370 id=370 data-nosnippet>370</a>/// local atoms such that the line ending at `j` is in fitness class `c`.
+<a href=#371 id=371 data-nosnippet>371</a>/// `j` ranges `0..=na`; `c` ranges `0..NCLASS`. The class discretisation is
+<a href=#372 id=372 data-nosnippet>372</a>/// what makes the DP finite — the continuous shortfall is carried only
+<a href=#373 id=373 data-nosnippet>373</a>/// implicitly through the class.
+<a href=#374 id=374 data-nosnippet>374</a></span><span class="attr">#[allow(clippy::too_many_arguments)]
+<a href=#375 id=375 data-nosnippet>375</a></span><span class="kw">fn </span>knuth_plass_segment(
+<a href=#376 id=376 data-nosnippet>376</a>    seg_start: usize,
+<a href=#377 id=377 data-nosnippet>377</a>    na: usize,
+<a href=#378 id=378 data-nosnippet>378</a>    atoms: <span class="kw-2">&amp;</span>[Atom],
+<a href=#379 id=379 data-nosnippet>379</a>    natural: <span class="kw-2">&amp;</span><span class="kw">impl </span>Fn(usize, usize) -&gt; f32,
+<a href=#380 id=380 data-nosnippet>380</a>    no_start: <span class="kw-2">&amp;</span>[bool],
+<a href=#381 id=381 data-nosnippet>381</a>    no_end: <span class="kw-2">&amp;</span>[bool],
+<a href=#382 id=382 data-nosnippet>382</a>    em: f32,
+<a href=#383 id=383 data-nosnippet>383</a>    max_width: f32,
+<a href=#384 id=384 data-nosnippet>384</a>    line_metrics: <span class="kw-2">&amp;</span><span class="kw">impl </span>Fn(usize, usize) -&gt; Metrics,
+<a href=#385 id=385 data-nosnippet>385</a>    out: <span class="kw-2">&amp;mut </span>Vec&lt;WrappedLine&gt;,
+<a href=#386 id=386 data-nosnippet>386</a>) {
+<a href=#387 id=387 data-nosnippet>387</a>    <span class="kw">const </span>NCLASS: usize = <span class="number">4</span>;
+<a href=#388 id=388 data-nosnippet>388</a>    <span class="kw">let </span>inf = f32::INFINITY;
+<a href=#389 id=389 data-nosnippet>389</a>    <span class="comment">// dp[0] is the source: zero cost, no predecessor. Its four entries are
+<a href=#390 id=390 data-nosnippet>390</a>    // identical; transitions treat i == 0 specially (no evenness demerit).
+<a href=#391 id=391 data-nosnippet>391</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>dp: Vec&lt;[(f32, usize, u8); NCLASS]&gt; = <span class="macro">vec!</span>[[(inf, <span class="number">0</span>, <span class="number">0</span>); NCLASS]; na + <span class="number">1</span>];
+<a href=#392 id=392 data-nosnippet>392</a>    dp[<span class="number">0</span>] = [(<span class="number">0.0</span>, <span class="number">0</span>, <span class="number">0</span>); NCLASS];
+<a href=#393 id=393 data-nosnippet>393</a>
+<a href=#394 id=394 data-nosnippet>394</a>    <span class="comment">// Scan i backwards from j-1: as i shrinks the line gains atoms, so width
+<a href=#395 id=395 data-nosnippet>395</a>    // rises and shortfall falls. Overfull multi-atom lines let us bail early
+<a href=#396 id=396 data-nosnippet>396</a>    // (smaller i only adds width); too-loose lines just get skipped (smaller
+<a href=#397 id=397 data-nosnippet>397</a>    // i may bring the line back under the looseness ceiling).
+<a href=#398 id=398 data-nosnippet>398</a>    </span><span class="kw">for </span>j <span class="kw">in </span><span class="number">1</span>..=na {
+<a href=#399 id=399 data-nosnippet>399</a>        <span class="comment">// Kinsoku: a line may end at j only if atom j-1 may end a line and
+<a href=#400 id=400 data-nosnippet>400</a>        // (unless j is the segment's final line) atom j may begin one.
+<a href=#401 id=401 data-nosnippet>401</a>        // Leaving dp[j] at INF makes the DP span over j — the atoms around
+<a href=#402 id=402 data-nosnippet>402</a>        // j join a longer line that ends at a legal break point.
+<a href=#403 id=403 data-nosnippet>403</a>        </span><span class="kw">if </span>j &lt; na &amp;&amp; (no_end[seg_start + j - <span class="number">1</span>] || no_start[seg_start + j]) {
+<a href=#404 id=404 data-nosnippet>404</a>            <span class="kw">continue</span>;
+<a href=#405 id=405 data-nosnippet>405</a>        }
+<a href=#406 id=406 data-nosnippet>406</a>        <span class="kw">for </span>i <span class="kw">in </span>(<span class="number">0</span>..j).rev() {
+<a href=#407 id=407 data-nosnippet>407</a>            <span class="kw">let </span>nat = natural(seg_start + i, seg_start + j);
+<a href=#408 id=408 data-nosnippet>408</a>            <span class="kw">let </span>single = j - i == <span class="number">1</span>;
+<a href=#409 id=409 data-nosnippet>409</a>            <span class="kw">let </span>is_last = j == na;
+<a href=#410 id=410 data-nosnippet>410</a>            <span class="kw">if </span>nat &gt; max_width &amp;&amp; !single {
+<a href=#411 id=411 data-nosnippet>411</a>                <span class="kw">break</span>;
+<a href=#412 id=412 data-nosnippet>412</a>            }
+<a href=#413 id=413 data-nosnippet>413</a>            <span class="kw">let </span>shortfall_em = ((max_width - nat).max(<span class="number">0.0</span>)) / em;
+<a href=#414 id=414 data-nosnippet>414</a>            <span class="comment">// Final line: up to KP_LAST_LINE_FREE_EM of shortfall is free
+<a href=#415 id=415 data-nosnippet>415</a>            // (≈ \parfillskip) — a short last line is correct, not bad.
+<a href=#416 id=416 data-nosnippet>416</a>            </span><span class="kw">let </span>eff_em = <span class="kw">if </span>is_last {
+<a href=#417 id=417 data-nosnippet>417</a>                (shortfall_em - KP_LAST_LINE_FREE_EM).max(<span class="number">0.0</span>)
+<a href=#418 id=418 data-nosnippet>418</a>            } <span class="kw">else </span>{
+<a href=#419 id=419 data-nosnippet>419</a>                shortfall_em
+<a href=#420 id=420 data-nosnippet>420</a>            };
+<a href=#421 id=421 data-nosnippet>421</a>            <span class="kw">if </span>!is_last &amp;&amp; !single &amp;&amp; shortfall_em &gt; KP_MAX_SHORTFALL_EM {
+<a href=#422 id=422 data-nosnippet>422</a>                <span class="kw">continue</span>;
+<a href=#423 id=423 data-nosnippet>423</a>            }
+<a href=#424 id=424 data-nosnippet>424</a>            <span class="kw">let </span>class = kp_class(eff_em);
+<a href=#425 id=425 data-nosnippet>425</a>            <span class="kw">let </span>badness = eff_em * eff_em * eff_em;
+<a href=#426 id=426 data-nosnippet>426</a>
+<a href=#427 id=427 data-nosnippet>427</a>            <span class="comment">// Best predecessor over the previous line's class.
+<a href=#428 id=428 data-nosnippet>428</a>            </span><span class="kw">let </span>(<span class="kw-2">mut </span>best, <span class="kw-2">mut </span>best_cprev) = (inf, <span class="number">0u8</span>);
+<a href=#429 id=429 data-nosnippet>429</a>            <span class="kw">if </span>i == <span class="number">0 </span>{
+<a href=#430 id=430 data-nosnippet>430</a>                best = <span class="number">0.0</span>;
+<a href=#431 id=431 data-nosnippet>431</a>            } <span class="kw">else </span>{
+<a href=#432 id=432 data-nosnippet>432</a>                <span class="kw">for </span>(cprev, <span class="kw-2">&amp;</span>(pcost, <span class="kw">_</span>, <span class="kw">_</span>)) <span class="kw">in </span>dp[i].iter().enumerate() {
+<a href=#433 id=433 data-nosnippet>433</a>                    <span class="kw">if </span>pcost &gt;= inf {
+<a href=#434 id=434 data-nosnippet>434</a>                        <span class="kw">continue</span>;
+<a href=#435 id=435 data-nosnippet>435</a>                    }
+<a href=#436 id=436 data-nosnippet>436</a>                    <span class="kw">let </span>even = <span class="kw">if </span>cprev == class {
+<a href=#437 id=437 data-nosnippet>437</a>                        <span class="number">0.0
+<a href=#438 id=438 data-nosnippet>438</a>                    </span>} <span class="kw">else </span>{
+<a href=#439 id=439 data-nosnippet>439</a>                        KP_CLASS_DEMERIT
+<a href=#440 id=440 data-nosnippet>440</a>                    };
+<a href=#441 id=441 data-nosnippet>441</a>                    <span class="kw">let </span>cost = pcost + even;
+<a href=#442 id=442 data-nosnippet>442</a>                    <span class="kw">if </span>cost &lt; best {
+<a href=#443 id=443 data-nosnippet>443</a>                        best = cost;
+<a href=#444 id=444 data-nosnippet>444</a>                        best_cprev = cprev <span class="kw">as </span>u8;
+<a href=#445 id=445 data-nosnippet>445</a>                    }
+<a href=#446 id=446 data-nosnippet>446</a>                }
+<a href=#447 id=447 data-nosnippet>447</a>            }
+<a href=#448 id=448 data-nosnippet>448</a>            <span class="kw">if </span>best &gt;= inf {
+<a href=#449 id=449 data-nosnippet>449</a>                <span class="kw">continue</span>;
+<a href=#450 id=450 data-nosnippet>450</a>            }
+<a href=#451 id=451 data-nosnippet>451</a>            <span class="kw">let </span>cand = best + badness;
+<a href=#452 id=452 data-nosnippet>452</a>            <span class="kw">if </span>cand &lt; dp[j][class].<span class="number">0 </span>{
+<a href=#453 id=453 data-nosnippet>453</a>                dp[j][class] = (cand, i, best_cprev);
+<a href=#454 id=454 data-nosnippet>454</a>            }
+<a href=#455 id=455 data-nosnippet>455</a>        }
+<a href=#456 id=456 data-nosnippet>456</a>    }
+<a href=#457 id=457 data-nosnippet>457</a>
+<a href=#458 id=458 data-nosnippet>458</a>    <span class="comment">// Recover the cheapest final state and walk the back-pointers.
+<a href=#459 id=459 data-nosnippet>459</a>    </span><span class="kw">let </span>(<span class="kw-2">mut </span>end_c, <span class="kw-2">mut </span>end_cost) = (<span class="number">0usize</span>, inf);
+<a href=#460 id=460 data-nosnippet>460</a>    <span class="kw">for </span>(c, state) <span class="kw">in </span>dp[na].iter().enumerate() {
+<a href=#461 id=461 data-nosnippet>461</a>        <span class="kw">if </span>state.<span class="number">0 </span>&lt; end_cost {
+<a href=#462 id=462 data-nosnippet>462</a>            end_cost = state.<span class="number">0</span>;
+<a href=#463 id=463 data-nosnippet>463</a>            end_c = c;
+<a href=#464 id=464 data-nosnippet>464</a>        }
+<a href=#465 id=465 data-nosnippet>465</a>    }
+<a href=#466 id=466 data-nosnippet>466</a>    <span class="kw">let </span><span class="kw-2">mut </span>breaks: Vec&lt;usize&gt; = Vec::with_capacity(na + <span class="number">1</span>);
+<a href=#467 id=467 data-nosnippet>467</a>    breaks.push(na);
+<a href=#468 id=468 data-nosnippet>468</a>    <span class="kw">let </span>(<span class="kw-2">mut </span>cur_j, <span class="kw-2">mut </span>cur_c) = (na, end_c);
+<a href=#469 id=469 data-nosnippet>469</a>    <span class="kw">while </span>cur_j &gt; <span class="number">0 </span>{
+<a href=#470 id=470 data-nosnippet>470</a>        <span class="kw">let </span>(<span class="kw">_</span>, back_i, back_c) = dp[cur_j][cur_c];
+<a href=#471 id=471 data-nosnippet>471</a>        breaks.push(back_i);
+<a href=#472 id=472 data-nosnippet>472</a>        cur_j = back_i;
+<a href=#473 id=473 data-nosnippet>473</a>        <span class="kw">if </span>cur_j &gt; <span class="number">0 </span>{
+<a href=#474 id=474 data-nosnippet>474</a>            cur_c = back_c <span class="kw">as </span>usize;
+<a href=#475 id=475 data-nosnippet>475</a>        }
+<a href=#476 id=476 data-nosnippet>476</a>    }
+<a href=#477 id=477 data-nosnippet>477</a>    breaks.reverse(); <span class="comment">// [0, b1, ..., na]
+<a href=#478 id=478 data-nosnippet>478</a>
+<a href=#479 id=479 data-nosnippet>479</a>    </span><span class="kw">for </span>w <span class="kw">in </span>breaks.windows(<span class="number">2</span>) {
+<a href=#480 id=480 data-nosnippet>480</a>        <span class="kw">let </span>(li, lj) = (w[<span class="number">0</span>], w[<span class="number">1</span>]);
+<a href=#481 id=481 data-nosnippet>481</a>        <span class="kw">let </span>glo = atoms[seg_start + li].start;
+<a href=#482 id=482 data-nosnippet>482</a>        <span class="kw">let </span>ghi = atoms[seg_start + lj - <span class="number">1</span>].end;
+<a href=#483 id=483 data-nosnippet>483</a>        out.push(WrappedLine {
+<a href=#484 id=484 data-nosnippet>484</a>            lo: glo,
+<a href=#485 id=485 data-nosnippet>485</a>            hi: ghi,
+<a href=#486 id=486 data-nosnippet>486</a>            metrics: line_metrics(glo, ghi),
+<a href=#487 id=487 data-nosnippet>487</a>        });
+<a href=#488 id=488 data-nosnippet>488</a>    }
+<a href=#489 id=489 data-nosnippet>489</a>}
+<a href=#490 id=490 data-nosnippet>490</a>
+<a href=#491 id=491 data-nosnippet>491</a><span class="doccomment">/// Fitness class 0..3 for a line whose effective shortfall is `eff_em` EM
+<a href=#492 id=492 data-nosnippet>492</a>/// (tight / decent / loose / very-loose). Used by [`knuth_plass_segment`].
+<a href=#493 id=493 data-nosnippet>493</a></span><span class="kw">fn </span>kp_class(eff_em: f32) -&gt; usize {
+<a href=#494 id=494 data-nosnippet>494</a>    <span class="kw">if </span>eff_em &lt; KP_FITNESS_EM[<span class="number">0</span>] {
+<a href=#495 id=495 data-nosnippet>495</a>        <span class="number">0
+<a href=#496 id=496 data-nosnippet>496</a>    </span>} <span class="kw">else if </span>eff_em &lt; KP_FITNESS_EM[<span class="number">1</span>] {
+<a href=#497 id=497 data-nosnippet>497</a>        <span class="number">1
+<a href=#498 id=498 data-nosnippet>498</a>    </span>} <span class="kw">else if </span>eff_em &lt; KP_FITNESS_EM[<span class="number">2</span>] {
+<a href=#499 id=499 data-nosnippet>499</a>        <span class="number">2
+<a href=#500 id=500 data-nosnippet>500</a>    </span>} <span class="kw">else </span>{
+<a href=#501 id=501 data-nosnippet>501</a>        <span class="number">3
+<a href=#502 id=502 data-nosnippet>502</a>    </span>}
+<a href=#503 id=503 data-nosnippet>503</a>}
+<a href=#504 id=504 data-nosnippet>504</a>
+<a href=#505 id=505 data-nosnippet>505</a><span class="doccomment">/// Fitness-class boundaries in EM of shortfall (max_width − natural width).
+<a href=#506 id=506 data-nosnippet>506</a>/// Four classes (the standard K-P count) — discretising shortfall into
+<a href=#507 id=507 data-nosnippet>507</a>/// classes is what keeps the DP finite: the state carries the previous
+<a href=#508 id=508 data-nosnippet>508</a>/// line's class, not its continuous shortfall.
+<a href=#509 id=509 data-nosnippet>509</a></span><span class="kw">const </span>KP_FITNESS_EM: [f32; <span class="number">3</span>] = [<span class="number">0.5</span>, <span class="number">1.5</span>, <span class="number">3.0</span>];
+<a href=#510 id=510 data-nosnippet>510</a>
+<a href=#511 id=511 data-nosnippet>511</a><span class="doccomment">/// Demerit added when two adjacent lines land in different fitness classes.
+<a href=#512 id=512 data-nosnippet>512</a>/// Scaled to be comparable to a line's badness (≈ shortfall_em³), so the
+<a href=#513 id=513 data-nosnippet>513</a>/// optimiser trades line badness against evenness rather than one
+<a href=#514 id=514 data-nosnippet>514</a>/// dominating. Tunable.
+<a href=#515 id=515 data-nosnippet>515</a></span><span class="kw">const </span>KP_CLASS_DEMERIT: f32 = <span class="number">10.0</span>;
+<a href=#516 id=516 data-nosnippet>516</a>
+<a href=#517 id=517 data-nosnippet>517</a><span class="doccomment">/// A non-final, non-single-atom line whose shortfall exceeds this (in EM) is
+<a href=#518 id=518 data-nosnippet>518</a>/// "too loose" to consider — rules out absurd breaks and bounds the active
+<a href=#519 id=519 data-nosnippet>519</a>/// set. Single-atom lines and each segment's final line are exempt.
+<a href=#520 id=520 data-nosnippet>520</a></span><span class="kw">const </span>KP_MAX_SHORTFALL_EM: f32 = <span class="number">6.0</span>;
+<a href=#521 id=521 data-nosnippet>521</a>
+<a href=#522 id=522 data-nosnippet>522</a><span class="doccomment">/// Free shortfall granted to a segment's final line (≈ TeX's
+<a href=#523 id=523 data-nosnippet>523</a>/// `\parfillskip`): a short last line is correct, not bad, so up to this
+<a href=#524 id=524 data-nosnippet>524</a>/// much costs nothing. Beyond it the line is penalised normally — which is
+<a href=#525 id=525 data-nosnippet>525</a>/// what discourages stranding a single word on the final line.
+<a href=#526 id=526 data-nosnippet>526</a></span><span class="kw">const </span>KP_LAST_LINE_FREE_EM: f32 = <span class="number">2.0</span>;
+<a href=#527 id=527 data-nosnippet>527</a>
+<a href=#528 id=528 data-nosnippet>528</a><span class="doccomment">/// Atom count above which K-P falls back to greedy. K-P is O(n²·C)
+<a href=#529 id=529 data-nosnippet>529</a>/// (C = [`kp_class`]'s 4 classes); past this a megabyte paste could drop a
+<a href=#530 id=530 data-nosnippet>530</a>/// frame. Well beyond any realistic paragraph.
+<a href=#531 id=531 data-nosnippet>531</a></span><span class="kw">const </span>KP_GREEDY_FALLBACK_ATOMS: usize = <span class="number">3000</span>;
+<a href=#532 id=532 data-nosnippet>532</a>
+<a href=#533 id=533 data-nosnippet>533</a><span class="doccomment">/// A maximal run of source bytes that the wrap algorithm treats as atomic
+<a href=#534 id=534 data-nosnippet>534</a>/// (cannot be split). See [`wrap`].
+<a href=#535 id=535 data-nosnippet>535</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+<a href=#536 id=536 data-nosnippet>536</a></span><span class="kw">struct </span>Atom {
+<a href=#537 id=537 data-nosnippet>537</a>    start: usize,
+<a href=#538 id=538 data-nosnippet>538</a>    end: usize,
+<a href=#539 id=539 data-nosnippet>539</a>}
+<a href=#540 id=540 data-nosnippet>540</a>
+<a href=#541 id=541 data-nosnippet>541</a><span class="doccomment">/// Split `input` into wrap atoms. Whitespace and `\n` are *separators* (not
+<a href=#542 id=542 data-nosnippet>542</a>/// atoms); they define break opportunities between atoms. Atoms are:
+<a href=#543 id=543 data-nosnippet>543</a>///
+<a href=#544 id=544 data-nosnippet>544</a>/// - a maximal run of non-whitespace, non-CJK characters (a Latin "word",
+<a href=#545 id=545 data-nosnippet>545</a>///   including digits, punctuation, emoji ZWJ sequences by codepoint), or
+<a href=#546 id=546 data-nosnippet>546</a>/// - a single CJK ideograph (which is its own atom so CJK text wraps without
+<a href=#547 id=547 data-nosnippet>547</a>///   spaces),
+<a href=#548 id=548 data-nosnippet>548</a>///
+<a href=#549 id=549 data-nosnippet>549</a>/// Adjacent atoms imply a break opportunity between them.
+<a href=#550 id=550 data-nosnippet>550</a></span><span class="kw">fn </span>split_atoms(input: <span class="kw-2">&amp;</span>str) -&gt; Vec&lt;Atom&gt; {
+<a href=#551 id=551 data-nosnippet>551</a>    <span class="kw">let </span><span class="kw-2">mut </span>atoms = Vec::new();
+<a href=#552 id=552 data-nosnippet>552</a>    <span class="kw">let </span><span class="kw-2">mut </span>chars = input.char_indices().peekable();
+<a href=#553 id=553 data-nosnippet>553</a>
+<a href=#554 id=554 data-nosnippet>554</a>    <span class="kw">while let </span><span class="prelude-val">Some</span>((i, ch)) = chars.next() {
+<a href=#555 id=555 data-nosnippet>555</a>        <span class="kw">if </span>ch == <span class="string">'\n' </span>|| ch.is_whitespace() {
+<a href=#556 id=556 data-nosnippet>556</a>            <span class="comment">// Separator — skip. Whitespace runs collapse together because
+<a href=#557 id=557 data-nosnippet>557</a>            // each whitespace char takes this branch.
+<a href=#558 id=558 data-nosnippet>558</a>            </span><span class="kw">continue</span>;
+<a href=#559 id=559 data-nosnippet>559</a>        }
+<a href=#560 id=560 data-nosnippet>560</a>
+<a href=#561 id=561 data-nosnippet>561</a>        <span class="kw">let </span>start = i;
+<a href=#562 id=562 data-nosnippet>562</a>        <span class="kw">if </span>is_cjk(ch) {
+<a href=#563 id=563 data-nosnippet>563</a>            <span class="comment">// Single CJK char is its own atom.
+<a href=#564 id=564 data-nosnippet>564</a>            </span>atoms.push(Atom {
+<a href=#565 id=565 data-nosnippet>565</a>                start,
+<a href=#566 id=566 data-nosnippet>566</a>                end: i + ch.len_utf8(),
+<a href=#567 id=567 data-nosnippet>567</a>            });
+<a href=#568 id=568 data-nosnippet>568</a>        } <span class="kw">else </span>{
+<a href=#569 id=569 data-nosnippet>569</a>            <span class="comment">// Read a maximal run of non-whitespace, non-CJK chars.
+<a href=#570 id=570 data-nosnippet>570</a>            </span><span class="kw">let </span><span class="kw-2">mut </span>end = i + ch.len_utf8();
+<a href=#571 id=571 data-nosnippet>571</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>(<span class="kw">_</span>, next_ch)) = chars.peek() {
+<a href=#572 id=572 data-nosnippet>572</a>                <span class="kw">if </span>next_ch == <span class="string">'\n' </span>|| next_ch.is_whitespace() || is_cjk(next_ch) {
+<a href=#573 id=573 data-nosnippet>573</a>                    <span class="kw">break</span>;
+<a href=#574 id=574 data-nosnippet>574</a>                }
+<a href=#575 id=575 data-nosnippet>575</a>                end += next_ch.len_utf8();
+<a href=#576 id=576 data-nosnippet>576</a>                chars.next();
+<a href=#577 id=577 data-nosnippet>577</a>            }
+<a href=#578 id=578 data-nosnippet>578</a>            atoms.push(Atom { start, end });
+<a href=#579 id=579 data-nosnippet>579</a>        }
+<a href=#580 id=580 data-nosnippet>580</a>    }
+<a href=#581 id=581 data-nosnippet>581</a>
+<a href=#582 id=582 data-nosnippet>582</a>    atoms
+<a href=#583 id=583 data-nosnippet>583</a>}
+<a href=#584 id=584 data-nosnippet>584</a>
+<a href=#585 id=585 data-nosnippet>585</a><span class="doccomment">/// Whether `ch` is a CJK ideograph or related script where line-wrap should
+<a href=#586 id=586 data-nosnippet>586</a>/// be allowed at every character. Covers CJK Unified, CJK Ext A/B/C/D/E/F/G,
+<a href=#587 id=587 data-nosnippet>587</a>/// Hiragana, Katakana, CJK symbols/punctuation, Hangul, and full-width
+<a href=#588 id=588 data-nosnippet>588</a>/// forms. Not exhaustive, but covers the common case: text in CJK locales
+<a href=#589 id=589 data-nosnippet>589</a>/// wraps character-by-character rather than at whitespace.
+<a href=#590 id=590 data-nosnippet>590</a></span><span class="kw">fn </span>is_cjk(ch: char) -&gt; bool {
+<a href=#591 id=591 data-nosnippet>591</a>    <span class="macro">matches!</span>(ch <span class="kw">as </span>u32,
+<a href=#592 id=592 data-nosnippet>592</a>        <span class="number">0x1100</span>..=<span class="number">0x11FF   </span><span class="comment">// Hangul Jamo
+<a href=#593 id=593 data-nosnippet>593</a>        </span>| <span class="number">0x2E80</span>..=<span class="number">0x2EFF </span><span class="comment">// CJK Radicals Supplement
+<a href=#594 id=594 data-nosnippet>594</a>        </span>| <span class="number">0x2F00</span>..=<span class="number">0x2FDF </span><span class="comment">// Kangxi Radicals
+<a href=#595 id=595 data-nosnippet>595</a>        </span>| <span class="number">0x3000</span>..=<span class="number">0x303F </span><span class="comment">// CJK Symbols and Punctuation
+<a href=#596 id=596 data-nosnippet>596</a>        </span>| <span class="number">0x3040</span>..=<span class="number">0x309F </span><span class="comment">// Hiragana
+<a href=#597 id=597 data-nosnippet>597</a>        </span>| <span class="number">0x30A0</span>..=<span class="number">0x30FF </span><span class="comment">// Katakana
+<a href=#598 id=598 data-nosnippet>598</a>        </span>| <span class="number">0x3100</span>..=<span class="number">0x312F </span><span class="comment">// Bopomofo
+<a href=#599 id=599 data-nosnippet>599</a>        </span>| <span class="number">0x3130</span>..=<span class="number">0x318F </span><span class="comment">// Hangul Compatibility Jamo
+<a href=#600 id=600 data-nosnippet>600</a>        </span>| <span class="number">0x3400</span>..=<span class="number">0x4DBF </span><span class="comment">// CJK Unified Ideographs Extension A
+<a href=#601 id=601 data-nosnippet>601</a>        </span>| <span class="number">0x4E00</span>..=<span class="number">0x9FFF </span><span class="comment">// CJK Unified Ideographs
+<a href=#602 id=602 data-nosnippet>602</a>        </span>| <span class="number">0xA960</span>..=<span class="number">0xA97F </span><span class="comment">// Hangul Jamo Extended-A
+<a href=#603 id=603 data-nosnippet>603</a>        </span>| <span class="number">0xAC00</span>..=<span class="number">0xD7AF </span><span class="comment">// Hangul Syllables
+<a href=#604 id=604 data-nosnippet>604</a>        </span>| <span class="number">0xD7B0</span>..=<span class="number">0xD7FF </span><span class="comment">// Hangul Jamo Extended-B
+<a href=#605 id=605 data-nosnippet>605</a>        </span>| <span class="number">0xF900</span>..=<span class="number">0xFAFF </span><span class="comment">// CJK Compatibility Ideographs
+<a href=#606 id=606 data-nosnippet>606</a>        </span>| <span class="number">0xFF00</span>..=<span class="number">0xFFEF </span><span class="comment">// Halfwidth and Full-width Forms
+<a href=#607 id=607 data-nosnippet>607</a>        </span>| <span class="number">0x1F300</span>..=<span class="number">0x1FAFF </span><span class="comment">// Symbols &amp; Pictographs + CJK symbols (broad emoji)
+<a href=#608 id=608 data-nosnippet>608</a>        </span>| <span class="number">0x20000</span>..=<span class="number">0x2A6DF </span><span class="comment">// CJK Unified Ideographs Extension B
+<a href=#609 id=609 data-nosnippet>609</a>        </span>| <span class="number">0x2A700</span>..=<span class="number">0x2B73F </span><span class="comment">// CJK Ext C
+<a href=#610 id=610 data-nosnippet>610</a>        </span>| <span class="number">0x2B740</span>..=<span class="number">0x2B81F </span><span class="comment">// CJK Ext D
+<a href=#611 id=611 data-nosnippet>611</a>        </span>| <span class="number">0x2B820</span>..=<span class="number">0x2CEAF </span><span class="comment">// CJK Ext E
+<a href=#612 id=612 data-nosnippet>612</a>        </span>| <span class="number">0x2CEB0</span>..=<span class="number">0x2EBEF </span><span class="comment">// CJK Ext F
+<a href=#613 id=613 data-nosnippet>613</a>        </span>| <span class="number">0x30000</span>..=<span class="number">0x3134F </span><span class="comment">// CJK Ext G
+<a href=#614 id=614 data-nosnippet>614</a>    </span>)
+<a href=#615 id=615 data-nosnippet>615</a>}
+<a href=#616 id=616 data-nosnippet>616</a>
+<a href=#617 id=617 data-nosnippet>617</a><span class="doccomment">/// Whether `atom`'s first codepoint is CJK — the atom's script class for the
+<a href=#618 id=618 data-nosnippet>618</a>/// inter-script auto-space rule in [`wrap`]. Derived from the text rather
+<a href=#619 id=619 data-nosnippet>619</a>/// than stored on [`Atom`], so the struct stays minimal and the rule reads
+<a href=#620 id=620 data-nosnippet>620</a>/// its input from the single source of truth (the codepoint), matching how
+<a href=#621 id=621 data-nosnippet>621</a>/// the C shaper derives the same fact from `run-&gt;script`.
+<a href=#622 id=622 data-nosnippet>622</a></span><span class="kw">fn </span>atom_is_cjk(input: <span class="kw-2">&amp;</span>str, atom: Atom) -&gt; bool {
+<a href=#623 id=623 data-nosnippet>623</a>    input[atom.start..].chars().next().is_some_and(is_cjk)
+<a href=#624 id=624 data-nosnippet>624</a>}
+<a href=#625 id=625 data-nosnippet>625</a>
+<a href=#626 id=626 data-nosnippet>626</a><span class="doccomment">/// The `(width, is_hard_break)` of the gap between atoms `idx - 1` and
+<a href=#627 id=627 data-nosnippet>627</a>/// `idx` — i.e. the source bytes `atoms[idx-1].end .. atoms[idx].start`.
+<a href=#628 id=628 data-nosnippet>628</a>///
+<a href=#629 id=629 data-nosnippet>629</a>/// The width includes the inter-script auto-space when the two atoms cross
+<a href=#630 id=630 data-nosnippet>630</a>/// the CJK line and no separator already covers the boundary. This is the
+<a href=#631 id=631 data-nosnippet>631</a>/// **single source of truth** for that rule: both the greedy
+<a href=#632 id=632 data-nosnippet>632</a>/// ([`wrap_with`]) and optimal ([`wrap_optimal_with`]) strategies call it,
+<a href=#633 id=633 data-nosnippet>633</a>/// so neither can drift from the ¼-em gap the shaper inserts.
+<a href=#634 id=634 data-nosnippet>634</a></span><span class="kw">fn </span>gap_cost(input: <span class="kw-2">&amp;</span>str, atoms: <span class="kw-2">&amp;</span>[Atom], idx: usize, space_w: f32, size_px: f32) -&gt; (f32, bool) {
+<a href=#635 id=635 data-nosnippet>635</a>    <span class="kw">let </span>gap = <span class="kw-2">&amp;</span>input[atoms[idx - <span class="number">1</span>].end..atoms[idx].start];
+<a href=#636 id=636 data-nosnippet>636</a>    <span class="kw">let </span>hard = gap.contains(<span class="string">'\n'</span>);
+<a href=#637 id=637 data-nosnippet>637</a>    <span class="kw">let </span><span class="kw-2">mut </span>w = space_w * gap.bytes().filter(|<span class="kw-2">&amp;</span>b| b != <span class="string">b'\n'</span>).count() <span class="kw">as </span>f32;
+<a href=#638 id=638 data-nosnippet>638</a>    <span class="comment">// `is_cjk` is a superset of the shaper's script test (it also covers
+<a href=#639 id=639 data-nosnippet>639</a>    // emoji / full-width), so this only ever over-estimates relative to the
+<a href=#640 id=640 data-nosnippet>640</a>    // shaper — the safe direction for line-break accounting.
+<a href=#641 id=641 data-nosnippet>641</a>    </span><span class="kw">if </span>w == <span class="number">0.0 </span>&amp;&amp; atom_is_cjk(input, atoms[idx - <span class="number">1</span>]) != atom_is_cjk(input, atoms[idx]) {
+<a href=#642 id=642 data-nosnippet>642</a>        w += size_px * INTERSCRIPT_GAP_EM;
+<a href=#643 id=643 data-nosnippet>643</a>    }
+<a href=#644 id=644 data-nosnippet>644</a>    (w, hard)
+<a href=#645 id=645 data-nosnippet>645</a>}
+<a href=#646 id=646 data-nosnippet>646</a>
+<a href=#647 id=647 data-nosnippet>647</a><span class="doccomment">/// CJK punctuation that must not **begin** a line: closing brackets and
+<a href=#648 id=648 data-nosnippet>648</a>/// stop punctuation (。，、）》」…). JLREQ cl-02 / cl-06 / cl-07. A break
+<a href=#649 id=649 data-nosnippet>649</a>/// immediately before one would strand it at a line start, so kinsoku shori
+<a href=#650 id=650 data-nosnippet>650</a>/// forbids such breaks (the char is pulled back onto the previous line).
+<a href=#651 id=651 data-nosnippet>651</a></span><span class="kw">fn </span>is_no_start(ch: char) -&gt; bool {
+<a href=#652 id=652 data-nosnippet>652</a>    <span class="macro">matches!</span>(
+<a href=#653 id=653 data-nosnippet>653</a>        ch,
+<a href=#654 id=654 data-nosnippet>654</a>        <span class="string">'〉' </span>| <span class="string">'》'
+<a href=#655 id=655 data-nosnippet>655</a>            </span>| <span class="string">'」'
+<a href=#656 id=656 data-nosnippet>656</a>            </span>| <span class="string">'』'
+<a href=#657 id=657 data-nosnippet>657</a>            </span>| <span class="string">'】'
+<a href=#658 id=658 data-nosnippet>658</a>            </span>| <span class="string">'〕'
+<a href=#659 id=659 data-nosnippet>659</a>            </span>| <span class="string">'〗'
+<a href=#660 id=660 data-nosnippet>660</a>            </span>| <span class="string">'〙'
+<a href=#661 id=661 data-nosnippet>661</a>            </span>| <span class="string">'〟'
+<a href=#662 id=662 data-nosnippet>662</a>            </span>| <span class="string">'）'
+<a href=#663 id=663 data-nosnippet>663</a>            </span>| <span class="string">'］'
+<a href=#664 id=664 data-nosnippet>664</a>            </span>| <span class="string">'｝'
+<a href=#665 id=665 data-nosnippet>665</a>            </span>| <span class="string">'｠'
+<a href=#666 id=666 data-nosnippet>666</a>            </span>| <span class="string">'、'
+<a href=#667 id=667 data-nosnippet>667</a>            </span>| <span class="string">'。'
+<a href=#668 id=668 data-nosnippet>668</a>            </span>| <span class="string">'，'
+<a href=#669 id=669 data-nosnippet>669</a>            </span>| <span class="string">'．'
+<a href=#670 id=670 data-nosnippet>670</a>            </span>| <span class="string">'：'
+<a href=#671 id=671 data-nosnippet>671</a>            </span>| <span class="string">'；'
+<a href=#672 id=672 data-nosnippet>672</a>            </span>| <span class="string">'！'
+<a href=#673 id=673 data-nosnippet>673</a>            </span>| <span class="string">'？'
+<a href=#674 id=674 data-nosnippet>674</a>    </span>)
+<a href=#675 id=675 data-nosnippet>675</a>}
+<a href=#676 id=676 data-nosnippet>676</a>
+<a href=#677 id=677 data-nosnippet>677</a><span class="doccomment">/// CJK opening brackets that must not **end** a line: （（「『…. JLREQ
+<a href=#678 id=678 data-nosnippet>678</a>/// cl-01. A break immediately after one would leave it dangling at a line
+<a href=#679 id=679 data-nosnippet>679</a>/// end, separated from what it opens, so kinsoku forbids such breaks (the
+<a href=#680 id=680 data-nosnippet>680</a>/// bracket is pushed onto the next line).
+<a href=#681 id=681 data-nosnippet>681</a></span><span class="kw">fn </span>is_no_end(ch: char) -&gt; bool {
+<a href=#682 id=682 data-nosnippet>682</a>    <span class="macro">matches!</span>(
+<a href=#683 id=683 data-nosnippet>683</a>        ch,
+<a href=#684 id=684 data-nosnippet>684</a>        <span class="string">'〈' </span>| <span class="string">'《' </span>| <span class="string">'「' </span>| <span class="string">'『' </span>| <span class="string">'【' </span>| <span class="string">'〔' </span>| <span class="string">'〖' </span>| <span class="string">'〚' </span>| <span class="string">'〝' </span>| <span class="string">'（' </span>| <span class="string">'［' </span>| <span class="string">'｛' </span>| <span class="string">'｟'
+<a href=#685 id=685 data-nosnippet>685</a>    </span>)
+<a href=#686 id=686 data-nosnippet>686</a>}
+<a href=#687 id=687 data-nosnippet>687</a>
+<a href=#688 id=688 data-nosnippet>688</a><span class="doccomment">/// Whether `atom`'s first character is no-start (must not begin a line).
+<a href=#689 id=689 data-nosnippet>689</a></span><span class="kw">fn </span>atom_no_start(input: <span class="kw-2">&amp;</span>str, atom: Atom) -&gt; bool {
+<a href=#690 id=690 data-nosnippet>690</a>    input[atom.start..].chars().next().is_some_and(is_no_start)
+<a href=#691 id=691 data-nosnippet>691</a>}
+<a href=#692 id=692 data-nosnippet>692</a>
+<a href=#693 id=693 data-nosnippet>693</a><span class="doccomment">/// Whether `atom`'s last character is no-end (must not end a line).
+<a href=#694 id=694 data-nosnippet>694</a></span><span class="kw">fn </span>atom_no_end(input: <span class="kw-2">&amp;</span>str, atom: Atom) -&gt; bool {
+<a href=#695 id=695 data-nosnippet>695</a>    input[..atom.end].chars().last().is_some_and(is_no_end)
+<a href=#696 id=696 data-nosnippet>696</a>}
+<a href=#697 id=697 data-nosnippet>697</a>
+<a href=#698 id=698 data-nosnippet>698</a><span class="attr">#[cfg(test)]
+<a href=#699 id=699 data-nosnippet>699</a></span><span class="kw">mod </span>tests {
+<a href=#700 id=700 data-nosnippet>700</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#701 id=701 data-nosnippet>701</a>
+<a href=#702 id=702 data-nosnippet>702</a>    <span class="doccomment">/// Build a measure-only shaper for wrap tests. Returns `None` if the
+<a href=#703 id=703 data-nosnippet>703</a>    /// engine cannot be initialised (e.g. no fontconfig in CI), in which
+<a href=#704 id=704 data-nosnippet>704</a>    /// case engine-dependent tests skip themselves.
+<a href=#705 id=705 data-nosnippet>705</a>    </span><span class="kw">fn </span>engine() -&gt; <span class="prelude-ty">Option</span>&lt;Text&gt; {
+<a href=#706 id=706 data-nosnippet>706</a>        Text::measure_only().ok()
+<a href=#707 id=707 data-nosnippet>707</a>    }
+<a href=#708 id=708 data-nosnippet>708</a>
+<a href=#709 id=709 data-nosnippet>709</a>    <span class="kw">fn </span>style() -&gt; Style {
+<a href=#710 id=710 data-nosnippet>710</a>        Style::new(<span class="number">17.0</span>, <span class="number">0xFFFFFFFF</span>)
+<a href=#711 id=711 data-nosnippet>711</a>    }
+<a href=#712 id=712 data-nosnippet>712</a>
+<a href=#713 id=713 data-nosnippet>713</a>    <span class="attr">#[test]
+<a href=#714 id=714 data-nosnippet>714</a>    #[ignore = <span class="string">"verification smoke-print; run with --nocapture --ignored"</span>]
+<a href=#715 id=715 data-nosnippet>715</a>    </span><span class="kw">fn </span>kp_smoke_realistic() {
+<a href=#716 id=716 data-nosnippet>716</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#717 id=717 data-nosnippet>717</a>        <span class="kw">let </span>st = style();
+<a href=#718 id=718 data-nosnippet>718</a>        <span class="kw">let </span>para = <span class="string">"Knuth-Plass \u{6574}\u{6bb5}\u{6700}\u{4f18}\u{65ad}\u{884c}\u{7b97}\u{6cd5}\u{901a}\u{8fc7}\u{52a8}\u{6001}\u{89c4}\u{5212}\u{6700}\u{5c0f}\u{5316}\u{6574}\u{6bb5}\u{7684}\u{6392}\u{7248}\u{4ee3}\u{4ef7}\u{ff0c}\u{800c}\u{4e0d}\u{662f}\u{50cf}\u{8d2a}\u{5fc3}\u{7b97}\u{6cd5}\u{90a3}\u{6837}\u{9010}\u{884c}\u{586b}\u{5145}\u{3002}\u{5b83}\u{7684}\u{6838}\u{5fc3}\u{662f}\u{628a}\u{6bcf}\u{4e2a}\u{53ef}\u{884c}\u{7684}\u{65ad}\u{70b9}\u{4f5c}\u{4e3a}\u{4e00}\u{4e2a}\u{72b6}\u{6001}\u{ff0c}\u{7528} badness \u{8861}\u{91cf}\u{6bcf}\u{4e00}\u{884c}\u{7684}\u{677e}\u{7d27}\u{ff0c}\u{5e76}\u{60e9}\u{7f5a}\u{76f8}\u{90bb}\u{884c}\u{4e4b}\u{95f4}\u{8fc7}\u{5927}\u{7684}\u{677e}\u{7d27}\u{5dee}\u{5f02}\u{3002}对于中文混排，断行的选择空间更大，整段最优的价值也更明显。"</span>;
+<a href=#719 id=719 data-nosnippet>719</a>        <span class="kw">let </span>max_w = <span class="number">420.0</span>;
+<a href=#720 id=720 data-nosnippet>720</a>        <span class="kw">let </span>greedy = wrap(<span class="kw-2">&amp;</span>engine, para, <span class="kw-2">&amp;</span>st, max_w);
+<a href=#721 id=721 data-nosnippet>721</a>        <span class="kw">let </span>optimal = wrap_optimal(<span class="kw-2">&amp;</span>engine, para, <span class="kw-2">&amp;</span>st, max_w);
+<a href=#722 id=722 data-nosnippet>722</a>        <span class="macro">println!</span>(
+<a href=#723 id=723 data-nosnippet>723</a>            <span class="string">"\n=== column {max_w}px, {} chars | greedy {} lines, K-P {} lines ==="</span>,
+<a href=#724 id=724 data-nosnippet>724</a>            para.chars().count(),
+<a href=#725 id=725 data-nosnippet>725</a>            greedy.len(),
+<a href=#726 id=726 data-nosnippet>726</a>            optimal.len()
+<a href=#727 id=727 data-nosnippet>727</a>        );
+<a href=#728 id=728 data-nosnippet>728</a>        <span class="macro">println!</span>(<span class="string">"--- K-P ---"</span>);
+<a href=#729 id=729 data-nosnippet>729</a>        <span class="kw">for </span>(i, l) <span class="kw">in </span>optimal.iter().enumerate() {
+<a href=#730 id=730 data-nosnippet>730</a>            <span class="kw">let </span>w = engine.measure(<span class="kw-2">&amp;</span>para[l.lo..l.hi], <span class="kw-2">&amp;</span>st).width;
+<a href=#731 id=731 data-nosnippet>731</a>            <span class="macro">println!</span>(<span class="string">"  KP {i}: {w:&gt;6.1}px  {:?}"</span>, <span class="kw-2">&amp;</span>para[l.lo..l.hi]);
+<a href=#732 id=732 data-nosnippet>732</a>        }
+<a href=#733 id=733 data-nosnippet>733</a>        <span class="macro">println!</span>(<span class="string">"--- greedy ---"</span>);
+<a href=#734 id=734 data-nosnippet>734</a>        <span class="kw">for </span>(i, l) <span class="kw">in </span>greedy.iter().enumerate() {
+<a href=#735 id=735 data-nosnippet>735</a>            <span class="kw">let </span>w = engine.measure(<span class="kw-2">&amp;</span>para[l.lo..l.hi], <span class="kw-2">&amp;</span>st).width;
+<a href=#736 id=736 data-nosnippet>736</a>            <span class="macro">println!</span>(<span class="string">"  gr {i}: {w:&gt;6.1}px  {:?}"</span>, <span class="kw-2">&amp;</span>para[l.lo..l.hi]);
+<a href=#737 id=737 data-nosnippet>737</a>        }
+<a href=#738 id=738 data-nosnippet>738</a>        <span class="kw">for </span>l <span class="kw">in </span><span class="kw-2">&amp;</span>optimal {
+<a href=#739 id=739 data-nosnippet>739</a>            <span class="kw">let </span>slice = <span class="kw-2">&amp;</span>para[l.lo..l.hi];
+<a href=#740 id=740 data-nosnippet>740</a>            <span class="kw">let </span>atoms = <span class="kw">super</span>::split_atoms(slice);
+<a href=#741 id=741 data-nosnippet>741</a>            <span class="kw">let </span>w = engine.measure(slice, <span class="kw-2">&amp;</span>st).width;
+<a href=#742 id=742 data-nosnippet>742</a>            <span class="macro">assert!</span>(
+<a href=#743 id=743 data-nosnippet>743</a>                atoms.len() == <span class="number">1 </span>|| w &lt;= max_w + <span class="number">0.5</span>,
+<a href=#744 id=744 data-nosnippet>744</a>                <span class="string">"overflow {w} &gt; {max_w}: {slice:?}"
+<a href=#745 id=745 data-nosnippet>745</a>            </span>);
+<a href=#746 id=746 data-nosnippet>746</a>        }
+<a href=#747 id=747 data-nosnippet>747</a>    }
+<a href=#748 id=748 data-nosnippet>748</a>
+<a href=#749 id=749 data-nosnippet>749</a>    <span class="attr">#[test]
+<a href=#750 id=750 data-nosnippet>750</a>    </span><span class="kw">fn </span>split_atoms_latin_words() {
+<a href=#751 id=751 data-nosnippet>751</a>        <span class="kw">let </span>atoms = split_atoms(<span class="string">"hello world  foo"</span>);
+<a href=#752 id=752 data-nosnippet>752</a>        <span class="macro">assert_eq!</span>(
+<a href=#753 id=753 data-nosnippet>753</a>            atoms,
+<a href=#754 id=754 data-nosnippet>754</a>            <span class="macro">vec!</span>[
+<a href=#755 id=755 data-nosnippet>755</a>                Atom { start: <span class="number">0</span>, end: <span class="number">5 </span>},   <span class="comment">// "hello"
+<a href=#756 id=756 data-nosnippet>756</a>                </span>Atom { start: <span class="number">6</span>, end: <span class="number">11 </span>},  <span class="comment">// "world"
+<a href=#757 id=757 data-nosnippet>757</a>                </span>Atom { start: <span class="number">13</span>, end: <span class="number">16 </span>}  <span class="comment">// "foo"
+<a href=#758 id=758 data-nosnippet>758</a>            </span>]
+<a href=#759 id=759 data-nosnippet>759</a>        );
+<a href=#760 id=760 data-nosnippet>760</a>    }
+<a href=#761 id=761 data-nosnippet>761</a>
+<a href=#762 id=762 data-nosnippet>762</a>    <span class="attr">#[test]
+<a href=#763 id=763 data-nosnippet>763</a>    </span><span class="kw">fn </span>split_atoms_cjk_each_char_is_atomic() {
+<a href=#764 id=764 data-nosnippet>764</a>        <span class="comment">// Chinese: no whitespace, but each char is its own atom.
+<a href=#765 id=765 data-nosnippet>765</a>        </span><span class="kw">let </span>atoms = split_atoms(<span class="string">"你好世界"</span>);
+<a href=#766 id=766 data-nosnippet>766</a>        <span class="macro">assert_eq!</span>(
+<a href=#767 id=767 data-nosnippet>767</a>            atoms,
+<a href=#768 id=768 data-nosnippet>768</a>            <span class="macro">vec!</span>[
+<a href=#769 id=769 data-nosnippet>769</a>                Atom { start: <span class="number">0</span>, end: <span class="number">3 </span>},  <span class="comment">// 你
+<a href=#770 id=770 data-nosnippet>770</a>                </span>Atom { start: <span class="number">3</span>, end: <span class="number">6 </span>},  <span class="comment">// 好
+<a href=#771 id=771 data-nosnippet>771</a>                </span>Atom { start: <span class="number">6</span>, end: <span class="number">9 </span>},  <span class="comment">// 世
+<a href=#772 id=772 data-nosnippet>772</a>                </span>Atom { start: <span class="number">9</span>, end: <span class="number">12 </span>}  <span class="comment">// 界
+<a href=#773 id=773 data-nosnippet>773</a>            </span>]
+<a href=#774 id=774 data-nosnippet>774</a>        );
+<a href=#775 id=775 data-nosnippet>775</a>    }
+<a href=#776 id=776 data-nosnippet>776</a>
+<a href=#777 id=777 data-nosnippet>777</a>    <span class="attr">#[test]
+<a href=#778 id=778 data-nosnippet>778</a>    </span><span class="kw">fn </span>split_atoms_mixed_cjk_and_latin() {
+<a href=#779 id=779 data-nosnippet>779</a>        <span class="comment">// Mixed: "你好 hello 世界" — atoms split at CJK/Latin boundaries.
+<a href=#780 id=780 data-nosnippet>780</a>        </span><span class="kw">let </span>atoms = split_atoms(<span class="string">"你好 hello 世界"</span>);
+<a href=#781 id=781 data-nosnippet>781</a>        <span class="macro">assert_eq!</span>(
+<a href=#782 id=782 data-nosnippet>782</a>            atoms,
+<a href=#783 id=783 data-nosnippet>783</a>            <span class="macro">vec!</span>[
+<a href=#784 id=784 data-nosnippet>784</a>                Atom { start: <span class="number">0</span>, end: <span class="number">3 </span>},   <span class="comment">// 你
+<a href=#785 id=785 data-nosnippet>785</a>                </span>Atom { start: <span class="number">3</span>, end: <span class="number">6 </span>},   <span class="comment">// 好
+<a href=#786 id=786 data-nosnippet>786</a>                </span>Atom { start: <span class="number">7</span>, end: <span class="number">12 </span>},  <span class="comment">// hello
+<a href=#787 id=787 data-nosnippet>787</a>                </span>Atom { start: <span class="number">13</span>, end: <span class="number">16 </span>}, <span class="comment">// 世
+<a href=#788 id=788 data-nosnippet>788</a>                </span>Atom { start: <span class="number">16</span>, end: <span class="number">19 </span>}  <span class="comment">// 界
+<a href=#789 id=789 data-nosnippet>789</a>            </span>]
+<a href=#790 id=790 data-nosnippet>790</a>        );
+<a href=#791 id=791 data-nosnippet>791</a>    }
+<a href=#792 id=792 data-nosnippet>792</a>
+<a href=#793 id=793 data-nosnippet>793</a>    <span class="attr">#[test]
+<a href=#794 id=794 data-nosnippet>794</a>    </span><span class="kw">fn </span>split_atoms_newline_is_separator() {
+<a href=#795 id=795 data-nosnippet>795</a>        <span class="kw">let </span>atoms = split_atoms(<span class="string">"a\nb\nc"</span>);
+<a href=#796 id=796 data-nosnippet>796</a>        <span class="macro">assert_eq!</span>(
+<a href=#797 id=797 data-nosnippet>797</a>            atoms,
+<a href=#798 id=798 data-nosnippet>798</a>            <span class="macro">vec!</span>[
+<a href=#799 id=799 data-nosnippet>799</a>                Atom { start: <span class="number">0</span>, end: <span class="number">1 </span>}, <span class="comment">// a
+<a href=#800 id=800 data-nosnippet>800</a>                </span>Atom { start: <span class="number">2</span>, end: <span class="number">3 </span>}, <span class="comment">// b
+<a href=#801 id=801 data-nosnippet>801</a>                </span>Atom { start: <span class="number">4</span>, end: <span class="number">5 </span>}  <span class="comment">// c
+<a href=#802 id=802 data-nosnippet>802</a>            </span>]
+<a href=#803 id=803 data-nosnippet>803</a>        );
+<a href=#804 id=804 data-nosnippet>804</a>    }
+<a href=#805 id=805 data-nosnippet>805</a>
+<a href=#806 id=806 data-nosnippet>806</a>    <span class="attr">#[test]
+<a href=#807 id=807 data-nosnippet>807</a>    </span><span class="kw">fn </span>split_atoms_empty_or_whitespace_only() {
+<a href=#808 id=808 data-nosnippet>808</a>        <span class="macro">assert!</span>(split_atoms(<span class="string">""</span>).is_empty());
+<a href=#809 id=809 data-nosnippet>809</a>        <span class="macro">assert!</span>(split_atoms(<span class="string">"   \n\t  "</span>).is_empty());
+<a href=#810 id=810 data-nosnippet>810</a>    }
+<a href=#811 id=811 data-nosnippet>811</a>
+<a href=#812 id=812 data-nosnippet>812</a>    <span class="attr">#[test]
+<a href=#813 id=813 data-nosnippet>813</a>    </span><span class="kw">fn </span>wrap_empty_input_returns_single_empty_line() {
+<a href=#814 id=814 data-nosnippet>814</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#815 id=815 data-nosnippet>815</a>        <span class="kw">let </span>st = style();
+<a href=#816 id=816 data-nosnippet>816</a>        <span class="kw">let </span>lines = wrap(<span class="kw-2">&amp;</span>engine, <span class="string">""</span>, <span class="kw-2">&amp;</span>st, <span class="number">100.0</span>);
+<a href=#817 id=817 data-nosnippet>817</a>        <span class="macro">assert_eq!</span>(lines.len(), <span class="number">1</span>);
+<a href=#818 id=818 data-nosnippet>818</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#819 id=819 data-nosnippet>819</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].hi, <span class="number">0</span>);
+<a href=#820 id=820 data-nosnippet>820</a>    }
+<a href=#821 id=821 data-nosnippet>821</a>
+<a href=#822 id=822 data-nosnippet>822</a>    <span class="attr">#[test]
+<a href=#823 id=823 data-nosnippet>823</a>    </span><span class="kw">fn </span>wrap_whitespace_only_returns_single_empty_line() {
+<a href=#824 id=824 data-nosnippet>824</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#825 id=825 data-nosnippet>825</a>        <span class="kw">let </span>st = style();
+<a href=#826 id=826 data-nosnippet>826</a>        <span class="kw">let </span>lines = wrap(<span class="kw-2">&amp;</span>engine, <span class="string">"   \n  "</span>, <span class="kw-2">&amp;</span>st, <span class="number">100.0</span>);
+<a href=#827 id=827 data-nosnippet>827</a>        <span class="macro">assert_eq!</span>(lines.len(), <span class="number">1</span>);
+<a href=#828 id=828 data-nosnippet>828</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#829 id=829 data-nosnippet>829</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].hi, <span class="number">0</span>);
+<a href=#830 id=830 data-nosnippet>830</a>    }
+<a href=#831 id=831 data-nosnippet>831</a>
+<a href=#832 id=832 data-nosnippet>832</a>    <span class="attr">#[test]
+<a href=#833 id=833 data-nosnippet>833</a>    </span><span class="kw">fn </span>wrap_single_word_one_line() {
+<a href=#834 id=834 data-nosnippet>834</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#835 id=835 data-nosnippet>835</a>        <span class="kw">let </span>st = style();
+<a href=#836 id=836 data-nosnippet>836</a>        <span class="comment">// A short word always fits in any reasonable max_width.
+<a href=#837 id=837 data-nosnippet>837</a>        </span><span class="kw">let </span>lines = wrap(<span class="kw-2">&amp;</span>engine, <span class="string">"hello"</span>, <span class="kw-2">&amp;</span>st, <span class="number">10000.0</span>);
+<a href=#838 id=838 data-nosnippet>838</a>        <span class="macro">assert_eq!</span>(lines.len(), <span class="number">1</span>);
+<a href=#839 id=839 data-nosnippet>839</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#840 id=840 data-nosnippet>840</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].hi, <span class="number">5</span>);
+<a href=#841 id=841 data-nosnippet>841</a>    }
+<a href=#842 id=842 data-nosnippet>842</a>
+<a href=#843 id=843 data-nosnippet>843</a>    <span class="attr">#[test]
+<a href=#844 id=844 data-nosnippet>844</a>    </span><span class="kw">fn </span>wrap_byte_ranges_tile_input_exactly() {
+<a href=#845 id=845 data-nosnippet>845</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#846 id=846 data-nosnippet>846</a>        <span class="kw">let </span>st = style();
+<a href=#847 id=847 data-nosnippet>847</a>        <span class="comment">// Three paragraph styles: short Latin, long CJK (no spaces), mixed.
+<a href=#848 id=848 data-nosnippet>848</a>        // For each, lines must cover all non-whitespace bytes exactly once,
+<a href=#849 id=849 data-nosnippet>849</a>        // with only whitespace between consecutive line ranges.
+<a href=#850 id=850 data-nosnippet>850</a>        </span><span class="kw">for </span>input <span class="kw">in </span>[
+<a href=#851 id=851 data-nosnippet>851</a>            <span class="string">"the quick brown fox jumps over the lazy dog"</span>,
+<a href=#852 id=852 data-nosnippet>852</a>            <span class="string">"你好世界你好世界你好世界你好世界"</span>,
+<a href=#853 id=853 data-nosnippet>853</a>            <span class="string">"mixed 你好 world 世界 with words"</span>,
+<a href=#854 id=854 data-nosnippet>854</a>        ] {
+<a href=#855 id=855 data-nosnippet>855</a>            <span class="kw">let </span>lines = wrap(<span class="kw-2">&amp;</span>engine, input, <span class="kw-2">&amp;</span>st, <span class="number">100.0</span>);
+<a href=#856 id=856 data-nosnippet>856</a>            <span class="macro">assert!</span>(!lines.is_empty(), <span class="string">"wrap returned no lines for {input:?}"</span>);
+<a href=#857 id=857 data-nosnippet>857</a>            <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].lo, <span class="number">0</span>, <span class="string">"first line should start at 0"</span>);
+<a href=#858 id=858 data-nosnippet>858</a>            <span class="comment">// Consecutive lines: no overlap, and any gap between them is
+<a href=#859 id=859 data-nosnippet>859</a>            // pure whitespace (the wrap algorithm trims the break).
+<a href=#860 id=860 data-nosnippet>860</a>            </span><span class="kw">for </span>w <span class="kw">in </span>lines.windows(<span class="number">2</span>) {
+<a href=#861 id=861 data-nosnippet>861</a>                <span class="macro">assert!</span>(
+<a href=#862 id=862 data-nosnippet>862</a>                    w[<span class="number">0</span>].hi &lt;= w[<span class="number">1</span>].lo,
+<a href=#863 id=863 data-nosnippet>863</a>                    <span class="string">"lines must not overlap: {:?} in {input:?}"</span>,
+<a href=#864 id=864 data-nosnippet>864</a>                    lines
+<a href=#865 id=865 data-nosnippet>865</a>                );
+<a href=#866 id=866 data-nosnippet>866</a>                <span class="kw">let </span>gap = <span class="kw-2">&amp;</span>input[w[<span class="number">0</span>].hi..w[<span class="number">1</span>].lo];
+<a href=#867 id=867 data-nosnippet>867</a>                <span class="macro">assert!</span>(
+<a href=#868 id=868 data-nosnippet>868</a>                    gap.bytes().all(|b| b == <span class="string">b' ' </span>|| b == <span class="string">b'\n' </span>|| b == <span class="string">b'\t'</span>),
+<a href=#869 id=869 data-nosnippet>869</a>                    <span class="string">"gap between lines must be whitespace, found {gap:?} in {input:?}: {lines:?}"
+<a href=#870 id=870 data-nosnippet>870</a>                </span>);
+<a href=#871 id=871 data-nosnippet>871</a>            }
+<a href=#872 id=872 data-nosnippet>872</a>            <span class="comment">// Last line's hi must be at or near input end. Trailing whitespace
+<a href=#873 id=873 data-nosnippet>873</a>            // (if any) is dropped from the last line.
+<a href=#874 id=874 data-nosnippet>874</a>            </span><span class="kw">let </span>last = lines.last().unwrap();
+<a href=#875 id=875 data-nosnippet>875</a>            <span class="macro">assert!</span>(
+<a href=#876 id=876 data-nosnippet>876</a>                last.hi &lt;= input.len(),
+<a href=#877 id=877 data-nosnippet>877</a>                <span class="string">"last line hi out of range: {} &gt; {}"</span>,
+<a href=#878 id=878 data-nosnippet>878</a>                last.hi,
+<a href=#879 id=879 data-nosnippet>879</a>                input.len()
+<a href=#880 id=880 data-nosnippet>880</a>            );
+<a href=#881 id=881 data-nosnippet>881</a>            <span class="comment">// No non-whitespace byte should be uncovered.
+<a href=#882 id=882 data-nosnippet>882</a>            </span><span class="kw">let </span>covered = lines
+<a href=#883 id=883 data-nosnippet>883</a>                .iter()
+<a href=#884 id=884 data-nosnippet>884</a>                .flat_map(|l| l.lo..l.hi)
+<a href=#885 id=885 data-nosnippet>885</a>                .collect::&lt;std::collections::HashSet&lt;<span class="kw">_</span>&gt;&gt;();
+<a href=#886 id=886 data-nosnippet>886</a>            <span class="kw">for </span>(i, b) <span class="kw">in </span>input.bytes().enumerate() {
+<a href=#887 id=887 data-nosnippet>887</a>                <span class="kw">if </span>b != <span class="string">b' ' </span>&amp;&amp; b != <span class="string">b'\n' </span>&amp;&amp; b != <span class="string">b'\t' </span>{
+<a href=#888 id=888 data-nosnippet>888</a>                    <span class="macro">assert!</span>(
+<a href=#889 id=889 data-nosnippet>889</a>                        covered.contains(<span class="kw-2">&amp;</span>i),
+<a href=#890 id=890 data-nosnippet>890</a>                        <span class="string">"byte {i} ({b}) uncovered in {input:?}: {lines:?}"
+<a href=#891 id=891 data-nosnippet>891</a>                    </span>);
+<a href=#892 id=892 data-nosnippet>892</a>                }
+<a href=#893 id=893 data-nosnippet>893</a>            }
+<a href=#894 id=894 data-nosnippet>894</a>        }
+<a href=#895 id=895 data-nosnippet>895</a>    }
+<a href=#896 id=896 data-nosnippet>896</a>
+<a href=#897 id=897 data-nosnippet>897</a>    <span class="attr">#[test]
+<a href=#898 id=898 data-nosnippet>898</a>    </span><span class="kw">fn </span>wrap_narrow_column_breaks_between_atoms() {
+<a href=#899 id=899 data-nosnippet>899</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#900 id=900 data-nosnippet>900</a>        <span class="kw">let </span>st = style();
+<a href=#901 id=901 data-nosnippet>901</a>        <span class="comment">// 10 short words; with a narrow column we expect &gt;1 line.
+<a href=#902 id=902 data-nosnippet>902</a>        </span><span class="kw">let </span>text = <span class="string">"the quick brown fox jumps over the lazy dog again"</span>;
+<a href=#903 id=903 data-nosnippet>903</a>        <span class="kw">let </span>wide = wrap(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, <span class="number">10000.0</span>);
+<a href=#904 id=904 data-nosnippet>904</a>        <span class="macro">assert_eq!</span>(wide.len(), <span class="number">1</span>, <span class="string">"very wide column should keep one line"</span>);
+<a href=#905 id=905 data-nosnippet>905</a>        <span class="kw">let </span>narrow = wrap(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, <span class="number">50.0</span>);
+<a href=#906 id=906 data-nosnippet>906</a>        <span class="macro">assert!</span>(
+<a href=#907 id=907 data-nosnippet>907</a>            narrow.len() &gt; <span class="number">1</span>,
+<a href=#908 id=908 data-nosnippet>908</a>            <span class="string">"narrow column should wrap, got {} lines: {:?}"</span>,
+<a href=#909 id=909 data-nosnippet>909</a>            narrow.len(),
+<a href=#910 id=910 data-nosnippet>910</a>            narrow
+<a href=#911 id=911 data-nosnippet>911</a>        );
+<a href=#912 id=912 data-nosnippet>912</a>        <span class="comment">// Narrow wrap should still cover the input contiguously modulo
+<a href=#913 id=913 data-nosnippet>913</a>        // whitespace gaps at line breaks.
+<a href=#914 id=914 data-nosnippet>914</a>        </span><span class="macro">assert_eq!</span>(narrow[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#915 id=915 data-nosnippet>915</a>        <span class="kw">for </span>w <span class="kw">in </span>narrow.windows(<span class="number">2</span>) {
+<a href=#916 id=916 data-nosnippet>916</a>            <span class="macro">assert!</span>(w[<span class="number">0</span>].hi &lt;= w[<span class="number">1</span>].lo);
+<a href=#917 id=917 data-nosnippet>917</a>            <span class="kw">let </span>gap = <span class="kw-2">&amp;</span>text[w[<span class="number">0</span>].hi..w[<span class="number">1</span>].lo];
+<a href=#918 id=918 data-nosnippet>918</a>            <span class="macro">assert!</span>(gap.bytes().all(|b| b == <span class="string">b' ' </span>|| b == <span class="string">b'\n' </span>|| b == <span class="string">b'\t'</span>));
+<a href=#919 id=919 data-nosnippet>919</a>        }
+<a href=#920 id=920 data-nosnippet>920</a>        <span class="macro">assert_eq!</span>(narrow.last().unwrap().hi, text.len());
+<a href=#921 id=921 data-nosnippet>921</a>    }
+<a href=#922 id=922 data-nosnippet>922</a>
+<a href=#923 id=923 data-nosnippet>923</a>    <span class="attr">#[test]
+<a href=#924 id=924 data-nosnippet>924</a>    </span><span class="kw">fn </span>wrap_long_atom_overflows_gracefully() {
+<a href=#925 id=925 data-nosnippet>925</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#926 id=926 data-nosnippet>926</a>        <span class="kw">let </span>st = style();
+<a href=#927 id=927 data-nosnippet>927</a>        <span class="comment">// A single 200-char word: cannot be split, so wrap emits one line
+<a href=#928 id=928 data-nosnippet>928</a>        // (overflowing), with hi covering the input.
+<a href=#929 id=929 data-nosnippet>929</a>        </span><span class="kw">let </span>long = <span class="string">"a"</span>.repeat(<span class="number">200</span>);
+<a href=#930 id=930 data-nosnippet>930</a>        <span class="kw">let </span>lines = wrap(<span class="kw-2">&amp;</span>engine, <span class="kw-2">&amp;</span>long, <span class="kw-2">&amp;</span>st, <span class="number">50.0</span>);
+<a href=#931 id=931 data-nosnippet>931</a>        <span class="macro">assert_eq!</span>(lines.len(), <span class="number">1</span>, <span class="string">"unbreakable atom stays on one line"</span>);
+<a href=#932 id=932 data-nosnippet>932</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#933 id=933 data-nosnippet>933</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].hi, long.len());
+<a href=#934 id=934 data-nosnippet>934</a>    }
+<a href=#935 id=935 data-nosnippet>935</a>
+<a href=#936 id=936 data-nosnippet>936</a>    <span class="attr">#[test]
+<a href=#937 id=937 data-nosnippet>937</a>    </span><span class="kw">fn </span>wrap_optimal_tiles_input_like_greedy() {
+<a href=#938 id=938 data-nosnippet>938</a>        <span class="comment">// The optimal path keeps the WrappedLine contract: lines tile the
+<a href=#939 id=939 data-nosnippet>939</a>        // input contiguously modulo whitespace, regardless of strategy.
+<a href=#940 id=940 data-nosnippet>940</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#941 id=941 data-nosnippet>941</a>        <span class="kw">let </span>st = style();
+<a href=#942 id=942 data-nosnippet>942</a>        <span class="kw">for </span>input <span class="kw">in </span>[
+<a href=#943 id=943 data-nosnippet>943</a>            <span class="string">"the quick brown fox jumps over the lazy dog again and again"</span>,
+<a href=#944 id=944 data-nosnippet>944</a>            <span class="string">"你好世界你好世界你好世界你好世界"</span>,
+<a href=#945 id=945 data-nosnippet>945</a>            <span class="string">"mixed 你好 hello 世界 world again 更多文字"</span>,
+<a href=#946 id=946 data-nosnippet>946</a>        ] {
+<a href=#947 id=947 data-nosnippet>947</a>            <span class="kw">let </span>lines = wrap_optimal(<span class="kw-2">&amp;</span>engine, input, <span class="kw-2">&amp;</span>st, <span class="number">90.0</span>);
+<a href=#948 id=948 data-nosnippet>948</a>            <span class="macro">assert!</span>(!lines.is_empty(), <span class="string">"no lines for {input:?}"</span>);
+<a href=#949 id=949 data-nosnippet>949</a>            <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].lo, <span class="number">0</span>, <span class="string">"first line starts at 0"</span>);
+<a href=#950 id=950 data-nosnippet>950</a>            <span class="kw">for </span>w <span class="kw">in </span>lines.windows(<span class="number">2</span>) {
+<a href=#951 id=951 data-nosnippet>951</a>                <span class="macro">assert!</span>(w[<span class="number">0</span>].hi &lt;= w[<span class="number">1</span>].lo, <span class="string">"overlap in {input:?}: {lines:?}"</span>);
+<a href=#952 id=952 data-nosnippet>952</a>                <span class="kw">let </span>gap = <span class="kw-2">&amp;</span>input[w[<span class="number">0</span>].hi..w[<span class="number">1</span>].lo];
+<a href=#953 id=953 data-nosnippet>953</a>                <span class="macro">assert!</span>(
+<a href=#954 id=954 data-nosnippet>954</a>                    gap.bytes().all(|b| b == <span class="string">b' ' </span>|| b == <span class="string">b'\n' </span>|| b == <span class="string">b'\t'</span>),
+<a href=#955 id=955 data-nosnippet>955</a>                    <span class="string">"non-whitespace gap in {input:?}: {gap:?}"
+<a href=#956 id=956 data-nosnippet>956</a>                </span>);
+<a href=#957 id=957 data-nosnippet>957</a>            }
+<a href=#958 id=958 data-nosnippet>958</a>            <span class="macro">assert!</span>(lines.last().unwrap().hi &lt;= input.len());
+<a href=#959 id=959 data-nosnippet>959</a>        }
+<a href=#960 id=960 data-nosnippet>960</a>    }
+<a href=#961 id=961 data-nosnippet>961</a>
+<a href=#962 id=962 data-nosnippet>962</a>    <span class="attr">#[test]
+<a href=#963 id=963 data-nosnippet>963</a>    </span><span class="kw">fn </span>wrap_optimal_never_overflows_a_multi_atom_line() {
+<a href=#964 id=964 data-nosnippet>964</a>        <span class="comment">// No multi-atom line may exceed max_width; only a single unbreakable
+<a href=#965 id=965 data-nosnippet>965</a>        // atom is allowed to overflow. (Feasibility is enforced inside the
+<a href=#966 id=966 data-nosnippet>966</a>        // DP; this guards against a regression.)
+<a href=#967 id=967 data-nosnippet>967</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#968 id=968 data-nosnippet>968</a>        <span class="kw">let </span>st = style();
+<a href=#969 id=969 data-nosnippet>969</a>        <span class="kw">let </span>text = <span class="string">"the quick brown fox jumps over the lazy dog again and again"</span>;
+<a href=#970 id=970 data-nosnippet>970</a>        <span class="kw">let </span>max_w = <span class="number">120.0</span>;
+<a href=#971 id=971 data-nosnippet>971</a>        <span class="kw">let </span>lines = wrap_optimal(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, max_w);
+<a href=#972 id=972 data-nosnippet>972</a>        <span class="kw">for </span>(k, line) <span class="kw">in </span>lines.iter().enumerate() {
+<a href=#973 id=973 data-nosnippet>973</a>            <span class="kw">let </span>slice = <span class="kw-2">&amp;</span>text[line.lo..line.hi];
+<a href=#974 id=974 data-nosnippet>974</a>            <span class="comment">// Count atoms in this line; if &gt;1, its drawn width must fit.
+<a href=#975 id=975 data-nosnippet>975</a>            </span><span class="kw">let </span>atoms = <span class="kw">super</span>::split_atoms(slice);
+<a href=#976 id=976 data-nosnippet>976</a>            <span class="kw">if </span>atoms.len() &gt; <span class="number">1 </span>{
+<a href=#977 id=977 data-nosnippet>977</a>                <span class="kw">let </span>w = engine.measure(slice, <span class="kw-2">&amp;</span>st).width;
+<a href=#978 id=978 data-nosnippet>978</a>                <span class="macro">assert!</span>(
+<a href=#979 id=979 data-nosnippet>979</a>                    w &lt;= max_w + <span class="number">0.5</span>,
+<a href=#980 id=980 data-nosnippet>980</a>                    <span class="string">"line {k} ({} atoms, {w:.1}px) overflows {max_w}: {slice:?}"</span>,
+<a href=#981 id=981 data-nosnippet>981</a>                    atoms.len()
+<a href=#982 id=982 data-nosnippet>982</a>                );
+<a href=#983 id=983 data-nosnippet>983</a>            }
+<a href=#984 id=984 data-nosnippet>984</a>        }
+<a href=#985 id=985 data-nosnippet>985</a>    }
+<a href=#986 id=986 data-nosnippet>986</a>
+<a href=#987 id=987 data-nosnippet>987</a>    <span class="attr">#[test]
+<a href=#988 id=988 data-nosnippet>988</a>    </span><span class="kw">fn </span>wrap_optimal_honours_newline_as_forced_break() {
+<a href=#989 id=989 data-nosnippet>989</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#990 id=990 data-nosnippet>990</a>        <span class="kw">let </span>st = style();
+<a href=#991 id=991 data-nosnippet>991</a>        <span class="kw">let </span>lines = wrap_optimal(<span class="kw-2">&amp;</span>engine, <span class="string">"a\nb"</span>, <span class="kw-2">&amp;</span>st, <span class="number">10000.0</span>);
+<a href=#992 id=992 data-nosnippet>992</a>        <span class="macro">assert_eq!</span>(lines.len(), <span class="number">2</span>, <span class="string">"newline forces a break under K-P too"</span>);
+<a href=#993 id=993 data-nosnippet>993</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#994 id=994 data-nosnippet>994</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].hi, <span class="number">1</span>);
+<a href=#995 id=995 data-nosnippet>995</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">1</span>].lo, <span class="number">2</span>);
+<a href=#996 id=996 data-nosnippet>996</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">1</span>].hi, <span class="number">3</span>);
+<a href=#997 id=997 data-nosnippet>997</a>    }
+<a href=#998 id=998 data-nosnippet>998</a>
+<a href=#999 id=999 data-nosnippet>999</a>    <span class="attr">#[test]
+<a href=#1000 id=1000 data-nosnippet>1000</a>    </span><span class="kw">fn </span>wrap_kinsoku_holds_on_punctuated_paragraph() {
+<a href=#1001 id=1001 data-nosnippet>1001</a>        <span class="comment">// Across columns and both strategies, no wrapped line may begin with
+<a href=#1002 id=1002 data-nosnippet>1002</a>        // a no-start char (。，、）》」…) or end with a no-end opening bracket
+<a href=#1003 id=1003 data-nosnippet>1003</a>        // （（《「『…. This is the kinsoku invariant.
+<a href=#1004 id=1004 data-nosnippet>1004</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1005 id=1005 data-nosnippet>1005</a>        <span class="kw">let </span>st = style();
+<a href=#1006 id=1006 data-nosnippet>1006</a>        <span class="kw">let </span>para = <span class="string">"\u{6d4b}\u{8bd5}\u{ff08}\u{62ec}\u{53f7}\u{ff09}\u{548c}\u{6807}\u{70b9}\u{7b26}\u{53f7}\u{3002}\u{53e6}\u{4e00}\u{53e5}\u{8bdd}\u{ff0c}\u{8fd8}\u{6709}\u{66f4}\u{591a}\u{6587}\u{5b57}\u{ff01}\u{6700}\u{540e}\u{662f}\u{95ee}\u{53f7}\u{ff1f}\u{597d}\u{7684}\u{3002}"</span>;
+<a href=#1007 id=1007 data-nosnippet>1007</a>        <span class="kw">for </span>max_w <span class="kw">in </span>[<span class="number">60.0</span>, <span class="number">90.0</span>, <span class="number">140.0</span>, <span class="number">240.0</span>, <span class="number">400.0</span>] {
+<a href=#1008 id=1008 data-nosnippet>1008</a>            <span class="kw">let </span>greedy = wrap(<span class="kw-2">&amp;</span>engine, para, <span class="kw-2">&amp;</span>st, max_w);
+<a href=#1009 id=1009 data-nosnippet>1009</a>            <span class="kw">let </span>optimal = wrap_optimal(<span class="kw-2">&amp;</span>engine, para, <span class="kw-2">&amp;</span>st, max_w);
+<a href=#1010 id=1010 data-nosnippet>1010</a>            <span class="kw">for </span>(strategy, lines) <span class="kw">in </span>[(<span class="string">"greedy"</span>, greedy), (<span class="string">"KP"</span>, optimal)] {
+<a href=#1011 id=1011 data-nosnippet>1011</a>                <span class="kw">for </span>l <span class="kw">in </span><span class="kw-2">&amp;</span>lines {
+<a href=#1012 id=1012 data-nosnippet>1012</a>                    <span class="kw">let </span>first = para[l.lo..].chars().next();
+<a href=#1013 id=1013 data-nosnippet>1013</a>                    <span class="kw">let </span>last = para[..l.hi].chars().last();
+<a href=#1014 id=1014 data-nosnippet>1014</a>                    <span class="macro">assert!</span>(
+<a href=#1015 id=1015 data-nosnippet>1015</a>                        !first.is_some_and(is_no_start),
+<a href=#1016 id=1016 data-nosnippet>1016</a>                        <span class="string">"{strategy} @ {max_w}: line starts with no-start: {:?}"</span>,
+<a href=#1017 id=1017 data-nosnippet>1017</a>                        <span class="kw-2">&amp;</span>para[l.lo..l.hi]
+<a href=#1018 id=1018 data-nosnippet>1018</a>                    );
+<a href=#1019 id=1019 data-nosnippet>1019</a>                    <span class="macro">assert!</span>(
+<a href=#1020 id=1020 data-nosnippet>1020</a>                        !last.is_some_and(is_no_end),
+<a href=#1021 id=1021 data-nosnippet>1021</a>                        <span class="string">"{strategy} @ {max_w}: line ends with no-end: {:?}"</span>,
+<a href=#1022 id=1022 data-nosnippet>1022</a>                        <span class="kw-2">&amp;</span>para[l.lo..l.hi]
+<a href=#1023 id=1023 data-nosnippet>1023</a>                    );
+<a href=#1024 id=1024 data-nosnippet>1024</a>                }
+<a href=#1025 id=1025 data-nosnippet>1025</a>            }
+<a href=#1026 id=1026 data-nosnippet>1026</a>        }
+<a href=#1027 id=1027 data-nosnippet>1027</a>    }
+<a href=#1028 id=1028 data-nosnippet>1028</a>
+<a href=#1029 id=1029 data-nosnippet>1029</a>    <span class="attr">#[test]
+<a href=#1030 id=1030 data-nosnippet>1030</a>    </span><span class="kw">fn </span>wrap_kinsoku_keeps_no_start_punct_off_line_start() {
+<a href=#1031 id=1031 data-nosnippet>1031</a>        <span class="comment">// "aaaa。bbbb" at a width that fits "aaaa" alone but not "aaaa。" —
+<a href=#1032 id=1032 data-nosnippet>1032</a>        // without kinsoku the period would start line 2; kinsoku pulls it
+<a href=#1033 id=1033 data-nosnippet>1033</a>        // back onto line 1 (overflowing) instead.
+<a href=#1034 id=1034 data-nosnippet>1034</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1035 id=1035 data-nosnippet>1035</a>        <span class="kw">let </span>st = style();
+<a href=#1036 id=1036 data-nosnippet>1036</a>        <span class="kw">let </span>text = String::from(<span class="string">"aaaa\u{3002}bbbb"</span>); <span class="comment">// aaaa。bbbb
+<a href=#1037 id=1037 data-nosnippet>1037</a>        </span><span class="kw">let </span>px = |r: std::ops::Range&lt;usize&gt;| (r.end - r.start) <span class="kw">as </span>f32 * <span class="number">10.0</span>;
+<a href=#1038 id=1038 data-nosnippet>1038</a>        <span class="kw">let </span>lines = wrap_optimal_with(<span class="kw-2">&amp;</span>engine, <span class="kw-2">&amp;</span>text, <span class="kw-2">&amp;</span>st, <span class="number">50.0</span>, px);
+<a href=#1039 id=1039 data-nosnippet>1039</a>        <span class="kw">for </span>l <span class="kw">in </span><span class="kw-2">&amp;</span>lines {
+<a href=#1040 id=1040 data-nosnippet>1040</a>            <span class="kw">let </span>first = text[l.lo..].chars().next();
+<a href=#1041 id=1041 data-nosnippet>1041</a>            <span class="macro">assert!</span>(
+<a href=#1042 id=1042 data-nosnippet>1042</a>                !first.is_some_and(is_no_start),
+<a href=#1043 id=1043 data-nosnippet>1043</a>                <span class="string">"line starts with no-start: {:?}"</span>,
+<a href=#1044 id=1044 data-nosnippet>1044</a>                <span class="kw-2">&amp;</span>text[l.lo..l.hi]
+<a href=#1045 id=1045 data-nosnippet>1045</a>            );
+<a href=#1046 id=1046 data-nosnippet>1046</a>        }
+<a href=#1047 id=1047 data-nosnippet>1047</a>        <span class="comment">// The period stayed with "aaaa" rather than starting its own line.
+<a href=#1048 id=1048 data-nosnippet>1048</a>        </span><span class="macro">assert!</span>(
+<a href=#1049 id=1049 data-nosnippet>1049</a>            text[lines[<span class="number">0</span>].lo..lines[<span class="number">0</span>].hi].contains(<span class="string">'\u{3002}'</span>),
+<a href=#1050 id=1050 data-nosnippet>1050</a>            <span class="string">"kinsoku should keep the period on line 1: {:?}"</span>,
+<a href=#1051 id=1051 data-nosnippet>1051</a>            lines.iter().map(|l| <span class="kw-2">&amp;</span>text[l.lo..l.hi]).collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+<a href=#1052 id=1052 data-nosnippet>1052</a>        );
+<a href=#1053 id=1053 data-nosnippet>1053</a>    }
+<a href=#1054 id=1054 data-nosnippet>1054</a>
+<a href=#1055 id=1055 data-nosnippet>1055</a>    <span class="attr">#[test]
+<a href=#1056 id=1056 data-nosnippet>1056</a>    </span><span class="kw">fn </span>wrap_kinsoku_keeps_no_end_bracket_off_line_end() {
+<a href=#1057 id=1057 data-nosnippet>1057</a>        <span class="comment">// "aaaa（bbbb" — （ is a no-end opening bracket. At a width that
+<a href=#1058 id=1058 data-nosnippet>1058</a>        // would otherwise leave （ alone at a line end, kinsoku pushes it
+<a href=#1059 id=1059 data-nosnippet>1059</a>        // onto the next line with "bbbb".
+<a href=#1060 id=1060 data-nosnippet>1060</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1061 id=1061 data-nosnippet>1061</a>        <span class="kw">let </span>st = style();
+<a href=#1062 id=1062 data-nosnippet>1062</a>        <span class="kw">let </span>text = String::from(<span class="string">"aaaa\u{ff08}bbbb"</span>); <span class="comment">// aaaa（bbbb
+<a href=#1063 id=1063 data-nosnippet>1063</a>        </span><span class="kw">let </span>px = |r: std::ops::Range&lt;usize&gt;| (r.end - r.start) <span class="kw">as </span>f32 * <span class="number">10.0</span>;
+<a href=#1064 id=1064 data-nosnippet>1064</a>        <span class="kw">let </span>lines = wrap_optimal_with(<span class="kw-2">&amp;</span>engine, <span class="kw-2">&amp;</span>text, <span class="kw-2">&amp;</span>st, <span class="number">50.0</span>, px);
+<a href=#1065 id=1065 data-nosnippet>1065</a>        <span class="kw">for </span>l <span class="kw">in </span><span class="kw-2">&amp;</span>lines {
+<a href=#1066 id=1066 data-nosnippet>1066</a>            <span class="kw">let </span>last = text[..l.hi].chars().last();
+<a href=#1067 id=1067 data-nosnippet>1067</a>            <span class="macro">assert!</span>(
+<a href=#1068 id=1068 data-nosnippet>1068</a>                !last.is_some_and(is_no_end),
+<a href=#1069 id=1069 data-nosnippet>1069</a>                <span class="string">"line ends with no-end: {:?}"</span>,
+<a href=#1070 id=1070 data-nosnippet>1070</a>                <span class="kw-2">&amp;</span>text[l.lo..l.hi]
+<a href=#1071 id=1071 data-nosnippet>1071</a>            );
+<a href=#1072 id=1072 data-nosnippet>1072</a>        }
+<a href=#1073 id=1073 data-nosnippet>1073</a>    }
+<a href=#1074 id=1074 data-nosnippet>1074</a>
+<a href=#1075 id=1075 data-nosnippet>1075</a>    <span class="attr">#[test]
+<a href=#1076 id=1076 data-nosnippet>1076</a>    </span><span class="kw">fn </span>shaper_compresses_fullwidth_brackets() {
+<a href=#1077 id=1077 data-nosnippet>1077</a>        <span class="comment">// Full-width CJK brackets carry ink in only one half of their em-box;
+<a href=#1078 id=1078 data-nosnippet>1078</a>        // the shaper trims the empty ½-em half when a neighbour is present.
+<a href=#1079 id=1079 data-nosnippet>1079</a>        // （你）should measure ≈ 2em (each bracket contributes ½em, 你 one em)
+<a href=#1080 id=1080 data-nosnippet>1080</a>        // and （）alone ≈ 1em (two half-width brackets collapsed). If the
+<a href=#1081 id=1081 data-nosnippet>1081</a>        // shaper were NOT compressing, these would be 3em and 2em.
+<a href=#1082 id=1082 data-nosnippet>1082</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1083 id=1083 data-nosnippet>1083</a>        <span class="kw">let </span>st = style();
+<a href=#1084 id=1084 data-nosnippet>1084</a>        <span class="kw">let </span>one = engine.measure(<span class="string">"\u{4f60}"</span>, <span class="kw-2">&amp;</span>st).width; <span class="comment">// 你 ≈ 1em
+<a href=#1085 id=1085 data-nosnippet>1085</a>        </span><span class="macro">assert!</span>(one &gt; <span class="number">0.0</span>);
+<a href=#1086 id=1086 data-nosnippet>1086</a>
+<a href=#1087 id=1087 data-nosnippet>1087</a>        <span class="kw">let </span>w = engine.measure(<span class="string">"\u{ff08}\u{4f60}\u{ff09}"</span>, <span class="kw-2">&amp;</span>st).width; <span class="comment">// （你）
+<a href=#1088 id=1088 data-nosnippet>1088</a>        </span><span class="macro">assert!</span>(
+<a href=#1089 id=1089 data-nosnippet>1089</a>            w &lt; <span class="number">2.8 </span>* one &amp;&amp; w &gt; <span class="number">1.6 </span>* one,
+<a href=#1090 id=1090 data-nosnippet>1090</a>            <span class="string">"（你）should compress to ~2em ({:.1}), got {w:.1}"</span>,
+<a href=#1091 id=1091 data-nosnippet>1091</a>            <span class="number">2.0 </span>* one
+<a href=#1092 id=1092 data-nosnippet>1092</a>        );
+<a href=#1093 id=1093 data-nosnippet>1093</a>
+<a href=#1094 id=1094 data-nosnippet>1094</a>        <span class="kw">let </span>ww = engine.measure(<span class="string">"\u{ff08}\u{ff09}"</span>, <span class="kw-2">&amp;</span>st).width; <span class="comment">// （）
+<a href=#1095 id=1095 data-nosnippet>1095</a>        </span><span class="macro">assert!</span>(
+<a href=#1096 id=1096 data-nosnippet>1096</a>            (ww - one).abs() &lt; <span class="number">0.4 </span>* one,
+<a href=#1097 id=1097 data-nosnippet>1097</a>            <span class="string">"（）should collapse to ~1em ({:.1}), got {ww:.1}"</span>,
+<a href=#1098 id=1098 data-nosnippet>1098</a>            one
+<a href=#1099 id=1099 data-nosnippet>1099</a>        );
+<a href=#1100 id=1100 data-nosnippet>1100</a>    }
+<a href=#1101 id=1101 data-nosnippet>1101</a>
+<a href=#1102 id=1102 data-nosnippet>1102</a>    <span class="attr">#[test]
+<a href=#1103 id=1103 data-nosnippet>1103</a>    </span><span class="kw">fn </span>wrap_optimal_rebalances_a_stranded_word() {
+<a href=#1104 id=1104 data-nosnippet>1104</a>        <span class="comment">// Four atoms whose widths (via the callback) are 50, 50, 50, 30 px,
+<a href=#1105 id=1105 data-nosnippet>1105</a>        // at a column that fits three 50s but not the 30 as well. Greedy
+<a href=#1106 id=1106 data-nosnippet>1106</a>        // packs three onto line 1 and strands the 30 alone on line 2.
+<a href=#1107 id=1107 data-nosnippet>1107</a>        // Knuth-Plass moves one 50 down so both lines are balanced — the
+<a href=#1108 id=1108 data-nosnippet>1108</a>        // visible benefit of whole-paragraph optimisation over greedy fill.
+<a href=#1109 id=1109 data-nosnippet>1109</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1110 id=1110 data-nosnippet>1110</a>        <span class="kw">let </span>st = style();
+<a href=#1111 id=1111 data-nosnippet>1111</a>        <span class="kw">let </span>text = <span class="string">"aaaaa aaaaa aaaaa aaa"</span>; <span class="comment">// byte widths 5,5,5,3
+<a href=#1112 id=1112 data-nosnippet>1112</a>        </span><span class="kw">let </span>px = |r: std::ops::Range&lt;usize&gt;| (r.end - r.start) <span class="kw">as </span>f32 * <span class="number">10.0</span>; <span class="comment">// -&gt; 50,50,50,30
+<a href=#1113 id=1113 data-nosnippet>1113</a>        </span><span class="kw">let </span>space_w = engine.measure(<span class="string">" "</span>, <span class="kw-2">&amp;</span>st).width;
+<a href=#1114 id=1114 data-nosnippet>1114</a>        <span class="comment">// Fits three 50s + two gaps; the fourth atom tips it over.
+<a href=#1115 id=1115 data-nosnippet>1115</a>        </span><span class="kw">let </span>max_w = <span class="number">3.0 </span>* <span class="number">50.0 </span>+ <span class="number">2.0 </span>* space_w + <span class="number">10.0</span>;
+<a href=#1116 id=1116 data-nosnippet>1116</a>
+<a href=#1117 id=1117 data-nosnippet>1117</a>        <span class="kw">let </span>greedy = wrap_with(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, max_w, px);
+<a href=#1118 id=1118 data-nosnippet>1118</a>        <span class="kw">let </span>optimal = wrap_optimal_with(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, max_w, px);
+<a href=#1119 id=1119 data-nosnippet>1119</a>
+<a href=#1120 id=1120 data-nosnippet>1120</a>        <span class="comment">// Both produce two lines; the difference is distribution.
+<a href=#1121 id=1121 data-nosnippet>1121</a>        </span><span class="macro">assert_eq!</span>(greedy.len(), <span class="number">2</span>);
+<a href=#1122 id=1122 data-nosnippet>1122</a>        <span class="macro">assert_eq!</span>(optimal.len(), <span class="number">2</span>);
+<a href=#1123 id=1123 data-nosnippet>1123</a>        <span class="comment">// Greedy's first line runs to the end of the third atom (byte 17);
+<a href=#1124 id=1124 data-nosnippet>1124</a>        // optimal breaks earlier, moving one atom onto line 2.
+<a href=#1125 id=1125 data-nosnippet>1125</a>        </span><span class="macro">assert_eq!</span>(greedy[<span class="number">0</span>].hi, <span class="number">17</span>, <span class="string">"greedy fills line 1 with three atoms"</span>);
+<a href=#1126 id=1126 data-nosnippet>1126</a>        <span class="macro">assert!</span>(
+<a href=#1127 id=1127 data-nosnippet>1127</a>            optimal[<span class="number">0</span>].hi &lt; greedy[<span class="number">0</span>].hi,
+<a href=#1128 id=1128 data-nosnippet>1128</a>            <span class="string">"K-P should rebalance (break line 1 earlier), got hi={}"</span>,
+<a href=#1129 id=1129 data-nosnippet>1129</a>            optimal[<span class="number">0</span>].hi
+<a href=#1130 id=1130 data-nosnippet>1130</a>        );
+<a href=#1131 id=1131 data-nosnippet>1131</a>        <span class="comment">// Contract still holds.
+<a href=#1132 id=1132 data-nosnippet>1132</a>        </span><span class="macro">assert_eq!</span>(optimal[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#1133 id=1133 data-nosnippet>1133</a>        <span class="macro">assert_eq!</span>(optimal.last().unwrap().hi, text.len());
+<a href=#1134 id=1134 data-nosnippet>1134</a>    }
+<a href=#1135 id=1135 data-nosnippet>1135</a>
+<a href=#1136 id=1136 data-nosnippet>1136</a>    <span class="attr">#[test]
+<a href=#1137 id=1137 data-nosnippet>1137</a>    </span><span class="kw">fn </span>wrap_newline_is_hard_break() {
+<a href=#1138 id=1138 data-nosnippet>1138</a>        <span class="comment">// `\n` is a forced break: "a\nb" produces two one-atom lines, not
+<a href=#1139 id=1139 data-nosnippet>1139</a>        // a single line that happens to fit. The previous wrap advertised
+<a href=#1140 id=1140 data-nosnippet>1140</a>        // this in its docstring but actually treated `\n` like ordinary
+<a href=#1141 id=1141 data-nosnippet>1141</a>        // whitespace; the rewrite honours the contract.
+<a href=#1142 id=1142 data-nosnippet>1142</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1143 id=1143 data-nosnippet>1143</a>        <span class="kw">let </span>st = style();
+<a href=#1144 id=1144 data-nosnippet>1144</a>        <span class="kw">let </span>lines = wrap(<span class="kw-2">&amp;</span>engine, <span class="string">"a\nb"</span>, <span class="kw-2">&amp;</span>st, <span class="number">10000.0</span>);
+<a href=#1145 id=1145 data-nosnippet>1145</a>        <span class="macro">assert_eq!</span>(lines.len(), <span class="number">2</span>, <span class="string">"newline must force a line break"</span>);
+<a href=#1146 id=1146 data-nosnippet>1146</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#1147 id=1147 data-nosnippet>1147</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].hi, <span class="number">1</span>);
+<a href=#1148 id=1148 data-nosnippet>1148</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">1</span>].lo, <span class="number">2</span>);
+<a href=#1149 id=1149 data-nosnippet>1149</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">1</span>].hi, <span class="number">3</span>);
+<a href=#1150 id=1150 data-nosnippet>1150</a>    }
+<a href=#1151 id=1151 data-nosnippet>1151</a>
+<a href=#1152 id=1152 data-nosnippet>1152</a>    <span class="attr">#[test]
+<a href=#1153 id=1153 data-nosnippet>1153</a>    </span><span class="kw">fn </span>wrap_blank_line_between_newlines() {
+<a href=#1154 id=1154 data-nosnippet>1154</a>        <span class="comment">// `\n\n` should yield a blank visual line between the two atoms.
+<a href=#1155 id=1155 data-nosnippet>1155</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1156 id=1156 data-nosnippet>1156</a>        <span class="kw">let </span>st = style();
+<a href=#1157 id=1157 data-nosnippet>1157</a>        <span class="kw">let </span>text = <span class="string">"a\n\nb"</span>;
+<a href=#1158 id=1158 data-nosnippet>1158</a>        <span class="kw">let </span>lines = wrap(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, <span class="number">10000.0</span>);
+<a href=#1159 id=1159 data-nosnippet>1159</a>        <span class="comment">// The middle line has no atoms — wrap drops it. Two atom lines is
+<a href=#1160 id=1160 data-nosnippet>1160</a>        // the contract: atoms tile the input, whitespace only separates.
+<a href=#1161 id=1161 data-nosnippet>1161</a>        </span><span class="macro">assert_eq!</span>(lines.len(), <span class="number">2</span>);
+<a href=#1162 id=1162 data-nosnippet>1162</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#1163 id=1163 data-nosnippet>1163</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].hi, <span class="number">1</span>);
+<a href=#1164 id=1164 data-nosnippet>1164</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">1</span>].lo, <span class="number">3</span>);
+<a href=#1165 id=1165 data-nosnippet>1165</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">1</span>].hi, <span class="number">4</span>);
+<a href=#1166 id=1166 data-nosnippet>1166</a>    }
+<a href=#1167 id=1167 data-nosnippet>1167</a>
+<a href=#1168 id=1168 data-nosnippet>1168</a>    <span class="attr">#[test]
+<a href=#1169 id=1169 data-nosnippet>1169</a>    </span><span class="kw">fn </span>atom_is_cjk_reads_first_codepoint() {
+<a href=#1170 id=1170 data-nosnippet>1170</a>        <span class="comment">// Script class is derived from an atom's first codepoint, not
+<a href=#1171 id=1171 data-nosnippet>1171</a>        // stored — verify the derivation at CJK/Latin boundaries.
+<a href=#1172 id=1172 data-nosnippet>1172</a>        </span><span class="kw">let </span>s = <span class="string">"你好hello世界"</span>;
+<a href=#1173 id=1173 data-nosnippet>1173</a>        <span class="kw">let </span>atoms = split_atoms(s);
+<a href=#1174 id=1174 data-nosnippet>1174</a>        <span class="macro">assert_eq!</span>(atoms.len(), <span class="number">5</span>); <span class="comment">// 你 好 hello 世 界
+<a href=#1175 id=1175 data-nosnippet>1175</a>        </span><span class="macro">assert!</span>(atom_is_cjk(s, atoms[<span class="number">0</span>])); <span class="comment">// 你
+<a href=#1176 id=1176 data-nosnippet>1176</a>        </span><span class="macro">assert!</span>(atom_is_cjk(s, atoms[<span class="number">1</span>])); <span class="comment">// 好
+<a href=#1177 id=1177 data-nosnippet>1177</a>        </span><span class="macro">assert!</span>(!atom_is_cjk(s, atoms[<span class="number">2</span>])); <span class="comment">// hello
+<a href=#1178 id=1178 data-nosnippet>1178</a>        </span><span class="macro">assert!</span>(atom_is_cjk(s, atoms[<span class="number">3</span>])); <span class="comment">// 世
+<a href=#1179 id=1179 data-nosnippet>1179</a>        </span><span class="macro">assert!</span>(atom_is_cjk(s, atoms[<span class="number">4</span>])); <span class="comment">// 界
+<a href=#1180 id=1180 data-nosnippet>1180</a>    </span>}
+<a href=#1181 id=1181 data-nosnippet>1181</a>
+<a href=#1182 id=1182 data-nosnippet>1182</a>    <span class="attr">#[test]
+<a href=#1183 id=1183 data-nosnippet>1183</a>    </span><span class="kw">fn </span>wrap_with_uses_caller_supplied_measure() {
+<a href=#1184 id=1184 data-nosnippet>1184</a>        <span class="comment">// A caller-supplied measure that reports each atom as 10px per
+<a href=#1185 id=1185 data-nosnippet>1185</a>        // source byte — unrelated to the real glyph widths. wrap_with must
+<a href=#1186 id=1186 data-nosnippet>1186</a>        // wrap against THAT width, proving atom widths route through
+<a href=#1187 id=1187 data-nosnippet>1187</a>        // `measure` rather than the raw-source shape.
+<a href=#1188 id=1188 data-nosnippet>1188</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1189 id=1189 data-nosnippet>1189</a>        <span class="kw">let </span>st = style();
+<a href=#1190 id=1190 data-nosnippet>1190</a>        <span class="kw">let </span>text = <span class="string">"alpha beta gamma delta epsilon"</span>;
+<a href=#1191 id=1191 data-nosnippet>1191</a>        <span class="comment">// Raw wrap at a wide column: one line.
+<a href=#1192 id=1192 data-nosnippet>1192</a>        </span><span class="macro">assert_eq!</span>(wrap(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, <span class="number">10000.0</span>).len(), <span class="number">1</span>);
+<a href=#1193 id=1193 data-nosnippet>1193</a>        <span class="comment">// Custom measure: 10px/byte. The string is 30 bytes =&gt; 300px, so a
+<a href=#1194 id=1194 data-nosnippet>1194</a>        // 100px column must wrap to several lines.
+<a href=#1195 id=1195 data-nosnippet>1195</a>        </span><span class="kw">let </span>measured = wrap_with(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, <span class="number">100.0</span>, |r| {
+<a href=#1196 id=1196 data-nosnippet>1196</a>            (r.end - r.start) <span class="kw">as </span>f32 * <span class="number">10.0
+<a href=#1197 id=1197 data-nosnippet>1197</a>        </span>});
+<a href=#1198 id=1198 data-nosnippet>1198</a>        <span class="macro">assert!</span>(
+<a href=#1199 id=1199 data-nosnippet>1199</a>            measured.len() &gt; <span class="number">1</span>,
+<a href=#1200 id=1200 data-nosnippet>1200</a>            <span class="string">"wrap_with must honour the caller-supplied measure"
+<a href=#1201 id=1201 data-nosnippet>1201</a>        </span>);
+<a href=#1202 id=1202 data-nosnippet>1202</a>        <span class="comment">// The WrappedLine contract is unchanged: lines tile the input.
+<a href=#1203 id=1203 data-nosnippet>1203</a>        </span><span class="macro">assert_eq!</span>(measured[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#1204 id=1204 data-nosnippet>1204</a>        <span class="kw">for </span>w <span class="kw">in </span>measured.windows(<span class="number">2</span>) {
+<a href=#1205 id=1205 data-nosnippet>1205</a>            <span class="macro">assert!</span>(w[<span class="number">0</span>].hi &lt;= w[<span class="number">1</span>].lo);
+<a href=#1206 id=1206 data-nosnippet>1206</a>        }
+<a href=#1207 id=1207 data-nosnippet>1207</a>        <span class="macro">assert_eq!</span>(measured.last().unwrap().hi, text.len());
+<a href=#1208 id=1208 data-nosnippet>1208</a>        <span class="comment">// And the returned metric width is the caller's drawn width, not a
+<a href=#1209 id=1209 data-nosnippet>1209</a>        // re-shape of the raw source.
+<a href=#1210 id=1210 data-nosnippet>1210</a>        </span><span class="kw">let </span>first = <span class="kw-2">&amp;</span>measured[<span class="number">0</span>];
+<a href=#1211 id=1211 data-nosnippet>1211</a>        <span class="kw">let </span>raw_width = engine.measure(<span class="kw-2">&amp;</span>text[first.lo..first.hi], <span class="kw-2">&amp;</span>st).width;
+<a href=#1212 id=1212 data-nosnippet>1212</a>        <span class="macro">assert!</span>(
+<a href=#1213 id=1213 data-nosnippet>1213</a>            (first.metrics.width - (first.hi - first.lo) <span class="kw">as </span>f32 * <span class="number">10.0</span>).abs() &lt; <span class="number">0.01</span>,
+<a href=#1214 id=1214 data-nosnippet>1214</a>            <span class="string">"metrics.width must come from `measure`, got {} vs raw {}"</span>,
+<a href=#1215 id=1215 data-nosnippet>1215</a>            first.metrics.width,
+<a href=#1216 id=1216 data-nosnippet>1216</a>            raw_width
+<a href=#1217 id=1217 data-nosnippet>1217</a>        );
+<a href=#1218 id=1218 data-nosnippet>1218</a>    }
+<a href=#1219 id=1219 data-nosnippet>1219</a>
+<a href=#1220 id=1220 data-nosnippet>1220</a>    <span class="attr">#[test]
+<a href=#1221 id=1221 data-nosnippet>1221</a>    </span><span class="kw">fn </span>wrap_counts_interscript_autospace_gap() {
+<a href=#1222 id=1222 data-nosnippet>1222</a>        <span class="comment">// Two CJK&lt;-&gt;Latin boundaries, no separators: the shaper inserts a
+<a href=#1223 id=1223 data-nosnippet>1223</a>        // 1/4-em gap at each when this is drawn/measured. Wrap must count
+<a href=#1224 id=1224 data-nosnippet>1224</a>        // the same gaps or a line it deems to "fit" would overflow on
+<a href=#1225 id=1225 data-nosnippet>1225</a>        // screen. The contract: wrap's fit decision must agree with the
+<a href=#1226 id=1226 data-nosnippet>1226</a>        // engine's measured width of the same string.
+<a href=#1227 id=1227 data-nosnippet>1227</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1228 id=1228 data-nosnippet>1228</a>        <span class="kw">let </span>st = style();
+<a href=#1229 id=1229 data-nosnippet>1229</a>        <span class="kw">let </span>text = <span class="string">"你好hello你好"</span>;
+<a href=#1230 id=1230 data-nosnippet>1230</a>        <span class="kw">let </span>drawn_w = engine.measure(text, <span class="kw-2">&amp;</span>st).width;
+<a href=#1231 id=1231 data-nosnippet>1231</a>        <span class="comment">// At the drawn width (+slack) the whole string fits on one line.
+<a href=#1232 id=1232 data-nosnippet>1232</a>        </span><span class="macro">assert_eq!</span>(wrap(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, drawn_w + <span class="number">1.0</span>).len(), <span class="number">1</span>);
+<a href=#1233 id=1233 data-nosnippet>1233</a>        <span class="comment">// Shaving off exactly the two gaps must force a wrap — proving
+<a href=#1234 id=1234 data-nosnippet>1234</a>        // wrap counted them. (If wrap ignored the gaps it would still
+<a href=#1235 id=1235 data-nosnippet>1235</a>        // report one line here, under-counting vs the shaper.)
+<a href=#1236 id=1236 data-nosnippet>1236</a>        </span><span class="kw">let </span>two_gaps = <span class="number">2.0 </span>* st.size_px * INTERSCRIPT_GAP_EM;
+<a href=#1237 id=1237 data-nosnippet>1237</a>        <span class="macro">assert!</span>(
+<a href=#1238 id=1238 data-nosnippet>1238</a>            wrap(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, drawn_w - two_gaps - <span class="number">0.5</span>).len() &gt; <span class="number">1</span>,
+<a href=#1239 id=1239 data-nosnippet>1239</a>            <span class="string">"wrap must account for the inter-script gaps"
+<a href=#1240 id=1240 data-nosnippet>1240</a>        </span>);
+<a href=#1241 id=1241 data-nosnippet>1241</a>    }
+<a href=#1242 id=1242 data-nosnippet>1242</a>
+<a href=#1243 id=1243 data-nosnippet>1243</a>    <span class="attr">#[test]
+<a href=#1244 id=1244 data-nosnippet>1244</a>    </span><span class="kw">fn </span>wrap_cjk_each_char_is_break_opportunity() {
+<a href=#1245 id=1245 data-nosnippet>1245</a>        <span class="comment">// No whitespace, but CJK atoms wrap individually.
+<a href=#1246 id=1246 data-nosnippet>1246</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1247 id=1247 data-nosnippet>1247</a>        <span class="kw">let </span>st = style();
+<a href=#1248 id=1248 data-nosnippet>1248</a>        <span class="kw">let </span>text = <span class="string">"你好世界你好世界"</span>;
+<a href=#1249 id=1249 data-nosnippet>1249</a>        <span class="kw">let </span>wide = wrap(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, <span class="number">10000.0</span>);
+<a href=#1250 id=1250 data-nosnippet>1250</a>        <span class="macro">assert_eq!</span>(wide.len(), <span class="number">1</span>, <span class="string">"wide column keeps CJK on one line"</span>);
+<a href=#1251 id=1251 data-nosnippet>1251</a>        <span class="comment">// 8 CJK ideographs at 17 px each is ~136 px; force many breaks.
+<a href=#1252 id=1252 data-nosnippet>1252</a>        </span><span class="kw">let </span>narrow = wrap(<span class="kw-2">&amp;</span>engine, text, <span class="kw-2">&amp;</span>st, <span class="number">40.0</span>);
+<a href=#1253 id=1253 data-nosnippet>1253</a>        <span class="macro">assert!</span>(
+<a href=#1254 id=1254 data-nosnippet>1254</a>            narrow.len() &gt; <span class="number">1</span>,
+<a href=#1255 id=1255 data-nosnippet>1255</a>            <span class="string">"narrow column must wrap CJK per-char, got {} lines"</span>,
+<a href=#1256 id=1256 data-nosnippet>1256</a>            narrow.len()
+<a href=#1257 id=1257 data-nosnippet>1257</a>        );
+<a href=#1258 id=1258 data-nosnippet>1258</a>        <span class="comment">// Atoms tile the input contiguously (no whitespace here).
+<a href=#1259 id=1259 data-nosnippet>1259</a>        </span><span class="macro">assert_eq!</span>(narrow[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#1260 id=1260 data-nosnippet>1260</a>        <span class="kw">for </span>w <span class="kw">in </span>narrow.windows(<span class="number">2</span>) {
+<a href=#1261 id=1261 data-nosnippet>1261</a>            <span class="macro">assert_eq!</span>(w[<span class="number">0</span>].hi, w[<span class="number">1</span>].lo, <span class="string">"no gap between CJK lines"</span>);
+<a href=#1262 id=1262 data-nosnippet>1262</a>        }
+<a href=#1263 id=1263 data-nosnippet>1263</a>        <span class="macro">assert_eq!</span>(narrow.last().unwrap().hi, text.len());
+<a href=#1264 id=1264 data-nosnippet>1264</a>    }
+<a href=#1265 id=1265 data-nosnippet>1265</a>
+<a href=#1266 id=1266 data-nosnippet>1266</a>    <span class="attr">#[test]
+<a href=#1267 id=1267 data-nosnippet>1267</a>    </span><span class="kw">fn </span>wrap_long_input_is_linear() {
+<a href=#1268 id=1268 data-nosnippet>1268</a>        <span class="comment">// Smoke-test the O(n) wrap on a large input. With the old prefix-
+<a href=#1269 id=1269 data-nosnippet>1269</a>        // remeasure implementation this scale of input was visibly slow;
+<a href=#1270 id=1270 data-nosnippet>1270</a>        // the rewrite measures each atom once. The test only asserts
+<a href=#1271 id=1271 data-nosnippet>1271</a>        // correctness of tiling, not timing.
+<a href=#1272 id=1272 data-nosnippet>1272</a>        </span><span class="kw">let </span><span class="prelude-val">Some</span>(engine) = engine() <span class="kw">else </span>{ <span class="kw">return </span>};
+<a href=#1273 id=1273 data-nosnippet>1273</a>        <span class="kw">let </span>st = style();
+<a href=#1274 id=1274 data-nosnippet>1274</a>        <span class="kw">let </span>words: Vec&lt;String&gt; = (<span class="number">0</span>..<span class="number">2000</span>).map(|i| <span class="macro">format!</span>(<span class="string">"word{i}"</span>)).collect();
+<a href=#1275 id=1275 data-nosnippet>1275</a>        <span class="kw">let </span>text = words.join(<span class="string">" "</span>);
+<a href=#1276 id=1276 data-nosnippet>1276</a>        <span class="kw">let </span>lines = wrap(<span class="kw-2">&amp;</span>engine, <span class="kw-2">&amp;</span>text, <span class="kw-2">&amp;</span>st, <span class="number">120.0</span>);
+<a href=#1277 id=1277 data-nosnippet>1277</a>        <span class="macro">assert!</span>(lines.len() &gt; <span class="number">1</span>);
+<a href=#1278 id=1278 data-nosnippet>1278</a>        <span class="macro">assert_eq!</span>(lines[<span class="number">0</span>].lo, <span class="number">0</span>);
+<a href=#1279 id=1279 data-nosnippet>1279</a>        <span class="kw">for </span>w <span class="kw">in </span>lines.windows(<span class="number">2</span>) {
+<a href=#1280 id=1280 data-nosnippet>1280</a>            <span class="macro">assert!</span>(w[<span class="number">0</span>].hi &lt;= w[<span class="number">1</span>].lo);
+<a href=#1281 id=1281 data-nosnippet>1281</a>            <span class="kw">let </span>gap = <span class="kw-2">&amp;</span>text[w[<span class="number">0</span>].hi..w[<span class="number">1</span>].lo];
+<a href=#1282 id=1282 data-nosnippet>1282</a>            <span class="macro">assert!</span>(
+<a href=#1283 id=1283 data-nosnippet>1283</a>                gap.bytes().all(|b| b == <span class="string">b' ' </span>|| b == <span class="string">b'\n' </span>|| b == <span class="string">b'\t'</span>),
+<a href=#1284 id=1284 data-nosnippet>1284</a>                <span class="string">"gap between lines must be whitespace"
+<a href=#1285 id=1285 data-nosnippet>1285</a>            </span>);
+<a href=#1286 id=1286 data-nosnippet>1286</a>        }
+<a href=#1287 id=1287 data-nosnippet>1287</a>        <span class="macro">assert_eq!</span>(lines.last().unwrap().hi, text.len());
+<a href=#1288 id=1288 data-nosnippet>1288</a>    }
+<a href=#1289 id=1289 data-nosnippet>1289</a>}
+</code></pre></div></section></main></body></html>

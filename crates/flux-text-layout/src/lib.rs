@@ -103,7 +103,7 @@ pub fn wrap(text: &Text, input: &str, style: &Style, max_width: f32) -> Vec<Wrap
 /// the Layer-1 "no full BiDi across the whole line" budget.
 ///
 /// Inter-script auto-space: at a CJK↔non-CJK atom boundary with no
-/// separator, a ¼-em gap ([`INTERSCRIPT_GAP_EM`]) is added to mirror the
+/// separator, a ¼-em gap (`INTERSCRIPT_GAP_EM`) is added to mirror the
 /// flux-text shaper, which inserts the same gap when the line is drawn.
 /// Without it wrap would under-count and pack a line that overflows on
 /// screen. A boundary already covered by whitespace is left alone (no
@@ -266,7 +266,7 @@ pub fn wrap_optimal(text: &Text, input: &str, style: &Style, max_width: f32) -> 
 /// Knuth-Plass optimal wrap with a caller-supplied measure. See
 /// [`wrap_with`] for the `measure` contract and [`wrap_optimal`] for the
 /// strategy. Falls back to [`wrap_with`] (greedy) for inputs above
-/// [`KP_GREEDY_FALLBACK_ATOMS`] atoms, where the O(n²·C) DP would risk
+/// `KP_GREEDY_FALLBACK_ATOMS` atoms, where the O(n²·C) DP would risk
 /// dropping a frame on a megabyte paste.
 pub fn wrap_optimal_with(
     text: &Text,

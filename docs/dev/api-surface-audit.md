@@ -40,6 +40,30 @@
 >   core, platform-specific IME/tablet branches), not copy-paste; the
 >   audited `(void)` error-discards are documented retry-next-frame
 >   resize paths.
+>
+> **Binding-completeness round (final):**
+> - Measured: of 300 bound flux symbols, 144 were wrapped; after this
+>   round the safe surface covers every symbol with a *Rust-relevant*
+>   job. The ~140 deliberately-unwrapped remainder is: pure vector math
+>   (Rust callers use glam; wrapping `flux_quat_*` would be noise),
+>   Vulkan interop handles (already reachable through typed accessors),
+>   and low-level compute/buffer/bindless machinery whose only consumer
+>   is the C scene layer — no Rust caller has ever needed them, and the
+>   documented `sys` escape hatch covers the day one does.
+> - Added: `flux::version()` / `version_number()` / `version_check()`
+>   (lens/iris/prism had equivalents; flux was the asymmetry), with a
+>   consistency test.
+> - **Documentation mechanism decision**: `docs/reference/symbols.md` is
+>   now GENERATED from the installed headers by `tools/gen_symbols.py`;
+>   CI (`symbols.md freshness` step) fails on drift. It had rotted
+>   exactly as a hand-maintained list always does (removed symbols
+>   lingered, new symbols never appeared, "additions" sections
+>   accreted). Empty Description cells mean the *header* lacks a doc
+>   comment — fix the header, regenerate. Rust API docs stay in
+>   rustdoc (`cargo doc`), which is the Rust ecosystem's single source
+>   of truth; no parallel markdown is maintained for the bindings.
+>   rustdoc coverage is now ~100% of pub fns across all safe crates,
+>   with zero doc-link warnings.
 
 Goal: keep the externally exposed interface set — C headers and Rust bindings —
 **clean, coarse-grained and properly layered**, because the surface is read by

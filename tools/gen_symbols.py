@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""gen_symbols.py — generate docs/reference/symbols.md from installed headers.
+
+The headers are the single source of truth for the public API surface. This
+script extracts every exported function (FLUX_API / LENS_API / IRIS_API /
+PRISM_API / FLUX_TEXT_API / FLUX_SG_API / ANIM_API) from the headers each
+library's meson.build actually installs, pairs each with the first sentence
+of its doc comment, and emits the symbol lookup table.
+
+Usage:
+    tools/gen_symbols.py --check    # verify docs/reference/symbols.md is fresh
+    tools/gen_symbols.py            # (re)write docs/reference/symbols.md
+
+The --check mode exits non-zero on drift — wire it into CI next to the
+format check so the table can never rot again (it drifted before: removed
+symbols lingered, new symbols never appeared, and "additions" sections
+accreted).
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "docs/reference/symbols.md"
+
+# (library title, header paths relative to repo root, API macro)
+LIBRARIES = [
+    (
+        "flux — rendering engine",
+        [
+            "libs/flux/include/flux/core.h",
+            "libs/flux/include/flux/math.h",
+            "libs/flux/include/flux/vulkan.h",
+            "libs/flux/include/flux/canvas.h",
+            "libs/flux/include/flux/canvas_cpu.h",
+            "libs/flux/include/flux/dmabuf.h",
+            "libs/flux/include/flux/scene.h",
+            "libs/flux/include/flux/compute.h",
+            "libs/flux/include/flux/effect.h",
+        ],
+        r"FLUX_API",
+    ),
+    (
+        "flux-text — text shaping (sibling of flux)",
+        ["libs/flux/text/include/flux-text/text.h"],
+        r"FLUX_TEXT_API",
+    ),
+    (
+        "flux-scene-graph — glTF scene layer (sibling of flux)",
+        ["libs/flux/scene_graph/include/flux-scene-graph/scene-graph.h"],
+        r"FLUX_SG_API",
+    ),
+    (
+        "lens — immediate-mode UI",
+        ["libs/lens/include/lens/lens.h", "libs/lens/include/lens/icon.h"],
+        r"LENS_API",
+    ),
+    (
+        "iris — application toolkit",
+        [
+            "libs/iris/include/iris/app.h",
+            "libs/iris/include/iris/iris.h",
+            "libs/iris/include/iris/window.h",
+            "libs/iris/include/iris/cursor.h",
+            "libs/iris/include/iris/theme.h",
+            "libs/iris/include/iris/file_dialog.h",
+            "libs/iris/include/iris/capability.h",
+            "libs/iris/include/iris/a11y.h",
+            "libs/iris/include/iris/a11y_prefs.h",
+        ],
+        r"IRIS_API",
+    ),
+    (
+        "prism — material library",
+        [
+            "libs/prism/include/prism/types.h",
+            "libs/prism/include/prism/liquid_glass.h",
+            "libs/prism/include/prism/frosted.h",
+            "libs/prism/include/prism/acrylic.h",
+            "libs/prism/include/prism/backdrop_layer.h",
+        ],
+        r"PRISM_API",
+    ),
+    (
+        "anim — motion vocabulary",
+        ["libs/anim/include/anim/anim.h"],
+        r"ANIM_API",
+    ),
+]
+
+DECL = re.compile(
+    r"(?:^|\n)(?P<comment>(?:/\*(?:[^*]|\*(?!/))*\*/\s*)*)"  # doc comment(s)
+    r"(?P<attr>(?:[A-Z_]+\([^)]*\)\s*)*)"                     # FLUX_NODISCARD etc.
+    r"(?P<api>{api})\s+"
+    r"(?P<ret>[A-Za-z_][A-Za-z0-9_ *]*?)\s+"
+    r"(?P<name>[a-z][a-z0-9_]*)\s*\(",
+)
+
+# Extern object exports (e.g. prism INIT-macro style tables) — rare; the
+# function table is the point of this document.
+
+
+def first_sentence(comment: str) -> str:
+    text = re.sub(r"^/\*+|\*+/$", "", comment.strip(), flags=re.S)
+    text = re.sub(r"^\s*\*\s?", "", text, flags=re.M)  # strip leading stars
+    text = " ".join(text.split())
+    if not text:
+        return ""
+    # Cut at the first sentence end; keep it if within a reasonable length.
+    m = re.match(r"(.+?(?<!\b[A-Z])[.!?])(?:\s|$)", text)
+    sentence = m.group(1) if m else text
+    return sentence.strip()
+
+
+def extract(header: Path, api_macro: str):
+    src = header.read_text()
+    pattern = DECL.pattern.replace("{api}", api_macro)
+    seen, rows = set(), []
+    for m in re.finditer(pattern, src, flags=re.S):
+        name = m.group("name")
+        if name in seen:  # declaration + definition dupes
+            continue
+        seen.add(name)
+        desc = first_sentence(m.group("comment"))
+        if not desc:
+            # Some headers document AFTER the declaration (canvas.h end_frame
+            # family): use a trailing comment when the leading one is absent.
+            tail = src[m.end():]
+            tm = re.match(r'\s*(/\*(?:[^*]|\*(?!/))*\*/)', tail)
+            if tm and '
+
+' not in tail[: tm.end()]:
+                desc = first_sentence(tm.group(1))
+        rows.append((name, desc))
+    return rows
+
+
+def render() -> str:
+    lines = [
+        "# Symbol Reference",
+        "",
+        "Lookup table for every exported function, grouped by library and",
+        "header. GENERATED by `tools/gen_symbols.py` from the installed",
+        "headers — the headers are the single source of truth; regenerate",
+        "with `python3 tools/gen_symbols.py` after changing a public",
+        "signature (CI fails on drift). For the shape of the API (object",
+        "model, lifecycle, error model), see [API Reference](api.md); for",
+        "blocking behavior per call, see [Thread Safety](thread-safety.md).",
+        "",
+    ]
+    for title, headers, api in LIBRARIES:
+        lines += [f"## {title}", ""]
+        for h in headers:
+            rows = extract(ROOT / h, api)
+            if not rows:
+                continue
+            lines += [f"### `{h.split('include/')[-1]}`", ""]
+            lines += ["| Symbol | Description |", "|--------|-------------|"]
+            for name, desc in rows:
+                d = desc.replace("|", "\\|") if desc else ""
+                lines.append(f"| `{name}` | {d} |")
+            lines.append("")
+    lines.append(
+        "Every fallible function returns `flux_result`-style codes; see"
+        " [API Reference](api.md#error-model). Functions returning `void`"
+        " either cannot fail or report through the library's error channel"
+        " as noted.\n"
+    )
+    return "\n".join(lines)
+
+
+def installed_headers_match_meson() -> bool:
+    """Cheap guard: every header listed above must exist."""
+    ok = True
+    for _, headers, _ in LIBRARIES:
+        for h in headers:
+            if not (ROOT / h).exists():
+                print(f"gen_symbols: header missing: {h}", file=sys.stderr)
+                ok = False
+    return ok
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--check", action="store_true",
+                    help="fail if symbols.md is stale")
+    args = ap.parse_args()
+
+    if not installed_headers_match_meson():
+        return 2
+
+    fresh = render()
+    if args.check:
+        current = OUT.read_text() if OUT.exists() else ""
+        if current != fresh:
+            print(
+                "docs/reference/symbols.md is stale. Regenerate with:\n"
+                "    python3 tools/gen_symbols.py",
+                file=sys.stderr,
+            )
+            return 1
+        print("symbols.md: fresh")
+        return 0
+
+    OUT.write_text(fresh)
+    print(f"wrote {OUT.relative_to(ROOT)} ({len(fresh.splitlines())} lines)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

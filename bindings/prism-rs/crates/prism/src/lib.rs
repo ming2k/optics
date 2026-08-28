@@ -338,6 +338,8 @@ pub struct BackdropLayerFilter {
 }
 
 impl BackdropLayerFilter {
+    /// Create the layered-backdrop filter (frost + glass compose in
+    /// one pass; ADR-0079).
     pub fn new(device: &flux::Device) -> Result<Self, Error> {
         let mut raw = std::ptr::null_mut();
         check(unsafe { sys::prism_backdrop_layer_filter_create(device.as_raw(), &mut raw) })?;
@@ -345,6 +347,8 @@ impl BackdropLayerFilter {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Frost the backdrop, then refract the glass groups through it —
+    /// one call replacing a manual frost+blur+glass chain.
     pub fn apply<'filter>(
         &'filter mut self,
         frame: &flux::Frame<'_>,
@@ -437,6 +441,8 @@ pub struct BackdropLayerImage<'filter> {
 }
 
 impl BackdropLayerImage<'_> {
+    /// Draw the leased output into `canvas` at `(x, y)`, `width`x`height`
+    /// logical px (the canvas transform applies).
     pub fn draw(&self, canvas: &flux::Canvas, x: f32, y: f32, width: f32, height: f32) {
         let destination = sys::flux_rect {
             x,
@@ -482,6 +488,7 @@ pub struct FrostedGroup {
 }
 
 impl FrostedGroup {
+    /// Translate to the C descriptor (owned copy).
     pub fn as_raw(&self) -> sys::prism_frosted_group {
         let sentinel = |v: Option<f32>| v.unwrap_or(-1.0);
         sys::prism_frosted_group {
@@ -532,12 +539,15 @@ pub struct FrostedFilter {
 }
 
 impl FrostedFilter {
+    /// Create the frosted-glass filter.
     pub fn new(device: &flux::Device) -> Result<Self, Error> {
         let mut raw = std::ptr::null_mut();
         check(unsafe { sys::prism_frosted_filter_create(device.as_raw(), &mut raw) })?;
         Ok(Self { raw })
     }
 
+    /// Blur-and-tint `input` per `groups`; returns the leased output
+    /// image (valid until next `apply` or drop).
     pub fn apply<'filter>(
         &'filter mut self,
         frame: &flux::Frame<'_>,
@@ -587,6 +597,8 @@ pub struct FrostedImage<'filter> {
 }
 
 impl FrostedImage<'_> {
+    /// Draw the leased output into `canvas` at `(x, y)`, `width`x`height`
+    /// logical px (the canvas transform applies).
     pub fn draw(&self, canvas: &flux::Canvas, x: f32, y: f32, width: f32, height: f32) {
         let destination = sys::flux_rect {
             x,
@@ -634,6 +646,7 @@ pub struct AcrylicGroup {
 }
 
 impl AcrylicGroup {
+    /// Translate to the C descriptor (owned copy).
     pub fn as_raw(&self) -> sys::prism_acrylic_group {
         let sentinel = |v: Option<f32>| v.unwrap_or(-1.0);
         sys::prism_acrylic_group {
@@ -690,12 +703,14 @@ pub struct AcrylicFilter {
 }
 
 impl AcrylicFilter {
+    /// Create the acrylic filter (procedural grain + luminance plate).
     pub fn new(device: &flux::Device) -> Result<Self, Error> {
         let mut raw = std::ptr::null_mut();
         check(unsafe { sys::prism_acrylic_filter_create(device.as_raw(), &mut raw) })?;
         Ok(Self { raw })
     }
 
+    /// Render the acrylic material for `groups` from `input`.
     pub fn apply<'filter>(
         &'filter mut self,
         frame: &flux::Frame<'_>,
@@ -747,6 +762,8 @@ pub struct AcrylicImage<'filter> {
 }
 
 impl AcrylicImage<'_> {
+    /// Draw the leased output into `canvas` at `(x, y)`, `width`x`height`
+    /// logical px (the canvas transform applies).
     pub fn draw(&self, canvas: &flux::Canvas, x: f32, y: f32, width: f32, height: f32) {
         let destination = sys::flux_rect {
             x,

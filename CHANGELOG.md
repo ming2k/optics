@@ -60,6 +60,27 @@ remaining callers; see `docs/dev/api-surface-audit.md`):
   `bindings/flux-rs/crates/` to the top-level `crates/` workspace: they
   are pure-Rust layers above the bindings, not bindings themselves.
 
+### Added — Rust bindings (completeness round)
+
+- `flux::version()` / `version_number()` / `version_check()` — flux was
+  the only library whose Rust wrapper lacked the version trio lens/iris/
+  prism already had.
+- prism crate rustdoc coverage completed (19 pub fns, was 2 documented);
+  flux/iris gap items documented; all `cargo doc` warnings across the
+  four workspaces are now zero (fixed stale links left over from the
+  begin/end removal).
+
+### Changed — documentation maintenance
+
+- `docs/reference/symbols.md` is now **generated** from the installed
+  headers by `tools/gen_symbols.py`; a `symbols.md freshness` CI step
+  fails on drift. It had rotted as hand-maintained lists do (removed
+  symbols lingered, new symbols missing). The maintenance contract is
+  documented in `docs/dev/documentation/common-docs.md`: regenerate in
+  the same commit that changes a public signature; an empty Description
+  cell means the header lacks a doc comment — fix the header, not the
+  table.
+
 ### Added — iris (all backends)
 
 - **`iris_request_frame_skip_render()` — zero-render skip that keeps the

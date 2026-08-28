@@ -155,7 +155,7 @@ impl StartHost {
 /// as [`StartHost`], live one last time after the frame loop and before
 /// iris tears down lens, flux, and the device (ADR-0045). This is where
 /// hosts release every device-backed resource created from
-/// [`StartHost::device`] / [`PaintHost::device`].
+/// [`StartHost::flux_device`] / [`PaintHost::flux_device`].
 pub type StopHost = StartHost;
 
 /// Errors returned by [`Application::run`].
@@ -303,6 +303,9 @@ pub fn request_frame_skip_render() {
 }
 
 impl Application {
+    /// Run the application until the user closes the window. Blocks the
+    /// calling thread; callbacks run on it. See [`Config`] for the setup
+    /// surface and the crate docs for the callback model.
     pub fn run<B, P>(config: Config, build: B, paint: Option<P>) -> Result<(), RunError>
     where
         B: FnMut(&mut Frame, &Input),
@@ -1101,6 +1104,9 @@ struct Prepared {
 }
 
 impl<'a> FileDialog<'a> {
+    /// Start building a file dialog with default options; finish with
+    /// [`FileDialog::pick_path`](Self::pick_path). Runs the platform portal
+    /// (Wayland), IFileDialog (Win32), or NSSavePanel (Cocoa).
     pub fn new() -> Self {
         FileDialog {
             title: None,

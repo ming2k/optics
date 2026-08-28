@@ -8,7 +8,7 @@
 //! [`Canvas`] is backend-agnostic: create it on the GPU from a [`Surface`]
 //! ([`Canvas::new`]) or headless on the **software (CPU)** backend
 //! ([`Canvas::new_cpu`]) — no GPU or window needed — then drive both with the
-//! same drawing calls between [`Canvas::begin_frame`] and [`Canvas::end`].
+//! same drawing calls between [`Canvas::begin_frame`] and [`Canvas::end_frame`].
 //! CPU pixels come back via [`Canvas::read_pixels`].
 //!
 //! Coverage grows demand-first; today it covers device creation and the raw
@@ -27,10 +27,43 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 /// for the exposure rationale.
 pub use flux_sys as sys;
 
+/// Library version string ("0.0.28" at the time of writing), from the
+/// linked library — the same value C's `FLUX_VERSION_NUMBER` macros
+/// describe. Sibling crates (`lens`, `iris`, `prism`) carry matching
+/// wrappers, so a mixed-version process can be detected at startup.
+pub fn version() -> &'static str {
+    // SAFETY: flux_version_string returns a static NUL-terminated string.
+    unsafe { std::ffi::CStr::from_ptr(sys::flux_version_string()) }
+        .to_str()
+        .unwrap_or("<invalid>")
+}
+
+/// Packed monotonic version of the linked library (the runtime form of
+/// `FLUX_VERSION_NUMBER`): `major << 22 | minor << 12 | patch`.
+pub fn version_number() -> u32 {
+    // SAFETY: pure query.
+    unsafe { sys::flux_version_number() }
+}
+
+/// True when the linked library is at least `major.minor.patch`. Bindings
+/// crates enforce the floor at build time (`atleast_version` in every
+/// build.rs); this is the runtime check for a dynamically-loaded libflux
+/// (e.g. an app embedding flux through a plugin host).
+pub fn version_check(major: u32, minor: u32, patch: u32) -> bool {
+    // SAFETY: pure query; the C signature takes int32s.
+    unsafe {
+        sys::flux_version_check(
+            major as i32,
+            minor as i32,
+            patch as i32,
+        )
+    }
+}
+
 /// Backend-neutral pixel format, re-exported from the raw bindings.
 /// Image/attachment texel format. The idiomatic mirror of the C
-/// `flux_format` enum; convert with [`Format::raw`] / `From<sys::flux_format>`
-/// at the FFI edge.
+/// `flux_format` enum; convert at the FFI edge (the conversion helpers are crate-private by
+/// design; public signatures speak [`Format`], never the raw enum).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Format {
     Undefined,
@@ -417,10 +450,12 @@ impl ColorSpace {
         }
     }
 
+    /// The RGB primaries chromaticities this surface is tagged with.
     pub fn primaries(&self) -> ColorPrimaries {
         ColorPrimaries::from_raw(self.raw.primaries)
     }
 
+    /// The transfer function (gamma encoding) this surface is tagged with.
     pub fn transfer(&self) -> TransferFunction {
         TransferFunction::from_raw(self.raw.transfer)
     }
@@ -495,6 +530,7 @@ pub struct Mat3 {
 }
 
 impl Mat3 {
+    /// The 3x3 identity matrix.
     pub fn identity() -> Mat3 {
         Mat3 {
             raw: unsafe { sys::flux_mat3_identity() },
@@ -508,6 +544,7 @@ impl Mat3 {
         }
     }
 
+    /// Apply the matrix to a column vector.
     pub fn transform_vec3(self, v: [f32; 3]) -> [f32; 3] {
         let out = unsafe { sys::flux_mat3_transform_vec3(self.raw, vec3(v)) };
         [out.x, out.y, out.z]
@@ -525,10 +562,12 @@ impl Mat3 {
         self.raw.m
     }
 
+    /// Adopt a raw C-side matrix value.
     pub fn from_raw(raw: sys::flux_mat3) -> Mat3 {
         Mat3 { raw }
     }
 
+    /// The C-side matrix value (for FFI edges).
     pub fn as_raw(&self) -> sys::flux_mat3 {
         self.raw
     }
@@ -893,18 +932,23 @@ impl Device {
         unsafe { sys::flux_device_vk_instance(self.raw) }
     }
 
+    /// Raw Vulkan handle — for integrating native Vulkan code. The handle
+    /// is owned by the device; do not destroy it.
     pub fn vk_physical_device(&self) -> sys::VkPhysicalDevice {
         unsafe { sys::flux_device_vk_physical_device(self.raw) }
     }
 
+    /// Raw Vulkan device handle. Owned by flux; do not destroy.
     pub fn vk_device(&self) -> sys::VkDevice {
         unsafe { sys::flux_device_vk_device(self.raw) }
     }
 
+    /// Raw Vulkan graphics queue handle. Owned by flux; do not destroy.
     pub fn vk_graphics_queue(&self) -> sys::VkQueue {
         unsafe { sys::flux_device_vk_graphics_queue(self.raw) }
     }
 
+    /// Queue family index of the graphics queue.
     pub fn vk_graphics_family(&self) -> u32 {
         unsafe { sys::flux_device_vk_graphics_family(self.raw) }
     }
@@ -1679,6 +1723,7 @@ impl Surface {
         })
     }
 
+    /// Raw `flux_surface*` for FFI edges (iris does this when bridging).
     pub fn as_raw(&self) -> *mut sys::flux_surface {
         self.raw
     }
@@ -1901,16 +1946,20 @@ pub struct Camera {
 }
 
 impl Camera {
+    /// Perspective projection (right-handed, depth 0..1 — Vulkan clip).
     pub fn perspective(fov_y_rad: f32, aspect: f32, z_near: f32, z_far: f32) -> Camera {
         let mut raw = sys::flux_camera::default();
         unsafe { sys::flux_camera_perspective(&mut raw, fov_y_rad, aspect, z_near, z_far) };
         Camera { raw }
     }
 
+    /// Position the camera at `eye` looking at `center` with `up` as the
+    /// world-space up vector.
     pub fn look_at(&mut self, eye: [f32; 3], center: [f32; 3], up: [f32; 3]) {
         unsafe { sys::flux_camera_look_at(&mut self.raw, vec3(eye), vec3(center), vec3(up)) };
     }
 
+    /// Raw `flux_camera*` (immutable view) for FFI edges.
     pub fn as_raw(&self) -> *const sys::flux_camera {
         &self.raw
     }
@@ -2265,7 +2314,7 @@ impl SubmittedFrame<'_> {
 }
 
 /// A 2D canvas bound to a [`Surface`]. Records draws into a [`Frame`] between
-/// [`Canvas::begin`] and [`Canvas::end`].
+/// [`Canvas::begin_frame`] and [`Canvas::end_frame`].
 pub struct Canvas {
     raw: *mut sys::flux_canvas,
     /// When `true`, this handle does **not** own the canvas and must not
@@ -3391,18 +3440,20 @@ impl Image {
     ) -> Result<Image, Error> {
         // SAFETY: the caller guarantees the dma-buf descriptor requirements
         // documented by this function; all values are forwarded unchanged.
-        let result = Self::import_dmabuf_raw(
-            device,
-            width,
-            height,
-            format,
-            modifier,
-            fd.as_raw_fd(),
-            offset,
-            stride,
-            None,
-            ImageColorSpace::default(),
-        );
+        let result = unsafe {
+            Self::import_dmabuf_raw(
+                device,
+                width,
+                height,
+                format,
+                modifier,
+                fd.as_raw_fd(),
+                offset,
+                stride,
+                None,
+                ImageColorSpace::default(),
+            )
+        };
         // On success flux owns the fd now; on error Rust still does and the
         // OwnedFd drop closes it. Either way exactly one side closes it.
         if result.is_ok() {
@@ -3431,18 +3482,20 @@ impl Image {
         stride: u32,
     ) -> Result<Image, Error> {
         // SAFETY: caller guarantees the descriptor contract above.
-        Self::import_dmabuf_raw(
-            device,
-            width,
-            height,
-            format,
-            modifier,
-            fd,
-            offset,
-            stride,
-            None,
-            ImageColorSpace::default(),
-        )
+        unsafe {
+            Self::import_dmabuf_raw(
+                device,
+                width,
+                height,
+                format,
+                modifier,
+                fd,
+                offset,
+                stride,
+                None,
+                ImageColorSpace::default(),
+            )
+        }
     }
 
     /// Import a dma-buf and wait a Linux `sync_file` acquire fence before the
@@ -3467,18 +3520,20 @@ impl Image {
     ) -> Result<Image, Error> {
         // SAFETY: the caller guarantees both file descriptors and the dma-buf
         // metadata meet the requirements documented by this function.
-        let result = Self::import_dmabuf_raw(
-            device,
-            width,
-            height,
-            format,
-            modifier,
-            fd.as_raw_fd(),
-            offset,
-            stride,
-            Some(acquire_sync_fd.as_raw_fd()),
-            ImageColorSpace::default(),
-        );
+        let result = unsafe {
+            Self::import_dmabuf_raw(
+                device,
+                width,
+                height,
+                format,
+                modifier,
+                fd.as_raw_fd(),
+                offset,
+                stride,
+                Some(acquire_sync_fd.as_raw_fd()),
+                ImageColorSpace::default(),
+            )
+        };
         if result.is_ok() {
             std::mem::forget(fd);
             std::mem::forget(acquire_sync_fd);
@@ -3512,18 +3567,20 @@ impl Image {
         // SAFETY: the caller guarantees the dma-buf/sync-file descriptor
         // requirements documented above; all values are forwarded unchanged.
         let raw_fence = acquire_sync_fd.as_ref().map(|f| f.as_raw_fd());
-        let result = Self::import_dmabuf_raw(
-            device,
-            width,
-            height,
-            format,
-            modifier,
-            fd.as_raw_fd(),
-            offset,
-            stride,
-            raw_fence,
-            color_space,
-        );
+        let result = unsafe {
+            Self::import_dmabuf_raw(
+                device,
+                width,
+                height,
+                format,
+                modifier,
+                fd.as_raw_fd(),
+                offset,
+                stride,
+                raw_fence,
+                color_space,
+            )
+        };
         if result.is_ok() {
             std::mem::forget(fd);
             if let Some(f) = acquire_sync_fd {

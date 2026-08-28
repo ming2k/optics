@@ -216,6 +216,29 @@ Should not include:
 - Step-by-step tutorials.
 - Contributor-only implementation details.
 
+## `docs/reference/symbols.md`
+
+Intent: per-symbol lookup table for every exported function, across all
+seven libraries.
+
+Maintenance contract: **generated, never hand-edited.** The installed
+headers are the single source of truth; regenerate with
+`python3 tools/gen_symbols.py` in the same commit that changes a public
+signature, and CI (`symbols.md freshness`) fails on drift. An empty
+Description cell means the header itself carries no doc comment for that
+symbol — fix the header, not the table; the next regeneration propagates
+it.
+
+Should include:
+
+- Every exported function, grouped by library then header.
+- The first sentence of the header's doc comment as the description.
+
+Should not include:
+
+- Hand-written summaries (they rot — that is why the generator exists).
+- Behaviour notes; those belong in `api.md` or the header doc comments.
+
 ## `docs/reference/glossary.md`
 
 Intent: define canonical terms so docs and code use the same vocabulary.

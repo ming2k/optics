@@ -57,6 +57,13 @@ jobs:
       - name: No library stdout writes
         run: tools/check-no-library-stdout.sh
 
+      # Symbol reference freshness: docs/reference/symbols.md is generated
+      # from the installed headers (tools/gen_symbols.py). It drifted
+      # silently before this check existed (removed symbols lingered,
+      # new ones never appeared).
+      - name: symbols.md freshness
+        run: python3 tools/gen_symbols.py --check
+
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
