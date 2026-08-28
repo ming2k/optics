@@ -83,6 +83,15 @@ uint8_t lensi_icon_mode(int32_t id) {
     return LENSI_ICON_RENDER_STROKE;
 }
 
+LENS_API const lens_icon_desc *lens_icon_info(lens_icon_id icon, uint8_t *mode) {
+    const int32_t id = (int32_t)icon;
+    if (!lensi_icon_valid(id))
+        return NULL;
+    if (mode)
+        *mode = lensi_icon_mode(id);
+    return lensi_icon_desc(id);
+}
+
 /* Rewrite every `currentColor` token (as a fill/stroke attribute value) in
  * the private copy to the sentinel hex so nanosvg can carry it through as
  * a colour we recognise afterwards. The replacement is shorter than the

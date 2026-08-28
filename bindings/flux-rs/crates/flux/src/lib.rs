@@ -111,11 +111,111 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // flux_result_string returns a static C string.
         let s = unsafe { std::ffi::CStr::from_ptr(sys::flux_result_string(self.0)) };
-        write!(f, "flux error: {}", s.to_string_lossy())
+        write!(f, "flux error: {}", s.to_string_lossy())?;
+        // Attach the thread-local diagnostic when it matches this code, so
+        // a logged error carries the same context the C examples print
+        // (function/file/line/message). The strings are owned by flux and
+        // valid until the next error on this thread — copying them here
+        // keeps Display free of lifetime surprises.
+        if let Some(info) = ErrorInfo::last_if(Some(self.0)) {
+            write!(f, " ({info})")?;
+        }
+        Ok(())
     }
 }
 
 impl std::error::Error for Error {}
+
+/// Structured diagnostic for the most recent flux error on this thread —
+/// the owned mirror of C's `flux_error_info` (string fields are copied, so
+/// the value outlives the next flux call). Thread-local by contract.
+///
+/// Prefer [`Error::last_info`] / the automatic context [`Error`]'s `Display`
+/// appends; call this directly only when you need the structured fields
+/// (e.g. routing `backend_code` to a VkResult table).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorInfo {
+    pub code: sys::flux_result,
+    /// Flux entry point that failed, e.g. `"flux_device_create"`.
+    pub function: Option<String>,
+    /// Source file inside flux.
+    pub file: Option<String>,
+    pub line: i32,
+    /// Human-readable detail.
+    pub message: Option<String>,
+    /// Backend result (e.g. `VkResult` as i32) when relevant.
+    pub backend_code: i32,
+}
+
+impl ErrorInfo {
+    /// Snapshot the thread-local diagnostic. `None` when no error has been
+    /// recorded on this thread (or since the last successful call, per
+    /// flux's lifetime rules — treat `None` as "no context available").
+    pub fn last() -> Option<ErrorInfo> {
+        Self::last_if(None)
+    }
+
+    fn last_if(code: Option<sys::flux_result>) -> Option<ErrorInfo> {
+        let mut raw = sys::flux_error_info {
+            code: sys::flux_result::FLUX_OK,
+            function: std::ptr::null(),
+            file: std::ptr::null(),
+            line: 0,
+            message: std::ptr::null(),
+            backend_code: 0,
+        };
+        // SAFETY: out is a valid, fully initialized flux_error_info slot.
+        unsafe { sys::flux_get_last_error(&mut raw) };
+        if raw.code == sys::flux_result::FLUX_OK {
+            return None;
+        }
+        if let Some(want) = code {
+            if raw.code != want {
+                return None; // stale diagnostic from a different call
+            }
+        }
+        let cstr = |p: *const std::os::raw::c_char| unsafe {
+            if p.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned())
+            }
+        };
+        Some(ErrorInfo {
+            code: raw.code,
+            function: cstr(raw.function),
+            file: cstr(raw.file),
+            line: raw.line,
+            message: cstr(raw.message),
+            backend_code: raw.backend_code,
+        })
+    }
+}
+
+impl fmt::Display for ErrorInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.code)?;
+        if let Some(func) = &self.function {
+            write!(f, " at {func}")?;
+            if let Some(file) = &self.file {
+                write!(f, " ({file}:{})", self.line)?;
+            }
+        }
+        if let Some(msg) = &self.message {
+            write!(f, ": {msg}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Error {
+    /// The structured thread-local diagnostic for this error, if one was
+    /// recorded by the failing call. `None` when the thread slot is empty
+    /// or holds a newer diagnostic for a different call.
+    pub fn last_info(&self) -> Option<ErrorInfo> {
+        ErrorInfo::last_if(Some(self.0))
+    }
+}
 
 /* ================================================================== */
 /*  Color management (ADR-0069/0070)                                  */
@@ -3269,11 +3369,11 @@ impl Image {
 }
 
 impl Image {
-    /// Import a single-plane Linux dma-buf as a sampled image (zero-copy).
-    ///
-    /// On success flux takes ownership of `fd` and closes it; on error the
-    /// caller retains `fd`. The device must have been created with the dma-buf
-    /// import extensions (see [`dmabuf_supported`]).
+    /// Import a single-plane Linux dma-buf as a sampled image (zero-copy),
+    /// taking ownership of `fd`: on success flux consumes and closes it; on
+    /// error `fd` is dropped (closed) on the Rust side, so there is no leak
+    /// and no double-close either way. The device must have been created
+    /// with the dma-buf import extensions (see [`dmabuf_supported`]).
     ///
     /// # Safety
     /// `fd` must be a valid dma-buf file descriptor whose contents match
@@ -3285,31 +3385,70 @@ impl Image {
         height: u32,
         format: Format,
         modifier: u64,
-        fd: i32,
+        fd: OwnedFd,
         offset: u32,
         stride: u32,
     ) -> Result<Image, Error> {
         // SAFETY: the caller guarantees the dma-buf descriptor requirements
         // documented by this function; all values are forwarded unchanged.
-        unsafe {
-            Self::import_dmabuf_impl(
-                device,
-                width,
-                height,
-                format,
-                modifier,
-                fd,
-                offset,
-                stride,
-                None,
-                ImageColorSpace::default(),
-            )
+        let result = Self::import_dmabuf_raw(
+            device,
+            width,
+            height,
+            format,
+            modifier,
+            fd.as_raw_fd(),
+            offset,
+            stride,
+            None,
+            ImageColorSpace::default(),
+        );
+        // On success flux owns the fd now; on error Rust still does and the
+        // OwnedFd drop closes it. Either way exactly one side closes it.
+        if result.is_ok() {
+            std::mem::forget(fd);
         }
+        result
+    }
+
+    /// Raw-fd spelling of [`Image::import_dmabuf`] for callers that do not
+    /// own the descriptor (e.g. it belongs to a compositor protocol object
+    /// they must keep using). The caller keeps `fd` open in ALL cases; flux
+    /// internally dups it. Nothing is closed on the Rust side.
+    ///
+    /// # Safety
+    /// `fd` must be a valid dma-buf file descriptor whose contents match
+    /// the metadata arguments.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn import_dmabuf_borrowed(
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: Format,
+        modifier: u64,
+        fd: i32,
+        offset: u32,
+        stride: u32,
+    ) -> Result<Image, Error> {
+        // SAFETY: caller guarantees the descriptor contract above.
+        Self::import_dmabuf_raw(
+            device,
+            width,
+            height,
+            format,
+            modifier,
+            fd,
+            offset,
+            stride,
+            None,
+            ImageColorSpace::default(),
+        )
     }
 
     /// Import a dma-buf and wait a Linux `sync_file` acquire fence before the
-    /// image becomes sampleable. On success Flux owns both file descriptors;
-    /// on error ownership remains with the caller.
+    /// image becomes sampleable, taking ownership of both descriptors: on
+    /// success flux consumes and closes them; on error Rust's `OwnedFd` drops
+    /// close them. No leak, no double-close.
     ///
     /// # Safety
     /// The dma-buf metadata must describe `fd`, and `acquire_sync_fd` must be
@@ -3321,34 +3460,39 @@ impl Image {
         height: u32,
         format: Format,
         modifier: u64,
-        fd: i32,
+        fd: OwnedFd,
         offset: u32,
         stride: u32,
-        acquire_sync_fd: i32,
+        acquire_sync_fd: OwnedFd,
     ) -> Result<Image, Error> {
         // SAFETY: the caller guarantees both file descriptors and the dma-buf
         // metadata meet the requirements documented by this function.
-        unsafe {
-            Self::import_dmabuf_impl(
-                device,
-                width,
-                height,
-                format,
-                modifier,
-                fd,
-                offset,
-                stride,
-                Some(acquire_sync_fd),
-                ImageColorSpace::default(),
-            )
+        let result = Self::import_dmabuf_raw(
+            device,
+            width,
+            height,
+            format,
+            modifier,
+            fd.as_raw_fd(),
+            offset,
+            stride,
+            Some(acquire_sync_fd.as_raw_fd()),
+            ImageColorSpace::default(),
+        );
+        if result.is_ok() {
+            std::mem::forget(fd);
+            std::mem::forget(acquire_sync_fd);
         }
+        result
     }
 
     /// Like [`Image::import_dmabuf`], plus an optional acquire fence and a
     /// color-space tag (ADR-0069/0070): the tag decodes the imported texels
     /// into the working space when the canvas samples them — the zero-copy
     /// path for color-tagged client buffers. The tag is read only during
-    /// creation.
+    /// creation. Takes ownership of `fd` (and of `acquire_sync_fd` when
+    /// given): on success flux consumes and closes them; on error the
+    /// `OwnedFd` drops close them.
     ///
     /// # Safety
     /// Same contract as [`Image::import_dmabuf_with_acquire_fence`].
@@ -3359,32 +3503,38 @@ impl Image {
         height: u32,
         format: Format,
         modifier: u64,
-        fd: i32,
+        fd: OwnedFd,
         offset: u32,
         stride: u32,
-        acquire_sync_fd: Option<i32>,
+        acquire_sync_fd: Option<OwnedFd>,
         color_space: ImageColorSpace<'_>,
     ) -> Result<Image, Error> {
         // SAFETY: the caller guarantees the dma-buf/sync-file descriptor
         // requirements documented above; all values are forwarded unchanged.
-        unsafe {
-            Self::import_dmabuf_impl(
-                device,
-                width,
-                height,
-                format,
-                modifier,
-                fd,
-                offset,
-                stride,
-                acquire_sync_fd,
-                color_space,
-            )
+        let raw_fence = acquire_sync_fd.as_ref().map(|f| f.as_raw_fd());
+        let result = Self::import_dmabuf_raw(
+            device,
+            width,
+            height,
+            format,
+            modifier,
+            fd.as_raw_fd(),
+            offset,
+            stride,
+            raw_fence,
+            color_space,
+        );
+        if result.is_ok() {
+            std::mem::forget(fd);
+            if let Some(f) = acquire_sync_fd {
+                std::mem::forget(f);
+            }
         }
+        result
     }
 
     #[allow(clippy::too_many_arguments)]
-    unsafe fn import_dmabuf_impl(
+    unsafe fn import_dmabuf_raw(
         device: &Device,
         width: u32,
         height: u32,

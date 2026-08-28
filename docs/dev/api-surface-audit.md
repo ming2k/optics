@@ -11,6 +11,35 @@
 > `flux_canvas_create_cpu_aa` **does** have C callers (it gained a Rust
 > wrapper instead of removal). See CHANGELOG `[Unreleased]` for the full
 > list.
+>
+> **Follow-up round (completeness + internal health):**
+> - `lens_icon_info()` implemented (the audit round had promised it in a
+>   comment without a symbol); tested in tests/lens/test_icon_info.c.
+> - `flux::ErrorInfo` + `Error::last_info()`: thread-local diagnostics
+>   (function/file/line/message) now surfaced safely; `Display for Error`
+>   appends them automatically. flux_canvas_create_cpu_aa's validation
+>   paths now record diagnostics (they silently didn't).
+> - `Image::import_dmabuf*` now take `OwnedFd` (ownership encoded; no
+>   leak/double-close either way); a `import_dmabuf_borrowed` spelling
+>   covers non-owning compositors.
+> - **Fixed a real 224-byte over-read**: win32/cocoa input accumulators
+>   used `char text[32]` but were whole-buffer-memcpy'd into
+>   `lens_input.text_utf8[256]`. Both now 256 with static_assert size
+>   guards (the wayland backend's pattern).
+> - Stale comment referencing the removed
+>   `flux_canvas_draw_image_coverage` rewritten; anim.h's "ADR-0139"
+>   clarified as an external consumer's ADR.
+> - **Completeness verdict**: the remaining surface is sufficient. The
+>   set-without-get asymmetries flagged by audit are immediate-mode
+>   semantics (values reset per frame; the host already owns them), and
+>   caret already has a getter (`lens_caret_rect`). No new symbols added
+>   beyond `lens_icon_info` and the Rust diagnostics/fd-ownership wrappers.
+> - **Internal-health verdict**: no rot. All TODO/FIXME markers live in
+>   vendored code (nanosvg); the iris backend "triplets" are
+>   interface-aligned per-platform implementations (shared field-mapping
+>   core, platform-specific IME/tablet branches), not copy-paste; the
+>   audited `(void)` error-discards are documented retry-next-frame
+>   resize paths.
 
 Goal: keep the externally exposed interface set — C headers and Rust bindings —
 **clean, coarse-grained and properly layered**, because the surface is read by

@@ -488,8 +488,7 @@ typedef struct flux_glyph_run_host_atlas_desc {
  * quads arrive positioned, the atlas is caller-owned and updated via
  * flux_image_update_region. The atlas's R channel is alpha coverage
  * multiplied by each quad's premultiplied tint, blended SRC_OVER —
- * the same contract as flux_canvas_draw_image_coverage, minus the
- * per-glyph draw-call cost.
+ * the same R8-coverage × tint contract, without per-glyph draw calls.
  *
  * On a device-less CPU canvas (flux_canvas_create_cpu) there is no
  * GPU image to bind, so `atlas` is ignored and `host_coverage` is used

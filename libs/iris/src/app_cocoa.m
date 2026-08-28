@@ -103,7 +103,8 @@ typedef struct cp_accum {
     double scroll_x, scroll_y;      /* wheel steps this frame               */
     double scroll_px_x, scroll_px_y; /* precise (trackpad) points this frame */
     uint32_t mods;                  /* level state (persists)               */
-    char text[32];                  /* committed text this frame            */
+    char text[256];                 /* committed text this frame; must match
+                                      lens_input.text_utf8 (static_assert below) */
     char preedit[LENS_PREEDIT_MAX]; /* IME preedit string (level state)     */
     uint32_t preedit_cursor;        /* caret byte offset in preedit         */
     uint32_t preedit_sel_lo;        /* selection byte range in preedit      */
@@ -111,6 +112,15 @@ typedef struct cp_accum {
     lens_key_event keys[LENS_INPUT_MAX_KEYS];
     uint32_t key_count;
 } cp_accum;
+
+/* The staging buffers feed lens_input by whole-buffer memcpy in
+ * drain_input; pin the sizes so a lens-side change fails at compile time
+ * instead of over-reading the accumulator (the wayland backend carries
+ * the same guards). */
+static_assert(sizeof((cp_accum *)0)->text == sizeof((lens_input *)0)->text_utf8,
+              "cp_accum.text must match lens_input.text_utf8");
+static_assert(sizeof((cp_accum *)0)->preedit == sizeof((lens_input *)0)->preedit_utf8,
+              "cp_accum.preedit must match lens_input.preedit_utf8");
 
 /* ------------------------------------------------------------------ */
 /*  Platform state                                                       */

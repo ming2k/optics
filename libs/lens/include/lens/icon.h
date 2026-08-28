@@ -334,6 +334,17 @@ typedef struct lens_icon_desc {
  * index it, and lens_icon_info() is the public read access. It is not part
  * of the installed API surface. */
 
+/* Resolve an icon id — built-in (0 .. LENS_ICON_COUNT-1) or runtime
+ * (lens_icon_register_svg, >= LENS_ICON_COUNT) — to its command stream,
+ * per-run paints, and render mode. Returns NULL for unknown ids. The
+ * returned descriptor is owned by the registry and stays valid for the
+ * process lifetime (ids are never reclaimed), so callers may cache it.
+ * `mode` (0 = filled, 1 = outlined) describes the built-in table's render
+ * style; runtime SVG icons always report 0 and carry their paints in
+ * `runs`. This is the public read access to the icon table that replaced
+ * exporting `lens_icon_table` directly. */
+LENS_API const lens_icon_desc *lens_icon_info(lens_icon_id icon, uint8_t *mode);
+
 /* Failure sentinel of lens_icon_register_svg; also usable as a "no icon"
  * value wherever a lens_icon_id is optional. */
 #define LENS_ICON_INVALID ((lens_icon_id) - 1)

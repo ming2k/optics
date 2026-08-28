@@ -19,7 +19,8 @@
  *     integrates nothing (a duplicated frame).
  *   - The spring advances by the closed-form analytic solution, so no
  *     accepted `dt` can make it diverge (the semi-implicit Euler class of
- *     bugs — observed in a consumer before its ADR-0139 — is structurally
+ *     bugs — observed in a consumer repository (their ADR-0139, not in
+ *     this repo) — is structurally
  *     absent).
  *   - Reduced motion is one flag per advance call: when set, every
  *     primitive resolves to its end state in one step.

@@ -14,7 +14,8 @@ tests = ['test_id', 'test_store', 'test_layout', 'test_input',
          'test_opacity',
          'test_ghost',
          'test_skin', 'test_audit_fixes', 'test_a11y_activate',
-         'test_store_spike', 'test_abi_guards', 'test_skin_userdata', 'test_user_widget_kind']
+         'test_store_spike', 'test_abi_guards', 'test_skin_userdata', 'test_user_widget_kind',
+         'test_icon_info']
 
 foreach t : tests
   exe = executable(t, t + '.c',

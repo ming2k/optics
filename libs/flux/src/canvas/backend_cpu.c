@@ -806,11 +806,15 @@ flux_result flux_canvas_create_cpu(uint32_t width, uint32_t height, float scale,
 
 flux_result flux_canvas_create_cpu_aa(uint32_t width, uint32_t height, float scale,
                                       flux_canvas_antialias antialias, flux_canvas **out) {
-    if (!out || width == 0 || height == 0)
+    if (!out || width == 0 || height == 0) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "width/height must be non-zero");
         return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     if (antialias != FLUX_CANVAS_ANTIALIAS_AUTO && antialias != FLUX_CANVAS_ANTIALIAS_NONE &&
-        antialias != FLUX_CANVAS_ANTIALIAS_MSAA_4X)
+        antialias != FLUX_CANVAS_ANTIALIAS_MSAA_4X) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "unknown flux_canvas_antialias value");
         return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     *out = nullptr;
 
     flux_canvas *c = calloc(1, sizeof(*c));

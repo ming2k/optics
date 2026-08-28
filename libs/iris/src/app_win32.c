@@ -117,7 +117,8 @@ typedef struct w32_accum {
     double scroll_x, scroll_y;       /* wheel notches this frame       */
     double scroll_px_x, scroll_px_y; /* smooth pixel deltas this frame */
     uint32_t mods;                   /* level state (persists)         */
-    char text[32];                   /* committed text this frame      */
+    char text[256];                  /* committed text this frame; must match
+                                       lens_input.text_utf8 (static_assert below) */
     char preedit[LENS_PREEDIT_MAX];  /* IME preedit string             */
     uint32_t preedit_cursor;         /* caret byte offset in preedit   */
     uint32_t preedit_sel_lo;         /* active clause, byte range      */
@@ -125,6 +126,15 @@ typedef struct w32_accum {
     lens_key_event keys[LENS_INPUT_MAX_KEYS];
     uint32_t key_count;
 } w32_accum;
+
+/* The staging buffers feed lens_input by whole-buffer memcpy in
+ * drain_input; pin the sizes so a lens-side change fails at compile time
+ * instead of over-reading the accumulator (the wayland backend carries
+ * the same guards). */
+static_assert(sizeof((w32_accum *)0)->text == sizeof((lens_input *)0)->text_utf8,
+              "w32_accum.text must match lens_input.text_utf8");
+static_assert(sizeof((w32_accum *)0)->preedit == sizeof((lens_input *)0)->preedit_utf8,
+              "w32_accum.preedit must match lens_input.preedit_utf8");
 
 /* ------------------------------------------------------------------ */
 /*  Platform state                                                     */
@@ -270,9 +280,10 @@ static int utf8_encode(uint32_t cp, char out[4]) {
     return 4;
 }
 
-/* Append UTF-8 text to the per-frame commit accumulator (cap 31 + NUL),
- * truncating on a code-point boundary (shared helper, platform_text.h).
- * Same cap as app_wayland.c. */
+/* Append UTF-8 text to the per-frame commit accumulator (cap 255 + NUL,
+ * matching lens_input.text_utf8; enforced by the static_assert at the
+ * w32_accum definition), truncating on a code-point boundary (shared
+ * helper, platform_text.h). Same cap as app_wayland.c. */
 static void accum_text_append(w32_platform *pl, const char *utf8, size_t n) {
     iris_utf8_append(pl->acc.text, sizeof pl->acc.text, utf8, n);
 }
