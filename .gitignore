@@ -1,6 +1,7 @@
 # Build directories
 build*/
 builddir/
+target/
 
 # Object files and libraries
 *.o
@@ -32,4 +33,3 @@ __pycache__/
 subprojects/*
 !subprojects/*.wrap
 !subprojects/packagefiles/
-

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["wrap","wrap_optimal","wrap_optimal_with","wrap_with"],"struct":["WrappedLine"]};
