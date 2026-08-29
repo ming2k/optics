@@ -205,8 +205,8 @@ int main(void) {
                                     EXPECT(flux_surface_begin_frame(consumer, nullptr,
                                                                     &consumer_frame) == FLUX_OK);
                                     flux_color clear = flux_color_rgba(0, 0, 0, 255);
-                                    EXPECT(flux_canvas_begin_frame(canvas, consumer_frame, &clear) ==
-                                           FLUX_OK);
+                                    EXPECT(flux_canvas_begin_frame(canvas, consumer_frame,
+                                                                   &clear) == FLUX_OK);
                                     if (reuse_sync_fd >= 0) {
                                         EXPECT(flux_canvas_wait_dmabuf_acquire(
                                                    canvas, sampled, reuse_sync_fd) == FLUX_OK);

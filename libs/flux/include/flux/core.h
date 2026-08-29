@@ -287,7 +287,8 @@ typedef enum flux_struct_type {
  * fires, a value was inserted or reordered instead of appended — see
  * docs/reference/api.md before changing them. */
 static_assert(FLUX_TYPE_DEVICE_DESC == 1, "flux_struct_type: append only — never renumber");
-static_assert(FLUX_TYPE_CANVAS_ANTIALIAS_DESC == 33, "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_CANVAS_ANTIALIAS_DESC == 33,
+              "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_PAINT_EXT_BASE == 34, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_EFFECT_SHADOW_DESC == 40, "flux_struct_type: append only — never renumber");
 
@@ -433,7 +434,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_create_compute_writable(
  * false (never an error) for unknown formats, NULL devices, or
  * unsupported usage combinations on this device. */
 typedef enum flux_image_usage_query {
-    FLUX_IMAGE_USAGE_SAMPLED = 0,     /* shader sampling (all flux images)   */
+    FLUX_IMAGE_USAGE_SAMPLED = 0,       /* shader sampling (all flux images)   */
     FLUX_IMAGE_USAGE_COMPUTE_WRITE = 1, /* storage write (compute_writable)  */
 } flux_image_usage_query;
 
@@ -457,12 +458,9 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_update_region(flux_image *image, 
  * minimum buffer size derived from the stride: at least
  * `(height - 1) * row_bytes + width * bpp` bytes; larger buffers are
  * accepted (trailing bytes ignored), matching the packed variant. */
-FLUX_NODISCARD FLUX_API flux_result flux_image_update_region_strided(flux_image *image, uint32_t x,
-                                                                     uint32_t y, uint32_t width,
-                                                                     uint32_t height,
-                                                                     const void *data,
-                                                                     size_t row_bytes,
-                                                                     size_t bytes);
+FLUX_NODISCARD FLUX_API flux_result
+flux_image_update_region_strided(flux_image *image, uint32_t x, uint32_t y, uint32_t width,
+                                 uint32_t height, const void *data, size_t row_bytes, size_t bytes);
 
 /* `flux_image_update_region_strided` that takes straight (non-premultiplied)
  * RGBA8 and premultiplies during the upload, so callers never replicate the
@@ -473,8 +471,8 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_update_region_strided(flux_image 
  * a == 255 and a == 0 fast paths — so the uploaded texels are bit-identical
  * to what that function produces. The source buffer is never modified. */
 FLUX_NODISCARD FLUX_API flux_result flux_image_update_region_premultiply(
-    flux_image *image, uint32_t x, uint32_t y, uint32_t width, uint32_t height,
-    const void *data, size_t row_bytes, size_t bytes);
+    flux_image *image, uint32_t x, uint32_t y, uint32_t width, uint32_t height, const void *data,
+    size_t row_bytes, size_t bytes);
 
 /* Emit a printf-style diagnostic through a device's logger (if any).
  * No-op when the device has no logger wired. Modules that treat
@@ -627,11 +625,11 @@ FLUX_API flux_device_feature_flags flux_device_enabled_features(const flux_devic
  * whole struct as it knows it, so link against matching headers or rely
  * on the documented pre-1.0 rebuild rule). */
 typedef struct flux_device_limits {
-    uint32_t struct_size;          /* sizeof(flux_device_limits)             */
-    uint32_t max_image_dimension1d;/* max flux_image_create width            */
-    uint32_t max_image_dimension2d;/* max width/height of 2D images/surfaces */
-    uint32_t max_image_dimension3d;/* max extent of 3D images (0 = none)     */
-    uint32_t max_color_attachments;/* per-pass color attachment count        */
+    uint32_t struct_size;           /* sizeof(flux_device_limits)             */
+    uint32_t max_image_dimension1d; /* max flux_image_create width            */
+    uint32_t max_image_dimension2d; /* max width/height of 2D images/surfaces */
+    uint32_t max_image_dimension3d; /* max extent of 3D images (0 = none)     */
+    uint32_t max_color_attachments; /* per-pass color attachment count        */
     uint32_t max_framebuffer_width;
     uint32_t max_framebuffer_height;
     uint32_t max_frames_in_flight; /* library cap actually applied (see
@@ -1236,8 +1234,9 @@ typedef struct flux_timestamp_result {
 /* Returns timestamps from the most recent COMPLETED frame at this
  * frame's slot. Caller-supplied buffer; out_count receives the actual
  * number written. */
-FLUX_NODISCARD FLUX_API flux_result flux_frame_collect_timestamps(flux_frame *f, flux_timestamp_result *out,
-                                                   uint32_t *inout_count);
+FLUX_NODISCARD FLUX_API flux_result flux_frame_collect_timestamps(flux_frame *f,
+                                                                  flux_timestamp_result *out,
+                                                                  uint32_t *inout_count);
 
 #ifdef __cplusplus
 }

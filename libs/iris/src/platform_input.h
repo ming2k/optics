@@ -78,7 +78,7 @@ static inline bool iris_scroll_source_is_continuous(uint32_t source) {
      * continuous, 3 wheel tilt. Numeric on purpose — this header must
      * stay compilable where wayland-client headers are unavailable
      * (win32/cocoa backends, headless tests). */
-    return source == 1 /* WL_POINTER_AXIS_SOURCE_FINGER      */
+    return source == 1     /* WL_POINTER_AXIS_SOURCE_FINGER      */
            || source == 2; /* WL_POINTER_AXIS_SOURCE_CONTINUOUS */
 }
 

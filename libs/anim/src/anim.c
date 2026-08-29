@@ -48,8 +48,8 @@ float anim_spring_snap_to(anim_spring *s, float target) {
     return target;
 }
 
-float anim_spring_advance(anim_spring *s, float target, anim_spring_params p,
-                          float dt_seconds, bool reduced_motion) {
+float anim_spring_advance(anim_spring *s, float target, anim_spring_params p, float dt_seconds,
+                          bool reduced_motion) {
     if (!s)
         return target;
     if (target != target) /* NaN target = no target: state stands */
@@ -80,9 +80,8 @@ float anim_spring_advance(anim_spring *s, float target, anim_spring_params p,
         float cos_ = cosf(omega_d * dt);
         float vterm = (s->velocity + decay_rate * x) / omega_d;
         s->value = target + decay * (x * cos_ + vterm * sin_);
-        s->velocity =
-            decay * (s->velocity * cos_ -
-                     (decay_rate * s->velocity + omega0 * omega0 * x) / omega_d * sin_);
+        s->velocity = decay * (s->velocity * cos_ -
+                               (decay_rate * s->velocity + omega0 * omega0 * x) / omega_d * sin_);
     } else {
         /* Critically damped (ζ ≥ 1 clamped): smooth approach, no overshoot. */
         float decay = expf(-omega0 * dt);

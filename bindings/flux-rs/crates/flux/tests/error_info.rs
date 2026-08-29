@@ -24,7 +24,9 @@ fn last_error_carries_structured_context() {
     let info = err.last_info().expect("thread-local diagnostic recorded");
     assert_eq!(info.code, err.0, "diagnostic must match the failing code");
     assert!(
-        info.function.as_deref().is_some_and(|f| f.contains("canvas")),
+        info.function
+            .as_deref()
+            .is_some_and(|f| f.contains("canvas")),
         "function should name the failing entry point, got {:?}",
         info.function
     );
@@ -53,9 +55,11 @@ fn version_wrappers_agree_with_linked_library() {
     let minor = (n >> 12) & 0x3FF;
     let patch = n & 0xFFF;
     let from_string: Vec<u32> = v.split('.').map(|p| p.parse().unwrap()).collect();
-    assert_eq!((major, minor, patch),
-               (from_string[0], from_string[1], from_string[2]),
-               "packed number must match version string");
+    assert_eq!(
+        (major, minor, patch),
+        (from_string[0], from_string[1], from_string[2]),
+        "packed number must match version string"
+    );
     assert!(flux::version_check(major, minor, patch));
     assert!(!flux::version_check(major, minor, patch + 1));
 }

@@ -30,13 +30,13 @@ typedef struct prism_frosted_shape {
 typedef struct prism_frosted_group {
     prism_frosted_shape shape;
     float opacity;
-    uint32_t tint_color;      /* 0xRRGGBB tint multiplier */
-    float tint_strength;      /* <0 = inherit desc value */
-    float saturation;         /* <0 = inherit desc value */
-    float shadow_alpha;       /* Drop shadow opacity [0, 1] */
-    float shadow_blur;        /* Drop shadow blur radius in px */
-    float shadow_offset_y;    /* Drop shadow vertical offset */
-    float noise_intensity;    /* <0 = inherit desc value */
+    uint32_t tint_color;   /* 0xRRGGBB tint multiplier */
+    float tint_strength;   /* <0 = inherit desc value */
+    float saturation;      /* <0 = inherit desc value */
+    float shadow_alpha;    /* Drop shadow opacity [0, 1] */
+    float shadow_blur;     /* Drop shadow blur radius in px */
+    float shadow_offset_y; /* Drop shadow vertical offset */
+    float noise_intensity; /* <0 = inherit desc value */
 } prism_frosted_group;
 
 #define PRISM_FROSTED_GROUP_INIT                                                                   \
@@ -54,15 +54,15 @@ typedef struct prism_frosted_desc {
     flux_image *blurred_input;
     const prism_frosted_group *groups;
     uint32_t group_count;
-    float opacity;            /* Overall opacity [0, 1] */
-    float saturation;         /* Saturation multiplier (default 1.25) */
-    float tint_strength;      /* Default tint strength (default 0.15) */
-    float noise_intensity;    /* Procedural grain intensity (default 0.015) */
+    float opacity;         /* Overall opacity [0, 1] */
+    float saturation;      /* Saturation multiplier (default 1.25) */
+    float tint_strength;   /* Default tint strength (default 0.15) */
+    float noise_intensity; /* Procedural grain intensity (default 0.015) */
     prism_material_quality quality;
 } prism_frosted_desc;
 
 #define PRISM_FROSTED_DESC_INIT                                                                    \
-    {.type = PRISM_TYPE_FROSTED_DESC,                                                             \
+    {.type = PRISM_TYPE_FROSTED_DESC,                                                              \
      .opacity = 1.0f,                                                                              \
      .saturation = 1.25f,                                                                          \
      .tint_strength = 0.15f,                                                                       \
@@ -71,17 +71,18 @@ typedef struct prism_frosted_desc {
 
 typedef struct prism_frosted_filter prism_frosted_filter;
 
-PRISM_NODISCARD PRISM_API flux_result
-prism_frosted_filter_create(flux_device *device, prism_frosted_filter **out);
+PRISM_NODISCARD PRISM_API flux_result prism_frosted_filter_create(flux_device *device,
+                                                                  prism_frosted_filter **out);
 
 PRISM_NODISCARD PRISM_API prism_frosted_filter *
 prism_frosted_filter_retain(prism_frosted_filter *filter);
 
 PRISM_API void prism_frosted_filter_release(prism_frosted_filter *filter);
 
-PRISM_NODISCARD PRISM_API flux_result
-prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame *frame,
-                           const prism_frosted_desc *desc, flux_image **out);
+PRISM_NODISCARD PRISM_API flux_result prism_frosted_filter_apply(prism_frosted_filter *filter,
+                                                                 flux_frame *frame,
+                                                                 const prism_frosted_desc *desc,
+                                                                 flux_image **out);
 
 #ifdef __cplusplus
 }

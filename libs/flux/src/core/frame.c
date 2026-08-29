@@ -201,7 +201,7 @@ bool flux_frame_track_foreign_image(flux_frame *f, VkImage image, void *resource
                                     flux_frame_resource_retain_fn retain,
                                     flux_frame_resource_release_fn release, bool *foreign_owned) {
     if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING || !image || !resource ||
-        !retain || !release || !foreign_owned)
+        !retain || !release)
         return false;
 
     flux_surface *s = f->surface;
@@ -219,7 +219,7 @@ bool flux_frame_track_foreign_image(flux_frame *f, VkImage image, void *resource
         .resource = retain(resource),
         .release = release,
         .foreign_owned = foreign_owned,
-        .acquired = *foreign_owned,
+        .acquired = foreign_owned ? *foreign_owned : false,
         .acquire_semaphore = VK_NULL_HANDLE,
         .acquire_wait_submitted = false,
     };
@@ -318,6 +318,8 @@ static VkResult foreign_images_record_acquire(flux_surface *s, flux_per_frame *p
 static void foreign_images_record_release(flux_surface *s, flux_per_frame *pf) {
     for (uint32_t i = 0; i < pf->foreign_image_count; ++i) {
         const flux_frame_foreign_image *entry = &pf->foreign_images[i];
+        if (!entry->foreign_owned)
+            continue;
         VkImageMemoryBarrier2 barrier = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,

@@ -14,10 +14,10 @@
 #ifndef PRISM_H
 #define PRISM_H
 
-#include <prism/types.h>
-#include <prism/liquid_glass.h>
-#include <prism/frosted.h>
 #include <prism/acrylic.h>
 #include <prism/backdrop_layer.h>
+#include <prism/frosted.h>
+#include <prism/liquid_glass.h>
+#include <prism/types.h>
 
 #endif /* PRISM_H */

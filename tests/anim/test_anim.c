@@ -85,8 +85,7 @@ static void test_spring_energy_never_increases(void) {
         float prev = INFINITY;
         for (int f = 0; f < 200; f++) {
             anim_spring_advance(&s, 0.0f, p, dts[i], false);
-            float e = 0.5f * p.stiffness * s.value * s.value +
-                      0.5f * s.velocity * s.velocity;
+            float e = 0.5f * p.stiffness * s.value * s.value + 0.5f * s.velocity * s.velocity;
             CHECK(e <= prev + 1e-2f);
             prev = e;
         }

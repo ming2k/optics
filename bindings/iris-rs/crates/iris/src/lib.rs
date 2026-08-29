@@ -401,14 +401,10 @@ impl Application {
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
-                // Cast the iris_sys view of `lens` / `lens_input` to lens's
-                // own bindgen view. Both come from the same C declaration, so
-                // the layouts are identical; the types are just nominally
-                // distinct because they came from two `-sys` crates.
-                let lens_ui = ui as *mut lens::sys::lens;
-                let mut frame = unsafe { Frame::from_raw(lens_ui) };
-                let input_ptr = in_ as *const lens::sys::lens_input;
-                let input = unsafe { Input::from_raw_ref(input_ptr) };
+                // The shared native seam aliases these handles to the same
+                // generated types across the Iris and Lens bindings.
+                let mut frame = unsafe { Frame::from_raw(ui) };
+                let input = unsafe { Input::from_raw_ref(in_) };
                 (run.build)(&mut frame, input);
                 // The backend follows the hovered widget's cursor hint
                 // natively once per frame — nothing to do here.
@@ -452,10 +448,7 @@ impl Application {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
                 match run.start.as_mut() {
-                    Some(s) => s(StartHost {
-                        ui,
-                        device,
-                    }),
+                    Some(s) => s(StartHost { ui, device }),
                     None => true,
                 }
             }))
@@ -475,10 +468,7 @@ impl Application {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
                 if let Some(t) = run.stop.as_mut() {
-                    t(StartHost {
-                        ui,
-                        device,
-                    });
+                    t(StartHost { ui, device });
                 }
             }));
         }

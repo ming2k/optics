@@ -65,8 +65,8 @@
  * MinGW-w64 headers tolerate the reverse order by accident; zig cc's
  * bundled MinGW headers do not — this include order was the reason the
  * CI cross-compile gate could not build this TU. */
-#include <windows.h>
 #include <imm.h>
+#include <windows.h>
 #include <windowsx.h>
 
 /* Win32 platform surface glue: included as the platform child header (the
@@ -1596,8 +1596,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
          * kill every streamed skip), but lens chrome damage, resizes,
          * a forced WM_PAINT, and a never-yet-presented surface all
          * change what is on screen and force a real paint below. */
-        bool surface_forced =
-            resized_this_frame || surface_needs_paint || pl.force_paint;
+        bool surface_forced = resized_this_frame || surface_needs_paint || pl.force_paint;
         bool host_skip_render =
             cfg->paint != NULL && pl.frame_skip_render && !surface_forced && !chrome_damaged;
         pl.frame_skip_render = false;
@@ -1605,10 +1604,9 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                                   !resized_this_frame && !surface_needs_paint && !chrome_damaged &&
                                   !pl.force_paint;
         pl.paint_static = false;
-        bool must_paint =
-            !host_canvas_static && !host_skip_render &&
-            (cfg->paint != NULL || chrome_damaged || host_animating ||
-             resized_this_frame || surface_needs_paint);
+        bool must_paint = !host_canvas_static && !host_skip_render &&
+                          (cfg->paint != NULL || chrome_damaged || host_animating ||
+                           resized_this_frame || surface_needs_paint);
         if (must_paint) {
             surface_needs_paint = true;
             flux_frame *frame = NULL;

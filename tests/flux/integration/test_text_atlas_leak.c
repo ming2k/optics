@@ -30,9 +30,8 @@
 
 /* Printable ASCII, each glyph rasterised at a distinct subpixel phase.
  * 512px cells in a 4096px atlas fill four pages in a handful of rounds. */
-static const char *FILLER =
-    "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
-    "abcdefghijklmnopqrstuvwxyz{|}~";
+static const char *FILLER = "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
+                            "abcdefghijklmnopqrstuvwxyz{|}~";
 
 typedef struct draw_case {
     flux_text *text;
@@ -53,6 +52,30 @@ static void draw_filler(flux_canvas *canvas, void *user) {
      * a subpixel phase shift forces new entries for every glyph. */
     style.size_px = dc->size_px;
     flux_text_draw(dc->text, canvas, nullptr, dc->x, 4.0f, FILLER, strlen(FILLER), &style);
+}
+
+/* An idle device has finished GPU work, but sampled images stay retained by
+ * their frame slot until that slot is reused. Submit one empty frame per slot
+ * before comparing allocator snapshots so the test measures the atlas's
+ * ownership, not the frame-lifetime safety retains. */
+static bool settle_frame_slots(flux_device *d, flux_surface *s, flux_canvas *canvas) {
+    flux_device_limits limits = FLUX_DEVICE_LIMITS_INIT;
+    if (flux_device_get_limits(d, &limits) != FLUX_OK)
+        return false;
+    flux_device_wait_idle(d);
+    for (uint32_t i = 0; i < limits.max_frames_in_flight; ++i) {
+        flux_frame *frame = nullptr;
+        if (flux_surface_begin_frame(s, nullptr, &frame) != FLUX_OK)
+            return false;
+        flux_color clear = flux_color_rgba(0, 0, 0, 255);
+        if (flux_canvas_begin_frame(canvas, frame, &clear) != FLUX_OK)
+            return false;
+        flux_canvas_end_frame(canvas);
+        if (flux_frame_submit(frame) != FLUX_OK || flux_frame_present(frame) != FLUX_OK)
+            return false;
+    }
+    flux_device_wait_idle(d);
+    return true;
 }
 
 int main(void) {
@@ -119,7 +142,7 @@ int main(void) {
 
         if (after.atlas_clears > before.atlas_clears) {
             clears_seen++;
-            flux_device_wait_idle(d);
+            EXPECT(settle_frame_slots(d, s, canvas));
             if (!have_first_clear) {
                 flux_device_memory_stats(d, &mem_first_clear_after);
                 have_first_clear = true;
@@ -135,7 +158,7 @@ int main(void) {
      * count after the final clear is at most one above the count measured
      * right after the first clear (the slack covers one in-flight page
      * mid-recreate, not a per-clear increment). */
-    flux_device_wait_idle(d);
+    EXPECT(settle_frame_slots(d, s, canvas));
     flux_device_memory_stats(d, &mem_after);
     EXPECT(have_first_clear);
     /* With the page-0 leak each clear permanently added one live
@@ -144,8 +167,7 @@ int main(void) {
      * settles within a constant slack of the first clear's snapshot. */
     EXPECT(have_first_clear);
     if (have_first_clear)
-        EXPECT(mem_after.live_allocations
-               <= mem_first_clear_after.live_allocations + 2);
+        EXPECT(mem_after.live_allocations <= mem_first_clear_after.live_allocations + 2);
 
     flux_canvas_destroy(canvas);
     flux_surface_release(s);

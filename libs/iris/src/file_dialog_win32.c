@@ -397,8 +397,7 @@ IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, s
 IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
     iris_file_dialog_opts o = opts ? *opts : (iris_file_dialog_opts){0};
     o.multiple_selection = false;
-    return pick_open(&o, false, true, out_path, out_cap, NULL, NULL) == 1 ? 0
-                                                                           : IRIS_PICK_CANCELLED;
+    return pick_open(&o, false, true, out_path, out_cap, NULL, NULL) == 1 ? 0 : IRIS_PICK_CANCELLED;
 }
 
 IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *default_name,

@@ -531,10 +531,11 @@ static void frame_release_image(void *resource) {
 }
 
 bool canvas_track_foreign_image(flux_canvas *c, flux_image *img) {
-    if (!c || !img || !img->imported_memory)
-        return true;
+    if (!c || !img)
+        return false;
+    bool *foreign_owned = img->imported_memory ? &img->foreign_owned : nullptr;
     return flux_frame_track_foreign_image(c->frame, img->image, img, frame_retain_image,
-                                          frame_release_image, &img->foreign_owned);
+                                          frame_release_image, foreign_owned);
 }
 
 static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux_sampler *sampler,

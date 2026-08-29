@@ -289,7 +289,6 @@ FLUX_API void flux_canvas_end_frame(flux_canvas *c);
  * successful termination returns FLUX_OK. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_frame_checked(flux_canvas *c);
 
-
 /* Descriptor form of flux_canvas_begin_frame. This makes attachment load
  * semantics and antialiasing independent: compositor/image-heavy passes can
  * clear a one-sample target without allocating and resolving a 4x attachment,

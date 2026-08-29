@@ -51,13 +51,7 @@ pub fn version_number() -> u32 {
 /// (e.g. an app embedding flux through a plugin host).
 pub fn version_check(major: u32, minor: u32, patch: u32) -> bool {
     // SAFETY: pure query; the C signature takes int32s.
-    unsafe {
-        sys::flux_version_check(
-            major as i32,
-            minor as i32,
-            patch as i32,
-        )
-    }
+    unsafe { sys::flux_version_check(major as i32, minor as i32, patch as i32) }
 }
 
 /// Backend-neutral pixel format, re-exported from the raw bindings.
@@ -1401,7 +1395,12 @@ impl Surface {
                 Ok(sys::flux_surface_offscreen_format_desc {
                     type_: sys::flux_struct_type::FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC,
                     next: std::ptr::null(),
-                    formats: options.offscreen_formats.iter().map(|f| f.raw()).collect::<Vec<_>>().as_ptr(),
+                    formats: options
+                        .offscreen_formats
+                        .iter()
+                        .map(|f| f.raw())
+                        .collect::<Vec<_>>()
+                        .as_ptr(),
                     format_count: options
                         .offscreen_formats
                         .len()
@@ -3266,10 +3265,7 @@ impl Path {
 fn image_data_len(width: u32, height: u32, format: Format) -> Result<usize, Error> {
     let bytes_per_pixel = match format {
         Format::R8Unorm => 1usize,
-        Format::Rgba8Unorm
-        | Format::Bgra8Unorm
-        | Format::Rgba8Srgb
-        | Format::Bgra8Srgb => 4usize,
+        Format::Rgba8Unorm | Format::Bgra8Unorm | Format::Rgba8Srgb | Format::Bgra8Srgb => 4usize,
         Format::Rgba16Sfloat => 8usize, // ADR-0069 working space
         _ => return Err(Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED)),
     };
@@ -4085,7 +4081,12 @@ pub fn dmabuf_format_modifiers(device: &Device, format: Format) -> Vec<u64> {
     // Two-pass: probe the required length with count 0, then allocate and fill.
     let mut count: u32 = 0;
     let rc = unsafe {
-        sys::flux_dmabuf_format_modifiers(device.raw, format.raw(), std::ptr::null_mut(), &mut count)
+        sys::flux_dmabuf_format_modifiers(
+            device.raw,
+            format.raw(),
+            std::ptr::null_mut(),
+            &mut count,
+        )
     };
     // FLUX_OK with count 0 (no qualifiers, or device lacks dma-buf) is the
     // common "nothing to advertise" path. An unsupported format is also mapped
@@ -4186,18 +4187,9 @@ mod tests {
 
     #[test]
     fn image_data_len_validates_supported_formats() {
-        assert_eq!(
-            image_data_len(3, 2, Format::R8Unorm).unwrap(),
-            6
-        );
-        assert_eq!(
-            image_data_len(3, 2, Format::Rgba8Unorm).unwrap(),
-            24
-        );
-        assert_eq!(
-            image_data_len(3, 2, Format::Rgba16Sfloat).unwrap(),
-            48
-        );
+        assert_eq!(image_data_len(3, 2, Format::R8Unorm).unwrap(), 6);
+        assert_eq!(image_data_len(3, 2, Format::Rgba8Unorm).unwrap(), 24);
+        assert_eq!(image_data_len(3, 2, Format::Rgba16Sfloat).unwrap(), 48);
         assert_eq!(
             image_data_len(1, 1, Format::Rgb10a2Unorm).unwrap_err(),
             Error(sys::flux_result::FLUX_ERROR_UNSUPPORTED)

@@ -185,9 +185,7 @@ fn main() {
         .blocklist_type("flux_image")
         .blocklist_function("flux_.*")
         .blocklist_var("FLUX_.*")
-        .raw_line(
-            "pub use flux_sys::{flux_canvas, flux_device, flux_image};",
-        )
+        .raw_line("pub use flux_sys::{flux_canvas, flux_device, flux_image};")
         .raw_line("pub use flux_sys::flux_color_rgba_premul;")
         .default_enum_style(bindgen::EnumVariation::Rust {
             non_exhaustive: false,

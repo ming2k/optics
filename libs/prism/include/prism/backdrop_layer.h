@@ -60,9 +60,9 @@ extern "C" {
 typedef struct prism_backdrop_frost {
     flux_rect bounds;
     float corner_radius;
-    float opacity; /* [0, 1] */
-    uint32_t tint_color;    /* 0xRRGGBB wash blended into the frost */
-    float tint_strength;    /* [0, 1]; 0 keeps the blurred backdrop */
+    float opacity;       /* [0, 1] */
+    uint32_t tint_color; /* 0xRRGGBB wash blended into the frost */
+    float tint_strength; /* [0, 1]; 0 keeps the blurred backdrop */
 } prism_backdrop_frost;
 
 #define PRISM_BACKDROP_FROST_INIT                                                                  \
@@ -74,9 +74,9 @@ typedef struct prism_backdrop_frost {
 typedef struct prism_backdrop_layer_desc {
     prism_struct_type type; /* PRISM_TYPE_BACKDROP_LAYER_DESC */
     const void *next;
-    flux_image *input;         /* sharp backdrop capture (required) */
-    flux_image *blurred_input; /* blurred backdrop (required, same extent) */
-    const prism_backdrop_frost *frost;   /* may be NULL/0 */
+    flux_image *input;                 /* sharp backdrop capture (required) */
+    flux_image *blurred_input;         /* blurred backdrop (required, same extent) */
+    const prism_backdrop_frost *frost; /* may be NULL/0 */
     uint32_t frost_count;
     const prism_liquid_glass_group *groups; /* may be NULL/0 */
     uint32_t group_count;
@@ -98,18 +98,18 @@ typedef struct prism_backdrop_layer_desc {
 } prism_backdrop_layer_desc;
 
 #define PRISM_BACKDROP_LAYER_DESC_INIT                                                             \
-    {.type = PRISM_TYPE_BACKDROP_LAYER_DESC,                                                      \
-     .refraction = 8.0f,                                                                          \
-     .chromatic_aberration = 1.25f,                                                               \
-     .saturation = 1.08f,                                                                         \
-     .brightness = 1.02f,                                                                         \
-     .edge_width = 18.0f,                                                                         \
-     .rim_light = 0.55f,                                                                          \
-     .light_direction = {-0.45f, -0.89f},                                                         \
-     .opacity = 1.0f,                                                                             \
-     .size_reference = 72.0f,                                                                     \
-     .size_scale_min = 0.15f,                                                                     \
-     .tint_strength = 1.0f,                                                                       \
+    {.type = PRISM_TYPE_BACKDROP_LAYER_DESC,                                                       \
+     .refraction = 8.0f,                                                                           \
+     .chromatic_aberration = 1.25f,                                                                \
+     .saturation = 1.08f,                                                                          \
+     .brightness = 1.02f,                                                                          \
+     .edge_width = 18.0f,                                                                          \
+     .rim_light = 0.55f,                                                                           \
+     .light_direction = {-0.45f, -0.89f},                                                          \
+     .opacity = 1.0f,                                                                              \
+     .size_reference = 72.0f,                                                                      \
+     .size_scale_min = 0.15f,                                                                      \
+     .tint_strength = 1.0f,                                                                        \
      .frost_strength = 1.0f}
 
 typedef struct prism_backdrop_layer_filter prism_backdrop_layer_filter;
@@ -135,10 +135,9 @@ prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filter, flux_fram
 /* Reads the glass statistics this frame slot last submitted (see
  * prism_liquid_glass_filter_stats; group i of the stats aligns with group
  * i of that submission's glass array). */
-PRISM_NODISCARD PRISM_API flux_result
-prism_backdrop_layer_filter_stats(prism_backdrop_layer_filter *filter, flux_frame *frame,
-                                  prism_backdrop_stat *out, uint32_t max_groups,
-                                  uint32_t *out_count);
+PRISM_NODISCARD PRISM_API flux_result prism_backdrop_layer_filter_stats(
+    prism_backdrop_layer_filter *filter, flux_frame *frame, prism_backdrop_stat *out,
+    uint32_t max_groups, uint32_t *out_count);
 
 #ifdef __cplusplus
 }

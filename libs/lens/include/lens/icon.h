@@ -326,8 +326,8 @@ typedef struct lens_icon_run {
 typedef struct lens_icon_desc {
     const lens_icon_cmd *cmds;
     uint32_t count;
-    const lens_icon_run *runs;     /* NULL = whole stream, one theme paint */
-    uint32_t run_count;            /* 0 unless runs != NULL */
+    const lens_icon_run *runs; /* NULL = whole stream, one theme paint */
+    uint32_t run_count;        /* 0 unless runs != NULL */
 } lens_icon_desc;
 
 /* The built-in icon table is internal: lens_icon_id values < LENS_ICON_COUNT

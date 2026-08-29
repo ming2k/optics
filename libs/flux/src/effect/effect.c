@@ -31,7 +31,7 @@
  * where the compiler lacks it — see renderer.c for the full rationale. */
 #if defined(__has_embed) && !defined(FLUX_SHADER_NO_EMBED)
 #if __has_embed("effect_blur.comp.spv") && __has_embed("effect_backdrop.comp.spv") &&              \
-    __has_embed("effect_blur_16f.comp.spv") && __has_embed("effect_backdrop_16f.comp.spv") &&       \
+    __has_embed("effect_blur_16f.comp.spv") && __has_embed("effect_backdrop_16f.comp.spv") &&      \
     __has_embed("effect_shadow.comp.spv") && __has_embed("effect_shadow_16f.comp.spv")
 #define FLUX_EFFECT_SHADERS_EMBED 1
 #endif
@@ -467,10 +467,10 @@ static flux_result ensure_backdrop_pipeline(flux_device *d, effect_state *st, bo
 }
 
 static flux_result ensure_shadow_pipeline(flux_device *d, effect_state *st, bool is16f) {
-    return ensure_pipeline(
-        d, &st->shadow_pipelines[is16f ? 1 : 0], is16f ? effect_shadow_16f_spv : effect_shadow_spv,
-        is16f ? sizeof(effect_shadow_16f_spv) : sizeof(effect_shadow_spv),
-        sizeof(effect_shadow_push));
+    return ensure_pipeline(d, &st->shadow_pipelines[is16f ? 1 : 0],
+                           is16f ? effect_shadow_16f_spv : effect_shadow_spv,
+                           is16f ? sizeof(effect_shadow_16f_spv) : sizeof(effect_shadow_spv),
+                           sizeof(effect_shadow_push));
 }
 
 /* Storage/intermediate format for an effect input (ADR-0069): 8-bit
@@ -1196,8 +1196,8 @@ static flux_result shadow_filter_ensure_slot(flux_shadow_filter *filter, uint32_
         flux_image_release(slot->ping);
     *slot = (shadow_filter_slot){0};
 
-    flux_result r = flux_image_create_compute_writable(filter->device, input->width,
-                                                       input->height, storage_format, &slot->ping);
+    flux_result r = flux_image_create_compute_writable(filter->device, input->width, input->height,
+                                                       storage_format, &slot->ping);
     if (r != FLUX_OK)
         return r;
     r = flux_image_create_compute_writable(filter->device, input->width, input->height,

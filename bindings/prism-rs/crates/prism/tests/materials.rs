@@ -1,8 +1,6 @@
 //! Tests for frosted glass and acrylic materials in prism-rs.
 
-use prism::{
-    AcrylicGroup, AcrylicParams, AcrylicShape, FrostedGroup, FrostedParams, FrostedShape,
-};
+use prism::{AcrylicGroup, AcrylicParams, AcrylicShape, FrostedGroup, FrostedParams, FrostedShape};
 
 #[test]
 fn frosted_params_default() {
@@ -101,7 +99,10 @@ fn backdrop_frost_maps_rect_and_opacity() {
         tint_strength: 0.6,
     };
     let raw = frost.as_raw();
-    assert_eq!((raw.bounds.x, raw.bounds.y, raw.bounds.w, raw.bounds.h), (4.0, 8.0, 320.0, 200.0));
+    assert_eq!(
+        (raw.bounds.x, raw.bounds.y, raw.bounds.w, raw.bounds.h),
+        (4.0, 8.0, 320.0, 200.0)
+    );
     assert_eq!(raw.corner_radius, 18.0);
     assert_eq!(raw.opacity, 0.85);
     assert_eq!(raw.tint_color, 0x0010_223A);

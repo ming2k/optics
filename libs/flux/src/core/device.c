@@ -1387,8 +1387,23 @@ static void zombie_park(flux_device *d, flux_retire_zombie *z) {
     pending = d->retire_pending;
     flux_platform_mutex_unlock(&d->retire_lock);
 
-    if (pending >= FLUX_RETIRE_MAX_PENDING)
-        flux_device_wait_idle(d); /* full drain: see comment above */
+    if (pending >= FLUX_RETIRE_MAX_PENDING) {
+        /* Keep submissions excluded through the sweep. A plain
+         * flux_device_wait_idle() only advances completed_serial to the
+         * latest submitted batch, while zombies are deliberately tagged one
+         * serial beyond it to cover a frame that is still recording. At the
+         * hard bound we take the documented slow path: no resource whose
+         * refcount reached zero may remain referenced by a recording frame,
+         * so after the device is idle the whole parked set is safe to drain.
+         * zombie_park releases retire_lock before reaching this point, so the
+         * queue_lock -> retire_lock order below has no inverse in this path. */
+        flux_platform_mutex_lock(&d->queue_lock);
+        vkDeviceWaitIdle(d->device);
+        flux_vk_note_graphics_completed(
+            d, atomic_load_explicit(&d->submit_serial, memory_order_acquire));
+        flux_device_drain_retire(d);
+        flux_platform_mutex_unlock(&d->queue_lock);
+    }
 }
 
 void flux_vk_retire_pipeline(flux_device *d, VkPipeline pipeline) {

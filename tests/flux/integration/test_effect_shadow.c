@@ -236,8 +236,8 @@ int main(void) {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .allocationSize = mr.size,
             .memoryTypeIndex = test_helpers_find_memory_type(
-                d, mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+                d, mr.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
         };
         EXPECT(vkAllocateMemory(vk, &ai, nullptr, &dst_mem) == VK_SUCCESS);
         EXPECT(vkBindBufferMemory(vk, dst, dst_mem, 0) == VK_SUCCESS);
@@ -334,7 +334,8 @@ int main(void) {
         uint8_t far = pixels[(2 * W + 2) * 4 + 3];
         uint8_t skirt = pixels[(16 * W + 6) * 4 + 3]; /* 2px left of the edge */
         float expect_center = expected_blur_at(16, 16);
-        EXPECT(center >= (uint8_t)(expect_center - 4.0f) && center <= (uint8_t)(expect_center + 4.0f));
+        EXPECT(center >= (uint8_t)(expect_center - 4.0f) &&
+               center <= (uint8_t)(expect_center + 4.0f));
         /* The corner is far outside the square but a radius-12 kernel still
          * leaks a faint skirt there (analytic ≈1-2/255); assert near-zero. */
         EXPECT(far <= 4u);
@@ -403,8 +404,7 @@ int main(void) {
         sd.tint_green = 1.0f;
         sd.tint_blue = 1.0f;
         sd.alpha = 1.0f;
-        EXPECT(flux_shadow_filter_apply(filter, nullptr, &sd, &out) ==
-               FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(flux_shadow_filter_apply(filter, nullptr, &sd, &out) == FLUX_ERROR_INVALID_ARGUMENT);
         EXPECT(out == nullptr);
 
         /* Wrong descriptor type is rejected. */

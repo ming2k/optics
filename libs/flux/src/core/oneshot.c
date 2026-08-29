@@ -1287,8 +1287,7 @@ FLUX_API flux_result flux_oneshot_begin(flux_device *d, VkCommandBuffer *out_cmd
     }
     if (slot == UINT32_MAX) {
         uint32_t new_count = d->oneshot_slot_count * 2;
-        __typeof__(d->oneshot_slots) grown =
-            flux_internal_alloc(d, sizeof(*grown) * new_count);
+        __typeof__(d->oneshot_slots) grown = flux_internal_alloc(d, sizeof(*grown) * new_count);
         if (!grown) {
             flux_platform_mutex_unlock(&d->staging_lock);
             transient_pool_release(d, pool, d->graphics_family, cmd, VK_NULL_HANDLE);

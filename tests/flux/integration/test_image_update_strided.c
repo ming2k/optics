@@ -19,10 +19,18 @@
 static uint32_t straight_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | ((uint32_t)a << 24);
 }
-static uint8_t px_r(uint32_t p) { return (uint8_t)(p & 0xffu); }
-static uint8_t px_g(uint32_t p) { return (uint8_t)((p >> 8) & 0xffu); }
-static uint8_t px_b(uint32_t p) { return (uint8_t)((p >> 16) & 0xffu); }
-static uint8_t px_a(uint32_t p) { return (uint8_t)((p >> 24) & 0xffu); }
+static uint8_t px_r(uint32_t p) {
+    return (uint8_t)(p & 0xffu);
+}
+static uint8_t px_g(uint32_t p) {
+    return (uint8_t)((p >> 8) & 0xffu);
+}
+static uint8_t px_b(uint32_t p) {
+    return (uint8_t)((p >> 16) & 0xffu);
+}
+static uint8_t px_a(uint32_t p) {
+    return (uint8_t)((p >> 24) & 0xffu);
+}
 
 /* The canvas samples UNORM texels through an sRGB decode/encode round trip,
  * so readback carries ±2 8-bit noise (same tolerance as test_offscreen). */
@@ -44,8 +52,8 @@ typedef struct {
  * surface pixel (x, y) reads back image texel (x, y) exactly. Rendering
  * follows the offscreen frame loop (ADR-0013): begin frame, draw with the
  * canvas, request the readback on the frame, then submit + present. */
-static flux_result blit_and_read(flux_surface *s, flux_canvas *canvas, blit_case *bc,
-                                 uint32_t *rb, size_t bytes) {
+static flux_result blit_and_read(flux_surface *s, flux_canvas *canvas, blit_case *bc, uint32_t *rb,
+                                 size_t bytes) {
     flux_frame *frame = nullptr;
     flux_result r = flux_surface_begin_frame(s, nullptr, &frame);
     if (r != FLUX_OK)
@@ -57,8 +65,7 @@ static flux_result blit_and_read(flux_surface *s, flux_canvas *canvas, blit_case
     flux_paint opaque = flux_paint_solid(flux_color_rgba(255, 255, 255, 255));
     opaque.blend = FLUX_BLEND_SRC;
     flux_canvas_draw_image_sampled(canvas, bc->image, bc->sampler,
-                                   (flux_rect){0.0f, 0.0f, (float)SURF_W, (float)SURF_H},
-                                   &opaque);
+                                   (flux_rect){0.0f, 0.0f, (float)SURF_W, (float)SURF_H}, &opaque);
     flux_canvas_end_frame(canvas);
     r = flux_frame_request_readback(frame);
     if (r != FLUX_OK)

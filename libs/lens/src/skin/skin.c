@@ -88,8 +88,7 @@ void lens_set_skin(lens *ui, lens_widget_kind kind, lens_skin_fn fn) {
     }
 }
 
-void lens_set_skin_userdata(lens *ui, lens_widget_kind kind, lens_skin_userdata_fn fn,
-                            void *user) {
+void lens_set_skin_userdata(lens *ui, lens_widget_kind kind, lens_skin_userdata_fn fn, void *user) {
     if (!ui)
         return;
     if ((uint32_t)kind >= (uint32_t)LENS_WIDGET_KIND_USER_BASE) {
@@ -143,8 +142,7 @@ void lensi_skin_emit(lens *ui, lens_node *n, const lens_widget_record *rec) {
         fn(ui, n, rec);
 }
 
-void lens_skin_emit_user(lens *ui, lens_node *node, lens_widget_kind kind,
-                         lens_widget_record rec) {
+void lens_skin_emit_user(lens *ui, lens_node *node, lens_widget_kind kind, lens_widget_record rec) {
     if (!ui || !node)
         return;
     if ((uint32_t)kind < (uint32_t)LENS_WIDGET_KIND_USER_BASE)

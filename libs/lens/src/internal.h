@@ -206,7 +206,6 @@ struct lens_node {
      * node by the ADR-0038 GC. Mechanism, not animation — the library stores
      * but never integrates. */
     float skin_scratch[LENS_SKIN_SCRATCH_FLOATS];
-
 };
 
 /* ------------------------------------------------------------------ */
@@ -501,7 +500,7 @@ typedef struct lens_ghost {
     uint32_t frames_left;
     float alpha;
     bool refreshed_this_frame;
-    bool wants_alive; /* the host asked for it this frame (lens_set_ghost) */
+    bool wants_alive;      /* the host asked for it this frame (lens_set_ghost) */
     lens_ghost_node *root; /* NULL = slot unused */
 } lens_ghost;
 

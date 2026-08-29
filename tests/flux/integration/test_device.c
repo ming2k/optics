@@ -162,8 +162,8 @@ int main(void) {
         bool q16 = flux_device_supports_image_usage(d, FLUX_FORMAT_RGBA16_SFLOAT,
                                                     FLUX_IMAGE_USAGE_COMPUTE_WRITE);
         flux_image *im16 = nullptr;
-        flux_result r16 = flux_image_create_compute_writable(d, 4, 4, FLUX_FORMAT_RGBA16_SFLOAT,
-                                                             &im16);
+        flux_result r16 =
+            flux_image_create_compute_writable(d, 4, 4, FLUX_FORMAT_RGBA16_SFLOAT, &im16);
         EXPECT((r16 == FLUX_OK) == q16);
         if (r16 == FLUX_OK)
             flux_image_release(im16);

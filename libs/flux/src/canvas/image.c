@@ -337,8 +337,8 @@ flux_image *flux_image_retain(flux_image *im) {
  * `row_bytes` == 0 means the packed variant (stride derived from width);
  * otherwise it is the source row pitch and must be at least width * bpp. */
 static flux_result update_region_validate(const flux_image *im, uint32_t x, uint32_t y, uint32_t w,
-                                           uint32_t h, const void *data, size_t row_bytes,
-                                           size_t bytes, size_t *packed_bytes) {
+                                          uint32_t h, const void *data, size_t row_bytes,
+                                          size_t bytes, size_t *packed_bytes) {
     if (!im || !data)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (w == 0 || h == 0)
@@ -414,16 +414,16 @@ flux_result flux_image_update_region_strided(flux_image *im, uint32_t x, uint32_
         src += row_bytes;
         dst += row_min;
     }
-    flux_result r = flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
-                                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, scratch,
-                                            packed);
+    flux_result r =
+        flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
+                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, scratch, packed);
     flux_internal_free(im->device, scratch);
     return r;
 }
 
-flux_result flux_image_update_region_premultiply(flux_image *im, uint32_t x, uint32_t y,
-                                                 uint32_t w, uint32_t h, const void *data,
-                                                 size_t row_bytes, size_t bytes) {
+flux_result flux_image_update_region_premultiply(flux_image *im, uint32_t x, uint32_t y, uint32_t w,
+                                                 uint32_t h, const void *data, size_t row_bytes,
+                                                 size_t bytes) {
     if (im && im->format != FLUX_FORMAT_RGBA8_UNORM) {
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "premultiply upload requires FLUX_FORMAT_RGBA8_UNORM");
         return FLUX_ERROR_UNSUPPORTED;
@@ -455,9 +455,9 @@ flux_result flux_image_update_region_premultiply(flux_image *im, uint32_t x, uin
         }
         src += stride;
     }
-    flux_result r = flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
-                                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, scratch,
-                                            packed);
+    flux_result r =
+        flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
+                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, scratch, packed);
     flux_internal_free(im->device, scratch);
     return r;
 }
@@ -527,21 +527,50 @@ bool flux_device_supports_image_usage(const flux_device *d, flux_format format,
      * doubles as the "format exists at all" check. */
     VkFormat vk;
     switch (format) {
-    case FLUX_FORMAT_R8_UNORM:      vk = VK_FORMAT_R8_UNORM; break;
-    case FLUX_FORMAT_RGBA8_UNORM:   vk = VK_FORMAT_R8G8B8A8_UNORM; break;
-    case FLUX_FORMAT_BGRA8_UNORM:   vk = VK_FORMAT_B8G8R8A8_UNORM; break;
-    case FLUX_FORMAT_RGBA8_SRGB:    vk = VK_FORMAT_R8G8B8A8_SRGB; break;
-    case FLUX_FORMAT_BGRA8_SRGB:    vk = VK_FORMAT_B8G8R8A8_SRGB; break;
-    case FLUX_FORMAT_RGB10A2_UNORM: vk = VK_FORMAT_A2B10G10R10_UNORM_PACK32; break;
-    case FLUX_FORMAT_RGBA16_SFLOAT: vk = VK_FORMAT_R16G16B16A16_SFLOAT; break;
-    case FLUX_FORMAT_D32_SFLOAT:    vk = VK_FORMAT_D32_SFLOAT; break;
-    case FLUX_FORMAT_D24_UNORM_S8:  vk = VK_FORMAT_D24_UNORM_S8_UINT; break;
-    case FLUX_FORMAT_D32_SFLOAT_S8: vk = VK_FORMAT_D32_SFLOAT_S8_UINT; break;
-    case FLUX_FORMAT_R32_SFLOAT:    vk = VK_FORMAT_R32_SFLOAT; break;
-    case FLUX_FORMAT_RG32_SFLOAT:   vk = VK_FORMAT_R32G32_SFLOAT; break;
-    case FLUX_FORMAT_RGB32_SFLOAT:  vk = VK_FORMAT_R32G32B32_SFLOAT; break;
-    case FLUX_FORMAT_RGBA32_SFLOAT: vk = VK_FORMAT_R32G32B32A32_SFLOAT; break;
-    default: return false;
+    case FLUX_FORMAT_R8_UNORM:
+        vk = VK_FORMAT_R8_UNORM;
+        break;
+    case FLUX_FORMAT_RGBA8_UNORM:
+        vk = VK_FORMAT_R8G8B8A8_UNORM;
+        break;
+    case FLUX_FORMAT_BGRA8_UNORM:
+        vk = VK_FORMAT_B8G8R8A8_UNORM;
+        break;
+    case FLUX_FORMAT_RGBA8_SRGB:
+        vk = VK_FORMAT_R8G8B8A8_SRGB;
+        break;
+    case FLUX_FORMAT_BGRA8_SRGB:
+        vk = VK_FORMAT_B8G8R8A8_SRGB;
+        break;
+    case FLUX_FORMAT_RGB10A2_UNORM:
+        vk = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+        break;
+    case FLUX_FORMAT_RGBA16_SFLOAT:
+        vk = VK_FORMAT_R16G16B16A16_SFLOAT;
+        break;
+    case FLUX_FORMAT_D32_SFLOAT:
+        vk = VK_FORMAT_D32_SFLOAT;
+        break;
+    case FLUX_FORMAT_D24_UNORM_S8:
+        vk = VK_FORMAT_D24_UNORM_S8_UINT;
+        break;
+    case FLUX_FORMAT_D32_SFLOAT_S8:
+        vk = VK_FORMAT_D32_SFLOAT_S8_UINT;
+        break;
+    case FLUX_FORMAT_R32_SFLOAT:
+        vk = VK_FORMAT_R32_SFLOAT;
+        break;
+    case FLUX_FORMAT_RG32_SFLOAT:
+        vk = VK_FORMAT_R32G32_SFLOAT;
+        break;
+    case FLUX_FORMAT_RGB32_SFLOAT:
+        vk = VK_FORMAT_R32G32B32_SFLOAT;
+        break;
+    case FLUX_FORMAT_RGBA32_SFLOAT:
+        vk = VK_FORMAT_R32G32B32A32_SFLOAT;
+        break;
+    default:
+        return false;
     }
 
     VkFormatProperties props;

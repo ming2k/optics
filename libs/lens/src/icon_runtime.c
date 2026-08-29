@@ -203,8 +203,7 @@ LENS_API lens_icon_id lens_icon_register_svg(const char *svg_utf8) {
                 nsvgDelete(img);
                 return LENS_ICON_INVALID;
             }
-            uint32_t color =
-                paint_run_color(shape_filled ? &s->fill : &s->stroke);
+            uint32_t color = paint_run_color(shape_filled ? &s->fill : &s->stroke);
             if (color != 0)
                 any_explicit_color = true;
             if (shape_filled)

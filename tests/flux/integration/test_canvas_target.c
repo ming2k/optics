@@ -253,9 +253,9 @@ int main(void) {
             /* Capture an opaque white square on transparent: the mask. */
             flux_color transparent = flux_color_rgba(0, 0, 0, 0);
             EXPECT(flux_canvas_begin_target(canvas, frame, target, &transparent) == FLUX_OK);
-            flux_canvas_fill_rect_color(canvas, (flux_rect){(float)(W / 4), (float)(H / 4),
-                                                            (float)(W / 2), (float)(H / 2)},
-                                        flux_color_rgba_premul(255, 255, 255, 255));
+            flux_canvas_fill_rect_color(
+                canvas, (flux_rect){(float)(W / 4), (float)(H / 4), (float)(W / 2), (float)(H / 2)},
+                flux_color_rgba_premul(255, 255, 255, 255));
             flux_canvas_end_target(canvas);
 
             flux_effect_shadow_desc sd = FLUX_EFFECT_SHADOW_DESC_INIT;

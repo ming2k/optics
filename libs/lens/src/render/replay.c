@@ -370,9 +370,8 @@ void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect
                             flux_path_line_to(p, pp[0] * s + ox, pp[1] * s + oy);
                             break;
                         case 2:
-                            flux_path_cubic_to(p, pp[0] * s + ox, pp[1] * s + oy,
-                                               pp[2] * s + ox, pp[3] * s + oy, pp[4] * s + ox,
-                                               pp[5] * s + oy);
+                            flux_path_cubic_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox,
+                                               pp[3] * s + oy, pp[4] * s + ox, pp[5] * s + oy);
                             break;
                         case 3:
                             flux_path_quad_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox,
@@ -385,8 +384,7 @@ void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect
                             flux_path_add_circle(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s);
                             break;
                         case 6: {
-                            flux_rect ir = {pp[0] * s + ox, pp[1] * s + oy, pp[2] * s,
-                                            pp[3] * s};
+                            flux_rect ir = {pp[0] * s + ox, pp[1] * s + oy, pp[2] * s, pp[3] * s};
                             flux_path_add_rect(p, ir);
                             break;
                         }
@@ -395,10 +393,9 @@ void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect
                     /* Straight 0xRRGGBBAA run colour -> flux_color
                      * 0xAARRGGBB premultiplied. */
                     uint32_t rc = ri->color;
-                    uint8_t rr = (uint8_t)(rc >> 16), rg = (uint8_t)(rc >> 8),
-                            rb = (uint8_t)rc, ra = (uint8_t)(rc >> 24);
-                    flux_color color =
-                        rc == 0 ? c->color : flux_color_rgba_premul(rr, rg, rb, ra);
+                    uint8_t rr = (uint8_t)(rc >> 16), rg = (uint8_t)(rc >> 8), rb = (uint8_t)rc,
+                            ra = (uint8_t)(rc >> 24);
+                    flux_color color = rc == 0 ? c->color : flux_color_rgba_premul(rr, rg, rb, ra);
                     flux_paint paint = flux_paint_solid(color);
                     if (ri->fill) {
                         flux_canvas_fill_path(canvas, p, &paint);

@@ -15,7 +15,7 @@
 #include <string.h>
 
 #if defined(__has_embed) && !defined(PRISM_SHADER_NO_EMBED)
-#if __has_embed("acrylic.comp.spv") && __has_embed("acrylic_16f.comp.spv") &&                       \
+#if __has_embed("acrylic.comp.spv") && __has_embed("acrylic_16f.comp.spv") &&                      \
     __has_embed("storage_clear.comp.spv") && __has_embed("storage_clear_16f.comp.spv")
 #define PRISM_ACRYLIC_SHADERS_EMBED 1
 #endif
@@ -288,7 +288,8 @@ static bool acrylic_group_dispatch_bounds(const prism_acrylic_group *group, uint
     int64_t x0 = (int64_t)floorf(group->shape.bounds.x - pad);
     int64_t y0 = (int64_t)floorf(group->shape.bounds.y - pad);
     int64_t x1 = (int64_t)ceilf(group->shape.bounds.x + group->shape.bounds.w + pad);
-    int64_t y1 = (int64_t)ceilf(group->shape.bounds.y + group->shape.bounds.h + pad + fmaxf(group->shadow_offset_y, 0.0f));
+    int64_t y1 = (int64_t)ceilf(group->shape.bounds.y + group->shape.bounds.h + pad +
+                                fmaxf(group->shadow_offset_y, 0.0f));
 
     x0 = x0 < 0 ? 0 : x0;
     y0 = y0 < 0 ? 0 : y0;
@@ -387,12 +388,15 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
                 .height = slot->height,
                 .origin_x = reg.x,
                 .origin_y = reg.y,
-                .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w, g->shape.bounds.h},
+                .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w,
+                           g->shape.bounds.h},
                 .corner_radius = g->shape.corner_radius,
                 .opacity = g->opacity * desc->opacity,
                 .tint_strength = g->tint_strength >= 0.0f ? g->tint_strength : desc->tint_strength,
-                .luminance_plate = g->luminance_plate >= 0.0f ? g->luminance_plate : desc->luminance_plate,
-                .noise_intensity = g->noise_intensity >= 0.0f ? g->noise_intensity : desc->noise_intensity,
+                .luminance_plate =
+                    g->luminance_plate >= 0.0f ? g->luminance_plate : desc->luminance_plate,
+                .noise_intensity =
+                    g->noise_intensity >= 0.0f ? g->noise_intensity : desc->noise_intensity,
                 .border_width = g->border_width >= 0.0f ? g->border_width : desc->border_width,
                 .border_alpha = g->border_alpha >= 0.0f ? g->border_alpha : desc->border_alpha,
                 .shadow_alpha = g->shadow_alpha,

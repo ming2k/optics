@@ -53,12 +53,12 @@ const char *iris_wayland__foreign_handle(void);
 typedef struct iris_picker_response {
     char *out; /* single-URI buffer or NUL-separated multi-URI buffer */
     size_t cap;
-    size_t used;   /* bytes written (excluding the final NUL) — on overflow,
-                      the FULL selection's requirement for retry sizing   */
-    int count;     /* URIs received                                       */
+    size_t used; /* bytes written (excluding the final NUL) — on overflow,
+                    the FULL selection's requirement for retry sizing   */
+    int count;   /* URIs received                                       */
     int done;
     int result;
-    int overflow;  /* set once the cap is hit; stops copying, keeps counting */
+    int overflow; /* set once the cap is hit; stops copying, keeps counting */
 } iris_picker_response;
 
 static int append_string_option(sd_bus_message *message, const char *key, const char *value) {

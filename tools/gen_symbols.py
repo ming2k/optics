@@ -131,9 +131,7 @@ def extract(header: Path, api_macro: str):
             # family): use a trailing comment when the leading one is absent.
             tail = src[m.end():]
             tm = re.match(r'\s*(/\*(?:[^*]|\*(?!/))*\*/)', tail)
-            if tm and '
-
-' not in tail[: tm.end()]:
+            if tm and "\n\n" not in tail[: tm.end()]:
                 desc = first_sentence(tm.group(1))
         rows.append((name, desc))
     return rows

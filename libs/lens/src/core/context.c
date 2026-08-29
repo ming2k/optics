@@ -3,8 +3,8 @@
 #include "../internal.h"
 
 const char *lens_version_string(void) {
-    return LENS_STRINGIFY(LENS_VERSION_MAJOR) "." LENS_STRINGIFY(LENS_VERSION_MINOR) "." LENS_STRINGIFY(
-        LENS_VERSION_PATCH);
+    return LENS_STRINGIFY(LENS_VERSION_MAJOR) "." LENS_STRINGIFY(
+        LENS_VERSION_MINOR) "." LENS_STRINGIFY(LENS_VERSION_PATCH);
 }
 
 void *lensi_alloc(lens *ui, size_t bytes) {
@@ -436,8 +436,8 @@ void lens_end(lens *ui) {
      * because layout itself must not author draw commands (ADR-0059). */
     lensi_scrollbars_emit(ui);
 
-    lensi_mark_dirty(ui); /* compute subtree_changed for culling */
-    lensi_ghost_capture(ui); /* freeze leaving subtrees (ADR-0078) */
+    lensi_mark_dirty(ui);      /* compute subtree_changed for culling */
+    lensi_ghost_capture(ui);   /* freeze leaving subtrees (ADR-0078) */
     lensi_ghost_end_frame(ui); /* expire unrefreshed ghosts */
 
     /* An AT activation that no widget consumed this frame (the node

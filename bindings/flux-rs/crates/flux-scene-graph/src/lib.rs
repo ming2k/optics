@@ -118,7 +118,7 @@ impl Scene {
         let mut raw = std::ptr::null_mut();
         check(unsafe {
             sys::flux_sg_load_glb(
-                device.as_raw() as *mut sys::flux_device,
+                device.as_raw(),
                 bytes.as_ptr().cast(),
                 bytes.len(),
                 &mut raw,
@@ -138,10 +138,8 @@ impl Scene {
         let gltf = gltf::Gltf::from_slice(bytes)?;
         let (materials, fallback) = materials::load(device, &gltf, target)?;
         let scene = Self::from_glb(device, bytes)?;
-        let raw_materials: Vec<*mut sys::flux_material> = materials
-            .iter()
-            .map(|material| material.as_raw() as *mut sys::flux_material)
-            .collect();
+        let raw_materials: Vec<*mut sys::flux_material> =
+            materials.iter().map(|material| material.as_raw()).collect();
         check(unsafe {
             sys::flux_sg_scene_set_materials(
                 scene.raw,
@@ -151,7 +149,7 @@ impl Scene {
                     raw_materials.as_ptr()
                 },
                 raw_materials.len() as u32,
-                fallback.as_raw() as *mut sys::flux_material,
+                fallback.as_raw(),
             )
         })?;
         Ok(scene)
@@ -219,20 +217,13 @@ impl Scene {
     ) {
         let raw_light = light.map(SceneLight::as_raw);
         let opts = sys::flux_sg_draw_opts {
-            material: material.as_raw() as *mut sys::flux_material,
+            material: material.as_raw(),
             light: raw_light
                 .as_ref()
-                .map(|value| value as *const _ as *const sys::flux_scene_light)
+                .map(|value| value as *const _)
                 .unwrap_or(std::ptr::null()),
         };
-        unsafe {
-            sys::flux_sg_draw(
-                pass.as_raw() as *mut sys::flux_frame,
-                camera.as_raw() as *const sys::flux_camera,
-                self.raw,
-                &opts,
-            )
-        };
+        unsafe { sys::flux_sg_draw(pass.as_raw(), camera.as_raw(), self.raw, &opts) };
     }
 
     /// Draw using the per-primitive materials installed by
@@ -248,17 +239,10 @@ impl Scene {
             material: std::ptr::null_mut(),
             light: raw_light
                 .as_ref()
-                .map(|value| value as *const _ as *const sys::flux_scene_light)
+                .map(|value| value as *const _)
                 .unwrap_or(std::ptr::null()),
         };
-        unsafe {
-            sys::flux_sg_draw(
-                pass.as_raw() as *mut sys::flux_frame,
-                camera.as_raw() as *const sys::flux_camera,
-                self.raw,
-                &opts,
-            )
-        };
+        unsafe { sys::flux_sg_draw(pass.as_raw(), camera.as_raw(), self.raw, &opts) };
     }
 }
 

@@ -29,8 +29,8 @@
 /* Shader bytecode: C23 #embed, or generated headers (tools/spv2h.py). */
 #if defined(__has_embed) && !defined(PRISM_SHADER_NO_EMBED)
 #if __has_embed("liquid_glass.comp.spv") && __has_embed("storage_clear.comp.spv") &&               \
-    __has_embed("backdrop_stats.comp.spv") && __has_embed("backdrop_frost.comp.spv") &&           \
-    __has_embed("liquid_glass_16f.comp.spv") && __has_embed("storage_clear_16f.comp.spv") &&      \
+    __has_embed("backdrop_stats.comp.spv") && __has_embed("backdrop_frost.comp.spv") &&            \
+    __has_embed("liquid_glass_16f.comp.spv") && __has_embed("storage_clear_16f.comp.spv") &&       \
     __has_embed("backdrop_frost_16f.comp.spv")
 #define PRISM_LAYER_SHADERS_EMBED 1
 #endif
@@ -146,8 +146,8 @@ typedef struct backdrop_layer_slot {
 
 struct prism_backdrop_layer_filter {
     atomic_uint ref_count;
-    flux_device *device; /* retained; slot images hold weak device refs */
-    flux_compute_pipeline *glass_pipelines[2];  /* [0] rgba8, [1] rgba16f */
+    flux_device *device;                       /* retained; slot images hold weak device refs */
+    flux_compute_pipeline *glass_pipelines[2]; /* [0] rgba8, [1] rgba16f */
     flux_compute_pipeline *clear_pipelines[2];
     flux_compute_pipeline *frost_pipelines[2];
     flux_compute_pipeline *stats_pipeline;
@@ -242,8 +242,7 @@ static void layer_barrier_compute_write_to_read_write(VkCommandBuffer cmd, VkIma
  * the first glass dispatch. The regular write→read-write barrier above does
  * not cover sampled reads; the standalone liquid-glass filter never needs
  * this because its input is a different image. */
-static void layer_barrier_compute_write_to_sampled_and_storage(VkCommandBuffer cmd,
-                                                               VkImage image) {
+static void layer_barrier_compute_write_to_sampled_and_storage(VkCommandBuffer cmd, VkImage image) {
     VkImageMemoryBarrier2 barrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -303,9 +302,8 @@ static flux_result layer_ensure_stats_buffer(prism_backdrop_layer_filter *filter
     return flux_buffer_create(filter->device, &bdesc, &slot->stats);
 }
 
-static flux_result
-layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32_t index, const flux_image *input,
-                  bool need_stats) {
+static flux_result layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32_t index,
+                                     const flux_image *input, bool need_stats) {
     backdrop_layer_slot *slot = &filter->slots[index];
     uint32_t width = flux_image_width(input);
     uint32_t height = flux_image_height(input);
@@ -351,8 +349,9 @@ static flux_result layer_ensure_pipelines(prism_backdrop_layer_filter *filter, b
     if (need_frost && !filter->frost_pipelines[cls]) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
         pdesc.spirv = (const uint32_t *)(is16f ? backdrop_frost_16f_spv : backdrop_frost_spv);
-        pdesc.spirv_word_count = (is16f ? sizeof(backdrop_frost_16f_spv) : sizeof(backdrop_frost_spv)) /
-                                 sizeof(uint32_t);
+        pdesc.spirv_word_count =
+            (is16f ? sizeof(backdrop_frost_16f_spv) : sizeof(backdrop_frost_spv)) /
+            sizeof(uint32_t);
         pdesc.entry_point = "main";
         pdesc.push_constant_bytes = sizeof(backdrop_frost_push);
         flux_result r =
@@ -411,8 +410,7 @@ static bool valid_backdrop_layer_desc(const prism_backdrop_layer_desc *desc) {
         if (!isfinite(frost->bounds.x) || !isfinite(frost->bounds.y) ||
             !isfinite(frost->bounds.w) || !isfinite(frost->bounds.h) ||
             !isfinite(frost->corner_radius) || !isfinite(frost->opacity) ||
-            !isfinite(frost->tint_strength) ||
-            frost->bounds.w <= 0.0f || frost->bounds.h <= 0.0f)
+            !isfinite(frost->tint_strength) || frost->bounds.w <= 0.0f || frost->bounds.h <= 0.0f)
             return false;
     }
     for (uint32_t i = 0; i < desc->group_count; ++i) {
@@ -422,9 +420,8 @@ static bool valid_backdrop_layer_desc(const prism_backdrop_layer_desc *desc) {
     return true;
 }
 
-static bool backdrop_frost_dispatch_bounds(const prism_backdrop_frost *frost,
-                                           uint32_t image_width, uint32_t image_height,
-                                           liquid_glass_region *out) {
+static bool backdrop_frost_dispatch_bounds(const prism_backdrop_frost *frost, uint32_t image_width,
+                                           uint32_t image_height, liquid_glass_region *out) {
     if (!frost || !out || image_width == 0u || image_height == 0u)
         return false;
     int64_t x0 = (int64_t)floorf(frost->bounds.x);
@@ -524,8 +521,7 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     uint32_t index = flux_frame_index(frame);
     if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
         return FLUX_ERROR_OUT_OF_RANGE;
-    flux_result result =
-        layer_ensure_slot(filter, index, input, desc->group_count > 0u);
+    flux_result result = layer_ensure_slot(filter, index, input, desc->group_count > 0u);
     if (result != FLUX_OK)
         return result;
 
@@ -548,10 +544,9 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     uint32_t current_group_count = 0u;
     for (uint32_t i = 0; i < desc->group_count; ++i) {
         const prism_liquid_glass_group *group = &desc->groups[i];
-        float shadow_reach = group->shadow_alpha > 0.0f
-                                 ? fmaxf(group->shadow_offset_y, 0.0f) +
-                                       2.0f * fmaxf(group->shadow_blur, 0.0f)
-                                 : 0.0f;
+        float shadow_reach = group->shadow_alpha > 0.0f ? fmaxf(group->shadow_offset_y, 0.0f) +
+                                                              2.0f * fmaxf(group->shadow_blur, 0.0f)
+                                                        : 0.0f;
         liquid_glass_region region;
         if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, image_width, image_height,
                                                 &region))
@@ -564,10 +559,9 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS;
     liquid_glass_region clear_regions[clear_capacity];
     uint32_t clear_count = 0u;
-    if (!liquid_glass_build_clear_regions(slot->initialized, image_width, image_height,
-                                          slot->previous, slot->previous_count, current,
-                                          current_count, clear_regions, clear_capacity,
-                                          &clear_count))
+    if (!liquid_glass_build_clear_regions(
+            slot->initialized, image_width, image_height, slot->previous, slot->previous_count,
+            current, current_count, clear_regions, clear_capacity, &clear_count))
         return FLUX_ERROR_INVALID_STATE;
 
     result = layer_ensure_pipelines(filter, is16f, clear_count > 0u, desc->frost_count > 0u,
@@ -639,8 +633,8 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
      * rect bounds, so a body-only region simply writes the sharp base. */
     if (current_count > 0u) {
         /* Merge all current footprints into disjoint dispatch regions. */
-        liquid_glass_region dispatch_regions[PRISM_BACKDROP_MAX_FROST_RECTS +
-                                             PRISM_BACKDROP_MAX_GLASS_GROUPS];
+        liquid_glass_region
+            dispatch_regions[PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS];
         uint32_t dispatch_count = 0u;
         for (uint32_t i = 0; i < current_count; ++i) {
             liquid_glass_region region = current[i];
@@ -739,10 +733,9 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     for (uint32_t i = 0; i < current_group_count; ++i) {
         const prism_liquid_glass_group *group = &desc->groups[current_group_indices[i]];
         liquid_glass_region region;
-        float shadow_reach = group->shadow_alpha > 0.0f
-                                 ? fmaxf(group->shadow_offset_y, 0.0f) +
-                                       2.0f * fmaxf(group->shadow_blur, 0.0f)
-                                 : 0.0f;
+        float shadow_reach = group->shadow_alpha > 0.0f ? fmaxf(group->shadow_offset_y, 0.0f) +
+                                                              2.0f * fmaxf(group->shadow_blur, 0.0f)
+                                                        : 0.0f;
         if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, image_width, image_height,
                                                 &region))
             continue;

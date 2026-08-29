@@ -149,7 +149,8 @@ typedef struct flux_text_desc {
  * A non-NULL `desc->device` is retained by the context (released at
  * flux_text_destroy), so the caller may drop its own reference right after
  * creation. */
-FLUX_NODISCARD FLUX_TEXT_API flux_result flux_text_create(const flux_text_desc *desc, flux_text **out);
+FLUX_NODISCARD FLUX_TEXT_API flux_result flux_text_create(const flux_text_desc *desc,
+                                                          flux_text **out);
 FLUX_TEXT_API void flux_text_destroy(flux_text *t);
 
 /* Scale contract (single source of truth):
@@ -212,7 +213,7 @@ FLUX_TEXT_API void flux_text_get_stats(const flux_text *t, flux_text_stats *out)
 /* Shape `len` bytes of `utf8` in `style` and report the extent. Returns a
  * zeroed metric for empty input. `style` NULL uses context defaults. */
 FLUX_TEXT_API flux_text_metrics flux_text_measure(flux_text *t, const char *utf8, size_t len,
-                                             const flux_text_style *style);
+                                                  const flux_text_style *style);
 
 /* ================================================================== */
 /*  Draw                                                             */
@@ -221,8 +222,9 @@ FLUX_TEXT_API flux_text_metrics flux_text_measure(flux_text *t, const char *utf8
 /* Shape `len` bytes of `utf8` and paint them as a single batched glyph
  * run with the top-left at (x, y) in logical pixels, using `style`
  * (including its colour). No-op for a measure-only context. */
-FLUX_TEXT_API void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
-                             const char *utf8, size_t len, const flux_text_style *style);
+FLUX_TEXT_API void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x,
+                                  float y, const char *utf8, size_t len,
+                                  const flux_text_style *style);
 
 /* Draw a run with a contour behind the foreground glyphs. `outline_width`
  * is the outward visual radius in logical pixels; values <= 0 preserve the
@@ -230,10 +232,10 @@ FLUX_TEXT_API void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena 
  * does not duplicate glyph storage. Keep the treatment opt-in: it is meant
  * for text floating over variable imagery or translucent material, not as a
  * replacement for choosing a legible foreground/background pair. */
-FLUX_TEXT_API void flux_text_draw_outlined(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x,
-                                      float y, const char *utf8, size_t len,
-                                      const flux_text_style *style, flux_color outline_color,
-                                      float outline_width);
+FLUX_TEXT_API void flux_text_draw_outlined(flux_text *t, flux_canvas *canvas, flux_arena *arena,
+                                           float x, float y, const char *utf8, size_t len,
+                                           const flux_text_style *style, flux_color outline_color,
+                                           float outline_width);
 
 /* ================================================================== */
 /*  Caret and selection mapping (BiDi-correct)                       */
@@ -243,22 +245,22 @@ FLUX_TEXT_API void flux_text_draw_outlined(flux_text *t, flux_canvas *canvas, fl
  * prefix width is not the caret x, so use this rather than measuring a
  * substring. */
 FLUX_TEXT_API float flux_text_x_for_byte(flux_text *t, const char *utf8, size_t len, size_t byte,
-                                    const flux_text_style *style);
+                                         const flux_text_style *style);
 
 /* Source byte offset of the glyph boundary nearest logical x `local_x`. */
 FLUX_TEXT_API size_t flux_text_byte_for_x(flux_text *t, const char *utf8, size_t len, float local_x,
-                                     const flux_text_style *style);
+                                          const flux_text_style *style);
 
 /* Fill `out` (capacity `max`) with the on-screen spans covering byte
  * range [lo, hi). Returns the number written. */
 FLUX_TEXT_API int flux_text_selection_rects(flux_text *t, const char *utf8, size_t len, size_t lo,
-                                       size_t hi, const flux_text_style *style,
-                                       flux_text_xrange *out, int max);
+                                            size_t hi, const flux_text_style *style,
+                                            flux_text_xrange *out, int max);
 
 /* Move the caret one glyph in visual order (forward = rightward on
  * screen) and return the resulting source byte offset. */
 FLUX_TEXT_API size_t flux_text_visual_move(flux_text *t, const char *utf8, size_t len, size_t byte,
-                                      bool forward, const flux_text_style *style);
+                                           bool forward, const flux_text_style *style);
 
 #ifdef __cplusplus
 }

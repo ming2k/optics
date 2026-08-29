@@ -26,15 +26,11 @@
  * forced drain. */
 #define BURST 16384u
 
-static flux_image *make_solid(flux_device *d, uint32_t rgba) {
-    static uint32_t pixels[IMG_W * IMG_H];
-    for (uint32_t i = 0; i < IMG_W * IMG_H; ++i)
-        pixels[i] = rgba;
+static flux_image *make_image(flux_device *d) {
     flux_image_desc desc = FLUX_IMAGE_DESC_INIT;
     desc.width = IMG_W;
     desc.height = IMG_H;
     desc.format = FLUX_FORMAT_RGBA8_UNORM;
-    desc.initial_data = pixels;
     flux_image *out = nullptr;
     return flux_image_create(d, &desc, &out) == FLUX_OK ? out : nullptr;
 }
@@ -46,12 +42,12 @@ int main(void) {
         TEST_SUMMARY();
     }
 
-    /* Warm up once so long-lived device caches (the staging-buffer
-     * pool and the transient command pools the upload path uses) reach
-     * their steady size; their allocations are intentional and show up
-     * in live_allocations. */
+    /* Warm up allocator bookkeeping before taking the two steady-state
+     * windows. Images intentionally have no initial upload: upload submissions
+     * advance the graphics serial and would hide the frozen-watermark case
+     * this test exists to exercise. */
     for (uint32_t i = 0; i < 16; ++i) {
-        flux_image *img = make_solid(d, 0xFF00FF00u);
+        flux_image *img = make_image(d);
         EXPECT(img != nullptr);
         flux_image_release(img);
     }
@@ -61,7 +57,7 @@ int main(void) {
      * parks a zombie; nothing advances the watermark, so the FIFO can
      * only stay bounded through the forced-drain backpressure. */
     for (uint32_t i = 0; i < BURST; ++i) {
-        flux_image *img = make_solid(d, 0xFF00FF00u);
+        flux_image *img = make_image(d);
         EXPECT(img != nullptr);
         flux_image_release(img);
     }
@@ -74,7 +70,7 @@ int main(void) {
      * working backpressure path drains at the bound, so both windows
      * end on the same live set (steady caches only). */
     for (uint32_t i = 0; i < BURST; ++i) {
-        flux_image *img = make_solid(d, 0xFF00FF00u);
+        flux_image *img = make_image(d);
         EXPECT(img != nullptr);
         flux_image_release(img);
     }
@@ -90,7 +86,7 @@ int main(void) {
     EXPECT(b.live_allocations < 256);
 
     /* The device must still be fully usable afterwards. */
-    flux_image *alive = make_solid(d, 0xFFFF0000u);
+    flux_image *alive = make_image(d);
     EXPECT(alive != nullptr);
     EXPECT(flux_image_device(alive) == d);
     flux_image_release(alive);

@@ -41,9 +41,9 @@ typedef struct iris_file_dialog_opts {
  * their mind" from "your buffer was too small" — which previously
  * behaved differently per backend (portal reported a cancel, Win32
  * silently truncated, Cocoa failed) with none of it documented. */
-#define IRIS_PICK_CANCELLED (-1)    /* user dismissed the dialog              */
-#define IRIS_PICK_UNAVAILABLE (-2)  /* no dialog service on this platform     */
-#define IRIS_PICK_TRUNCATED (-3)    /* out buffer too small: retry with more  */
+#define IRIS_PICK_CANCELLED (-1)   /* user dismissed the dialog              */
+#define IRIS_PICK_UNAVAILABLE (-2) /* no dialog service on this platform     */
+#define IRIS_PICK_TRUNCATED (-3)   /* out buffer too small: retry with more  */
 
 /* Open a single-file picker. On success, writes a NUL-terminated UTF-8
  * file URI (e.g. "file:///home/user/foo.txt") into out_path and returns 0.

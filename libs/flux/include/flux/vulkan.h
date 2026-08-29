@@ -154,12 +154,12 @@ FLUX_NODISCARD FLUX_API flux_result flux_oneshot_begin(flux_device *d, VkCommand
  * (fence with a finite timeout, queue-idle fallback), then recycle the
  * buffer. On return, nothing recorded into `cmd` is pending. Preserves
  * a VK_TIMEOUT as FLUX_ERROR_TIMEOUT for the caller. */
-FLUX_NODISCARD FLUX_API flux_result flux_oneshot_submit_and_end(flux_device *d, VkCommandBuffer cmd);
+FLUX_NODISCARD FLUX_API flux_result flux_oneshot_submit_and_end(flux_device *d,
+                                                                VkCommandBuffer cmd);
 
 /* Single-recording convenience: begin, call `record` (non-NULL), submit,
  * wait, recycle. */
-FLUX_NODISCARD FLUX_API flux_result flux_oneshot_run(flux_device *d,
-                                                     flux_oneshot_record_fn record,
+FLUX_NODISCARD FLUX_API flux_result flux_oneshot_run(flux_device *d, flux_oneshot_record_fn record,
                                                      void *userdata);
 
 /* The sampled bindless handle the image was registered into at
@@ -270,8 +270,7 @@ FLUX_API void flux_graphics_pipeline_release(flux_graphics_pipeline *p);
  * device retire queue, destroyed once in-flight batches complete. Safe
  * at any time. (Declared in <flux/compute.h> for the compute flavour;
  * one implementation serves both.) */
-FLUX_API void flux_graphics_pipeline_release_deferred(flux_device *d,
-                                                      flux_graphics_pipeline *p);
+FLUX_API void flux_graphics_pipeline_release_deferred(flux_device *d, flux_graphics_pipeline *p);
 
 FLUX_API VkPipeline flux_graphics_pipeline_vk_pipeline(const flux_graphics_pipeline *p);
 FLUX_API VkPipelineLayout flux_graphics_pipeline_vk_layout(const flux_graphics_pipeline *p);

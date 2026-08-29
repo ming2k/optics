@@ -186,7 +186,7 @@ typedef struct flux_effect_shadow_desc {
     float tint_red;        /* straight colour, input colour space */
     float tint_green;
     float tint_blue;
-    float alpha;           /* shadow opacity, clamped to [0,1] */
+    float alpha; /* shadow opacity, clamped to [0,1] */
 } flux_effect_shadow_desc;
 
 #define FLUX_EFFECT_SHADOW_DESC_INIT {.type = FLUX_TYPE_EFFECT_SHADOW_DESC}
@@ -219,8 +219,7 @@ typedef struct flux_shadow_filter flux_shadow_filter;
 
 FLUX_NODISCARD FLUX_API flux_result flux_shadow_filter_create(flux_device *device,
                                                               flux_shadow_filter **out);
-FLUX_NODISCARD FLUX_API flux_shadow_filter *flux_shadow_filter_retain(
-    flux_shadow_filter *filter);
+FLUX_NODISCARD FLUX_API flux_shadow_filter *flux_shadow_filter_retain(flux_shadow_filter *filter);
 FLUX_API void flux_shadow_filter_release(flux_shadow_filter *filter);
 FLUX_NODISCARD FLUX_API flux_result flux_shadow_filter_apply(flux_shadow_filter *filter,
                                                              flux_frame *frame,

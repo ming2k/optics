@@ -443,7 +443,8 @@ int main(void) {
         flux_icc_profile_release(lut_icc);
     }
 
-    /* --- 9. BT.2020 PQ tagged image rendered onto sRGB surface: 203 nits maps to sRGB 1.0 white --- */
+    /* --- 9. BT.2020 PQ tagged image rendered onto sRGB surface: 203 nits maps to sRGB 1.0 white
+     * --- */
     {
         /* 203 nits in ST 2084 PQ is ~0.5807 encoded (148/255). */
         uint8_t pq_white_203nits = (uint8_t)lrintf(

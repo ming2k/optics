@@ -3135,10 +3135,9 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         bool host_canvas_static = cfg->paint != NULL && pl.paint_static && !host_animating &&
                                   !resized_this_frame && !surface_needs_paint && !chrome_damaged;
         pl.paint_static = false;
-        bool must_paint =
-            !host_canvas_static && !host_skip_render &&
-            (cfg->paint != NULL || chrome_damaged || host_animating ||
-             resized_this_frame || surface_needs_paint);
+        bool must_paint = !host_canvas_static && !host_skip_render &&
+                          (cfg->paint != NULL || chrome_damaged || host_animating ||
+                           resized_this_frame || surface_needs_paint);
         if (must_paint) {
             surface_needs_paint = true;
             flux_frame *frame = NULL;

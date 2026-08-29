@@ -732,10 +732,10 @@ typedef struct flux_per_frame {
      * to this serial (see the device retire queue). */
     uint64_t submitted_serial;
 
-    /* Imported dma-buf images sampled by this batch. They stay retained
-     * through the slot fence and are returned to FOREIGN ownership in the
-     * same submission that samples them, so the exported completion fence
-     * also covers the ownership release. */
+    /* Images sampled by this batch. Every image stays retained through the
+     * slot fence, so atlas replacement and other mid-frame owner releases
+     * cannot invalidate a recorded bindless handle. Imported dma-bufs also
+     * carry the optional FOREIGN ownership bookkeeping below. */
     flux_frame_foreign_image *foreign_images;
     /* Submit-time storage. One extra entry accommodates the window-system
      * image-acquired semaphore before the foreign-image waits. */
@@ -787,10 +787,11 @@ struct flux_frame {
     bool scene_view_inv_valid;
 };
 
-/* Recorders call this before sampling an imported dma-buf. The first use in
- * a frame retains resource until the frame slot's fence retires.
- * flux_frame_submit prepends a FOREIGN -> graphics acquire when necessary and
- * records the matching graphics -> FOREIGN release after all sampling. */
+/* Recorders call this before sampling an image. The first use in a frame
+ * retains resource until the frame slot's fence retires. `foreign_owned` is
+ * NULL for ordinary images; for imported dma-bufs, flux_frame_submit prepends
+ * a FOREIGN -> graphics acquire when necessary and records the matching
+ * graphics -> FOREIGN release after all sampling. */
 bool flux_frame_track_foreign_image(flux_frame *frame, VkImage image, void *resource,
                                     flux_frame_resource_retain_fn retain,
                                     flux_frame_resource_release_fn release, bool *foreign_owned);

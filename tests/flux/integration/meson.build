@@ -215,7 +215,10 @@ if opt_canvas
     'test_text_atlas_leak.c',
     dependencies : [test_helpers_dep, flux_text_dep],
   )
-  test('text_atlas_leak', test_text_atlas_leak, suite : 'integration')
+  test('text_atlas_leak', test_text_atlas_leak,
+    suite       : 'integration',
+    is_parallel : false,
+  )
 
   # Retire-FIFO backpressure: releasing past the pending bound with a
   # frozen watermark must force a full drain, not unbounded growth.
@@ -223,7 +226,10 @@ if opt_canvas
     'test_retire_backpressure.c',
     dependencies : [test_helpers_dep],
   )
-  test('retire_backpressure', test_retire_backpressure, suite : 'integration')
+  test('retire_backpressure', test_retire_backpressure,
+    suite       : 'integration',
+    is_parallel : false,
+  )
 endif
 
 # Built only when the effect module is enabled.

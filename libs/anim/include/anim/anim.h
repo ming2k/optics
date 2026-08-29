@@ -84,14 +84,13 @@ ANIM_API anim_spring anim_spring_at(float value);
 
 /* True when the spring rests on `target` within the given tolerances and
  * can be dropped from the frame-cadence decision. */
-ANIM_API bool anim_spring_settled(const anim_spring *s, float target,
-                                  float value_epsilon, float velocity_epsilon);
+ANIM_API bool anim_spring_settled(const anim_spring *s, float target, float value_epsilon,
+                                  float velocity_epsilon);
 
 /* Advance toward `target` by clamped `dt_seconds`; returns the new value.
  * `reduced_motion` resolves to the target in one step. */
-ANIM_API float anim_spring_advance(anim_spring *s, float target,
-                                   anim_spring_params p, float dt_seconds,
-                                   bool reduced_motion);
+ANIM_API float anim_spring_advance(anim_spring *s, float target, anim_spring_params p,
+                                   float dt_seconds, bool reduced_motion);
 
 /* One-step resolve (reduced motion, or an animation that must end now). */
 ANIM_API float anim_spring_snap_to(anim_spring *s, float target);
@@ -102,8 +101,7 @@ ANIM_API float anim_spring_snap_to(anim_spring *s, float target);
 
 /* Move `current` toward `target` by rate per second: after t seconds the
  * remaining distance is e^(−rate·t) of the original. `rate` ≤ 0 snaps. */
-ANIM_API float anim_approach(float current, float target, float rate,
-                             float dt_seconds);
+ANIM_API float anim_approach(float current, float target, float rate, float dt_seconds);
 
 /* Exponential decay toward zero (opacity tails, trailing values). */
 ANIM_API float anim_decay(float value, float rate, float dt_seconds);
@@ -142,9 +140,8 @@ ANIM_API anim_hysteresis anim_hysteresis_init(bool initial_high);
  * `high_threshold` define the dead band (they are the caller's comparator
  * bounds; passing the same value for both disables the band, leaving only
  * the dwell de-jitter). Returns the latched state. */
-ANIM_API bool anim_hysteresis_step(anim_hysteresis *h, bool input_high,
-                                   float low_threshold, float high_threshold,
-                                   float measurement, float dwell_seconds,
+ANIM_API bool anim_hysteresis_step(anim_hysteresis *h, bool input_high, float low_threshold,
+                                   float high_threshold, float measurement, float dwell_seconds,
                                    float dt_seconds);
 
 /* ================================================================== */
@@ -168,8 +165,7 @@ ANIM_API anim_smoother anim_smoother_init(float initial);
  * input is stationary; while |target − value| exceeds `motion_epsilon`
  * the filter uses tau_rest × `motion_scale`. */
 ANIM_API float anim_smoother_step(anim_smoother *s, float target, float tau_rest,
-                                  float motion_scale, float motion_epsilon,
-                                  float dt_seconds);
+                                  float motion_scale, float motion_epsilon, float dt_seconds);
 
 #ifdef __cplusplus
 }

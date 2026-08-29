@@ -15,7 +15,7 @@
 #include <string.h>
 
 #if defined(__has_embed) && !defined(PRISM_SHADER_NO_EMBED)
-#if __has_embed("frosted.comp.spv") && __has_embed("frosted_16f.comp.spv") &&                       \
+#if __has_embed("frosted.comp.spv") && __has_embed("frosted_16f.comp.spv") &&                      \
     __has_embed("storage_clear.comp.spv") && __has_embed("storage_clear_16f.comp.spv")
 #define PRISM_FROSTED_SHADERS_EMBED 1
 #endif
@@ -286,7 +286,8 @@ static bool frosted_group_dispatch_bounds(const prism_frosted_group *group, uint
     int64_t x0 = (int64_t)floorf(group->shape.bounds.x - pad);
     int64_t y0 = (int64_t)floorf(group->shape.bounds.y - pad);
     int64_t x1 = (int64_t)ceilf(group->shape.bounds.x + group->shape.bounds.w + pad);
-    int64_t y1 = (int64_t)ceilf(group->shape.bounds.y + group->shape.bounds.h + pad + fmaxf(group->shadow_offset_y, 0.0f));
+    int64_t y1 = (int64_t)ceilf(group->shape.bounds.y + group->shape.bounds.h + pad +
+                                fmaxf(group->shadow_offset_y, 0.0f));
 
     x0 = x0 < 0 ? 0 : x0;
     y0 = y0 < 0 ? 0 : y0;
@@ -385,12 +386,14 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
                 .height = slot->height,
                 .origin_x = reg.x,
                 .origin_y = reg.y,
-                .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w, g->shape.bounds.h},
+                .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w,
+                           g->shape.bounds.h},
                 .corner_radius = g->shape.corner_radius,
                 .opacity = g->opacity * desc->opacity,
                 .saturation = g->saturation >= 0.0f ? g->saturation : desc->saturation,
                 .tint_strength = g->tint_strength >= 0.0f ? g->tint_strength : desc->tint_strength,
-                .noise_intensity = g->noise_intensity >= 0.0f ? g->noise_intensity : desc->noise_intensity,
+                .noise_intensity =
+                    g->noise_intensity >= 0.0f ? g->noise_intensity : desc->noise_intensity,
                 .shadow_alpha = g->shadow_alpha,
                 .shadow_blur = g->shadow_blur,
                 .shadow_offset_y = g->shadow_offset_y,

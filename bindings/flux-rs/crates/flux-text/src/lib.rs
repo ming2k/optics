@@ -128,7 +128,7 @@ impl Text {
     /// Create a context that uploads its glyph atlas through `device` (so it
     /// can both measure and draw).
     pub fn new(device: &Device) -> Result<Text, Error> {
-        Self::create(device.as_raw() as *mut flux_text_sys::flux_device, 1.0)
+        Self::create(device.as_raw(), 1.0)
     }
 
     /// Create a measure-only context (no device, no atlas uploads). Useful for
@@ -196,8 +196,8 @@ impl Text {
         unsafe {
             flux_text_sys::flux_text_draw(
                 self.raw,
-                canvas.as_raw() as *mut flux_text_sys::flux_canvas,
-                arena.as_raw() as *mut flux_text_sys::flux_arena,
+                canvas.as_raw(),
+                arena.as_raw(),
                 x,
                 y,
                 text.as_ptr() as *const i8,
