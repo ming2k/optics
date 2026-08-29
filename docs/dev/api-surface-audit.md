@@ -5,7 +5,7 @@
 > exists in all four libraries; the `-sys` crates share seam types via
 > blocklist+re-export; `flux::Canvas`/`Format`/error-type cleanups landed;
 > `flux-composition-graph` and `flux-text-layout` moved to `crates/`;
-> `atleast_version("0.0.28")` is enforced in every build.rs. Two audit
+> `atleast_version("0.0.29")` is enforced in every build.rs. Two audit
 > claims were corrected during implementation: iris **did** already have
 > version macros (only prism was missing them), and
 > `flux_canvas_create_cpu_aa` **does** have C callers (it gained a Rust
@@ -78,7 +78,7 @@ functions and macros.
 
 | Layer | Installed headers | Public functions | Notes |
 |---|---|---|---|
-| flux (L1) | flux.h, core.h, math.h, vulkan.h, dmabuf.h, canvas.h, canvas_cpu.h, scene.h, compute.h, effect.h + flux-scene-graph/scene-graph.h + flux-text/text.h | ~230 | version coherent `0.0.28`; install set == include set, nothing incidental |
+| flux (L1) | flux.h, core.h, math.h, vulkan.h, dmabuf.h, canvas.h, canvas_cpu.h, scene.h, compute.h, effect.h + flux-scene-graph/scene-graph.h + flux-text/text.h | ~230 | version coherent `0.0.29`; install set == include set, nothing incidental |
 | lens (L2) | lens.h (~2,900 lines, 119 fns), icon.h | ~119 | version string hardcoded in `context.c:6`, drift risk vs `LENS_VERSION_*` |
 | iris (L3) | iris.h, app.h, capability.h, cursor.h, theme.h, file_dialog.h, a11y.h, a11y_prefs.h, window.h | ~29 | no version macros at all |
 | prism | prism.h, types.h, liquid_glass.h, 4 more | ~16 | no version macros at all |

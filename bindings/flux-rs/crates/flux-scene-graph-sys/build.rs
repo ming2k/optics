@@ -52,12 +52,12 @@ fn main() {
     }
 
     // Enforce the MINIMUM C library version this crate's bindings assume
-    // (the bindings share flux_sys handle types (0.0.28 seam)); pkg-config fails the build loudly when an older flux/lens/
+    // (the bindings share flux_sys handle types (0.0.29 seam)); pkg-config fails the build loudly when an older flux/lens/
     // iris/prism is picked up (e.g. a stale system install shadowing the
     // meson uninstalled dir).
     let lib = pkg_config::Config::new()
         .print_system_libs(false)
-        .atleast_version("0.0.28")
+        .atleast_version("0.0.29")
         .probe("flux-scene-graph")
         .unwrap_or_else(|e| {
             panic!(

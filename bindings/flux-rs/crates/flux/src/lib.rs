@@ -27,7 +27,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 /// for the exposure rationale.
 pub use flux_sys as sys;
 
-/// Library version string ("0.0.28" at the time of writing), from the
+/// Library version string ("0.0.29" at the time of writing), from the
 /// linked library — the same value C's `FLUX_VERSION_NUMBER` macros
 /// describe. Sibling crates (`lens`, `iris`, `prism`) carry matching
 /// wrappers, so a mixed-version process can be detected at startup.

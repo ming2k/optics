@@ -10,7 +10,7 @@
 //!          `PKG_CONFIG_PATH`. iris depends on lens (which depends on
 //!          flux), so when dev mode is on we also prepend LENS_BUILD_DIR
 //!          and FLUX_BUILD_DIR's uninstalled dirs — otherwise pkg-config
-//!          resolves `Requires: lens >= 0.0.28` against any stale system
+//!          resolves `Requires: lens >= 0.0.29` against any stale system
 //!          copy. Optionally also set `IRIS_SOURCE_DIR=<iris-source>` so
 //!          bindgen reads headers straight from the source checkout.
 //!   2. Publish non-system link dirs as rpath metadata (`cargo:rpaths`)
@@ -104,12 +104,12 @@ fn main() {
     }
 
     // Enforce the MINIMUM C library version this crate's bindings assume
-    // (a11y surface matches this header set (0.0.28)); pkg-config fails the build loudly when an older flux/lens/
+    // (a11y surface matches this header set (0.0.29)); pkg-config fails the build loudly when an older flux/lens/
     // iris/prism is picked up (e.g. a stale system install shadowing the
     // meson uninstalled dir).
     let iris = pkg_config::Config::new()
         .print_system_libs(false)
-        .atleast_version("0.0.28")
+        .atleast_version("0.0.29")
         .probe("iris")
         .unwrap_or_else(|e| {
             panic!(

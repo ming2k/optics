@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.29] - 2026-08-29
+
 ### Changed — public API surface cleanup (all libraries)
 
 Dead and superseded public symbols were removed outright (pre-1.0, no
@@ -54,7 +56,7 @@ remaining callers; see `docs/dev/api-surface-audit.md`):
 - `iris::PaintHost` / `StartHost` expose typed `flux::Canvas` /
   `flux::Device` / `Ui` borrows instead of `*mut c_void`. `lens::Ui`
   gains `borrow_raw`. `prism::version()` added.
-- Every `-sys` build.rs now enforces `atleast_version("0.0.28")`, and the
+- Every `-sys` build.rs now enforces `atleast_version("0.0.29")`, and the
   stale `>= 0.1.0` / `>= 0.0.13` constraint comments were corrected.
 - `flux-composition-graph` and `flux-text-layout` moved from
   `bindings/flux-rs/crates/` to the top-level `crates/` workspace: they
@@ -95,6 +97,22 @@ remaining callers; see `docs/dev/api-surface-audit.md`):
   backends: input, resize/scale changes, lens chrome damage, and
   not-yet-presented surfaces always force a real paint regardless of the
   declaration. Rust binding: `iris::request_frame_skip_render()`.
+
+### Fixed — flux resource lifetime and release validation
+
+- Sampled images are retained until the recording frame slot is recycled,
+  preventing glyph-atlas replacement from releasing an image still referenced
+  by submitted GPU work.
+- The deferred-resource hard limit now performs a true idle drain even when
+  retire records are deliberately tagged one serial beyond the last submitted
+  batch, keeping the retire queue bounded without relying on incidental upload
+  submissions.
+- The symbol-table generator once again parses adjacent trailing comments, and
+  the repository format gate is clean across the C headers, sources, tests, and
+  Rust bindings.
+- GPU lifetime tests now isolate frame-slot retains and serial-watermark
+  behaviour, while the backdrop probe tolerates the expected Gaussian-tail
+  variance between Lavapipe and hardware drivers.
 
 ## [0.0.28] - 2026-08-25
 
@@ -525,4 +543,3 @@ remaining callers; see `docs/dev/api-surface-audit.md`):
   bindings.
 - The misleadingly-named `run_with_null_config_returns_error_not_crash`
   smoke test (which tested neither) renamed to what it actually checks.
-
