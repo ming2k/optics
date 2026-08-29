@@ -27,11 +27,13 @@ void lensi_skin_table(lens *ui, lens_node *n, const lens_widget_record *rec) {
 
     /* Header. */
     if (c->header_height > 0.0f) {
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
-                                            .rel = {0, 0, 0, c->header_height},
-                                            .color = rs->bg_hover,
-                                            .radius = 0.0f});
+        if ((rs->bg_hover >> 24) > 0) {
+            lensi_drawlist_push(ui, n,
+                                (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                                .rel = {0, 0, 0, c->header_height},
+                                                .color = rs->bg_hover,
+                                                .radius = 0.0f});
+        }
         for (int i = 0; i < column_count; i++) {
             const lens_grid_column *col = &c->columns[i];
             if (!col->title)
@@ -41,10 +43,9 @@ void lensi_skin_table(lens *ui, lens_node *n, const lens_widget_record *rec) {
                 (lens_draw_cmd){
                     .kind = LENS_DRAW_TEXT,
                     .rel = {col->x + padding, (c->header_height - font_size) * 0.5f, 0, 0},
-                    .color = rs->fg,
+                    .color = t->color_disabled,
                     .text = col->title,
-                    .text_size = font_size,
-                    .text_weight = t->font_weight_bold});
+                    .text_size = font_size});
         }
     }
 
@@ -104,16 +105,19 @@ void lensi_skin_table(lens *ui, lens_node *n, const lens_widget_record *rec) {
                                     .rel = {row->cell_x[i] - icon_size - 8.0f,
                                             row->y + (c->row_height - icon_size) * 0.5f, icon_size,
                                             icon_size},
-                                    .color = sel ? rs->accent : rs->fg,
+                                    .color = row->icons[i] == LENS_ICON_FOLDER
+                                                 ? flux_color_rgba(76, 141, 245, 255)
+                                                 : (sel ? rs->accent : rs->fg),
                                     .width = 2.0f * (icon_size / 24.0f),
                                     .icon_id = row->icons[i]});
             }
             if (has_txt) {
+                float text_y = row->y + (c->row_height - font_size * 1.35f) * 0.5f;
                 lensi_drawlist_push(
                     ui, n,
                     (lens_draw_cmd){
                         .kind = LENS_DRAW_TEXT,
-                        .rel = {row->cell_x[i], row->y + (c->row_height - font_size) * 0.5f, 0, 0},
+                        .rel = {row->cell_x[i], text_y, 0, 0},
                         .color = sel ? rs->accent : rs->fg,
                         .text = txt,
                         .text_size = font_size});
