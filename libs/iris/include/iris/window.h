@@ -59,6 +59,15 @@ IRIS_API void iris_window_focus(void);
  * returns as if the user had clicked the close button. */
 IRIS_API void iris_window_close(void);
 
+/* Request the compositor / window manager to start an interactive move
+ * of the active window (e.g. initiated by a pointer drag on a custom
+ * title bar or tab bar in client-side decoration mode).
+ *
+ * On Wayland, this issues an xdg_toplevel.move request using the seat and
+ * serial of the current pointer interaction. On backends without
+ * interactive move support, this call is a safe no-op. */
+IRIS_API void iris_window_start_move(void);
+
 /* ================================================================== */
 /*  Size hints                                                         */
 /* ================================================================== */

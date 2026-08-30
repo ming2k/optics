@@ -792,6 +792,17 @@ pub fn window_close() {
     unsafe { sys::iris_window_close() };
 }
 
+/// Request the compositor / window manager to start an interactive move of
+/// the active window (initiated e.g. by pointer drag on a custom title bar
+/// in client-side decoration mode).
+///
+/// On Wayland, this issues an `xdg_toplevel.move` request using the seat and
+/// serial of the current pointer event. Safe no-op on backends without
+/// interactive move capability.
+pub fn window_start_move() {
+    unsafe { sys::iris_window_start_move() };
+}
+
 /// Minimize the active window to the taskbar / dock.
 pub fn window_minimize() {
     unsafe { sys::iris_window_minimize() };
@@ -1504,6 +1515,7 @@ mod tests {
         // Thread-affine but inert outside a run loop — the documented
         // degradation. Calling them must not crash.
         window_close();
+        window_start_move();
         window_minimize();
         window_restore();
         window_fullscreen();

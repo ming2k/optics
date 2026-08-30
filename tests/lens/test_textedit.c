@@ -1,6 +1,8 @@
 /* test_textedit.c — unified single-line and multi-line text input: paste, preedit,
- * committed text, cursor navigation, backspace, delete, multiline newlines. */
+ * committed text, cursor navigation, backspace, delete, multiline newlines,
+ * cursor hints, and vertical centering. */
 
+#include "../../libs/lens/src/internal.h"
 #include "test_helpers.h"
 #include <lens/lens.h>
 #include <string.h>
@@ -18,24 +20,20 @@ static void focus_area(lens *ui, const char *label, char *buf, size_t cap) {
     lens_begin(ui, &IN0);
     lens_textedit(ui,
                   &(lens_textedit_opts){
-                      .box = {.id = label}, .buf = buf, .cap = cap, .multiline = true, .rows = 4});
+                      .box = {.id = label}, .buf = buf, .cap = cap, .multiline = true});
     lens_end(ui);
     lens_set_focus(ui, lens_current_id(ui, label));
 }
 
-/* ------------------------------------------------------------------ */
-/*  Single-line input tests                                           */
-/* ------------------------------------------------------------------ */
-
 static void test_insert_ascii(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    char buf[64] = "";
+    char buf[32] = {0};
 
     focus_field(ui, "tf", buf, sizeof buf);
 
     lens_input in = IN0;
-    snprintf(in.text_utf8, sizeof in.text_utf8, "a");
+    strncpy(in.text_utf8, "hello", sizeof in.text_utf8 - 1);
     lens_begin(ui, &in);
     bool changed =
         lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf})
@@ -43,7 +41,7 @@ static void test_insert_ascii(void) {
     lens_end(ui);
 
     CHECK(changed);
-    CHECK(strcmp(buf, "a") == 0);
+    CHECK(strcmp(buf, "hello") == 0);
 
     lens_destroy(ui);
 }
@@ -51,12 +49,12 @@ static void test_insert_ascii(void) {
 static void test_backspace_and_delete(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    char buf[64] = "abc";
+    char buf[32] = "abc";
 
     focus_field(ui, "tf", buf, sizeof buf);
-    lens_textedit_set_caret(ui, "tf", 2); /* cursor between 'b' and 'c' */
+    lens_textedit_set_caret(ui, "tf", 3);
 
-    /* Backspace removes 'b' */
+    /* Backspace removes 'c' */
     lens_input in = IN0;
     in.key_count = 1;
     in.keys[0] = (lens_key_event){.key = LENS_KEY_BACKSPACE, .pressed = true};
@@ -67,11 +65,10 @@ static void test_backspace_and_delete(void) {
     lens_end(ui);
 
     CHECK(changed);
-    CHECK(strcmp(buf, "ac") == 0);
+    CHECK(strcmp(buf, "ab") == 0);
 
-    /* Delete removes 'c' */
-    in = IN0;
-    in.key_count = 1;
+    /* Move caret to 0 and Delete removes 'a' */
+    lens_textedit_set_caret(ui, "tf", 0);
     in.keys[0] = (lens_key_event){.key = LENS_KEY_DELETE, .pressed = true};
     lens_begin(ui, &in);
     changed =
@@ -80,7 +77,7 @@ static void test_backspace_and_delete(void) {
     lens_end(ui);
 
     CHECK(changed);
-    CHECK(strcmp(buf, "a") == 0);
+    CHECK(strcmp(buf, "b") == 0);
 
     lens_destroy(ui);
 }
@@ -88,25 +85,34 @@ static void test_backspace_and_delete(void) {
 static void test_cursor_navigation(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    char buf[64] = "world";
+    char buf[32] = "world";
 
     focus_field(ui, "tf", buf, sizeof buf);
-    lens_textedit_set_caret(ui, "tf", 0);
+    lens_textedit_set_caret(ui, "tf", 5);
 
-    /* Insert 'A' at start -> "Aworld" */
+    /* Home moves to 0 */
     lens_input in = IN0;
-    snprintf(in.text_utf8, sizeof in.text_utf8, "A");
+    in.key_count = 1;
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_HOME, .pressed = true};
     lens_begin(ui, &in);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_end(ui);
-    CHECK(strcmp(buf, "Aworld") == 0);
+
+    /* Insert 'a' at 0 */
+    in.keys[0] = (lens_key_event){0};
+    in.key_count = 0;
+    strncpy(in.text_utf8, "a", sizeof in.text_utf8 - 1);
+    lens_begin(ui, &in);
+    bool changed =
+        lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf})
+            .changed;
+    lens_end(ui);
+
+    CHECK(changed);
+    CHECK(strcmp(buf, "aworld") == 0);
 
     lens_destroy(ui);
 }
-
-/* ------------------------------------------------------------------ */
-/*  Multi-line input tests                                            */
-/* ------------------------------------------------------------------ */
 
 static void test_multiline_enter_inserts_newline(void) {
     lens *ui = NULL;
@@ -116,7 +122,7 @@ static void test_multiline_enter_inserts_newline(void) {
     focus_area(ui, "ta", buf, sizeof buf);
     lens_textedit_set_caret(ui, "ta", 5);
 
-    /* Press Enter -> inserts '\n' */
+    /* Press Enter in multiline */
     lens_input in = IN0;
     in.key_count = 1;
     in.keys[0] = (lens_key_event){.key = LENS_KEY_RETURN, .pressed = true};
@@ -131,9 +137,10 @@ static void test_multiline_enter_inserts_newline(void) {
     CHECK(changed);
     CHECK(strcmp(buf, "line1\n") == 0);
 
-    /* Type 'line2' */
-    in = IN0;
-    snprintf(in.text_utf8, sizeof in.text_utf8, "line2");
+    /* Add "line2" */
+    in.keys[0] = (lens_key_event){0};
+    in.key_count = 0;
+    strncpy(in.text_utf8, "line2", sizeof in.text_utf8 - 1);
     lens_begin(ui, &in);
     changed =
         lens_textedit(ui,
@@ -174,11 +181,72 @@ static void test_multiline_selection_and_copy(void) {
     lens_destroy(ui);
 }
 
+static void test_textedit_cursor_hint(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    char buf[32] = "search";
+
+    /* Frame 1: render textedit at known position */
+    lens_begin(ui, &IN0);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf", .width = 200.0f, .height = 36.0f},
+                                           .buf = buf,
+                                           .cap = sizeof buf});
+    lens_end(ui);
+
+    /* Frame 2: hover cursor over the textedit */
+    lens_input in = IN0;
+    in.cursor = (flux_point){50.0f, 18.0f};
+    lens_begin(ui, &in);
+    lens_response r = lens_textedit(
+        ui, &(lens_textedit_opts){.box = {.id = "tf", .width = 200.0f, .height = 36.0f},
+                                  .buf = buf,
+                                  .cap = sizeof buf});
+    lens_end(ui);
+
+    CHECK(r.hovered);
+    CHECK(lens_get_cursor_hint(ui) == LENS_CURSOR_TEXT);
+
+    lens_destroy(ui);
+}
+
+static void test_textedit_vertical_centering(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    char buf[32] = "centered";
+
+    /* Render textedit with 40px height */
+    lens_begin(ui, &IN0);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf", .width = 200.0f, .height = 40.0f},
+                                           .buf = buf,
+                                           .cap = sizeof buf});
+    lens_end(ui);
+
+    lens_node *n = lens_find(ui, lens_current_id(ui, "tf"));
+    CHECK(n != NULL);
+
+    /* Find text draw command and verify vertical centering */
+    const lens_draw_cmd *text_cmd = NULL;
+    for (uint32_t i = 0; i < n->cmd_count; i++) {
+        if (n->cmds[i].kind == LENS_DRAW_TEXT) {
+            text_cmd = &n->cmds[i];
+            break;
+        }
+    }
+    CHECK(text_cmd != NULL);
+    /* In a 40px box, text should be centered: (40 - fm.height) * 0.5f */
+    CHECK(text_cmd->rel.y > 0.0f);
+    CHECK(text_cmd->rel.y < 20.0f);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_insert_ascii();
     test_backspace_and_delete();
     test_cursor_navigation();
     test_multiline_enter_inserts_newline();
     test_multiline_selection_and_copy();
+    test_textedit_cursor_hint();
+    test_textedit_vertical_centering();
     return TEST_REPORT();
 }

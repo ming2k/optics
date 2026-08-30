@@ -720,6 +720,13 @@ IRIS_API void iris_window_close(void) {
         pl->running = false;
 }
 
+IRIS_API void iris_window_start_move(void) {
+    wp_platform *pl = g_active_pl;
+    if (!pl || !pl->toplevel || !pl->seat)
+        return;
+    xdg_toplevel_move(pl->toplevel, pl->seat, pl->last_serial);
+}
+
 IRIS_API void iris_window_set_min_size(int32_t width, int32_t height) {
     wp_platform *pl = g_active_pl;
     if (!pl || !pl->toplevel)

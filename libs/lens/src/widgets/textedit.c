@@ -11,24 +11,15 @@
 /*  UTF-8 and word boundary helpers                                   */
 /* ------------------------------------------------------------------ */
 
-static size_t utf8_char_len(const char *s, size_t pos) {
-    unsigned char c = (unsigned char)s[pos];
-    if ((c & 0x80) == 0)
-        return 1;
-    if ((c & 0xE0) == 0xC0)
-        return 2;
-    if ((c & 0xF0) == 0xE0)
-        return 3;
-    if ((c & 0xF8) == 0xF0)
-        return 4;
-    return 1;
+static inline bool is_utf8_continuation(unsigned char b) {
+    return (b & 0xC0) == 0x80;
 }
 
 static size_t prev_char_boundary(const char *s, size_t pos) {
     if (pos == 0)
         return 0;
     pos--;
-    while (pos > 0 && ((unsigned char)s[pos] & 0xC0) == 0x80)
+    while (pos > 0 && is_utf8_continuation((unsigned char)s[pos]))
         pos--;
     return pos;
 }
@@ -36,15 +27,19 @@ static size_t prev_char_boundary(const char *s, size_t pos) {
 static size_t next_char_boundary(const char *s, size_t len, size_t pos) {
     if (pos >= len)
         return len;
-    return pos + utf8_char_len(s, pos);
+    pos++;
+    while (pos < len && is_utf8_continuation((unsigned char)s[pos]))
+        pos++;
+    return pos;
 }
 
-static bool is_word_char(char c) {
-    unsigned char u = (unsigned char)c;
-    return (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z') || (u >= '0' && u <= '9') || u == '_';
+static inline bool is_word_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 }
 
 static size_t prev_word_boundary(const char *s, size_t pos) {
+    if (pos == 0)
+        return 0;
     while (pos > 0 && s[pos - 1] == ' ')
         pos--;
     while (pos > 0 && is_word_char(s[pos - 1]))
@@ -53,6 +48,8 @@ static size_t prev_word_boundary(const char *s, size_t pos) {
 }
 
 static size_t next_word_boundary(const char *s, size_t len, size_t pos) {
+    while (pos < len && s[pos] != ' ' && !is_word_char(s[pos]))
+        pos++;
     while (pos < len && is_word_char(s[pos]))
         pos++;
     while (pos < len && s[pos] == ' ')
@@ -89,18 +86,17 @@ static inline void sel_clear(lens_textedit_state *ts) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Buffer mutation                                                   */
+/*  Buffer mutation helpers                                           */
 /* ------------------------------------------------------------------ */
 
-static bool delete_range(char *buf, size_t *len, uint32_t lo, uint32_t hi) {
+static void delete_range(char *buf, size_t *len, size_t lo, size_t hi) {
     if (lo >= hi || hi > *len)
-        return false;
+        return;
     memmove(buf + lo, buf + hi, *len - hi + 1);
     *len -= (hi - lo);
-    return true;
 }
 
-static bool insert_text(char *buf, size_t *len, size_t cap, uint32_t pos, const char *ins,
+static bool insert_text(char *buf, size_t *len, size_t cap, size_t pos, const char *ins,
                         size_t ins_len) {
     if (*len + ins_len >= cap)
         return false;
@@ -142,6 +138,23 @@ static float prefix_width(lens *ui, const char *str, size_t len, float font_size
                                                 .weight = 0.0f,
                                                 .family = (flux_text_family)ui->text_family})
         .width;
+}
+
+static size_t hit_test_line(lens *ui, const char *line, size_t line_len, float font_size,
+                            float click_x) {
+    if (!line || line_len == 0 || click_x <= 0.0f)
+        return 0;
+    size_t pos = 0;
+    float prev_x = 0.0f;
+    while (pos < line_len) {
+        size_t next = next_char_boundary(line, line_len, pos);
+        float next_x = prefix_width(ui, line, next, font_size);
+        if (click_x < (prev_x + next_x) * 0.5f)
+            return pos;
+        prev_x = next_x;
+        pos = next;
+    }
+    return line_len;
 }
 
 /* ------------------------------------------------------------------ */
@@ -189,25 +202,114 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     if (ts->sel_anchor != UINT32_MAX && ts->sel_anchor > len)
         ts->sel_anchor = (uint32_t)len;
 
-    float line_height = font_size * LENS_TEXTEDIT_LINE_HEIGHT;
+    lens_text_metrics fm = lensi_text_measure_label(ui, "Ag", font_size, 0.0f);
+    float line_h = fm.height > 0.0f ? fm.height : font_size;
+    float line_height = line_h * LENS_TEXTEDIT_LINE_HEIGHT;
     uint32_t rows = opts->rows > 0 ? opts->rows : (multiline ? 4 : 1);
     float min_h = multiline ? (float)rows * line_height : 0.0f;
 
     float h = (n->fixed_h > 0) ? n->fixed_h
-                               : (multiline ? min_h + 2.0f * padding : font_size + 2.0f * padding);
+                               : (multiline ? min_h + 2.0f * padding : line_h + 2.0f * padding);
     float w = (n->fixed_w > 0) ? n->fixed_w : 200.0f;
     n->measured = (flux_point){w, h};
 
     lens_response r = lensi_interact(ui, n, true, disabled);
 
-    /* Selection on focus */
-    if (r.focused && opts->select_all_on_focus && !ts->select_all_seeded && len > 0) {
+    /* Text cursor hint on hover or drag */
+    if (!disabled && (r.hovered || ts->dragging))
+        ui->cursor_hint = LENS_CURSOR_TEXT;
+
+    /* Mouse click & drag interaction */
+    if (!disabled && buf && buf_cap > 1 && !opts->readonly) {
+        bool mouse_down = ui->input.mouse_down[LENS_MOUSE_LEFT];
+        bool mouse_pressed = ui->input.mouse_pressed[LENS_MOUSE_LEFT];
+
+        if (r.pressed && mouse_pressed) {
+            if (opts->select_all_on_focus && !ts->select_all_seeded && len > 0) {
+                ts->sel_anchor = 0;
+                ts->cursor = (uint32_t)len;
+                ts->select_all_seeded = true;
+            } else {
+                float click_x = ui->input.cursor.x - (n->prev_rect.x + padding);
+                uint32_t target_cursor = 0;
+                if (multiline) {
+                    float click_y = ui->input.cursor.y - (n->prev_rect.y + padding - ts->scroll_y);
+                    int target_line = (int)floorf(click_y / line_height);
+                    if (target_line < 0)
+                        target_line = 0;
+                    size_t ls = 0;
+                    int li = 0;
+                    while (li < target_line && ls < len) {
+                        size_t llen = line_length(buf, len, ls);
+                        ls += llen;
+                        if (ls < len && buf[ls] == '\n') {
+                            ls++;
+                            li++;
+                        }
+                    }
+                    size_t llen = line_length(buf, len, ls);
+                    target_cursor =
+                        (uint32_t)(ls + hit_test_line(ui, buf + ls, llen, font_size, click_x));
+                } else {
+                    target_cursor = (uint32_t)hit_test_line(ui, buf, len, font_size, click_x);
+                }
+
+                bool shift = (ui->input.mods & LENS_MOD_SHIFT) != 0;
+                if (shift) {
+                    if (ts->sel_anchor == UINT32_MAX)
+                        ts->sel_anchor = ts->cursor;
+                    ts->cursor = target_cursor;
+                } else {
+                    ts->cursor = target_cursor;
+                    ts->sel_anchor = target_cursor;
+                    ts->dragging = true;
+                }
+            }
+        } else if (ts->dragging) {
+            if (mouse_down) {
+                float click_x = ui->input.cursor.x - (n->prev_rect.x + padding);
+                uint32_t target_cursor = 0;
+                if (multiline) {
+                    float click_y = ui->input.cursor.y - (n->prev_rect.y + padding - ts->scroll_y);
+                    int target_line = (int)floorf(click_y / line_height);
+                    if (target_line < 0)
+                        target_line = 0;
+                    size_t ls = 0;
+                    int li = 0;
+                    while (li < target_line && ls < len) {
+                        size_t llen = line_length(buf, len, ls);
+                        ls += llen;
+                        if (ls < len && buf[ls] == '\n') {
+                            ls++;
+                            li++;
+                        }
+                    }
+                    size_t llen = line_length(buf, len, ls);
+                    target_cursor =
+                        (uint32_t)(ls + hit_test_line(ui, buf + ls, llen, font_size, click_x));
+                } else {
+                    target_cursor = (uint32_t)hit_test_line(ui, buf, len, font_size, click_x);
+                }
+                ts->cursor = target_cursor;
+            } else {
+                ts->dragging = false;
+                if (ts->sel_anchor == ts->cursor)
+                    sel_clear(ts);
+            }
+        }
+    }
+
+    /* Selection on programmatic/keyboard focus */
+    if (r.focused && opts->select_all_on_focus && !ts->select_all_seeded && len > 0 &&
+        !ui->input.mouse_pressed[LENS_MOUSE_LEFT]) {
         ts->sel_anchor = 0;
         ts->cursor = (uint32_t)len;
         ts->select_all_seeded = true;
     }
-    if (!r.focused)
+    if (!r.focused) {
         ts->select_all_seeded = false;
+        ts->dragging = false;
+    }
 
     bool changed = false;
 
@@ -262,6 +364,29 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
                 }
                 if (!shift)
                     sel_clear(ts);
+            } else if (k.key == LENS_KEY_UP && multiline) {
+                size_t ls;
+                int li;
+                find_line(buf, ts->cursor, &ls, &li);
+                if (li > 0) {
+                    size_t col = ts->cursor - ls;
+                    size_t prev_ls = 0;
+                    int prev_li = 0;
+                    find_line(buf, ls - 1, &prev_ls, &prev_li);
+                    size_t prev_len = line_length(buf, len, prev_ls);
+                    ts->cursor = (uint32_t)(prev_ls + (col < prev_len ? col : prev_len));
+                }
+            } else if (k.key == LENS_KEY_DOWN && multiline) {
+                size_t ls;
+                int li;
+                find_line(buf, ts->cursor, &ls, &li);
+                size_t cur_len = line_length(buf, len, ls);
+                if (ls + cur_len < len) {
+                    size_t col = ts->cursor - ls;
+                    size_t next_ls = ls + cur_len + 1;
+                    size_t next_len = line_length(buf, len, next_ls);
+                    ts->cursor = (uint32_t)(next_ls + (col < next_len ? col : next_len));
+                }
             } else if (k.key == LENS_KEY_HOME) {
                 if (shift && ts->sel_anchor == UINT32_MAX)
                     ts->sel_anchor = ts->cursor;
@@ -296,10 +421,10 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
                     sel_clear(ts);
                     changed = true;
                 } else if (ts->cursor > 0) {
-                    uint32_t prev = (uint32_t)(ctrl ? prev_word_boundary(buf, ts->cursor)
-                                                    : prev_char_boundary(buf, ts->cursor));
+                    size_t prev = (ctrl ? prev_word_boundary(buf, ts->cursor)
+                                        : prev_char_boundary(buf, ts->cursor));
                     delete_range(buf, &len, prev, ts->cursor);
-                    ts->cursor = prev;
+                    ts->cursor = (uint32_t)prev;
                     changed = true;
                 }
             } else if (k.key == LENS_KEY_DELETE) {
@@ -310,9 +435,9 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
                     sel_clear(ts);
                     changed = true;
                 } else if (ts->cursor < len) {
-                    uint32_t nxt = (uint32_t)(ctrl ? next_word_boundary(buf, len, ts->cursor)
-                                                   : next_char_boundary(buf, len, ts->cursor));
-                    delete_range(buf, &len, ts->cursor, nxt);
+                    size_t next = (ctrl ? next_word_boundary(buf, len, ts->cursor)
+                                        : next_char_boundary(buf, len, ts->cursor));
+                    delete_range(buf, &len, ts->cursor, next);
                     changed = true;
                 }
             } else if (k.key == LENS_KEY_RETURN) {
@@ -370,16 +495,17 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     /* Measure and layout display text */
     bool show_placeholder = (len == 0 && placeholder && placeholder[0]);
     const char *display_text = show_placeholder ? placeholder : (buf ? buf : "");
-    float text_y = fmaxf((h - font_size) * 0.5f - 1.0f, 0.0f);
-    lens_text_metrics fm = lensi_text_measure_label(ui, "Ag", font_size, 0.0f);
+    float text_y = multiline ? padding - ts->scroll_y : fmaxf((h - line_h) * 0.5f, 0.0f);
 
     float caret_x = 0.0f;
+    float caret_y = text_y;
     if (r.focused && !show_placeholder && buf) {
         if (multiline) {
             size_t ls;
             int li;
             find_line(buf, ts->cursor, &ls, &li);
             caret_x = prefix_width(ui, buf + ls, ts->cursor - ls, font_size);
+            caret_y = text_y + (float)li * line_height;
         } else {
             caret_x = prefix_width(ui, buf, ts->cursor, font_size);
         }
@@ -387,9 +513,9 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
 
     flux_rect caret_rect = {
         padding + caret_x,
-        text_y,
+        caret_y,
         1.5f,
-        fm.height > 0 ? fm.height : font_size,
+        line_h,
     };
 
     /* Build text lines for multiline or single-line */
@@ -426,8 +552,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
         uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
         float x1 = prefix_width(ui, buf, lo, font_size);
         float x2 = prefix_width(ui, buf, hi, font_size);
-        sel_rect =
-            (flux_rect){padding + x1, text_y, x2 - x1, fm.height > 0 ? fm.height : font_size};
+        sel_rect = (flux_rect){padding + x1, text_y, x2 - x1, line_h};
         sel_rect_count = 1;
     }
 

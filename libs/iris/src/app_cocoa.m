@@ -347,6 +347,15 @@ IRIS_API void iris_window_close(void) {
         pl->running = false;
 }
 
+IRIS_API void iris_window_start_move(void) {
+    IrisPlatform *pl = g_active_pl;
+    if (!pl || !pl->window)
+        return;
+    NSEvent *current_event = [NSApp currentEvent];
+    if (current_event)
+        [pl->window performWindowDragWithEvent:current_event];
+}
+
 IRIS_API void iris_window_set_min_size(int32_t width, int32_t height) {
     IrisPlatform *pl = g_active_pl;
     if (!pl || !pl->window)

@@ -801,6 +801,14 @@ IRIS_API void iris_window_close(void) {
         pl->running = false;
 }
 
+IRIS_API void iris_window_start_move(void) {
+    w32_platform *pl = g_active_pl;
+    if (!pl || !pl->hwnd)
+        return;
+    ReleaseCapture();
+    SendMessageW(pl->hwnd, WM_SYSCOMMAND, (WPARAM)(0xF010 /* SC_MOVE + HTCAPTION */ | 0x0002), 0);
+}
+
 IRIS_API void iris_window_set_min_size(int32_t width, int32_t height) {
     w32_platform *pl = g_active_pl;
     if (!pl)
