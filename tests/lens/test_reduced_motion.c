@@ -44,7 +44,8 @@ static void test_reduced_motion_hover_stays_settled(void) {
     float value = 0.5f;
 
     lens_begin(ui, &IN0);
-    lens_slider(ui, "Volume", &value, 0.0f, 1.0f);
+    lens_slider(ui,
+                &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
     lens_end(ui);
     CHECK(!lens_anim_pending(ui));
 
@@ -52,7 +53,8 @@ static void test_reduced_motion_hover_stays_settled(void) {
     lens_input hover = IN0;
     hover.cursor = (flux_point){80, 16};
     lens_begin(ui, &hover);
-    lens_slider(ui, "Volume", &value, 0.0f, 1.0f);
+    lens_slider(ui,
+                &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
     lens_end(ui);
     CHECK(!lens_anim_pending(ui));
 

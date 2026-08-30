@@ -23,11 +23,10 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 /// Raw-bindings escape hatch, shared with the other safe crates. Kept `pub`
 /// (not `pub(crate)`) deliberately: a thin binding ecosystem needs one
 /// documented way to reach a symbol the safe layer has not wrapped yet, and
-/// every such use is inherently `unsafe`. See docs/dev/api-surface-audit.md
-/// for the exposure rationale.
+/// every such use is inherently `unsafe`.
 pub use flux_sys as sys;
 
-/// Library version string ("0.0.29" at the time of writing), from the
+/// Library version string ("0.0.30" at the time of writing), from the
 /// linked library — the same value C's `FLUX_VERSION_NUMBER` macros
 /// describe. Sibling crates (`lens`, `iris`, `prism`) carry matching
 /// wrappers, so a mixed-version process can be detected at startup.

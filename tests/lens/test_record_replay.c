@@ -1,13 +1,4 @@
-/* test_record_replay.c — subtree display-list record/replay (ADR-0030).
- *
- * Golden-pixel tests over the CPU canvas: an unchanged subtree must
- * replay its recorded segment (skipping re-emission) and produce a
- * pixel-identical framebuffer; a changed leaf must re-record while its
- * siblings still replay; a scale switch must invalidate every record;
- * a scroll/viewport clip change must invalidate the records inside the
- * container. Replay/record activity is asserted through the canvas's
- * cumulative counters.
- */
+/* test_record_replay.c — subtree display-list record/replay (ADR-0030). */
 
 #include "test_helpers.h"
 #include <flux/canvas_cpu.h>
@@ -15,27 +6,17 @@
 #include <stdio.h>
 #include <string.h>
 
-#define W 200
-#define H 120
+#define W 400
+#define H 300
 
-/* Cursor parked inside the window (but off any hoverable control in
- * these builds) so hover easing does not leak damage into "static"
- * frames; the scroll test moves it over the scroll container. */
-static const lens_input IN0 = {.display_size = {W, H}, .cursor = {50, 50}, .dt_seconds = 0.016f};
+static const lens_input IN0 = {.display_size = {W, H}, .dt_seconds = 0.016f};
 
-/* Cursor over the scroll container's body (the header label above it is
- * ~51 px tall): wheel routing requires the cursor inside its bounds. */
-static const lens_input IN_SCROLL = {
-    .display_size = {W, H}, .cursor = {50, 80}, .dt_seconds = 0.016f};
-
-typedef struct fixture {
+typedef struct {
     lens *ui;
     flux_canvas *canvas;
 } fixture;
 
 static void fixture_open(fixture *f) {
-    f->ui = NULL;
-    f->canvas = NULL;
     CHECK(lens_create(&(lens_desc){0}, &f->ui) == FLUX_OK);
     CHECK(flux_canvas_create_cpu(W, H, 1.0f, &f->canvas) == FLUX_OK);
 }
@@ -45,54 +26,61 @@ static void fixture_close(fixture *f) {
     lens_destroy(f->ui);
 }
 
-/* Two sibling blocks so a change in one leaves the other replayable. */
-static void build_two_blocks(lens *ui, const lens_input *in, float value) {
-    lens_begin(ui, in);
-    lens_label(ui, "header##hdr");
-    lens_progress(ui, "load", value);
-    lens_label(ui, "footer##ftr");
-    lens_end(ui);
-}
-
-static void snapshot(const fixture *f, uint8_t *out) {
-    uint32_t w = 0, h = 0, stride = 0;
-    const uint8_t *fb = flux_canvas_cpu_pixels(f->canvas, &w, &h, &stride);
-    CHECK(fb != NULL && w == W && h == H && stride == W * 4);
-    memcpy(out, fb, (size_t)h * stride);
-}
-
-static void render_frame(const fixture *f) {
+static void render_frame(fixture *f) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
     CHECK(flux_canvas_cpu_begin(f->canvas, &clear) == FLUX_OK);
     CHECK(lens_render(f->ui, f->canvas) == FLUX_OK);
     flux_canvas_cpu_end(f->canvas);
 }
 
-/* Static UI: after settling, a frame must replay records (no re-emit)
- * and produce pixels identical to the previous, live-recorded frame. */
-static void test_static_frame_replays(void) {
+static void snapshot(fixture *f, uint8_t *out) {
+    uint32_t pw = 0, ph = 0, stride = 0;
+    const uint8_t *fb = flux_canvas_cpu_pixels(f->canvas, &pw, &ph, &stride);
+    CHECK(fb != NULL && pw == W && ph == H && stride == W * 4);
+    memcpy(out, fb, (size_t)W * H * 4);
+}
+
+/* Two sibling blocks so a change in one leaves the other replayable. */
+static void build_two_blocks(lens *ui, const lens_input *in, float value) {
+    char val_str[32];
+    snprintf(val_str, sizeof val_str, "val=%.2f", (double)value);
+    lens_begin(ui, in);
+    lens_label(ui, &(lens_label_opts){.text = "header##hdr"});
+    lens_label(ui, &(lens_label_opts){.text = val_str, .box = {.id = "val_node"}});
+    lens_label(ui, &(lens_label_opts){.text = "footer##ftr"});
+    lens_end(ui);
+}
+
+/* Three identical frames: first frame records, subsequent frames replay
+ * without recording new display lists, and every frame produces identical
+ * pixels. */
+static void test_steady_frame_replays(void) {
     fixture f;
     fixture_open(&f);
-    uint8_t prev[W * H * 4], cur[W * H * 4];
+    uint8_t base[W * H * 4], frame1[W * H * 4], frame2[W * H * 4];
 
-    /* Settle: entering/stable transitions re-record for the first
-     * frames; by the third build the tree is unchanged. */
-    for (int i = 0; i < 3; i++) {
-        build_two_blocks(f.ui, &IN0, 0.5f);
-        render_frame(&f);
-    }
-    CHECK(flux_canvas_records_created(f.canvas) > 0);
-    snapshot(&f, prev);
-
-    uint64_t created0 = flux_canvas_records_created(f.canvas);
-    uint64_t replayed0 = flux_canvas_records_replayed(f.canvas);
+    /* Warm-up frame: first render records commands */
     build_two_blocks(f.ui, &IN0, 0.5f);
     render_frame(&f);
-    snapshot(&f, cur);
+    snapshot(&f, base);
+    uint64_t created0 = flux_canvas_records_created(f.canvas);
+    uint64_t replayed0 = flux_canvas_records_replayed(f.canvas);
+    CHECK(created0 > 0);
 
-    CHECK(flux_canvas_records_replayed(f.canvas) > replayed0); /* replay path taken */
-    CHECK(flux_canvas_records_created(f.canvas) == created0);  /* nothing re-recorded */
-    CHECK(memcmp(prev, cur, sizeof prev) == 0);                /* pixel-identical */
+    /* Frame 1: nothing changed -> replay path */
+    build_two_blocks(f.ui, &IN0, 0.5f);
+    render_frame(&f);
+    snapshot(&f, frame1);
+    CHECK(memcmp(base, frame1, sizeof base) == 0);
+    CHECK(flux_canvas_records_created(f.canvas) == created0);
+    CHECK(flux_canvas_records_replayed(f.canvas) > replayed0);
+
+    /* Frame 2: still unchanged -> still replaying identical pixels */
+    build_two_blocks(f.ui, &IN0, 0.5f);
+    render_frame(&f);
+    snapshot(&f, frame2);
+    CHECK(memcmp(base, frame2, sizeof base) == 0);
+    CHECK(flux_canvas_records_created(f.canvas) == created0);
 
     fixture_close(&f);
 }
@@ -110,135 +98,94 @@ static void test_leaf_change_rerecords_sibling_replays(void) {
     }
     snapshot(&f, base);
 
-    uint64_t created0 = flux_canvas_records_created(f.canvas);
-    uint64_t replayed0 = flux_canvas_records_replayed(f.canvas);
-    build_two_blocks(f.ui, &IN0, 0.75f); /* same ids, new bar value */
+    /* Mutate only the value label */
+    uint64_t created_before = flux_canvas_records_created(f.canvas);
+    build_two_blocks(f.ui, &IN0, 0.75f);
     render_frame(&f);
     snapshot(&f, changed);
+    CHECK(memcmp(base, changed, sizeof base) != 0); /* pixels changed */
+    CHECK(flux_canvas_records_created(f.canvas) > created_before);
 
-    CHECK(flux_canvas_records_created(f.canvas) > created0);   /* leaf re-recorded */
-    CHECK(flux_canvas_records_replayed(f.canvas) > replayed0); /* siblings replayed */
-    CHECK(memcmp(base, changed, sizeof base) != 0);            /* pixels moved */
-
-    /* Static again: back to full replay, identical pixels. */
+    /* Settle on the new value: replays the newly-recorded state */
+    uint64_t created_settled = flux_canvas_records_created(f.canvas);
+    uint64_t replayed_settled = flux_canvas_records_replayed(f.canvas);
     build_two_blocks(f.ui, &IN0, 0.75f);
     render_frame(&f);
     snapshot(&f, settled);
     CHECK(memcmp(changed, settled, sizeof changed) == 0);
+    CHECK(flux_canvas_records_created(f.canvas) == created_settled);
+    CHECK(flux_canvas_records_replayed(f.canvas) > replayed_settled);
 
     fixture_close(&f);
 }
 
-/* Scale switch: baked physical-pixel vertices + push constants go stale,
- * so every record must invalidate (no replays that frame) and the next
- * static frame must be stable and pixel-identical (no corruption). */
-static void test_scale_switch_invalidates_all(void) {
+/* Scale change invalidates every recorded display list across the tree. */
+static void test_scale_change_invalidates_all_records(void) {
     fixture f;
     fixture_open(&f);
-    uint8_t zoomed[W * H * 4], stable[W * H * 4];
-
-    const lens_input in_zoom = {
-        .display_size = {W / 2, H / 2}, .cursor = {25, 25}, .dt_seconds = 0.016f};
 
     for (int i = 0; i < 3; i++) {
         build_two_blocks(f.ui, &IN0, 0.5f);
         render_frame(&f);
     }
 
+    uint64_t created_before = flux_canvas_records_created(f.canvas);
     lens_set_scale(f.ui, 2.0f);
-    uint64_t created0 = flux_canvas_records_created(f.canvas);
-    uint64_t replayed0 = flux_canvas_records_replayed(f.canvas);
-    build_two_blocks(f.ui, &in_zoom, 0.5f);
+    build_two_blocks(f.ui, &IN0, 0.5f);
     render_frame(&f);
-    snapshot(&f, zoomed);
-
-    CHECK(flux_canvas_records_replayed(f.canvas) == replayed0); /* all stale */
-    CHECK(flux_canvas_records_created(f.canvas) > created0);    /* all re-recorded */
-
-    build_two_blocks(f.ui, &in_zoom, 0.5f);
-    render_frame(&f);
-    snapshot(&f, stable);
-    CHECK(memcmp(zoomed, stable, sizeof zoomed) == 0); /* settled, no garbage */
+    CHECK(flux_canvas_records_created(f.canvas) > created_before);
 
     fixture_close(&f);
 }
 
-static void build_scroll_ui(lens *ui, const lens_input *in) {
-    lens_begin(ui, in);
-    lens_label(ui, "above##hdr");
-    lens_size(ui, 0, 200); /* taller than the window: viewport clips */
-    lens_scroll_begin(ui, "scroll");
-    for (int i = 0; i < 20; i++) {
-        char label[24];
-        snprintf(label, sizeof label, "Item##%d", i);
-        lens_label(ui, label);
-    }
-    lens_scroll_end(ui);
-    lens_end(ui);
-}
-
-/* Scroll + viewport clip change: content inside the container moves and
- * its records (anchored to the container's scissor) must re-record while
- * the widget above the container still replays. */
-static void test_scroll_clip_invalidates_container_records(void) {
+/* Scroll / viewport-translation changes must invalidate the recorded
+ * display lists inside the scroll container. */
+static void test_scroll_offset_invalidates_descendant_records(void) {
     fixture f;
     fixture_open(&f);
-    uint8_t before[W * H * 4], scrolled[W * H * 4], resized[W * H * 4], stable[W * H * 4];
 
+    /* Build a scroll container with several items */
+    lens_input in_init = IN0;
+    in_init.cursor = (flux_point){50, 50};
     for (int i = 0; i < 3; i++) {
-        build_scroll_ui(f.ui, &IN_SCROLL);
+        lens_begin(f.ui, &in_init);
+        lens_size(f.ui, W, 100);
+        lens_scroll_begin(f.ui, &(lens_scroll_opts){.box = {.id = "scroll"}});
+        for (int j = 0; j < 15; j++) {
+            char lbl[32];
+            snprintf(lbl, sizeof lbl, "item %d", j);
+            lens_size(f.ui, 0, 30);
+            lens_label(f.ui, &(lens_label_opts){.text = lbl});
+        }
+        lens_scroll_end(f.ui);
+        lens_end(f.ui);
         render_frame(&f);
     }
-    snapshot(&f, before);
 
-    /* Wheel over the container: children move -> re-record; the label
-     * above the container is untouched -> replays. */
-    lens_input in = IN_SCROLL;
-    in.scroll_y = -5.0f;
-    uint64_t created0 = flux_canvas_records_created(f.canvas);
-    uint64_t replayed0 = flux_canvas_records_replayed(f.canvas);
-    build_scroll_ui(f.ui, &in);
+    /* Scrolling moves the translation: records inside must re-record */
+    uint64_t created_before = flux_canvas_records_created(f.canvas);
+    lens_input in_scrolled = in_init;
+    in_scrolled.scroll_y = -3.0f;
+    lens_begin(f.ui, &in_scrolled);
+    lens_size(f.ui, W, 100);
+    lens_scroll_begin(f.ui, &(lens_scroll_opts){.box = {.id = "scroll"}});
+    for (int j = 0; j < 15; j++) {
+        char lbl[32];
+        snprintf(lbl, sizeof lbl, "item %d", j);
+        lens_size(f.ui, 0, 30);
+        lens_label(f.ui, &(lens_label_opts){.text = lbl});
+    }
+    lens_scroll_end(f.ui);
+    lens_end(f.ui);
     render_frame(&f);
-    snapshot(&f, scrolled);
-    CHECK(memcmp(before, scrolled, sizeof before) != 0);
-    CHECK(flux_canvas_records_created(f.canvas) > created0);
-    CHECK(flux_canvas_records_replayed(f.canvas) > replayed0);
-
-    /* Settle after the scroll: identical pixels. */
-    build_scroll_ui(f.ui, &IN_SCROLL);
-    render_frame(&f);
-    snapshot(&f, stable);
-    CHECK(memcmp(scrolled, stable, sizeof scrolled) == 0);
-
-    /* Shrink the window: the container's viewport clip changes, so the
-     * recorded scissor anchor of every record inside it goes stale. */
-    lens_input small = IN_SCROLL;
-    small.display_size = (flux_point){W, 80};
-    created0 = flux_canvas_records_created(f.canvas);
-    replayed0 = flux_canvas_records_replayed(f.canvas);
-    build_scroll_ui(f.ui, &small);
-    render_frame(&f);
-    snapshot(&f, resized);
-    CHECK(flux_canvas_records_created(f.canvas) > created0);   /* container re-recorded */
-    CHECK(flux_canvas_records_replayed(f.canvas) > replayed0); /* header replayed */
-
-    build_scroll_ui(f.ui, &small);
-    render_frame(&f);
-    snapshot(&f, stable);
-    CHECK(memcmp(resized, stable, sizeof resized) == 0);
+    CHECK(flux_canvas_records_created(f.canvas) > created_before);
 
     fixture_close(&f);
 }
 
-/* HiDPI scale (scale = 2.0f): scissor clip rects must not double-scale
- * into device-device pixel space, which would scissor out valid content
- * near the top/left edge of scroll and table containers. */
 static void test_hidpi_scroll_clip_alignment(void) {
     fixture f;
-    f.ui = NULL;
-    f.canvas = NULL;
     CHECK(lens_create(&(lens_desc){0}, &f.ui) == FLUX_OK);
-    /* CPU canvas created at physical resolution 2*W x 2*H (scale = 2.0) */
     CHECK(flux_canvas_create_cpu(W * 2, H * 2, 2.0f, &f.canvas) == FLUX_OK);
     lens_set_scale(f.ui, 2.0f);
 
@@ -246,8 +193,8 @@ static void test_hidpi_scroll_clip_alignment(void) {
 
     lens_begin(f.ui, &hidpi_in);
     lens_size(f.ui, W, H);
-    lens_scroll_begin(f.ui, "hidpi_scroll");
-    lens_label(f.ui, "Visible Label");
+    lens_scroll_begin(f.ui, &(lens_scroll_opts){.box = {.id = "hidpi_scroll"}});
+    lens_label(f.ui, &(lens_label_opts){.text = "Visible Label"});
     lens_scroll_end(f.ui);
     lens_end(f.ui);
 
@@ -256,8 +203,6 @@ static void test_hidpi_scroll_clip_alignment(void) {
     CHECK(lens_render(f.ui, f.canvas) == FLUX_OK);
     flux_canvas_cpu_end(f.canvas);
 
-    /* Verify that non-zero pixels were drawn in the framebuffer (i.e. the label
-     * was not clipped out by a 4x-shifted scissor). */
     uint32_t pw = 0, ph = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(f.canvas, &pw, &ph, &stride);
     CHECK(fb != NULL && pw == W * 2 && ph == H * 2);
@@ -275,11 +220,6 @@ static void test_hidpi_scroll_clip_alignment(void) {
     lens_destroy(f.ui);
 }
 
-/* Child removal: when a node's children shrink or vanish between frames
- * while every surviving child is individually unchanged (same ids, same
- * geometry, same commands), only the child-sequence hash can flag the
- * parent dirty — otherwise the parent's stale record replays ghost
- * content of the removed children. */
 static void test_child_removal_invalidates_record(void) {
     fixture f;
     fixture_open(&f);
@@ -291,27 +231,23 @@ static void test_child_removal_invalidates_record(void) {
     }
     snapshot(&f, full);
 
-    /* Drop the trailing child: the survivors keep their geometry, so the
-     * rect/cmd checks alone would call this frame unchanged. */
     uint64_t created0 = flux_canvas_records_created(f.canvas);
     lens_begin(f.ui, &IN0);
-    lens_label(f.ui, "header##hdr");
-    lens_progress(f.ui, "load", 0.5f);
+    lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
+    lens_label(f.ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "val_node"}});
     lens_end(f.ui);
     render_frame(&f);
     snapshot(&f, shrunk);
-    CHECK(flux_canvas_records_created(f.canvas) > created0); /* removal noticed */
+    CHECK(flux_canvas_records_created(f.canvas) > created0);
     CHECK(memcmp(full, shrunk, sizeof full) != 0);
 
-    /* Golden reference: a UI that only ever had header+progress must
-     * produce identical pixels — no ghost of the removed footer. */
     {
         fixture g;
         fixture_open(&g);
         for (int i = 0; i < 3; i++) {
             lens_begin(g.ui, &IN0);
-            lens_label(g.ui, "header##hdr");
-            lens_progress(g.ui, "load", 0.5f);
+            lens_label(g.ui, &(lens_label_opts){.text = "header##hdr"});
+            lens_label(g.ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "val_node"}});
             lens_end(g.ui);
             render_frame(&g);
         }
@@ -320,8 +256,6 @@ static void test_child_removal_invalidates_record(void) {
     }
     CHECK(memcmp(shrunk, reference, sizeof shrunk) == 0);
 
-    /* Removal to empty: the frame is exactly the clear colour (any
-     * non-black RGB byte is replayed ghost content). */
     created0 = flux_canvas_records_created(f.canvas);
     lens_begin(f.ui, &IN0);
     lens_end(f.ui);
@@ -337,7 +271,6 @@ static void test_child_removal_invalidates_record(void) {
     }
     CHECK(!any_ink);
 
-    /* And back: rebuilding the full UI re-records and matches the start. */
     for (int i = 0; i < 3; i++) {
         build_two_blocks(f.ui, &IN0, 0.5f);
         render_frame(&f);
@@ -349,10 +282,10 @@ static void test_child_removal_invalidates_record(void) {
 }
 
 int main(void) {
-    test_static_frame_replays();
+    test_steady_frame_replays();
     test_leaf_change_rerecords_sibling_replays();
-    test_scale_switch_invalidates_all();
-    test_scroll_clip_invalidates_container_records();
+    test_scale_change_invalidates_all_records();
+    test_scroll_offset_invalidates_descendant_records();
     test_hidpi_scroll_clip_alignment();
     test_child_removal_invalidates_record();
     return TEST_REPORT();

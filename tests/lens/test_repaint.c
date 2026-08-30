@@ -1,17 +1,18 @@
-/* test_repaint.c — lens_frame_needs_repaint: damage-driven repaint query.
- * A changed leaf (same id, new content) must report true; a pure time
- * frame with identical content must report false. */
+/* test_repaint.c — lens_frame_needs_repaint: damage-driven repaint query. */
 
 #include "test_helpers.h"
 #include <flux/canvas_cpu.h>
 #include <lens/lens.h>
+#include <stdio.h>
 
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
 
 static void build_frame(lens *ui, float value) {
+    char val_str[32];
+    snprintf(val_str, sizeof val_str, "val=%.2f", (double)value);
     lens_begin(ui, &IN0);
-    lens_label(ui, "status");
-    lens_progress(ui, "load", value);
+    lens_label(ui, &(lens_label_opts){.text = "status"});
+    lens_label(ui, &(lens_label_opts){.text = val_str, .box = {.id = "val_node"}});
     lens_end(ui);
 }
 
@@ -33,14 +34,12 @@ static void test_first_frames_repaint_then_settle(void) {
     CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     build_frame(ui, 0.5f);
-    CHECK(lens_frame_needs_repaint(ui)); /* entering nodes: first paint */
+    CHECK(lens_frame_needs_repaint(ui));
     render_frame(ui, canvas);
 
     build_frame(ui, 0.5f);
     render_frame(ui, canvas);
     build_frame(ui, 0.5f);
-    /* Stable nodes, identical geometry and draw lists, only dt advanced:
-     * nothing to repaint. */
     CHECK(!lens_frame_needs_repaint(ui));
 
     flux_canvas_destroy(canvas);
@@ -74,6 +73,7 @@ static void test_place_open_close_repaints(void) {
     CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     const lens_place_opts popup = {
+        .box = {.id = "menu"},
         .band = LENS_BAND_POPUP,
         .mode = LENS_PLACE_ANCHORED,
         .rect = {10, 10, 50, 20},
@@ -87,27 +87,26 @@ static void test_place_open_close_repaints(void) {
     CHECK(!lens_frame_needs_repaint(ui));
     render_frame(ui, canvas);
 
-    /* Open a transient popup: the tree's child set changes even though
-     * the base widgets are untouched. */
+    /* Open a transient popup: the tree's child set changes */
     lens_begin(ui, &IN0);
-    lens_label(ui, "status");
-    lens_progress(ui, "load", 0.5f);
+    lens_label(ui, &(lens_label_opts){.text = "status"});
+    lens_label(ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "val_node"}});
     lens_place_open(ui, "menu");
-    if (lens_place_begin(ui, "menu", popup)) {
-        lens_label(ui, "item");
+    if (lens_place_begin(ui, &popup)) {
+        lens_label(ui, &(lens_label_opts){.text = "item"});
         lens_place_end(ui);
     }
     lens_end(ui);
     CHECK(lens_frame_needs_repaint(ui));
     render_frame(ui, canvas);
 
-    /* Let the popup settle: identical frames must stop reporting. */
+    /* Let the popup settle */
     for (int i = 0; i < 3; i++) {
         lens_begin(ui, &IN0);
-        lens_label(ui, "status");
-        lens_progress(ui, "load", 0.5f);
-        if (lens_place_begin(ui, "menu", popup)) {
-            lens_label(ui, "item");
+        lens_label(ui, &(lens_label_opts){.text = "status"});
+        lens_label(ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "val_node"}});
+        if (lens_place_begin(ui, &popup)) {
+            lens_label(ui, &(lens_label_opts){.text = "item"});
             lens_place_end(ui);
         }
         lens_end(ui);
@@ -117,11 +116,11 @@ static void test_place_open_close_repaints(void) {
 
     /* Close it: the popup's pixels must be erased. */
     lens_begin(ui, &IN0);
-    lens_label(ui, "status");
-    lens_progress(ui, "load", 0.5f);
+    lens_label(ui, &(lens_label_opts){.text = "status"});
+    lens_label(ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "val_node"}});
     lens_place_close(ui, "menu");
-    if (lens_place_begin(ui, "menu", popup)) {
-        lens_label(ui, "item");
+    if (lens_place_begin(ui, &popup)) {
+        lens_label(ui, &(lens_label_opts){.text = "item"});
         lens_place_end(ui);
     }
     lens_end(ui);

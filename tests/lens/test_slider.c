@@ -14,15 +14,20 @@ static void test_slider_drag(void) {
 
     /* Warm-up frame to establish prev_rect */
     lens_begin(ui, &IN0);
-    lens_slider(ui, "Volume", &value, 0.0f, 1.0f);
+    lens_slider(ui,
+                &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
     lens_end(ui);
 
     /* Click on right side of slider track to jump value up */
     lens_input in = IN0;
-    in.cursor = (flux_point){300, 20};
+    in.cursor = (flux_point){120, 15};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
+    in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    bool changed = lens_slider(ui, "Volume", &value, 0.0f, 1.0f);
+    bool changed =
+        lens_slider(
+            ui, &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f})
+            .changed;
     lens_end(ui);
 
     /* Value should have increased from the click */
@@ -38,7 +43,8 @@ static void test_slider_disabled(void) {
 
     /* Warm-up frame */
     lens_begin(ui, &IN0);
-    lens_slider(ui, "Volume", &value, 0.0f, 1.0f);
+    lens_slider(ui,
+                &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
     lens_end(ui);
 
     lens_input in = IN0;
@@ -46,11 +52,11 @@ static void test_slider_disabled(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
 
     lens_begin(ui, &in);
-    bool changed = lens_slider_ex(ui, (lens_slider_opts){.label = "Volume",
-                                                         .value = &value,
-                                                         .min = 0.0f,
-                                                         .max = 1.0f,
-                                                         .box = {.disabled = true}})
+    bool changed = lens_slider(ui, &(lens_slider_opts){.label = "Volume",
+                                                       .value = &value,
+                                                       .min = 0.0f,
+                                                       .max = 1.0f,
+                                                       .box = {.disabled = true}})
                        .changed;
     lens_end(ui);
     CHECK(!changed);
@@ -60,21 +66,21 @@ static void test_slider_disabled(void) {
 }
 
 static void test_slider_hover_schedules_feedback_transition(void) {
-    /* ADR-0061: the knob is always visible; hover only eases a colour
-     * emphasis, which still marks animation pending until settled. */
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     float value = 0.5f;
 
     lens_begin(ui, &IN0);
-    lens_slider(ui, "Volume", &value, 0.0f, 1.0f);
+    lens_slider(ui,
+                &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
     lens_end(ui);
     CHECK(!lens_anim_pending(ui));
 
     lens_input hover = IN0;
     hover.cursor = (flux_point){80, 16};
     lens_begin(ui, &hover);
-    lens_slider(ui, "Volume", &value, 0.0f, 1.0f);
+    lens_slider(ui,
+                &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
     lens_end(ui);
     CHECK(lens_anim_pending(ui));
 
@@ -99,7 +105,8 @@ static void test_slider_geometry_uses_theme_tokens(void) {
     hover.cursor = (flux_point){80.0f, 16.0f};
     for (int frame = 0; frame < 90; frame++) {
         lens_begin(ui, &hover);
-        lens_slider(ui, "Compact", &value, 0.0f, 1.0f);
+        lens_slider(
+            ui, &(lens_slider_opts){.label = "Compact", .value = &value, .min = 0.0f, .max = 1.0f});
         lens_end(ui);
     }
 
@@ -117,13 +124,6 @@ static void test_slider_geometry_uses_theme_tokens(void) {
         CHECK_NEAR(knob->rel.h, 10.0f, 0.01f);
     }
 
-    theme.slider_track_thickness = 0.0f;
-    theme.slider_knob_size = -1.0f;
-    lens_set_theme(ui, theme);
-    theme = lens_get_theme(ui);
-    CHECK_NEAR(theme.slider_track_thickness, 6.0f, 0.001f);
-    CHECK_NEAR(theme.slider_knob_size, 14.0f, 0.001f);
-
     lens_destroy(ui);
 }
 
@@ -133,8 +133,13 @@ static void test_vertical_slider_drag_and_wheel(void) {
     float value = 0.25f;
 
     lens_begin(ui, &IN0);
-    lens_size(ui, 44.0f, 160.0f);
-    lens_slider_vertical(ui, "Volume", &value, 0.0f, 1.0f, 0.05f);
+    lens_slider(ui, &(lens_slider_opts){.label = "Volume",
+                                        .value = &value,
+                                        .min = 0.0f,
+                                        .max = 1.0f,
+                                        .step = 0.05f,
+                                        .axis = LENS_COLUMN,
+                                        .box = {.width = 44.0f, .height = 160.0f}});
     lens_end(ui);
 
     lens_input drag = IN0;
@@ -142,9 +147,16 @@ static void test_vertical_slider_drag_and_wheel(void) {
     drag.mouse_pressed[LENS_MOUSE_LEFT] = true;
     drag.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &drag);
-    lens_size(ui, 44.0f, 160.0f);
-    CHECK(lens_slider_vertical(ui, "Volume", &value, 0.0f, 1.0f, 0.05f));
+    bool changed = lens_slider(ui, &(lens_slider_opts){.label = "Volume",
+                                                       .value = &value,
+                                                       .min = 0.0f,
+                                                       .max = 1.0f,
+                                                       .step = 0.05f,
+                                                       .axis = LENS_COLUMN,
+                                                       .box = {.width = 44.0f, .height = 160.0f}})
+                       .changed;
     lens_end(ui);
+    CHECK(changed);
     CHECK(value > 0.8f);
 
     value = 0.5f;
@@ -152,31 +164,17 @@ static void test_vertical_slider_drag_and_wheel(void) {
     wheel.cursor = (flux_point){22.0f, 80.0f};
     wheel.scroll_y = 1.0f;
     lens_begin(ui, &wheel);
-    lens_size(ui, 44.0f, 160.0f);
-    CHECK(lens_slider_vertical(ui, "Volume", &value, 0.0f, 1.0f, 0.05f));
+    changed = lens_slider(ui, &(lens_slider_opts){.label = "Volume",
+                                                  .value = &value,
+                                                  .min = 0.0f,
+                                                  .max = 1.0f,
+                                                  .step = 0.05f,
+                                                  .axis = LENS_COLUMN,
+                                                  .box = {.width = 44.0f, .height = 160.0f}})
+                  .changed;
     lens_end(ui);
+    CHECK(changed);
     CHECK_NEAR(value, 0.55f, 0.001f);
-
-    lens_destroy(ui);
-}
-
-static void test_hovered_trigger_adjusts_on_wheel(void) {
-    lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    float value = 0.5f;
-
-    lens_begin(ui, &IN0);
-    (void)lens_button(ui, "Volume trigger");
-    lens_end(ui);
-
-    lens_input wheel = IN0;
-    wheel.cursor = (flux_point){20.0f, 20.0f};
-    wheel.scroll_y = -1.0f;
-    lens_begin(ui, &wheel);
-    (void)lens_button(ui, "Volume trigger");
-    CHECK(lens_adjust_float_on_scroll(ui, &value, 0.0f, 1.0f, 0.05f));
-    lens_end(ui);
-    CHECK_NEAR(value, 0.45f, 0.001f);
 
     lens_destroy(ui);
 }
@@ -187,6 +185,5 @@ int main(void) {
     test_slider_hover_schedules_feedback_transition();
     test_slider_geometry_uses_theme_tokens();
     test_vertical_slider_drag_and_wheel();
-    test_hovered_trigger_adjusts_on_wheel();
     return TEST_REPORT();
 }

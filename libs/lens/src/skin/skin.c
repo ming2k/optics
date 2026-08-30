@@ -12,50 +12,24 @@
 
 lens_skin_fn lens_default_skin(lens_widget_kind kind) {
     switch (kind) {
-    case LENS_WIDGET_BUTTON:
-        return lensi_skin_button;
-    case LENS_WIDGET_SELECTABLE:
-        return lensi_skin_selectable;
-    case LENS_WIDGET_CHECKBOX:
-        return lensi_skin_checkbox;
-    case LENS_WIDGET_SWITCH:
-        return lensi_skin_switch;
-    case LENS_WIDGET_RADIO:
-        return lensi_skin_radio;
-    case LENS_WIDGET_SLIDER:
-        return lensi_skin_slider;
-    case LENS_WIDGET_ICON_BUTTON:
-        return lensi_skin_icon_button;
-    case LENS_WIDGET_TABS:
-        return lensi_skin_tabs;
     case LENS_WIDGET_LABEL:
         return lensi_skin_label;
-    case LENS_WIDGET_SEPARATOR:
-        return lensi_skin_separator;
     case LENS_WIDGET_ICON:
         return lensi_skin_icon;
     case LENS_WIDGET_IMAGE:
         return lensi_skin_image;
-    case LENS_WIDGET_PROGRESS:
-        return lensi_skin_progress;
-    case LENS_WIDGET_TEXTFIELD:
-        return lensi_skin_textfield;
-    case LENS_WIDGET_TEXTAREA:
-        return lensi_skin_textarea;
-    case LENS_WIDGET_COLLAPSING:
-        return lensi_skin_collapsing;
-    case LENS_WIDGET_TREE:
-        return lensi_skin_tree;
-    case LENS_WIDGET_TABLE:
-        return lensi_skin_table;
-    case LENS_WIDGET_SPLIT:
-        return lensi_skin_split;
-    case LENS_WIDGET_MENU_ITEM:
-        return lensi_skin_menu_item;
-    case LENS_WIDGET_DROPDOWN:
-        return lensi_skin_dropdown;
-    case LENS_WIDGET_LINK:
-        return lensi_skin_link;
+    case LENS_WIDGET_SEPARATOR:
+        return lensi_skin_separator;
+    case LENS_WIDGET_BUTTON:
+        return lensi_skin_button;
+    case LENS_WIDGET_CHECKBOX:
+        return lensi_skin_checkbox;
+    case LENS_WIDGET_SELECTABLE:
+        return lensi_skin_selectable;
+    case LENS_WIDGET_SLIDER:
+        return lensi_skin_slider;
+    case LENS_WIDGET_TEXTEDIT:
+        return lensi_skin_textedit;
     default:
         return NULL;
     }

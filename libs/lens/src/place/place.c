@@ -90,6 +90,21 @@ void lens_place_close(lens *ui, const char *id) {
     close_id(ui, lensi_gen_widget_id(ui, id));
 }
 
+void lens_place_toggle(lens *ui, const char *id) {
+    if (!ui || !id)
+        return;
+    if (lens_place_is_open(ui, id))
+        lens_place_close(ui, id);
+    else
+        lens_place_open(ui, id);
+}
+
+void lens_place_close_all(lens *ui) {
+    if (!ui)
+        return;
+    ui->open_transient_count = 0;
+}
+
 bool lens_place_is_open(const lens *ui, const char *id) {
     if (!ui || !id)
         return false;
@@ -110,11 +125,17 @@ bool lens_place_hovered(const lens *ui, const char *id) {
 
 /* ---- place begin / end -------------------------------------------- */
 
-bool lens_place_begin(lens *ui, const char *id_str, lens_place_opts opts) {
-    if (!ui || !id_str)
+bool lens_place_begin(lens *ui, const lens_place_opts *opts) {
+    if (!ui)
         return false;
+    lens_place_opts default_opts = {0};
+    if (!opts)
+        opts = &default_opts;
+
+    const char *id_str =
+        opts->box.id ? opts->box.id : (opts->layout.box.id ? opts->layout.box.id : "##place");
     lens_id id = lensi_gen_widget_id(ui, id_str);
-    if (opts.transient && !lensi_place_is_open_id(ui, id))
+    if (opts->transient && !lensi_place_is_open_id(ui, id))
         return false;
 
     lens_node *n = lensi_store_touch(ui, id);
@@ -135,53 +156,53 @@ bool lens_place_begin(lens *ui, const char *id_str, lens_place_opts opts) {
      * BASE is clamped to CHROME — it would render above the base tree, and
      * the "what paints above also hit-tests above" invariant requires it to
      * occlude like one. */
-    lens_band band = (opts.band >= LENS_BAND_BACKDROP && opts.band < LENS_BAND_COUNT)
-                         ? opts.band
+    lens_band band = (opts->band >= LENS_BAND_BACKDROP && opts->band < LENS_BAND_COUNT)
+                         ? opts->band
                          : LENS_BAND_POPUP;
     if (band == LENS_BAND_BASE)
         band = LENS_BAND_CHROME;
     n->band = band;
-    n->mode = (opts.mode >= LENS_PLACE_EXACT && opts.mode <= LENS_PLACE_CENTERED)
-                  ? opts.mode
+    n->mode = (opts->mode >= LENS_PLACE_EXACT && opts->mode <= LENS_PLACE_BACKDROP)
+                  ? opts->mode
                   : LENS_PLACE_EXACT;
-    n->place_rect = opts.rect;
-    if (opts.bounds.w > 0.0f && opts.bounds.h > 0.0f) {
-        n->place_bounds = opts.bounds;
+    n->place_rect = opts->rect;
+    if (opts->bounds.w > 0.0f && opts->bounds.h > 0.0f) {
+        n->place_bounds = opts->bounds;
         n->has_place_bounds = true;
     }
-    n->transient = opts.transient;
-    n->interactive = opts.interactive;
+    n->transient = opts->transient;
+    n->interactive = opts->interactive;
 
     /* The subtree's internal flexbox (same contract as open_flex). */
     n->axis = LENS_COLUMN;
-    n->gap = opts.layout.gap;
-    n->pad = opts.layout.pad;
-    n->cross = opts.layout.cross;
-    if (opts.layout.box.flex != 0)
-        n->flex_grow = opts.layout.box.flex;
-    if (opts.layout.min_width > 0)
-        n->min_w = opts.layout.min_width;
-    if (opts.layout.max_width > 0)
-        n->max_w = opts.layout.max_width;
-    if (opts.layout.min_height > 0)
-        n->min_h = opts.layout.min_height;
-    if (opts.layout.max_height > 0)
-        n->max_h = opts.layout.max_height;
+    n->gap = opts->layout.gap;
+    n->pad = opts->layout.pad;
+    n->cross = opts->layout.cross;
+    if (opts->layout.box.flex != 0)
+        n->flex_grow = opts->layout.box.flex;
+    if (opts->layout.min_width > 0)
+        n->min_w = opts->layout.min_width;
+    if (opts->layout.max_width > 0)
+        n->max_w = opts->layout.max_width;
+    if (opts->layout.min_height > 0)
+        n->min_h = opts->layout.min_height;
+    if (opts->layout.max_height > 0)
+        n->max_h = opts->layout.max_height;
 
     /* Fixed size: box.width/height win; else min_width fixes the width (the
      * popup contract — a dropdown's menu matches its trigger). For EXACT
      * the rect is additionally a minimum extent: content may grow beyond
      * it, but an empty paint-only node (scrims, dim backdrops, selection
      * borders) must still cover the caller-supplied rectangle. */
-    float fw = opts.layout.box.width > 0.0f   ? opts.layout.box.width
-               : opts.layout.min_width > 0.0f ? opts.layout.min_width
-                                              : 0.0f;
-    float fh = opts.layout.box.height > 0.0f ? opts.layout.box.height : 0.0f;
+    float fw = opts->layout.box.width > 0.0f   ? opts->layout.box.width
+               : opts->layout.min_width > 0.0f ? opts->layout.min_width
+                                               : 0.0f;
+    float fh = opts->layout.box.height > 0.0f ? opts->layout.box.height : 0.0f;
     if (n->mode == LENS_PLACE_EXACT) {
-        if (opts.rect.w > fw)
-            fw = opts.rect.w;
-        if (opts.rect.h > fh)
-            fh = opts.rect.h;
+        if (opts->rect.w > fw)
+            fw = opts->rect.w;
+        if (opts->rect.h > fh)
+            fh = opts->rect.h;
     }
     if (fw > 0.0f)
         n->fixed_w = fw;
@@ -189,20 +210,20 @@ bool lens_place_begin(lens *ui, const char *id_str, lens_place_opts opts) {
         n->fixed_h = fh;
 
     /* Surface fill + border, resolved at replay against final_rect. */
-    if ((opts.layout.bg >> 24) != 0) {
+    if ((opts->layout.bg & 0xFF000000u) != 0) {
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_RECT,
                                             .rel = {0, 0, 0, 0},
-                                            .color = opts.layout.bg,
-                                            .radius = opts.layout.radius});
+                                            .color = opts->layout.bg,
+                                            .radius = opts->layout.radius});
     }
-    if ((opts.layout.border >> 24) != 0 && opts.layout.border_width > 0.0f) {
+    if ((opts->layout.border & 0xFF000000u) != 0 && opts->layout.border_width > 0.0f) {
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
                                             .rel = {0, 0, 0, 0},
-                                            .color = opts.layout.border,
-                                            .radius = opts.layout.radius,
-                                            .width = opts.layout.border_width});
+                                            .color = opts->layout.border,
+                                            .radius = opts->layout.radius,
+                                            .width = opts->layout.border_width});
     }
 
     lensi_open_container_push(ui, n);

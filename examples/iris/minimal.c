@@ -17,9 +17,9 @@ static void build(lens *ui, const lens_input *in, void *user) {
     for (uint32_t k = 0; k < in->key_count; k++)
         if (in->keys[k].pressed && in->keys[k].key == LENS_KEY_ESCAPE)
             iris_window_close();
-    lens_column_ex(ui, (lens_layout_opts){.pad = 24, .gap = 14, .cross = LENS_START});
-    lens_label(ui, "Hello from iris");
-    if (lens_button(ui, "Click me"))
+    lens_column_begin(ui, &(lens_layout_opts){.pad = 24, .gap = 14, .cross = LENS_START});
+    lens_label(ui, &(lens_label_opts){.text = "Hello from iris"});
+    if (lens_button(ui, &(lens_button_opts){.label = "Click me"}).clicked)
         printf("clicked!\n");
     lens_close(ui);
 }

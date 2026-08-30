@@ -342,7 +342,49 @@ FLUX_API void flux_canvas_scale(flux_canvas *c, float sx, float sy);
 FLUX_API void flux_canvas_rotate(flux_canvas *c, float radians);
 FLUX_API void flux_canvas_transform(flux_canvas *c, flux_mat3x2 m);
 
-/* Drawing. */
+/* ================================================================== */
+/*  Geometry shapes & unified draw (ADR-0083)                         */
+/* ================================================================== */
+
+typedef struct flux_glyph_run_desc flux_glyph_run_desc;
+
+typedef enum flux_shape_kind : uint32_t {
+    FLUX_SHAPE_RECT = 0,
+    FLUX_SHAPE_RRECT = 1,
+    FLUX_SHAPE_CIRCLE = 2,
+    FLUX_SHAPE_LINE = 3,
+    FLUX_SHAPE_PATH = 4,
+    FLUX_SHAPE_IMAGE = 5,
+    FLUX_SHAPE_GLYPHS = 6,
+} flux_shape_kind;
+
+typedef struct flux_shape {
+    flux_shape_kind kind;
+    flux_rect rect;     /* target geometry in canvas space */
+    float radius;       /* corner radius for RRECT / CIRCLE */
+    float stroke_width; /* 0 = fill; > 0 = stroke width */
+    flux_line_cap stroke_cap;
+    flux_line_join stroke_join;
+
+    /* Path geometry */
+    const flux_path *path;
+
+    /* Image parameters */
+    flux_image *image;
+    flux_rect src_rect;  /* normalized UV coordinates {u, v, du, dv} */
+    flux_rect clip_rect; /* analytic clip bounds */
+    float clip_radius;
+    flux_sampler *sampler; /* optional sampler (nullptr = default linear) */
+    bool opaque_only;      /* force opaque SRC blend */
+
+    /* Glyphs parameters */
+    const flux_glyph_run_desc *glyph_run;
+} flux_shape;
+
+/* The single unified 2D drawing primitive (ADR-0083) */
+FLUX_API void flux_canvas_draw(flux_canvas *c, const flux_shape *shape, const flux_paint *paint);
+
+/* Drawing helpers. */
 FLUX_API void flux_canvas_fill_rect(flux_canvas *c, flux_rect r, const flux_paint *paint);
 FLUX_API void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint *paint);
 FLUX_API void flux_canvas_stroke_path(flux_canvas *c, const flux_path *p, const flux_paint *paint);

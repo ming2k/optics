@@ -122,7 +122,7 @@ typedef void (*iris_paint_fn)(flux_canvas *canvas, flux_device *device, float sc
 typedef bool (*iris_start_fn)(lens *ui, flux_device *device, void *user);
 typedef void (*iris_stop_fn)(lens *ui, flux_device *device, void *user);
 
-typedef struct iris_app_config {
+typedef struct iris_app_opts {
     const char *title;   /* window title (UTF-8, optional)       */
     const char *app_id;  /* Wayland desktop app ID (optional)    */
     int32_t width;       /* initial logical width (0 = default)  */
@@ -131,10 +131,12 @@ typedef struct iris_app_config {
     bool log_raw;        /* debug raw input events to stderr     */
     iris_start_fn start; /* resource setup before first frame (optional) */
     iris_stop_fn stop;   /* resource teardown before iris GPU teardown (optional) */
-    iris_build_fn build; /* per-frame build callback (may be NULL) */
-    iris_paint_fn paint; /* per-frame canvas paint (may be NULL)   */
-    void *user;          /* opaque pointer passed to both callbacks */
-} iris_app_config;
+    iris_build_fn build; /* per-frame build callback (may be nullptr) */
+    iris_paint_fn paint; /* per-frame canvas paint (may be nullptr)   */
+    void *user;          /* opaque pointer passed to callbacks */
+} iris_app_opts;
+
+typedef iris_app_opts iris_app_config;
 
 /* Request one more frame at the backend's active animation cadence.
  *
@@ -217,11 +219,8 @@ typedef void (*iris_main_thread_fn)(void *user);
 IRIS_API int iris_post_to_main_thread(iris_main_thread_fn fn, void *user);
 
 /* Run the application until the window is closed. Returns 0 on success,
- * non-zero on platform failure (no display, GPU init failure, etc.).
- *
- * When cfg->dark is false, iris queries the system colour scheme at
- * startup (see theme.h) and applies it to the lens theme. */
-IRIS_API int iris_app_run(const iris_app_config *cfg);
+ * non-zero on platform failure (no display, GPU init failure, etc.). */
+[[nodiscard]] IRIS_API int iris_app_run(const iris_app_opts *opts);
 
 #ifdef __cplusplus
 }

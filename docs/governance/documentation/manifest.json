@@ -2,7 +2,7 @@
   "schema": "docs-governance/manifest",
   "schema_version": 1,
   "name": "docs-governance",
-  "description": "Portable documentation governance: three routing gates, knowledge layers, writing style, and review workflow. Copied verbatim into repositories at docs/dev/documentation/.",
+  "description": "Portable documentation governance: routing gates, knowledge layers, writing style, and review workflow. Copied verbatim into repositories at docs/governance/documentation/.",
   "license": "MIT",
   "homepage": "https://github.com/ming/docs-governance",
   "protocol_version": "2.0.0",
@@ -30,7 +30,7 @@
     "adoption.md": {
       "role": "guide",
       "editable": false,
-      "sha256": "9aa5f748845e1f241221c63f05f3157934fee2f18baadf34165b189398b3c428"
+      "sha256": "2eeef39c16a39fbd54efd4e407072a8a2f27776d266d9449121960770c7e0054"
     },
     "adr-workflow.md": {
       "role": "guide",
@@ -40,7 +40,7 @@
     "common-docs.md": {
       "role": "library",
       "editable": false,
-      "sha256": "a9e2f1a2222b68234eff4a2dbc06987dd2c1fed28f716ec9666090d5157e2b85"
+      "sha256": "510424bd4a25714703ecdeb35de95207852b2893ef2df69c50e9f63aab1272be"
     },
     "contracts.md": {
       "role": "template",
@@ -65,7 +65,7 @@
     "routing.md": {
       "role": "guide",
       "editable": false,
-      "sha256": "23b0bfd2f44603186a656714ad8aae59ae920424c3c38827587ebedfcec50344"
+      "sha256": "bcde0d31050893fd4bd3d4348747f3067e4c1a388ab4fdcc8166d54cde1665c6"
     },
     "style-guide.md": {
       "role": "guide",

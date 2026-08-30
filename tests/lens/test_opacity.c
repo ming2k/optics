@@ -44,9 +44,9 @@ int main(void) {
     /* Frame 1: two labels at different opacities — per-node stamps. */
     lens_begin(ui, &IN0);
     lens_set_opacity(ui, 0.5f);
-    lens_label(ui, "dimmed");
+    lens_label(ui, &(lens_label_opts){.text = "dimmed"});
     lens_set_opacity(ui, 1.0f);
-    lens_label(ui, "solid");
+    lens_label(ui, &(lens_label_opts){.text = "solid"});
     lens_end(ui);
 
     lens_node *dimmed = lens_node_first_child(lens_root(ui));
@@ -60,8 +60,8 @@ int main(void) {
 
     /* Frame 2: the switch reset with lens_begin — no restore needed. */
     lens_begin(ui, &IN0);
-    lens_label(ui, "dimmed");
-    lens_label(ui, "solid");
+    lens_label(ui, &(lens_label_opts){.text = "dimmed"});
+    lens_label(ui, &(lens_label_opts){.text = "solid"});
     lens_end(ui);
     dimmed = lens_node_first_child(lens_root(ui));
     dim_cmd = first_text_cmd(dimmed);

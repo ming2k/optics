@@ -82,7 +82,11 @@ bool lensi_widget_occluded(const lens *ui, const lens_node *n) {
         uint32_t start = (above == band) ? same_band_start : 0;
         for (uint32_t i = start; i < ui->prev_band_counts[above]; i++) {
             lens_node *m = lensi_store_find(ui, ui->prev_band_ids[above][i]);
-            if (m && m->has_prev && lensi_point_in(ui->input.cursor, m->prev_rect))
+            if (!m || !m->has_prev)
+                continue;
+            if (m->band == LENS_BAND_BACKDROP && !m->interactive)
+                continue;
+            if (lensi_point_in(ui->input.cursor, m->prev_rect))
                 return true;
         }
     }

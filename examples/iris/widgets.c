@@ -1,9 +1,5 @@
 /* widgets.c — every iris widget in one labeled reference.
  *
- * A tidy single-window form: each control sits in a "label : widget" row,
- * grouped under section headers, so the whole widget set is visible and
- * self-describing at a glance.
- *
  * Interactions print to the console. Esc quits.
  */
 
@@ -14,29 +10,27 @@
 
 #include <stdio.h>
 
-#define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
-
 typedef struct app {
     bool enable, wrap, dark;
     float volume, zoom, progress;
     int counter, theme_sel, tab_active, nav_sel;
     char username[64];
     char bio[256];
-    const char *theme_items[3];
+    bool collapsing_open;
 } app;
 
 /* Section header: a label with a touch of breathing room above it. */
 static void section(lens *ui, const char *title) {
     lens_size(ui, 0, 30);
-    lens_label(ui, title);
+    lens_label(ui, &(lens_label_opts){.text = title, .size = 18.0f});
 }
 
 /* Open a "label : control" row. Caller fills the control, then lens_close. */
 static void row(lens *ui, const char *label) {
     lens_size(ui, 0, 30);
-    lens_row_ex(ui, (lens_layout_opts){.gap = 12, .cross = LENS_CENTER});
+    lens_row_begin(ui, &(lens_layout_opts){.gap = 12, .cross = LENS_CENTER});
     lens_size(ui, 130, 24);
-    lens_label(ui, label);
+    lens_label(ui, &(lens_label_opts){.text = label});
 }
 
 static void build(lens *ui, const lens_input *in, void *user) {
@@ -50,68 +44,80 @@ static void build(lens *ui, const lens_input *in, void *user) {
             iris_window_close();
 
     lens_flex(ui, 1.0f);
-    lens_scroll_begin(ui, "root_scroll");
-    lens_column_ex(ui,
-                   (lens_layout_opts){.pad = 22, .gap = 6, .cross = LENS_STRETCH, .bg = tn.card});
+    lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "root_scroll"}});
+    lens_column_begin(
+        ui, &(lens_layout_opts){.pad = 22, .gap = 6, .cross = LENS_STRETCH, .bg = tn.card});
 
     lens_size(ui, 0, 34);
-    lens_label(ui, "iris widget reference");
-    lens_separator(ui);
+    lens_label(ui, &(lens_label_opts){.text = "iris widget reference", .size = 22.0f});
+    lens_separator(ui, NULL);
 
     /* ── Buttons ─────────────────────────────────────────── */
     section(ui, "Buttons");
     row(ui, "Actions");
-    if (lens_button(ui, "New"))
+    if (lens_button(ui, &(lens_button_opts){.label = "New"}).clicked)
         printf("New\n");
-    if (lens_button(ui, "Open"))
+    if (lens_button(ui, &(lens_button_opts){.label = "Open"}).clicked)
         printf("Open\n");
-    if (lens_button(ui, "Save"))
+    if (lens_button(ui, &(lens_button_opts){.label = "Save", .variant = LENS_BUTTON_PRIMARY})
+            .clicked)
         printf("Save\n");
     lens_close(ui);
+
     row(ui, "Counter");
-    if (lens_button(ui, "Increment"))
+    if (lens_button(ui, &(lens_button_opts){.label = "Increment"}).clicked)
         a->counter++;
     char n[32];
     snprintf(n, sizeof n, "count = %d", a->counter);
-    lens_label(ui, n);
+    lens_label(ui, &(lens_label_opts){.text = n});
     lens_close(ui);
 
     /* ── Checkboxes ──────────────────────────────────────── */
     section(ui, "Checkboxes");
     row(ui, "Enable feature");
-    if (lens_checkbox(ui, "##enable", &a->enable))
+    if (lens_checkbox(ui, &(lens_checkbox_opts){.label = "Enable", .value = &a->enable}).changed)
         printf("enable = %d\n", a->enable);
     lens_close(ui);
+
     row(ui, "Dark theme");
-    if (lens_checkbox(ui, "##dark", &a->dark))
+    if (lens_checkbox(ui, &(lens_checkbox_opts){.label = "Dark",
+                                                .value = &a->dark,
+                                                .appearance = LENS_CHECKBOX_SWITCH})
+            .changed)
         lens_set_theme(ui, a->dark ? lens_theme_dark() : lens_theme_default());
     lens_close(ui);
 
     /* ── Radio buttons ───────────────────────────────────── */
     section(ui, "Radio buttons");
     row(ui, "Theme");
-    if (lens_radio(ui, "Light", &a->theme_sel, 0))
-        printf("theme = light\n");
-    if (lens_radio(ui, "Dark", &a->theme_sel, 1))
-        printf("theme = dark\n");
-    if (lens_radio(ui, "Auto", &a->theme_sel, 2))
-        printf("theme = auto\n");
-    lens_close(ui);
-
-    /* ── Dropdown ────────────────────────────────────────── */
-    section(ui, "Dropdown");
-    row(ui, "Theme");
-    lens_flex(ui, 1.0f);
-    if (lens_dropdown(ui, "##theme", &a->theme_sel, a->theme_items,
-                      (int)ARRAY_COUNT(a->theme_items)))
-        printf("dropdown = %d\n", a->theme_sel);
+    bool opt_light = (a->theme_sel == 0);
+    bool opt_dark = (a->theme_sel == 1);
+    bool opt_auto = (a->theme_sel == 2);
+    if (lens_checkbox(ui, &(lens_checkbox_opts){.label = "Light",
+                                                .value = &opt_light,
+                                                .appearance = LENS_CHECKBOX_RADIO})
+            .changed)
+        a->theme_sel = 0;
+    if (lens_checkbox(ui, &(lens_checkbox_opts){.label = "Dark",
+                                                .value = &opt_dark,
+                                                .appearance = LENS_CHECKBOX_RADIO})
+            .changed)
+        a->theme_sel = 1;
+    if (lens_checkbox(ui, &(lens_checkbox_opts){.label = "Auto",
+                                                .value = &opt_auto,
+                                                .appearance = LENS_CHECKBOX_RADIO})
+            .changed)
+        a->theme_sel = 2;
     lens_close(ui);
 
     /* ── Textfield ───────────────────────────────────────── */
     section(ui, "Textfield");
     row(ui, "Username");
     lens_flex(ui, 1.0f);
-    if (lens_textfield(ui, "##user", a->username, sizeof a->username))
+    if (lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "user"},
+                                                .buf = a->username,
+                                                .cap = sizeof a->username})
+            .changed)
         printf("username = %s\n", a->username);
     lens_close(ui);
 
@@ -119,109 +125,92 @@ static void build(lens *ui, const lens_input *in, void *user) {
     section(ui, "Sliders");
     row(ui, "Volume");
     lens_flex(ui, 1.0f);
-    if (lens_slider(ui, "##vol", &a->volume, 0.0f, 1.0f))
+    if (lens_slider(
+            ui, &(lens_slider_opts){.label = "vol", .value = &a->volume, .min = 0.0f, .max = 1.0f})
+            .changed)
         printf("volume = %.2f\n", a->volume);
     lens_close(ui);
+
     row(ui, "Zoom");
     lens_flex(ui, 1.0f);
-    if (lens_slider(ui, "##zoom", &a->zoom, 0.5f, 4.0f))
+    if (lens_slider(
+            ui, &(lens_slider_opts){.label = "zoom", .value = &a->zoom, .min = 0.5f, .max = 4.0f})
+            .changed)
         printf("zoom = %.2f\n", a->zoom);
     lens_close(ui);
 
-    /* ── Progress bar ────────────────────────────────────── */
-    section(ui, "Progress bar");
+    /* ── Progress indicator (custom box / bar composition) ── */
+    section(ui, "Progress indicator (composed)");
     row(ui, "Loading");
     lens_flex(ui, 1.0f);
-    a->progress += lens_dt(ui) * 0.2f;
+    a->progress += in->dt_seconds * 0.2f;
     if (a->progress > 1.0f)
         a->progress = 0.0f;
-    lens_progress(ui, "##prog", a->progress);
-    /* The bar animates on its own: without a per-frame request the backend
-     * drops to the idle cadence (or stops scheduling frames entirely) and
-     * the bar only advances when the user wiggles something. */
+    lens_row_begin(
+        ui, &(lens_layout_opts){.box = {.height = 10.0f}, .bg = 0xFF303038u, .radius = 5.0f});
+    lens_size(ui, a->progress * 200.0f, 10.0f);
+    lens_row_begin(ui, &(lens_layout_opts){.bg = th.color_accent, .radius = 5.0f});
+    lens_close(ui);
+    lens_close(ui);
     iris_request_animation_frame();
     lens_close(ui);
 
-    /* ── Tabs ────────────────────────────────────────────── */
+    /* ── Tabs (built with row + selectables) ─────────────── */
     section(ui, "Tabs");
-    if (lens_tabs_begin(ui, "tabs", &a->tab_active)) {
-        lens_tab(ui, "General");
-        lens_tab(ui, "Advanced");
-        lens_tab(ui, "About");
-    }
-    lens_tabs_end(ui);
+    lens_row_begin(ui, &(lens_layout_opts){.gap = 8});
+    if (lens_selectable(
+            ui, &(lens_selectable_opts){.label = "General", .selected = (a->tab_active == 0)})
+            .clicked)
+        a->tab_active = 0;
+    if (lens_selectable(
+            ui, &(lens_selectable_opts){.label = "Advanced", .selected = (a->tab_active == 1)})
+            .clicked)
+        a->tab_active = 1;
+    if (lens_selectable(ui,
+                        &(lens_selectable_opts){.label = "About", .selected = (a->tab_active == 2)})
+            .clicked)
+        a->tab_active = 2;
+    lens_close(ui);
+
     if (a->tab_active == 0)
-        lens_label(ui, "General settings panel.");
+        lens_label(ui, &(lens_label_opts){.text = "General settings panel."});
     else if (a->tab_active == 1)
-        lens_label(ui, "Advanced settings panel.");
+        lens_label(ui, &(lens_label_opts){.text = "Advanced settings panel."});
     else
-        lens_label(ui, "About this application.");
-
-    /* ── Style cascade (ADR-0061) ────────────────────────── */
-    section(ui, "Style cascade (scope + box.style)");
-    lens_label(ui, "A lens_push_style scope restyles everything declared inside it:");
-    row(ui, "Scoped row");
-    lens_style danger = lens_style_init();
-    danger.fields = LENS_STYLE_BG | LENS_STYLE_CORNER_RADIUS;
-    danger.bg = flux_color_rgba(0xC0, 0x30, 0x28, 0xFF);
-    danger.corner_radius = 2.0f;
-    lens_push_style(ui, danger);
-    if (lens_button(ui, "Delete"))
-        printf("delete\n");
-    if (lens_button(ui, "Also danger"))
-        printf("also danger\n");
-    lens_pop_style(ui);
-    if (lens_button(ui, "Back to theme"))
-        printf("themed\n");
-    lens_close(ui);
-
-    /* The icon-button active state is a neutral tint by default. The old
-     * accent treatment is reachable as data — a scope supplies the atoms
-     * (accent glyph + stronger active tile), the widget family stays free
-     * of per-variant APIs (ADR-0061 item 7). */
-    lens_label(ui, "Active icon button, accent treatment via scope atoms:");
-    row(ui, "Nav strip");
-    lens_style nav = lens_style_init();
-    nav.fields = LENS_STYLE_FG | LENS_STYLE_BG_PRESSED;
-    nav.fg = th.color_accent;                                 /* glyph colour at rest and active */
-    nav.bg_pressed = flux_color_rgba(0x3A, 0x6A, 0xC0, 0x30); /* active tile tint */
-    lens_push_style(ui, nav);
-    if (lens_icon_button_active(ui, LENS_ICON_HOME, a->nav_sel == 0))
-        a->nav_sel = 0;
-    if (lens_icon_button_active(ui, LENS_ICON_GLOBE, a->nav_sel == 1))
-        a->nav_sel = 1;
-    if (lens_icon_button_active(ui, LENS_ICON_SETTINGS, a->nav_sel == 2))
-        a->nav_sel = 2;
-    lens_pop_style(ui);
-    lens_close(ui);
+        lens_label(ui, &(lens_label_opts){.text = "About this application."});
 
     /* ── Textarea ────────────────────────────────────────── */
     section(ui, "Textarea");
-    if (lens_textarea_ex(ui, (lens_textarea_opts){.box = {.id = "bio", .height = 120},
-                                                  .buf = a->bio,
-                                                  .buf_cap = sizeof a->bio,
-                                                  .min_height = 60.0f,
-                                                  .placeholder = "Tell us about yourself..."})
+    if (lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "bio", .height = 120},
+                                                .buf = a->bio,
+                                                .cap = sizeof a->bio,
+                                                .placeholder = "Tell us about yourself...",
+                                                .rows = 4})
             .changed)
         printf("bio changed\n");
 
     /* ── Tooltip demo ────────────────────────────────────── */
     section(ui, "Tooltip");
-    if (lens_button_ex(ui,
-                       (lens_button_opts){.label = "Hover for tip",
-                                          .box = {.tooltip = "This is a tooltip shown on hover."}})
+    if (lens_button(ui,
+                    &(lens_button_opts){.label = "Hover for tip",
+                                        .box = {.tooltip = "This is a tooltip shown on hover."}})
             .clicked)
         printf("button clicked\n");
 
     /* ── Label ───────────────────────────────────────────── */
     section(ui, "Label");
-    lens_label(ui, "A static, non-interactive line of text.");
+    lens_label(ui, &(lens_label_opts){.text = "A static, non-interactive line of text."});
 
-    /* ── Collapsing ──────────────────────────────────────── */
-    section(ui, "Collapsing header");
-    if (lens_collapsing(ui, "Details")) {
-        lens_label(ui, "Revealed when the header is expanded.");
-        if (lens_button(ui, "Nested button"))
+    /* ── Collapsing via button + state ───────────────────── */
+    section(ui, "Collapsible Section");
+    if (lens_button(
+            ui, &(lens_button_opts){.label = a->collapsing_open ? "[-] Details" : "[+] Details"})
+            .clicked)
+        a->collapsing_open = !a->collapsing_open;
+    if (a->collapsing_open) {
+        lens_column_begin(ui, &(lens_layout_opts){.pad = 8.0f});
+        lens_label(ui, &(lens_label_opts){.text = "Revealed when the header is expanded."});
+        if (lens_button(ui, &(lens_button_opts){.label = "Nested button"}).clicked)
             printf("nested\n");
         lens_close(ui);
     }
@@ -229,12 +218,12 @@ static void build(lens *ui, const lens_input *in, void *user) {
     /* ── Scroll ──────────────────────────────────────────── */
     section(ui, "Scroll area (wheel over it)");
     lens_size(ui, 0, 150);
-    lens_scroll_begin(ui, "scroll");
-    lens_column_ex(ui, (lens_layout_opts){.pad = 12, .gap = 6, .cross = LENS_STRETCH});
+    lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "scroll"}});
+    lens_column_begin(ui, &(lens_layout_opts){.pad = 12, .gap = 6, .cross = LENS_STRETCH});
     for (int i = 0; i < 14; i++) {
         char l[24];
         snprintf(l, sizeof l, "Row %d", i + 1);
-        if (lens_button(ui, l))
+        if (lens_button(ui, &(lens_button_opts){.label = l}).clicked)
             printf("%s\n", l);
     }
     lens_close(ui);
@@ -251,7 +240,6 @@ int main(void) {
         .zoom = 1.0f,
         .username = "",
         .bio = "",
-        .theme_items = {"Light", "Dark", "Auto"},
     };
     printf("iris widgets reference. Interactions print here. Esc quits.\n\n");
     return iris_app_run(&(iris_app_config){

@@ -27,9 +27,9 @@ static void test_row_packs_children(void) {
     float gap = lens_get_theme(ui).gap;
 
     lens_begin(ui, &in);
-    lens_row(ui);
-    (void)lens_button(ui, "A");
-    (void)lens_button(ui, "B");
+    lens_row_begin(ui, NULL);
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"});
+    (void)lens_button(ui, &(lens_button_opts){.label = "B"});
     lens_close(ui);
     lens_end(ui);
 
@@ -60,11 +60,11 @@ static void test_flex_distributes_slack(void) {
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
-    lens_row_ex(ui, (lens_layout_opts){.gap = 0, .pad = 0, .cross = LENS_STRETCH});
+    lens_row_begin(ui, &(lens_layout_opts){.gap = 0, .pad = 0, .cross = LENS_STRETCH});
     lens_flex(ui, 1.0f);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_flex(ui, 1.0f);
-    (void)lens_button(ui, "B");
+    (void)lens_button(ui, &(lens_button_opts){.label = "B"});
     lens_close(ui);
     lens_end(ui);
 
@@ -91,15 +91,16 @@ static void test_flex_child_shrinks_between_fixed_siblings(void) {
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
-    lens_row_ex(ui, (lens_layout_opts){.gap = 5, .pad = 0, .cross = LENS_STRETCH});
+    lens_row_begin(ui, &(lens_layout_opts){.gap = 5, .pad = 0, .cross = LENS_STRETCH});
     lens_size(ui, 40.0f, 0.0f);
-    (void)lens_button(ui, "sidebar");
+    (void)lens_button(ui, &(lens_button_opts){.label = "sidebar"});
     lens_flex(ui, 1.0f);
-    lens_column(ui);
-    (void)lens_button(ui, "workspace content with a wide intrinsic size");
+    lens_column_begin(ui, NULL);
+    (void)lens_button(ui,
+                      &(lens_button_opts){.label = "workspace content with a wide intrinsic size"});
     lens_close(ui);
     lens_size(ui, 50.0f, 0.0f);
-    (void)lens_button(ui, "inspector");
+    (void)lens_button(ui, &(lens_button_opts){.label = "inspector"});
     lens_close(ui);
     lens_end(ui);
 
@@ -131,8 +132,9 @@ static void test_column_stacks_children(void) {
     float gap = lens_get_theme(ui).gap;
 
     lens_begin(ui, &in);
-    (void)lens_button(ui, "A"); /* direct children of the root column */
-    (void)lens_button(ui, "B");
+    (void)lens_button(ui,
+                      &(lens_button_opts){.label = "A"}); /* direct children of the root column */
+    (void)lens_button(ui, &(lens_button_opts){.label = "B"});
     lens_end(ui);
 
     lens_node *root = lens_root(ui);
@@ -161,8 +163,8 @@ static void test_flex_applies_to_terse_container(void) {
 
     lens_begin(ui, &in);
     lens_flex(ui, 1.0f); /* should stretch the row to fill the column */
-    lens_row(ui);
-    (void)lens_button(ui, "A");
+    lens_row_begin(ui, NULL);
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_close(ui);
     lens_end(ui);
 
@@ -182,15 +184,16 @@ static void test_container_width_constraints_bound_intrinsic_size(void) {
     const float natural = btn_w(ui, "natural") + 2.0f * pad;
 
     lens_begin(ui, &in);
-    lens_row_ex(ui, (lens_layout_opts){.gap = 5.0f, .cross = LENS_STRETCH});
-    lens_column_ex(ui, (lens_layout_opts){.min_width = 90.0f, .pad = pad});
-    (void)lens_button(ui, "A");
+    lens_row_begin(ui, &(lens_layout_opts){.gap = 5.0f, .cross = LENS_STRETCH});
+    lens_column_begin(ui, &(lens_layout_opts){.min_width = 90.0f, .pad = pad});
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_close(ui);
-    lens_column_ex(ui, (lens_layout_opts){.min_width = 20.0f, .max_width = 240.0f, .pad = pad});
-    (void)lens_button(ui, "natural");
+    lens_column_begin(ui, &(lens_layout_opts){.min_width = 20.0f, .max_width = 240.0f, .pad = pad});
+    (void)lens_button(ui, &(lens_button_opts){.label = "natural"});
     lens_close(ui);
-    lens_column_ex(ui, (lens_layout_opts){.max_width = 100.0f, .pad = pad});
-    (void)lens_button(ui, "content that is intentionally much wider than the cap");
+    lens_column_begin(ui, &(lens_layout_opts){.max_width = 100.0f, .pad = pad});
+    (void)lens_button(
+        ui, &(lens_button_opts){.label = "content that is intentionally much wider than the cap"});
     lens_close(ui);
     lens_close(ui);
     lens_end(ui);
@@ -212,12 +215,12 @@ static void test_flex_redistributes_space_after_max_width(void) {
     lens_input in = {.display_size = {300, 100}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
-    lens_row_ex(ui, (lens_layout_opts){.cross = LENS_STRETCH});
-    lens_column_ex(ui, (lens_layout_opts){.box = {.flex = 1.0f}, .max_width = 100.0f});
-    (void)lens_button(ui, "A");
+    lens_row_begin(ui, &(lens_layout_opts){.cross = LENS_STRETCH});
+    lens_column_begin(ui, &(lens_layout_opts){.box = {.flex = 1.0f}, .max_width = 100.0f});
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_close(ui);
-    lens_column_ex(ui, (lens_layout_opts){.box = {.flex = 1.0f}});
-    (void)lens_button(ui, "B");
+    lens_column_begin(ui, &(lens_layout_opts){.box = {.flex = 1.0f}});
+    (void)lens_button(ui, &(lens_button_opts){.label = "B"});
     lens_close(ui);
     lens_close(ui);
     lens_end(ui);
@@ -237,13 +240,13 @@ static void test_flex_respects_min_width_while_shrinking(void) {
     lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
-    lens_row_ex(ui, (lens_layout_opts){.cross = LENS_STRETCH});
-    lens_column_ex(ui,
-                   (lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f}, .min_width = 80.0f});
-    (void)lens_button(ui, "A");
+    lens_row_begin(ui, &(lens_layout_opts){.cross = LENS_STRETCH});
+    lens_column_begin(
+        ui, &(lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f}, .min_width = 80.0f});
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_close(ui);
-    lens_column_ex(ui, (lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f}});
-    (void)lens_button(ui, "B");
+    lens_column_begin(ui, &(lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f}});
+    (void)lens_button(ui, &(lens_button_opts){.label = "B"});
     lens_close(ui);
     lens_close(ui);
     lens_end(ui);

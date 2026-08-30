@@ -655,28 +655,15 @@ lens_style lensi_style_effective(lens *ui); /* drains ui->next_style */
  * built-in default. The lensi_skin_* set is the built-in default table
  * behind lens_default_skin. */
 void lensi_skin_emit(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_button(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_selectable(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_checkbox(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_switch(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_radio(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_slider(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_icon_button(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_tabs(lens *ui, lens_node *n, const lens_widget_record *rec);
 void lensi_skin_label(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_separator(lens *ui, lens_node *n, const lens_widget_record *rec);
 void lensi_skin_icon(lens *ui, lens_node *n, const lens_widget_record *rec);
 void lensi_skin_image(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_progress(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_textfield(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_textarea(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_collapsing(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_tree(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_table(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_split(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_menu_item(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_dropdown(lens *ui, lens_node *n, const lens_widget_record *rec);
-void lensi_skin_link(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_separator(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_button(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_checkbox(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_selectable(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_slider(lens *ui, lens_node *n, const lens_widget_record *rec);
+void lensi_skin_textedit(lens *ui, lens_node *n, const lens_widget_record *rec);
 
 /* scrollbar chrome (skin/scrollbar.c, ADR-0059) — the drawlist-finalize
  * walk that emits scrollbars for solved scroll containers (placed

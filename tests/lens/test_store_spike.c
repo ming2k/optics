@@ -44,7 +44,7 @@ static void spike_and_dwell(lens *ui, int count, int idle_frames) {
     for (int i = 0; i < count; i++) {
         char label[32];
         snprintf(label, sizeof label, "spike##%d", i);
-        lens_button(ui, label);
+        lens_button(ui, &(lens_button_opts){.label = label});
     }
     lens_end(ui);
     /* Per-frame arena overflow is acceptable and expected for the big
@@ -85,8 +85,8 @@ int main(void) {
      *    lens_button returns "clicked", which is false without input —
      *    node presence is the surviving-state assertion here. */
     lens_begin(ui, &(lens_input){.size = sizeof(lens_input)});
-    lens_row(ui);
-    (void)lens_button(ui, "stable##keep");
+    lens_row_begin(ui, NULL);
+    (void)lens_button(ui, &(lens_button_opts){.label = "stable##keep"});
     lens_end(ui);
     g_seen_button = false;
     lens_accessibility_walk(ui, saw_button, NULL);

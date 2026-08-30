@@ -132,11 +132,11 @@ static void test_text_context_textfield(void) {
     char buf[64] = "hello";
     /* frame 1: enter; frame 2: focus explicitly */
     lens_begin(ui, &in);
-    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_end(ui);
     lens_begin(ui, &in);
     lens_set_focus(ui, lens_current_id(ui, "tf"));
-    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_end(ui);
 
     /* frame 3: caret to end (EOL = 5) */
@@ -144,7 +144,7 @@ static void test_text_context_textfield(void) {
     end.key_count = 1;
     end.keys[0] = (lens_key_event){.key = LENS_KEY_END, .pressed = true};
     lens_begin(ui, &end);
-    lens_textfield(ui, "tf", buf, sizeof buf);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_end(ui);
 
     lens_text_context tc = lens_text_context_get(ui);
@@ -172,11 +172,17 @@ static void test_text_context_textarea(void) {
 
     char buf[64] = "ab\ncd";
     lens_begin(ui, &in);
-    lens_textarea(ui, "ta", buf, sizeof buf, 80.0f);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "ta", .min_height = 80.0f},
+                                            .buf = buf,
+                                            .cap = sizeof buf,
+                                            .multiline = true});
     lens_end(ui);
     lens_begin(ui, &in);
     lens_set_focus(ui, lens_current_id(ui, "ta"));
-    lens_textarea(ui, "ta", buf, sizeof buf, 80.0f);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "ta", .min_height = 80.0f},
+                                            .buf = buf,
+                                            .cap = sizeof buf,
+                                            .multiline = true});
     lens_end(ui);
 
     lens_text_context tc = lens_text_context_get(ui);

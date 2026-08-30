@@ -46,13 +46,15 @@ void lensi_skin_label(lens *ui, lens_node *n, const lens_widget_record *rec) {
         return;
     }
 
-    /* Padded forms (label/label_ex/title/heading): negative rel.h centres
+    /* Padded forms: negative rel.h centres
      * vertically in the RESOLVED node box at replay, so text stays centred
      * even when a fixed-height parent constrains the node. */
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
                                         .rel = {rs->padding, 0, 0, -1.0f},
                                         .color = rs->fg,
+                                        .outline_color = rs->outline_color,
+                                        .outline_width = rs->outline_width,
                                         .text = rec->content.label,
                                         .text_size = size,
                                         .text_weight = rec->content.text_weight});

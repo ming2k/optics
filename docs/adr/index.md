@@ -47,10 +47,10 @@ a decision, write a new ADR and update the old one's status to
 | 0036 | [Lens input / clipboard / IME — host-supplied, size-guarded ABI](0036-lens-input-clipboard-ime.md) | Accepted |
 | 0037 | [Lens overlay layers — transient overlays + persistent floating panels](0037-lens-overlay-layers.md) | Superseded by ADR-0060 |
 | 0038 | [Lens node state GC — 8-frame grace window for leaving nodes](0038-lens-node-state-gc.md) | Accepted |
-| 0039 | [Lens modal dialog — centered overlay + backdrop + Tab focus trap](0039-lens-modal-dialog.md) | Accepted (amended 2026-08-10) |
-| 0040 | [Lens menus — menubar, context menu, submenu, items (hover-dwell)](0040-lens-menus.md) | Accepted |
-| 0041 | [Lens resizable split panel — persisted ratio, draggable divider](0041-lens-resizable-split.md) | Accepted |
-| 0042 | [Lens virtualized table / data grid](0042-lens-virtualized-table.md) | Accepted |
+| 0039 | [Lens modal dialog — centered overlay + backdrop + Tab focus trap](0039-lens-modal-dialog.md) | Superseded by ADR-0082 |
+| 0040 | [Lens menus — menubar, context menu, submenu, items (hover-dwell)](0040-lens-menus.md) | Superseded by ADR-0082 |
+| 0041 | [Lens resizable split panel — persisted ratio, draggable divider](0041-lens-resizable-split.md) | Superseded by ADR-0082 |
+| 0042 | [Lens virtualized table / data grid](0042-lens-virtualized-table.md) | Superseded by ADR-0082 |
 | 0043 | [Iris project foundations — L3 application toolkit](0043-iris-foundations.md) | Accepted |
 | 0044 | [Iris backend compile-time selection](0044-iris-backend-selection.md) | Accepted |
 | 0045 | [Iris host resource lifecycle callbacks](0045-iris-host-resource-lifecycle.md) | Accepted |
@@ -89,3 +89,7 @@ a decision, write a new ADR and update the old one's status to
 | 0078 | [Ghost replay — the render surface for leave animations](0078-lens-ghost-replay-leave-surface.md) | Proposed |
 | 0079 | [Layered backdrop material — frost beneath glass in one dispatch](0079-layered-backdrop-material.md) | Accepted (glass-over-glass scope superseded by [0080](0080-explicit-offscreen-composition-graph.md)) |
 | 0080 | [Explicit offscreen composition graph above flux](0080-explicit-offscreen-composition-graph.md) | Accepted |
+| 0081 | [Lens unified fluent flex containers and component orthogonality](0081-lens-unified-fluent-flex-containers-and-component-orthogonality.md) | Accepted |
+| 0082 | [Lens minimal orthogonal components and single descriptor API](0082-lens-minimal-orthogonal-components-and-single-descriptor-api.md) | Accepted |
+| 0083 | [Flux orthogonal shape-paint model and full C23 baseline](0083-flux-orthogonal-shape-paint-model-and-c23-baseline.md) | Accepted |
+| 0084 | [Iris tripartite architecture and C23 app-opts descriptor](0084-iris-tripartite-architecture-and-c23-app-opts.md) | Accepted |

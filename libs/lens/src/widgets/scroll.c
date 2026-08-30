@@ -4,12 +4,18 @@
 
 #define LENS_SCROLL_SPEED 40.0f
 
-void lens_scroll_begin(lens *ui, const char *id) {
+bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts) {
+    lens_scroll_opts default_opts = {0};
+    if (!opts)
+        opts = &default_opts;
+
+    lensi_apply_box(ui, opts->box);
     const lens_theme *t = &ui->theme;
-    lens_id fid = lensi_gen_widget_id(ui, id);
+    const char *id_str = opts->box.id ? opts->box.id : "##scroll";
+    lens_id fid = lensi_gen_widget_id(ui, id_str);
     lens_node *n = lensi_store_touch(ui, fid);
     if (!n)
-        return;
+        return false;
     lensi_link_child(ui, n);
 
     n->is_container = true;
@@ -19,9 +25,11 @@ void lens_scroll_begin(lens *ui, const char *id) {
     n->pad = 0.0f;
     n->cross = LENS_STRETCH;
 
-    /* Wheel scroll is deferred to lens_scroll_end so the innermost hovered
-       scroll container gets priority over outer ones. A placed node in a
-       higher band above the area occludes it (same rule as lensi_interact). */
+    if (opts->max_width > 0.0f)
+        n->max_w = opts->max_width;
+    if (opts->max_height > 0.0f)
+        n->max_h = opts->max_height;
+
     bool occluded = n->has_prev && lensi_widget_occluded(ui, n);
     if (n->has_prev && !occluded && lensi_point_in(ui->input.cursor, n->prev_rect)) {
         ui->scroll_hot_id = n->id;
@@ -29,8 +37,6 @@ void lens_scroll_begin(lens *ui, const char *id) {
 
     lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
     if (ss) {
-        /* scrollbar interaction (thumb drag + track click). All geometry is
-         * theme-driven so consumers can size the bar to their chrome. */
         const float sb_w = t->scrollbar_width;
         bool have_bar = (ss->thumb_h > 0.0f && n->has_prev);
         flux_rect thumb_rect = {0, 0, 0, 0};
@@ -73,9 +79,6 @@ void lens_scroll_begin(lens *ui, const char *id) {
             }
         }
 
-        /* hover state for draw styling: dragging wins, else cursor on track.
-         * Persisted into ss so the post-layout draw pass (solve.c) can pick
-         * the hovered thumb colour without recomputing hit geometry. */
         ss->hovering =
             ss->dragging || (have_bar && !occluded && lensi_point_in(ui->input.cursor, track_rect));
 
@@ -84,12 +87,8 @@ void lens_scroll_begin(lens *ui, const char *id) {
     }
 
     lensi_node_semantics(ui, n, LENS_ROLE_SCROLLAREA, NULL, NULL, 0);
-
-    /* A scroll area is transparent by default — it inherits its parent's
-     * surface (sidebar lists, file trees, etc. sit flush). A consumer that
-     * wants a framed "card" wraps it in a container with a bg/border. */
-
     lensi_open_container_push(ui, n);
+    return true;
 }
 
 void lens_scroll_end(lens *ui) {
@@ -111,25 +110,11 @@ void lens_scroll_end(lens *ui) {
     lensi_open_container_pop(ui);
 }
 
-void lens_scroll_to(lens *ui, const char *id, float x, float y) {
-    if (!ui || !id)
-        return;
-    lens_node *n = lensi_store_find(ui, lens_current_id(ui, id));
-    if (!n || !n->is_scroll)
-        return;
-    lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
-    if (!ss)
-        return;
-    ss->offset_x = fmaxf(0.0f, x);
-    ss->offset_y = fmaxf(0.0f, y);
-    n->scroll_x = ss->offset_x;
-    n->scroll_y = ss->offset_y;
-}
-
-bool lens_scroll_offset(lens *ui, const char *id, float *x, float *y) {
+bool lens_scroll_offset(const lens *ui, const char *id, float *x, float *y) {
     if (!ui || !id)
         return false;
-    lens_node *n = lensi_store_find(ui, lens_current_id(ui, id));
+    lens_id fid = lens_current_id(ui, id);
+    lens_node *n = lens_find((lens *)ui, fid);
     if (!n || !n->is_scroll)
         return false;
     lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
@@ -140,4 +125,20 @@ bool lens_scroll_offset(lens *ui, const char *id, float *x, float *y) {
     if (y)
         *y = ss->offset_y;
     return true;
+}
+
+void lens_scroll_to(lens *ui, const char *id, float x, float y) {
+    if (!ui || !id)
+        return;
+    lens_id fid = lens_current_id(ui, id);
+    lens_node *n = lens_find(ui, fid);
+    if (!n || !n->is_scroll)
+        return;
+    lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
+    if (ss) {
+        ss->offset_x = x;
+        ss->offset_y = y;
+        n->scroll_x = x;
+        n->scroll_y = y;
+    }
 }

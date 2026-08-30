@@ -9,6 +9,11 @@
 
 static const lens_input ZERO_IN = {.display_size = {400, 300}, .dt_seconds = 0.016f};
 
+static inline bool place_begin(lens *ui, const char *id, lens_place_opts opts) {
+    opts.box.id = id;
+    return lens_place_begin(ui, &opts);
+}
+
 static lens_place_opts exact_at(flux_rect rect, lens_band band, flux_color bg) {
     return (lens_place_opts){
         .band = band,
@@ -28,10 +33,10 @@ static void test_exact_always_entered(void) {
     int body_runs = 0;
     for (int frame = 0; frame < 2; frame++) {
         lens_begin(ui, &ZERO_IN);
-        if (lens_place_begin(ui, "dock",
-                             exact_at((flux_rect){100, 260, 200, 36}, LENS_BAND_CHROME, 0))) {
+        if (place_begin(ui, "dock",
+                        exact_at((flux_rect){100, 260, 200, 36}, LENS_BAND_CHROME, 0))) {
             body_runs++;
-            lens_label(ui, "tile");
+            lens_label(ui, &(lens_label_opts){.text = "tile"});
             lens_place_end(ui);
         }
         lens_end(ui);
@@ -55,8 +60,8 @@ static void test_exact_place_at_rect(void) {
     flux_rect label_rect = {0, 0, 0, 0};
     for (int frame = 0; frame < 2; frame++) {
         lens_begin(ui, &ZERO_IN);
-        if (lens_place_begin(ui, "bar", o)) {
-            lens_label(ui, "x");
+        if (place_begin(ui, "bar", o)) {
+            lens_label(ui, &(lens_label_opts){.text = "x"});
             label_rect = lens_get_response(ui).rect;
             lens_place_end(ui);
         }
@@ -83,8 +88,7 @@ static void test_rect_extent_tracks_updates(void) {
 
     lens_begin(ui, &ZERO_IN);
     lens_id id = lens_current_id(ui, "selection");
-    CHECK(lens_place_begin(ui, "selection",
-                           exact_at((flux_rect){20, 30, 40, 50}, LENS_BAND_CHROME, 0)));
+    CHECK(place_begin(ui, "selection", exact_at((flux_rect){20, 30, 40, 50}, LENS_BAND_CHROME, 0)));
     lens_place_end(ui);
     lens_end(ui);
 
@@ -97,8 +101,8 @@ static void test_rect_extent_tracks_updates(void) {
     CHECK_NEAR(bounds.h, 50.0f, 0.001f);
 
     lens_begin(ui, &ZERO_IN);
-    CHECK(lens_place_begin(ui, "selection",
-                           exact_at((flux_rect){80, 60, 120, 90}, LENS_BAND_CHROME, 0)));
+    CHECK(
+        place_begin(ui, "selection", exact_at((flux_rect){80, 60, 120, 90}, LENS_BAND_CHROME, 0)));
     lens_place_end(ui);
     lens_end(ui);
 
@@ -120,8 +124,8 @@ static void test_persistent_not_dismissed(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
-        lens_label(ui, "ws1");
+    if (place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
+        lens_label(ui, &(lens_label_opts){.text = "ws1"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -131,9 +135,9 @@ static void test_persistent_not_dismissed(void) {
     in_esc.keys[0] = (lens_key_event){.key = LENS_KEY_ESCAPE, .pressed = true};
     lens_begin(ui, &in_esc);
     int runs_after_esc = 0;
-    if (lens_place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
+    if (place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
         runs_after_esc++;
-        lens_label(ui, "ws1");
+        lens_label(ui, &(lens_label_opts){.text = "ws1"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -145,9 +149,9 @@ static void test_persistent_not_dismissed(void) {
     in_click.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in_click);
     int runs_after_click = 0;
-    if (lens_place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
+    if (place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
         runs_after_click++;
-        lens_label(ui, "ws1");
+        lens_label(ui, &(lens_label_opts){.text = "ws1"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -170,9 +174,9 @@ static void test_chrome_occludes_base(void) {
 
     /* Frame 1: base button + chrome node covering it. */
     lens_begin(ui, &ZERO_IN);
-    (void)lens_button(ui, "Base");
-    if (lens_place_begin(ui, "cov", cover)) {
-        (void)lens_button(ui, "Top");
+    (void)lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
+    if (place_begin(ui, "cov", cover)) {
+        (void)lens_button(ui, &(lens_button_opts){.label = "Top"}).clicked;
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -184,9 +188,9 @@ static void test_chrome_occludes_base(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    bool base_clicked = lens_button(ui, "Base");
-    if (lens_place_begin(ui, "cov", cover)) {
-        (void)lens_button(ui, "Top");
+    bool base_clicked = lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
+    if (place_begin(ui, "cov", cover)) {
+        (void)lens_button(ui, &(lens_button_opts){.label = "Top"}).clicked;
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -207,12 +211,12 @@ static void test_popup_occludes_chrome_contents(void) {
 
     /* Frame 1: settle both nodes. */
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "panel", chrome)) {
-        (void)lens_button(ui, "DockBtn");
+    if (place_begin(ui, "panel", chrome)) {
+        (void)lens_button(ui, &(lens_button_opts){.label = "DockBtn"}).clicked;
         lens_place_end(ui);
     }
-    if (lens_place_begin(ui, "pop", popup)) {
-        lens_label(ui, "shade");
+    if (place_begin(ui, "pop", popup)) {
+        lens_label(ui, &(lens_label_opts){.text = "shade"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -224,12 +228,12 @@ static void test_popup_occludes_chrome_contents(void) {
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     bool dock_clicked = false;
-    if (lens_place_begin(ui, "panel", chrome)) {
-        dock_clicked = lens_button(ui, "DockBtn");
+    if (place_begin(ui, "panel", chrome)) {
+        dock_clicked = lens_button(ui, &(lens_button_opts){.label = "DockBtn"}).clicked;
         lens_place_end(ui);
     }
-    if (lens_place_begin(ui, "pop", popup)) {
-        lens_label(ui, "shade");
+    if (place_begin(ui, "pop", popup)) {
+        lens_label(ui, &(lens_label_opts){.text = "shade"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -250,9 +254,9 @@ static void test_backdrop_hit_transparent(void) {
     /* Frame 1: settle geometry — base button plus a full-display backdrop
      * carrying its own button. */
     lens_begin(ui, &ZERO_IN);
-    (void)lens_button(ui, "Base");
-    if (lens_place_begin(ui, "bd", bd)) {
-        (void)lens_button(ui, "Ghost");
+    (void)lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
+    if (place_begin(ui, "bd", bd)) {
+        (void)lens_button(ui, &(lens_button_opts){.label = "Ghost"}).clicked;
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -265,9 +269,9 @@ static void test_backdrop_hit_transparent(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    (void)lens_button(ui, "Base");
-    if (lens_place_begin(ui, "bd", bd)) {
-        (void)lens_button(ui, "Ghost");
+    (void)lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
+    if (place_begin(ui, "bd", bd)) {
+        (void)lens_button(ui, &(lens_button_opts){.label = "Ghost"}).clicked;
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -276,10 +280,10 @@ static void test_backdrop_hit_transparent(void) {
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    bool base_clicked = lens_button(ui, "Base");
+    bool base_clicked = lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
     bool ghost_clicked = false;
-    if (lens_place_begin(ui, "bd", bd)) {
-        ghost_clicked = lens_button(ui, "Ghost");
+    if (place_begin(ui, "bd", bd)) {
+        ghost_clicked = lens_button(ui, &(lens_button_opts){.label = "Ghost"}).clicked;
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -298,8 +302,8 @@ static void test_backdrop_interactive_opt_in(void) {
     bd.interactive = true;
 
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "bd", bd)) {
-        (void)lens_button(ui, "Deco");
+    if (place_begin(ui, "bd", bd)) {
+        (void)lens_button(ui, &(lens_button_opts){.label = "Deco"}).clicked;
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -309,8 +313,8 @@ static void test_backdrop_interactive_opt_in(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    if (lens_place_begin(ui, "bd", bd)) {
-        (void)lens_button(ui, "Deco");
+    if (place_begin(ui, "bd", bd)) {
+        (void)lens_button(ui, &(lens_button_opts){.label = "Deco"}).clicked;
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -320,8 +324,8 @@ static void test_backdrop_interactive_opt_in(void) {
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     bool clicked = false;
-    if (lens_place_begin(ui, "bd", bd)) {
-        clicked = lens_button(ui, "Deco");
+    if (place_begin(ui, "bd", bd)) {
+        clicked = lens_button(ui, &(lens_button_opts){.label = "Deco"}).clicked;
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -370,16 +374,16 @@ static void test_band_render_order(void) {
      * TOPMOST magenta, all over the same 100x100 spot. The topmost band
      * wins the pixel. */
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
+    if (place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
         lens_place_end(ui);
     lens_size(ui, 100, 100);
-    lens_row_ex(ui, (lens_layout_opts){.bg = GREEN});
+    lens_row_begin(ui, &(lens_layout_opts){.bg = GREEN});
     lens_close(ui);
-    if (lens_place_begin(ui, "ch", exact_at(R, LENS_BAND_CHROME, BLUE)))
+    if (place_begin(ui, "ch", exact_at(R, LENS_BAND_CHROME, BLUE)))
         lens_place_end(ui);
-    if (lens_place_begin(ui, "pp", exact_at(R, LENS_BAND_POPUP, YELLOW)))
+    if (place_begin(ui, "pp", exact_at(R, LENS_BAND_POPUP, YELLOW)))
         lens_place_end(ui);
-    if (lens_place_begin(ui, "tm", exact_at(R, LENS_BAND_TOPMOST, MAGENTA)))
+    if (place_begin(ui, "tm", exact_at(R, LENS_BAND_TOOLTIP, MAGENTA)))
         lens_place_end(ui);
     lens_end(ui);
     render(ui, canvas);
@@ -394,14 +398,14 @@ static void test_band_render_order(void) {
 
     /* Drop TOPMOST: POPUP yellow now wins (G=255). */
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
+    if (place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
         lens_place_end(ui);
     lens_size(ui, 100, 100);
-    lens_row_ex(ui, (lens_layout_opts){.bg = GREEN});
+    lens_row_begin(ui, &(lens_layout_opts){.bg = GREEN});
     lens_close(ui);
-    if (lens_place_begin(ui, "ch", exact_at(R, LENS_BAND_CHROME, BLUE)))
+    if (place_begin(ui, "ch", exact_at(R, LENS_BAND_CHROME, BLUE)))
         lens_place_end(ui);
-    if (lens_place_begin(ui, "pp", exact_at(R, LENS_BAND_POPUP, YELLOW)))
+    if (place_begin(ui, "pp", exact_at(R, LENS_BAND_POPUP, YELLOW)))
         lens_place_end(ui);
     lens_end(ui);
     render(ui, canvas);
@@ -409,12 +413,12 @@ static void test_band_render_order(void) {
 
     /* Drop POPUP too: CHROME blue wins (G=0, B=255). */
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
+    if (place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
         lens_place_end(ui);
     lens_size(ui, 100, 100);
-    lens_row_ex(ui, (lens_layout_opts){.bg = GREEN});
+    lens_row_begin(ui, &(lens_layout_opts){.bg = GREEN});
     lens_close(ui);
-    if (lens_place_begin(ui, "ch", exact_at(R, LENS_BAND_CHROME, BLUE)))
+    if (place_begin(ui, "ch", exact_at(R, LENS_BAND_CHROME, BLUE)))
         lens_place_end(ui);
     lens_end(ui);
     render(ui, canvas);
@@ -423,10 +427,10 @@ static void test_band_render_order(void) {
 
     /* Drop CHROME: the base-tree green row beats the BACKDROP. */
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
+    if (place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
         lens_place_end(ui);
     lens_size(ui, 100, 100);
-    lens_row_ex(ui, (lens_layout_opts){.bg = GREEN});
+    lens_row_begin(ui, &(lens_layout_opts){.bg = GREEN});
     lens_close(ui);
     lens_end(ui);
     render(ui, canvas);
@@ -437,7 +441,7 @@ static void test_band_render_order(void) {
 
     /* Drop the base row: only the BACKDROP remains. */
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
+    if (place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
         lens_place_end(ui);
     lens_end(ui);
     render(ui, canvas);
@@ -460,9 +464,9 @@ static void test_intra_band_registration_order(void) {
     const flux_rect R = {0, 0, 100, 100};
 
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "first", exact_at(R, LENS_BAND_POPUP, CYAN)))
+    if (place_begin(ui, "first", exact_at(R, LENS_BAND_POPUP, CYAN)))
         lens_place_end(ui);
-    if (lens_place_begin(ui, "second", exact_at(R, LENS_BAND_POPUP, YELLOW)))
+    if (place_begin(ui, "second", exact_at(R, LENS_BAND_POPUP, YELLOW)))
         lens_place_end(ui);
     lens_end(ui);
     render(ui, canvas);
@@ -492,8 +496,8 @@ static void test_base_band_request_clamped_to_chrome(void) {
     /* Frame 1: base button + the BASE-requested node covering it; settle,
      * then verify it paints above the base tree. */
     lens_begin(ui, &ZERO_IN);
-    (void)lens_button(ui, "Base");
-    if (lens_place_begin(ui, "bd-request", o))
+    (void)lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
+    if (place_begin(ui, "bd-request", o))
         lens_place_end(ui);
     lens_end(ui);
     render(ui, canvas);
@@ -507,16 +511,16 @@ static void test_base_band_request_clamped_to_chrome(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    (void)lens_button(ui, "Base");
-    if (lens_place_begin(ui, "bd-request", o))
+    (void)lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
+    if (place_begin(ui, "bd-request", o))
         lens_place_end(ui);
     lens_end(ui);
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    bool base_clicked = lens_button(ui, "Base");
-    if (lens_place_begin(ui, "bd-request", o))
+    bool base_clicked = lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
+    if (place_begin(ui, "bd-request", o))
         lens_place_end(ui);
     lens_end(ui);
     CHECK(base_clicked == false); /* and it hit-tests above, too */

@@ -11,7 +11,7 @@ int main(void) {
 
     /* frame 1: button enters */
     lens_begin(ui, &in);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_end(ui);
     lens_id id = lens_get_response(ui).id;
     CHECK(id != 0);
@@ -21,7 +21,7 @@ int main(void) {
 
     /* frame 2: stable */
     lens_begin(ui, &in);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_end(ui);
     n = lens_find(ui, id);
     CHECK(n != NULL);

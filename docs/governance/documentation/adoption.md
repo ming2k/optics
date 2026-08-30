@@ -16,6 +16,7 @@ Decide these before adopting the guide:
 | Documentation language | American English |
 | Documentation layout | Diátaxis under `docs/` |
 | Contributor documentation path | `docs/dev/` |
+| Governance and standards path | `docs/governance/` |
 | Architecture decision format | ADRs under `docs/adr/` |
 | User-visible change log | `CHANGELOG.md` with an `Unreleased` section |
 | AI policy edits | AI may suggest governance changes but must not apply them |
@@ -25,10 +26,10 @@ equivalent contributor instruction file.
 
 ## Adoption checklist
 
-1. Copy `docs/dev/documentation/` into the target repository.
+1. Copy `docs/governance/documentation/` into the target repository.
 2. Add or update the target repository's root `AGENTS.md` to require this
    guide before documentation changes.
-3. Create `docs/index.md`, `docs/dev/index.md`, and an `index.md` for each
+3. Create `docs/index.md`, `docs/governance/index.md`, `docs/dev/index.md`, and an `index.md` for each
    `docs/` subdirectory the repository adopts, if they do not exist.
 4. Decide which optional contracts the repository uses; record them per
    [Repository Contracts](contracts.md).

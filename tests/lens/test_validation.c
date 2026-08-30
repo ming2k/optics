@@ -28,16 +28,17 @@ static void capture(lens *ui, lens_node *n, const lens_widget_record *rec) {
 
 static void build_textfield_pair(lens *ui, char *buf_a, char *buf_b) {
     lens_begin(ui, &IN0);
-    lens_textfield_ex(ui, (lens_textfield_opts){
-                              .label = "tf1", .buf = buf_a, .buf_cap = 64, .box = {.error = true}});
-    lens_textfield(ui, "tf2", buf_b, 64); /* no error */
+    lens_textedit(
+        ui, &(lens_textedit_opts){.box = {.id = "tf1", .error = true}, .buf = buf_a, .cap = 64});
+    lens_textedit(
+        ui, &(lens_textedit_opts){.box = {.id = "tf2"}, .buf = buf_b, .cap = 64}); /* no error */
     lens_end(ui);
 }
 
 static void test_textfield_error_reaches_skin(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    lens_set_skin(ui, LENS_WIDGET_TEXTFIELD, capture);
+    lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, capture);
 
     char a[64] = "test", b[64] = "other";
     g_saw_error = g_saw_clean = g_saw_any = false;
@@ -48,7 +49,7 @@ static void test_textfield_error_reaches_skin(void) {
     CHECK(g_saw_clean); /* tf2's record carried error = false */
     CHECK(!lens_overflowed(ui));
 
-    lens_set_skin(ui, LENS_WIDGET_TEXTFIELD, NULL); /* restore */
+    lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, NULL); /* restore */
     lens_destroy(ui);
 }
 
@@ -59,9 +60,9 @@ static void test_slider_error_reaches_skin(void) {
 
     float val = 0.5f;
     lens_begin(ui, &IN0);
-    lens_slider_ex(
-        ui, (lens_slider_opts){
-                .label = "s", .value = &val, .min = 0.0f, .max = 1.0f, .box = {.error = true}});
+    lens_slider(ui,
+                &(lens_slider_opts){
+                    .label = "s", .value = &val, .min = 0.0f, .max = 1.0f, .box = {.error = true}});
     lens_end(ui);
 
     CHECK(g_saw_any);
@@ -75,7 +76,7 @@ static void test_slider_error_reaches_skin(void) {
 static void test_error_scoped_to_its_own_widget(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    lens_set_skin(ui, LENS_WIDGET_TEXTFIELD, capture);
+    lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, capture);
 
     /* Error is carried by the descriptor, so it can only apply to the one
      * widget it is set on — the capture above asserts exactly one record
@@ -86,7 +87,7 @@ static void test_error_scoped_to_its_own_widget(void) {
     build_textfield_pair(ui, a, b);
     CHECK(g_saw_any && g_saw_error && g_saw_clean);
 
-    lens_set_skin(ui, LENS_WIDGET_TEXTFIELD, NULL);
+    lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, NULL);
     lens_destroy(ui);
 }
 

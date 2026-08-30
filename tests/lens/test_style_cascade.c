@@ -69,11 +69,11 @@ static void test_scope_reaches_terse_widgets(void) {
     flux_color red = flux_color_rgba_premul(0xFF, 0x20, 0x20, 0xFF);
 
     lens_begin(ui, &IN0);
-    lens_label(ui, "before");
+    lens_label(ui, &(lens_label_opts){.text = "before"});
     lens_push_style(ui, fg_only(red));
-    lens_label(ui, "scoped");
+    lens_label(ui, &(lens_label_opts){.text = "scoped"});
     lens_pop_style(ui);
-    lens_label(ui, "after");
+    lens_label(ui, &(lens_label_opts){.text = "after"});
     lens_end(ui);
 
     flux_color themed = lens_get_theme(ui).color_fg;
@@ -96,11 +96,11 @@ static void test_nested_scopes_merge_and_nearest_wins(void) {
 
     lens_begin(ui, &IN0);
     lens_push_style(ui, outer);
-    lens_label(ui, "outer");
+    lens_label(ui, &(lens_label_opts){.text = "outer"});
     lens_push_style(ui, inner);
-    lens_label(ui, "inner");
+    lens_label(ui, &(lens_label_opts){.text = "inner"});
     lens_pop_style(ui);
-    lens_label(ui, "back-to-outer");
+    lens_label(ui, &(lens_label_opts){.text = "back-to-outer"});
     lens_pop_style(ui);
     lens_end(ui);
 
@@ -122,13 +122,13 @@ static void test_forgotten_pop_cannot_leak_across_frames(void) {
 
     lens_begin(ui, &IN0);
     lens_push_style(ui, fg_only(red));
-    lens_label(ui, "scoped");
+    lens_label(ui, &(lens_label_opts){.text = "scoped"});
     /* no pop — the frame ends with the stack non-empty */
     lens_end(ui);
     CHECK(first_text_color(find_widget(ui, "scoped")) == red);
 
     lens_begin(ui, &IN0);
-    lens_label(ui, "next-frame");
+    lens_label(ui, &(lens_label_opts){.text = "next-frame"});
     lens_end(ui);
     CHECK(first_text_color(find_widget(ui, "next-frame")) == lens_get_theme(ui).color_fg);
     lens_destroy(ui);
@@ -161,14 +161,14 @@ static void test_box_style_beats_scope_beats_theme(void) {
     flux_color blue = flux_color_rgba_premul(0x20, 0x20, 0xC0, 0xFF);
 
     lens_begin(ui, &IN0);
-    lens_button_ex(ui, (lens_button_opts){.label = "themed"});
+    lens_button(ui, &(lens_button_opts){.label = "themed"});
     lens_push_style(ui, bg_only(red));
-    lens_button_ex(ui, (lens_button_opts){.label = "scoped"});
-    lens_button_ex(ui, (lens_button_opts){.label = "per-call", .box = {.style = bg_only(blue)}});
+    lens_button(ui, &(lens_button_opts){.label = "scoped"});
+    lens_button(ui, &(lens_button_opts){.label = "per-call", .box = {.style = bg_only(blue)}});
     lens_pop_style(ui);
     lens_end(ui);
 
-    flux_color themed = lens_get_theme(ui).color_accent; /* default body: accent */
+    flux_color themed = lens_get_theme(ui).color_bg;
     CHECK(first_rect_color(find_widget(ui, "themed")) == themed);
     CHECK(first_rect_color(find_widget(ui, "scoped")) == red);
     CHECK(first_rect_color(find_widget(ui, "per-call")) == blue);
@@ -188,9 +188,9 @@ static void test_outline_atoms_reach_draw_commands(void) {
     s.outline_width = 0.75f;
 
     lens_begin(ui, &IN0);
-    lens_label(ui, "plain");
+    lens_label(ui, &(lens_label_opts){.text = "plain"});
     lens_push_style(ui, s);
-    lens_label_compact_ex(ui, "12:34", 14.0f, 0.0f);
+    lens_label(ui, &(lens_label_opts){.text = "12:34", .size = 14.0f});
     lens_pop_style(ui);
     lens_end(ui);
 
@@ -215,7 +215,7 @@ static void test_skin_scratch_lifecycle(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
-    lens_button(ui, "Host");
+    lens_button(ui, &(lens_button_opts){.label = "Host"});
     lens_end(ui);
 
     lens_node *n = find_widget(ui, "Host");
@@ -230,7 +230,7 @@ static void test_skin_scratch_lifecycle(void) {
     scratch[0] = 12.5f;
     scratch[3] = -4.25f;
     lens_begin(ui, &IN0);
-    lens_button(ui, "Host");
+    lens_button(ui, &(lens_button_opts){.label = "Host"});
     lens_end(ui);
     n = find_widget(ui, "Host");
     CHECK(n != NULL);
@@ -244,7 +244,7 @@ static void test_skin_scratch_lifecycle(void) {
      * is gone. */
     for (int f = 0; f < 12; f++) {
         lens_begin(ui, &IN0);
-        lens_label(ui, "unrelated");
+        lens_label(ui, &(lens_label_opts){.text = "unrelated"});
         lens_end(ui);
     }
     CHECK(find_widget(ui, "Host") == NULL);

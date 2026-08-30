@@ -9,8 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 # This crate is pure-Rust layout logic ABOVE the bindings, not a binding
-# itself; it lives at crates/ (see docs/dev/api-surface-audit.md) and
-# depends on the flux-rs workspace by path.
+# itself; it lives at crates/ and depends on the flux-rs workspace by path.
 flux-text = { path = "../../bindings/flux-rs/crates/flux-text", version = "0.1.1" }
 # flux-text-sys is a direct dep so its `links = "flux-text"` metadata
 # (DEP_FLUX_TEXT_RPATHS) is visible to this crate's build.rs, which relays the

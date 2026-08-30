@@ -1,6 +1,7 @@
-/* label.c — static text (ADR-0031). Non-interactive. */
+/* label.c — unified label widget (text rendering, sizing, wrapping) */
 
 #include "../internal.h"
+#include <string.h>
 
 static bool ascii_wrap_space(unsigned char c) {
     return c == ' ' || c == '\t' || c == '\r';
@@ -37,9 +38,6 @@ static flux_text_metrics measure_slice(lens *ui, const char *text, size_t len, f
                                                 .family = (flux_text_family)ui->text_family});
 }
 
-/* Pick the next visual line in [start, len). Whole words are preferred; a
- * token wider than max_width is split at the nearest UTF-8 cluster boundary
- * reported by flux-text so URLs and identifiers cannot escape the box. */
 static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t start, float size,
                                float max_width, size_t *next) {
     size_t segment_end = start;
@@ -63,11 +61,6 @@ static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t st
     size_t cut = flux_text_byte_for_x(ui->text, segment, segment_len, max_width, &style);
     if (cut > segment_len)
         cut = segment_len;
-    /* byte_for_x returns the *nearest* boundary, which can overshoot the
-     * budget by up to half a glyph; back off one codepoint at a time until
-     * the caret x of `cut` fits. Querying the caret within the full segment
-     * keeps every step on the same layout-cache entry — measuring each
-     * shrinking prefix instead would shape a fresh string per step. */
     while (cut > 0 && flux_text_x_for_byte(ui->text, segment, segment_len, cut, &style) > max_width)
         cut = utf8_prev_boundary(segment, cut);
     if (cut == 0)
@@ -106,9 +99,6 @@ static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t st
     return start + cut;
 }
 
-/* Append one wrapped line to the frame's slice array (arena-grown). The
- * string copy keeps any caller lifetime safe; the skin draws the slices
- * verbatim (ADR-0059: wrapping is measure behaviour and stays here). */
 static void push_line_slice(lens *ui, lens_text_line **lines, int *count, int *cap,
                             const char *text, size_t len, float x, float y) {
     if (len == 0)
@@ -136,55 +126,78 @@ static void push_line_slice(lens *ui, lens_text_line **lines, int *count, int *c
     (*count)++;
 }
 
-static void label_wrapped(lens *ui, const char *text, float size, float max_width) {
+lens_response lens_label(lens *ui, const lens_label_opts *opts) {
+    lens_label_opts default_opts = {0};
+    if (!opts)
+        opts = &default_opts;
+
+    lensi_apply_box(ui, opts->box);
     lens_style eff = lensi_style_effective(ui);
-    float padding = lensi_style_padding(&eff, &ui->theme);
-    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
+    const char *text = opts->text ? opts->text : "";
+
+    float size = opts->size;
     if (size <= 0.0f)
-        size = rs.font_size; /* cascade default for the terse form */
+        size = lensi_style_font_size(ui, &eff, &ui->theme);
     else
-        size = lensi_font_px(ui, size); /* explicit sizes scale (see lens_label_ex) */
-    lens_id id = lensi_gen_widget_id(ui, text);
+        size = lensi_font_px(ui, size);
+
+    float padding = lensi_style_padding(&eff, &ui->theme);
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
+
+    lens_id id =
+        opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return;
+        return (lens_response){0};
+
     lensi_link_child(ui, n);
     n->is_container = false;
 
-    lens_text_metrics intrinsic = lensi_text_measure_label(ui, text, size, 0.0f);
-    float requested_width = max_width > 0.0f ? max_width : intrinsic.width + 2.0f * padding;
-    float w =
-        n->fixed_w > 0.0f ? n->fixed_w : fminf(intrinsic.width + 2.0f * padding, requested_width);
-    float content_width = fmaxf(w - 2.0f * padding, 1.0f);
-    flux_text_metrics line_metrics = measure_slice(ui, "Ag", 2, size);
-    float line_height = line_metrics.height > 0.0f ? line_metrics.height : size;
-    float line_gap = fmaxf(size * 0.25f, 2.0f);
+    lens_text_metrics intrinsic = lensi_text_measure_label(ui, text, size, opts->weight);
+    float max_w = opts->box.max_width;
+    bool wrap = opts->wrap || max_w > 0.0f;
 
+    float w = 0.0f;
+    float h = 0.0f;
     lens_text_line *lines = NULL;
-    int line_count = 0, line_cap = 0;
-    int logical_lines = 0; /* advances even for empty slices (line spacing) */
-    size_t len = strlen(text);
-    size_t start = 0;
-    do {
-        size_t next = start;
-        size_t end = wrapped_line_end(ui, text, len, start, size, content_width, &next);
-        push_line_slice(ui, &lines, &line_count, &line_cap, text + start, end - start, padding,
-                        padding + (float)logical_lines * (line_height + line_gap));
-        logical_lines++;
-        if (next <= start)
-            break;
-        start = next;
-    } while (start < len);
+    int line_count = 0;
 
-    float content_height = (float)logical_lines * line_height;
-    if (logical_lines > 1)
-        content_height += (float)(logical_lines - 1) * line_gap;
-    float h = n->fixed_h > 0.0f ? n->fixed_h : content_height + 2.0f * padding;
+    if (wrap && max_w > 0.0f) {
+        float requested_width = max_w;
+        w = n->fixed_w > 0.0f ? n->fixed_w
+                              : fminf(intrinsic.width + 2.0f * padding, requested_width);
+        float content_width = fmaxf(w - 2.0f * padding, 1.0f);
+        flux_text_metrics line_metrics = measure_slice(ui, "Ag", 2, size);
+        float line_height = line_metrics.height > 0.0f ? line_metrics.height : size;
+        float line_gap = fmaxf(size * 0.25f, 2.0f);
+
+        int line_cap = 0;
+        int logical_lines = 0;
+        size_t len = strlen(text);
+        size_t start = 0;
+        do {
+            size_t next = start;
+            size_t end = wrapped_line_end(ui, text, len, start, size, content_width, &next);
+            push_line_slice(ui, &lines, &line_count, &line_cap, text + start, end - start, padding,
+                            padding + (float)logical_lines * (line_height + line_gap));
+            logical_lines++;
+            if (next <= start)
+                break;
+            start = next;
+        } while (start < len);
+
+        float content_height = (float)logical_lines * line_height;
+        if (logical_lines > 1)
+            content_height += (float)(logical_lines - 1) * line_gap;
+        h = n->fixed_h > 0.0f ? n->fixed_h : content_height + 2.0f * padding;
+    } else {
+        w = (n->fixed_w > 0) ? n->fixed_w : intrinsic.width + 2.0f * padding;
+        h = (n->fixed_h > 0) ? n->fixed_h : intrinsic.height + 2.0f * padding;
+    }
     n->measured = (flux_point){w, h};
 
     lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
 
-    /* emit — through the replaceable skin (ADR-0059) */
     lensi_skin_emit(ui, n,
                     &(lens_widget_record){
                         .kind = LENS_WIDGET_LABEL,
@@ -193,127 +206,18 @@ static void label_wrapped(lens *ui, const char *text, float size, float max_widt
                         .last_bounds = n->prev_rect,
                         .style = rs,
                         .style_fields = eff.fields,
-                        .content = {.label = text,
-                                    .text = intrinsic,
-                                    .text_size = size,
-                                    .lines = lines,
-                                    .line_count = line_count},
+                        .content =
+                            {
+                                .label = text,
+                                .text = intrinsic,
+                                .text_size = size,
+                                .text_weight = opts->weight,
+                                .lines = lines,
+                                .line_count = line_count,
+                            },
                     });
 
-    ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
-}
-
-void lens_label(lens *ui, const char *text) {
-    lens_style eff = lensi_style_effective(ui);
-    float font_size = lensi_style_font_size(ui, &eff, &ui->theme);
-    float padding = lensi_style_padding(&eff, &ui->theme);
-    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
-    lens_id id = lensi_gen_widget_id(ui, text);
-    lens_node *n = lensi_store_touch(ui, id);
-    if (!n)
-        return;
-    lensi_link_child(ui, n);
-    n->is_container = false;
-
-    lens_text_metrics tm = lensi_text_measure_label(ui, text, font_size, 0.0f);
-    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * padding;
-    float h = (n->fixed_h > 0) ? n->fixed_h : tm.height + 2.0f * padding;
-    n->measured = (flux_point){w, h};
-
-    lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
-
-    /* emit — through the replaceable skin (ADR-0059) */
-    lensi_skin_emit(ui, n,
-                    &(lens_widget_record){
-                        .kind = LENS_WIDGET_LABEL,
-                        .state = 0,
-                        .bounds = {0, 0, w, h},
-                        .last_bounds = n->prev_rect,
-                        .style = rs,
-                        .style_fields = eff.fields,
-                        .content = {.label = text, .text = tm},
-                    });
-
-    ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
-}
-
-void lens_label_ex(lens *ui, const char *text, float size) {
-    lens_style eff = lensi_style_effective(ui);
-    float padding = lensi_style_padding(&eff, &ui->theme);
-    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
-    lens_id id = lensi_gen_widget_id(ui, text);
-    lens_node *n = lensi_store_touch(ui, id);
-    if (!n)
-        return;
-    lensi_link_child(ui, n);
-    n->is_container = false;
-
-    /* Explicit point size scales with the accessibility text factor too —
-     * an explicit size is a design intent ("twice body text"), not an
-     * absolute accessibility exemption. */
-    size = lensi_font_px(ui, size);
-    lens_text_metrics tm = lensi_text_measure_label(ui, text, size, 0.0f);
-    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width + 2.0f * padding;
-    float h = (n->fixed_h > 0) ? n->fixed_h : tm.height + 2.0f * padding;
-    n->measured = (flux_point){w, h};
-
-    lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
-
-    /* emit — through the replaceable skin (ADR-0059) */
-    lensi_skin_emit(ui, n,
-                    &(lens_widget_record){
-                        .kind = LENS_WIDGET_LABEL,
-                        .state = 0,
-                        .bounds = {0, 0, w, h},
-                        .last_bounds = n->prev_rect,
-                        .style = rs,
-                        .style_fields = eff.fields,
-                        .content = {.label = text, .text = tm, .text_size = size},
-                    });
-
-    ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
-}
-
-void lens_label_wrapped(lens *ui, const char *text, float max_width) {
-    label_wrapped(ui, text, 0.0f, max_width); /* 0 = cascade-resolved font size */
-}
-
-void lens_label_compact_ex(lens *ui, const char *text, float size, float weight) {
-    lens_style eff = lensi_style_effective(ui);
-    lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
-    lens_id id = lensi_gen_widget_id(ui, text);
-    lens_node *n = lensi_store_touch(ui, id);
-    if (!n)
-        return;
-    lensi_link_child(ui, n);
-    n->is_container = false;
-
-    size = lensi_font_px(ui, size); /* explicit sizes scale (see lens_label_ex) */
-    lens_text_metrics tm = lensi_text_measure_label(ui, text, size, weight);
-    float w = (n->fixed_w > 0) ? n->fixed_w : tm.width;
-    float h = (n->fixed_h > 0) ? n->fixed_h : tm.height;
-    n->measured = (flux_point){w, h};
-
-    lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
-
-    /* The opt-in contour is a style atom (ADR-0061 item 6): set
-     * LENS_STYLE_OUTLINE_COLOR/WIDTH via box.style or a scope and the
-     * contour paints outside the glyph coverage; intrinsic layout is
-     * identical either way. Emission is the skin's (ADR-0059). */
-    lensi_skin_emit(ui, n,
-                    &(lens_widget_record){
-                        .kind = LENS_WIDGET_LABEL,
-                        .state = 0,
-                        .bounds = {0, 0, w, h},
-                        .last_bounds = n->prev_rect,
-                        .style = rs,
-                        .style_fields = eff.fields,
-                        .content = {.label = text,
-                                    .text = tm,
-                                    .text_size = size,
-                                    .text_weight = weight,
-                                    .compact = true},
-                    });
-
-    ui->last_response = (lens_response){.id = id, .rect = n->prev_rect};
+    lens_response r = (lens_response){.id = id, .rect = n->prev_rect};
+    ui->last_response = r;
+    return r;
 }

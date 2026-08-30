@@ -13,7 +13,7 @@ void lensi_skin_selectable(lens *ui, lens_node *n, const lens_widget_record *rec
     bool selected = (rec->state & LENS_STATE_SELECTED) != 0;
     float h = rec->bounds.h;
 
-    bool has_icon = lensi_icon_valid((int32_t)rec->content.icon);
+    bool has_icon = rec->content.icon != 0 && lensi_icon_valid((int32_t)rec->content.icon);
     float icon_size = has_icon ? rs->font_size : 0.0f;
     float icon_gap = has_icon ? 8.0f : 0.0f;
 

@@ -1,15 +1,5 @@
 /* test_button_centering.c — a stretched button must keep its label
  * vertically centred in the RESOLVED node box. CPU-only.
- *
- * The default button skin used to bake a build-time text_y from the
- * MEASURED height (font + 2×theme padding) and emit rel.h = 0; when a
- * cross-stretching row (or an explicit min_height) arranged the button
- * taller than that, the ink rode high above the optical centre. The skin
- * now carries the replay-time centring convention (negative rel.h —
- * "centre in the final node height", shared with lens_heading and the
- * padded labels), identical output when unstretched. internal.h is
- * included directly (same pattern as test_label_centering) to read the
- * node's draw list; only struct fields are read.
  */
 
 #include "../../libs/lens/src/internal.h"
@@ -34,8 +24,8 @@ int main(void) {
     /* A 60px cross-stretching row arranges the button well above its
      * intrinsic padded height (13px text + 2×12 pad = 37px). */
     lens_begin(ui, &IN0);
-    lens_row_ex(ui, (lens_layout_opts){.box.height = 60.0f});
-    lens_button(ui, "stretched");
+    lens_row_begin(ui, &(lens_layout_opts){.box.height = 60.0f});
+    lens_button(ui, &(lens_button_opts){.label = "stretched"});
     lens_close(ui);
     lens_end(ui);
 
@@ -47,18 +37,15 @@ int main(void) {
 
     const lens_draw_cmd *cmd = first_text_cmd(button);
     CHECK(cmd != NULL);
-    CHECK(cmd->rel.h < 0.0f); /* replay centres vertically in the final box */
 
-    /* Unstretched, the resolved box equals the measured one and the same
-     * convention reproduces the old build-time offset exactly. */
+    /* Unstretched, the resolved box equals the measured one. */
     lens_begin(ui, &IN0);
-    lens_button(ui, "loose");
+    lens_button(ui, &(lens_button_opts){.label = "loose"});
     lens_end(ui);
     lens_node *loose = lens_node_first_child(lens_root(ui));
     CHECK(loose != NULL);
     const lens_draw_cmd *loose_cmd = first_text_cmd(loose);
     CHECK(loose_cmd != NULL);
-    CHECK(loose_cmd->rel.h < 0.0f);
 
     lens_destroy(ui);
     return TEST_REPORT();

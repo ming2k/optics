@@ -10,7 +10,7 @@ static void test_hover_press_click(void) {
     /* frame 1: button enters, no input */
     lens_input in1 = {.display_size = {200, 100}, .dt_seconds = 0.016f};
     lens_begin(ui, &in1);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     lens_end(ui);
     lens_response r1 = lens_get_response(ui);
     CHECK(r1.hovered == false);
@@ -23,7 +23,7 @@ static void test_hover_press_click(void) {
     in2.mouse_down[LENS_MOUSE_LEFT] = true;
     in2.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in2);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     lens_end(ui);
     lens_response r2 = lens_get_response(ui);
     CHECK(r2.hovered == true);
@@ -35,7 +35,7 @@ static void test_hover_press_click(void) {
     in3.cursor = (flux_point){10, 10};
     in3.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in3);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     lens_end(ui);
     lens_response r3 = lens_get_response(ui);
     CHECK(r3.hovered == true);
@@ -52,7 +52,7 @@ static void test_drag_outside_no_click(void) {
     /* frame 1: button enters */
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
     lens_begin(ui, &in);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     lens_end(ui);
 
     /* frame 2: press inside */
@@ -61,7 +61,7 @@ static void test_drag_outside_no_click(void) {
     in2.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in2.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in2);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     lens_end(ui);
     CHECK(lens_active(ui) != 0);
 
@@ -70,7 +70,7 @@ static void test_drag_outside_no_click(void) {
     in3.cursor = (flux_point){500, 500};
     in3.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in3);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     lens_end(ui);
     lens_response r3 = lens_get_response(ui);
     CHECK(r3.clicked == false);
@@ -86,8 +86,8 @@ static void test_tab_focus(void) {
 
     /* frame 1: two buttons enter */
     lens_begin(ui, &in);
-    (void)lens_button(ui, "A");
-    (void)lens_button(ui, "B");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
+    (void)lens_button(ui, &(lens_button_opts){.label = "B"}).clicked;
     lens_end(ui);
 
     /* frame 2: Tab press → focus moves to first focusable */
@@ -97,8 +97,8 @@ static void test_tab_focus(void) {
     lens_begin(ui, &in2);
     lens_id aid = lens_current_id(ui, "A");
     lens_id bid = lens_current_id(ui, "B");
-    (void)lens_button(ui, "A");
-    (void)lens_button(ui, "B");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
+    (void)lens_button(ui, &(lens_button_opts){.label = "B"}).clicked;
     lens_end(ui);
 
     /* After first Tab, focus should be on A (first focusable) if none was focused before */

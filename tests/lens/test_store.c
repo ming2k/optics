@@ -17,7 +17,7 @@ int main(void) {
 
     /* frame 1: a button enters */
     lens_begin(ui, &in);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_id aid = lens_get_response(ui).id;
     lens_end(ui);
     CHECK(aid != 0);
@@ -33,7 +33,7 @@ int main(void) {
 
     /* frame 2: same id -> same node pointer, state carried forward */
     lens_begin(ui, &in);
-    (void)lens_button(ui, "A");
+    (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_end(ui);
 
     lens_node *n2 = lens_find(ui, aid);
@@ -86,7 +86,7 @@ int main(void) {
 
         /* functional after any shrink: build, find, and reap normally */
         lens_begin(ui, &in);
-        (void)lens_button(ui, "post-shrink");
+        (void)lens_button(ui, &(lens_button_opts){.label = "post-shrink"});
         lens_id pid = lens_get_response(ui).id;
         lens_end(ui);
         CHECK(pid != 0 && lens_find(ui, pid) != NULL);

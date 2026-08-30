@@ -14,8 +14,9 @@ static const lens_place_opts POPUP_AT_ZERO = {
     .transient = true,
 };
 
-static lens_place_opts anchored(flux_rect anchor, float pad, float min_width) {
+static lens_place_opts anchored(const char *id, flux_rect anchor, float pad, float min_width) {
     lens_place_opts o = POPUP_AT_ZERO;
+    o.box.id = id;
     o.rect = anchor;
     o.layout.pad = pad;
     o.layout.min_width = min_width;
@@ -49,7 +50,8 @@ static void test_begin_gated_by_open_state(void) {
 
     int body_runs = 0;
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "m", anchored((flux_rect){10, 10, 50, 20}, 4, 80))) {
+    lens_place_opts o1 = anchored("m", (flux_rect){10, 10, 50, 20}, 4, 80);
+    if (lens_place_begin(ui, &o1)) {
         body_runs++;
         lens_place_end(ui);
     }
@@ -58,9 +60,10 @@ static void test_begin_gated_by_open_state(void) {
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "m");
-    if (lens_place_begin(ui, "m", anchored((flux_rect){10, 10, 50, 20}, 4, 80))) {
+    lens_place_opts o2 = anchored("m", (flux_rect){10, 10, 50, 20}, 4, 80);
+    if (lens_place_begin(ui, &o2)) {
         body_runs++;
-        lens_label(ui, "item");
+        lens_label(ui, &(lens_label_opts){.text = "item"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -75,8 +78,9 @@ static void test_open_place_reports_hover_for_its_whole_surface(void) {
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "hover-card");
-    if (lens_place_begin(ui, "hover-card", anchored((flux_rect){40, 40, 40, 20}, 12, 100))) {
-        lens_label(ui, "value");
+    lens_place_opts o = anchored("hover-card", (flux_rect){40, 40, 40, 20}, 12, 100);
+    if (lens_place_begin(ui, &o)) {
+        lens_label(ui, &(lens_label_opts){.text = "value"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -85,8 +89,8 @@ static void test_open_place_reports_hover_for_its_whole_surface(void) {
     hover.cursor = (flux_point){50, 75};
     lens_begin(ui, &hover);
     CHECK(lens_place_hovered(ui, "hover-card"));
-    if (lens_place_begin(ui, "hover-card", anchored((flux_rect){40, 40, 40, 20}, 12, 100))) {
-        lens_label(ui, "value");
+    if (lens_place_begin(ui, &o)) {
+        lens_label(ui, &(lens_label_opts){.text = "value"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -107,19 +111,20 @@ static void test_anchor_placement_and_flip(void) {
 
     /* Anchor near the top: the popup drops below it. Two frames so the
      * child's prev_rect settles, then read placement through it. */
+    lens_place_opts o_top = anchored("ov", (flux_rect){50, 20, 100, 24}, 6, 100);
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "ov");
-    if (lens_place_begin(ui, "ov", anchored((flux_rect){50, 20, 100, 24}, 6, 100))) {
-        lens_label(ui, "row1");
-        lens_label(ui, "row2");
+    if (lens_place_begin(ui, &o_top)) {
+        lens_label(ui, &(lens_label_opts){.text = "row1"});
+        lens_label(ui, &(lens_label_opts){.text = "row2"});
         lens_place_end(ui);
     }
     lens_end(ui);
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "ov", anchored((flux_rect){50, 20, 100, 24}, 6, 100))) {
-        lens_label(ui, "row1");
+    if (lens_place_begin(ui, &o_top)) {
+        lens_label(ui, &(lens_label_opts){.text = "row1"});
         bounds_below = lens_get_response(ui).rect; /* row1's prev_rect */
-        lens_label(ui, "row2");
+        lens_label(ui, &(lens_label_opts){.text = "row2"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -127,19 +132,20 @@ static void test_anchor_placement_and_flip(void) {
 
     /* Now anchor at the bottom; the popup should flip ABOVE. */
     flux_rect anchor_bot = {50, 280, 100, 18}; /* y+h = 298 (near 300 bottom) */
+    lens_place_opts o_bot = anchored("ov2", anchor_bot, 6, 100);
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "ov2");
-    if (lens_place_begin(ui, "ov2", anchored(anchor_bot, 6, 100))) {
-        lens_label(ui, "row1-bot");
-        lens_label(ui, "row2-bot");
+    if (lens_place_begin(ui, &o_bot)) {
+        lens_label(ui, &(lens_label_opts){.text = "row1-bot"});
+        lens_label(ui, &(lens_label_opts){.text = "row2-bot"});
         lens_place_end(ui);
     }
     lens_end(ui);
     lens_begin(ui, &ZERO_IN);
-    if (lens_place_begin(ui, "ov2", anchored(anchor_bot, 6, 100))) {
-        lens_label(ui, "row1-bot");
+    if (lens_place_begin(ui, &o_bot)) {
+        lens_label(ui, &(lens_label_opts){.text = "row1-bot"});
         bounds_flip = lens_get_response(ui).rect;
-        lens_label(ui, "row2-bot");
+        lens_label(ui, &(lens_label_opts){.text = "row2-bot"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -154,15 +160,15 @@ static void test_higher_band_blocks_base(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
-    lens_place_opts cover = anchored((flux_rect){0, 0, 200, 200}, 8, 200);
-    cover.layout.bg = 0xff000000u;
+    lens_place_opts cover = anchored("cov", (flux_rect){0, 0, 200, 200}, 8, 200);
+    cover.layout.bg = flux_color_rgba_premul(0, 0, 0, 255);
 
     /* Frame 1: build base button + open popup covering it. */
     lens_begin(ui, &ZERO_IN);
-    (void)lens_button(ui, "Base"); /* hidden under the popup */
+    (void)lens_button(ui, &(lens_button_opts){.label = "Base"}); /* hidden under the popup */
     lens_place_open(ui, "cov");
-    if (lens_place_begin(ui, "cov", cover)) {
-        (void)lens_button(ui, "Top");
+    if (lens_place_begin(ui, &cover)) {
+        (void)lens_button(ui, &(lens_button_opts){.label = "Top"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -174,9 +180,9 @@ static void test_higher_band_blocks_base(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    bool base_clicked = lens_button(ui, "Base");
-    if (lens_place_begin(ui, "cov", cover)) {
-        (void)lens_button(ui, "Top");
+    bool base_clicked = lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
+    if (lens_place_begin(ui, &cover)) {
+        (void)lens_button(ui, &(lens_button_opts){.label = "Top"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -190,10 +196,11 @@ static void test_click_outside_dismisses(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
+    lens_place_opts o = anchored("m", (flux_rect){100, 100, 80, 24}, 4, 100);
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "m");
-    if (lens_place_begin(ui, "m", anchored((flux_rect){100, 100, 80, 24}, 4, 100))) {
-        lens_label(ui, "a");
+    if (lens_place_begin(ui, &o)) {
+        lens_label(ui, &(lens_label_opts){.text = "a"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -205,8 +212,9 @@ static void test_click_outside_dismisses(void) {
     in.cursor = (flux_point){5, 5};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    if (lens_place_begin(ui, "m", anchored((flux_rect){100, 100, 80, 24}, 4, 0))) {
-        lens_label(ui, "a");
+    lens_place_opts o_zero = anchored("m", (flux_rect){100, 100, 80, 24}, 4, 0);
+    if (lens_place_begin(ui, &o_zero)) {
+        lens_label(ui, &(lens_label_opts){.text = "a"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -245,10 +253,14 @@ static void test_centered_on_display(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
-    lens_modal_open(ui, "m");
-    if (lens_modal_begin(ui, "m", (lens_modal_opts){.min_width = 200})) {
-        lens_label(ui, "body");
-        lens_modal_end(ui);
+    lens_place_open(ui, "m");
+    if (lens_place_begin(ui, &(lens_place_opts){.box = {.id = "m"},
+                                                .band = LENS_BAND_MODAL,
+                                                .mode = LENS_PLACE_CENTERED,
+                                                .layout = {.min_width = 200},
+                                                .transient = true})) {
+        lens_label(ui, &(lens_label_opts){.text = "body"});
+        lens_place_end(ui);
     }
     lens_end(ui);
 
@@ -270,8 +282,9 @@ static void test_placed_node_parents_into_tree(void) {
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "pp");
-    if (lens_place_begin(ui, "pp", anchored((flux_rect){10, 10, 40, 20}, 4, 60))) {
-        lens_label(ui, "inside");
+    lens_place_opts o = anchored("pp", (flux_rect){10, 10, 40, 20}, 4, 60);
+    if (lens_place_begin(ui, &o)) {
+        lens_label(ui, &(lens_label_opts){.text = "inside"});
         lens_place_end(ui);
     }
     lens_end(ui);

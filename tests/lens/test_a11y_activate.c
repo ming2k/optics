@@ -15,7 +15,7 @@ static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f}
  * whether it reported clicked. */
 static lens_id build_button_frame(lens *ui, bool *clicked) {
     lens_begin(ui, &IN0);
-    *clicked = lens_button(ui, "OK");
+    *clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
     lens_id id = lens_get_response(ui).id;
     lens_end(ui);
     return id;
@@ -101,8 +101,8 @@ static void test_activate_disabled_blocked(void) {
 
     /* frame 1: disabled button */
     lens_begin(ui, &IN0);
-    clicked = lens_button_ex(ui, (lens_button_opts){.box = {.disabled = disabled}, .label = "No"})
-                  .clicked;
+    clicked =
+        lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
     id = lens_get_response(ui).id;
     lens_end(ui);
     CHECK(id != 0);
@@ -111,8 +111,8 @@ static void test_activate_disabled_blocked(void) {
     /* activation request → blocked by disabled; no focus move */
     lens_a11y_activate(ui, id);
     lens_begin(ui, &IN0);
-    clicked = lens_button_ex(ui, (lens_button_opts){.box = {.disabled = disabled}, .label = "No"})
-                  .clicked;
+    clicked =
+        lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
     lens_end(ui);
     CHECK(!clicked);
     CHECK(!lens_focused(ui, id));
@@ -120,16 +120,16 @@ static void test_activate_disabled_blocked(void) {
     /* enabled again: the dropped request must NOT fire retroactively */
     disabled = false;
     lens_begin(ui, &IN0);
-    clicked = lens_button_ex(ui, (lens_button_opts){.box = {.disabled = disabled}, .label = "No"})
-                  .clicked;
+    clicked =
+        lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
     lens_end(ui);
     CHECK(!clicked);
 
     /* fresh request now fires */
     lens_a11y_activate(ui, id);
     lens_begin(ui, &IN0);
-    clicked = lens_button_ex(ui, (lens_button_opts){.box = {.disabled = disabled}, .label = "No"})
-                  .clicked;
+    clicked =
+        lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
     lens_end(ui);
     CHECK(clicked);
     CHECK(lens_focused(ui, id));
@@ -147,16 +147,16 @@ static void test_activate_bypasses_occlusion(void) {
      * occludes; a BACKDROP would be hit-transparent) */
     bool clicked = false;
     lens_begin(ui, &IN0);
-    clicked = lens_button(ui, "OK");
+    clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
     lens_id id = lens_get_response(ui).id;
     lens_place_open(ui, "cover");
-    if (lens_place_begin(ui, "cover",
-                         (lens_place_opts){.band = LENS_BAND_POPUP,
-                                           .mode = LENS_PLACE_EXACT,
-                                           .rect = {0, 0, 400, 200},
-                                           .transient = true})) {
+    if (lens_place_begin(ui, &(lens_place_opts){.box = {.id = "cover"},
+                                                .band = LENS_BAND_POPUP,
+                                                .mode = LENS_PLACE_EXACT,
+                                                .rect = {0, 0, 400, 200},
+                                                .transient = true})) {
         lens_size(ui, 400, 200);
-        lens_label(ui, "cover");
+        lens_label(ui, &(lens_label_opts){.text = "cover"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -168,15 +168,15 @@ static void test_activate_bypasses_occlusion(void) {
     in.cursor = (flux_point){20, 20};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    clicked = lens_button(ui, "OK");
+    clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
     bool pressed = lens_get_response(ui).pressed;
-    if (lens_place_begin(ui, "cover",
-                         (lens_place_opts){.band = LENS_BAND_POPUP,
-                                           .mode = LENS_PLACE_EXACT,
-                                           .rect = {0, 0, 400, 200},
-                                           .transient = true})) {
+    if (lens_place_begin(ui, &(lens_place_opts){.box = {.id = "cover"},
+                                                .band = LENS_BAND_POPUP,
+                                                .mode = LENS_PLACE_EXACT,
+                                                .rect = {0, 0, 400, 200},
+                                                .transient = true})) {
         lens_size(ui, 400, 200);
-        lens_label(ui, "cover");
+        lens_label(ui, &(lens_label_opts){.text = "cover"});
         lens_place_end(ui);
     }
     lens_end(ui);
@@ -186,14 +186,14 @@ static void test_activate_bypasses_occlusion(void) {
     /* frame 3: AT activation fires anyway */
     lens_a11y_activate(ui, id);
     lens_begin(ui, &IN0);
-    clicked = lens_button(ui, "OK");
-    if (lens_place_begin(ui, "cover",
-                         (lens_place_opts){.band = LENS_BAND_POPUP,
-                                           .mode = LENS_PLACE_EXACT,
-                                           .rect = {0, 0, 400, 200},
-                                           .transient = true})) {
+    clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
+    if (lens_place_begin(ui, &(lens_place_opts){.box = {.id = "cover"},
+                                                .band = LENS_BAND_POPUP,
+                                                .mode = LENS_PLACE_EXACT,
+                                                .rect = {0, 0, 400, 200},
+                                                .transient = true})) {
         lens_size(ui, 400, 200);
-        lens_label(ui, "cover");
+        lens_label(ui, &(lens_label_opts){.text = "cover"});
         lens_place_end(ui);
     }
     lens_end(ui);

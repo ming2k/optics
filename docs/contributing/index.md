@@ -39,6 +39,14 @@ meson test -C build --no-suite bench
 See [development setup](../dev/setup.md) for dependencies and
 [testing](../dev/testing.md) for suite selection and sanitizer builds.
 
+## Architecture & Governance Standards
+
+Before designing or proposing any API, component, or operator, review the mandatory governance rules:
+- [Architecture Governance](../governance/index.md) — 5-Gate review filter, RACI matrix, and PR checklist.
+- [UI Component Governance](../governance/components.md) — Lens component orthogonality and state machine rules.
+- [API Design Guidelines](../governance/api-design-guidelines.md) — Single Opts Descriptor paradigm and naming invariants.
+- [Design Philosophy](../explanation/design-philosophy.md) — Four-layer system model and foundational principles.
+
 ## Make a change
 
 Place code and coverage together:

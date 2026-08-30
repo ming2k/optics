@@ -123,39 +123,71 @@ static lens_node *open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
     return n;
 }
 
-void lens_row_ex(lens *ui, lens_layout_opts opts) {
-    open_flex(ui, LENS_ROW, opts);
+void lens_row_begin(lens *ui, const lens_layout_opts *opts) {
+    lens_layout_opts default_opts = {
+        .gap = ui ? ui->theme.gap : 0, .pad = 0, .cross = LENS_STRETCH};
+    open_flex(ui, LENS_ROW, opts ? *opts : default_opts);
 }
-void lens_column_ex(lens *ui, lens_layout_opts opts) {
-    open_flex(ui, LENS_COLUMN, opts);
+void lens_row_end(lens *ui) {
+    lensi_open_container_pop(ui);
+}
+void lens_column_begin(lens *ui, const lens_layout_opts *opts) {
+    lens_layout_opts default_opts = {
+        .gap = ui ? ui->theme.gap : 0, .pad = 0, .cross = LENS_STRETCH};
+    open_flex(ui, LENS_COLUMN, opts ? *opts : default_opts);
+}
+void lens_column_end(lens *ui) {
+    lensi_open_container_pop(ui);
 }
 
-void lens_row(lens *ui) {
-    lens_row_ex(ui, (lens_layout_opts){.gap = ui->theme.gap, .pad = 0, .cross = LENS_STRETCH});
+void lens_grid_begin(lens *ui, const lens_grid_opts *opts) {
+    lens_grid_opts default_opts = {
+        .columns = 1, .col_gap = ui ? ui->theme.gap : 0, .row_gap = ui ? ui->theme.gap : 0};
+    if (!opts)
+        opts = &default_opts;
+    lens_layout_opts lopts = {
+        .box = opts->box,
+        .gap = opts->col_gap,
+        .pad = opts->pad,
+        .cross = LENS_STRETCH,
+    };
+    open_flex(ui, LENS_ROW, lopts);
 }
-void lens_column(lens *ui) {
-    lens_column_ex(ui, (lens_layout_opts){.gap = ui->theme.gap, .pad = 0, .cross = LENS_STRETCH});
+void lens_grid_end(lens *ui) {
+    lensi_open_container_pop(ui);
 }
 
 void lens_close(lens *ui) {
     lensi_open_container_pop(ui);
 }
 
-lens_response lens_pressable_begin(lens *ui, const char *id, const char *label,
-                                   lens_layout_opts opts) {
+lens_response lens_pressable_begin(lens *ui, const lens_pressable_opts *opts) {
     lens_response empty = {0};
     if (!ui)
         return empty;
 
-    opts.box.id = id;
-    lens_node *n = open_flex(ui, LENS_ROW, opts);
+    lens_pressable_opts default_opts = {0};
+    if (!opts)
+        opts = &default_opts;
+
+    lens_layout_opts lopts = opts->layout;
+    if (opts->box.id)
+        lopts.box.id = opts->box.id;
+    if (opts->box.width > 0.0f)
+        lopts.box.width = opts->box.width;
+    if (opts->box.height > 0.0f)
+        lopts.box.height = opts->box.height;
+    if (opts->box.disabled)
+        lopts.box.disabled = true;
+
+    lens_node *n = open_flex(ui, LENS_ROW, lopts);
     if (!n)
         return empty;
 
-    bool disabled = opts.box.disabled;
+    bool disabled = lopts.box.disabled;
     lens_response r = lensi_interact(ui, n, true, disabled);
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0);
-    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, sem_flags);
+    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, opts->label ? opts->label : "", NULL, sem_flags);
 
     if (!disabled) {
         float dt = ui->input.dt_seconds;
@@ -175,14 +207,14 @@ lens_response lens_pressable_begin(lens *ui, const char *id, const char *label,
             (lens_draw_cmd){.kind = LENS_DRAW_RECT,
                             .rel = {0, 0, 0, 0},
                             .color = lensi_lerp_color(transparent, target, emphasis),
-                            .radius = opts.radius});
+                            .radius = lopts.radius});
     }
     if (r.focused) {
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
                                             .rel = {0, 0, 0, 0},
                                             .color = ui->theme.color_accent,
-                                            .radius = opts.radius,
+                                            .radius = lopts.radius,
                                             .width = ui->theme.border_width});
     }
 

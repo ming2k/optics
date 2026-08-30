@@ -13,19 +13,19 @@
 #include <stdio.h>
 
 static void build_ui(lens *ui, bool *wrap, float *zoom, int *clicks) {
-    lens_label(ui, "lens headless demo");
+    lens_label(ui, &(lens_label_opts){.text = "lens headless demo"});
 
-    lens_row(ui);
-    if (lens_button(ui, "New"))
+    lens_row_begin(ui, NULL);
+    if (lens_button(ui, &(lens_button_opts){.label = "New"}).clicked)
         (*clicks)++;
-    if (lens_button(ui, "Open"))
+    if (lens_button(ui, &(lens_button_opts){.label = "Open"}).clicked)
         (*clicks)++;
     lens_flex(ui, 1.0f);
     lens_spacer(ui, 0); /* push the rest right */
-    lens_checkbox(ui, "Wrap", wrap);
+    lens_checkbox(ui, &(lens_checkbox_opts){.label = "Wrap", .value = wrap});
     lens_close(ui);
 
-    lens_slider(ui, "Zoom", zoom, 0.5f, 4.0f);
+    lens_slider(ui, &(lens_slider_opts){.label = "Zoom", .value = zoom, .min = 0.5f, .max = 4.0f});
 }
 
 int main(void) {

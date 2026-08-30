@@ -23,24 +23,34 @@ cognitive-mode questions of Gate 3 do not apply to it.
 
 See [ADR Workflow](adr-workflow.md) for the per-record maintenance rules.
 
-## Gate 2 — Audience: contributor-only
+## Gate 2 — Governance: architectural charter, review gates, and API guidelines
+
+Question: *Is this document a project-wide architectural constitution, an API design guideline, or a multi-domain intake/review gate SOP?*
+
+If yes: `docs/governance/`. Stop.
+
+Top-level governance documents define the mandatory rules, review filters, and lifecycle standards that all code in the repository must obey. They sit above internal developer tooling (`docs/dev/`) and are accessible to both core maintainers and external contributors. Sub-types include:
+- `docs/governance/index.md` — The governance charter, review gates overview, and contributor PR checklist.
+- `docs/governance/api-design-guidelines.md` — Single Opts Descriptor rules, naming invariants, and memory safety contracts.
+- `docs/governance/<domain>-governance.md` — Subsystem-specific intake SOPs (components, effects, materials, backends).
+
+## Gate 3 — Audience: contributor-only
 
 Question: *Is the only intended reader a project contributor (setup, build,
-test, release, governance, internal maintenance)?*
+test, release, internal maintenance)?*
 
 If yes: `docs/dev/`. Stop.
 
 `docs/dev/` is the firewall between contributor knowledge and user knowledge.
 User-facing documentation must never link into it. Within `docs/dev/`,
-sub-types include setup, testing, project layout, release process, and this
-governance directory itself.
+sub-types include setup, testing, project layout, and release process.
 
 Explanation documents under `docs/explanation/` are dual-audience:
 contributors read them for architectural context, but they live on the user
 side of the firewall because users need them too. Contributor docs may link
 out to explanation docs; the reverse direction is forbidden.
 
-## Gate 3 — Cognitive mode: user-facing Diátaxis
+## Gate 4 — Cognitive mode: user-facing Diátaxis
 
 Question: *How is the user engaging with the material?*
 

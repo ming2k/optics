@@ -16,11 +16,11 @@ static void test_many_nodes(void) {
 
     /* frame 1: create 500 labels */
     lens_begin(ui, &IN0);
-    lens_column(ui);
+    lens_column_begin(ui, NULL);
     for (int i = 0; i < 500; i++) {
         char lbl[32];
         snprintf(lbl, sizeof lbl, "item_%d", i);
-        lens_label(ui, lbl);
+        lens_label(ui, &(lens_label_opts){.text = lbl});
     }
     lens_close(ui);
     lens_end(ui);
@@ -37,11 +37,11 @@ static void test_many_nodes(void) {
 
     /* frame 2: all 500 still present (stable identity) */
     lens_begin(ui, &IN0);
-    lens_column(ui);
+    lens_column_begin(ui, NULL);
     for (int i = 0; i < 500; i++) {
         char lbl[32];
         snprintf(lbl, sizeof lbl, "item_%d", i);
-        lens_label(ui, lbl);
+        lens_label(ui, &(lens_label_opts){.text = lbl});
     }
     lens_close(ui);
     lens_end(ui);
@@ -62,8 +62,8 @@ static void test_deep_nesting(void) {
     /* 50-deep: should succeed */
     lens_begin(ui, &IN0);
     for (int i = 0; i < 50; i++)
-        lens_column(ui);
-    lens_label(ui, "deep");
+        lens_column_begin(ui, NULL);
+    lens_label(ui, &(lens_label_opts){.text = "deep"});
     for (int i = 0; i < 50; i++)
         lens_close(ui);
     lens_end(ui);
@@ -80,8 +80,8 @@ static void test_deep_nesting(void) {
     /* 70-deep: pushes beyond 64 stack entries fail and set overflow. */
     lens_begin(ui, &IN0);
     for (int i = 0; i < 70; i++)
-        lens_column(ui);
-    lens_label(ui, "too deep");
+        lens_column_begin(ui, NULL);
+    lens_label(ui, &(lens_label_opts){.text = "too deep"});
     for (int i = 0; i < 70; i++)
         lens_close(ui);
     lens_end(ui);
@@ -110,10 +110,10 @@ static void test_arena_pressure(void) {
     CHECK(lens_create(&(lens_desc){.arena_bytes = 4096}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
-    lens_column(ui);
+    lens_column_begin(ui, NULL);
     for (int i = 0; i < 200; i++) {
         /* each button pushes multiple draw commands and arena-copies text */
-        if (lens_button(ui, "X")) { /* ignore */
+        if (lens_button(ui, &(lens_button_opts){.label = "X"}).clicked) { /* ignore */
         }
     }
     lens_close(ui);
@@ -127,8 +127,8 @@ static void test_arena_pressure(void) {
     CHECK(lens_overflowed(ui) == true);
 
     lens_begin(ui, &IN0);
-    lens_column(ui);
-    (void)lens_button(ui, "one");
+    lens_column_begin(ui, NULL);
+    (void)lens_button(ui, &(lens_button_opts){.label = "one"});
     lens_close(ui);
     lens_end(ui);
     CHECK(lens_overflowed(ui) == false); /* flag is per frame */
@@ -145,11 +145,11 @@ static void test_rapid_churn(void) {
 
     /* Frame 1: 100 buttons */
     lens_begin(ui, &IN0);
-    lens_column(ui);
+    lens_column_begin(ui, NULL);
     for (int i = 0; i < 100; i++) {
         char lbl[16];
         snprintf(lbl, sizeof lbl, "b%d", i);
-        if (lens_button(ui, lbl)) { /* ignore */
+        if (lens_button(ui, &(lens_button_opts){.label = lbl}).clicked) { /* ignore */
         }
     }
     lens_close(ui);
@@ -157,11 +157,11 @@ static void test_rapid_churn(void) {
 
     /* Frame 2: only even ids remain */
     lens_begin(ui, &IN0);
-    lens_column(ui);
+    lens_column_begin(ui, NULL);
     for (int i = 0; i < 100; i += 2) {
         char lbl[16];
         snprintf(lbl, sizeof lbl, "b%d", i);
-        if (lens_button(ui, lbl)) { /* ignore */
+        if (lens_button(ui, &(lens_button_opts){.label = lbl}).clicked) { /* ignore */
         }
     }
     lens_close(ui);
@@ -169,11 +169,11 @@ static void test_rapid_churn(void) {
 
     /* Frame 3: restore all 100 */
     lens_begin(ui, &IN0);
-    lens_column(ui);
+    lens_column_begin(ui, NULL);
     for (int i = 0; i < 100; i++) {
         char lbl[16];
         snprintf(lbl, sizeof lbl, "b%d", i);
-        if (lens_button(ui, lbl)) { /* ignore */
+        if (lens_button(ui, &(lens_button_opts){.label = lbl}).clicked) { /* ignore */
         }
     }
     lens_close(ui);
@@ -192,8 +192,9 @@ static void test_id_collision_reuses_node(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
-    lens_button(ui, "Dup");
-    lens_button(ui, "Dup"); /* same id — should resolve to same node */
+    lens_button(ui, &(lens_button_opts){.label = "Dup"});
+    lens_button(ui,
+                &(lens_button_opts){.label = "Dup"}); /* same id — should resolve to same node */
     lens_end(ui);
 
     lens_node *root = lens_root(ui);

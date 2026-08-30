@@ -13,12 +13,41 @@ either.
 
 ## [Unreleased]
 
-## [0.0.29] - 2026-08-29
+## [0.0.30] - 2026-08-29
+
+### Changed — Minimal Orthogonal Component Architecture & Full C23 Standard Baseline
+
+A comprehensive, zero-baggage architectural overhaul across `flux`, `lens`, and `iris` implementing minimal orthogonal primitives, the Single Opts Descriptor paradigm, and full C23 modern language standards (ADR-0082, ADR-0083, ADR-0084).
+
+- **lens**:
+  - `lens_widget_kind` pruned from 22 kinds to 9 strictly orthogonal primitives: `LABEL`, `ICON`, `IMAGE`, `SEPARATOR`, `BUTTON`, `CHECKBOX`, `SELECTABLE`, `SLIDER`, `TEXTEDIT`.
+  - Merged `textfield` and `textarea` into a single, unified `lens_textedit` widget with multiline support.
+  - Merged `switch` and `radio` into `lens_checkbox` with `.appearance` styling (`BOX`, `SWITCH`, `RADIO`).
+  - Merged `primary`, `subtle`, `link`, `icon_button`, `image_button` into `lens_button` with `.variant` styling.
+  - Eliminated dual-tier APIs (`_ex`) and parameter-derived suffixes (`_wrapped`, `_vertical`, etc.) across all components; every component now exports a single canonical `const lens_<widget>_opts *opts` entry point returning `lens_response`.
+  - Removed compound widgets (`table`, `tabs`, `menu`, `menubar`, `dropdown`, `collapsing`, `tree`, `split`, `modal`) from the core micro-kernel into composable userland patterns.
+  - Established a strict 4-layer physical separation: Overlay (`Place`), Viewport (`Scroll`), Layout (`Row`/`Column`/`Grid`), and Data Atoms.
+
+- **flux**:
+  - Unified 15+ specialized draw functions into a single orthogonal `flux_canvas_draw(canvas, const flux_shape *shape, const flux_paint *paint)` drawing primitive.
+  - Introduced `flux_shape` covering `RECT`, `RRECT`, `CIRCLE`, `LINE`, `PATH`, `IMAGE`, and `GLYPHS`.
+
+- **iris**:
+  - Implemented the tripartite architecture: Physical Window/Lifecycle $\perp$ Pure Event Pump $\perp$ Modular Host Service Bridges.
+  - Unified application launch into `[[nodiscard]] IRIS_API int iris_app_run(const iris_app_opts *opts)`.
+
+- **governance**:
+  - Upgraded meta-governance protocol in `docs-governance` to support top-level `docs/governance/`.
+  - Established `docs/governance/index.md`, `docs/governance/api-design-guidelines.md`, and domain-specific governance specifications.
+  - Published `ADR-0082`, `ADR-0083`, `ADR-0084`.
+
+- **rust bindings**:
+  - Synchronized `bindings/lens-rs` with the new orthogonal C23 single-descriptor API and removed obsolete wrapper glue.
 
 ### Changed — public API surface cleanup (all libraries)
 
 Dead and superseded public symbols were removed outright (pre-1.0, no
-remaining callers; see `docs/dev/api-surface-audit.md`):
+remaining callers):
 
 - **flux**: removed `flux_canvas_begin` / `flux_canvas_end` /
   `flux_canvas_end_checked` (GPU-spelled compatibility wrappers; use the

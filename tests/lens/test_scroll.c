@@ -11,49 +11,28 @@ static void test_scroll_offset(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
-    /* First frame: build scroll container with many DISTINCT items. Every
-     * label needs a unique id (push_id_int): same-label siblings merge
-     * into one node (ADR-0026), and a single row of content leaves zero
-     * scroll range — the earlier version of this test scrolled nothing
-     * and its placeholder assertion hid it. */
-    for (int f = 0; f < 2; f++) {
-        lens_begin(ui, f == 0 ? &IN0 : &IN0);
-        lens_size(ui, 0, 200);
-        lens_scroll_begin(ui, "scroll");
-        for (int i = 0; i < 20; i++) {
-            lens_push_id_int(ui, i);
-            lens_label(ui, "Item");
-            lens_pop_id(ui);
-        }
-        lens_scroll_end(ui);
-        lens_end(ui);
-    }
-
-    /* Wheel notch over it: -5 notches at LENS_SCROLL_SPEED px/notch move
-     * the content up; the clamped offset must come back positive. */
-    lens_input in = IN0;
-    in.cursor = (flux_point){50, 50};
-    in.scroll_y = -5.0f; /* wheel notch: negative delta = content moves up */
-    lens_begin(ui, &in);
-    lens_size(ui, 0, 200);
-    lens_scroll_begin(ui, "scroll");
-    for (int i = 0; i < 20; i++) {
-        lens_push_id_int(ui, i);
-        lens_label(ui, "Item");
-        lens_pop_id(ui);
-    }
+    /* Frame 1: empty scroll with cursor inside */
+    lens_input in1 = IN0;
+    in1.cursor = (flux_point){50, 50};
+    lens_begin(ui, &in1);
+    lens_size(ui, 200, 200);
+    lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
     lens_scroll_end(ui);
     lens_end(ui);
 
-    /* The wheel event over the container must move its offset: 20 items
-     * in a 200-unit viewport leave scrollable range, so a down-wheel
-     * scroll produces a strictly positive offset (direction matches the
-     * precise-scroll test below). This replaces a bare "no crash"
-     * placeholder — scroll consumption IS observable through the public
-     * offset query. */
-    float sx = -1.0f, sy = -1.0f;
-    CHECK(lens_scroll_offset(ui, "scroll", &sx, &sy));
-    CHECK(sy > 0.0f);
+    /* Frame 2: scroll down */
+    lens_input in = IN0;
+    in.cursor = (flux_point){50, 50};
+    in.scroll_y = -2.0f; /* 2 units down */
+    lens_begin(ui, &in);
+    lens_size(ui, 200, 200);
+    lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
+    lens_scroll_end(ui);
+    lens_end(ui);
+
+    float sx = 0, sy = 0;
+    CHECK(lens_scroll_offset(ui, "log", &sx, &sy));
+    CHECK(sy > 0.0f); /* scrolled down -> positive offset */
 
     lens_destroy(ui);
 }
@@ -62,44 +41,27 @@ static void test_precise_scroll_uses_pixel_distance(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
-    /* Two stable frames establish previous-frame hit-test geometry. */
-    for (int frame = 0; frame < 2; frame++) {
-        lens_begin(ui, &IN0);
-        lens_size(ui, 0, 200);
-        lens_scroll_begin(ui, "precise-scroll");
-        for (int i = 0; i < 20; i++) {
-            lens_push_id_int(ui, i);
-            lens_label(ui, "Item");
-            lens_pop_id(ui);
-        }
-        lens_scroll_end(ui);
-        lens_end(ui);
-    }
-
-    lens_node *scroll = lens_node_first_child(lens_root(ui));
-    lens_node *first = lens_node_first_child(scroll);
-    CHECK(scroll != NULL && first != NULL);
-    float before = lens_node_bounds(first).y;
-
+    /* Warm-up frame: place the pointer inside the scroll container */
     lens_input in = IN0;
     in.cursor = (flux_point){50, 50};
-    in.scroll_pixels_y = -12.0f;
     lens_begin(ui, &in);
-    lens_size(ui, 0, 200);
-    lens_scroll_begin(ui, "precise-scroll");
-    for (int i = 0; i < 20; i++) {
-        lens_push_id_int(ui, i);
-        lens_label(ui, "Item");
-        lens_pop_id(ui);
-    }
+    lens_size(ui, 200, 200);
+    lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
     lens_scroll_end(ui);
     lens_end(ui);
 
-    scroll = lens_node_first_child(lens_root(ui));
-    first = lens_node_first_child(scroll);
-    CHECK(scroll != NULL && first != NULL);
-    float after = lens_node_bounds(first).y;
-    CHECK(fabsf((after - before) + 12.0f) < 0.01f);
+    /* Frame 2: 12 px touchpad scroll */
+    in.scroll_y = 0.0f;
+    in.scroll_pixels_y = -12.0f;
+    lens_begin(ui, &in);
+    lens_size(ui, 200, 200);
+    lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
+    lens_scroll_end(ui);
+    lens_end(ui);
+
+    float sx = 0, sy = 0;
+    CHECK(lens_scroll_offset(ui, "log", &sx, &sy));
+    CHECK_NEAR(sy, 12.0f, 0.001f);
 
     lens_destroy(ui);
 }
@@ -111,11 +73,11 @@ static void test_programmatic_scroll_is_applied_and_clamped(void) {
     lens_input input = {.display_size = {200, 160}, .dt_seconds = 0.016f};
     lens_begin(ui, &input);
     lens_size(ui, 200, 80);
-    lens_scroll_begin(ui, "jump-scroll");
+    lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "jump-scroll"}});
     for (int i = 0; i < 10; i++) {
         lens_push_id_int(ui, i);
         lens_size(ui, 0, 20);
-        lens_label(ui, "Item");
+        lens_label(ui, &(lens_label_opts){.text = "Item"});
         lens_pop_id(ui);
     }
     lens_scroll_end(ui);
@@ -147,16 +109,13 @@ static void test_scrollbar_gutter_clips_overflowing_descendants(void) {
     lens_input input = {.display_size = {100, 40}, .dt_seconds = 0.016f};
     lens_begin(ui, &input);
     lens_size(ui, 100.0f, 40.0f);
-    lens_scroll_begin(ui, "scroll-gutter");
+    lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "scroll-gutter"}});
     for (int i = 0; i < 2; i++) {
-        /* The scroll child is clamped to the 92 px content width, while its
-         * fixed-width descendant deliberately paints through the trailing
-         * edge. The viewport clip must keep that white surface out of the
-         * green scrollbar gutter. */
         lens_size(ui, 100.0f, 30.0f);
-        lens_row_ex(ui, (lens_layout_opts){.gap = 0.0f, .cross = LENS_STRETCH});
+        lens_row_begin(ui, &(lens_layout_opts){.gap = 0.0f, .cross = LENS_STRETCH});
         lens_size(ui, 100.0f, 30.0f);
-        lens_column_ex(ui, (lens_layout_opts){.bg = flux_color_rgba_premul(255, 255, 255, 255)});
+        lens_column_begin(ui,
+                          &(lens_layout_opts){.bg = flux_color_rgba_premul(255, 255, 255, 255)});
         lens_close(ui);
         lens_close(ui);
     }

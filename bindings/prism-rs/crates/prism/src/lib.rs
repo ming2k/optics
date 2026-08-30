@@ -23,7 +23,7 @@ pub use prism_sys as sys;
 /// prism call returns `flux_result`, so the error type is flux's own.
 pub use flux::Error;
 
-/// Library version string ("0.0.29" at the time of writing), derived from
+/// Library version string ("0.0.30" at the time of writing), derived from
 /// the `PRISM_VERSION_*` macros — not a hardcoded literal.
 pub fn version() -> &'static str {
     unsafe {

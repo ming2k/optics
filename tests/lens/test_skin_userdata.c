@@ -1,11 +1,4 @@
-/* test_skin_userdata.c — the closure-slot skin registration.
- *
- * ADR-0059 flagged that lens_skin_fn has no user pointer, so a stateful
- * skin had to reach its state through a process global. This test pins
- * the fix: the userdata form delivers the caller's pointer on every
- * emission, coexists with the plain form (last registration wins), and
- * restores cleanly.
- */
+/* test_skin_userdata.c — the closure-slot skin registration. */
 
 #include "test_helpers.h"
 
@@ -42,7 +35,7 @@ int main(void) {
     spring_state spring = {0, 0.0f};
     lens_set_skin_userdata(ui, LENS_WIDGET_BUTTON, spring_skin, &spring);
     lens_begin(ui, NULL);
-    lens_button(ui, "Click");
+    lens_button(ui, &(lens_button_opts){.label = "Click"});
     lens_end(ui);
     CHECK(spring.emissions >= 1);
     CHECK(spring.indicator >= 1.0f);
@@ -50,14 +43,14 @@ int main(void) {
     /* The userdata pointer is stable across frames (stored verbatim). */
     int before = spring.emissions;
     lens_begin(ui, NULL);
-    lens_button(ui, "Click");
+    lens_button(ui, &(lens_button_opts){.label = "Click"});
     lens_end(ui);
     CHECK(spring.emissions > before);
 
     /* Plain registration supersedes the userdata form for that kind. */
     lens_set_skin(ui, LENS_WIDGET_BUTTON, plain_skin);
     lens_begin(ui, NULL);
-    lens_button(ui, "Click");
+    lens_button(ui, &(lens_button_opts){.label = "Click"});
     lens_end(ui);
     CHECK(plain_emissions >= 1);
     int frozen = spring.emissions;
@@ -67,7 +60,7 @@ int main(void) {
     lens_set_skin(ui, LENS_WIDGET_BUTTON, NULL);
     lens_set_skin_userdata(ui, LENS_WIDGET_BUTTON, NULL, NULL);
     lens_begin(ui, NULL);
-    lens_button(ui, "Click");
+    lens_button(ui, &(lens_button_opts){.label = "Click"});
     lens_end(ui);
     CHECK(plain_emissions == 1); /* no more plain-skin emissions */
     CHECK(spring.emissions == frozen);

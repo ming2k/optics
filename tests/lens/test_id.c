@@ -46,8 +46,8 @@ int main(void) {
     /* Repeated visible labels under one parent are a caller error and must be
      * diagnosable instead of silently looking like missing layout nodes. */
     lens_begin(ui, &in);
-    lens_label(ui, "duplicate");
-    lens_label(ui, "duplicate");
+    lens_label(ui, &(lens_label_opts){.text = "duplicate"});
+    lens_label(ui, &(lens_label_opts){.text = "duplicate"});
     lens_end(ui);
     CHECK(lens_has_duplicate_ids(ui));
 
@@ -55,10 +55,10 @@ int main(void) {
      * frame-local, so a clean frame clears the previous report. */
     lens_begin(ui, &in);
     lens_push_id_int(ui, 41);
-    lens_label(ui, "duplicate");
+    lens_label(ui, &(lens_label_opts){.text = "duplicate"});
     lens_pop_id(ui);
     lens_push_id_int(ui, 42);
-    lens_label(ui, "duplicate");
+    lens_label(ui, &(lens_label_opts){.text = "duplicate"});
     lens_pop_id(ui);
     lens_end(ui);
     CHECK(!lens_has_duplicate_ids(ui));

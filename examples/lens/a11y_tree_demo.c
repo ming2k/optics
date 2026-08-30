@@ -3,8 +3,7 @@
  *
  * lens retains semantic information for every widget (roles, accessible names,
  * values, and states like focused/disabled). This demo builds a typical
- * settings panel and then walks the tree to print the semantic hierarchy,
- * which is exactly what a platform AT-SPI or UIA bridge would do.
+ * settings panel and then walks the tree to print the semantic hierarchy.
  *
  * Build: meson setup build -Dexamples=true && ./build/examples/lens/a11y_tree_demo
  */
@@ -14,10 +13,11 @@
 
 static void a11y_visitor(const lens_semantics *s, flux_rect bounds, lens_id id, lens_id parent,
                          void *user) {
+    (void)bounds;
+    (void)id;
+    (void)parent;
     int *depth = (int *)user;
 
-    /* Indent based on depth (this is a simplified linear walk,
-     * but the parent ID allows building a true tree). */
     for (int i = 0; i < *depth; i++)
         printf("  ");
 
@@ -113,24 +113,31 @@ int main(void) {
     lens_begin(ui, &in);
 
     /* Build a mock settings dialog */
-    lens_column_ex(ui, (lens_layout_opts){.pad = 16.0f, .gap = 8.0f});
-    lens_title(ui, "Preferences");
+    lens_column_begin(ui, &(lens_layout_opts){.pad = 16.0f, .gap = 8.0f});
+    lens_label(ui, &(lens_label_opts){.text = "Preferences", .size = 20.0f});
 
     bool notifications = true;
-    lens_checkbox(ui, "Enable Notifications", &notifications);
+    lens_checkbox(ui,
+                  &(lens_checkbox_opts){.label = "Enable Notifications", .value = &notifications});
 
     float volume = 0.75f;
-    lens_slider(ui, "Volume", &volume, 0.0f, 1.0f);
+    lens_slider(ui,
+                &(lens_slider_opts){.label = "Volume", .value = &volume, .min = 0.0f, .max = 1.0f});
 
-    int theme = 1;
-    lens_label(ui, "Theme Selection:");
-    lens_row(ui);
-    lens_radio(ui, "Light", &theme, 0);
-    lens_radio(ui, "Dark", &theme, 1);
+    bool light_theme = false;
+    bool dark_theme = true;
+    lens_label(ui, &(lens_label_opts){.text = "Theme Selection:"});
+    lens_row_begin(ui, NULL);
+    lens_checkbox(ui, &(lens_checkbox_opts){.label = "Light",
+                                            .value = &light_theme,
+                                            .appearance = LENS_CHECKBOX_RADIO});
+    lens_checkbox(ui, &(lens_checkbox_opts){.label = "Dark",
+                                            .value = &dark_theme,
+                                            .appearance = LENS_CHECKBOX_RADIO});
     lens_close(ui);
 
     lens_spacer(ui, 20.0f);
-    lens_button_ex(ui, (lens_button_opts){.label = "Save Changes", .box = {.disabled = true}});
+    lens_button(ui, &(lens_button_opts){.label = "Save Changes", .box = {.disabled = true}});
     lens_close(ui);
 
     lens_end(ui);

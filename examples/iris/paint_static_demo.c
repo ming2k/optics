@@ -40,9 +40,10 @@ static void build(lens *ui, const lens_input *in, void *user) {
     /* A trivial, non-animating tree: any chrome damage here is zero after
      * the first frame, so the paint callback alone decides the cadence. */
     lens_begin(ui, NULL);
-    lens_column(ui);
-    lens_label(ui, "paint_static demo: watch stderr counters");
-    lens_label(ui, "phase toggles every 2s; close the window to finish");
+    lens_column_begin(ui, NULL);
+    lens_label(ui, &(lens_label_opts){.text = "paint_static demo: watch stderr counters"});
+    lens_label(ui,
+               &(lens_label_opts){.text = "phase toggles every 2s; close the window to finish"});
     lens_close(ui);
     lens_end(ui);
     d->build_calls++;

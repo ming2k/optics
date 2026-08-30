@@ -1,13 +1,6 @@
 /*
  * state_demo.c — Demonstrates how to use lens_node_state for retained state.
  *
- * lens is an immediate-mode API over a retained-mode core. You can ask the
- * core to store a few bytes of state for a widget across frames by calling
- * lens_node_state() with the widget's ID. This is useful for building
- * custom interactive widgets (like a toggle switch or a collapsible section)
- * where you don't want the host application to have to store the local
- * visual state.
- *
  * Build: meson setup build -Dexamples=true && ./build/examples/lens/state_demo
  */
 
@@ -20,13 +13,10 @@ static void custom_toggle(lens *ui, const char *label) {
     /* 1. Generate a stable ID for this widget based on the label */
     lens_id id = lens_current_id(ui, label);
 
-    /* 2. Push an interactive box (we'll just use a button for the hit-test) */
-    lens_button_opts opts = {.label = label};
-    lens_response r = lens_button_ex(ui, opts);
+    /* 2. Push an interactive button */
+    lens_response r = lens_button(ui, &(lens_button_opts){.label = label});
 
-    /* 3. Ask the retained store for 1 byte of state for this ID.
-     *    On the first frame this ID is seen, it will be zeroed out.
-     *    On subsequent frames, it returns the same pointer. */
+    /* 3. Ask the retained store for 1 byte of state for this ID. */
     lens_node *n = lens_find(ui, id);
     if (n) {
         bool *is_on = (bool *)lens_node_state(n, sizeof(bool));
@@ -35,8 +25,6 @@ static void custom_toggle(lens *ui, const char *label) {
             *is_on = !(*is_on); /* Toggle the state */
         }
 
-        /* We can't easily draw custom shapes in pure headless lens without
-         * tapping into lensi_ internals, but we can print the retained state! */
         printf("Widget '%s' (id:%016llx) is currently %s (clicked this frame: %s)\n", label,
                (unsigned long long)id, *is_on ? "ON" : "OFF", r.clicked ? "yes" : "no");
     }
@@ -66,7 +54,7 @@ int main(void) {
 
         lens_begin(ui, &in);
         printf("--- Frame %d ---\n", frame);
-        lens_column(ui);
+        lens_column_begin(ui, NULL);
         custom_toggle(ui, "Auto-Save");
         custom_toggle(ui, "Dark Mode");
         lens_close(ui);

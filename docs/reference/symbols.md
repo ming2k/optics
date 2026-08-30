@@ -200,7 +200,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_canvas_scale` |  |
 | `flux_canvas_rotate` |  |
 | `flux_canvas_transform` |  |
-| `flux_canvas_fill_rect` | Drawing. |
+| `flux_canvas_draw` | The single unified 2D drawing primitive (ADR-0083) |
+| `flux_canvas_fill_rect` | Drawing helpers. |
 | `flux_canvas_fill_path` |  |
 | `flux_canvas_stroke_path` |  |
 | `flux_canvas_fill_rrect` | Rounded rectangles and circles via a signed-distance field: analytic, resolution-independent anti-aliasing (crisp at any DPI, unlike tessellated fills which rely on MSAA). |
@@ -357,102 +358,43 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_push_id_int` |  |
 | `lens_pop_id` |  |
 | `lens_current_id` |  |
-| `lens_row` |  |
-| `lens_column` |  |
-| `lens_row_ex` |  |
-| `lens_column_ex` |  |
+| `lens_row_begin` |  |
+| `lens_row_end` |  |
+| `lens_column_begin` |  |
+| `lens_column_end` |  |
 | `lens_close` |  |
-| `lens_pressable_begin` | A composable row with one button-sized interaction target around all of its children. |
-| `lens_pressable_end` |  |
-| `lens_flex` | Positional layout hints applied to the *next* node (widget OR container). |
-| `lens_size` |  |
-| `lens_spacer` |  |
-| `lens_button` | ================================================================== */ /* Widgets — terse forms (ADR-0031) */ /* */ /* The common case: label doubles as the stable id, no styling. |
-| `lens_button_mouse` | Same widget with an explicit mouse button: true when that button was pressed and released inside it this frame. |
-| `lens_link` | Inline text action for breadcrumbs and secondary navigation. |
-| `lens_selectable` | A borderless, full-width list / nav item. |
-| `lens_selectable_icon` |  |
-| `lens_label` | A standalone padded label. |
-| `lens_label_ex` |  |
-| `lens_label_wrapped` | A label constrained to max_width logical pixels. |
-| `lens_label_compact_ex` | Unpadded (compact) form at an explicit point size. |
-| `lens_title` |  |
-| `lens_heading` |  |
-| `lens_checkbox` |  |
-| `lens_switch` | Full-width settings row with a trailing platform-style switch. |
-| `lens_slider` | Horizontal value control. |
-| `lens_slider_vertical` | Vertical value control. |
-| `lens_adjust_float_on_scroll` | Apply the current vertical wheel delta to `value` when the most recently built widget is hovered. |
-| `lens_radio` |  |
-| `lens_textfield` |  |
-| `lens_textfield_set_caret` | Move the caret / selection of the text field identified by `label` in the current id scope. |
-| `lens_textfield_set_selection` |  |
-| `lens_textarea` |  |
-| `lens_dropdown` | Select trigger with a trailing vector chevron and an opaque floating option surface. |
-| `lens_collapsing` |  |
-| `lens_collapsing_set_open` | Force the expanded state of a collapsing section identified by `label`. |
-| `lens_tree_node` | ------------------------------------------------------------------ */ /* Tree (ADR: lens tree widget) */ /* ------------------------------------------------------------------ */ /* A tree is a stack of nested disclosure rows. |
-| `lens_tree_node_set_open` | Pre-seed / force the open state of the tree node identified by `label` in the current id scope. |
-| `lens_tree_node_end` | Close the current tree node body. |
+| `lens_grid_begin` |  |
+| `lens_grid_end` |  |
 | `lens_scroll_begin` |  |
 | `lens_scroll_end` |  |
-| `lens_scroll_to` | Programmatically position a scroll area identified in the current id scope. |
-| `lens_scroll_offset` | Current offset of a scroll area in the current id scope; false when the id does not resolve to a scroll area (e.g. |
-| `lens_tabs_begin` | Horizontal selection strip (ADR-0061: emission lives behind the LENS_WIDGET_TABS skin seam; the default skin is the neutral static indicator — theme accent, fixed thickness, zero animation). |
-| `lens_tabs_begin_ex` |  |
-| `lens_tab` |  |
-| `lens_tabs_end` |  |
-| `lens_progress` |  |
-| `lens_separator` |  |
-| `lens_icon` |  |
-| `lens_image` | A host-owned raster image drawn as a widget (e.g. |
-| `lens_image_tinted` | As lens_image, with a premultiplied tint applied to the texture. |
-| `lens_image_button` | Texture-backed variants of lens_icon_button / lens_icon_button_active: identical hover/active/click behaviour, but draw the host-owned raster image where the glyph would be. |
-| `lens_image_button_active` |  |
-| `lens_icon_button` | Flat icon button for navigation strips and toolbars: transparent at rest, with a subtle hover fill. |
-| `lens_icon_button_active` | As lens_icon_button, but `active` shows a steady neutral tint (style-resolved bg_pressed; theme: color_active) for the selected view — state as data, no flavor (ADR-0061). |
-| `lens_icon_button_badged` | Rounded icon tile with an explicit logical glyph size and optional top-right text badge (for example "1" on repeat-one). |
-| `lens_icon_toggle_button` | Checkable rounded icon button whose state is expressed by swapping glyphs, not by painting a persistent selected surface. |
-| `lens_button_ex` |  |
-| `lens_selectable_ex` |  |
-| `lens_checkbox_ex` |  |
-| `lens_switch_ex` |  |
-| `lens_radio_ex` |  |
-| `lens_slider_ex` |  |
-| `lens_collapsing_ex` |  |
-| `lens_textfield_ex` |  |
-| `lens_textarea_ex` |  |
-| `lens_dropdown_ex` |  |
+| `lens_scroll_offset` |  |
+| `lens_scroll_to` |  |
+| `lens_pressable_begin` |  |
+| `lens_pressable_end` |  |
+| `lens_flex` | Layout modifiers |
+| `lens_spacer` |  |
+| `lens_space_between` |  |
+| `lens_fit` |  |
+| `lens_size` |  |
+| `lens_place_begin` |  |
+| `lens_place_end` |  |
 | `lens_place_open` |  |
 | `lens_place_close` |  |
+| `lens_place_toggle` |  |
 | `lens_place_is_open` |  |
-| `lens_place_hovered` | Whether the last-frame bounds of an open transient place node contain the cursor. |
-| `lens_place_begin` | Open an absolutely-placed container sub-root. |
-| `lens_place_end` |  |
-| `lens_modal_open` |  |
-| `lens_modal_close` |  |
-| `lens_modal_is_open` |  |
-| `lens_modal_begin` | Returns true when the modal is open and the body should build; pair with lens_modal_end. |
-| `lens_modal_end` |  |
-| `lens_menubar_begin` |  |
-| `lens_menubar_end` |  |
-| `lens_menu_begin` | A menu trigger in a bar: opens its popup on click, switches on hover while a sibling is open. |
-| `lens_menu_end` |  |
-| `lens_menu_item` | A menu item. |
-| `lens_menu_item_disabled` |  |
-| `lens_menu_item_flags` |  |
-| `lens_menu_separator` |  |
-| `lens_submenu_begin` | A submenu: anchors to the parent item, opens on hover dwell. |
-| `lens_submenu_end` |  |
-| `lens_context_menu_open` | Context menu: open on right-click (or programmatically), anchored at the cursor. |
-| `lens_context_menu_begin` |  |
-| `lens_context_menu_end` |  |
-| `lens_menubar_close_all_open` | Close every menu opened by a menu bar (the whole stack). |
-| `lens_split_begin` |  |
-| `lens_split_pane` |  |
-| `lens_split_end` |  |
-| `lens_split_ratio` | Current ratio (for host persistence across restarts). |
-| `lens_table` |  |
+| `lens_place_close_all` |  |
+| `lens_place_hovered` |  |
+| `lens_label` |  |
+| `lens_icon` |  |
+| `lens_image` |  |
+| `lens_separator` |  |
+| `lens_button` |  |
+| `lens_checkbox` |  |
+| `lens_selectable` |  |
+| `lens_slider` |  |
+| `lens_textedit` |  |
+| `lens_textedit_set_caret` |  |
+| `lens_textedit_set_selection` |  |
 | `lens_get_response` | ================================================================== */ /* Interaction queries (ADR-0029) */ /* ================================================================== |
 | `lens_get_cursor_hint` |  |
 | `lens_focused` |  |
@@ -485,7 +427,6 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `iris_paint_mark_static` | Declare the current frame's host canvas content static. |
 | `iris_request_frame_skip_render` | Zero-render skip for hosts with a paint callback: after a build in which the host knows the canvas content is unchanged *and* it still wants the active-rate cadence to continue, call this instead of (not in addition to) iris_paint_mark_static. |
 | `iris_post_to_main_thread` | Post fn(user) to the iris main thread. |
-| `iris_app_run` | Run the application until the window is closed. |
 
 ### `iris/window.h`
 

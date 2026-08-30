@@ -1,13 +1,6 @@
 /* test_icon_runtime.c — runtime SVG icon registration
  * (lens_icon_register_svg). CPU-only.
- *
- * Runtime ids must flow through the same widgets as built-ins, so a
- * headless frame asserts the LENS_DRAW_ICON command lands on the retained
- * node with the runtime id attached. internal.h is included directly (same
- * pattern as test_drawlist_hash) to read the node's draw list; only struct
- * fields are read, no hidden symbols are called. The closing loop floods
- * the per-frame arena to prove the overflow flag (and its debug warning)
- * still trip with runtime icons in play. */
+ */
 
 #include "../../libs/lens/src/internal.h"
 #include "test_helpers.h"
@@ -51,8 +44,6 @@ int main(void) {
     CHECK((int)lens_icon_register_svg("<html><body/></html>") == (int)LENS_ICON_INVALID);
     CHECK((int)lens_icon_register_svg("<svg viewBox=\"0 0 24 24\"></svg>") ==
           (int)LENS_ICON_INVALID);
-    /* No viewBox/size: nanosvg falls back to the content bounds as the
-     * coordinate frame, so this still registers. */
     CHECK((int)lens_icon_register_svg("<svg><circle cx=\"1\" cy=\"1\" r=\"1\"/></svg>") >=
           (int)LENS_ICON_COUNT);
 
@@ -61,10 +52,10 @@ int main(void) {
 
     /* Runtime ids work through every icon widget, alongside a built-in. */
     lens_begin(ui, &IN0);
-    lens_icon(ui, stroke, 16.0f);
-    lens_icon(ui, LENS_ICON_SEARCH, 16.0f);
-    lens_icon_button(ui, fill);
-    lens_selectable_icon(ui, stroke, "row", false);
+    lens_icon(ui, &(lens_icon_opts){.id = stroke, .size = 16.0f});
+    lens_icon(ui, &(lens_icon_opts){.id = LENS_ICON_SEARCH, .size = 16.0f});
+    lens_button(ui, &(lens_button_opts){.icon = fill});
+    lens_selectable(ui, &(lens_selectable_opts){.icon = stroke, .label = "row", .selected = false});
     lens_end(ui);
     CHECK(!lens_overflowed(ui));
 
@@ -80,25 +71,23 @@ int main(void) {
     /* The no-icon sentinel must stay icon-less even though LENS_ICON_COUNT
      * is now a valid runtime id (the first registration took it). */
     lens_begin(ui, &IN0);
-    lens_selectable(ui, "plain", false);
+    lens_selectable(ui, &(lens_selectable_opts){.label = "plain", .selected = false});
     lens_end(ui);
     lens_node *row = lens_node_first_child(lens_root(ui));
     CHECK(row && row->cmd_count == 1 && row->cmds[0].kind == LENS_DRAW_TEXT);
 
     /* Unknown and invalid ids draw nothing and do not crash. */
     lens_begin(ui, &IN0);
-    lens_icon(ui, LENS_ICON_INVALID, 16.0f);
-    lens_icon(ui, (lens_icon_id)(fill + 1000), 16.0f);
-    lens_icon_button(ui, LENS_ICON_INVALID);
+    lens_icon(ui, &(lens_icon_opts){.id = LENS_ICON_INVALID, .size = 16.0f});
+    lens_icon(ui, &(lens_icon_opts){.id = (lens_icon_id)(fill + 1000), .size = 16.0f});
     lens_end(ui);
     CHECK(!lens_overflowed(ui));
     CHECK(lens_node_first_child(lens_root(ui)) == NULL);
 
-    /* Flood the per-frame arena: the overflow flag (and, in debug builds,
-     * the one-shot stderr warning) must trip. */
+    /* Flood the per-frame arena */
     lens_begin(ui, &IN0);
     for (int i = 0; i < 8000; i++)
-        lens_icon(ui, stroke, 16.0f);
+        lens_icon(ui, &(lens_icon_opts){.id = stroke, .size = 16.0f});
     lens_end(ui);
     CHECK(lens_overflowed(ui));
 

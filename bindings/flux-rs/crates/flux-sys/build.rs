@@ -112,12 +112,12 @@ fn main() {
 
     // 2. Probe. Emits rustc-link-lib / rustc-link-search for flux automatically.
     // Enforce the MINIMUM C library version this crate's bindings assume
-    // (the bindings expose flux_canvas_create_cpu_aa / end_frame_checked (0.0.29 surface)); pkg-config fails the build loudly when an older flux/lens/
+    // (the bindings expose flux_canvas_create_cpu_aa / end_frame_checked (0.0.30 surface)); pkg-config fails the build loudly when an older flux/lens/
     // iris/prism is picked up (e.g. a stale system install shadowing the
     // meson uninstalled dir).
     let lib = pkg_config::Config::new()
         .print_system_libs(false)
-        .atleast_version("0.0.29")
+        .atleast_version("0.0.30")
         .probe("flux")
         .unwrap_or_else(|e| {
             panic!(

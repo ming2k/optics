@@ -2,6 +2,8 @@
 
 These pages cover maintenance of the Optics monorepo:
 
+- [Architecture Governance](../governance/index.md) — project governance charter, 5-gate review filter, and domain intake standards.
+- [Design philosophy](../explanation/design-philosophy.md) — foundational architectural principles and layered system model.
 - [Setup](setup.md) — install dependencies and configure a development build.
 - [Testing](testing.md) — run, select, debug, and extend the C and Rust suites.
 - [Cross-platform](cross-platform.md) — Windows/macOS requirements,

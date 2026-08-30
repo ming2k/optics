@@ -84,7 +84,7 @@ fn main() {
     if dev_mode {
         let dir = build_dir.as_ref().unwrap();
         // lens's own uninstalled tree first, then flux's (if pointed at),
-        // so lens's `Requires: flux >= 0.0.29` resolves to the matching
+        // so lens's `Requires: flux >= 0.0.30` resolves to the matching
         // freshly-built libflux rather than any stale system copy.
         let mut dirs = vec![dir.join("meson-uninstalled")];
         let flux_build_dir = env::var_os("FLUX_BUILD_DIR")
@@ -102,12 +102,12 @@ fn main() {
     // 2. Probe lens (and transitively flux) via pkg-config. Emits link
     //    directives for cargo automatically.
     // Enforce the MINIMUM C library version this crate's bindings assume
-    // (lens_version_string derives from macros; label family collapsed (0.0.29 surface)); pkg-config fails the build loudly when an older flux/lens/
+    // (lens_version_string derives from macros; label family collapsed (0.0.30 surface)); pkg-config fails the build loudly when an older flux/lens/
     // iris/prism is picked up (e.g. a stale system install shadowing the
     // meson uninstalled dir).
     let lens = pkg_config::Config::new()
         .print_system_libs(false)
-        .atleast_version("0.0.29")
+        .atleast_version("0.0.30")
         .probe("lens")
         .unwrap_or_else(|e| {
             panic!(

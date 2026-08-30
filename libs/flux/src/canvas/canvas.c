@@ -925,3 +925,70 @@ uint64_t flux_canvas_submit_calls(const flux_canvas *c) {
 uint64_t flux_canvas_recorded_draws(const flux_canvas *c) {
     return c ? c->recorded_draws : 0;
 }
+
+void flux_canvas_draw(flux_canvas *c, const flux_shape *shape, const flux_paint *paint) {
+    if (!c || !c->recording || !shape)
+        return;
+
+    switch (shape->kind) {
+    case FLUX_SHAPE_RECT:
+        flux_canvas_fill_rect(c, shape->rect, paint);
+        break;
+    case FLUX_SHAPE_RRECT:
+    case FLUX_SHAPE_CIRCLE:
+        if (shape->stroke_width > 0.0f) {
+            flux_color col = paint ? paint->color : 0xFF000000u;
+            flux_canvas_stroke_rrect(c, shape->rect, shape->radius, col, shape->stroke_width);
+        } else {
+            flux_color col = paint ? paint->color : 0xFF000000u;
+            flux_canvas_fill_rrect(c, shape->rect, shape->radius, col);
+        }
+        break;
+    case FLUX_SHAPE_LINE: {
+        flux_path_segment segs[2];
+        flux_path p = {
+            .segments = segs,
+            .capacity = 2,
+            .count = 0,
+            .dropped = 0,
+            .cursor_x = 0,
+            .cursor_y = 0,
+            .arena = nullptr,
+        };
+        flux_path_move_to(&p, shape->rect.x, shape->rect.y);
+        flux_path_line_to(&p, shape->rect.x + shape->rect.w, shape->rect.y + shape->rect.h);
+        flux_canvas_stroke_path(c, &p, paint);
+        break;
+    }
+    case FLUX_SHAPE_PATH:
+        if (shape->path) {
+            if (shape->stroke_width > 0.0f)
+                flux_canvas_stroke_path(c, shape->path, paint);
+            else
+                flux_canvas_fill_path(c, shape->path, paint);
+        }
+        break;
+    case FLUX_SHAPE_IMAGE:
+        if (shape->image) {
+            if (shape->clip_rect.w > 0.0f && shape->clip_rect.h > 0.0f) {
+                flux_canvas_draw_image_clipped_rrect(c, shape->image, shape->rect, shape->clip_rect,
+                                                     shape->clip_radius, paint);
+            } else if (shape->radius > 0.0f) {
+                flux_canvas_draw_image_rrect(c, shape->image, shape->rect, shape->radius, paint);
+            } else if (shape->opaque_only) {
+                flux_canvas_draw_image_opaque(c, shape->image, shape->rect);
+            } else if (shape->sampler) {
+                flux_canvas_draw_image_sampled(c, shape->image, shape->sampler, shape->rect, paint);
+            } else {
+                flux_canvas_draw_image(c, shape->image, shape->rect, paint);
+            }
+        }
+        break;
+    case FLUX_SHAPE_GLYPHS:
+        if (shape->glyph_run)
+            flux_canvas_draw_glyph_run(c, shape->glyph_run);
+        break;
+    default:
+        break;
+    }
+}

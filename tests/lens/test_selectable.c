@@ -20,7 +20,8 @@ static void test_selectable_click(void) {
 
     /* Frame 1: establish prev_rect */
     lens_begin(ui, &IN0);
-    bool clicked = lens_selectable(ui, "Note", false);
+    bool clicked =
+        lens_selectable(ui, &(lens_selectable_opts){.label = "Note", .selected = false}).clicked;
     lens_end(ui);
     CHECK(!clicked);
 
@@ -29,7 +30,8 @@ static void test_selectable_click(void) {
     in.cursor = (flux_point){20, 12};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    clicked = lens_selectable(ui, "Note", false);
+    clicked =
+        lens_selectable(ui, &(lens_selectable_opts){.label = "Note", .selected = false}).clicked;
     lens_end(ui);
     CHECK(!clicked);
 
@@ -38,7 +40,8 @@ static void test_selectable_click(void) {
     in.cursor = (flux_point){20, 12};
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    clicked = lens_selectable(ui, "Note", false);
+    clicked =
+        lens_selectable(ui, &(lens_selectable_opts){.label = "Note", .selected = false}).clicked;
     lens_end(ui);
     CHECK(clicked);
 
@@ -52,16 +55,16 @@ static void test_selectable_selected_and_disabled(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
-    lens_selectable(ui, "Note", true);
+    lens_selectable(ui, &(lens_selectable_opts){.label = "Note", .selected = true});
     lens_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){20, 12};
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    bool clicked = lens_selectable_ex(ui, (lens_selectable_opts){.label = "Note",
-                                                                 .selected = true,
-                                                                 .box = {.disabled = true}})
+    bool clicked = lens_selectable(ui, &(lens_selectable_opts){.label = "Note",
+                                                               .selected = true,
+                                                               .box = {.disabled = true}})
                        .clicked;
     lens_end(ui);
     CHECK(!clicked);
@@ -81,7 +84,7 @@ static void test_selected_surface_uses_theme(void) {
     lens_input input = {.display_size = {100, 40}, .dt_seconds = 0.016f};
     lens_begin(ui, &input);
     lens_size(ui, 100.0f, 40.0f);
-    lens_selectable(ui, "Selected", true);
+    lens_selectable(ui, &(lens_selectable_opts){.label = "Selected", .selected = true});
     lens_end(ui);
 
     flux_canvas *canvas = NULL;

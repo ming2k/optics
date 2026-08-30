@@ -28,6 +28,9 @@ compile_commands.json
 __pycache__/
 *.pyc
 
+# Local agents cache
+.muta/
+
 # Meson subprojects: only the .wrap recipes are tracked; downloaded
 # sources and the package cache stay out of git.
 subprojects/*

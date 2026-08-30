@@ -7,14 +7,19 @@ static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f}
 
 static lens_response build_pressable(lens *ui) {
     lens_response response =
-        lens_pressable_begin(ui, "track-7", "Play track",
-                             (lens_layout_opts){.box = {.width = 240.0f, .height = 76.0f},
-                                                .gap = 8.0f,
-                                                .pad = 8.0f,
-                                                .cross = LENS_CENTER,
-                                                .radius = 12.0f});
-    lens_icon(ui, LENS_ICON_PLAY, 24.0f);
-    lens_label(ui, "A track title");
+        lens_pressable_begin(ui, &(lens_pressable_opts){
+                                     .box = {.id = "track-7", .width = 240.0f, .height = 76.0f},
+                                     .label = "Play track",
+                                     .layout =
+                                         {
+                                             .gap = 8.0f,
+                                             .pad = 8.0f,
+                                             .cross = LENS_CENTER,
+                                             .radius = 12.0f,
+                                         },
+                                 });
+    lens_icon(ui, &(lens_icon_opts){.id = LENS_ICON_PLAY, .size = 24.0f});
+    lens_label(ui, &(lens_label_opts){.text = "A track title"});
     lens_pressable_end(ui);
     return response;
 }

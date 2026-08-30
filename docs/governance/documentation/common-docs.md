@@ -199,6 +199,55 @@ Should not include:
 - General bug reporting instructions.
 - Legal language that maintainers cannot honor.
 
+## `docs/explanation/design-philosophy.md`
+
+Intent: articulate the foundational architectural principles, technical invariants, and mental model of the system.
+
+Should include:
+
+- Core principles (minimal orthogonality, single descriptor paradigm, composition over specialization).
+- System layer breakdown and boundary invariants (what each layer owns and forbids).
+- Structural mental model (how components compose across layers).
+- The uncompromising quality/invariance rule (no backward compatibility shims in micro-kernels).
+
+Should not include:
+
+- Day-to-day task tutorials (belongs in `docs/tutorials/` or `docs/how-to/`).
+- Raw function signature listings (belongs in `docs/reference/`).
+- Ephemeral sprint plans or bug trackers.
+
+## `docs/governance/index.md`
+
+Intent: establish the top-level repository governance charter, review gates, and decision hierarchy for contributing code.
+
+Should include:
+
+- Governance charter, authority hierarchy, and core responsibilities.
+- The global intake decision matrix / gate filter (how changes are evaluated).
+- Cross-domain governance index (links to component, effect, material, and platform backend governance).
+- Contribution lifecycle pipeline (Proposal ➔ Incubation ➔ Core Promotion ➔ Clean Deprecation).
+- Contributor PR submission verification checklist.
+
+Should not include:
+
+- Implementation tutorials or how-to walkthroughs.
+- Detailed technical math (belongs in `docs/explanation/`).
+
+## `docs/governance/api-design-guidelines.md`
+
+Intent: provide the mandatory API design rules and naming invariants that every public and internal interface must obey.
+
+Should include:
+
+- The Single Opts Descriptor paradigm (exact signature rules, C99 compound literals, uniform return structs).
+- Forbidden patterns (no dual tiers, no `_ex`, `_wrapped`, or parameter-derived suffixes).
+- Structure layout rules (embedding `lens_box box;` / POD memory safety).
+- Error handling, null-safety, and FFI-friendliness contracts.
+
+Should not include:
+
+- Code snippets unrelated to API design patterns.
+
 ## `docs/reference/api.md`
 
 Intent: provide exact lookup for the public API.
@@ -215,29 +264,6 @@ Should not include:
 - Design rationale.
 - Step-by-step tutorials.
 - Contributor-only implementation details.
-
-## `docs/reference/symbols.md`
-
-Intent: per-symbol lookup table for every exported function, across all
-seven libraries.
-
-Maintenance contract: **generated, never hand-edited.** The installed
-headers are the single source of truth; regenerate with
-`python3 tools/gen_symbols.py` in the same commit that changes a public
-signature, and CI (`symbols.md freshness`) fails on drift. An empty
-Description cell means the header itself carries no doc comment for that
-symbol — fix the header, not the table; the next regeneration propagates
-it.
-
-Should include:
-
-- Every exported function, grouped by library then header.
-- The first sentence of the header's doc comment as the description.
-
-Should not include:
-
-- Hand-written summaries (they rot — that is why the generator exists).
-- Behaviour notes; those belong in `api.md` or the header doc comments.
 
 ## `docs/reference/glossary.md`
 

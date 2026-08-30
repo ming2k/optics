@@ -45,7 +45,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             uint32_t n = (uint32_t)snprintf(label, sizeof label, "w%u",
                                             (unsigned)(scope_counter++ & 0xFFFF));
             (void)n;
-            lens_button(ui, label);
+            lens_button(ui, &(lens_button_opts){.label = label}).clicked;
             break;
         }
         case 2: {
@@ -58,7 +58,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             /* container identity is established by the call sequence; the
              * label is decorative for this fuzzer's purposes. */
             (void)clabel;
-            lens_button(ui, wlabel);
+            lens_button(ui, &(lens_button_opts){.label = wlabel}).clicked;
             lens_close(ui);
             break;
         }
