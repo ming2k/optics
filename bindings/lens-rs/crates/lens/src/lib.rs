@@ -371,6 +371,25 @@ impl Frame {
         }
     }
 
+    /// Push an ID seed string onto the UI's ID generator stack.
+    pub fn push_id(&mut self, seed: &str) {
+        let c = cstr(seed);
+        // SAFETY: ui is live for the frame.
+        unsafe { sys::lens_push_id(self.ui, c.as_ptr()) };
+    }
+
+    /// Push an allocation-free integer scope for repeated data rows.
+    pub fn push_id_int(&mut self, seed: i64) {
+        // SAFETY: ui is live and the integer is copied by value.
+        unsafe { sys::lens_push_id_int(self.ui, seed) };
+    }
+
+    /// Pop the most recent [`Self::push_id`].
+    pub fn pop_id(&mut self) {
+        // SAFETY: ui is live for the frame.
+        unsafe { sys::lens_pop_id(self.ui) };
+    }
+
     /// Shape `text` with the active theme font and return its logical extent.
     /// This is the same measurement seam used by Lens widgets during their
     /// intrinsic-size pass.
@@ -437,16 +456,34 @@ impl Frame {
         FlexBuilder::new(self, false)
     }
 
+    /// Start a horizontal flex container (row) with preconfigured options.
+    #[inline]
+    pub fn row_ex<R>(&mut self, opts: &LayoutOpts, body: impl FnOnce(&mut Frame) -> R) -> (Response, R) {
+        self.row().with_opts(opts).show(body)
+    }
+
     /// Start a vertical flex container (column) with a fluent builder.
     #[inline]
     pub fn col(&mut self) -> FlexBuilder<'_> {
         FlexBuilder::new(self, true)
     }
 
+    /// Start a vertical flex container (column) with preconfigured options.
+    #[inline]
+    pub fn col_ex<R>(&mut self, opts: &LayoutOpts, body: impl FnOnce(&mut Frame) -> R) -> (Response, R) {
+        self.col().with_opts(opts).show(body)
+    }
+
     /// Start a vertical flex container (column) with a fluent builder (alias for [`Self::col`]).
     #[inline]
     pub fn column(&mut self) -> FlexBuilder<'_> {
         FlexBuilder::new(self, true)
+    }
+
+    /// Start a vertical flex container (column) with preconfigured options (alias for [`Self::col_ex`]).
+    #[inline]
+    pub fn column_ex<R>(&mut self, opts: &LayoutOpts, body: impl FnOnce(&mut Frame) -> R) -> (Response, R) {
+        self.col().with_opts(opts).show(body)
     }
 
     /// Center `body` on both axes inside a `width` × `height` box.
@@ -520,6 +557,32 @@ impl Frame {
         }
     }
 
+    pub fn pressable_row<R>(
+        &mut self,
+        id: &str,
+        label: &str,
+        opts: &LayoutOpts,
+        body: impl FnOnce(&mut Frame, Response) -> R,
+    ) -> (Response, R) {
+        let id_c = cstr(id);
+        let label_c = cstr(label);
+        let raw_opts = sys::lens_pressable_opts {
+            box_: sys::lens_box {
+                id: id_c.as_ptr(),
+                ..Default::default()
+            },
+            label: label_c.as_ptr(),
+            layout: opts.to_raw(),
+            ..Default::default()
+        };
+        let response = Response::from_raw(unsafe {
+            sys::lens_pressable_begin(self.ui, &raw_opts)
+        });
+        let result = body(self, response);
+        unsafe { sys::lens_pressable_end(self.ui) };
+        (response, result)
+    }
+
     
     /// A fixed empty gap along the main axis.
     pub fn spacer(&mut self, size: f32) {
@@ -561,7 +624,7 @@ impl Frame {
     /// [`Frame::push_style`] with [`Style::with_outline_color`] /
     /// [`Style::with_outline_width`].
     pub fn icon(&mut self, id: Icon, size: f32) {
-        self.icon_raw(id, size);
+        self.icon_raw(id.raw(), size);
     }
 
     pub fn icon_raw(&mut self, id: sys::lens_icon_id, size: f32) {
@@ -618,11 +681,11 @@ impl Frame {
     }
 
     pub fn icon_button(&mut self, id: Icon) -> bool {
-        self.icon_button_raw(id)
+        self.icon_button_raw(id.raw())
     }
 
     pub fn icon_button_active(&mut self, id: Icon, active: bool) -> bool {
-        self.icon_button_raw_active(id, active)
+        self.icon_button_raw_active(id.raw(), active)
     }
 
     pub fn button_primary(&mut self, label: &str) -> bool {
@@ -705,6 +768,83 @@ impl Frame {
         unsafe { sys::lens_slider(self.ui, &opts).changed }
     }
 
+    pub fn slider_vertical(&mut self, label: &str, value: &mut f32, min: f32, max: f32, step: f32) -> bool {
+        let c = cstr(label);
+        let opts = sys::lens_slider_opts {
+            label: c.as_ptr(),
+            value: value as *mut f32,
+            min,
+            max,
+            step,
+            axis: sys::lens_axis::LENS_COLUMN,
+            ..Default::default()
+        };
+        unsafe { sys::lens_slider(self.ui, &opts).changed }
+    }
+
+    pub fn dropdown(&mut self, label: &str, selected: &mut i32, items: &[&str]) -> bool {
+        let mut changed = false;
+        let menu_id = format!("{}_dropdown_menu", label);
+        let curr_label = if *selected >= 0 && (*selected as usize) < items.len() {
+            items[*selected as usize]
+        } else {
+            label
+        };
+        if self.button(curr_label) {
+            self.place_toggle(&menu_id);
+        }
+        let theme = self.theme();
+        let opts = PlaceOpts {
+            band: Band::Popup,
+            mode: PlaceMode::Anchored,
+            transient: true,
+            layout: LayoutOpts {
+                bg: theme.bg(),
+                border: theme.border(),
+                border_width: 1.0,
+                pad: 4.0,
+                gap: 2.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        self.place(&menu_id, &opts, |frame| {
+            for (i, &item) in items.iter().enumerate() {
+                if frame.selectable(item, *selected == i as i32) {
+                    *selected = i as i32;
+                    changed = true;
+                    frame.place_close(&menu_id);
+                }
+            }
+        });
+        changed
+    }
+
+    pub fn setting_switch(
+        &mut self,
+        id: &str,
+        label: &str,
+        description: &str,
+        value: &mut bool,
+        disabled: bool,
+    ) -> Response {
+        let (resp, _) = self.row().id(id).cross(Align::Center).show(|frame| {
+            frame.col().flex(1.0).show(|frame| {
+                frame.label(label);
+                if !description.is_empty() {
+                    let muted_color = frame.theme().fg().with_alpha(160);
+                    frame.push_style(Style::new().with_fg(muted_color));
+                    frame.label_sized(description, frame.theme().font_size_sm());
+                    frame.pop_style();
+                }
+            });
+            if !disabled {
+                frame.switch(label, value);
+            }
+        });
+        resp
+    }
+
     pub fn label(&mut self, text: &str) {
         let c = cstr(text);
         let opts = sys::lens_label_opts {
@@ -724,6 +864,72 @@ impl Frame {
         unsafe { sys::lens_label(self.ui, &opts); }
     }
 
+    pub fn label_compact(&mut self, text: &str) {
+        self.label(text);
+    }
+
+    pub fn label_compact_sized(&mut self, text: &str, size: f32) {
+        self.label_sized(text, size);
+    }
+
+    pub fn label_compact_weighted(&mut self, text: &str, size: f32, weight: f32) {
+        let c = cstr(text);
+        let opts = sys::lens_label_opts {
+            text: c.as_ptr(),
+            size,
+            weight,
+            ..Default::default()
+        };
+        unsafe { sys::lens_label(self.ui, &opts); }
+    }
+
+    pub fn heading(&mut self, text: &str, level: i32) {
+        let theme = self.theme();
+        let size = match level {
+            1 => theme.0.font_size_h1,
+            2 => theme.0.font_size_h2,
+            3 => theme.0.font_size_h3,
+            _ => theme.0.font_size_h3,
+        };
+        let c = cstr(text);
+        let opts = sys::lens_label_opts {
+            text: c.as_ptr(),
+            size,
+            weight: theme.0.font_weight_bold,
+            ..Default::default()
+        };
+        unsafe { sys::lens_label(self.ui, &opts); }
+    }
+
+    pub fn label_wrapped(&mut self, text: &str, max_width: f32) {
+        let c = cstr(text);
+        let opts = sys::lens_label_opts {
+            box_: sys::lens_box {
+                max_width: max_width.max(0.0),
+                ..Default::default()
+            },
+            text: c.as_ptr(),
+            wrap: true,
+            ..Default::default()
+        };
+        unsafe { sys::lens_label(self.ui, &opts); }
+    }
+
+    pub fn label_wrapped_sized(&mut self, text: &str, size: f32, max_width: f32) {
+        let c = cstr(text);
+        let opts = sys::lens_label_opts {
+            box_: sys::lens_box {
+                max_width: max_width.max(0.0),
+                ..Default::default()
+            },
+            text: c.as_ptr(),
+            size,
+            wrap: true,
+            ..Default::default()
+        };
+        unsafe { sys::lens_label(self.ui, &opts); }
+    }
+
     pub fn selectable(&mut self, label: &str, selected: bool) -> bool {
         let c = cstr(label);
         let opts = sys::lens_selectable_opts {
@@ -734,8 +940,41 @@ impl Frame {
         unsafe { sys::lens_selectable(self.ui, &opts).clicked }
     }
 
+    pub fn selectable_icon(&mut self, label: &str, icon: impl Into<sys::lens_icon_id>, selected: bool) -> bool {
+        let c = cstr(label);
+        let opts = sys::lens_selectable_opts {
+            label: c.as_ptr(),
+            icon: icon.into(),
+            selected,
+            ..Default::default()
+        };
+        unsafe { sys::lens_selectable(self.ui, &opts).clicked }
+    }
+
     pub fn textfield(&mut self, label: &str, buf: &mut TextBuf) -> bool {
         self.textedit(label, buf, false)
+    }
+
+    pub fn textfield_set_caret(&mut self, label: &str, caret: u32) {
+        self.textedit_set_caret(label, caret);
+    }
+
+    pub fn response(&self) -> Response {
+        Response::from_raw(unsafe { sys::lens_get_response(self.ui as *const sys::lens) })
+    }
+
+    pub fn textfield_placeholder(&mut self, label: &str, buf: &mut TextBuf, placeholder: &str) -> bool {
+        let c = cstr(label);
+        let p = cstr(placeholder);
+        let opts = sys::lens_textedit_opts {
+            box_: sys::lens_box { id: c.as_ptr(), ..Default::default() },
+            buf: buf.as_mut_ptr(),
+            cap: buf.cap(),
+            multiline: false,
+            placeholder: p.as_ptr(),
+            ..Default::default()
+        };
+        unsafe { sys::lens_textedit(self.ui, &opts).changed }
     }
 
     pub fn scroll<R>(&mut self, id: &str, body: impl FnOnce(&mut Frame) -> R) -> R {
@@ -765,6 +1004,47 @@ impl Frame {
         } else {
             None
         }
+    }
+
+    pub fn place_open(&mut self, id: &str) {
+        let c = cstr(id);
+        unsafe { sys::lens_place_open(self.ui, c.as_ptr()) };
+    }
+
+    pub fn place_close(&mut self, id: &str) {
+        let c = cstr(id);
+        unsafe { sys::lens_place_close(self.ui, c.as_ptr()) };
+    }
+
+    pub fn place_toggle(&mut self, id: &str) {
+        let c = cstr(id);
+        unsafe { sys::lens_place_toggle(self.ui, c.as_ptr()) };
+    }
+
+    pub fn place_is_open(&self, id: &str) -> bool {
+        let c = cstr(id);
+        unsafe { sys::lens_place_is_open(self.ui as *const sys::lens, c.as_ptr()) }
+    }
+
+    pub fn place_close_all(&mut self) {
+        unsafe { sys::lens_place_close_all(self.ui) };
+    }
+
+    pub fn node_bounds(&self, id: &str) -> Option<Rect> {
+        let c = cstr(id);
+        let raw_id = unsafe { sys::lens_current_id(self.ui, c.as_ptr()) };
+        if raw_id == 0 {
+            return None;
+        }
+        let node = unsafe { sys::lens_find(self.ui, raw_id) };
+        if node.is_null() {
+            return None;
+        }
+        Some(Rect::from_raw(unsafe { sys::lens_node_bounds(node) }))
+    }
+
+    pub fn clear_focus(&mut self) {
+        unsafe { sys::lens_set_focus(self.ui, 0) };
     }
 
     pub fn textedit(&mut self, label: &str, buf: &mut TextBuf, multiline: bool) -> bool {

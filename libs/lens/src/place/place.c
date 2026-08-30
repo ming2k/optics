@@ -180,23 +180,23 @@ bool lens_place_begin(lens *ui, const lens_place_opts *opts) {
     n->cross = opts->layout.cross;
     if (opts->layout.box.flex != 0)
         n->flex_grow = opts->layout.box.flex;
-    if (opts->layout.min_width > 0)
-        n->min_w = opts->layout.min_width;
-    if (opts->layout.max_width > 0)
-        n->max_w = opts->layout.max_width;
-    if (opts->layout.min_height > 0)
-        n->min_h = opts->layout.min_height;
-    if (opts->layout.max_height > 0)
-        n->max_h = opts->layout.max_height;
+    if (opts->layout.box.min_width > 0)
+        n->min_w = opts->layout.box.min_width;
+    if (opts->layout.box.max_width > 0)
+        n->max_w = opts->layout.box.max_width;
+    if (opts->layout.box.min_height > 0)
+        n->min_h = opts->layout.box.min_height;
+    if (opts->layout.box.max_height > 0)
+        n->max_h = opts->layout.box.max_height;
 
     /* Fixed size: box.width/height win; else min_width fixes the width (the
      * popup contract — a dropdown's menu matches its trigger). For EXACT
      * the rect is additionally a minimum extent: content may grow beyond
      * it, but an empty paint-only node (scrims, dim backdrops, selection
      * borders) must still cover the caller-supplied rectangle. */
-    float fw = opts->layout.box.width > 0.0f   ? opts->layout.box.width
-               : opts->layout.min_width > 0.0f ? opts->layout.min_width
-                                               : 0.0f;
+    float fw = opts->layout.box.width > 0.0f       ? opts->layout.box.width
+               : opts->layout.box.min_width > 0.0f ? opts->layout.box.min_width
+                                                   : 0.0f;
     float fh = opts->layout.box.height > 0.0f ? opts->layout.box.height : 0.0f;
     if (n->mode == LENS_PLACE_EXACT) {
         if (opts->rect.w > fw)

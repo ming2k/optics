@@ -53,7 +53,7 @@ static void test_exact_place_at_rect(void) {
 
     lens_place_opts o = exact_at((flux_rect){40, 50, 120, 24}, LENS_BAND_CHROME, 0);
     o.layout.pad = 4.0f;
-    o.layout.min_width = 120.0f;
+    o.layout.box.min_width = 120.0f;
 
     /* Frame 1: build so prev_rect is seeded; frame 2: read the settled
      * geometry through the child's prev_rect (one-frame latency). */
@@ -170,7 +170,7 @@ static void test_chrome_occludes_base(void) {
 
     lens_place_opts cover = exact_at((flux_rect){0, 0, 200, 200}, LENS_BAND_CHROME, 0xff000000u);
     cover.layout.pad = 8.0f;
-    cover.layout.min_width = 200.0f;
+    cover.layout.box.min_width = 200.0f;
 
     /* Frame 1: base button + chrome node covering it. */
     lens_begin(ui, &ZERO_IN);

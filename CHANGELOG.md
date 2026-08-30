@@ -13,7 +13,19 @@ either.
 
 ## [Unreleased]
 
-## [0.0.30] - 2026-08-29
+## [0.0.31] - 2026-08-29
+
+### Changed — Box Model Orthogonality, Legacy Layout Elimination, and Native C23 SVG Engine
+
+- **lens**:
+  - **ADR-0085**: Streamlined `lens_layout_opts` by completely eliminating redundant top-level `min_width`, `max_width`, `min_height`, and `max_height` fields; all geometry, constraints, identity, and per-call styles are exclusively sourced from `opts.box`.
+  - **C23 Compile-Time Contracts**: Enforced static assertions (`static_assert(offsetof(..., box) == 0)`) across all 14 component and container descriptor structs to guarantee structural subtyping in memory.
+  - **Native C23 SVG Icon Engine**: Completely removed third-party vendored dependencies (`nanosvg`) from `libs/lens/src/vendor/`. Implemented a focused, lightweight native C23 SVG parser (`icon_svg.c` / `icon_svg.h`) supporting W3C path commands, curves, elliptical arcs, shapes, style inheritance, native `currentColor` mapping, and automatic color run merging.
+  - **C23 Standard Attributes**: Annotated query and life-cycle APIs with `LENS_NODISCARD` (`[[nodiscard]]`).
+
+- **bindings**:
+  - `lens-rs`: Aligned `LayoutOpts` raw FFI translation with the unified `lens_box` geometry model.
+
 
 ### Changed — Minimal Orthogonal Component Architecture & Full C23 Standard Baseline
 

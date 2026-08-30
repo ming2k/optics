@@ -3,7 +3,7 @@
 //! frame drives the widget set through the safe wrapper. No GPU required.
 
 use lens::{
-    Align, Color, Input, MouseButton, TextBuf, Theme, Ui,
+    Input, TextBuf, Ui,
 };
 
 #[test]
@@ -39,7 +39,7 @@ fn headless_frame_drives_widgets() {
         f.column().show_flat(|f| {
             f.label("Settings");
             f.label("A label");
-            f.icon(lens::Icon::LENS_ICON_GLOBE, 16.0);
+            f.icon(lens::Icon::Globe, 16.0);
             f.separator();
             f.checkbox("Wrap", &mut wrap);
             f.switch("Compact mode", &mut wrap);

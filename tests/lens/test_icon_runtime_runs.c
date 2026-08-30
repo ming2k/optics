@@ -1,6 +1,6 @@
 /* test_icon_runtime_runs.c — per-shape colour runs recorded by
  * lens_icon_register_svg (lens_icon_run). CPU-only; links icon_runtime.c
- * (+ icon_data.c, nanosvg.c) directly, same as test_icon_runtime_content.
+ * (+ icon_data.c, icon_svg.c) directly, same as test_icon_runtime_content.
  *
  * Asserts WHAT was registered:
  *  - a stroke="#FF0000" shape records a stroke run with color 0xFF0000FF;

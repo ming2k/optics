@@ -78,7 +78,7 @@ static void test_place_open_close_repaints(void) {
         .mode = LENS_PLACE_ANCHORED,
         .rect = {10, 10, 50, 20},
         .transient = true,
-        .layout = {.pad = 4, .min_width = 80},
+        .layout = {.box = {.min_width = 80}, .pad = 4},
     };
 
     build_frame(ui, 0.5f);

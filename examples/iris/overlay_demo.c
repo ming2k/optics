@@ -106,7 +106,7 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
                                  .mode = LENS_PLACE_ANCHORED,
                                  .rect = a->file_btn_rect,
                                  .transient = true,
-                                 .layout = {.pad = 6, .min_width = 140, .bg = tn.card, .radius = 6},
+                                 .layout = {.box = {.min_width = 140}, .pad = 6, .bg = tn.card, .radius = 6},
                              })) {
             if (lens_button(ui, &(lens_button_opts){.label = "New"}).clicked) {
                 printf("  FILE     New\n");
@@ -139,7 +139,7 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
                                  .mode = LENS_PLACE_ANCHORED,
                                  .rect = a->edit_btn_rect,
                                  .transient = true,
-                                 .layout = {.pad = 6, .min_width = 140, .bg = tn.card, .radius = 6},
+                                 .layout = {.box = {.min_width = 140}, .pad = 6, .bg = tn.card, .radius = 6},
                              })) {
             if (lens_button(ui, &(lens_button_opts){.label = "Cut"}).clicked) {
                 printf("  EDIT     Cut\n");
@@ -179,7 +179,7 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
                         .band = LENS_BAND_POPUP,
                         .mode = LENS_PLACE_CENTERED,
                         .transient = true,
-                        .layout = {.pad = 20, .min_width = 280, .bg = tn.card, .radius = 10},
+                        .layout = {.box = {.min_width = 280}, .pad = 20, .bg = tn.card, .radius = 10},
                     })) {
             lens_label(ui, &(lens_label_opts){.text = "Modal Dialog", .size = 18.0f});
             lens_label(ui, &(lens_label_opts){

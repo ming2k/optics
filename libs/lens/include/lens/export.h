@@ -22,6 +22,17 @@
 #define LENS_API
 #endif
 
+/* LENS_NODISCARD: mark a function whose return value must be checked. */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#define LENS_NODISCARD [[nodiscard]]
+#elif defined(__GNUC__) || defined(__clang__)
+#define LENS_NODISCARD __attribute__((warn_unused_result))
+#elif defined(_MSC_VER)
+#define LENS_NODISCARD _Check_return_
+#else
+#define LENS_NODISCARD
+#endif
+
 /* LENS_DEPRECATED(msg): mark a public symbol as scheduled for removal. Mirrors
  * FLUX_DEPRECATED in <flux/core.h>; compiles to the compiler attribute where
  * available so call sites get a warning, and stays empty otherwise so

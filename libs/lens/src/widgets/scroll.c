@@ -25,10 +25,10 @@ bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts) {
     n->pad = 0.0f;
     n->cross = LENS_STRETCH;
 
-    if (opts->max_width > 0.0f)
-        n->max_w = opts->max_width;
-    if (opts->max_height > 0.0f)
-        n->max_h = opts->max_height;
+    if (opts->box.max_width > 0.0f)
+        n->max_w = opts->box.max_width;
+    if (opts->box.max_height > 0.0f)
+        n->max_h = opts->box.max_height;
 
     bool occluded = n->has_prev && lensi_widget_occluded(ui, n);
     if (n->has_prev && !occluded && lensi_point_in(ui->input.cursor, n->prev_rect)) {

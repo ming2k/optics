@@ -20,8 +20,8 @@ fn main() -> Result<(), iris::RunError> {
     Application::run(
         cfg,
         |f, _| {
-            f.column(|f| {
-                f.title("Hello, iris");
+            f.column().show(|f| {
+                f.label("Hello, iris");
                 f.label("Cross-platform L3 toolkit for the flux/lens stack");
                 f.separator();
                 f.checkbox("Wrap", &mut wrap);

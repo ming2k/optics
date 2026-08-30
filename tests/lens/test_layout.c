@@ -185,13 +185,13 @@ static void test_container_width_constraints_bound_intrinsic_size(void) {
 
     lens_begin(ui, &in);
     lens_row_begin(ui, &(lens_layout_opts){.gap = 5.0f, .cross = LENS_STRETCH});
-    lens_column_begin(ui, &(lens_layout_opts){.min_width = 90.0f, .pad = pad});
+    lens_column_begin(ui, &(lens_layout_opts){.box = {.min_width = 90.0f}, .pad = pad});
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_close(ui);
-    lens_column_begin(ui, &(lens_layout_opts){.min_width = 20.0f, .max_width = 240.0f, .pad = pad});
+    lens_column_begin(ui, &(lens_layout_opts){.box = {.min_width = 20.0f, .max_width = 240.0f}, .pad = pad});
     (void)lens_button(ui, &(lens_button_opts){.label = "natural"});
     lens_close(ui);
-    lens_column_begin(ui, &(lens_layout_opts){.max_width = 100.0f, .pad = pad});
+    lens_column_begin(ui, &(lens_layout_opts){.box = {.max_width = 100.0f}, .pad = pad});
     (void)lens_button(
         ui, &(lens_button_opts){.label = "content that is intentionally much wider than the cap"});
     lens_close(ui);
@@ -216,7 +216,7 @@ static void test_flex_redistributes_space_after_max_width(void) {
 
     lens_begin(ui, &in);
     lens_row_begin(ui, &(lens_layout_opts){.cross = LENS_STRETCH});
-    lens_column_begin(ui, &(lens_layout_opts){.box = {.flex = 1.0f}, .max_width = 100.0f});
+    lens_column_begin(ui, &(lens_layout_opts){.box = {.flex = 1.0f, .max_width = 100.0f}});
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_close(ui);
     lens_column_begin(ui, &(lens_layout_opts){.box = {.flex = 1.0f}});
@@ -242,7 +242,7 @@ static void test_flex_respects_min_width_while_shrinking(void) {
     lens_begin(ui, &in);
     lens_row_begin(ui, &(lens_layout_opts){.cross = LENS_STRETCH});
     lens_column_begin(
-        ui, &(lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f}, .min_width = 80.0f});
+        ui, &(lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f, .min_width = 80.0f}});
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_close(ui);
     lens_column_begin(ui, &(lens_layout_opts){.box = {.flex = 1.0f, .width = 100.0f}});

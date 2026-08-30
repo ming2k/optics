@@ -48,7 +48,7 @@
  * meson.project_version() in the root meson.build). */
 #define PRISM_VERSION_MAJOR 0
 #define PRISM_VERSION_MINOR 0
-#define PRISM_VERSION_PATCH 29
+#define PRISM_VERSION_PATCH 31
 
 /* Stringify helpers; PRISM_STRINGIFY_ adds the indirection level required
  * for macro-expansion of literal tokens. */

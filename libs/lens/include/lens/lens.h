@@ -45,7 +45,7 @@ extern "C" {
 
 #define LENS_VERSION_MAJOR 0
 #define LENS_VERSION_MINOR 0
-#define LENS_VERSION_PATCH 29
+#define LENS_VERSION_PATCH 31
 
 /* Stringify helpers used by lens_version_string(); LENS_STRINGIFY_ adds the
  * indirection level required for macro-expansion of literal tokens. */
@@ -882,11 +882,7 @@ typedef struct lens_box {
 /* ================================================================== */
 
 typedef struct lens_layout_opts {
-    lens_box box;
-    float min_width;    /* minimum resolved width; 0 = no lower bound   */
-    float max_width;    /* maximum resolved width; 0 = no upper bound   */
-    float min_height;   /* minimum resolved height; 0 = no lower bound  */
-    float max_height;   /* maximum resolved height; 0 = no upper bound  */
+    lens_box box;       /* sole source of geometry, constraints, identity, style */
     float gap;          /* between children, main axis                  */
     float pad;          /* inside the container, all sides              */
     lens_align align;   /* main-axis distribution                       */
@@ -916,14 +912,12 @@ LENS_API void lens_grid_end(lens *ui);
 
 typedef struct lens_scroll_opts {
     lens_box box;
-    float max_height;
-    float max_width;
     bool autohide;
 } lens_scroll_opts;
 
 LENS_API bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts);
 LENS_API void lens_scroll_end(lens *ui);
-LENS_API bool lens_scroll_offset(const lens *ui, const char *id, float *x, float *y);
+LENS_NODISCARD LENS_API bool lens_scroll_offset(const lens *ui, const char *id, float *x, float *y);
 LENS_API void lens_scroll_to(lens *ui, const char *id, float x, float y);
 
 typedef struct lens_pressable_opts {
@@ -982,9 +976,9 @@ LENS_API void lens_place_end(lens *ui);
 LENS_API void lens_place_open(lens *ui, const char *id);
 LENS_API void lens_place_close(lens *ui, const char *id);
 LENS_API void lens_place_toggle(lens *ui, const char *id);
-LENS_API bool lens_place_is_open(const lens *ui, const char *id);
+LENS_NODISCARD LENS_API bool lens_place_is_open(const lens *ui, const char *id);
 LENS_API void lens_place_close_all(lens *ui);
-LENS_API bool lens_place_hovered(const lens *ui, const char *id);
+LENS_NODISCARD LENS_API bool lens_place_hovered(const lens *ui, const char *id);
 
 /* ================================================================== */
 /*  Minimal Orthogonal Widgets (Single Descriptor API)                */
@@ -1096,6 +1090,23 @@ LENS_API lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts);
 LENS_API void lens_textedit_set_caret(lens *ui, const char *label, uint32_t caret);
 LENS_API void lens_textedit_set_selection(lens *ui, const char *label, uint32_t sel_start,
                                           uint32_t sel_end);
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+static_assert(offsetof(lens_layout_opts, box) == 0, "lens_layout_opts.box must be at offset 0");
+static_assert(offsetof(lens_grid_opts, box) == 0, "lens_grid_opts.box must be at offset 0");
+static_assert(offsetof(lens_scroll_opts, box) == 0, "lens_scroll_opts.box must be at offset 0");
+static_assert(offsetof(lens_pressable_opts, box) == 0, "lens_pressable_opts.box must be at offset 0");
+static_assert(offsetof(lens_place_opts, box) == 0, "lens_place_opts.box must be at offset 0");
+static_assert(offsetof(lens_label_opts, box) == 0, "lens_label_opts.box must be at offset 0");
+static_assert(offsetof(lens_icon_opts, box) == 0, "lens_icon_opts.box must be at offset 0");
+static_assert(offsetof(lens_image_opts, box) == 0, "lens_image_opts.box must be at offset 0");
+static_assert(offsetof(lens_separator_opts, box) == 0, "lens_separator_opts.box must be at offset 0");
+static_assert(offsetof(lens_button_opts, box) == 0, "lens_button_opts.box must be at offset 0");
+static_assert(offsetof(lens_checkbox_opts, box) == 0, "lens_checkbox_opts.box must be at offset 0");
+static_assert(offsetof(lens_selectable_opts, box) == 0, "lens_selectable_opts.box must be at offset 0");
+static_assert(offsetof(lens_slider_opts, box) == 0, "lens_slider_opts.box must be at offset 0");
+static_assert(offsetof(lens_textedit_opts, box) == 0, "lens_textedit_opts.box must be at offset 0");
+#endif
 
 /* ================================================================== */
 /*  Interaction queries (ADR-0029)                                    */

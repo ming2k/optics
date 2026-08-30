@@ -17,13 +17,13 @@ static lens_place_opts card_opts(flux_rect rect) {
         .rect = rect,
         .layout =
             {
+                .box = {.min_width = 260.0f},
                 .pad = 10.0f,
                 .gap = 4.0f,
                 .bg = 0xFA20202Cu,
                 .border = 0x12FFFFFFu,
                 .border_width = 1.0f,
                 .radius = 12.0f,
-                .min_width = 260.0f,
                 .cross = LENS_STRETCH,
             },
     };

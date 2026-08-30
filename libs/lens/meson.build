@@ -42,7 +42,7 @@ lens_sources = files(
   'src/widgets/image.c',
   'src/icon_data.c',
   'src/icon_runtime.c',
-  'src/vendor/nanosvg.c',
+  'src/icon_svg.c',
   'src/a11y/semantics.c',
   'src/place/place.c',
   'src/theme/theme.c',

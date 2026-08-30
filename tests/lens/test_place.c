@@ -19,7 +19,7 @@ static lens_place_opts anchored(const char *id, flux_rect anchor, float pad, flo
     o.box.id = id;
     o.rect = anchor;
     o.layout.pad = pad;
-    o.layout.min_width = min_width;
+    o.layout.box.min_width = min_width;
     return o;
 }
 
@@ -257,7 +257,7 @@ static void test_centered_on_display(void) {
     if (lens_place_begin(ui, &(lens_place_opts){.box = {.id = "m"},
                                                 .band = LENS_BAND_MODAL,
                                                 .mode = LENS_PLACE_CENTERED,
-                                                .layout = {.min_width = 200},
+                                                .layout = {.box = {.min_width = 200}},
                                                 .transient = true})) {
         lens_label(ui, &(lens_label_opts){.text = "body"});
         lens_place_end(ui);

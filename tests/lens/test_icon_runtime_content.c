@@ -2,7 +2,7 @@
  * lens_icon_register_svg. CPU-only.
  *
  * Widget-level coverage lives in test_icon_runtime.c; this binary compiles
- * icon_runtime.c (+ icon_data.c, nanosvg.c) directly — the same pattern as
+ * icon_runtime.c (+ icon_data.c, icon_svg.c) directly — the same pattern as
  * test_drawlist_hash — because the registry accessors (lensi_icon_desc and
  * friends) are hidden symbols that do not link from liblens.so. The point
  * is to assert WHAT got registered, not just that an id came back:
