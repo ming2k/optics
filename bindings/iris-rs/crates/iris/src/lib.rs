@@ -1315,6 +1315,7 @@ pub enum Capability {
     DropTarget,
     Decorations,
     FractionalScale,
+    DragSource,
 }
 
 impl Capability {
@@ -1331,6 +1332,7 @@ impl Capability {
             Self::DropTarget => C::IRIS_CAP_DROP_TARGET,
             Self::Decorations => C::IRIS_CAP_DECORATIONS,
             Self::FractionalScale => C::IRIS_CAP_FRACTIONAL_SCALE,
+            Self::DragSource => C::IRIS_CAP_DRAG_SOURCE,
         }
     }
 }
@@ -1350,6 +1352,54 @@ pub fn backend_name() -> &'static str {
         std::ffi::CStr::from_ptr(sys::iris_backend_name())
             .to_str()
             .unwrap_or("unknown")
+    }
+}
+
+// =====================================================================
+//  Drag-and-Drop (dnd.h, ADR-0086)
+// =====================================================================
+
+pub mod dnd {
+    use super::*;
+
+    /// Action bitflags for Drag-and-Drop.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct DndAction(pub u32);
+
+    impl DndAction {
+        pub const NONE: Self = Self(sys::iris_dnd_action::IRIS_DND_ACTION_NONE as u32);
+        pub const COPY: Self = Self(sys::iris_dnd_action::IRIS_DND_ACTION_COPY as u32);
+        pub const MOVE: Self = Self(sys::iris_dnd_action::IRIS_DND_ACTION_MOVE as u32);
+        pub const LINK: Self = Self(sys::iris_dnd_action::IRIS_DND_ACTION_LINK as u32);
+        pub const ASK: Self = Self(sys::iris_dnd_action::IRIS_DND_ACTION_ASK as u32);
+    }
+
+    /// Start an outgoing drag session.
+    pub fn start_drag(text: &str, actions: DndAction) -> Result<(), ()> {
+        let src = sys::iris_dnd_source {
+            actions: actions.0,
+            mime_types: std::ptr::null(),
+            mime_count: 0,
+            static_text: text.as_ptr() as *const std::ffi::c_char,
+            static_text_len: text.len(),
+            callbacks: unsafe { std::mem::zeroed() },
+        };
+        let rc = unsafe { sys::iris_dnd_start(&src) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
+    /// Query whether a drag session is currently active.
+    pub fn is_active() -> bool {
+        unsafe { sys::iris_dnd_is_active() }
+    }
+
+    /// Cancel any active drag session.
+    pub fn cancel() {
+        unsafe { sys::iris_dnd_cancel() }
     }
 }
 
@@ -1406,21 +1456,29 @@ mod tests {
                 assert!(supports(Capability::Tablet));
                 assert!(!supports(Capability::FractionalScale));
                 assert!(supports(Capability::WindowControl));
+                assert!(supports(Capability::DropTarget));
+                assert!(supports(Capability::DragSource));
             }
             "win32" => {
                 assert!(!supports(Capability::PrimarySelection));
                 assert!(supports(Capability::FractionalScale));
                 assert!(supports(Capability::Decorations));
                 assert!(!supports(Capability::A11y)); // stub, ADR-0056 D5
+                assert!(supports(Capability::DropTarget));
+                assert!(supports(Capability::DragSource));
             }
             "cocoa" => {
                 assert!(!supports(Capability::PrimarySelection));
                 assert!(!supports(Capability::A11y)); // stub, ADR-0056 D5
                 assert!(supports(Capability::Decorations));
+                assert!(supports(Capability::DropTarget));
+                assert!(supports(Capability::DragSource));
             }
             _ => {
                 assert!(!supports(Capability::WindowControl));
                 assert!(!supports(Capability::FileDialog));
+                assert!(!supports(Capability::DropTarget));
+                assert!(!supports(Capability::DragSource));
             }
         }
     }
@@ -1432,6 +1490,13 @@ mod tests {
         assert_eq!(sys::IRIS_PICK_CANCELLED, -1);
         assert_eq!(sys::IRIS_PICK_UNAVAILABLE, -2);
         assert_eq!(sys::IRIS_PICK_TRUNCATED, -3);
+    }
+
+    #[test]
+    fn dnd_calls_without_an_active_app_are_safe() {
+        assert!(!dnd::is_active());
+        dnd::cancel();
+        assert!(dnd::start_drag("hello", dnd::DndAction::COPY).is_err());
     }
 
     #[test]
