@@ -372,10 +372,10 @@ impl CheckboxAppearance {
 /// Flex alignment along the cross axis (ADR-0028).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Align {
-    #[default]
     Start,
     Center,
     End,
+    #[default]
     Stretch,
 }
 

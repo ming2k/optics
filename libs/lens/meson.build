@@ -41,6 +41,10 @@ lens_sources = files(
   'src/widgets/separator.c',
   'src/widgets/icon.c',
   'src/widgets/image.c',
+  'src/patterns/segmented.c',
+  'src/patterns/virtual.c',
+  'src/patterns/tab_strip.c',
+  'src/patterns/split_pane.c',
   'src/icon_data.c',
   'src/icon_runtime.c',
   'src/icon_svg.c',
@@ -63,6 +67,7 @@ lens_lib = library('lens',
 
 install_headers(
   'include/lens/lens.h',
+  'include/lens/patterns.h',
   'include/lens/icon.h',
   'include/lens/export.h',
   subdir : 'lens',

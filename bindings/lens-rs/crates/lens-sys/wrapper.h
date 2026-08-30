@@ -5,4 +5,5 @@
  * icon header is listed for completeness.
  */
 #include <lens/icon.h>
+#include <lens/patterns.h>
 #include <lens/lens.h>

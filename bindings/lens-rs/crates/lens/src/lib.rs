@@ -34,7 +34,10 @@ use std::ptr;
 pub use lens_sys as sys;
 
 mod input;
+pub mod patterns;
+pub mod reactive;
 mod types;
+pub mod view;
 
 pub use input::{Input, MouseButton, key, mods};
 pub use types::{Align, Band, ButtonVariant, CheckboxAppearance, Color, CursorHint, FontFamily, Icon, LayoutOpts, PlaceMode, PlaceOpts, Rect, Response, SkinFn, Style, StyleResolved, TextLine, TextMetrics, Theme, WidgetContent, WidgetKind, WidgetRecord, WidgetState};
