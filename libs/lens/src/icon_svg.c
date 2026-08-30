@@ -412,11 +412,11 @@ static void emit_arc(svg_parser *ctx, svg_transform t, float x0, float y0, float
         float ep2_x = cx + rx * cos_next * cos_phi - ry * sin_next * sin_phi;
         float ep2_y = cy + rx * cos_next * sin_phi + ry * sin_next * cos_phi;
 
-        float cp1_x = ep1_x - alpha * (-rx * sin_th * cos_phi - ry * cos_th * sin_phi);
-        float cp1_y = ep1_y - alpha * (-rx * sin_th * sin_phi + ry * cos_th * cos_phi);
+        float cp1_x = ep1_x + alpha * (-rx * sin_th * cos_phi - ry * cos_th * sin_phi);
+        float cp1_y = ep1_y + alpha * (-rx * sin_th * sin_phi + ry * cos_th * cos_phi);
 
-        float cp2_x = ep2_x + alpha * (-rx * sin_next * cos_phi - ry * cos_next * sin_phi);
-        float cp2_y = ep2_y + alpha * (-rx * sin_next * sin_phi + ry * cos_next * cos_phi);
+        float cp2_x = ep2_x - alpha * (-rx * sin_next * cos_phi - ry * cos_next * sin_phi);
+        float cp2_y = ep2_y - alpha * (-rx * sin_next * sin_phi + ry * cos_next * cos_phi);
 
         float q1x, q1y, q2x, q2y, q3x, q3y;
         svg_transform_point(t, cp1_x, cp1_y, &q1x, &q1y);
