@@ -89,6 +89,5 @@ IRIS_API bool iris_dnd_is_active(void) {
     return false;
 }
 
-IRIS_API void iris_dnd_cancel(void) {
-}
+IRIS_API void iris_dnd_cancel(void) {}
 #endif

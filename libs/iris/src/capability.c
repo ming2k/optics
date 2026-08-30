@@ -31,13 +31,12 @@ const char *iris_backend_name(void) {
 /* ------------------------------------------------------------------ */
 /*  Capability table                                                  */
 /* ------------------------------------------------------------------ */
-/* Tablet and drop-target are Wayland-only because the protocol surface
- * (zwp_tablet_v2, wl_data_device offers) is only wired there; pen input
- * degrades to synthesized mouse events elsewhere. Primary selection is
- * Wayland-only by platform design. Fractional scale: Win32 carries true
- * per-monitor DPI into the scale factor today; Wayland quantizes to the
- * nearest integer buffer scale and Cocoa reports integer
- * backingScaleFactor (ADR-0067). */
+/* Tablet is Wayland-only because the protocol surface (zwp_tablet_v2)
+ * is only wired there; pen input degrades to synthesized mouse events
+ * elsewhere. Primary selection is Wayland-only by platform design.
+ * Fractional scale: Win32 carries true per-monitor DPI into the scale
+ * factor today; Wayland quantizes to the nearest integer buffer scale
+ * and Cocoa reports integer backingScaleFactor (ADR-0067). */
 
 static const int irisi_caps_wayland[] = {
     1, /* IRIS_CAP_WINDOW_CONTROL  */

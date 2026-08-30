@@ -7,20 +7,20 @@
 #ifndef LENSI_ICON_SVG_H
 #define LENSI_ICON_SVG_H
 
+#include <lens/icon.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <lens/icon.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct lensi_svg_shape {
-    uint32_t color;      /* 0xRRGGBBAA or 0 for currentColor/theme */
-    bool filled;         /* true = fill, false = stroke */
-    uint32_t first_cmd;  /* index in global cmd buffer */
-    uint32_t cmd_count;  /* number of cmds in this shape */
+    uint32_t color;     /* 0xRRGGBBAA or 0 for currentColor/theme */
+    bool filled;        /* true = fill, false = stroke */
+    uint32_t first_cmd; /* index in global cmd buffer */
+    uint32_t cmd_count; /* number of cmds in this shape */
 } lensi_svg_shape;
 
 typedef struct lensi_svg_result {

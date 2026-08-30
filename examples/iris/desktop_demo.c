@@ -150,13 +150,14 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
     /* Modal */
     if (lens_place_is_open(ui, "about_modal")) {
         if (lens_place_begin(
-                ui, &(lens_place_opts){
-                        .box = {.id = "about_modal"},
-                        .band = LENS_BAND_MODAL,
-                        .mode = LENS_PLACE_CENTERED,
-                        .transient = true,
-                        .layout = {.box = {.min_width = 340}, .pad = 20, .bg = tn.card, .radius = 8},
-                    })) {
+                ui,
+                &(lens_place_opts){
+                    .box = {.id = "about_modal"},
+                    .band = LENS_BAND_MODAL,
+                    .mode = LENS_PLACE_CENTERED,
+                    .transient = true,
+                    .layout = {.box = {.min_width = 340}, .pad = 20, .bg = tn.card, .radius = 8},
+                })) {
             lens_label(ui, &(lens_label_opts){.text = "About this demo", .size = 18.0f});
             lens_label(
                 ui, &(lens_label_opts){.text = "Clean minimal orthogonal components in action."});

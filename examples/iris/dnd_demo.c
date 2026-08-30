@@ -57,17 +57,20 @@ static void build(lens *ui, const lens_input *in, void *user) {
 
     /* --- Left Column: Drag Source Affordances --- */
     lens_flex(ui, 1.0f);
-    lens_column_begin(ui, &(lens_layout_opts){.pad = 16, .gap = 12, .cross = LENS_STRETCH, .bg = tn.sidebar});
+    lens_column_begin(
+        ui, &(lens_layout_opts){.pad = 16, .gap = 12, .cross = LENS_STRETCH, .bg = tn.sidebar});
 
     lens_size(ui, 0, 24);
     lens_label(ui, &(lens_label_opts){.text = "1. Drag Out to External Apps", .size = 16.0f});
     lens_size(ui, 0, 18);
-    lens_label(ui, &(lens_label_opts){.text = "Click and drag any card out to an editor or terminal:"});
+    lens_label(ui,
+               &(lens_label_opts){.text = "Click and drag any card out to an editor or terminal:"});
 
     /* Draggable Item 1 */
     lens_id drag_id1 = lens_current_id(ui, "card1");
     lens_size(ui, 0, 60);
-    lens_row_begin(ui, &(lens_layout_opts){.pad = 12, .gap = 10, .cross = LENS_CENTER, .bg = tn.card});
+    lens_row_begin(ui,
+                   &(lens_layout_opts){.pad = 12, .gap = 10, .cross = LENS_CENTER, .bg = tn.card});
     lens_label(ui, &(lens_label_opts){.text = "[Drag Me] Optics C23 Graphics Framework"});
     lens_close(ui);
 
@@ -82,7 +85,8 @@ static void build(lens *ui, const lens_input *in, void *user) {
     /* Draggable Item 2 */
     lens_id drag_id2 = lens_current_id(ui, "card2");
     lens_size(ui, 0, 60);
-    lens_row_begin(ui, &(lens_layout_opts){.pad = 12, .gap = 10, .cross = LENS_CENTER, .bg = tn.card});
+    lens_row_begin(ui,
+                   &(lens_layout_opts){.pad = 12, .gap = 10, .cross = LENS_CENTER, .bg = tn.card});
     lens_label(ui, &(lens_label_opts){.text = "[Drag Me] Code Snippet: lens_dnd_source()"});
     lens_close(ui);
 
@@ -98,7 +102,8 @@ static void build(lens *ui, const lens_input *in, void *user) {
 
     /* --- Right Column: Drop Target Zone --- */
     lens_flex(ui, 1.0f);
-    lens_column_begin(ui, &(lens_layout_opts){.pad = 16, .gap = 12, .cross = LENS_STRETCH, .bg = tn.sidebar});
+    lens_column_begin(
+        ui, &(lens_layout_opts){.pad = 16, .gap = 12, .cross = LENS_STRETCH, .bg = tn.sidebar});
 
     lens_size(ui, 0, 24);
     lens_label(ui, &(lens_label_opts){.text = "2. Drop In from External Apps", .size = 16.0f});
@@ -110,7 +115,8 @@ static void build(lens *ui, const lens_input *in, void *user) {
     lens_flex(ui, 1.0f);
 
     uint32_t zone_bg = a->target_hovered ? th.color_accent : tn.card;
-    lens_column_begin(ui, &(lens_layout_opts){.pad = 16, .gap = 8, .cross = LENS_STRETCH, .bg = zone_bg});
+    lens_column_begin(
+        ui, &(lens_layout_opts){.pad = 16, .gap = 8, .cross = LENS_STRETCH, .bg = zone_bg});
 
     lens_dnd_drop_info dinfo = {0};
     bool in_target = lens_dnd_drop_target(ui, drop_zone_id, IRIS_DND_ACTION_COPY, &dinfo);
@@ -130,7 +136,8 @@ static void build(lens *ui, const lens_input *in, void *user) {
     if (a->dropped_len > 0) {
         lens_size(ui, 0, 24);
         char summary[128];
-        snprintf(summary, sizeof(summary), "Received Drop #%u (%u bytes):", a->drop_count, a->dropped_len);
+        snprintf(summary, sizeof(summary), "Received Drop #%u (%u bytes):", a->drop_count,
+                 a->dropped_len);
         lens_label(ui, &(lens_label_opts){.text = summary});
 
         lens_flex(ui, 1.0f);

@@ -188,7 +188,8 @@ static void test_container_width_constraints_bound_intrinsic_size(void) {
     lens_column_begin(ui, &(lens_layout_opts){.box = {.min_width = 90.0f}, .pad = pad});
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_close(ui);
-    lens_column_begin(ui, &(lens_layout_opts){.box = {.min_width = 20.0f, .max_width = 240.0f}, .pad = pad});
+    lens_column_begin(
+        ui, &(lens_layout_opts){.box = {.min_width = 20.0f, .max_width = 240.0f}, .pad = pad});
     (void)lens_button(ui, &(lens_button_opts){.label = "natural"});
     lens_close(ui);
     lens_column_begin(ui, &(lens_layout_opts){.box = {.max_width = 100.0f}, .pad = pad});

@@ -99,15 +99,15 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
     /* ── File dropdown popup ───────────────────────────────────── */
 
     if (lens_place_is_open(ui, "file_menu")) {
-        if (lens_place_begin(ui,
-                             &(lens_place_opts){
-                                 .box = {.id = "file_menu"},
-                                 .band = LENS_BAND_POPUP,
-                                 .mode = LENS_PLACE_ANCHORED,
-                                 .rect = a->file_btn_rect,
-                                 .transient = true,
-                                 .layout = {.box = {.min_width = 140}, .pad = 6, .bg = tn.card, .radius = 6},
-                             })) {
+        if (lens_place_begin(
+                ui, &(lens_place_opts){
+                        .box = {.id = "file_menu"},
+                        .band = LENS_BAND_POPUP,
+                        .mode = LENS_PLACE_ANCHORED,
+                        .rect = a->file_btn_rect,
+                        .transient = true,
+                        .layout = {.box = {.min_width = 140}, .pad = 6, .bg = tn.card, .radius = 6},
+                    })) {
             if (lens_button(ui, &(lens_button_opts){.label = "New"}).clicked) {
                 printf("  FILE     New\n");
                 lens_place_close(ui, "file_menu");
@@ -132,15 +132,15 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
     /* ── Edit dropdown popup ───────────────────────────────────── */
 
     if (lens_place_is_open(ui, "edit_menu")) {
-        if (lens_place_begin(ui,
-                             &(lens_place_opts){
-                                 .box = {.id = "edit_menu"},
-                                 .band = LENS_BAND_POPUP,
-                                 .mode = LENS_PLACE_ANCHORED,
-                                 .rect = a->edit_btn_rect,
-                                 .transient = true,
-                                 .layout = {.box = {.min_width = 140}, .pad = 6, .bg = tn.card, .radius = 6},
-                             })) {
+        if (lens_place_begin(
+                ui, &(lens_place_opts){
+                        .box = {.id = "edit_menu"},
+                        .band = LENS_BAND_POPUP,
+                        .mode = LENS_PLACE_ANCHORED,
+                        .rect = a->edit_btn_rect,
+                        .transient = true,
+                        .layout = {.box = {.min_width = 140}, .pad = 6, .bg = tn.card, .radius = 6},
+                    })) {
             if (lens_button(ui, &(lens_button_opts){.label = "Cut"}).clicked) {
                 printf("  EDIT     Cut\n");
                 lens_place_close(ui, "edit_menu");
@@ -174,13 +174,14 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
         }
 
         if (lens_place_begin(
-                ui, &(lens_place_opts){
-                        .box = {.id = "modal"},
-                        .band = LENS_BAND_POPUP,
-                        .mode = LENS_PLACE_CENTERED,
-                        .transient = true,
-                        .layout = {.box = {.min_width = 280}, .pad = 20, .bg = tn.card, .radius = 10},
-                    })) {
+                ui,
+                &(lens_place_opts){
+                    .box = {.id = "modal"},
+                    .band = LENS_BAND_POPUP,
+                    .mode = LENS_PLACE_CENTERED,
+                    .transient = true,
+                    .layout = {.box = {.min_width = 280}, .pad = 20, .bg = tn.card, .radius = 10},
+                })) {
             lens_label(ui, &(lens_label_opts){.text = "Modal Dialog", .size = 18.0f});
             lens_label(ui, &(lens_label_opts){
                                .text = "Popups can stack. Escape or click outside to close."});

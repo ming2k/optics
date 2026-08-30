@@ -42,13 +42,13 @@ typedef enum iris_dnd_action {
     IRIS_DND_ACTION_COPY = 1u << 0,
     IRIS_DND_ACTION_MOVE = 1u << 1,
     IRIS_DND_ACTION_LINK = 1u << 2,
-    IRIS_DND_ACTION_ASK  = 1u << 3,
+    IRIS_DND_ACTION_ASK = 1u << 3,
 } iris_dnd_action;
 
 /* Well-known MIME formats for data exchange. */
 #define IRIS_DND_MIME_TEXT_PLAIN "text/plain;charset=utf-8"
-#define IRIS_DND_MIME_TEXT_URI   "text/uri-list"
-#define IRIS_DND_MIME_IMAGE_PNG  "image/png"
+#define IRIS_DND_MIME_TEXT_URI "text/uri-list"
+#define IRIS_DND_MIME_IMAGE_PNG "image/png"
 
 /* Callbacks invoked for outgoing drag sources. */
 typedef struct iris_dnd_source_callbacks {

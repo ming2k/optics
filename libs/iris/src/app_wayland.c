@@ -1800,7 +1800,8 @@ IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
         wl_data_source_offer(pl->drag_source, "UTF8_STRING");
     }
 
-    uint32_t actions = WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY | WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
+    uint32_t actions =
+        WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY | WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
     if (wl_data_source_get_version(pl->drag_source) >= 3) {
         wl_data_source_set_actions(pl->drag_source, actions);
     }
@@ -3036,8 +3037,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                                  .clipboard = {.set_text = clip_set_text,
                                                .request_text = clip_request_text,
                                                .user = &pl},
-                                 .dnd = {.start_drag = lens_host_start_drag,
-                                         .user = &pl}},
+                                 .dnd = {.start_drag = lens_host_start_drag, .user = &pl}},
                     &ui) != FLUX_OK) {
         fprintf(stderr, "lens_create failed\n");
         goto fail;

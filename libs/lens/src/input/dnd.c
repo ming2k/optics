@@ -41,10 +41,8 @@ bool lens_dnd_source(lens *ui, const lens_dnd_source_desc *desc) {
                 }
 
                 if (ui->dnd_host.start_drag) {
-                    ui->dnd_host.start_drag(ui->dnd_source.drag_text,
-                                            ui->dnd_source.drag_text_len,
-                                            ui->dnd_source.drag_actions,
-                                            ui->dnd_host.user);
+                    ui->dnd_host.start_drag(ui->dnd_source.drag_text, ui->dnd_source.drag_text_len,
+                                            ui->dnd_source.drag_actions, ui->dnd_host.user);
                 }
             }
         }
@@ -53,7 +51,8 @@ bool lens_dnd_source(lens *ui, const lens_dnd_source_desc *desc) {
     return ui->dnd_source.active && (ui->dnd_source.source_id == desc->id);
 }
 
-bool lens_dnd_drop_target(lens *ui, lens_id id, uint32_t accepted_actions, lens_dnd_drop_info *out_info) {
+bool lens_dnd_drop_target(lens *ui, lens_id id, uint32_t accepted_actions,
+                          lens_dnd_drop_info *out_info) {
     if (!ui || !id)
         return false;
 
@@ -90,9 +89,8 @@ void lens_deliver_drop(lens *ui, const char *payload, size_t len, flux_point pos
     if (!ui || !payload || !len)
         return;
 
-    size_t cp = len < (sizeof(ui->dnd_drop.drop_buf) - 1)
-                    ? len
-                    : (sizeof(ui->dnd_drop.drop_buf) - 1);
+    size_t cp =
+        len < (sizeof(ui->dnd_drop.drop_buf) - 1) ? len : (sizeof(ui->dnd_drop.drop_buf) - 1);
     memcpy(ui->dnd_drop.drop_buf, payload, cp);
     ui->dnd_drop.drop_buf[cp] = '\0';
     ui->dnd_drop.drop_len = (uint32_t)cp;
@@ -105,9 +103,7 @@ uint32_t lens_take_drop(lens *ui, char *dst, uint32_t cap) {
     if (!ui || !dst || cap == 0 || !ui->dnd_drop.drop_len)
         return 0;
 
-    uint32_t n = ui->dnd_drop.drop_len < (cap - 1)
-                     ? ui->dnd_drop.drop_len
-                     : (cap - 1);
+    uint32_t n = ui->dnd_drop.drop_len < (cap - 1) ? ui->dnd_drop.drop_len : (cap - 1);
     memcpy(dst, ui->dnd_drop.drop_buf, n);
     dst[n] = '\0';
     ui->dnd_drop.drop_len = 0;

@@ -235,10 +235,10 @@ static bool parse_color(const char *str, svg_paint *out) {
         const char *name;
         uint32_t color;
     } named[] = {
-        {"black", 0xFF000000u},   {"white", 0xFFFFFFFFu},   {"red", 0xFFFF0000u},
-        {"green", 0xFF008000u},   {"blue", 0xFF0000FFu},    {"yellow", 0xFFFFFF00u},
-        {"cyan", 0xFF00FFFFu},    {"magenta", 0xFFFF00FFu}, {"gray", 0xFF808080u},
-        {"grey", 0xFF808080u},    {"orange", 0xFFFFA500u},  {"purple", 0xFF800080u},
+        {"black", 0xFF000000u},       {"white", 0xFFFFFFFFu},   {"red", 0xFFFF0000u},
+        {"green", 0xFF008000u},       {"blue", 0xFF0000FFu},    {"yellow", 0xFFFFFF00u},
+        {"cyan", 0xFF00FFFFu},        {"magenta", 0xFFFF00FFu}, {"gray", 0xFF808080u},
+        {"grey", 0xFF808080u},        {"orange", 0xFFFFA500u},  {"purple", 0xFF800080u},
         {"transparent", 0x00000000u},
     };
     for (size_t i = 0; i < sizeof(named) / sizeof(named[0]); ++i) {
@@ -314,10 +314,12 @@ static void parse_transform(const char *str, svg_transform *out) {
                 float sin_a = sinf(rad);
                 if (parse_number(&p, &cx) && parse_number(&p, &cy)) {
                     t = svg_transform_multiply(t, (svg_transform){1, 0, 0, 1, cx, cy});
-                    t = svg_transform_multiply(t, (svg_transform){cos_a, sin_a, -sin_a, cos_a, 0, 0});
+                    t = svg_transform_multiply(t,
+                                               (svg_transform){cos_a, sin_a, -sin_a, cos_a, 0, 0});
                     t = svg_transform_multiply(t, (svg_transform){1, 0, 0, 1, -cx, -cy});
                 } else {
-                    t = svg_transform_multiply(t, (svg_transform){cos_a, sin_a, -sin_a, cos_a, 0, 0});
+                    t = svg_transform_multiply(t,
+                                               (svg_transform){cos_a, sin_a, -sin_a, cos_a, 0, 0});
                 }
             }
             while (*p && *p != ')')
@@ -424,9 +426,9 @@ static void emit_arc(svg_parser *ctx, svg_transform t, float x0, float y0, float
         svg_transform_point(t, ep2_x, ep2_y, &q3x, &q3y);
 
         cmd_buf_push(&ctx->cmds, (lens_icon_cmd){
-            .type = 2,
-            .params = {q1x, q1y, q2x, q2y, q3x, q3y},
-        });
+                                     .type = 2,
+                                     .params = {q1x, q1y, q2x, q2y, q3x, q3y},
+                                 });
         th = next_th;
     }
 }
@@ -497,9 +499,9 @@ static void parse_path_d(svg_parser *ctx, const char *d, svg_transform t) {
                 svg_transform_point(t, x0, y0, &p0x, &p0y);
                 svg_transform_point(t, cur_x, cur_y, &p3x, &p3y);
                 cmd_buf_push(&ctx->cmds, (lens_icon_cmd){
-                    .type = 2,
-                    .params = {p0x, p0y, p3x, p3y, p3x, p3y},
-                });
+                                             .type = 2,
+                                             .params = {p0x, p0y, p3x, p3y, p3x, p3y},
+                                         });
             }
             last_cmd = cmd;
             break;
@@ -518,9 +520,9 @@ static void parse_path_d(svg_parser *ctx, const char *d, svg_transform t) {
                 svg_transform_point(t, x0, y0, &p0x, &p0y);
                 svg_transform_point(t, cur_x, cur_y, &p3x, &p3y);
                 cmd_buf_push(&ctx->cmds, (lens_icon_cmd){
-                    .type = 2,
-                    .params = {p0x, p0y, p3x, p3y, p3x, p3y},
-                });
+                                             .type = 2,
+                                             .params = {p0x, p0y, p3x, p3y, p3x, p3y},
+                                         });
             }
             last_cmd = cmd;
             break;
@@ -539,9 +541,9 @@ static void parse_path_d(svg_parser *ctx, const char *d, svg_transform t) {
                 svg_transform_point(t, x0, y0, &p0x, &p0y);
                 svg_transform_point(t, cur_x, cur_y, &p3x, &p3y);
                 cmd_buf_push(&ctx->cmds, (lens_icon_cmd){
-                    .type = 2,
-                    .params = {p0x, p0y, p3x, p3y, p3x, p3y},
-                });
+                                             .type = 2,
+                                             .params = {p0x, p0y, p3x, p3y, p3x, p3y},
+                                         });
             }
             last_cmd = cmd;
             break;
@@ -584,12 +586,14 @@ static void parse_path_d(svg_parser *ctx, const char *d, svg_transform t) {
                     x += cur_x;
                     y += cur_y;
                 }
-                float x1 = (last_cmd == 'C' || last_cmd == 'c' || last_cmd == 'S' || last_cmd == 's')
-                               ? 2.0f * cur_x - last_cpx
-                               : cur_x;
-                float y1 = (last_cmd == 'C' || last_cmd == 'c' || last_cmd == 'S' || last_cmd == 's')
-                               ? 2.0f * cur_y - last_cpy
-                               : cur_y;
+                float x1 =
+                    (last_cmd == 'C' || last_cmd == 'c' || last_cmd == 'S' || last_cmd == 's')
+                        ? 2.0f * cur_x - last_cpx
+                        : cur_x;
+                float y1 =
+                    (last_cmd == 'C' || last_cmd == 'c' || last_cmd == 'S' || last_cmd == 's')
+                        ? 2.0f * cur_y - last_cpy
+                        : cur_y;
                 float p1x, p1y, p2x, p2y, p3x, p3y;
                 svg_transform_point(t, x1, y1, &p1x, &p1y);
                 svg_transform_point(t, x2, y2, &p2x, &p2y);
@@ -642,12 +646,14 @@ static void parse_path_d(svg_parser *ctx, const char *d, svg_transform t) {
                     x += cur_x;
                     y += cur_y;
                 }
-                float x1 = (last_cmd == 'Q' || last_cmd == 'q' || last_cmd == 'T' || last_cmd == 't')
-                               ? 2.0f * cur_x - last_cpx
-                               : cur_x;
-                float y1 = (last_cmd == 'Q' || last_cmd == 'q' || last_cmd == 'T' || last_cmd == 't')
-                               ? 2.0f * cur_y - last_cpy
-                               : cur_y;
+                float x1 =
+                    (last_cmd == 'Q' || last_cmd == 'q' || last_cmd == 'T' || last_cmd == 't')
+                        ? 2.0f * cur_x - last_cpx
+                        : cur_x;
+                float y1 =
+                    (last_cmd == 'Q' || last_cmd == 'q' || last_cmd == 'T' || last_cmd == 't')
+                        ? 2.0f * cur_y - last_cpy
+                        : cur_y;
                 float cx1 = cur_x + 2.0f / 3.0f * (x1 - cur_x);
                 float cy1 = cur_y + 2.0f / 3.0f * (y1 - cur_y);
                 float cx2 = x + 2.0f / 3.0f * (x1 - x);
@@ -720,29 +726,25 @@ static void emit_circle(svg_parser *ctx, float cx, float cy, float r, svg_transf
     svg_transform_point(t, cx + r, cy + k, &p1x, &p1y);
     svg_transform_point(t, cx + k, cy + r, &p2x, &p2y);
     svg_transform_point(t, cx, cy + r, &p3x, &p3y);
-    cmd_buf_push(&ctx->cmds,
-                 (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
+    cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
 
     /* Bottom to Left */
     svg_transform_point(t, cx - k, cy + r, &p1x, &p1y);
     svg_transform_point(t, cx - r, cy + k, &p2x, &p2y);
     svg_transform_point(t, cx - r, cy, &p3x, &p3y);
-    cmd_buf_push(&ctx->cmds,
-                 (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
+    cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
 
     /* Left to Top */
     svg_transform_point(t, cx - r, cy - k, &p1x, &p1y);
     svg_transform_point(t, cx - k, cy - r, &p2x, &p2y);
     svg_transform_point(t, cx, cy - r, &p3x, &p3y);
-    cmd_buf_push(&ctx->cmds,
-                 (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
+    cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
 
     /* Top to Right */
     svg_transform_point(t, cx + k, cy - r, &p1x, &p1y);
     svg_transform_point(t, cx + r, cy - k, &p2x, &p2y);
     svg_transform_point(t, cx + r, cy, &p3x, &p3y);
-    cmd_buf_push(&ctx->cmds,
-                 (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
+    cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
 
     cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 4});
 }
@@ -771,9 +773,12 @@ static void emit_rect(svg_parser *ctx, float x, float y, float w, float h, float
         svg_transform_point(t, x + w, y + h, &p2x, &p2y);
         svg_transform_point(t, x, y + h, &p3x, &p3y);
         cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 0, .params = {p0x, p0y}});
-        cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p0x, p0y, p1x, p1y, p1x, p1y}});
-        cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p2x, p2y}});
-        cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p2x, p2y, p3x, p3y, p3x, p3y}});
+        cmd_buf_push(&ctx->cmds,
+                     (lens_icon_cmd){.type = 2, .params = {p0x, p0y, p1x, p1y, p1x, p1y}});
+        cmd_buf_push(&ctx->cmds,
+                     (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p2x, p2y}});
+        cmd_buf_push(&ctx->cmds,
+                     (lens_icon_cmd){.type = 2, .params = {p2x, p2y, p3x, p3y, p3x, p3y}});
         cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 4});
     } else {
         /* Rounded rect with beziers */
@@ -785,7 +790,8 @@ static void emit_rect(svg_parser *ctx, float x, float y, float w, float h, float
         cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 0, .params = {p0x, p0y}});
 
         svg_transform_point(t, x + w - rx, y, &p1x, &p1y);
-        cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p0x, p0y, p1x, p1y, p1x, p1y}});
+        cmd_buf_push(&ctx->cmds,
+                     (lens_icon_cmd){.type = 2, .params = {p0x, p0y, p1x, p1y, p1x, p1y}});
 
         svg_transform_point(t, x + w - rx + kx, y, &p1x, &p1y);
         svg_transform_point(t, x + w, y + ry - ky, &p2x, &p2y);
@@ -794,7 +800,8 @@ static void emit_rect(svg_parser *ctx, float x, float y, float w, float h, float
                      (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
 
         svg_transform_point(t, x + w, y + h - ry, &p1x, &p1y);
-        cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p3x, p3y, p1x, p1y, p1x, p1y}});
+        cmd_buf_push(&ctx->cmds,
+                     (lens_icon_cmd){.type = 2, .params = {p3x, p3y, p1x, p1y, p1x, p1y}});
 
         svg_transform_point(t, x + w, y + h - ry + ky, &p1x, &p1y);
         svg_transform_point(t, x + w - rx + kx, y + h, &p2x, &p2y);
@@ -803,7 +810,8 @@ static void emit_rect(svg_parser *ctx, float x, float y, float w, float h, float
                      (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
 
         svg_transform_point(t, x + rx, y + h, &p1x, &p1y);
-        cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p3x, p3y, p1x, p1y, p1x, p1y}});
+        cmd_buf_push(&ctx->cmds,
+                     (lens_icon_cmd){.type = 2, .params = {p3x, p3y, p1x, p1y, p1x, p1y}});
 
         svg_transform_point(t, x + rx - kx, y + h, &p1x, &p1y);
         svg_transform_point(t, x, y + h - ry + ky, &p2x, &p2y);
@@ -812,7 +820,8 @@ static void emit_rect(svg_parser *ctx, float x, float y, float w, float h, float
                      (lens_icon_cmd){.type = 2, .params = {p1x, p1y, p2x, p2y, p3x, p3y}});
 
         svg_transform_point(t, x, y + ry, &p1x, &p1y);
-        cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 2, .params = {p3x, p3y, p1x, p1y, p1x, p1y}});
+        cmd_buf_push(&ctx->cmds,
+                     (lens_icon_cmd){.type = 2, .params = {p3x, p3y, p1x, p1y, p1x, p1y}});
 
         svg_transform_point(t, x, y + ry - ky, &p1x, &p1y);
         svg_transform_point(t, x + rx - kx, y, &p2x, &p2y);
@@ -829,9 +838,9 @@ static void emit_line(svg_parser *ctx, float x1, float y1, float x2, float y2, s
     svg_transform_point(t, x2, y2, &p3x, &p3y);
     cmd_buf_push(&ctx->cmds, (lens_icon_cmd){.type = 0, .params = {p0x, p0y}});
     cmd_buf_push(&ctx->cmds, (lens_icon_cmd){
-        .type = 2,
-        .params = {p0x, p0y, p3x, p3y, p3x, p3y},
-    });
+                                 .type = 2,
+                                 .params = {p0x, p0y, p3x, p3y, p3x, p3y},
+                             });
 }
 
 static void emit_polyline(svg_parser *ctx, const char *pts, bool closed, svg_transform t) {
@@ -847,9 +856,9 @@ static void emit_polyline(svg_parser *ctx, const char *pts, bool closed, svg_tra
             first = false;
         } else {
             cmd_buf_push(&ctx->cmds, (lens_icon_cmd){
-                .type = 2,
-                .params = {prev_x, prev_y, tx, ty, tx, ty},
-            });
+                                         .type = 2,
+                                         .params = {prev_x, prev_y, tx, ty, tx, ty},
+                                     });
         }
         prev_x = tx;
         prev_y = ty;
@@ -871,7 +880,8 @@ static const char *find_attr(const char *tag, const char *name) {
             p++;
             while (*p && isspace((unsigned char)*p))
                 p++;
-            if (strncmp(p, name, nlen) == 0 && (p[nlen] == '=' || isspace((unsigned char)p[nlen]))) {
+            if (strncmp(p, name, nlen) == 0 &&
+                (p[nlen] == '=' || isspace((unsigned char)p[nlen]))) {
                 p += nlen;
                 while (*p && *p != '=')
                     p++;
@@ -1304,7 +1314,8 @@ bool lensi_svg_parse(const char *svg_text, lensi_svg_result *out) {
                 }
             }
 
-            /* If all runs are theme-colored (color == 0) and uniform, collapse to runs == nullptr */
+            /* If all runs are theme-colored (color == 0) and uniform, collapse to runs == nullptr
+             */
             bool all_theme = true;
             for (uint32_t i = 0; i < run_count; ++i) {
                 if (runs[i].color != 0) {

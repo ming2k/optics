@@ -1103,15 +1103,18 @@ LENS_API void lens_textedit_set_selection(lens *ui, const char *label, uint32_t 
 static_assert(offsetof(lens_layout_opts, box) == 0, "lens_layout_opts.box must be at offset 0");
 static_assert(offsetof(lens_grid_opts, box) == 0, "lens_grid_opts.box must be at offset 0");
 static_assert(offsetof(lens_scroll_opts, box) == 0, "lens_scroll_opts.box must be at offset 0");
-static_assert(offsetof(lens_pressable_opts, box) == 0, "lens_pressable_opts.box must be at offset 0");
+static_assert(offsetof(lens_pressable_opts, box) == 0,
+              "lens_pressable_opts.box must be at offset 0");
 static_assert(offsetof(lens_place_opts, box) == 0, "lens_place_opts.box must be at offset 0");
 static_assert(offsetof(lens_label_opts, box) == 0, "lens_label_opts.box must be at offset 0");
 static_assert(offsetof(lens_icon_opts, box) == 0, "lens_icon_opts.box must be at offset 0");
 static_assert(offsetof(lens_image_opts, box) == 0, "lens_image_opts.box must be at offset 0");
-static_assert(offsetof(lens_separator_opts, box) == 0, "lens_separator_opts.box must be at offset 0");
+static_assert(offsetof(lens_separator_opts, box) == 0,
+              "lens_separator_opts.box must be at offset 0");
 static_assert(offsetof(lens_button_opts, box) == 0, "lens_button_opts.box must be at offset 0");
 static_assert(offsetof(lens_checkbox_opts, box) == 0, "lens_checkbox_opts.box must be at offset 0");
-static_assert(offsetof(lens_selectable_opts, box) == 0, "lens_selectable_opts.box must be at offset 0");
+static_assert(offsetof(lens_selectable_opts, box) == 0,
+              "lens_selectable_opts.box must be at offset 0");
 static_assert(offsetof(lens_slider_opts, box) == 0, "lens_slider_opts.box must be at offset 0");
 static_assert(offsetof(lens_textedit_opts, box) == 0, "lens_textedit_opts.box must be at offset 0");
 #endif
@@ -1182,24 +1185,25 @@ LENS_API void lens_set_caret_rect(lens *ui, flux_rect r);
 
 typedef struct lens_dnd_source_desc {
     lens_id id;
-    const char *text;               /* Static text payload (e.g. URI or text) */
+    const char *text; /* Static text payload (e.g. URI or text) */
     size_t text_len;
-    uint32_t actions;               /* Allowed actions bitmask (1=copy, 2=move) */
-    flux_rect preview_rect;         /* UI-space visual bounding box */
+    uint32_t actions;       /* Allowed actions bitmask (1=copy, 2=move) */
+    flux_rect preview_rect; /* UI-space visual bounding box */
 } lens_dnd_source_desc;
 
 typedef struct lens_dnd_drop_info {
-    bool is_hovered;                /* Cursor is over this drop zone */
-    bool is_dropped;                /* Payload dropped on this target this frame */
-    flux_point drop_pos;            /* Drop position relative to target bounding box */
-    uint32_t action;                /* Negotiated action */
+    bool is_hovered;     /* Cursor is over this drop zone */
+    bool is_dropped;     /* Payload dropped on this target this frame */
+    flux_point drop_pos; /* Drop position relative to target bounding box */
+    uint32_t action;     /* Negotiated action */
 } lens_dnd_drop_info;
 
 /* Declare a node as a drag source. Returns true if drag was actively initiated/active. */
 LENS_API bool lens_dnd_source(lens *ui, const lens_dnd_source_desc *desc);
 
 /* Declare a node as a drop target zone. Returns true if hovered or dropped. */
-LENS_API bool lens_dnd_drop_target(lens *ui, lens_id id, uint32_t accepted_actions, lens_dnd_drop_info *out_info);
+LENS_API bool lens_dnd_drop_target(lens *ui, lens_id id, uint32_t accepted_actions,
+                                   lens_dnd_drop_info *out_info);
 
 /* Platform delivery of drop payload into lens. */
 LENS_API void lens_deliver_drop(lens *ui, const char *payload, size_t len, flux_point pos);

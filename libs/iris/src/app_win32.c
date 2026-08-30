@@ -61,17 +61,18 @@
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
-/* windows.h MUST precede imm.h: imm.h uses the base handle macros
- * (DECLARE_HANDLE, HKL, UINT, DWORD, POINT, RECT) without defining them.
- * MinGW-w64 headers tolerate the reverse order by accident; zig cc's
- * bundled MinGW headers do not — this include order was the reason the
- * CI cross-compile gate could not build this TU. */
+/* clang-format off */
+/* windows.h MUST precede imm.h, ole2.h, shellapi.h, and vulkan_win32.h:
+ * imm.h uses the base handle macros (DECLARE_HANDLE, HKL, UINT, DWORD,
+ * POINT, RECT) without defining them. MinGW-w64 headers tolerate the
+ * reverse order by accident; zig cc's bundled MinGW headers do not. */
 #include <windows.h>
 #include <windowsx.h>
 #include <imm.h>
 #include <ole2.h>
 #include <shellapi.h>
 #include <shlobj.h>
+/* clang-format on */
 
 /* Win32 platform surface glue: included as the platform child header (the
  * way app_wayland.c pulls <vulkan/vulkan_wayland.h>), after windows.h has
@@ -839,7 +840,8 @@ typedef struct w32_drop_target_impl {
     w32_platform *pl;
 } w32_drop_target_impl;
 
-static HRESULT STDMETHODCALLTYPE dt_QueryInterface(IDropTarget *This, REFIID riid, void **ppvObject) {
+static HRESULT STDMETHODCALLTYPE dt_QueryInterface(IDropTarget *This, REFIID riid,
+                                                   void **ppvObject) {
     if (!ppvObject)
         return E_POINTER;
     if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDropTarget)) {
@@ -862,7 +864,8 @@ static ULONG STDMETHODCALLTYPE dt_Release(IDropTarget *This) {
     return (ULONG)(c > 0 ? c : 0);
 }
 
-static HRESULT STDMETHODCALLTYPE dt_DragEnter(IDropTarget *This, IDataObject *pDataObj, DWORD grfKeyState, POINTL pt, DWORD *pdwEffect) {
+static HRESULT STDMETHODCALLTYPE dt_DragEnter(IDropTarget *This, IDataObject *pDataObj,
+                                              DWORD grfKeyState, POINTL pt, DWORD *pdwEffect) {
     (void)This;
     (void)pDataObj;
     (void)grfKeyState;
@@ -872,7 +875,8 @@ static HRESULT STDMETHODCALLTYPE dt_DragEnter(IDropTarget *This, IDataObject *pD
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE dt_DragOver(IDropTarget *This, DWORD grfKeyState, POINTL pt, DWORD *pdwEffect) {
+static HRESULT STDMETHODCALLTYPE dt_DragOver(IDropTarget *This, DWORD grfKeyState, POINTL pt,
+                                             DWORD *pdwEffect) {
     (void)This;
     (void)grfKeyState;
     (void)pt;
@@ -886,7 +890,8 @@ static HRESULT STDMETHODCALLTYPE dt_DragLeave(IDropTarget *This) {
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE dt_Drop(IDropTarget *This, IDataObject *pDataObj, DWORD grfKeyState, POINTL pt, DWORD *pdwEffect) {
+static HRESULT STDMETHODCALLTYPE dt_Drop(IDropTarget *This, IDataObject *pDataObj,
+                                         DWORD grfKeyState, POINTL pt, DWORD *pdwEffect) {
     (void)grfKeyState;
     w32_drop_target_impl *impl = (w32_drop_target_impl *)This;
     if (!impl || !impl->pl || !impl->pl->ui || !pDataObj)
@@ -924,13 +929,16 @@ static HRESULT STDMETHODCALLTYPE dt_Drop(IDropTarget *This, IDataObject *pDataOb
                 if (count > 0) {
                     wchar_t path_w[MAX_PATH];
                     if (DragQueryFileW(hdrop, 0, path_w, MAX_PATH) > 0) {
-                        int utf8_len = WideCharToMultiByte(CP_UTF8, 0, path_w, -1, NULL, 0, NULL, NULL);
+                        int utf8_len =
+                            WideCharToMultiByte(CP_UTF8, 0, path_w, -1, NULL, 0, NULL, NULL);
                         if (utf8_len > 1) {
                             char *utf8 = (char *)malloc((size_t)utf8_len);
                             if (utf8) {
-                                WideCharToMultiByte(CP_UTF8, 0, path_w, -1, utf8, utf8_len, NULL, NULL);
+                                WideCharToMultiByte(CP_UTF8, 0, path_w, -1, utf8, utf8_len, NULL,
+                                                    NULL);
                                 lens_paste(impl->pl->ui, utf8, (size_t)(utf8_len - 1));
-                                lens_deliver_drop(impl->pl->ui, utf8, (size_t)(utf8_len - 1), drop_pos);
+                                lens_deliver_drop(impl->pl->ui, utf8, (size_t)(utf8_len - 1),
+                                                  drop_pos);
                                 free(utf8);
                             }
                         }
@@ -964,7 +972,8 @@ typedef struct w32_drop_source_impl {
     LONG ref_count;
 } w32_drop_source_impl;
 
-static HRESULT STDMETHODCALLTYPE ds_QueryInterface(IDropSource *This, REFIID riid, void **ppvObject) {
+static HRESULT STDMETHODCALLTYPE ds_QueryInterface(IDropSource *This, REFIID riid,
+                                                   void **ppvObject) {
     if (!ppvObject)
         return E_POINTER;
     if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDropSource)) {
@@ -987,7 +996,8 @@ static ULONG STDMETHODCALLTYPE ds_Release(IDropSource *This) {
     return (ULONG)(c > 0 ? c : 0);
 }
 
-static HRESULT STDMETHODCALLTYPE ds_QueryContinueDrag(IDropSource *This, BOOL fEscapePressed, DWORD grfKeyState) {
+static HRESULT STDMETHODCALLTYPE ds_QueryContinueDrag(IDropSource *This, BOOL fEscapePressed,
+                                                      DWORD grfKeyState) {
     (void)This;
     if (fEscapePressed)
         return DRAGDROP_S_CANCEL;
@@ -1018,7 +1028,8 @@ typedef struct w32_data_object_impl {
     wchar_t *text_w;
 } w32_data_object_impl;
 
-static HRESULT STDMETHODCALLTYPE do_QueryInterface(IDataObject *This, REFIID riid, void **ppvObject) {
+static HRESULT STDMETHODCALLTYPE do_QueryInterface(IDataObject *This, REFIID riid,
+                                                   void **ppvObject) {
     if (!ppvObject)
         return E_POINTER;
     if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDataObject)) {
@@ -1041,11 +1052,13 @@ static ULONG STDMETHODCALLTYPE do_Release(IDataObject *This) {
     return (ULONG)(c > 0 ? c : 0);
 }
 
-static HRESULT STDMETHODCALLTYPE do_GetData(IDataObject *This, FORMATETC *pformatetcIn, STGMEDIUM *pmedium) {
+static HRESULT STDMETHODCALLTYPE do_GetData(IDataObject *This, FORMATETC *pformatetcIn,
+                                            STGMEDIUM *pmedium) {
     w32_data_object_impl *impl = (w32_data_object_impl *)This;
     if (!pformatetcIn || !pmedium)
         return E_POINTER;
-    if (pformatetcIn->cfFormat == CF_UNICODETEXT && (pformatetcIn->tymed & TYMED_HGLOBAL) && impl->text_w) {
+    if (pformatetcIn->cfFormat == CF_UNICODETEXT && (pformatetcIn->tymed & TYMED_HGLOBAL) &&
+        impl->text_w) {
         size_t len = (wcslen(impl->text_w) + 1) * sizeof(wchar_t);
         HGLOBAL hg = GlobalAlloc(GHND, len);
         if (!hg)
@@ -1065,7 +1078,8 @@ static HRESULT STDMETHODCALLTYPE do_GetData(IDataObject *This, FORMATETC *pforma
     return DV_E_FORMATETC;
 }
 
-static HRESULT STDMETHODCALLTYPE do_GetDataHere(IDataObject *This, FORMATETC *pformatetc, STGMEDIUM *pmedium) {
+static HRESULT STDMETHODCALLTYPE do_GetDataHere(IDataObject *This, FORMATETC *pformatetc,
+                                                STGMEDIUM *pmedium) {
     (void)This;
     (void)pformatetc;
     (void)pmedium;
@@ -1076,19 +1090,23 @@ static HRESULT STDMETHODCALLTYPE do_QueryGetData(IDataObject *This, FORMATETC *p
     w32_data_object_impl *impl = (w32_data_object_impl *)This;
     if (!pformatetc)
         return E_POINTER;
-    if (pformatetc->cfFormat == CF_UNICODETEXT && (pformatetc->tymed & TYMED_HGLOBAL) && impl->text_w)
+    if (pformatetc->cfFormat == CF_UNICODETEXT && (pformatetc->tymed & TYMED_HGLOBAL) &&
+        impl->text_w)
         return S_OK;
     return DV_E_FORMATETC;
 }
 
-static HRESULT STDMETHODCALLTYPE do_GetCanonicalFormatEtc(IDataObject *This, FORMATETC *pformatectIn, FORMATETC *pformatetcOut) {
+static HRESULT STDMETHODCALLTYPE do_GetCanonicalFormatEtc(IDataObject *This,
+                                                          FORMATETC *pformatectIn,
+                                                          FORMATETC *pformatetcOut) {
     (void)This;
     (void)pformatectIn;
     (void)pformatetcOut;
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE do_SetData(IDataObject *This, FORMATETC *pformatetc, STGMEDIUM *pmedium, BOOL fRelease) {
+static HRESULT STDMETHODCALLTYPE do_SetData(IDataObject *This, FORMATETC *pformatetc,
+                                            STGMEDIUM *pmedium, BOOL fRelease) {
     (void)This;
     (void)pformatetc;
     (void)pmedium;
@@ -1096,7 +1114,8 @@ static HRESULT STDMETHODCALLTYPE do_SetData(IDataObject *This, FORMATETC *pforma
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE do_EnumFormatEtc(IDataObject *This, DWORD dwDirection, IEnumFORMATETC **ppenumFormatEtc) {
+static HRESULT STDMETHODCALLTYPE do_EnumFormatEtc(IDataObject *This, DWORD dwDirection,
+                                                  IEnumFORMATETC **ppenumFormatEtc) {
     (void)This;
     (void)dwDirection;
     if (ppenumFormatEtc)
@@ -1104,7 +1123,8 @@ static HRESULT STDMETHODCALLTYPE do_EnumFormatEtc(IDataObject *This, DWORD dwDir
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE do_DAdvise(IDataObject *This, FORMATETC *pformatetc, DWORD advf, IAdviseSink *pAdvSink, DWORD *pdwConnection) {
+static HRESULT STDMETHODCALLTYPE do_DAdvise(IDataObject *This, FORMATETC *pformatetc, DWORD advf,
+                                            IAdviseSink *pAdvSink, DWORD *pdwConnection) {
     (void)This;
     (void)pformatetc;
     (void)advf;
@@ -1151,11 +1171,13 @@ IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
 
     wchar_t *wstr = NULL;
     if (source->static_text && source->static_text_len) {
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, source->static_text, (int)source->static_text_len, NULL, 0);
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, source->static_text,
+                                       (int)source->static_text_len, NULL, 0);
         if (wlen > 0) {
             wstr = (wchar_t *)malloc((size_t)(wlen + 1) * sizeof(wchar_t));
             if (wstr) {
-                MultiByteToWideChar(CP_UTF8, 0, source->static_text, (int)source->static_text_len, wstr, wlen);
+                MultiByteToWideChar(CP_UTF8, 0, source->static_text, (int)source->static_text_len,
+                                    wstr, wlen);
                 wstr[wlen] = L'\0';
             }
         }
@@ -1173,7 +1195,8 @@ IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
 
     DWORD effect = 0;
     DWORD ok_effects = DROPEFFECT_COPY | DROPEFFECT_MOVE;
-    HRESULT hr = DoDragDrop((IDataObject *)&data_obj, (IDropSource *)&drop_src, ok_effects, &effect);
+    HRESULT hr =
+        DoDragDrop((IDataObject *)&data_obj, (IDropSource *)&drop_src, ok_effects, &effect);
 
     pl->drag_active = false;
     free(wstr);
@@ -1752,8 +1775,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                                  .clipboard = {.set_text = clip_set_text,
                                                .request_text = clip_request_text,
                                                .user = &pl},
-                                 .dnd = {.start_drag = lens_host_start_drag_win32,
-                                         .user = &pl}},
+                                 .dnd = {.start_drag = lens_host_start_drag_win32, .user = &pl}},
                     &ui) != FLUX_OK) {
         fprintf(stderr, "lens_create failed\n");
         goto fail;

@@ -5,8 +5,8 @@
  * them through every icon widget exactly like a built-in.
  */
 
-#include "internal.h"
 #include "icon_svg.h"
+#include "internal.h"
 #include <lens/icon.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,12 +98,13 @@ lens_icon_id lens_icon_register_svg(const char *svg_text) {
     }
 
     g_runtime_icons[g_runtime_count] = (lensi_runtime_icon){
-        .desc = {
-            .cmds = res.cmds,
-            .count = res.cmd_count,
-            .runs = res.runs,
-            .run_count = res.run_count,
-        },
+        .desc =
+            {
+                .cmds = res.cmds,
+                .count = res.cmd_count,
+                .runs = res.runs,
+                .run_count = res.run_count,
+            },
         .mode = res.has_fill ? LENSI_ICON_RENDER_FILL : LENSI_ICON_RENDER_STROKE,
     };
 
