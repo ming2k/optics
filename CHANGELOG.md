@@ -13,6 +13,12 @@ either.
 
 ## [Unreleased]
 
+## [0.0.32] - 2026-08-30
+
+### Fixed
+
+- **lens**: Ensure box model orthogonality and layout constraints consistency across Rust bindings.
+
 ## [0.0.31] - 2026-08-29
 
 ### Changed — Box Model Orthogonality, Legacy Layout Elimination, and Native C23 SVG Engine
