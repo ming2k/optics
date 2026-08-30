@@ -91,6 +91,7 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
     ui->opacity = 1.0f;
     ui->tooltip.opacity = 1.0f;
     ui->clipboard = d.clipboard;
+    ui->dnd_host = d.dnd;
 
     size_t arena_bytes = d.arena_bytes ? d.arena_bytes : LENSI_DEFAULT_ARENA_BYTES;
     flux_result r = flux_arena_init(&ui->arena, arena_bytes, NULL);
@@ -364,6 +365,13 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->menu_nav = 0;
     ui->caret_rect = (flux_rect){0, 0, 0, 0};  /* refreshed by text widget */
     ui->text_context = (lens_text_context){0}; /* refreshed alongside it */
+    if (!ui->input.mouse_down[0] || ui->input.mouse_released[0]) {
+        ui->dnd_source.active = false;
+    }
+    if (ui->frame > ui->dnd_drop.drop_frame + 1) {
+        ui->dnd_drop.dropped = false;
+        ui->dnd_drop.drop_len = 0;
+    }
 
     /* per-frame build state */
     ui->id_top = 0;

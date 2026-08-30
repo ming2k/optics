@@ -189,6 +189,7 @@ install_headers(
   'include/iris/app.h',
   'include/iris/capability.h',
   'include/iris/cursor.h',
+  'include/iris/dnd.h',
   'include/iris/theme.h',
   'include/iris/file_dialog.h',
   'include/iris/a11y.h',

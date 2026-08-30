@@ -368,6 +368,7 @@ struct lens {
 
     /* clipboard + IME (ADR-0036) */
     lens_clipboard clipboard;
+    lens_dnd_host dnd_host;
     flux_rect caret_rect;           /* set by the focused text widget */
     lens_text_context text_context; /* set alongside caret_rect (surrounding
                                      * text + content hints for the host IME) */
@@ -376,6 +377,25 @@ struct lens {
     lens_id paste_target; /* focused widget at lens_request_paste time;
                              0 = unbound (host pushed lens_paste directly) */
     uint64_t paste_frame; /* ui->frame when the paste payload arrived */
+
+    /* Drag-and-drop state (ADR-0086) */
+    struct {
+        bool active;
+        lens_id source_id;
+        flux_point press_pos;
+        char drag_text[LENSI_PASTE_MAX];
+        uint32_t drag_text_len;
+        uint32_t drag_actions;
+        flux_rect preview_rect;
+    } dnd_source;
+
+    struct {
+        char drop_buf[LENSI_PASTE_MAX];
+        uint32_t drop_len;
+        flux_point drop_pos;
+        uint64_t drop_frame;
+        bool dropped;
+    } dnd_drop;
 
     /* transient open-set (ADR-0060): retained per id; only transient place
      * nodes enter this table. Drives begin gating, is_open queries, and

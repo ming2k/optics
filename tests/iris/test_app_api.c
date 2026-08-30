@@ -47,6 +47,11 @@ int main(void) {
      * active app, and never a crash. */
     iris_paint_mark_static();
 
+    /* DnD safety outside a running app (ADR-0086) */
+    CHECK(!iris_dnd_is_active());
+    iris_dnd_cancel();
+    CHECK(iris_dnd_start(NULL) != 0);
+
     /* Pickers reject NULL buffers / zero capacity before contacting the
      * portal. A valid buffer would open a live desktop picker. */
     CHECK(iris_pick_file(NULL, NULL, 0) != 0);

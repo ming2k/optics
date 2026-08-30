@@ -76,3 +76,19 @@ IRIS_API int iris_app_run(const iris_app_config *cfg) {
     return 2; /* IRIS_BUILD_NO_BACKEND */
 #endif
 }
+
+#if !defined(IRIS_BACKEND_WAYLAND) && !defined(IRIS_BACKEND_WIN32) && !defined(IRIS_BACKEND_COCOA)
+#include <iris/dnd.h>
+
+IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
+    (void)source;
+    return -1;
+}
+
+IRIS_API bool iris_dnd_is_active(void) {
+    return false;
+}
+
+IRIS_API void iris_dnd_cancel(void) {
+}
+#endif

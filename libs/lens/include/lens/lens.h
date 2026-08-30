@@ -194,6 +194,12 @@ typedef struct lens_clipboard {
     void *user;
 } lens_clipboard;
 
+/* Host Drag-and-Drop interface (ADR-0086). Supplied in lens_desc; optional. */
+typedef struct lens_dnd_host {
+    int (*start_drag)(const char *text, size_t len, uint32_t actions, void *user);
+    void *user;
+} lens_dnd_host;
+
 /* ================================================================== */
 /*  Interaction result (ADR-0029; state bits ADR-0058)                */
 /* ================================================================== */
@@ -215,6 +221,7 @@ typedef enum lens_widget_state : uint32_t {
     LENS_STATE_SELECTED = 1u << 5,      /* picked out of a set (selectable) */
     LENS_STATE_ACTIVE = 1u << 6,        /* on-state of a toggle            */
     LENS_STATE_DRAGGED = 1u << 7,       /* captured pointer drives a value */
+    LENS_STATE_DROP_TARGET = 1u << 8,   /* cursor or drop over target zone */
 } lens_widget_state;
 
 typedef struct lens_response {
@@ -742,6 +749,7 @@ typedef struct lens_desc {
     float scale;              /* device-pixel scale; 0 = 1.0          */
     float text_scale;         /* accessibility text scale; 0/1 = 1.0  */
     lens_clipboard clipboard; /* optional host clipboard (ADR-0036)   */
+    lens_dnd_host dnd;        /* optional host DnD interface (ADR-0086) */
 } lens_desc;
 
 FLUX_NODISCARD LENS_API flux_result lens_create(const lens_desc *desc, lens **out);
@@ -1167,6 +1175,37 @@ LENS_API uint32_t lens_take_paste(lens *ui, char *dst, uint32_t cap);
  * the widget-reported rect: the platform layer forwards it to the IME so
  * the candidate window follows the caret. UI-space logical pixels. */
 LENS_API void lens_set_caret_rect(lens *ui, flux_rect r);
+
+/* ================================================================== */
+/*  Drag-and-Drop (DnD, ADR-0086)                                     */
+/* ================================================================== */
+
+typedef struct lens_dnd_source_desc {
+    lens_id id;
+    const char *text;               /* Static text payload (e.g. URI or text) */
+    size_t text_len;
+    uint32_t actions;               /* Allowed actions bitmask (1=copy, 2=move) */
+    flux_rect preview_rect;         /* UI-space visual bounding box */
+} lens_dnd_source_desc;
+
+typedef struct lens_dnd_drop_info {
+    bool is_hovered;                /* Cursor is over this drop zone */
+    bool is_dropped;                /* Payload dropped on this target this frame */
+    flux_point drop_pos;            /* Drop position relative to target bounding box */
+    uint32_t action;                /* Negotiated action */
+} lens_dnd_drop_info;
+
+/* Declare a node as a drag source. Returns true if drag was actively initiated/active. */
+LENS_API bool lens_dnd_source(lens *ui, const lens_dnd_source_desc *desc);
+
+/* Declare a node as a drop target zone. Returns true if hovered or dropped. */
+LENS_API bool lens_dnd_drop_target(lens *ui, lens_id id, uint32_t accepted_actions, lens_dnd_drop_info *out_info);
+
+/* Platform delivery of drop payload into lens. */
+LENS_API void lens_deliver_drop(lens *ui, const char *payload, size_t len, flux_point pos);
+
+/* Retrieve and consume pending drop payload during drop frame. Returns bytes copied. */
+LENS_API uint32_t lens_take_drop(lens *ui, char *dst, uint32_t cap);
 
 /* ================================================================== */
 /*  Escape hatch — retained nodes (ADR-0031)                          */

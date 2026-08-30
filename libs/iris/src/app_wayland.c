@@ -18,6 +18,7 @@
 
 #include <iris/a11y.h>
 #include <iris/cursor.h>
+#include <iris/dnd.h>
 #include <iris/theme.h>
 
 #include <flux/flux.h>
@@ -141,6 +142,13 @@ typedef struct wp_platform {
     uint32_t last_serial; /* most recent input serial (set_selection) */
     bool dnd_inside;      /* drag currently over our surface           */
     flux_point dnd_pos;   /* last reported drag position (surface px)  */
+
+    /* Drag-and-drop source state (ADR-0086) */
+    struct wl_data_source *drag_source;
+    iris_dnd_source drag_info;
+    char *drag_text_buf;
+    size_t drag_text_len;
+    bool drag_active;
 
     /* Primary selection (zwp_primary_selection_unstable_v1): the X11-style
      * middle-click clipboard. clip_set_text mirrors the copy onto it; a
@@ -1493,8 +1501,10 @@ static void paste_deliver(void *user) {
         wl_data_offer_destroy(res->offer);
         res->pl->dnd_job_offer = NULL;
     }
-    if (res->pl->ui && res->text && res->len)
+    if (res->pl->ui && res->text && res->len) {
         lens_paste(res->pl->ui, res->text, res->len);
+        lens_deliver_drop(res->pl->ui, res->text, res->len, res->pl->dnd_pos);
+    }
     free(res->text);
     free(res);
 }
@@ -1672,6 +1682,144 @@ static const struct wl_data_source_listener data_source_listener = {
     .send = dsource_send,
     .cancelled = dsource_cancelled,
 };
+
+/* Outgoing Drag-and-Drop source (ADR-0086) */
+static void drag_source_cleanup(wp_platform *pl) {
+    if (pl->drag_source) {
+        wl_data_source_destroy(pl->drag_source);
+        pl->drag_source = NULL;
+    }
+    if (pl->drag_text_buf) {
+        free(pl->drag_text_buf);
+        pl->drag_text_buf = NULL;
+        pl->drag_text_len = 0;
+    }
+    pl->drag_active = false;
+    memset(&pl->drag_info, 0, sizeof(pl->drag_info));
+}
+
+static void drag_source_send(void *data, struct wl_data_source *src, const char *mime, int32_t fd) {
+    wp_platform *pl = data;
+    (void)src;
+    if (pl->drag_info.callbacks.provide_data) {
+        pl->drag_info.callbacks.provide_data(mime, fd, pl->drag_info.callbacks.user);
+    } else if (pl->drag_text_buf && pl->drag_text_len) {
+        const char *p = pl->drag_text_buf;
+        size_t left = pl->drag_text_len;
+        while (left) {
+            ssize_t w = write(fd, p, left);
+            if (w <= 0)
+                break;
+            p += w;
+            left -= (size_t)w;
+        }
+        close(fd);
+    } else {
+        close(fd);
+    }
+}
+
+static void drag_source_cancelled(void *data, struct wl_data_source *src) {
+    wp_platform *pl = data;
+    (void)src;
+    if (pl->drag_info.callbacks.cancelled) {
+        pl->drag_info.callbacks.cancelled(pl->drag_info.callbacks.user);
+    }
+    drag_source_cleanup(pl);
+}
+
+static void drag_source_target(void *d, struct wl_data_source *s, const char *m) {
+    (void)d;
+    (void)s;
+    (void)m;
+}
+
+static void drag_source_dnd_drop_performed(void *data, struct wl_data_source *src) {
+    (void)data;
+    (void)src;
+}
+
+static void drag_source_dnd_finished(void *data, struct wl_data_source *src) {
+    wp_platform *pl = data;
+    (void)src;
+    if (pl->drag_info.callbacks.finished) {
+        pl->drag_info.callbacks.finished(IRIS_DND_ACTION_COPY, pl->drag_info.callbacks.user);
+    }
+    drag_source_cleanup(pl);
+}
+
+static void drag_source_action(void *data, struct wl_data_source *src, uint32_t dnd_action) {
+    (void)data;
+    (void)src;
+    (void)dnd_action;
+}
+
+static const struct wl_data_source_listener drag_source_listener = {
+    .target = drag_source_target,
+    .send = drag_source_send,
+    .cancelled = drag_source_cancelled,
+    .dnd_drop_performed = drag_source_dnd_drop_performed,
+    .dnd_finished = drag_source_dnd_finished,
+    .action = drag_source_action,
+};
+
+IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
+    wp_platform *pl = g_active_pl;
+    if (!pl || !pl->data_device_mgr || !pl->data_device || !pl->surface || !source)
+        return -1;
+
+    if (pl->drag_active)
+        drag_source_cleanup(pl);
+
+    pl->drag_source = wl_data_device_manager_create_data_source(pl->data_device_mgr);
+    if (!pl->drag_source)
+        return -1;
+
+    pl->drag_info = *source;
+    pl->drag_active = true;
+
+    if (source->static_text && source->static_text_len) {
+        pl->drag_text_buf = malloc(source->static_text_len + 1);
+        if (pl->drag_text_buf) {
+            memcpy(pl->drag_text_buf, source->static_text, source->static_text_len);
+            pl->drag_text_buf[source->static_text_len] = '\0';
+            pl->drag_text_len = source->static_text_len;
+        }
+    }
+
+    wl_data_source_add_listener(pl->drag_source, &drag_source_listener, pl);
+
+    if (source->mime_count > 0 && source->mime_types) {
+        for (uint32_t i = 0; i < source->mime_count; i++) {
+            if (source->mime_types[i])
+                wl_data_source_offer(pl->drag_source, source->mime_types[i]);
+        }
+    } else {
+        wl_data_source_offer(pl->drag_source, "text/plain;charset=utf-8");
+        wl_data_source_offer(pl->drag_source, "text/plain");
+        wl_data_source_offer(pl->drag_source, "UTF8_STRING");
+    }
+
+    uint32_t actions = WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY | WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
+    if (wl_data_source_get_version(pl->drag_source) >= 3) {
+        wl_data_source_set_actions(pl->drag_source, actions);
+    }
+
+    wl_data_device_start_drag(pl->data_device, pl->drag_source, pl->surface, NULL, pl->last_serial);
+    return 0;
+}
+
+IRIS_API bool iris_dnd_is_active(void) {
+    wp_platform *pl = g_active_pl;
+    return pl && pl->drag_active;
+}
+
+IRIS_API void iris_dnd_cancel(void) {
+    wp_platform *pl = g_active_pl;
+    if (pl && pl->drag_active) {
+        drag_source_cleanup(pl);
+    }
+}
 
 static void wp_maybe_create_data_device(wp_platform *pl) {
     if (pl->data_device || !pl->data_device_mgr || !pl->seat)
@@ -1870,6 +2018,16 @@ static void clip_request_text(void *user) {
 
     if (!start_offer_read(pl, fds[0], NULL, WP_PASTE_TIMEOUT_MS, false))
         close(fds[0]);
+}
+
+static int lens_host_start_drag(const char *text, size_t len, uint32_t actions, void *user) {
+    (void)user;
+    iris_dnd_source src = {
+        .actions = actions,
+        .static_text = text,
+        .static_text_len = len,
+    };
+    return iris_dnd_start(&src);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2877,7 +3035,9 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                                  .scale = (float)pl.buffer_scale,
                                  .clipboard = {.set_text = clip_set_text,
                                                .request_text = clip_request_text,
-                                               .user = &pl}},
+                                               .user = &pl},
+                                 .dnd = {.start_drag = lens_host_start_drag,
+                                         .user = &pl}},
                     &ui) != FLUX_OK) {
         fprintf(stderr, "lens_create failed\n");
         goto fail;
@@ -3317,6 +3477,9 @@ fail:
     }
     if (pl.copy_source)
         wl_data_source_destroy(pl.copy_source);
+    if (pl.drag_source)
+        wl_data_source_destroy(pl.drag_source);
+    free(pl.drag_text_buf);
     if (pl.selection_offer)
         wl_data_offer_destroy(pl.selection_offer);
     if (pl.dnd_offer && pl.dnd_offer != pl.selection_offer)

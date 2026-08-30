@@ -36,6 +36,8 @@ int main(void) {
      * shows a "primary selection" affordance on Windows would be wrong. */
     CHECK(iris_supports(IRIS_CAP_PRIMARY_SELECTION) == is_wayland);
     CHECK(iris_supports(IRIS_CAP_TABLET) == is_wayland);
+    CHECK(iris_supports(IRIS_CAP_DROP_TARGET) == is_wayland);
+    CHECK(iris_supports(IRIS_CAP_DRAG_SOURCE) == is_wayland);
     CHECK(iris_supports(IRIS_CAP_FRACTIONAL_SCALE) == is_win32);
 
     /* The window/file-dialog capability is backend-level, not OS-level:

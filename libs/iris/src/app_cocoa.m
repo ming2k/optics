@@ -73,6 +73,7 @@
 #include <iris/a11y.h>
 #include <iris/a11y_prefs.h>
 #include <iris/cursor.h>
+#include <iris/dnd.h>
 #include <iris/theme.h>
 
 #include <flux/flux.h>
@@ -373,6 +374,18 @@ IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) 
     if (out_height)
         *out_height = pl->height;
     return true;
+}
+
+IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
+    (void)source;
+    return -1;
+}
+
+IRIS_API bool iris_dnd_is_active(void) {
+    return false;
+}
+
+IRIS_API void iris_dnd_cancel(void) {
 }
 
 /* ------------------------------------------------------------------ */

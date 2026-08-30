@@ -52,6 +52,7 @@ static const int irisi_caps_wayland[] = {
         * xdg-decoration protocol; the static answer is "not guaranteed".
         * A runtime-refined variant can flip this when the globals land. */
     0, /* IRIS_CAP_FRACTIONAL_SCALE */
+    1, /* IRIS_CAP_DRAG_SOURCE     */
 };
 
 static const int irisi_caps_win32[] = {
@@ -65,6 +66,7 @@ static const int irisi_caps_win32[] = {
     0, /* DROP_TARGET     */
     1, /* DECORATIONS — native */
     1, /* FRACTIONAL_SCALE — per-monitor DPI v2 */
+    0, /* DRAG_SOURCE     */
 };
 
 static const int irisi_caps_cocoa[] = {
@@ -78,10 +80,11 @@ static const int irisi_caps_cocoa[] = {
     0, /* DROP_TARGET     */
     1, /* DECORATIONS — native */
     0, /* FRACTIONAL_SCALE — integer backingScaleFactor */
+    0, /* DRAG_SOURCE     */
 };
 
 static const int irisi_caps_none[] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
 
 #define IRISI_CAP_COUNT ((int)(sizeof(irisi_caps_wayland) / sizeof(irisi_caps_wayland[0])))

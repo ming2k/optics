@@ -15,6 +15,7 @@ lens_sources = files(
   'src/input/input.c',
   'src/input/focus.c',
   'src/input/clipboard.c',
+  'src/input/dnd.c',
   'src/render/drawlist.c',
   'src/render/replay.c',
   'src/render/ghost.c',

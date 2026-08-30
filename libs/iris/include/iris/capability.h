@@ -71,8 +71,7 @@ typedef enum iris_capability {
      * zero and pen contact synthesizes mouse input. Wayland-only. */
     IRIS_CAP_TABLET = 6,
 
-    /* Drag-and-drop *target* (receiving drops). There is no drag-source
-     * API yet (ADR-0067). Degradation: drops never arrive. */
+    /* Drag-and-drop *target* (receiving drops). Degradation: drops never arrive. */
     IRIS_CAP_DROP_TARGET = 7,
 
     /* Server-side window decorations. Degradation on Wayland without
@@ -86,6 +85,10 @@ typedef enum iris_capability {
      * buffer scale (ADR-0067 follow-on). Win32 reports true per-monitor
      * DPI today; Wayland/Cocoa currently quantize. */
     IRIS_CAP_FRACTIONAL_SCALE = 9,
+
+    /* Drag-and-drop *source* (initiating drags, ADR-0086).
+     * Degradation: drag initiation returns -1. */
+    IRIS_CAP_DRAG_SOURCE = 10,
 
     /* Append only. Never repurpose. Unknown values return false from
      * iris_supports() (forward compatibility with a newer libiris). */
