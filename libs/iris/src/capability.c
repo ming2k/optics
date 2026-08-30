@@ -63,10 +63,10 @@ static const int irisi_caps_win32[] = {
     1, /* CLIPBOARD       */
     0, /* PRIMARY_SELECTION — platform has none */
     0, /* TABLET          */
-    0, /* DROP_TARGET     */
+    1, /* DROP_TARGET — OLE IDropTarget (ADR-0086) */
     1, /* DECORATIONS — native */
     1, /* FRACTIONAL_SCALE — per-monitor DPI v2 */
-    0, /* DRAG_SOURCE     */
+    1, /* DRAG_SOURCE — OLE DoDragDrop (ADR-0086) */
 };
 
 static const int irisi_caps_cocoa[] = {
@@ -77,10 +77,10 @@ static const int irisi_caps_cocoa[] = {
     1, /* CLIPBOARD       */
     0, /* PRIMARY_SELECTION */
     0, /* TABLET          */
-    0, /* DROP_TARGET     */
+    1, /* DROP_TARGET — NSDraggingDestination (ADR-0086) */
     1, /* DECORATIONS — native */
     0, /* FRACTIONAL_SCALE — integer backingScaleFactor */
-    0, /* DRAG_SOURCE     */
+    1, /* DRAG_SOURCE — NSDraggingSource (ADR-0086) */
 };
 
 static const int irisi_caps_none[] = {

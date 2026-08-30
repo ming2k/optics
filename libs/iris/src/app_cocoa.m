@@ -161,6 +161,10 @@ static_assert(sizeof((cp_accum *)0)->preedit == sizeof((lens_input *)0)->preedit
 
     NSString *pending_paste; /* clipboard text awaiting async lens_paste     */
 
+    /* Drag-and-drop state (ADR-0086) */
+    iris_dnd_source drag_source;
+    bool drag_active;
+
     cp_accum acc;
 }
 @end
@@ -377,15 +381,44 @@ IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) 
 }
 
 IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
-    (void)source;
-    return -1;
+    IrisPlatform *pl = g_active_pl;
+    if (!pl || !pl->view || !source)
+        return -1;
+
+    pl->drag_source = *source;
+    pl->drag_active = true;
+
+    NSPasteboardItem *item = [[NSPasteboardItem alloc] init];
+    if (source->static_text && source->static_text_len) {
+        NSString *str = [[NSString alloc] initWithBytes:source->static_text
+                                                 length:source->static_text_len
+                                               encoding:NSUTF8StringEncoding];
+        if (str) {
+            [item setString:str forType:NSPasteboardTypeString];
+        }
+    }
+
+    NSDraggingItem *dragItem = [[NSDraggingItem alloc] initWithPasteboardWriter:item];
+    NSRect frame = NSMakeRect(0, 0, 32, 32);
+    [dragItem setDraggingFrame:frame contents:[[NSImage alloc] initWithSize:NSMakeSize(16, 16)]];
+
+    NSEvent *event = [NSApp currentEvent];
+    if (!event)
+        return -1;
+
+    [pl->view beginDraggingSessionWithItems:@[dragItem] event:event source:pl->view];
+    return 0;
 }
 
 IRIS_API bool iris_dnd_is_active(void) {
-    return false;
+    IrisPlatform *pl = g_active_pl;
+    return pl && pl->drag_active;
 }
 
 IRIS_API void iris_dnd_cancel(void) {
+    IrisPlatform *pl = g_active_pl;
+    if (pl)
+        pl->drag_active = false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -498,7 +531,7 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
 /*  View — input, IME (NSTextInputClient), CAMetalLayer backing         */
 /* ------------------------------------------------------------------ */
 
-@interface IrisView : NSView <NSTextInputClient> {
+@interface IrisView : NSView <NSTextInputClient, NSDraggingDestination, NSDraggingSource> {
   @public
     /* Owned by iris_app_run_cocoa for the whole view lifetime; the view is
      * torn down first, so a weak back-pointer is safe. */
@@ -521,6 +554,7 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
         _selected_in_marked = NSMakeRange(NSNotFound, 0);
         /* Layer-backed by CAMetalLayer (makeBackingLayer below). */
         [self setWantsLayer:YES];
+        [self registerForDraggedTypes:@[NSPasteboardTypeString, NSPasteboardTypeFileURL]];
         NSTrackingAreaOptions opts = NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
                                      NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect |
                                      NSTrackingCursorUpdate;
@@ -530,6 +564,73 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
                                                           userInfo:nil]];
     }
     return self;
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+    (void)sender;
+    return NSDragOperationCopy | NSDragOperationMove;
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
+    (void)sender;
+    return NSDragOperationCopy | NSDragOperationMove;
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)sender {
+    (void)sender;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    NSPoint loc = [self convertPoint:[sender draggingLocation] fromView:nil];
+    flux_point drop_pos = (flux_point){(float)loc.x, (float)loc.y};
+
+    if ([[pboard types] containsObject:NSPasteboardTypeString]) {
+        NSString *str = [pboard stringForType:NSPasteboardTypeString];
+        if (str) {
+            const char *utf8 = [str UTF8String];
+            if (utf8 && _platform && _platform->ui) {
+                lens_paste(_platform->ui, utf8, strlen(utf8));
+                lens_deliver_drop(_platform->ui, utf8, strlen(utf8), drop_pos);
+                return YES;
+            }
+        }
+    }
+
+    if ([[pboard types] containsObject:NSPasteboardTypeFileURL]) {
+        NSURL *fileURL = [NSURL URLFromPasteboard:pboard];
+        if (fileURL) {
+            NSString *path = [fileURL path];
+            if (path) {
+                const char *utf8 = [path UTF8String];
+                if (utf8 && _platform && _platform->ui) {
+                    lens_paste(_platform->ui, utf8, strlen(utf8));
+                    lens_deliver_drop(_platform->ui, utf8, strlen(utf8), drop_pos);
+                    return YES;
+                }
+            }
+        }
+    }
+    return NO;
+}
+
+- (NSDragOperation)draggingSession:(NSDraggingSession *)session sourceOperationMaskForDraggingContext:(NSDraggingContext)context {
+    (void)session;
+    (void)context;
+    return NSDragOperationCopy | NSDragOperationMove;
+}
+
+- (void)draggingSession:(NSDraggingSession *)session endedAtPoint:(NSPoint)screenPoint operation:(NSDragOperation)operation {
+    (void)session;
+    (void)screenPoint;
+    if (_platform) {
+        _platform->drag_active = false;
+        if (_platform->drag_source.callbacks.finished && operation != NSDragOperationNone) {
+            _platform->drag_source.callbacks.finished(IRIS_DND_ACTION_COPY, _platform->drag_source.callbacks.user);
+        } else if (_platform->drag_source.callbacks.cancelled && operation == NSDragOperationNone) {
+            _platform->drag_source.callbacks.cancelled(_platform->drag_source.callbacks.user);
+        }
+    }
 }
 
 - (BOOL)isFlipped {
@@ -1365,6 +1466,16 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
             goto fail;
         }
 
+static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t actions, void *user) {
+    (void)user;
+    iris_dnd_source src = {
+        .actions = actions,
+        .static_text = text,
+        .static_text_len = len,
+    };
+    return iris_dnd_start(&src);
+}
+
         if (lens_create(&(lens_desc){.device = device,
                                      .theme = cfg->dark
                                                   ? lens_theme_dark()
@@ -1374,7 +1485,9 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                                      .scale = pl->scale,
                                      .clipboard = {.set_text = clip_set_text,
                                                    .request_text = clip_request_text,
-                                                   .user = pl}},
+                                                   .user = pl},
+                                     .dnd = {.start_drag = lens_host_start_drag_cocoa,
+                                             .user = pl}},
                         &ui) != FLUX_OK) {
             fprintf(stderr, "lens_create failed\n");
             goto fail;

@@ -66,9 +66,12 @@
  * MinGW-w64 headers tolerate the reverse order by accident; zig cc's
  * bundled MinGW headers do not — this include order was the reason the
  * CI cross-compile gate could not build this TU. */
-#include <imm.h>
 #include <windows.h>
 #include <windowsx.h>
+#include <imm.h>
+#include <ole2.h>
+#include <shellapi.h>
+#include <shlobj.h>
 
 /* Win32 platform surface glue: included as the platform child header (the
  * way app_wayland.c pulls <vulkan/vulkan_wayland.h>), after windows.h has
@@ -180,6 +183,10 @@ typedef struct w32_platform {
      * the frame loop. */
     bool ime_composing;
     uint32_t pending_high_surrogate; /* carried UTF-16 lead surrogate, 0 = none */
+
+    /* Drag-and-drop state (ADR-0086) */
+    iris_dnd_source drag_source;
+    bool drag_active;
 
     w32_accum acc;
 } w32_platform;
@@ -820,16 +827,377 @@ IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) 
     return true;
 }
 
+/* ================================================================== */
+/*  OLE / COM Drag-and-Drop Subsystem (ADR-0086)                      */
+/* ================================================================== */
+
+/* --- Drop Target Implementation (Receiving drops) --- */
+
+typedef struct w32_drop_target_impl {
+    IDropTarget target;
+    LONG ref_count;
+    w32_platform *pl;
+} w32_drop_target_impl;
+
+static HRESULT STDMETHODCALLTYPE dt_QueryInterface(IDropTarget *This, REFIID riid, void **ppvObject) {
+    if (!ppvObject)
+        return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDropTarget)) {
+        *ppvObject = This;
+        This->lpVtbl->AddRef(This);
+        return S_OK;
+    }
+    *ppvObject = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE dt_AddRef(IDropTarget *This) {
+    w32_drop_target_impl *impl = (w32_drop_target_impl *)This;
+    return (ULONG)InterlockedIncrement(&impl->ref_count);
+}
+
+static ULONG STDMETHODCALLTYPE dt_Release(IDropTarget *This) {
+    w32_drop_target_impl *impl = (w32_drop_target_impl *)This;
+    LONG c = InterlockedDecrement(&impl->ref_count);
+    return (ULONG)(c > 0 ? c : 0);
+}
+
+static HRESULT STDMETHODCALLTYPE dt_DragEnter(IDropTarget *This, IDataObject *pDataObj, DWORD grfKeyState, POINTL pt, DWORD *pdwEffect) {
+    (void)This;
+    (void)pDataObj;
+    (void)grfKeyState;
+    (void)pt;
+    if (pdwEffect)
+        *pdwEffect &= (DROPEFFECT_COPY | DROPEFFECT_MOVE);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dt_DragOver(IDropTarget *This, DWORD grfKeyState, POINTL pt, DWORD *pdwEffect) {
+    (void)This;
+    (void)grfKeyState;
+    (void)pt;
+    if (pdwEffect)
+        *pdwEffect &= (DROPEFFECT_COPY | DROPEFFECT_MOVE);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dt_DragLeave(IDropTarget *This) {
+    (void)This;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dt_Drop(IDropTarget *This, IDataObject *pDataObj, DWORD grfKeyState, POINTL pt, DWORD *pdwEffect) {
+    (void)grfKeyState;
+    w32_drop_target_impl *impl = (w32_drop_target_impl *)This;
+    if (!impl || !impl->pl || !impl->pl->ui || !pDataObj)
+        return E_FAIL;
+
+    POINT p = {pt.x, pt.y};
+    ScreenToClient(impl->pl->hwnd, &p);
+    float scale = (impl->pl->scale > 0.0f) ? impl->pl->scale : 1.0f;
+    flux_point drop_pos = {(float)p.x / scale, (float)p.y / scale};
+
+    FORMATETC fmt_text = {CF_UNICODETEXT, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM med = {0};
+    if (SUCCEEDED(pDataObj->lpVtbl->GetData(pDataObj, &fmt_text, &med))) {
+        const wchar_t *wstr = (const wchar_t *)GlobalLock(med.hGlobal);
+        if (wstr) {
+            int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
+            if (utf8_len > 1) {
+                char *utf8 = (char *)malloc((size_t)utf8_len);
+                if (utf8) {
+                    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, utf8, utf8_len, NULL, NULL);
+                    lens_paste(impl->pl->ui, utf8, (size_t)(utf8_len - 1));
+                    lens_deliver_drop(impl->pl->ui, utf8, (size_t)(utf8_len - 1), drop_pos);
+                    free(utf8);
+                }
+            }
+            GlobalUnlock(med.hGlobal);
+        }
+        ReleaseStgMedium(&med);
+    } else {
+        FORMATETC fmt_file = {CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        if (SUCCEEDED(pDataObj->lpVtbl->GetData(pDataObj, &fmt_file, &med))) {
+            HDROP hdrop = (HDROP)GlobalLock(med.hGlobal);
+            if (hdrop) {
+                UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, NULL, 0);
+                if (count > 0) {
+                    wchar_t path_w[MAX_PATH];
+                    if (DragQueryFileW(hdrop, 0, path_w, MAX_PATH) > 0) {
+                        int utf8_len = WideCharToMultiByte(CP_UTF8, 0, path_w, -1, NULL, 0, NULL, NULL);
+                        if (utf8_len > 1) {
+                            char *utf8 = (char *)malloc((size_t)utf8_len);
+                            if (utf8) {
+                                WideCharToMultiByte(CP_UTF8, 0, path_w, -1, utf8, utf8_len, NULL, NULL);
+                                lens_paste(impl->pl->ui, utf8, (size_t)(utf8_len - 1));
+                                lens_deliver_drop(impl->pl->ui, utf8, (size_t)(utf8_len - 1), drop_pos);
+                                free(utf8);
+                            }
+                        }
+                    }
+                }
+                GlobalUnlock(med.hGlobal);
+            }
+            ReleaseStgMedium(&med);
+        }
+    }
+
+    if (pdwEffect)
+        *pdwEffect = DROPEFFECT_COPY;
+    return S_OK;
+}
+
+static IDropTargetVtbl g_drop_target_vtbl = {
+    .QueryInterface = dt_QueryInterface,
+    .AddRef = dt_AddRef,
+    .Release = dt_Release,
+    .DragEnter = dt_DragEnter,
+    .DragOver = dt_DragOver,
+    .DragLeave = dt_DragLeave,
+    .Drop = dt_Drop,
+};
+
+/* --- Drop Source Implementation (Initiating drag) --- */
+
+typedef struct w32_drop_source_impl {
+    IDropSource source;
+    LONG ref_count;
+} w32_drop_source_impl;
+
+static HRESULT STDMETHODCALLTYPE ds_QueryInterface(IDropSource *This, REFIID riid, void **ppvObject) {
+    if (!ppvObject)
+        return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDropSource)) {
+        *ppvObject = This;
+        This->lpVtbl->AddRef(This);
+        return S_OK;
+    }
+    *ppvObject = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE ds_AddRef(IDropSource *This) {
+    w32_drop_source_impl *impl = (w32_drop_source_impl *)This;
+    return (ULONG)InterlockedIncrement(&impl->ref_count);
+}
+
+static ULONG STDMETHODCALLTYPE ds_Release(IDropSource *This) {
+    w32_drop_source_impl *impl = (w32_drop_source_impl *)This;
+    LONG c = InterlockedDecrement(&impl->ref_count);
+    return (ULONG)(c > 0 ? c : 0);
+}
+
+static HRESULT STDMETHODCALLTYPE ds_QueryContinueDrag(IDropSource *This, BOOL fEscapePressed, DWORD grfKeyState) {
+    (void)This;
+    if (fEscapePressed)
+        return DRAGDROP_S_CANCEL;
+    if (!(grfKeyState & (MK_LBUTTON | MK_RBUTTON)))
+        return DRAGDROP_S_DROP;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE ds_GiveFeedback(IDropSource *This, DWORD dwEffect) {
+    (void)This;
+    (void)dwEffect;
+    return DRAGDROP_S_USEDEFAULTCURSORS;
+}
+
+static IDropSourceVtbl g_drop_source_vtbl = {
+    .QueryInterface = ds_QueryInterface,
+    .AddRef = ds_AddRef,
+    .Release = ds_Release,
+    .QueryContinueDrag = ds_QueryContinueDrag,
+    .GiveFeedback = ds_GiveFeedback,
+};
+
+/* --- Data Object Implementation (Payload container) --- */
+
+typedef struct w32_data_object_impl {
+    IDataObject data_obj;
+    LONG ref_count;
+    wchar_t *text_w;
+} w32_data_object_impl;
+
+static HRESULT STDMETHODCALLTYPE do_QueryInterface(IDataObject *This, REFIID riid, void **ppvObject) {
+    if (!ppvObject)
+        return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDataObject)) {
+        *ppvObject = This;
+        This->lpVtbl->AddRef(This);
+        return S_OK;
+    }
+    *ppvObject = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE do_AddRef(IDataObject *This) {
+    w32_data_object_impl *impl = (w32_data_object_impl *)This;
+    return (ULONG)InterlockedIncrement(&impl->ref_count);
+}
+
+static ULONG STDMETHODCALLTYPE do_Release(IDataObject *This) {
+    w32_data_object_impl *impl = (w32_data_object_impl *)This;
+    LONG c = InterlockedDecrement(&impl->ref_count);
+    return (ULONG)(c > 0 ? c : 0);
+}
+
+static HRESULT STDMETHODCALLTYPE do_GetData(IDataObject *This, FORMATETC *pformatetcIn, STGMEDIUM *pmedium) {
+    w32_data_object_impl *impl = (w32_data_object_impl *)This;
+    if (!pformatetcIn || !pmedium)
+        return E_POINTER;
+    if (pformatetcIn->cfFormat == CF_UNICODETEXT && (pformatetcIn->tymed & TYMED_HGLOBAL) && impl->text_w) {
+        size_t len = (wcslen(impl->text_w) + 1) * sizeof(wchar_t);
+        HGLOBAL hg = GlobalAlloc(GHND, len);
+        if (!hg)
+            return E_OUTOFMEMORY;
+        void *dst = GlobalLock(hg);
+        if (!dst) {
+            GlobalFree(hg);
+            return E_OUTOFMEMORY;
+        }
+        memcpy(dst, impl->text_w, len);
+        GlobalUnlock(hg);
+        pmedium->tymed = TYMED_HGLOBAL;
+        pmedium->hGlobal = hg;
+        pmedium->pUnkForRelease = NULL;
+        return S_OK;
+    }
+    return DV_E_FORMATETC;
+}
+
+static HRESULT STDMETHODCALLTYPE do_GetDataHere(IDataObject *This, FORMATETC *pformatetc, STGMEDIUM *pmedium) {
+    (void)This;
+    (void)pformatetc;
+    (void)pmedium;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE do_QueryGetData(IDataObject *This, FORMATETC *pformatetc) {
+    w32_data_object_impl *impl = (w32_data_object_impl *)This;
+    if (!pformatetc)
+        return E_POINTER;
+    if (pformatetc->cfFormat == CF_UNICODETEXT && (pformatetc->tymed & TYMED_HGLOBAL) && impl->text_w)
+        return S_OK;
+    return DV_E_FORMATETC;
+}
+
+static HRESULT STDMETHODCALLTYPE do_GetCanonicalFormatEtc(IDataObject *This, FORMATETC *pformatectIn, FORMATETC *pformatetcOut) {
+    (void)This;
+    (void)pformatectIn;
+    (void)pformatetcOut;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE do_SetData(IDataObject *This, FORMATETC *pformatetc, STGMEDIUM *pmedium, BOOL fRelease) {
+    (void)This;
+    (void)pformatetc;
+    (void)pmedium;
+    (void)fRelease;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE do_EnumFormatEtc(IDataObject *This, DWORD dwDirection, IEnumFORMATETC **ppenumFormatEtc) {
+    (void)This;
+    (void)dwDirection;
+    if (ppenumFormatEtc)
+        *ppenumFormatEtc = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE do_DAdvise(IDataObject *This, FORMATETC *pformatetc, DWORD advf, IAdviseSink *pAdvSink, DWORD *pdwConnection) {
+    (void)This;
+    (void)pformatetc;
+    (void)advf;
+    (void)pAdvSink;
+    (void)pdwConnection;
+    return OLE_E_ADVISENOTSUPPORTED;
+}
+
+static HRESULT STDMETHODCALLTYPE do_DUnadvise(IDataObject *This, DWORD dwConnection) {
+    (void)This;
+    (void)dwConnection;
+    return OLE_E_ADVISENOTSUPPORTED;
+}
+
+static HRESULT STDMETHODCALLTYPE do_EnumDAdvise(IDataObject *This, IEnumSTATDATA **ppenumAdvise) {
+    (void)This;
+    if (ppenumAdvise)
+        *ppenumAdvise = NULL;
+    return OLE_E_ADVISENOTSUPPORTED;
+}
+
+static IDataObjectVtbl g_data_object_vtbl = {
+    .QueryInterface = do_QueryInterface,
+    .AddRef = do_AddRef,
+    .Release = do_Release,
+    .GetData = do_GetData,
+    .GetDataHere = do_GetDataHere,
+    .QueryGetData = do_QueryGetData,
+    .GetCanonicalFormatEtc = do_GetCanonicalFormatEtc,
+    .SetData = do_SetData,
+    .EnumFormatEtc = do_EnumFormatEtc,
+    .DAdvise = do_DAdvise,
+    .DUnadvise = do_DUnadvise,
+    .EnumDAdvise = do_EnumDAdvise,
+};
+
 IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
-    (void)source;
-    return -1;
+    w32_platform *pl = g_active_pl;
+    if (!pl || !pl->hwnd || !source)
+        return -1;
+
+    pl->drag_source = *source;
+    pl->drag_active = true;
+
+    wchar_t *wstr = NULL;
+    if (source->static_text && source->static_text_len) {
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, source->static_text, (int)source->static_text_len, NULL, 0);
+        if (wlen > 0) {
+            wstr = (wchar_t *)malloc((size_t)(wlen + 1) * sizeof(wchar_t));
+            if (wstr) {
+                MultiByteToWideChar(CP_UTF8, 0, source->static_text, (int)source->static_text_len, wstr, wlen);
+                wstr[wlen] = L'\0';
+            }
+        }
+    }
+
+    w32_data_object_impl data_obj = {
+        .data_obj = {.lpVtbl = &g_data_object_vtbl},
+        .ref_count = 1,
+        .text_w = wstr,
+    };
+    w32_drop_source_impl drop_src = {
+        .source = {.lpVtbl = &g_drop_source_vtbl},
+        .ref_count = 1,
+    };
+
+    DWORD effect = 0;
+    DWORD ok_effects = DROPEFFECT_COPY | DROPEFFECT_MOVE;
+    HRESULT hr = DoDragDrop((IDataObject *)&data_obj, (IDropSource *)&drop_src, ok_effects, &effect);
+
+    pl->drag_active = false;
+    free(wstr);
+
+    if (hr == DRAGDROP_S_DROP) {
+        if (source->callbacks.finished)
+            source->callbacks.finished(IRIS_DND_ACTION_COPY, source->callbacks.user);
+        return 0;
+    } else {
+        if (source->callbacks.cancelled)
+            source->callbacks.cancelled(source->callbacks.user);
+        return (hr == DRAGDROP_S_CANCEL) ? 0 : -1;
+    }
 }
 
 IRIS_API bool iris_dnd_is_active(void) {
-    return false;
+    w32_platform *pl = g_active_pl;
+    return pl && pl->drag_active;
 }
 
 IRIS_API void iris_dnd_cancel(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl)
+        pl->drag_active = false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1210,6 +1578,16 @@ static void w32_destroy_vk_surface(const flux_device *device, VkSurfaceKHR vk_su
 /*  Run                                                                */
 /* ------------------------------------------------------------------ */
 
+static int lens_host_start_drag_win32(const char *text, size_t len, uint32_t actions, void *user) {
+    (void)user;
+    iris_dnd_source src = {
+        .actions = actions,
+        .static_text = text,
+        .static_text_len = len,
+    };
+    return iris_dnd_start(&src);
+}
+
 int iris_app_run_win32(const iris_app_config *cfg) {
     /* All resources declared up front and NULL/VK_NULL_HANDLE-initialized so
      * a single `fail:` cleanup block can run on every exit path (error or
@@ -1237,6 +1615,14 @@ int iris_app_run_win32(const iris_app_config *cfg) {
      * iris_set_cursor() / iris_window_*() can reach it. Cleared on the way
      * out (success or fail). */
     g_active_pl = &pl;
+
+    OleInitialize(NULL);
+
+    w32_drop_target_impl drop_target = {
+        .target = {.lpVtbl = &g_drop_target_vtbl},
+        .ref_count = 1,
+        .pl = &pl,
+    };
 
     /* Per-monitor DPI awareness must be opted into before any window exists
      * (a process manifest would be stronger still, but iris is a library and
@@ -1286,6 +1672,8 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         fprintf(stderr, "CreateWindowExW failed (%lu)\n", GetLastError());
         goto fail;
     }
+
+    RegisterDragDrop(pl.hwnd, (IDropTarget *)&drop_target);
 
     /* The window may have been created on a monitor whose DPI differs from
      * the system DPI: re-derive the scale and resize the window so the
@@ -1363,7 +1751,9 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                                  .scale = pl.scale,
                                  .clipboard = {.set_text = clip_set_text,
                                                .request_text = clip_request_text,
-                                               .user = &pl}},
+                                               .user = &pl},
+                                 .dnd = {.start_drag = lens_host_start_drag_win32,
+                                         .user = &pl}},
                     &ui) != FLUX_OK) {
         fprintf(stderr, "lens_create failed\n");
         goto fail;
@@ -1749,7 +2139,10 @@ fail:
         w32_destroy_vk_surface(device, vk_surface);
     if (device)
         flux_device_release(device);
-    if (pl.hwnd)
+    if (pl.hwnd) {
+        RevokeDragDrop(pl.hwnd);
         DestroyWindow(pl.hwnd);
+    }
+    OleUninitialize();
     return rc;
 }
