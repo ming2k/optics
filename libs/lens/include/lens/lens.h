@@ -604,6 +604,7 @@ typedef struct lens_widget_content {
     bool compact;
     const lens_text_line *lines;
     int line_count;
+    lens_align align;
     lens_icon_id icon;
     float glyph_size;
     flux_image *image;
@@ -617,6 +618,7 @@ typedef struct lens_widget_content {
     /* TEXTEDIT: text-edit payload */
     bool multiline;
     const char *edit_text;
+    float edit_text_x;
     float edit_text_y;
     bool show_placeholder;
     const flux_rect *sel_rects;

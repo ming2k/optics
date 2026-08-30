@@ -13,7 +13,7 @@ static void test_scroll_thumb_drag(void) {
     lens_begin(ui, &in);
     lens_size(ui, 0, 80);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "sc"}});
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 30; i++) {
         char lbl[16];
         snprintf(lbl, sizeof lbl, "line %d", i);
         lens_label(ui, &(lens_label_opts){.text = lbl});
@@ -27,7 +27,7 @@ static void test_scroll_thumb_drag(void) {
     lens_begin(ui, &in2);
     lens_size(ui, 0, 80);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "sc"}});
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 30; i++) {
         char lbl[16];
         snprintf(lbl, sizeof lbl, "line %d", i);
         lens_label(ui, &(lens_label_opts){.text = lbl});
@@ -47,7 +47,7 @@ static void test_scroll_thumb_drag(void) {
     lens_begin(ui, &in3);
     lens_size(ui, 0, 80);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "sc"}});
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 30; i++) {
         char lbl[16];
         snprintf(lbl, sizeof lbl, "line %d", i);
         lens_label(ui, &(lens_label_opts){.text = lbl});
@@ -62,7 +62,7 @@ static void test_scroll_thumb_drag(void) {
     lens_begin(ui, &in4);
     lens_size(ui, 0, 80);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "sc"}});
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 30; i++) {
         char lbl[16];
         snprintf(lbl, sizeof lbl, "line %d", i);
         lens_label(ui, &(lens_label_opts){.text = lbl});
@@ -149,7 +149,7 @@ static void test_wrapped_label_respects_width_and_grows_height(void) {
     lens_input in = {.display_size = {200, 200}, .dt_seconds = 0.016f};
     lens_theme theme = lens_get_theme(ui);
     float single_line_h =
-        lens_text_measure(ui, theme.font, "Ag", theme.font_size).height + 2.0f * theme.padding;
+        lens_text_measure(ui, theme.font, "Ag", theme.font_size).height;
 
     lens_begin(ui, &in);
     lens_column_begin(ui, &(lens_layout_opts){.cross = LENS_START});
@@ -177,10 +177,35 @@ static void test_wrapped_label_respects_width_and_grows_height(void) {
     lens_destroy(ui);
 }
 
+
+static void test_label_zero_padding_by_default(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
+    lens_theme theme = lens_get_theme(ui);
+
+    lens_begin(ui, &in);
+    lens_row_begin(ui, &(lens_layout_opts){.cross = LENS_START});
+    lens_label(ui, &(lens_label_opts){.text = "Tight Label", .size = 14.0f});
+    lens_close(ui);
+    lens_end(ui);
+
+    lens_node *row = lens_node_first_child(lens_root(ui));
+    lens_node *label = lens_node_first_child(row);
+    CHECK(label != NULL);
+    flux_rect r = lens_node_bounds(label);
+    lens_text_metrics m = lens_text_measure(ui, theme.font, "Tight Label", 14.0f);
+    CHECK_NEAR(r.w, m.width, 0.5f);
+    CHECK_NEAR(r.h, m.height, 0.5f);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_scroll_thumb_drag();
     test_label_sizes();
     test_compact_outlined_label_preserves_intrinsic_metrics();
     test_wrapped_label_respects_width_and_grows_height();
+    test_label_zero_padding_by_default();
     return TEST_REPORT();
 }

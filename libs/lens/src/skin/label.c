@@ -19,6 +19,8 @@ void lensi_skin_label(lens *ui, lens_node *n, const lens_widget_record *rec) {
                                 (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
                                                 .rel = {line->x, line->y, 0, 0},
                                                 .color = rs->fg,
+                                                .outline_color = rs->outline_color,
+                                                .outline_width = rs->outline_width,
                                                 .text = line->text,
                                                 .text_size = size,
                                                 .text_weight = rec->content.text_weight});
@@ -26,32 +28,22 @@ void lensi_skin_label(lens *ui, lens_node *n, const lens_widget_record *rec) {
         return;
     }
 
-    if (rec->content.compact) {
-        /* Compact form: no padding, text centred in the intrinsic box, with
-         * the opt-in outline atoms (ADR-0061). The record's text_weight
-         * rides through like the padded forms — callers that never set it
-         * keep the theme's regular weight (0 = default). */
-        float y = (rec->bounds.h - rec->content.text.height) * 0.5f;
-        if (y < 0.0f)
-            y = 0.0f;
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                            .rel = {0, y, 0, 0},
-                                            .color = rs->fg,
-                                            .outline_color = rs->outline_color,
-                                            .outline_width = rs->outline_width,
-                                            .text = rec->content.label,
-                                            .text_size = size,
-                                            .text_weight = rec->content.text_weight});
-        return;
+    float x = rs->padding;
+    float rel_w = 0.0f;
+    if (rec->content.align == LENS_CENTER) {
+        rel_w = -1.0f;
+        x = 0.0f;
+    } else if (rec->content.align == LENS_END) {
+        x = rec->bounds.w - rec->content.text.width - rs->padding;
+        if (x < rs->padding)
+            x = rs->padding;
     }
 
-    /* Padded forms: negative rel.h centres
-     * vertically in the RESOLVED node box at replay, so text stays centred
-     * even when a fixed-height parent constrains the node. */
+    /* Single-line label: negative rel.h centres vertically in the RESOLVED
+     * node box at replay; negative rel.w centres horizontally when align == LENS_CENTER. */
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = {rs->padding, 0, 0, -1.0f},
+                                        .rel = {x, 0, rel_w, -1.0f},
                                         .color = rs->fg,
                                         .outline_color = rs->outline_color,
                                         .outline_width = rs->outline_width,

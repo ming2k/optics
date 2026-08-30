@@ -219,6 +219,18 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     if (!disabled && (r.hovered || ts->dragging))
         ui->cursor_hint = LENS_CURSOR_TEXT;
 
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
+
+    /* Concentric padding: when corner radius is large (e.g. pill/capsule),
+     * inset the text horizontally so it never collides with the circular corner arc. */
+    float pad_x = padding;
+    if (rs.corner_radius > padding) {
+        /* Inset concentric to the rounded corner arc */
+        float arc_inset = rs.corner_radius * 0.8f;
+        if (arc_inset > pad_x)
+            pad_x = arc_inset;
+    }
+
     /* Mouse click & drag interaction */
     if (!disabled && buf && buf_cap > 1 && !opts->readonly) {
         bool mouse_down = ui->input.mouse_down[LENS_MOUSE_LEFT];
@@ -230,7 +242,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
                 ts->cursor = (uint32_t)len;
                 ts->select_all_seeded = true;
             } else {
-                float click_x = ui->input.cursor.x - (n->prev_rect.x + padding);
+                float click_x = ui->input.cursor.x - (n->prev_rect.x + pad_x);
                 uint32_t target_cursor = 0;
                 if (multiline) {
                     float click_y = ui->input.cursor.y - (n->prev_rect.y + padding - ts->scroll_y);
@@ -267,7 +279,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
             }
         } else if (ts->dragging) {
             if (mouse_down) {
-                float click_x = ui->input.cursor.x - (n->prev_rect.x + padding);
+                float click_x = ui->input.cursor.x - (n->prev_rect.x + pad_x);
                 uint32_t target_cursor = 0;
                 if (multiline) {
                     float click_y = ui->input.cursor.y - (n->prev_rect.y + padding - ts->scroll_y);
@@ -315,7 +327,25 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
 
     /* Single-line vs Multi-line interaction handling */
     if (!disabled && r.focused && buf && buf_cap > 1 && !opts->readonly) {
-        /* Direct character input */
+        /* IME delete_surrounding_text: applied BEFORE the commit string per
+         * the text-input-v3 protocol, so freshly committed text lands in
+         * the right place relative to the IME's expected context window. */
+        if (ui->input.ime_delete_before || ui->input.ime_delete_after) {
+            uint32_t lo = ts->cursor >= ui->input.ime_delete_before
+                              ? ts->cursor - ui->input.ime_delete_before
+                              : 0;
+            uint32_t hi = ts->cursor + ui->input.ime_delete_after;
+            if (hi > len)
+                hi = (uint32_t)len;
+            if (hi > lo) {
+                delete_range(buf, &len, lo, hi);
+                ts->cursor = lo;
+                sel_clear(ts);
+                changed = true;
+            }
+        }
+
+        /* Direct character input / IME committed text */
         if (ui->input.text_utf8[0] != '\0') {
             size_t in_len = strlen(ui->input.text_utf8);
             if (sel_active(ts)) {
@@ -493,31 +523,54 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     }
 
     /* Measure and layout display text */
-    bool show_placeholder = (len == 0 && placeholder && placeholder[0]);
+    bool has_preedit = r.focused && buf && buf_cap > 1 && ui->input.preedit_utf8[0] != '\0';
+    bool show_placeholder = (!has_preedit && len == 0 && placeholder && placeholder[0]);
     const char *display_text = show_placeholder ? placeholder : (buf ? buf : "");
-    float text_y = multiline ? padding - ts->scroll_y : fmaxf((h - line_h) * 0.5f, 0.0f);
-
-    float caret_x = 0.0f;
-    float caret_y = text_y;
-    if (r.focused && !show_placeholder && buf) {
+    float cap_height = fm.baseline > 0.0f ? (fm.baseline * 0.72f) : (font_size * 0.72f);
+    float optical_baseline = roundf(h * 0.5f + cap_height * 0.5f);
+    float text_y = multiline ? padding - ts->scroll_y : (optical_baseline - fm.baseline);
+    float font_asc = fm.baseline > 0.0f ? fm.baseline : (font_size * 0.95f);
+    float font_desc = (fm.height > fm.baseline && fm.baseline > 0.0f) ? (fm.height - fm.baseline) : (font_size * 0.25f);
+    float caret_h = font_asc + font_desc;
+    float base_caret_x = prefix_width(ui, buf, ts->cursor, font_size);
+    float caret_x = base_caret_x;
+    float caret_y = optical_baseline - font_asc;
+    flux_rect preedit_underline = {0};
+    flux_rect preedit_clause = {0};
+    if (has_preedit) {
+        const char *pe = ui->input.preedit_utf8;
+        size_t pe_len = strlen(pe);
+        size_t display_len = ts->cursor + pe_len + (len - ts->cursor);
+        char *display = flux_arena_alloc(&ui->arena, display_len + 1);
+        if (display) {
+            if (ts->cursor) memcpy(display, buf, ts->cursor);
+            if (pe_len) memcpy(display + ts->cursor, pe, pe_len);
+            if (len > ts->cursor) memcpy(display + ts->cursor + pe_len, buf + ts->cursor, len - ts->cursor);
+            display[display_len] = '\0';
+            display_text = display;
+        }
+        float pe_width = prefix_width(ui, pe, pe_len, font_size);
+        preedit_underline = (flux_rect){pad_x + base_caret_x, optical_baseline + 1.0f, pe_width, 1.5f};
+        uint32_t clause_lo = ui->input.preedit_sel_lo;
+        uint32_t clause_hi = ui->input.preedit_sel_hi;
+        if (clause_hi > clause_lo && clause_hi <= pe_len) {
+            float clause_x = prefix_width(ui, pe, clause_lo, font_size);
+            float clause_w = prefix_width(ui, pe, clause_hi, font_size) - clause_x;
+            preedit_clause = (flux_rect){pad_x + base_caret_x + clause_x, optical_baseline + 1.0f, clause_w, 2.5f};
+        }
+        caret_x = base_caret_x + prefix_width(ui, pe, ui->input.preedit_cursor, font_size);
+    } else if (r.focused && !show_placeholder && buf) {
         if (multiline) {
-            size_t ls;
-            int li;
+            size_t ls; int li;
             find_line(buf, ts->cursor, &ls, &li);
             caret_x = prefix_width(ui, buf + ls, ts->cursor - ls, font_size);
-            caret_y = text_y + (float)li * line_height;
+            caret_y = padding - ts->scroll_y + (float)li * line_height;
+            caret_h = line_h;
         } else {
-            caret_x = prefix_width(ui, buf, ts->cursor, font_size);
+            caret_x = base_caret_x;
         }
     }
-
-    flux_rect caret_rect = {
-        padding + caret_x,
-        caret_y,
-        1.5f,
-        line_h,
-    };
-
+    flux_rect caret_rect = { pad_x + caret_x, caret_y, 1.5f, caret_h };
     /* Build text lines for multiline or single-line */
     lens_text_line *lines = NULL;
     int line_count = 0;
@@ -534,7 +587,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
                 line_str[llen] = '\0';
                 lines[line_count++] = (lens_text_line){
                     .text = line_str,
-                    .x = padding,
+                    .x = pad_x,
                     .y = padding + (float)row_idx * line_height,
                 };
             }
@@ -552,12 +605,11 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
         uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
         float x1 = prefix_width(ui, buf, lo, font_size);
         float x2 = prefix_width(ui, buf, hi, font_size);
-        sel_rect = (flux_rect){padding + x1, text_y, x2 - x1, line_h};
+        sel_rect = (flux_rect){pad_x + x1, text_y, x2 - x1, line_h};
         sel_rect_count = 1;
     }
 
     /* Skin emission */
-    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
     lensi_skin_emit(ui, n,
                     &(lens_widget_record){
                         .kind = LENS_WIDGET_TEXTEDIT,
@@ -570,6 +622,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
                             {
                                 .multiline = multiline,
                                 .edit_text = multiline ? NULL : display_text,
+                                .edit_text_x = pad_x,
                                 .edit_text_y = text_y,
                                 .show_placeholder = show_placeholder,
                                 .lines = lines,
@@ -578,6 +631,9 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
                                 .sel_rect_count = sel_rect_count,
                                 .caret = caret_rect,
                                 .show_caret = r.focused && !disabled,
+                                .preedit_underline = preedit_underline,
+                                .has_preedit = has_preedit,
+                                .preedit_clause = preedit_clause,
                                 .error = error,
                             },
                     });

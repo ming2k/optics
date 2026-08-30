@@ -141,8 +141,10 @@ lens_response lens_label(lens *ui, const lens_label_opts *opts) {
     else
         size = lensi_font_px(ui, size);
 
-    float padding = lensi_style_padding(&eff, &ui->theme);
+    float padding = (eff.fields & LENS_STYLE_PADDING) ? eff.padding : 0.0f;
     lens_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
+    if (!(eff.fields & LENS_STYLE_PADDING))
+        rs.padding = 0.0f;
 
     lens_id id =
         opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, text);
@@ -178,7 +180,15 @@ lens_response lens_label(lens *ui, const lens_label_opts *opts) {
         do {
             size_t next = start;
             size_t end = wrapped_line_end(ui, text, len, start, size, content_width, &next);
-            push_line_slice(ui, &lines, &line_count, &line_cap, text + start, end - start, padding,
+            float line_x = padding;
+            if (opts->align == LENS_CENTER || opts->align == LENS_END) {
+                flux_text_metrics lm = measure_slice(ui, text + start, end - start, size);
+                if (opts->align == LENS_CENTER)
+                    line_x = padding + fmaxf((content_width - lm.width) * 0.5f, 0.0f);
+                else
+                    line_x = padding + fmaxf(content_width - lm.width, 0.0f);
+            }
+            push_line_slice(ui, &lines, &line_count, &line_cap, text + start, end - start, line_x,
                             padding + (float)logical_lines * (line_height + line_gap));
             logical_lines++;
             if (next <= start)
@@ -212,6 +222,7 @@ lens_response lens_label(lens *ui, const lens_label_opts *opts) {
                                 .text = intrinsic,
                                 .text_size = size,
                                 .text_weight = opts->weight,
+                                .align = opts->align,
                                 .lines = lines,
                                 .line_count = line_count,
                             },

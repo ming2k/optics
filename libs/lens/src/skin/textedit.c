@@ -53,9 +53,10 @@ void lensi_skin_textedit(lens *ui, lens_node *n, const lens_widget_record *rec) 
                                                 .text_size = rs->font_size});
         }
     } else if (c->edit_text) {
+        float text_x = c->edit_text_x > 0.0f ? c->edit_text_x : rs->padding;
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                            .rel = {rs->padding, c->edit_text_y, 0, 0},
+                                            .rel = {text_x, c->edit_text_y, 0, 0},
                                             .color = text_color,
                                             .text = c->edit_text,
                                             .text_size = rs->font_size});

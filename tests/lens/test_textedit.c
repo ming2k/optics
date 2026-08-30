@@ -31,6 +31,7 @@ static void test_insert_ascii(void) {
     char buf[32] = {0};
 
     focus_field(ui, "tf", buf, sizeof buf);
+    lens_textedit_set_caret(ui, "tf", 6);
 
     lens_input in = IN0;
     strncpy(in.text_utf8, "hello", sizeof in.text_utf8 - 1);
@@ -52,6 +53,7 @@ static void test_backspace_and_delete(void) {
     char buf[32] = "abc";
 
     focus_field(ui, "tf", buf, sizeof buf);
+    lens_textedit_set_caret(ui, "tf", 6);
     lens_textedit_set_caret(ui, "tf", 3);
 
     /* Backspace removes 'c' */
@@ -88,6 +90,7 @@ static void test_cursor_navigation(void) {
     char buf[32] = "world";
 
     focus_field(ui, "tf", buf, sizeof buf);
+    lens_textedit_set_caret(ui, "tf", 6);
     lens_textedit_set_caret(ui, "tf", 5);
 
     /* Home moves to 0 */
@@ -240,6 +243,83 @@ static void test_textedit_vertical_centering(void) {
     lens_destroy(ui);
 }
 
+static void test_textedit_caret_coverage(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    char buf[32] = "/home/ming";
+
+    focus_field(ui, "tf", buf, sizeof buf);
+    lens_textedit_set_caret(ui, "tf", 6);
+
+    /* Frame 2: render focused field to emit caret */
+    lens_begin(ui, &IN0);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
+    lens_end(ui);
+
+    lens_node *n = lens_find(ui, lens_current_id(ui, "tf"));
+    CHECK(n != NULL);
+
+    /* Find caret draw command */
+    const lens_draw_cmd *caret_cmd = NULL;
+    for (uint32_t i = 0; i < n->cmd_count; i++) {
+        /* Caret is drawn as LENS_DRAW_RECT with width 1.5f */
+        if (n->cmds[i].kind == LENS_DRAW_RECT && n->cmds[i].rel.w == 1.5f) {
+            caret_cmd = &n->cmds[i];
+            break;
+        }
+    }
+    CHECK(caret_cmd != NULL);
+    if (caret_cmd) {
+        /* Caret height must span full ascent + descent (>= 14.0f for standard 13px font) */
+        CHECK(caret_cmd->rel.h >= 14.0f);
+    }
+
+    lens_destroy(ui);
+}
+
+static void test_textedit_ime_preedit_and_commit(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    char buf[64] = "hello ";
+
+    focus_field(ui, "tf", buf, sizeof buf);
+    lens_textedit_set_caret(ui, "tf", 6);
+
+    /* Frame 1: IME sends preedit "nihao" */
+    lens_input in = IN0;
+    strncpy(in.preedit_utf8, "nihao", sizeof in.preedit_utf8 - 1);
+    in.preedit_cursor = 5;
+    in.preedit_sel_lo = 0;
+    in.preedit_sel_hi = 5;
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
+    lens_end(ui);
+
+    lens_node *n = lens_find(ui, lens_current_id(ui, "tf"));
+    CHECK(n != NULL);
+    /* Node must have preedit underline draw command */
+    bool found_preedit_underline = false;
+    for (uint32_t i = 0; i < n->cmd_count; i++) {
+        if (n->cmds[i].kind == LENS_DRAW_RECT && n->cmds[i].rel.h == 1.5f && n->cmds[i].rel.w > 0.0f) {
+            found_preedit_underline = true;
+            break;
+        }
+    }
+    CHECK(found_preedit_underline);
+
+    /* Frame 2: IME commits "你好" */
+    in = IN0;
+    strncpy(in.text_utf8, "你好", sizeof in.text_utf8 - 1);
+    lens_begin(ui, &in);
+    bool changed = lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf}).changed;
+    lens_end(ui);
+
+    CHECK(changed);
+    CHECK(strcmp(buf, "hello 你好") == 0);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_insert_ascii();
     test_backspace_and_delete();
@@ -248,5 +328,7 @@ int main(void) {
     test_multiline_selection_and_copy();
     test_textedit_cursor_hint();
     test_textedit_vertical_centering();
+    test_textedit_caret_coverage();
+    test_textedit_ime_preedit_and_commit();
     return TEST_REPORT();
 }
