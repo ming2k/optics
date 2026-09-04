@@ -13,6 +13,12 @@ either.
 
 ## [Unreleased]
 
+## [0.0.34] - 2026-09-05
+
+### Added
+
+- **lens**: Added `Frame::textfield_password` safe Rust binding for masked password entry.
+
 ## [0.0.33] - 2026-09-05
 
 ### Added
