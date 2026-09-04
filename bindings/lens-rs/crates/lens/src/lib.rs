@@ -980,6 +980,21 @@ impl Frame {
         unsafe { sys::lens_textedit(self.ui, &opts).changed }
     }
 
+    pub fn textfield_password(&mut self, label: &str, buf: &mut TextBuf, placeholder: &str) -> bool {
+        let c = cstr(label);
+        let p = cstr(placeholder);
+        let opts = sys::lens_textedit_opts {
+            box_: sys::lens_box { id: c.as_ptr(), ..Default::default() },
+            buf: buf.as_mut_ptr(),
+            cap: buf.cap(),
+            multiline: false,
+            placeholder: p.as_ptr(),
+            password: true,
+            ..Default::default()
+        };
+        unsafe { sys::lens_textedit(self.ui, &opts).changed }
+    }
+
     pub fn scroll<R>(&mut self, id: &str, body: impl FnOnce(&mut Frame) -> R) -> R {
         let c = cstr(id);
         let opts = sys::lens_scroll_opts {
