@@ -13,6 +13,18 @@ either.
 
 ## [Unreleased]
 
+## [0.0.33] - 2026-09-05
+
+### Added
+
+- **lens**: Introduce patterns layer, declarative view tree, and fine-grained reactivity (`SplitOpts`, `TabStrip`, `SegmentedControl`, `virtual_grid_calc`).
+- **iris**: Introduce `iris_window_start_move` for interactive CSD window dragging over Wayland/CSD.
+- **iris/lens**: Cross-platform drag and drop subsystem with native OLE/COM and Cocoa backends (ADR-0086), exposing safe DnD API and `Capability::DragSource`.
+
+### Fixed
+
+- **lens**: Optical baseline centering, full caret span, concentric pill padding, text-input-v3 IME preedit, and SVG arc tangent derivative signs.
+
 ## [0.0.32] - 2026-08-30
 
 ### Fixed
