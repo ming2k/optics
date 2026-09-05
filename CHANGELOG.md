@@ -13,6 +13,12 @@ either.
 
 ## [Unreleased]
 
+## [0.0.35] - 2026-09-05
+
+### Fixed
+
+- **prism**: Clamp liquid glass rim width on small bodies to maintain flat centers, and suppress excessive dark backdrop tinting under smoke plates.
+
 ## [0.0.34] - 2026-09-05
 
 ### Added
