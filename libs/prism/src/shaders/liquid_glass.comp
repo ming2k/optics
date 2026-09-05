@@ -242,8 +242,10 @@ void main()
     vec2 rim_normal = normalize(vec2(dx, dy) + vec2(1e-6));
 
     /* Rim parameter: 1 at the silhouette, 0 where the lens flattens out.
-     * Band width scales with the body like the rest of the geometry. */
-    float edge = max(pc.edge_width * size_scale, 1.0);
+     * Band width scales with the body like the rest of the geometry.
+     * Clamped so small bodies (e.g. pills/chips) maintain an undistorted flat center. */
+    float max_edge = max(body_min * 0.35, 1.0);
+    float edge = clamp(pc.edge_width * size_scale, 1.0, max_edge);
     float u = clamp(1.0 + d / edge, 0.0, 1.0);
     /* Convex-lens bend profile: spherical-cap slope u/sqrt(1-u²), clamped
      * where the physical cap would turn vertical, then normalised to 0..1.
@@ -303,6 +305,11 @@ void main()
     float tint_amount = mix(0.24, 0.10, dark_backdrop) * (0.65 + 0.35 * (1.0 - u)) *
                         tint_strength;
     tint_amount *= 1.0 - 0.48 * focus;
+    /* Prevent smoke plate from crushing dark backdrops into pitch-black mud */
+    if (plate_polarity >= 0.0 && plate_polarity < 0.5) {
+        float low_luma_suppression = smoothstep(0.05, 0.30, backdrop_luminance);
+        tint_amount *= mix(0.35, 1.0, low_luma_suppression);
+    }
     /* Busy backdrops get a stronger tint: the energy boost lifts the body
      * off high-frequency content without changing the quiet-content look. */
     if (backdrop_energy >= 0.0)
