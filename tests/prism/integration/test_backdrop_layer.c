@@ -443,6 +443,66 @@ int main(void) {
         EXPECT(body_centre[0] > 150u);
     }
 
+    /* --- multiple glass bodies with NO frost rects: all bodies must render (never black) --- */
+    {
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+
+        flux_color white = flux_color_rgba(255, 255, 255, 255);
+        EXPECT(flux_canvas_begin_target(canvas, frame, target, &white) == FLUX_OK);
+        flux_canvas_end_target(canvas);
+
+        flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+        bd.input = target;
+        bd.sigma = 4.0f;
+        flux_image *blurred = nullptr;
+        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+
+        prism_liquid_glass_group bodies[3] = {PRISM_LIQUID_GLASS_GROUP_INIT,
+                                              PRISM_LIQUID_GLASS_GROUP_INIT,
+                                              PRISM_LIQUID_GLASS_GROUP_INIT};
+        /* Body 0: top chip (e.g. HUD status) */
+        bodies[0].shapes[0] =
+            (prism_liquid_glass_shape){.bounds = {4.0f, 4.0f, 24.0f, 16.0f}, .corner_radius = 4.0f};
+        /* Body 1: middle chip (e.g. HUD workspace) */
+        bodies[1].shapes[0] =
+            (prism_liquid_glass_shape){.bounds = {36.0f, 4.0f, 24.0f, 16.0f}, .corner_radius = 4.0f};
+        /* Body 2: bottom panel (e.g. Dock) */
+        bodies[2].shapes[0] =
+            (prism_liquid_glass_shape){.bounds = {8.0f, 36.0f, 48.0f, 20.0f}, .corner_radius = 6.0f};
+
+        prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
+        ld.input = target;
+        ld.blurred_input = blurred;
+        ld.frost_count = 0u;
+        ld.groups = bodies;
+        ld.group_count = 3u;
+        ld.refraction = 4.0f;
+        ld.edge_width = 8.0f;
+        flux_image *layer = nullptr;
+        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+
+        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
+        flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        flux_canvas_end_frame(canvas);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+
+        /* All three bodies must be visible and bright (none skipped or black). */
+        const uint8_t *b0 = &px[(12u * W + 16u) * 4u];
+        const uint8_t *b1 = &px[(12u * W + 48u) * 4u];
+        const uint8_t *b2 = &px[(46u * W + 32u) * 4u];
+        EXPECT(b0[0] > 150u);
+        EXPECT(b1[0] > 150u);
+        EXPECT(b2[0] > 150u);
+
+        /* Outside all bodies must remain transparent (black base shows through). */
+        const uint8_t *gap = &px[(28u * W + 32u) * 4u];
+        EXPECT(gap[0] < 5u && gap[1] < 5u && gap[2] < 5u);
+    }
+
     /* --- glass statistics round-trip on the layer filter --- */
     {
         flux_frame *frame = nullptr;
@@ -452,7 +512,8 @@ int main(void) {
         /* First submission on this slot's cadence: stats may legitimately be
          * UNSUPPORTED_STATE on a fresh slot; the contract is that a slot
          * with a prior glass submission reports the group count. */
-        prism_backdrop_layer_filter_stats(layer_filter, frame, stats, 8u, &count);
+        EXPECT(prism_backdrop_layer_filter_stats(layer_filter, frame, stats, 8u, &count) ==
+               FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
     }

@@ -135,6 +135,7 @@ typedef struct backdrop_layer_slot {
     uint32_t height;
     flux_format format;
     flux_image *output;
+    flux_image *scratch;
     bool initialized;
     /* Clear footprints: previous and current frost rects + glass bodies. */
     uint32_t previous_count;
@@ -303,15 +304,24 @@ static flux_result layer_ensure_stats_buffer(prism_backdrop_layer_filter *filter
 }
 
 static flux_result layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32_t index,
-                                     const flux_image *input, bool need_stats) {
+                                     const flux_image *input, bool need_stats, bool need_scratch) {
     backdrop_layer_slot *slot = &filter->slots[index];
     uint32_t width = flux_image_width(input);
     uint32_t height = flux_image_height(input);
     flux_format format = prism_layer_output_format(input);
-    if (slot->output && slot->width == width && slot->height == height && slot->format == format)
+    if (slot->output && slot->width == width && slot->height == height && slot->format == format) {
+        if (need_scratch && !slot->scratch) {
+            flux_result r = flux_image_create_compute_writable(filter->device, width, height, format,
+                                                               &slot->scratch);
+            if (r != FLUX_OK)
+                return r;
+        }
         return need_stats ? layer_ensure_stats_buffer(filter, slot) : FLUX_OK;
+    }
     if (slot->output)
         flux_image_release(slot->output);
+    if (slot->scratch)
+        flux_image_release(slot->scratch);
     if (slot->stats)
         flux_buffer_release(slot->stats);
     *slot = (backdrop_layer_slot){0};
@@ -319,6 +329,11 @@ static flux_result layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32
         flux_image_create_compute_writable(filter->device, width, height, format, &slot->output);
     if (r != FLUX_OK)
         return r;
+    if (need_scratch) {
+        r = flux_image_create_compute_writable(filter->device, width, height, format, &slot->scratch);
+        if (r != FLUX_OK)
+            return r;
+    }
     slot->width = width;
     slot->height = height;
     slot->format = format;
@@ -475,6 +490,8 @@ void prism_backdrop_layer_filter_release(prism_backdrop_layer_filter *filter) {
     for (uint32_t i = 0; i < FLUX_MAX_FRAMES_IN_FLIGHT; ++i) {
         if (filter->slots[i].output)
             flux_image_release(filter->slots[i].output);
+        if (filter->slots[i].scratch)
+            flux_image_release(filter->slots[i].scratch);
         if (filter->slots[i].stats)
             flux_buffer_release(filter->slots[i].stats);
     }
@@ -521,7 +538,8 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     uint32_t index = flux_frame_index(frame);
     if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
         return FLUX_ERROR_OUT_OF_RANGE;
-    flux_result result = layer_ensure_slot(filter, index, input, desc->group_count > 0u);
+    const bool need_scratch = (desc->frost_count > 0u && desc->group_count > 0u);
+    flux_result result = layer_ensure_slot(filter, index, input, desc->group_count > 0u, need_scratch);
     if (result != FLUX_OK)
         return result;
 
@@ -592,6 +610,29 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
             flux_compute_dispatch(command, filter->clear_pipelines[is16f ? 1 : 0], &push,
                                   sizeof(push), gx, gy, 1u);
         }
+        if (need_scratch && slot->scratch) {
+            VkImage scratch_image = flux_image_vk_image(slot->scratch);
+            if (slot->initialized)
+                layer_barrier_reuse_to_compute_write(command, scratch_image);
+            for (uint32_t i = 0; i < clear_count; ++i) {
+                liquid_glass_region region = clear_regions[i];
+                storage_clear_push push = {
+                    .output_handle = flux_image_bindless_storage_handle(slot->scratch),
+                    .width = image_width,
+                    .height = image_height,
+                    .origin_x = region.x,
+                    .origin_y = region.y,
+                    .region_width = region.width,
+                    .region_height = region.height,
+                };
+                uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+                uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+                flux_compute_dispatch(command, filter->clear_pipelines[is16f ? 1 : 0], &push,
+                                      sizeof(push), gx, gy, 1u);
+            }
+            if (current_count > 0u)
+                layer_barrier_compute_write_to_read_write(command, scratch_image);
+        }
         if (current_count > 0u)
             layer_barrier_compute_write_to_read_write(command, output_image);
     }
@@ -623,15 +664,14 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         layer_barrier_stats_write_to_compute(command, flux_buffer_vk_buffer(slot->stats));
     }
 
-    /* 3. Frost/base layer. The pass renders a COMPLETE opaque background
-     * (the sharp capture, with each frost rect blending its frosted body
-     * over it), so it must run over every footprint the frame needs —
-     * every frost rect AND every glass body (a lens may sample anywhere
-     * its bend reaches, including outside all frost rects). Frost rects
-     * are deduplicated against the body footprints they fall inside by
-     * merging into the dispatch set below; each dispatch carries its own
-     * rect bounds, so a body-only region simply writes the sharp base. */
-    if (current_count > 0u) {
+    /* 3. Frost/base layer.
+     * When frost rects exist:
+     *   - If glass bodies also exist (need_scratch), render the opaque sharp base + frost
+     *     into slot->scratch so the glass lens samples the frosted backdrop without in-place hazard.
+     *   - In slot->output, render the frost rects.
+     * When NO frost rects exist (desc->frost_count == 0):
+     *   Skip Step 3 completely. The glass pass samples `input` directly and writes to slot->output. */
+    if (desc->frost_count > 0u && current_count > 0u) {
         /* Merge all current footprints into disjoint dispatch regions. */
         liquid_glass_region
             dispatch_regions[PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS];
@@ -645,15 +685,77 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
                 return FLUX_ERROR_INVALID_STATE;
             }
         }
-        bool frost_dispatched = false;
+
+        if (need_scratch && slot->scratch) {
+            VkImage scratch_image = flux_image_vk_image(slot->scratch);
+            bool any_scratch_dispatched = false;
+            for (uint32_t r = 0; r < dispatch_count; ++r) {
+                liquid_glass_region region = dispatch_regions[r];
+                if (any_scratch_dispatched)
+                    layer_barrier_compute_write_to_read_write(command, scratch_image);
+                bool region_frost_dispatched = false;
+                for (uint32_t f = 0; f < desc->frost_count; ++f) {
+                    const prism_backdrop_frost *frost = &desc->frost[f];
+                    backdrop_frost_push push = {
+                        .input_handle = flux_image_bindless_handle(input),
+                        .blurred_handle = flux_image_bindless_handle(blurred),
+                        .sampler_handle = flux_device_default_sampler_handle(filter->device),
+                        .output_handle = flux_image_bindless_storage_handle(slot->scratch),
+                        .width = image_width,
+                        .height = image_height,
+                        .origin_x = region.x,
+                        .origin_y = region.y,
+                        .bounds = {frost->bounds.x, frost->bounds.y, frost->bounds.w, frost->bounds.h},
+                        .corner_radius = fmaxf(frost->corner_radius, 0.0f),
+                        .opacity = fminf(fmaxf(frost->opacity, 0.0f), 1.0f),
+                        .tint_color = frost->tint_color & 0x00FFFFFFu,
+                        .tint_strength = fminf(fmaxf(frost->tint_strength, 0.0f), 1.0f),
+                        .region_width = region.width,
+                        .region_height = region.height,
+                    };
+                    uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+                    uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+                    flux_compute_dispatch(command, filter->frost_pipelines[is16f ? 1 : 0], &push,
+                                          sizeof(push), gx, gy, 1u);
+                    any_scratch_dispatched = true;
+                    region_frost_dispatched = true;
+                }
+                if (!region_frost_dispatched) {
+                    backdrop_frost_push push = {
+                        .input_handle = flux_image_bindless_handle(input),
+                        .blurred_handle = flux_image_bindless_handle(blurred),
+                        .sampler_handle = flux_device_default_sampler_handle(filter->device),
+                        .output_handle = flux_image_bindless_storage_handle(slot->scratch),
+                        .width = image_width,
+                        .height = image_height,
+                        .origin_x = region.x,
+                        .origin_y = region.y,
+                        .bounds = {0.0f, 0.0f, 0.0f, 0.0f},
+                        .corner_radius = 0.0f,
+                        .opacity = 0.0f,
+                        .tint_color = 0xFFFFFFu,
+                        .tint_strength = 0.0f,
+                        .region_width = region.width,
+                        .region_height = region.height,
+                    };
+                    uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+                    uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+                    flux_compute_dispatch(command, filter->frost_pipelines[is16f ? 1 : 0], &push,
+                                          sizeof(push), gx, gy, 1u);
+                    any_scratch_dispatched = true;
+                }
+            }
+            if (any_scratch_dispatched)
+                layer_barrier_compute_write_to_sampled_and_storage(command, scratch_image);
+        }
+
+        /* Render frost rects into slot->output */
+        bool any_output_dispatched = false;
         for (uint32_t r = 0; r < dispatch_count; ++r) {
             liquid_glass_region region = dispatch_regions[r];
-            if (frost_dispatched)
-                layer_barrier_compute_write_to_read_write(command, output_image);
-            /* Every frost rect intersecting this dispatch region is drawn
-             * by one dispatch: identical writes are idempotent because the
-             * pass writes absolute colours (never accumulates). */
             for (uint32_t f = 0; f < desc->frost_count; ++f) {
+                if (any_output_dispatched)
+                    layer_barrier_compute_write_to_read_write(command, output_image);
                 const prism_backdrop_frost *frost = &desc->frost[f];
                 backdrop_frost_push push = {
                     .input_handle = flux_image_bindless_handle(input),
@@ -676,44 +778,18 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
                 uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
                 flux_compute_dispatch(command, filter->frost_pipelines[is16f ? 1 : 0], &push,
                                       sizeof(push), gx, gy, 1u);
-                frost_dispatched = true;
-            }
-            /* A dispatch region with no frost rect still needs the sharp
-             * base written for the lens: run one pass with a degenerate
-             * frost rect (zero coverage — pure base write). */
-            if (!frost_dispatched) {
-                backdrop_frost_push push = {
-                    .input_handle = flux_image_bindless_handle(input),
-                    .blurred_handle = flux_image_bindless_handle(blurred),
-                    .sampler_handle = flux_device_default_sampler_handle(filter->device),
-                    .output_handle = flux_image_bindless_storage_handle(slot->output),
-                    .width = image_width,
-                    .height = image_height,
-                    .origin_x = region.x,
-                    .origin_y = region.y,
-                    .bounds = {0.0f, 0.0f, 0.0f, 0.0f},
-                    .corner_radius = 0.0f,
-                    .opacity = 0.0f,
-                    .tint_color = 0xFFFFFFu,
-                    .tint_strength = 0.0f,
-                    .region_width = region.width,
-                    .region_height = region.height,
-                };
-                uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                flux_compute_dispatch(command, filter->frost_pipelines[is16f ? 1 : 0], &push,
-                                      sizeof(push), gx, gy, 1u);
-                frost_dispatched = true;
+                any_output_dispatched = true;
             }
         }
+        if (any_output_dispatched && current_group_count > 0u)
+            layer_barrier_compute_write_to_read_write(command, output_image);
     }
 
-    /* 4. Glass layer: the lens samples the layer image — this is the
-     * nesting the standalone material cannot express. Input == output here,
-     * so the barrier must publish the frost/base writes to sampled reads
-     * too. */
-    if (current_count > 0u && current_group_count > 0u)
-        layer_barrier_compute_write_to_sampled_and_storage(command, output_image);
+    /* 4. Glass layer:
+     * When frost exists, the lens samples the frosted layer (slot->scratch).
+     * When no frost exists, the lens samples the sharp capture (desc->input).
+     * In both cases, input != slot->output, guaranteeing zero in-place cross-workgroup race hazards. */
+    const flux_image *glass_input = (need_scratch && slot->scratch) ? slot->scratch : input;
     const prism_glass_policy policy = {
         .refraction = desc->refraction,
         .chromatic_aberration = desc->chromatic_aberration,
@@ -740,10 +816,10 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
                                                 &region))
             continue;
         if (glass_dispatched)
-            layer_barrier_compute_write_to_sampled_and_storage(command, output_image);
+            layer_barrier_compute_write_to_read_write(command, output_image);
         prism_glass_record_group(command, filter->glass_pipelines[is16f ? 1 : 0], filter->device,
-                                 slot->output /* the frosted layer */, blurred, slot->output,
-                                 image_width, image_height, region, group, &policy);
+                                 glass_input, blurred, slot->output, image_width, image_height,
+                                 region, group, &policy);
         glass_dispatched = true;
     }
 
