@@ -13,6 +13,12 @@ either.
 
 ## [Unreleased]
 
+## [0.0.36] - 2026-09-05
+
+### Fixed
+
+- **prism**: Decouple backdrop layer glass sampling with a dedicated scratch buffer to eliminate in-place read/write race hazards, and skip the frost pass when frost count is zero.
+
 ## [0.0.35] - 2026-09-05
 
 ### Fixed

@@ -79,7 +79,7 @@ extern "C" {
 
 #define FLUX_TEXT_VERSION_MAJOR 0
 #define FLUX_TEXT_VERSION_MINOR 0
-#define FLUX_TEXT_VERSION_PATCH 35
+#define FLUX_TEXT_VERSION_PATCH 36
 
 FLUX_TEXT_API const char *flux_text_version_string(void);
 
