@@ -325,6 +325,40 @@ string literals at the failure site, so their storage outlives the
 program. The "valid until the next non-OK return" rule is the strict
 guarantee; the looser observation should not be relied on.
 
+### Void-returning calls: the sticky pass error
+
+A handful of hot-path draw calls return `void` (`flux_canvas_draw_*`,
+`flux_canvas_fill_*`). Checking a `flux_result` per call would cost
+more than the call; instead the canvas defers error reporting:
+
+- The **first** error during a canvas pass is recorded (the "sticky"
+  pass error); later errors this pass do not overwrite it.
+- The error surfaces when the pass completes: `flux_canvas_end_frame`
+  (or `flux_canvas_end_target`) returns it as the pass result.
+- Between the failing call and pass end, `flux_get_last_error` already
+  carries the diagnostic — a caller that needs the reason inline (not
+  just the pass outcome) can read it there.
+
+Rules for callers:
+
+1. Treat `void` draw calls as fallible at the *pass boundary* — check
+   what `end_frame`/`end_target` returns; do not assume per-call success.
+2. Do not try to "retry after error" mid-pass: the pass is poisoned.
+   Build a new frame instead.
+3. Error reason for logging: read `flux_get_last_error` right after the
+   pass-end call reports non-OK (it still holds the first error).
+
+Rules for the library:
+
+1. Every `void` draw call may record at most one sticky error; it must
+   not abort or reorder rendering on error (the bad call is skipped,
+   the pass continues).
+2. Sticky state lives on the canvas pass object, never in thread-local
+   storage (the pass is single-threaded by contract; `flux_get_last_error`
+   remains thread-local for the general case).
+3. Any new fallible-but-`void` API must document which call reports its
+   error, in its header comment, before landing.
+
 ## Compatibility surface
 
 The following changes are considered breaking and trigger a minor or
@@ -404,17 +438,28 @@ submit-and-end, nothing recorded is pending. Required reading for
 
 ## Library versioning
 
-`libflux.so` releases as a single unit. All modules share the same
-version string and so-name; independent module versioning is not
-supported.
+Every library in the stack (`libflux`, `libflux-text`, `libflux-scene-graph`,
+`liblens`, `libiris`, `libprism`, `libanim`) releases as a unit and shares
+one version: `meson.project_version()`. Each library exposes the same
+four accessors under its own prefix (`flux_*`, `lens_*`, `iris_*`,
+`prism_*`, `anim_*`, `flux_sg_*`) — one versioning scheme, learn once,
+apply to every library the consumer links.
 
-| Macro / accessor              | Returns                                                  |
-|-------------------------------|----------------------------------------------------------|
-| `FLUX_VERSION_MAJOR/MINOR/PATCH` | Compile-time integer literals.                         |
-| `FLUX_VERSION_NUMBER`         | Packed at compile time: bits 16–23 major, 8–15 minor, 0–7 patch. |
-| `flux_version_number()`       | Runtime equivalent.                                      |
-| `flux_version_string()`       | `"M.m.p"` string for logging.                            |
-| `flux_version_check(M, m, p)` | True iff this library is at least `M.m.p`.               |
+| Macro / accessor                | Returns                                                     |
+|---------------------------------|-------------------------------------------------------------|
+| `<PREFIX>_VERSION_MAJOR/MINOR/PATCH` | Compile-time integer literals.                         |
+| `<PREFIX>_VERSION_NUMBER`       | Packed at compile time: bits 16–23 major, 8–15 minor, 0–7 patch. |
+| `<prefix>_version_number()`     | Runtime equivalent.                                         |
+| `<prefix>_version_string()`     | `"M.m.p"` string for logging.                               |
+| `<prefix>_version_check(M, m, p)` | True iff this library is at least `M.m.p`.                |
+
+The lockstep is **machine-enforced**: `tools/check-version-lockstep.sh`
+(CI step) parses every library's macros and fails the build when any of
+them differs from `meson.project_version()`, and bans hard-coded version
+string literals (they always drift — flux-scene-graph shipped a
+hard-coded "0.0.29" against 0.0.36 headers; anim sat at 0.0.1 for seven
+months). Bumping the release version therefore means touching every
+library's macros in one commit — the intended discipline.
 
 ## Related
 

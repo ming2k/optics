@@ -43,7 +43,27 @@ extern "C" {
 
 #define ANIM_VERSION_MAJOR 0
 #define ANIM_VERSION_MINOR 0
-#define ANIM_VERSION_PATCH 1
+#define ANIM_VERSION_PATCH 36
+
+/* Packed integer version, monotonic — identical layout to
+ * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
+ * The whole stack shares one versioning scheme so a consumer can check
+ * every library it loads the same way. */
+#define ANIM_VERSION_NUMBER                                                                        \
+    (((uint32_t)ANIM_VERSION_MAJOR << 16) | ((uint32_t)ANIM_VERSION_MINOR << 8) |                  \
+     (uint32_t)ANIM_VERSION_PATCH)
+
+/* Version accessors. The macros were left at 0.0.1 for seven months
+ * while every other library moved in lockstep — the version is now a
+ * CI-checked invariant (tools/check-version-lockstep.sh), not a
+ * convention. */
+ANIM_API void anim_version(int *major, int *minor, int *patch);
+ANIM_API uint32_t anim_version_number(void);
+/* True when the linked library can stand in for the one compiled
+ * against: same major, and its (minor, patch) is >= the requested one.
+ * ABI is major-locked; API additions ride minors. */
+ANIM_API bool anim_version_check(int major, int minor, int patch);
+ANIM_API const char *anim_version_string(void);
 
 /* The largest delta time any primitive integrates over. A longer stall is
  * absorbed across subsequent frames instead of producing a teleport or a

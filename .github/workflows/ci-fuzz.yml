@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [fuzz_path_flatten, fuzz_text_shape, fuzz_lens_store]
+        target: [fuzz_path_flatten, fuzz_text_shape, fuzz_lens_store, fuzz_glb_parse]
     steps:
       - uses: actions/checkout@v4
 
@@ -76,6 +76,8 @@ jobs:
               corpus=tests/flux/fuzz/corpus/text_shape ;;
             fuzz_lens_store)
               corpus=tests/lens/fuzz/corpus/lens_store ;;
+            fuzz_glb_parse)
+              corpus=tests/flux/fuzz/corpus/glb_parse ;;
           esac
           ASAN_OPTIONS=abort_on_error=1:detect_leaks=1 \
             ./build/tests/flux/fuzz/${{ matrix.target }} \
@@ -92,6 +94,8 @@ jobs:
               corpus=tests/flux/fuzz/corpus/text_shape ;;
             fuzz_lens_store)
               corpus=tests/lens/fuzz/corpus/lens_store ;;
+            fuzz_glb_parse)
+              corpus=tests/flux/fuzz/corpus/glb_parse ;;
           esac
           # PR smoke: 60s. Daily run: 300s (5 min) per target.
           runs_per_target=60

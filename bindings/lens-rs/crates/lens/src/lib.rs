@@ -1327,6 +1327,18 @@ pub fn version() -> &'static str {
         .unwrap_or("<invalid>")
 }
 
+/// The linked library's packed version number — identical layout to
+/// flux's (`major << 16 | minor << 8 | patch`).
+pub fn version_number() -> u32 {
+    unsafe { sys::lens_version_number() }
+}
+
+/// True when the linked library can stand in for the one compiled
+/// against: same major, and its (minor, patch) >= the requested pair.
+pub fn version_check(major: i32, minor: i32, patch: i32) -> bool {
+    unsafe { sys::lens_version_check(major, minor, patch) }
+}
+
 /// A zero-allocation fluent builder for Flexbox containers (rows, columns, and
 /// custom layout boxes).
 ///

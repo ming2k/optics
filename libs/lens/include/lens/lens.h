@@ -52,6 +52,20 @@ extern "C" {
 #define LENS_STRINGIFY_(x) #x
 #define LENS_STRINGIFY(x) LENS_STRINGIFY_(x)
 
+/* Packed integer version, monotonic — identical layout to
+ * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
+ * The whole stack shares one versioning scheme so a consumer can check
+ * every library it loads the same way. */
+#define LENS_VERSION_NUMBER                                                                        \
+    (((uint32_t)LENS_VERSION_MAJOR << 16) | ((uint32_t)LENS_VERSION_MINOR << 8) |                  \
+     (uint32_t)LENS_VERSION_PATCH)
+
+LENS_API void lens_version(int *major, int *minor, int *patch);
+LENS_API uint32_t lens_version_number(void);
+/* True when the linked library can stand in for the one compiled
+ * against: same major, and its (minor, patch) is >= the requested one.
+ * ABI is major-locked; API additions ride minors. */
+LENS_API bool lens_version_check(int major, int minor, int patch);
 LENS_API const char *lens_version_string(void);
 
 /* ================================================================== */

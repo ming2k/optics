@@ -52,6 +52,13 @@ jobs:
       - name: Material boundary check
         run: tools/check-material-boundary.sh
 
+      # One release, one version: every library's *_VERSION_* macros
+      # must equal meson.project_version(). (flux-scene-graph shipped
+      # a hard-coded "0.0.29" string against 0.0.36 headers; anim sat
+      # at 0.0.1 for seven months. Both invisible until this check.)
+      - name: Version lockstep check
+        run: tools/check-version-lockstep.sh
+
       # Library stdout guardrail: diagnostics go to stderr, never stdout —
       # a consumer's stdout may be an IPC wire (e.g. the portal prompter).
       - name: No library stdout writes

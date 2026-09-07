@@ -55,6 +55,20 @@ extern "C" {
 #define FLUX_SG_VERSION_MINOR 0
 #define FLUX_SG_VERSION_PATCH 36
 
+/* Packed integer version, monotonic — identical layout to
+ * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
+ * The whole stack shares one versioning scheme so a consumer can check
+ * every library it loads the same way. */
+#define FLUX_SG_VERSION_NUMBER                                                                     \
+    (((uint32_t)FLUX_SG_VERSION_MAJOR << 16) | ((uint32_t)FLUX_SG_VERSION_MINOR << 8) |            \
+     (uint32_t)FLUX_SG_VERSION_PATCH)
+
+FLUX_SG_API void flux_sg_version(int *major, int *minor, int *patch);
+FLUX_SG_API uint32_t flux_sg_version_number(void);
+/* True when the linked library can stand in for the one compiled
+ * against: same major, and its (minor, patch) is >= the requested one.
+ * ABI is major-locked; API additions ride minors. */
+FLUX_SG_API bool flux_sg_version_check(int major, int minor, int patch);
 FLUX_SG_API const char *flux_sg_version_string(void);
 
 /* ================================================================== */
@@ -70,13 +84,55 @@ typedef struct flux_sg_scene flux_sg_scene;
 typedef struct flux_sg_animation flux_sg_animation;
 
 /* Parse a .glb (binary glTF 2.0) and build GPU resources on `device`.
- * On success `*out` is a scene with refcount 1. Returns:
+ * Equivalent to flux_sg_parse_glb followed by flux_sg_scene_data_build.
+ * Returns:
  *   FLUX_OK                      — at least one mesh primitive loaded.
  *   FLUX_ERROR_UNSUPPORTED       — parsed, but no loadable primitive found.
  *   FLUX_ERROR_INVALID_ARGUMENT  — not a .glb, or malformed container/JSON.
  *   FLUX_ERROR_OUT_OF_MEMORY.                                    */
 FLUX_NODISCARD FLUX_SG_API flux_result flux_sg_load_glb(flux_device *device, const void *glb_bytes,
                                                         size_t byte_count, flux_sg_scene **out);
+
+/* Opaque parsed scene: everything a .glb contains, minus the device.
+ * Geometry is already in flux's vertex layout. Inspectable with the
+ * accessors below, uploadable with flux_sg_scene_data_build, released
+ * with flux_sg_scene_data_free. */
+typedef struct flux_sg_scene_data flux_sg_scene_data;
+
+/* Parse a .glb (binary glTF 2.0) into device-independent scene data.
+ * No GPU work, no device — the parse stage of flux_sg_load_glb, exposed
+ * so parsers can be fuzzed, unit-tested, and inspected without a
+ * Vulkan context. Returns:
+ *   FLUX_OK                      — at least one mesh primitive parsed.
+ *   FLUX_ERROR_UNSUPPORTED       — parsed, but no loadable primitive found.
+ *   FLUX_ERROR_INVALID_ARGUMENT  — not a .glb, or malformed container/JSON.
+ *   FLUX_ERROR_OUT_OF_MEMORY.
+ * On any non-OK return `*out` is set to NULL and nothing is allocated. */
+FLUX_NODISCARD FLUX_SG_API flux_result flux_sg_parse_glb(const void *glb_bytes, size_t byte_count,
+                                                         flux_sg_scene_data **out);
+
+/* Upload a parsed scene onto `device`: one flux_mesh per primitive.
+ * On success `*out` is a live scene (refcount 1) equivalent to what
+ * flux_sg_load_glb would return; `data` is consumed and released. On
+ * failure `*out` is NULL, `data` is still consumed, and the error is
+ * returned. */
+FLUX_NODISCARD FLUX_SG_API flux_result flux_sg_scene_data_build(flux_device *device,
+                                                                flux_sg_scene_data *data,
+                                                                flux_sg_scene **out);
+
+/* Release a parsed scene (or one already consumed by build — safe, it
+ * is a no-op on NULL). */
+FLUX_SG_API void flux_sg_scene_data_free(flux_sg_scene_data *data);
+
+/* Number of mesh primitives in the parsed scene. */
+FLUX_SG_API uint32_t flux_sg_scene_data_primitive_count(const flux_sg_scene_data *data);
+
+/* World-space axis-aligned bounding box of every parsed primitive
+ * (local AABBs; the node transforms are not applied — see
+ * flux_sg_scene_bounds for the built-scene form). Returns false when
+ * the scene has no primitives with finite bounds. */
+FLUX_SG_API bool flux_sg_scene_data_bounds(const flux_sg_scene_data *data, flux_vec3 *out_min,
+                                           flux_vec3 *out_max);
 
 FLUX_SG_API flux_sg_scene *flux_sg_scene_retain(flux_sg_scene *scene);
 FLUX_SG_API void flux_sg_scene_release(flux_sg_scene *scene);

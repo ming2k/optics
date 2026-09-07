@@ -10,6 +10,39 @@
 
 #include <math.h>
 
+/* ---- Version accessors ------------------------------------------------ */
+
+#define ANIM_STR2(x) #x
+#define ANIM_STR(x) ANIM_STR2(x)
+
+void anim_version(int *major, int *minor, int *patch) {
+    if (major)
+        *major = ANIM_VERSION_MAJOR;
+    if (minor)
+        *minor = ANIM_VERSION_MINOR;
+    if (patch)
+        *patch = ANIM_VERSION_PATCH;
+}
+
+uint32_t anim_version_number(void) {
+    return ANIM_VERSION_NUMBER;
+}
+
+bool anim_version_check(int major, int minor, int patch) {
+    if (major != ANIM_VERSION_MAJOR)
+        return false;
+    if (minor > ANIM_VERSION_MINOR)
+        return false;
+    if (minor == ANIM_VERSION_MINOR && patch > ANIM_VERSION_PATCH)
+        return false;
+    return true;
+}
+
+const char *anim_version_string(void) {
+    return ANIM_STR(ANIM_VERSION_MAJOR) "." ANIM_STR(ANIM_VERSION_MINOR) "." ANIM_STR(
+        ANIM_VERSION_PATCH);
+}
+
 float anim_dt_clamp(float dt_seconds) {
     if (!(dt_seconds > 0.0f)) /* NaN and ≤ 0 integrate nothing */
         return 0.0f;

@@ -41,12 +41,20 @@ flux_result sg_glb_parse(const void *bytes, size_t len, sg_glb *out) {
     uint32_t magic = rd_u32(p);
     uint32_t version = rd_u32(p + 4);
     uint32_t total = rd_u32(p + 8);
-    if (magic != GLB_MAGIC || version != GLB_VERSION2 || total > len)
+    /* `total` is fully attacker-controlled: clamp it to the buffer
+     * before any pointer arithmetic derives from it. A total < 12
+     * (or > len) means no room for even the header + one chunk header;
+     * the unsigned subtraction in the chunk loop would otherwise wrap
+     * and walk past the buffer (found by fuzz_glb_parse in 90 seconds:
+     * total=0 crashed rd_u32 reading out-of-bounds chunk headers). */
+    if (magic != GLB_MAGIC || version != GLB_VERSION2)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (total < 12 || total > len)
         return FLUX_ERROR_INVALID_ARGUMENT;
 
     size_t offset = 12;
     memset(out, 0, sizeof(*out));
-    while ((size_t)total - offset >= 8) {
+    while (offset + 8 <= (size_t)total) {
         const uint8_t *q = p + offset;
         uint32_t clen = rd_u32(q);
         uint32_t ctype = rd_u32(q + 4);
@@ -232,9 +240,11 @@ static const jv *attr(const jv *prim, const char *name) {
     return jv_obj_get(jv_obj_get(prim, "attributes"), name);
 }
 
-/* Build one primitive's mesh on the device. Returns true on success. */
-static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, const uint8_t *bin,
-                            size_t bin_len, flux_sg_primitive *out_prim) {
+/* Parse one primitive's geometry into device-independent form. Returns
+ * true on success (ownership of the buffers passes to *out_data); false
+ * on malformed/unsupported input (no allocation retained). */
+static bool parse_primitive(const jv *root, const jv *prim, const uint8_t *bin, size_t bin_len,
+                            sg_primitive_data *out_data) {
     int pos_acc = (int)jv_num(attr(prim, "POSITION"), -1);
     int nrm_acc = (int)jv_num(attr(prim, "NORMAL"), -1);
     int uv_acc = (int)jv_num(attr(prim, "TEXCOORD_0"), -1);
@@ -419,41 +429,25 @@ static bool build_primitive(flux_device *dev, const jv *root, const jv *prim, co
             idx[i] = (uint32_t)i;
     }
 
-    flux_mesh_skin_desc sd = {
-        .type = FLUX_TYPE_MESH_SKIN_DESC,
-        .vertices = skin_verts,
-    };
-    flux_mesh_desc md = {
-        .type = FLUX_TYPE_MESH_DESC,
-        .next = have_skin ? &sd : NULL,
-        .vertices = verts,
-        .vertex_count = (uint32_t)pcount,
-        .indices = idx,
-        .index_count = (uint32_t)idx_count,
-    };
-    flux_mesh *mesh = NULL;
-    flux_result r = flux_mesh_create(dev, &md, &mesh);
-    free(skin_verts);
-    free(verts);
-    free(idx);
-    if (r != FLUX_OK)
-        return false;
-
-    out_prim->mesh = mesh;
-    out_prim->base_color = flux_vec4_make(1.0f, 1.0f, 1.0f, 1.0f);
-    out_prim->material_index = -1;
-    out_prim->aabb_min = aabb_min;
-    out_prim->aabb_max = aabb_max;
+    out_data->vertices = verts;
+    out_data->vertex_count = (uint32_t)pcount;
+    out_data->indices = idx;
+    out_data->index_count = (uint32_t)idx_count;
+    out_data->skin_vertices = skin_verts;
+    out_data->aabb_min = aabb_min;
+    out_data->aabb_max = aabb_max;
+    out_data->base_color = flux_vec4_make(1.0f, 1.0f, 1.0f, 1.0f);
+    out_data->material_index = -1;
 
     /* Map the glTF material's base colour, if any. */
     int mat_idx = (int)jv_num(jv_obj_get(prim, "material"), -1);
-    out_prim->material_index = mat_idx;
+    out_data->material_index = mat_idx;
     const jv *mats = jv_obj_get(root, "materials");
     const jv *mat = jv_arr_at(mats, (size_t)mat_idx);
     const jv *pbr = mat ? jv_obj_get(mat, "pbrMetallicRoughness") : NULL;
     const jv *bcf = pbr ? jv_obj_get(pbr, "baseColorFactor") : NULL;
     if (bcf && bcf->kind == J_ARR && bcf->arr.count >= 4) {
-        out_prim->base_color = flux_vec4_make(
+        out_data->base_color = flux_vec4_make(
             (float)jv_num(jv_arr_at(bcf, 0), 1.0), (float)jv_num(jv_arr_at(bcf, 1), 1.0),
             (float)jv_num(jv_arr_at(bcf, 2), 1.0), (float)jv_num(jv_arr_at(bcf, 3), 1.0));
     }
@@ -557,7 +551,7 @@ void sg_read_node(const jv *node, flux_sg_node *n) {
 /*  Public: parse .glb into a scene                                   */
 /* ------------------------------------------------------------------ */
 
-flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_sg_scene *sc) {
+flux_result sg_parse_glb(const void *bytes, size_t len, sg_scene_data *data) {
     sg_glb g;
     flux_result r = sg_glb_parse(bytes, len, &g);
     if (r != FLUX_OK)
@@ -573,7 +567,7 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
     flux_sg_skin *skin_arr = NULL;
     uint32_t skin_count = 0;
     size_t prim_cap = 16, prim_n = 0;
-    flux_sg_primitive *prims = NULL;
+    sg_primitive_data *prims = NULL;
     int *mesh_prim_start = NULL, *mesh_prim_count = NULL;
     jv *root = NULL;
 
@@ -589,7 +583,7 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
     uint32_t mesh_count = (meshes && meshes->kind == J_ARR) ? (uint32_t)meshes->arr.count : 0;
     uint32_t node_count = (nodes && nodes->kind == J_ARR) ? (uint32_t)nodes->arr.count : 0;
 
-    /* First pass: build all primitives, record each mesh's primitive span. */
+    /* First pass: parse all primitives, record each mesh's primitive span. */
     mesh_prim_start = mesh_count ? calloc(mesh_count + 1, sizeof(int)) : NULL;
     mesh_prim_count = mesh_count ? calloc(mesh_count, sizeof(int)) : NULL;
     if (mesh_count && (!mesh_prim_start || !mesh_prim_count)) {
@@ -602,6 +596,7 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
         r = FLUX_ERROR_OUT_OF_MEMORY;
         goto fail;
     }
+    memset(prims, 0, prim_cap * sizeof(*prims));
 
     for (uint32_t mi = 0; mi < mesh_count; ++mi) {
         const jv *mesh = jv_arr_at(meshes, mi);
@@ -611,14 +606,15 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
         for (uint32_t pi = 0; pi < pc; ++pi) {
             if (prim_n == prim_cap) {
                 prim_cap *= 2;
-                flux_sg_primitive *np = realloc(prims, prim_cap * sizeof(*prims));
+                sg_primitive_data *np = realloc(prims, prim_cap * sizeof(*prims));
                 if (!np) {
                     r = FLUX_ERROR_OUT_OF_MEMORY;
                     goto fail;
                 }
+                memset(np + prim_n, 0, (prim_cap - prim_n) * sizeof(*prims));
                 prims = np;
             }
-            if (!build_primitive(dev, root, jv_arr_at(prims_arr, pi), g.bin, g.bin_len,
+            if (!parse_primitive(root, jv_arr_at(prims_arr, pi), g.bin, g.bin_len,
                                  &prims[prim_n])) {
                 continue; /* unsupported primitive — skip, not fatal */
             }
@@ -748,25 +744,22 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
                 roots[root_n++] = (int)ni;
     }
 
-    /* Success: hand ownership of everything to the scene. */
-    sc->prims = prims;
-    sc->prim_count = (uint32_t)prim_n;
-    sc->nodes = narr;
-    sc->node_count = node_count;
-    sc->skins = skin_arr;
-    sc->skin_count = skin_count;
-    sc->roots = roots;
-    sc->root_count = root_n;
+    /* Success: hand ownership of everything to the caller's data. */
+    data->prims = prims;
+    data->prim_count = (uint32_t)prim_n;
+    data->nodes = narr;
+    data->node_count = node_count;
+    data->skins = skin_arr;
+    data->skin_count = skin_count;
+    data->roots = roots;
+    data->root_count = root_n;
     for (int i = 0; i < SG_HUMAN_BONE_COUNT; ++i)
-        sc->human_bones[i] = -1;
+        data->human_bones[i] = -1;
     const jv *extensions = jv_obj_get(root, "extensions");
     if (jv_obj_get(extensions, "VRMC_vrm"))
-        sg_read_humanoid(root, "VRMC_vrm", false, sc->human_bones);
+        sg_read_humanoid(root, "VRMC_vrm", false, data->human_bones);
     else if (jv_obj_get(extensions, "VRM"))
-        sg_read_humanoid(root, "VRM", true, sc->human_bones);
-    sg_update_worlds(sc);
-    sg_update_rest_world_rotations(sc);
-    sg_update_skin_palettes(sc);
+        sg_read_humanoid(root, "VRM", true, data->human_bones);
     free(mesh_prim_start);
     free(mesh_prim_count);
     jv_free(root);
@@ -776,14 +769,16 @@ flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_s
      *
      * Every exit sets `r` in place and jumps here — no error-code-mapping
      * labels chained into `fail`. Ownership is never partially
-     * transferred, so releasing the locals is always correct; `sc`
+     * transferred, so releasing the locals is always correct; `data`
      * itself is zeroed by the caller and stays owned by the caller on
      * failure. */
 fail:
-    if (prim_n)
-        for (size_t i = 0; i < prim_n; ++i)
-            if (prims[i].mesh)
-                flux_mesh_release(prims[i].mesh);
+    if (prims)
+        for (size_t i = 0; i < prim_n; ++i) {
+            free(prims[i].vertices);
+            free(prims[i].indices);
+            free(prims[i].skin_vertices);
+        }
     free(prims);
     if (narr)
         for (uint32_t i = 0; i < node_count; ++i)

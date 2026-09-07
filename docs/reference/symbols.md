@@ -365,7 +365,15 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `flux_sg_version` |  |
+| `flux_sg_version_number` |  |
+| `flux_sg_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
 | `flux_sg_load_glb` | Parse a .glb (binary glTF 2.0) and build GPU resources on `device`. |
+| `flux_sg_parse_glb` | Parse a .glb (binary glTF 2.0) into device-independent scene data. |
+| `flux_sg_scene_data_build` | Upload a parsed scene onto `device`: one flux_mesh per primitive. |
+| `flux_sg_scene_data_free` | Release a parsed scene (or one already consumed by build — safe, it is a no-op on NULL). |
+| `flux_sg_scene_data_primitive_count` | Number of mesh primitives in the parsed scene. |
+| `flux_sg_scene_data_bounds` | World-space axis-aligned bounding box of every parsed primitive (local AABBs; the node transforms are not applied — see flux_sg_scene_bounds for the built-scene form). |
 | `flux_sg_scene_release` |  |
 | `flux_sg_scene_set_materials` | Transactionally replace the scene-owned per-index material table and fallback material. |
 | `flux_sg_scene_primitive_count` | Number of mesh primitives in the scene (diagnostic). |
@@ -385,6 +393,9 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `lens_version` |  |
+| `lens_version_number` |  |
+| `lens_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
 | `lens_a11y` |  |
 | `lens_accessibility_walk` |  |
 | `lens_a11y_activate` | Request activation of a widget by id (ADR-0062) — the write direction of the a11y seam. |
@@ -501,6 +512,9 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `iris_version` |  |
+| `iris_version_number` |  |
+| `iris_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
 | `iris_request_animation_frame` | Request one more frame at the backend's active animation cadence. |
 | `iris_paint_mark_static` | Declare the current frame's host canvas content static. |
 | `iris_request_frame_skip_render` | Zero-render skip for hosts with a paint callback: after a build in which the host knows the canvas content is unchanged *and* it still wants the active-rate cadence to continue, call this instead of (not in addition to) iris_paint_mark_static. |
@@ -572,6 +586,14 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 ## prism — material library
 
+### `prism/types.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `prism_version` | Compile-time version of the library actually linked against, derived from the macros above (not a hardcoded literal). |
+| `prism_version_number` |  |
+| `prism_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
+
 ### `prism/liquid_glass.h`
 
 | Symbol | Description |
@@ -616,6 +638,9 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `anim_version` | Version accessors. |
+| `anim_version_number` |  |
+| `anim_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
 | `anim_dt_clamp` | Clamp `dt` into the integrable range. |
 | `anim_spring_snappy` | Named presets (the vocabulary the consumers share; constants live in the .c so tuning is one place). |
 | `anim_spring_gentle` |  |

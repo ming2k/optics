@@ -198,6 +198,10 @@ int main(void) {
     }
 
     flux_sg_animation_release(animation);
+    /* Drain before releasing the scene: mesh buffers park on the device
+     * retire queue and the release contract requires all referencing GPU
+     * work to have completed. */
+    flux_device_wait_idle(device);
     flux_sg_scene_release(scene);
     free(target_glb.bytes);
     free(animation_glb.bytes);

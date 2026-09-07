@@ -54,6 +54,9 @@ const jv *jv_arr_at(const jv *v, size_t i);
 double jv_num(const jv *v, double fallback);
 bool jv_bool(const jv *v, bool fallback);
 
+/* VRM humanoid bone-slot count (shared by parse and scene). */
+#define SG_HUMAN_BONE_COUNT 55
+
 /* ------------------------------------------------------------------ */
 /*  Loaded scene                                                      */
 /* ------------------------------------------------------------------ */
@@ -129,8 +132,6 @@ struct flux_sg_animation {
     float duration;
 };
 
-#define SG_HUMAN_BONE_COUNT 55
-
 struct flux_sg_scene {
     int32_t refcount;
     flux_sg_primitive *prims; /* flat list across all meshes */
@@ -146,6 +147,67 @@ struct flux_sg_scene {
     uint32_t root_count;
     int human_bones[SG_HUMAN_BONE_COUNT];
 };
+
+/* ------------------------------------------------------------------ */
+/*  Parsed scene data (CPU-only, no device)                           */
+/* ------------------------------------------------------------------ */
+
+/* One parsed primitive: device-independent geometry. Everything is
+ * heap-owned by the enclosing sg_scene_data and freed by sg_data_free.
+ * Geometry is already in flux's vertex layout, so the build stage is a
+ * straight flux_mesh_create upload. */
+typedef struct sg_primitive_data {
+    flux_vertex *vertices;
+    uint32_t vertex_count;
+    uint32_t *indices; /* NULL = non-indexed */
+    uint32_t index_count;
+    flux_skin_vertex *skin_vertices; /* NULL = static mesh */
+    flux_vec3 aabb_min;
+    flux_vec3 aabb_max;
+    flux_vec4 base_color;
+    int material_index; /* -1 selects the installed fallback */
+} sg_primitive_data;
+
+/* Parsed-but-not-built scene: everything flux_sg_load_glb produces,
+ * minus the device. Zero GPU state, safe to inspect, fuzz, and test.
+ *
+ * The public header declares `typedef struct flux_sg_scene_data
+ * flux_sg_scene_data;` (opaque). We COMPLETE that same struct tag here
+ * — not a parallel type — so the public handle and the internal
+ * storage are one and the same type by definition, no downcasts, no
+ * layout-drift risk. */
+struct flux_sg_scene_data {
+    sg_primitive_data *prims;
+    uint32_t prim_count;
+    flux_sg_node *nodes;
+    uint32_t node_count;
+    flux_sg_skin *skins;
+    uint32_t skin_count;
+    int *roots;
+    uint32_t root_count;
+    int human_bones[SG_HUMAN_BONE_COUNT];
+};
+
+typedef struct flux_sg_scene_data sg_scene_data;
+
+void sg_data_free(sg_scene_data *data);
+/* Transfer every node/skin/root pointer in `data` into `sc` and zero
+ * the donor, so the build stage's single sg_data_free never
+ * double-frees. */
+void sg_data_transfer(sg_scene_data *data, flux_sg_scene *sc);
+
+/* Parse the .glb container + glTF JSON into device-independent scene
+ * data. No device, no GPU — this is the fuzz/test seam. Returns
+ * FLUX_OK with at least one primitive; FLUX_ERROR_UNSUPPORTED when the
+ * file parses but contains no loadable primitive; the usual errors
+ * otherwise. On any non-OK return `*data` is fully released. */
+flux_result sg_parse_glb(const void *bytes, size_t len, sg_scene_data *data);
+
+/* Build a live scene from parsed data: upload each primitive as a
+ * flux_mesh on `dev`, move node/skin/root ownership into `sc`. `data`
+ * is consumed (zeroed) on both success and failure, except that the
+ * caller still owns the flux_sg_scene itself. */
+flux_result sg_data_build(flux_device *dev, sg_scene_data *data, flux_sg_scene *sc);
 
 typedef struct sg_glb {
     const uint8_t *json;
@@ -174,10 +236,9 @@ int sg_human_bone_index(const char *name, bool legacy_vrm0);
 void sg_read_humanoid(const jv *root, const char *extension_name, bool legacy_vrm0,
                       int out_bones[SG_HUMAN_BONE_COUNT]);
 
-/* Parse the .glb container + glTF JSON and populate `*sc` (which must be
- * pre-allocated and zeroed). Returns FLUX_OK if at least one primitive was
- * built; otherwise a flux_result code. */
-flux_result sg_parse_glb(flux_device *dev, const void *bytes, size_t len, flux_sg_scene *sc);
+/* Parse the .glb container + glTF JSON into device-independent scene
+ * data (declared above, next to sg_scene_data). */
+/* sg_parse_glb */
 
 flux_result sg_parse_animation_glb(const flux_sg_scene *target, const void *bytes, size_t len,
                                    flux_sg_animation **out);

@@ -40,22 +40,15 @@ fuzz_harnesses += {
   'corpus': 'corpus/path_flatten',
 }
 
-if get_option('scene-graph')
-  # GLB parser: feed random bytes as a fake glb file. The parser validates
-  # the magic, chunk lengths, and JSON header; harness asserts it either
-  # succeeds with a discovered mesh count or returns a non-OK flux_result.
-  #
-  # DISABLED for now: flux_sg_load_glb requires a flux_device*; fuzzing it
-  # without a GPU requires a deviceless parser entry point we do not yet
-  # expose. See ADR-0016 for the pure-RHI direction that would unlock this.
-  # The harness source is kept so it can be re-enabled when the seam lands.
+  # GLB parser: feed arbitrary bytes through the deviceless parse seam
+  # (flux_sg_parse_glb, ADR-0016). Public API; libfuzzer-built via the
+  # ci-fuzz workflow (see .github/workflows/ci-fuzz.yml matrix).
   fuzz_harnesses += {
-    'name': 'fuzz_glb_parse_disabled',
-    'src': files('fuzz_glb_parse_disabled.c'),
-    'deps': [m_dep],
-    'corpus': '',
+    'name': 'fuzz_glb_parse',
+    'src': files('fuzz_glb_parse.c'),
+    'deps': [flux_sg_dep, m_dep],
+    'corpus': 'corpus/glb_parse',
   }
-endif
 
 if get_option('text')
   # Text shaping: feed arbitrary / truncated UTF-8 through the measure-only

@@ -9,6 +9,27 @@ test_smoke = executable('test_smoke',
 )
 test('smoke', test_smoke, suite : 'unit')
 
+# One versioning scheme across every library: macros round-trip through
+# the runtime accessors, packed numbers agree, and the version_string()
+# output is derived from the macros (a hard-coded literal like the
+# scene-graph "0.0.29" incident fails here). CPU-only.
+test_version_lockstep = executable('test_version_lockstep',
+  'test_version_lockstep.c',
+  dependencies : [test_helpers_dep, anim_dep, prism_dep, iris_dep,
+                  flux_sg_dep, lens_dep],
+)
+test('version_lockstep', test_version_lockstep, suite : 'unit')
+
+# Deviceless GLB parse stage (ADR-0016): container validation, the
+# documented out-handle contract, truncation at every boundary, hostile
+# headers/bodies, and garbage sweeps — all without a Vulkan device.
+# (The GPU build stage is covered by the scene_graph integration suite.)
+test_glb_parse = executable('test_glb_parse',
+  'test_glb_parse.c',
+  dependencies : [test_helpers_dep, flux_sg_dep],
+)
+test('glb_parse', test_glb_parse, suite : 'unit')
+
 test_math = executable('test_math',
   'test_math.c',
   dependencies : [test_helpers_dep],

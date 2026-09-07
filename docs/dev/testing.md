@@ -112,6 +112,40 @@ required.
   portal, D-Bus session, and physical GPU.
 - Add Rust coverage in the workspace that exposes the changed API.
 
+## Golden References
+
+`tests/prism/golden/liquid_glass_default.pam` is a tolerance golden: a
+rendered reference that `tests/prism/integration/test_prism_golden.c`
+compares against with a per-channel tolerance (12/255) and a small
+outlier allowance, layered over driver-independent hard invariants
+(exact silhouette, edge-direction preservation, rim-brightness
+direction, same-device bit-identical re-render).
+
+Driver validity, and its limits:
+
+- The committed reference is generated on **lavapipe** (the CI's Vulkan
+  implementation). Any Mesa version can regenerate it bit-identically
+  on the same implementation.
+- A *different* driver (real Intel/AMD/NVIDIA hardware, MoltenVK) may
+  legitimately differ by a few quantization steps — that is what the
+  tolerance and the outlier allowance absorb. The hard invariants do
+  the strict work everywhere else.
+- If a golden comparison fails, first check `max_delta` in the test's
+  stderr line: a few hundred pixels at delta ≤ 24 on new hardware is
+  driver variance (tune `GOLDEN_TOLERANCE` only if the new value still
+  discriminates); a systematic shift of every pixel is a real
+  regression.
+- Regenerate deliberately, never casually:
+
+```bash
+PRISM_GOLDEN_UPDATE=1 ./build/tests/prism/integration/test_prism_golden
+git diff tests/prism/golden/   # the reference must be part of the change
+```
+
+A golden commit whose diff shows the reference but not the recipe (or
+vice versa) is wrong: one visual change, one reference update, one
+commit.
+
 ## Manual or Example Verification
 
 Build examples with `-Dexamples=true`, then run the smallest relevant program:

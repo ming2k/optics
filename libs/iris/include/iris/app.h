@@ -74,6 +74,20 @@ extern "C" {
 #define IRIS_VERSION_MINOR 0
 #define IRIS_VERSION_PATCH 36
 
+/* Packed integer version, monotonic — identical layout to
+ * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
+ * The whole stack shares one versioning scheme so a consumer can check
+ * every library it loads the same way. */
+#define IRIS_VERSION_NUMBER                                                                        \
+    (((uint32_t)IRIS_VERSION_MAJOR << 16) | ((uint32_t)IRIS_VERSION_MINOR << 8) |                  \
+     (uint32_t)IRIS_VERSION_PATCH)
+
+IRIS_API void iris_version(int *major, int *minor, int *patch);
+IRIS_API uint32_t iris_version_number(void);
+/* True when the linked library can stand in for the one compiled
+ * against: same major, and its (minor, patch) is >= the requested one.
+ * ABI is major-locked; API additions ride minors. */
+IRIS_API bool iris_version_check(int major, int minor, int patch);
 IRIS_API const char *iris_version_string(void);
 
 /* ================================================================== */

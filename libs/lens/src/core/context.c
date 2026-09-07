@@ -2,6 +2,29 @@
 
 #include "../internal.h"
 
+void lens_version(int *major, int *minor, int *patch) {
+    if (major)
+        *major = LENS_VERSION_MAJOR;
+    if (minor)
+        *minor = LENS_VERSION_MINOR;
+    if (patch)
+        *patch = LENS_VERSION_PATCH;
+}
+
+uint32_t lens_version_number(void) {
+    return LENS_VERSION_NUMBER;
+}
+
+bool lens_version_check(int major, int minor, int patch) {
+    if (major != LENS_VERSION_MAJOR)
+        return false;
+    if (minor > LENS_VERSION_MINOR)
+        return false;
+    if (minor == LENS_VERSION_MINOR && patch > LENS_VERSION_PATCH)
+        return false;
+    return true;
+}
+
 const char *lens_version_string(void) {
     return LENS_STRINGIFY(LENS_VERSION_MAJOR) "." LENS_STRINGIFY(
         LENS_VERSION_MINOR) "." LENS_STRINGIFY(LENS_VERSION_PATCH);

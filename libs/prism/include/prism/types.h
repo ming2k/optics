@@ -50,6 +50,14 @@
 #define PRISM_VERSION_MINOR 0
 #define PRISM_VERSION_PATCH 36
 
+/* Packed integer version, monotonic — identical layout to
+ * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
+ * The whole stack shares one versioning scheme so a consumer can check
+ * every library it loads the same way. */
+#define PRISM_VERSION_NUMBER                                                                       \
+    (((uint32_t)PRISM_VERSION_MAJOR << 16) | ((uint32_t)PRISM_VERSION_MINOR << 8) |                \
+     (uint32_t)PRISM_VERSION_PATCH)
+
 /* Stringify helpers; PRISM_STRINGIFY_ adds the indirection level required
  * for macro-expansion of literal tokens. */
 #define PRISM_STRINGIFY_(x) #x
@@ -57,6 +65,12 @@
 
 /* Compile-time version of the library actually linked against, derived from
  * the macros above (not a hardcoded literal). */
+PRISM_API void prism_version(int *major, int *minor, int *patch);
+PRISM_API uint32_t prism_version_number(void);
+/* True when the linked library can stand in for the one compiled
+ * against: same major, and its (minor, patch) is >= the requested one.
+ * ABI is major-locked; API additions ride minors. */
+PRISM_API bool prism_version_check(int major, int minor, int patch);
 PRISM_API const char *prism_version_string(void);
 
 #ifdef __cplusplus

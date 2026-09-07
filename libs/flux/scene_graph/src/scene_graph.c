@@ -12,12 +12,48 @@
 #include <flux/math.h>
 #include <flux/scene.h>
 
+#include <float.h>
+#include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
-#define FLUX_SG_VERSION_STRING "0.0.29"
+/* ---- Version accessors ------------------------------------------------
+ * All derived from the FLUX_SG_VERSION_* macros. This file previously
+ * hard-coded the string "0.0.29" while the header macros had moved on
+ * to 0.0.36 — a stale literal that no test could catch. The string is
+ * now built by the macros, and tools/check-version-lockstep.sh keeps
+ * every library's macros in lockstep so this class of drift is
+ * structurally impossible. */
+
+#define FLUX_SG_STR2(x) #x
+#define FLUX_SG_STR(x) FLUX_SG_STR2(x)
+
+void flux_sg_version(int *major, int *minor, int *patch) {
+    if (major)
+        *major = FLUX_SG_VERSION_MAJOR;
+    if (minor)
+        *minor = FLUX_SG_VERSION_MINOR;
+    if (patch)
+        *patch = FLUX_SG_VERSION_PATCH;
+}
+
+uint32_t flux_sg_version_number(void) {
+    return FLUX_SG_VERSION_NUMBER;
+}
+
+bool flux_sg_version_check(int major, int minor, int patch) {
+    if (major != FLUX_SG_VERSION_MAJOR)
+        return false;
+    if (minor > FLUX_SG_VERSION_MINOR)
+        return false;
+    if (minor == FLUX_SG_VERSION_MINOR && patch > FLUX_SG_VERSION_PATCH)
+        return false;
+    return true;
+}
 
 FLUX_SG_API const char *flux_sg_version_string(void) {
-    return FLUX_SG_VERSION_STRING;
+    return FLUX_SG_STR(FLUX_SG_VERSION_MAJOR) "." FLUX_SG_STR(
+        FLUX_SG_VERSION_MINOR) "." FLUX_SG_STR(FLUX_SG_VERSION_PATCH);
 }
 
 FLUX_SG_API flux_result flux_sg_load_glb(flux_device *device, const void *glb_bytes,
@@ -25,14 +61,216 @@ FLUX_SG_API flux_result flux_sg_load_glb(flux_device *device, const void *glb_by
     if (!device || !glb_bytes || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = NULL;
+
+    /* Two-stage pipeline: parse (device-independent, testable, fuzzer-
+     * reachable) then build (the only stage touching the device). */
+    sg_scene_data data;
+    memset(&data, 0, sizeof(data));
+    flux_result r = sg_parse_glb(glb_bytes, byte_count, &data);
+    if (r != FLUX_OK)
+        return r; /* sg_parse_glb releases everything it allocated on failure */
+
     flux_sg_scene *sc = calloc(1, sizeof(*sc));
-    if (!sc)
+    if (!sc) {
+        sg_data_free(&data);
         return FLUX_ERROR_OUT_OF_MEMORY;
+    }
     sc->refcount = 1;
-    flux_result r = sg_parse_glb(device, glb_bytes, byte_count, sc);
+    r = sg_data_build(device, &data, sc);
+    /* sg_data_build consumed `data` either way; on failure it released
+     * whatever it uploaded and left `sc` safe to free. */
     if (r != FLUX_OK) {
-        /* sg_parse_glb frees anything it allocated on failure. */
-        free(sc);
+        flux_sg_scene_release(sc);
+        return r;
+    }
+    *out = sc;
+    return FLUX_OK;
+}
+
+/* ---- Parsed-data lifecycle (the parse/build seam, ADR-0016) -------- */
+
+/* ---- Parsed-data lifecycle (the parse/build seam, ADR-0016) -------- */
+
+/* The internal header completes the same struct tag the public header
+ * declares (classic C opaque pattern), so the public handle and the
+ * internal storage are one type — no downcasts, no layout drift. */
+
+FLUX_SG_API flux_result flux_sg_parse_glb(const void *glb_bytes, size_t byte_count,
+                                          flux_sg_scene_data **out) {
+    if (!glb_bytes || !out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = NULL;
+    sg_scene_data *data = calloc(1, sizeof(*data));
+    if (!data)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    flux_result r = sg_parse_glb(glb_bytes, byte_count, data);
+    if (r != FLUX_OK) {
+        /* sg_parse_glb releases everything it allocated on failure. */
+        free(data);
+        return r;
+    }
+    *out = (flux_sg_scene_data *)(void *)data;
+    return FLUX_OK;
+}
+
+void sg_data_free(sg_scene_data *data) {
+    if (!data)
+        return;
+    for (uint32_t i = 0; i < data->prim_count; ++i) {
+        free(data->prims[i].vertices);
+        free(data->prims[i].indices);
+        free(data->prims[i].skin_vertices);
+    }
+    free(data->prims);
+    if (data->nodes)
+        for (uint32_t i = 0; i < data->node_count; ++i)
+            free(data->nodes[i].name);
+    free(data->nodes);
+    if (data->skins)
+        for (uint32_t i = 0; i < data->skin_count; ++i) {
+            free(data->skins[i].joints);
+            free(data->skins[i].inverse_bind);
+            free(data->skins[i].palette);
+        }
+    free(data->skins);
+    free(data->roots);
+    memset(data, 0, sizeof(*data));
+}
+
+FLUX_SG_API void flux_sg_scene_data_free(flux_sg_scene_data *data) {
+    sg_data_free(data);
+    free(data);
+}
+
+FLUX_SG_API uint32_t flux_sg_scene_data_primitive_count(const flux_sg_scene_data *data) {
+    return data ? data->prim_count : 0;
+}
+
+FLUX_SG_API bool flux_sg_scene_data_bounds(const flux_sg_scene_data *data, flux_vec3 *out_min,
+                                           flux_vec3 *out_max) {
+    if (!out_min || !out_max || !data)
+        return false;
+    flux_vec3 wmin = {FLT_MAX, FLT_MAX, FLT_MAX};
+    flux_vec3 wmax = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
+    bool any = false;
+    for (uint32_t k = 0; k < data->prim_count; ++k) {
+        if (data->prims[k].vertices) {
+            wmin.x = fminf(wmin.x, data->prims[k].aabb_min.x);
+            wmin.y = fminf(wmin.y, data->prims[k].aabb_min.y);
+            wmin.z = fminf(wmin.z, data->prims[k].aabb_min.z);
+            wmax.x = fmaxf(wmax.x, data->prims[k].aabb_max.x);
+            wmax.y = fmaxf(wmax.y, data->prims[k].aabb_max.y);
+            wmax.z = fmaxf(wmax.z, data->prims[k].aabb_max.z);
+            any = true;
+        }
+    }
+    if (!any)
+        return false;
+    *out_min = wmin;
+    *out_max = wmax;
+    return true;
+}
+
+void sg_data_transfer(sg_scene_data *data, flux_sg_scene *sc) {
+    /* sc->prims is the build stage's business (it owns the upload);
+     * this moves only the parse-owned node/skin/root state. */
+    sc->nodes = data->nodes;
+    data->nodes = NULL;
+    sc->node_count = data->node_count;
+    data->node_count = 0;
+    sc->skins = data->skins;
+    data->skins = NULL;
+    sc->skin_count = data->skin_count;
+    data->skin_count = 0;
+    sc->roots = data->roots;
+    data->roots = NULL;
+    sc->root_count = data->root_count;
+    data->root_count = 0;
+    for (int i = 0; i < SG_HUMAN_BONE_COUNT; ++i)
+        sc->human_bones[i] = data->human_bones[i];
+}
+
+flux_result sg_data_build(flux_device *dev, sg_scene_data *data, flux_sg_scene *sc) {
+    if (!dev || !data || !sc)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+
+    /* Upload every parsed primitive. On failure the already-uploaded
+     * meshes are released here; the node/skin transfers below have not
+     * happened yet (they are only committed on full success), so the
+     * caller's zeroed `data` and `sc` stay consistent for either path. */
+    flux_sg_primitive *prims = data->prim_count ? calloc(data->prim_count, sizeof(*prims)) : NULL;
+    if (data->prim_count && !prims) {
+        sg_data_free(data);
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    for (uint32_t i = 0; i < data->prim_count; ++i) {
+        const sg_primitive_data *pd = &data->prims[i];
+        flux_mesh_skin_desc sd = {
+            .type = FLUX_TYPE_MESH_SKIN_DESC,
+            .vertices = pd->skin_vertices,
+        };
+        flux_mesh_desc md = {
+            .type = FLUX_TYPE_MESH_DESC,
+            .next = pd->skin_vertices ? &sd : NULL,
+            .vertices = pd->vertices,
+            .vertex_count = pd->vertex_count,
+            .indices = pd->indices,
+            .index_count = pd->index_count,
+        };
+        flux_result r = flux_mesh_create(dev, &md, &prims[i].mesh);
+        if (r != FLUX_OK) {
+            for (uint32_t k = 0; k < i; ++k)
+                flux_mesh_release(prims[k].mesh);
+            free(prims);
+            sg_data_free(data);
+            return r;
+        }
+        prims[i].base_color = pd->base_color;
+        prims[i].material_index = pd->material_index;
+        prims[i].aabb_min = pd->aabb_min;
+        prims[i].aabb_max = pd->aabb_max;
+        /* The mesh owns copies on the GPU; the parsed buffers are
+         * consumed here, one primitive at a time (the array free below
+         * then sees zeroed slots and frees nothing twice). */
+        free(pd->vertices);
+        free(pd->indices);
+        free(pd->skin_vertices);
+        data->prims[i] = (sg_primitive_data){0};
+    }
+
+    /* All meshes live: transfer everything into the scene and finish the
+     * derived CPU state (world matrices, rest rotations, skin palettes).
+     * The parsed primitive array itself is consumed here — its buffers
+     * were freed per-primitive above, the copies now live in sc->prims. */
+    sc->prims = prims;
+    sc->prim_count = data->prim_count;
+    free(data->prims);
+    data->prims = NULL;
+    data->prim_count = 0;
+    sg_data_transfer(data, sc);
+    sg_data_free(data); /* nodes/skins/roots transferred; nothing left */
+    sg_update_worlds(sc);
+    sg_update_rest_world_rotations(sc);
+    sg_update_skin_palettes(sc);
+    return FLUX_OK;
+}
+
+FLUX_SG_API flux_result flux_sg_scene_data_build(flux_device *device, flux_sg_scene_data *data,
+                                                 flux_sg_scene **out) {
+    if (!device || !data || !out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = NULL;
+    flux_sg_scene *sc = calloc(1, sizeof(*sc));
+    if (!sc) {
+        sg_data_free(data);
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    sc->refcount = 1;
+    flux_result r = sg_data_build(device, data, sc);
+    /* sg_data_build consumed `data` either way; on failure it released
+     * whatever it uploaded and left `sc` safe to free. */
+    if (r != FLUX_OK) {
+        flux_sg_scene_release(sc);
         return r;
     }
     *out = sc;

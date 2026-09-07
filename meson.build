@@ -14,6 +14,12 @@ cc = meson.get_compiler('c')
 m_dep = cc.find_library('m', required : false)
 pkg = import('pkgconfig')
 
+# Fuzz targets and the ci-fuzz workflow must run under clang (libFuzzer
+# runtime is clang-only). Probe with the clang executable directly —
+# `cc` here is whatever CC meson picked (often gcc, which rejects
+# -fsanitize=fuzzer even when clang and its runtime are installed).
+clang_cc = find_program('clang', required : false, version : '>=10')
+
 # Soname policy shared by every library in this tree (see
 # docs/reference/api.md): the SONAME encodes the compatibility boundary
 # (major.minor while pre-1.0 — patches are binary compatible, minors may
@@ -77,31 +83,35 @@ if get_option('fuzz')
   # startup). Both mainline clang and Apple clang provide the runtime;
   # GCC does not (its -fsanitize=fuzzer is not implemented).
   #
-  # The probe compiles AND links a trivial harness so the check fails
-  # whenever the runtime is absent, instead of poisoning every fuzz
-  # executable's link line. `libfuzzer_enabled` is read by
-  # tests/flux/fuzz and tests/lens/fuzz to pick the driver: libFuzzer's
-  # main() replaces fuzz_main.c's standalone driver.
-  #
-  # NOTE: b_sanitize must NOT already contain 'fuzzer' here; the probe
-  # would double-enable it and fail spuriously. meson forbids
-  # b_sanitize=fuzzer together with other sanitizers, and the fuzz CI
-  # job configures with b_sanitize=address explicitly.
-  libfuzzer_c_args = ['-fsanitize=fuzzer-no-link']
+  # The probe is what the fuzz executables actually are: a complete
+  # program with main() (libFuzzer's driver ships one) that references
+  # LLVMFuzzerTestOneInput, linked with -fsanitize=fuzzer. Probed with
+  # clang directly (see clang_cc above): `cc` may be gcc, which rejects
+  # the flag regardless of whether the clang runtime is installed.
+  libfuzzer_c_args = []
   libfuzzer_link_args = []
-  if cc.links(
-    'int LLVMFuzzerTestOneInput(const unsigned char *d, unsigned long s);\n'
-    + 'int main(void) { return LLVMFuzzerTestOneInput("x", 1) != 0; }\n',
-    args : libfuzzer_c_args + ['-fsanitize=fuzzer'],
-    name : 'libFuzzer runtime (clang -fsanitize=fuzzer)',
-  )
-    libfuzzer_enabled = true
-    libfuzzer_link_args = ['-fsanitize=fuzzer']
+  libfuzzer_enabled = false
+  if clang_cc.found()
+    # Compile+link a complete fuzz program with clang itself.
+    probe_src = '/tmp/.optics_libfuzzer_probe.c'
+    run_command('sh', '-c',
+      'cat > ' + probe_src + ' <<"EOF"\n'
+      + 'int LLVMFuzzerTestOneInput(const unsigned char *d, unsigned long s);\n'
+      + 'int LLVMFuzzerTestOneInput(const unsigned char *d, unsigned long s) {\n'
+      + '  (void)d; (void)s; return 0;\n'
+      + '}\nEOF', check : false)
+    probe_ok = run_command(clang_cc, '-fsanitize=fuzzer', probe_src,
+                           '-o', '/tmp/.optics_libfuzzer_probe', check : false)
+    if probe_ok.returncode() == 0
+      libfuzzer_enabled = true
+      libfuzzer_c_args = ['-fsanitize=fuzzer-no-link']
+      libfuzzer_link_args = ['-fsanitize=fuzzer']
+      message('libFuzzer runtime: OK (clang) — fuzz executables link the engine')
+    else
+      message('libFuzzer runtime unavailable (' + probe_ok.stderr().strip() + ') — standalone harnesses')
+    endif
   else
-    libfuzzer_enabled = false
-    # Standalone build: keep -fsanitize=fuzzer-no-link off the compile
-    # line so plain gcc/clang builds of the harnesses stay warning-clean.
-    libfuzzer_c_args = []
+    message('clang not found — libFuzzer unavailable, standalone harnesses')
   endif
 endif
 
