@@ -1,17 +1,14 @@
 /* tab_strip.c — tab strip interaction pattern. */
 
-#include "../internal.h"
 #include "../../include/lens/patterns.h"
+#include "../internal.h"
 
 #include <stdio.h>
 
-lens_tab_action lens_tab_strip(lens *ui,
-                               const char *id_str,
-                               const lens_tab_item *tabs,
-                               uint32_t tab_count,
-                               uint32_t active_index,
+lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item *tabs,
+                               uint32_t tab_count, uint32_t active_index,
                                const lens_tab_strip_opts *opts) {
-    lens_tab_action action = { .kind = LENS_TAB_ACTION_NONE, .index = 0 };
+    lens_tab_action action = {.kind = LENS_TAB_ACTION_NONE, .index = 0};
     if (!ui || !tabs || tab_count == 0)
         return action;
 
@@ -23,9 +20,10 @@ lens_tab_action lens_tab_strip(lens *ui,
     float max_w = (opts && opts->max_tab_width > 0.0f) ? opts->max_tab_width : 200.0f;
 
     lens_layout_opts strip_opts = {
-        .box = {
-            .height = h,
-        },
+        .box =
+            {
+                .height = h,
+            },
         .gap = 4.0f,
         .pad = 3.0f,
         .cross = LENS_CENTER,
@@ -41,12 +39,13 @@ lens_tab_action lens_tab_strip(lens *ui,
         snprintf(tab_id, sizeof(tab_id), "tab_%u", i);
 
         lens_selectable_opts sel = {
-            .box = {
-                .id = tab_id,
-                .height = tab_h,
-                .min_width = min_w,
-                .max_width = max_w,
-            },
+            .box =
+                {
+                    .id = tab_id,
+                    .height = tab_h,
+                    .min_width = min_w,
+                    .max_width = max_w,
+                },
             .label = tab->title,
             .selected = is_active,
             .icon = tab->icon,
@@ -63,12 +62,14 @@ lens_tab_action lens_tab_strip(lens *ui,
             char close_id[32];
             snprintf(close_id, sizeof(close_id), "close_%u", i);
             lens_button_opts close_btn = {
-                .box = {
-                    .id = close_id,
-                    .width = 18.0f,
-                    .height = 18.0f,
-                },
-                .icon = (opts && opts->close_icon != LENS_ICON_INVALID) ? opts->close_icon : LENS_ICON_INVALID,
+                .box =
+                    {
+                        .id = close_id,
+                        .width = 18.0f,
+                        .height = 18.0f,
+                    },
+                .icon = (opts && opts->close_icon != LENS_ICON_INVALID) ? opts->close_icon
+                                                                        : LENS_ICON_INVALID,
                 .label = (opts && opts->close_icon != LENS_ICON_INVALID) ? NULL : "×",
                 .variant = LENS_BUTTON_SUBTLE,
             };
@@ -84,11 +85,12 @@ lens_tab_action lens_tab_strip(lens *ui,
     /* Trailing New Tab Button */
     if (opts && opts->show_new_button) {
         lens_button_opts new_btn = {
-            .box = {
-                .id = "btn_new_tab",
-                .width = tab_h,
-                .height = tab_h,
-            },
+            .box =
+                {
+                    .id = "btn_new_tab",
+                    .width = tab_h,
+                    .height = tab_h,
+                },
             .icon = opts->new_icon,
             .label = (opts->new_icon != LENS_ICON_INVALID) ? NULL : "+",
             .variant = LENS_BUTTON_SUBTLE,

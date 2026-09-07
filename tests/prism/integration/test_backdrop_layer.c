@@ -465,11 +465,11 @@ int main(void) {
         bodies[0].shapes[0] =
             (prism_liquid_glass_shape){.bounds = {4.0f, 4.0f, 24.0f, 16.0f}, .corner_radius = 4.0f};
         /* Body 1: middle chip (e.g. HUD workspace) */
-        bodies[1].shapes[0] =
-            (prism_liquid_glass_shape){.bounds = {36.0f, 4.0f, 24.0f, 16.0f}, .corner_radius = 4.0f};
+        bodies[1].shapes[0] = (prism_liquid_glass_shape){.bounds = {36.0f, 4.0f, 24.0f, 16.0f},
+                                                         .corner_radius = 4.0f};
         /* Body 2: bottom panel (e.g. Dock) */
-        bodies[2].shapes[0] =
-            (prism_liquid_glass_shape){.bounds = {8.0f, 36.0f, 48.0f, 20.0f}, .corner_radius = 6.0f};
+        bodies[2].shapes[0] = (prism_liquid_glass_shape){.bounds = {8.0f, 36.0f, 48.0f, 20.0f},
+                                                         .corner_radius = 6.0f};
 
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;

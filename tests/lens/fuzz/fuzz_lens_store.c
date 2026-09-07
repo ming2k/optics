@@ -54,12 +54,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             uint32_t cs = scope_counter++;
             snprintf(clabel, sizeof clabel, "c%u", (unsigned)(cs & 0xFFFF));
             snprintf(wlabel, sizeof wlabel, "w%u", (unsigned)((cs + 1) & 0xFFFF));
-            lens_column(ui);
-            /* container identity is established by the call sequence; the
-             * label is decorative for this fuzzer's purposes. */
-            (void)clabel;
+            lens_column_begin(ui, &(lens_layout_opts){.box = {.id = clabel}});
             lens_button(ui, &(lens_button_opts){.label = wlabel}).clicked;
-            lens_close(ui);
+            lens_column_end(ui);
             break;
         }
         default:

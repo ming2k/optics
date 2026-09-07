@@ -1,11 +1,9 @@
 /* split_pane.c — interactive split divider pattern implementation. */
 
-#include "../internal.h"
 #include "../../include/lens/patterns.h"
+#include "../internal.h"
 
-bool lens_split_handle_v(lens *ui,
-                         const char *id_str,
-                         float *split_offset,
+bool lens_split_handle_v(lens *ui, const char *id_str, float *split_offset,
                          const lens_split_opts *opts) {
     if (!ui || !split_offset)
         return false;
@@ -17,10 +15,11 @@ bool lens_split_handle_v(lens *ui,
     lens_push_id(ui, id_str ? id_str : "split_v");
 
     lens_separator_opts sep_opts = {
-        .box = {
-            .id = "split_bar",
-            .width = handle_w,
-        },
+        .box =
+            {
+                .id = "split_bar",
+                .width = handle_w,
+            },
         .axis = LENS_COLUMN,
         .thickness = handle_w,
     };
@@ -31,8 +30,10 @@ bool lens_split_handle_v(lens *ui,
     bool changed = false;
     if (resp.pressed) {
         float new_offset = ui->input.cursor.x;
-        if (new_offset < min_s) new_offset = min_s;
-        if (new_offset > max_s) new_offset = max_s;
+        if (new_offset < min_s)
+            new_offset = min_s;
+        if (new_offset > max_s)
+            new_offset = max_s;
         if (new_offset != *split_offset) {
             *split_offset = new_offset;
             changed = true;

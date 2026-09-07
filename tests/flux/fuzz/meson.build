@@ -7,12 +7,18 @@
 #     calls LLVMFuzzerTestOneInput once. Use this to repro a crash found by
 #     a real fuzzer.
 #
-#   * libFuzzer (set LIBFUZZER=1 on the environment when configuring meson
-#     with -Dfuzz=true): libFuzzer supplies main(); the harness is linked
-#     with -fsanitize=fuzzer,address. Run the resulting binary directly.
+#   * libFuzzer (probed at the root meson.build; requires the clang
+#     runtime): libFuzzer supplies main(); the harness is linked with
+#     -fsanitize=fuzzer,address. Run the resulting binary directly — see
+#     .github/workflows/ci-fuzz.yml for the invocation the CI uses.
 #
-# Harnesses are excluded from the default `meson test` run via the 'fuzz'
-# suite — invoke explicitly with `meson test -C build --suite fuzz`.
+# Seed corpus: corpus/<harness>/*.bin is copied into the build tree and
+# each seed is replayed through the standalone driver as its own meson
+# test (suite 'fuzz'), so a regression in one seed names the seed. The
+# same directory is what the libFuzzer CI job passes as the corpus — one
+# set of files, two consumers.
+
+fs = import('fs')
 
 flux_fuzz_inc = include_directories('..')
 
@@ -31,6 +37,7 @@ fuzz_harnesses += {
   'name': 'fuzz_path_flatten',
   'src': files('fuzz_path_flatten.c'),
   'deps': [flux_dep, m_dep],
+  'corpus': 'corpus/path_flatten',
 }
 
 if get_option('scene-graph')
@@ -46,29 +53,32 @@ if get_option('scene-graph')
     'name': 'fuzz_glb_parse_disabled',
     'src': files('fuzz_glb_parse_disabled.c'),
     'deps': [m_dep],
+    'corpus': '',
   }
 endif
 
 if get_option('text')
-  # Text shaping: feed random UTF-8 to the itemizer. BiDi / script
-  # detection runs over arbitrary bytes; the harness asserts no UB / leak.
+  # Text shaping: feed arbitrary / truncated UTF-8 through the measure-only
+  # seam (no device needed): measure, caret mapping, bidi cursor moves, and
+  # selection rects at every truncation boundary. Asserts finite metrics,
+  # ordered selection rects, and in-range cursor state; ASan catches the rest.
   fuzz_harnesses += {
     'name': 'fuzz_text_shape',
     'src': files('fuzz_text_shape.c'),
     'deps': [flux_text_dep, flux_dep, m_dep],
+    'corpus': 'corpus/text_shape',
   }
 endif
 
 foreach h : fuzz_harnesses
   srcs = h['src']
   deps = h['deps']
-  # When LIBFUZZER is requested, do not pull in our standalone main().
-  if get_option('fuzz') and get_variable('libfuzzer_enabled', false)
+  if libfuzzer_enabled
     exe = executable(h['name'], srcs,
       include_directories : flux_fuzz_inc,
       dependencies        : deps,
-      c_args              : ['-fsanitize=fuzzer-no-link'],
-      link_args           : ['-fsanitize=fuzzer'],
+      c_args              : libfuzzer_c_args,
+      link_args           : libfuzzer_link_args,
       install             : false,
     )
   else
@@ -78,5 +88,28 @@ foreach h : fuzz_harnesses
       install             : false,
     )
     test(h['name'], exe, suite : 'fuzz', should_fail : false)
+  endif
+
+  # Deploy the seed corpus into the build tree and replay every seed
+  # through the standalone driver (libFuzzer builds replay the corpus
+  # from the CI job instead, so the per-seed tests are standalone-only).
+  corpus_dir = h.get('corpus', '')
+  if not libfuzzer_enabled and corpus_dir != ''
+    seeds = []
+    foreach f : run_command('find', meson.current_source_dir() / corpus_dir,
+                            '-name', '*.bin', check : true).stdout().split('\n')
+      if f != ''
+        seeds += configure_file(input : f,
+          output : fs.name(f),
+          copy : true)
+      endif
+    endforeach
+    foreach s : seeds
+      test(h['name'] + '_' + fs.name(s), exe,
+        args : [s],
+        suite : 'fuzz',
+        should_fail : false,
+      )
+    endforeach
   endif
 endforeach

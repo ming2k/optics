@@ -94,7 +94,10 @@ LIBRARIES = [
 
 DECL = re.compile(
     r"(?:^|\n)(?P<comment>(?:/\*(?:[^*]|\*(?!/))*\*/\s*)*)"  # doc comment(s)
-    r"(?P<attr>(?:[A-Z_]+\([^)]*\)\s*)*)"                     # FLUX_NODISCARD etc.
+    # Attribute macros: parenthesised (FLUX_NODISCARD(...)) or bare
+    # (LENS_NODISCARD). Bare macros were previously dropped here, which
+    # silently excluded every nodiscard declaration from the reference.
+    r"(?P<attr>(?:[A-Z_]+(?:\([^)]*\))?\s*)*)"
     r"(?P<api>{api})\s+"
     r"(?P<ret>[A-Za-z_][A-Za-z0-9_ *]*?)\s+"
     r"(?P<name>[a-z][a-z0-9_]*)\s*\(",
@@ -105,6 +108,13 @@ DECL = re.compile(
 
 
 def first_sentence(comment: str) -> str:
+    # Multiple consecutive comment blocks may precede a declaration (file
+    # banners, section dividers). Only the block adjacent to the
+    # declaration is its doc comment — gluing the others in produced
+    # banner junk like "-------- */ ..." inside the first sentence.
+    blocks = re.findall(r"/\*.*?\*/", comment, flags=re.S)
+    if blocks:
+        comment = blocks[-1]
     text = re.sub(r"^/\*+|\*+/$", "", comment.strip(), flags=re.S)
     text = re.sub(r"^\s*\*\s?", "", text, flags=re.M)  # strip leading stars
     text = " ".join(text.split())

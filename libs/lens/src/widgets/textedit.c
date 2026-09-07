@@ -530,7 +530,8 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     float optical_baseline = roundf(h * 0.5f + cap_height * 0.5f);
     float text_y = multiline ? padding - ts->scroll_y : (optical_baseline - fm.baseline);
     float font_asc = fm.baseline > 0.0f ? fm.baseline : (font_size * 0.95f);
-    float font_desc = (fm.height > fm.baseline && fm.baseline > 0.0f) ? (fm.height - fm.baseline) : (font_size * 0.25f);
+    float font_desc = (fm.height > fm.baseline && fm.baseline > 0.0f) ? (fm.height - fm.baseline)
+                                                                      : (font_size * 0.25f);
     float caret_h = font_asc + font_desc;
     float base_caret_x = prefix_width(ui, buf, ts->cursor, font_size);
     float caret_x = base_caret_x;
@@ -543,25 +544,31 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
         size_t display_len = ts->cursor + pe_len + (len - ts->cursor);
         char *display = flux_arena_alloc(&ui->arena, display_len + 1);
         if (display) {
-            if (ts->cursor) memcpy(display, buf, ts->cursor);
-            if (pe_len) memcpy(display + ts->cursor, pe, pe_len);
-            if (len > ts->cursor) memcpy(display + ts->cursor + pe_len, buf + ts->cursor, len - ts->cursor);
+            if (ts->cursor)
+                memcpy(display, buf, ts->cursor);
+            if (pe_len)
+                memcpy(display + ts->cursor, pe, pe_len);
+            if (len > ts->cursor)
+                memcpy(display + ts->cursor + pe_len, buf + ts->cursor, len - ts->cursor);
             display[display_len] = '\0';
             display_text = display;
         }
         float pe_width = prefix_width(ui, pe, pe_len, font_size);
-        preedit_underline = (flux_rect){pad_x + base_caret_x, optical_baseline + 1.0f, pe_width, 1.5f};
+        preedit_underline =
+            (flux_rect){pad_x + base_caret_x, optical_baseline + 1.0f, pe_width, 1.5f};
         uint32_t clause_lo = ui->input.preedit_sel_lo;
         uint32_t clause_hi = ui->input.preedit_sel_hi;
         if (clause_hi > clause_lo && clause_hi <= pe_len) {
             float clause_x = prefix_width(ui, pe, clause_lo, font_size);
             float clause_w = prefix_width(ui, pe, clause_hi, font_size) - clause_x;
-            preedit_clause = (flux_rect){pad_x + base_caret_x + clause_x, optical_baseline + 1.0f, clause_w, 2.5f};
+            preedit_clause = (flux_rect){pad_x + base_caret_x + clause_x, optical_baseline + 1.0f,
+                                         clause_w, 2.5f};
         }
         caret_x = base_caret_x + prefix_width(ui, pe, ui->input.preedit_cursor, font_size);
     } else if (r.focused && !show_placeholder && buf) {
         if (multiline) {
-            size_t ls; int li;
+            size_t ls;
+            int li;
             find_line(buf, ts->cursor, &ls, &li);
             caret_x = prefix_width(ui, buf + ls, ts->cursor - ls, font_size);
             caret_y = padding - ts->scroll_y + (float)li * line_height;
@@ -570,7 +577,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
             caret_x = base_caret_x;
         }
     }
-    flux_rect caret_rect = { pad_x + caret_x, caret_y, 1.5f, caret_h };
+    flux_rect caret_rect = {pad_x + caret_x, caret_y, 1.5f, caret_h};
     /* Build text lines for multiline or single-line */
     lens_text_line *lines = NULL;
     int line_count = 0;

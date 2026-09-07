@@ -1,18 +1,14 @@
 /* virtual.c — virtual grid and list math calculations. */
 
-#include "../internal.h"
 #include "../../include/lens/patterns.h"
+#include "../internal.h"
 
 #include <math.h>
 
-lens_virtual_grid_plan lens_virtual_grid_calc(float available_width,
-                                              float viewport_height,
-                                              float scroll_y,
-                                              uint32_t total_items,
-                                              float min_col_width,
-                                              float max_col_width,
-                                              float item_height,
-                                              float target_gap,
+lens_virtual_grid_plan lens_virtual_grid_calc(float available_width, float viewport_height,
+                                              float scroll_y, uint32_t total_items,
+                                              float min_col_width, float max_col_width,
+                                              float item_height, float target_gap,
                                               uint32_t overscan_rows) {
     lens_virtual_grid_plan plan = {0};
 
@@ -21,15 +17,20 @@ lens_virtual_grid_plan lens_virtual_grid_calc(float available_width,
         return plan;
     }
 
-    if (min_col_width <= 1.0f) min_col_width = 120.0f;
-    if (max_col_width < min_col_width) max_col_width = min_col_width * 1.5f;
-    if (item_height <= 1.0f) item_height = 100.0f;
-    if (target_gap < 0.0f) target_gap = 12.0f;
+    if (min_col_width <= 1.0f)
+        min_col_width = 120.0f;
+    if (max_col_width < min_col_width)
+        max_col_width = min_col_width * 1.5f;
+    if (item_height <= 1.0f)
+        item_height = 100.0f;
+    if (target_gap < 0.0f)
+        target_gap = 12.0f;
 
     /* Calculate how many columns fit with target_gap */
     float unit = min_col_width + target_gap;
     uint32_t cols = (uint32_t)floorf((available_width + target_gap) / unit);
-    if (cols < 1) cols = 1;
+    if (cols < 1)
+        cols = 1;
 
     /* Calculate allocated item width so columns span neatly */
     float total_gap_w = (cols > 1) ? (float)(cols - 1) * target_gap : 0.0f;
@@ -47,10 +48,12 @@ lens_virtual_grid_plan lens_virtual_grid_calc(float available_width,
     int32_t visible_count = (int32_t)ceilf(viewport_height / row_pitch) + 1;
 
     int32_t start_row = raw_first_row - (int32_t)overscan_rows;
-    if (start_row < 0) start_row = 0;
+    if (start_row < 0)
+        start_row = 0;
 
     int32_t end_row = raw_first_row + visible_count + (int32_t)overscan_rows;
-    if (end_row > (int32_t)total_rows) end_row = (int32_t)total_rows;
+    if (end_row > (int32_t)total_rows)
+        end_row = (int32_t)total_rows;
 
     plan.columns = cols;
     plan.column_width = allocated_col_w;
@@ -61,7 +64,8 @@ lens_virtual_grid_plan lens_virtual_grid_calc(float available_width,
     plan.visible_row_end = (uint32_t)end_row;
     plan.top_padding = (float)start_row * row_pitch;
     plan.bottom_padding = ((float)total_rows - (float)end_row) * row_pitch;
-    if (plan.bottom_padding < 0.0f) plan.bottom_padding = 0.0f;
+    if (plan.bottom_padding < 0.0f)
+        plan.bottom_padding = 0.0f;
 
     return plan;
 }

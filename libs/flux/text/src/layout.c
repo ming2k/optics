@@ -513,8 +513,16 @@ bool txt_text_layout_build(flux_text *t, const char *utf8, size_t len, float siz
                 shift += half;
             }
         }
-        /* Width is the trailing edge of the last glyph. */
-        pen = t->layout_buf[count - 1].x + t->layout_buf[count - 1].advance;
+        /* Width is the trailing edge of the last glyph — but only when
+         * that actually trails the line. Marks without a base character
+         * (e.g. U+0301 at string start) carry a negative x_offset from
+         * HarfBuzz and zero advance, so last.x + last.advance can be
+         * negative; the accumulated pen (which already includes every
+         * real advance) is the honest width in that case. Take the max
+         * of the two: the bracket recomputation wins only when it
+         * extends the line, never drags it left of the pen. */
+        float trailing = t->layout_buf[count - 1].x + t->layout_buf[count - 1].advance;
+        pen = fmaxf(pen, trailing);
     }
 
     out->glyphs = t->layout_buf;
@@ -654,6 +662,16 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
      * baked UVs predate a later atlas_clear (rearranged texels). */
     flux_glyph_run_host_atlas_desc host_atlas_gen = FLUX_GLYPH_RUN_HOST_ATLAS_DESC_INIT;
     run.atlas = t->atlas;
+    /* Hold a reference on the batch's atlas for the duration of the walk:
+     * txt_glyph_get below can trigger atlas_clear (page cap reached),
+     * which flux_image_release()s every page — and release frees the
+     * flux_image struct inline once the last reference drops. Without
+     * this retain, the pending flush's raw run.atlas would dangle and
+     * the clears-change flush would read freed memory. (Batches already
+     * handed to the canvas hold their own retains via the frame's
+     * foreign-image tracking; this covers the not-yet-recorded batch.) */
+    flux_image *batch_atlas = run.atlas ? flux_image_retain(run.atlas) : NULL;
+    run.atlas = batch_atlas;
     if (!t->atlas) {
         /* Device-less CPU canvas (ADR-0019): feed the host R8 coverage buffer
          * straight to the CPU rasteriser instead of a GPU image. */
@@ -709,9 +727,16 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
                 flux_canvas_draw_glyph_run(canvas, &run);
                 n = 0;
             }
-            if (run.atlas)
-                run.atlas = t->atlas_pages[t->atlas_page];
-            else
+            if (batch_atlas) {
+                /* Follow the fresh page 0; swap the batch's own retain. */
+                flux_image *fresh = t->atlas_pages[t->atlas_page];
+                if (fresh)
+                    flux_image_retain(fresh);
+                if (batch_atlas)
+                    flux_image_release(batch_atlas);
+                batch_atlas = fresh;
+                run.atlas = batch_atlas;
+            } else
                 /* Post-clear quads carry new-era UVs: tag them with the new
                  * generation so recorded segments validate against the
                  * rearranged buffer, not its pre-clear contents. */
@@ -724,7 +749,7 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
          * image, so a page change mid-run flushes the pending batch first
          * and retargets the run at the entry's page. Cache hits keep the
          * run on one page for whole spans; page changes cluster where the
-         * packer rolled over. */
+         * packer rolled over. The batch retain swaps with the page. */
         if (t->atlas && e->atlas_page != run_page) {
             if (n > 0) {
                 run.quad_count = n;
@@ -732,7 +757,13 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
                 n = 0;
             }
             run_page = e->atlas_page;
-            run.atlas = t->atlas_pages[e->atlas_page];
+            flux_image *page_img = t->atlas_pages[e->atlas_page];
+            if (page_img)
+                flux_image_retain(page_img);
+            if (batch_atlas)
+                flux_image_release(batch_atlas);
+            batch_atlas = page_img;
+            run.atlas = batch_atlas;
         }
 
         float dst_x_dev = origin + (float)e->left;
@@ -761,6 +792,11 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
         run.quad_count = n;
         flux_canvas_draw_glyph_run(canvas, &run);
     }
+    /* The batch's atlas retain was handed over to every flush via the
+     * frame's foreign-image tracking (canvas_record_retain_image), so one
+     * release here drops the walk's own reference. */
+    if (batch_atlas)
+        flux_image_release(batch_atlas);
 }
 
 static void text_draw_impl(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
@@ -886,11 +922,29 @@ int flux_text_selection_rects(flux_text *t, const char *utf8, size_t len, size_t
         const txt_placed_glyph *g = &L.glyphs[i];
         bool sel = (size_t)g->cluster >= lo && (size_t)g->cluster < hi;
         if (sel) {
-            if (!active) {
-                x0 = g->x;
-                active = true;
+            /* Marks without a base carry a negative HarfBuzz x_offset, so
+             * a zero-advance mark can sit left of the running pen. Extend
+             * the running rect on both sides instead of assuming visual
+             * monotonicity — the union of ordered glyph spans is itself
+             * an ordered span, and anything else renders as a backwards
+             * highlight. */
+            float gx0 = g->x;
+            float gx1 = g->x + g->advance;
+            if (gx1 < gx0) {
+                float tmp = gx0;
+                gx0 = gx1;
+                gx1 = tmp;
             }
-            x1 = g->x + g->advance;
+            if (!active) {
+                x0 = gx0;
+                x1 = gx1;
+                active = true;
+            } else {
+                if (gx0 < x0)
+                    x0 = gx0;
+                if (gx1 > x1)
+                    x1 = gx1;
+            }
         } else if (active) {
             if (n < max)
                 out[n++] = (flux_text_xrange){x0, x1};

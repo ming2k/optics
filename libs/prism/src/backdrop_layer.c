@@ -311,8 +311,8 @@ static flux_result layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32
     flux_format format = prism_layer_output_format(input);
     if (slot->output && slot->width == width && slot->height == height && slot->format == format) {
         if (need_scratch && !slot->scratch) {
-            flux_result r = flux_image_create_compute_writable(filter->device, width, height, format,
-                                                               &slot->scratch);
+            flux_result r = flux_image_create_compute_writable(filter->device, width, height,
+                                                               format, &slot->scratch);
             if (r != FLUX_OK)
                 return r;
         }
@@ -330,7 +330,8 @@ static flux_result layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32
     if (r != FLUX_OK)
         return r;
     if (need_scratch) {
-        r = flux_image_create_compute_writable(filter->device, width, height, format, &slot->scratch);
+        r = flux_image_create_compute_writable(filter->device, width, height, format,
+                                               &slot->scratch);
         if (r != FLUX_OK)
             return r;
     }
@@ -539,7 +540,8 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
         return FLUX_ERROR_OUT_OF_RANGE;
     const bool need_scratch = (desc->frost_count > 0u && desc->group_count > 0u);
-    flux_result result = layer_ensure_slot(filter, index, input, desc->group_count > 0u, need_scratch);
+    flux_result result =
+        layer_ensure_slot(filter, index, input, desc->group_count > 0u, need_scratch);
     if (result != FLUX_OK)
         return result;
 
@@ -667,10 +669,12 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     /* 3. Frost/base layer.
      * When frost rects exist:
      *   - If glass bodies also exist (need_scratch), render the opaque sharp base + frost
-     *     into slot->scratch so the glass lens samples the frosted backdrop without in-place hazard.
+     *     into slot->scratch so the glass lens samples the frosted backdrop without in-place
+     * hazard.
      *   - In slot->output, render the frost rects.
      * When NO frost rects exist (desc->frost_count == 0):
-     *   Skip Step 3 completely. The glass pass samples `input` directly and writes to slot->output. */
+     *   Skip Step 3 completely. The glass pass samples `input` directly and writes to slot->output.
+     */
     if (desc->frost_count > 0u && current_count > 0u) {
         /* Merge all current footprints into disjoint dispatch regions. */
         liquid_glass_region
@@ -705,7 +709,8 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
                         .height = image_height,
                         .origin_x = region.x,
                         .origin_y = region.y,
-                        .bounds = {frost->bounds.x, frost->bounds.y, frost->bounds.w, frost->bounds.h},
+                        .bounds = {frost->bounds.x, frost->bounds.y, frost->bounds.w,
+                                   frost->bounds.h},
                         .corner_radius = fmaxf(frost->corner_radius, 0.0f),
                         .opacity = fminf(fmaxf(frost->opacity, 0.0f), 1.0f),
                         .tint_color = frost->tint_color & 0x00FFFFFFu,
@@ -788,7 +793,8 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     /* 4. Glass layer:
      * When frost exists, the lens samples the frosted layer (slot->scratch).
      * When no frost exists, the lens samples the sharp capture (desc->input).
-     * In both cases, input != slot->output, guaranteeing zero in-place cross-workgroup race hazards. */
+     * In both cases, input != slot->output, guaranteeing zero in-place cross-workgroup race
+     * hazards. */
     const flux_image *glass_input = (need_scratch && slot->scratch) ? slot->scratch : input;
     const prism_glass_policy policy = {
         .refraction = desc->refraction,

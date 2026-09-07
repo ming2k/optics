@@ -148,8 +148,7 @@ static void test_wrapped_label_respects_width_and_grows_height(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 200}, .dt_seconds = 0.016f};
     lens_theme theme = lens_get_theme(ui);
-    float single_line_h =
-        lens_text_measure(ui, theme.font, "Ag", theme.font_size).height;
+    float single_line_h = lens_text_measure(ui, theme.font, "Ag", theme.font_size).height;
 
     lens_begin(ui, &in);
     lens_column_begin(ui, &(lens_layout_opts){.cross = LENS_START});
@@ -176,7 +175,6 @@ static void test_wrapped_label_respects_width_and_grows_height(void) {
 
     lens_destroy(ui);
 }
-
 
 static void test_label_zero_padding_by_default(void) {
     lens *ui = NULL;

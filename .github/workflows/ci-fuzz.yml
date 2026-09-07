@@ -1,0 +1,118 @@
+name: ci-fuzz
+
+# Fuzzing gate. Two modes:
+#
+#   * PR smoke (pull_request): builds the harnesses with libFuzzer
+#     (clang + -fsanitize=fuzzer,address), replays the committed seed
+#     corpus through the real fuzzing engine, and runs a short bounded
+#     campaign per target so a fresh crash is caught within minutes of
+#     landing, not days later.
+#
+#   * Daily long-run (schedule): the same targets for 5 minutes each
+#     with -fork=1 to parallelise across cores. Crashes are uploaded as
+#     workflow artifacts; a crashing input found here must be
+#     minimised and committed back into the seed corpus as a
+#     regression test.
+#
+# The libFuzzer availability probe lives in the root meson.build
+# (libfuzzer_enabled); GCC-only toolchains degrade to standalone
+# harnesses, so this job pins clang explicitly.
+
+on:
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  libfuzzer:
+    name: libFuzzer (${{ matrix.target }}, clang)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [fuzz_path_flatten, fuzz_text_shape, fuzz_lens_store]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang lld meson ninja-build pkg-config \
+            libvulkan-dev libfreetype-dev
+
+      - name: Configure (libFuzzer + ASan)
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          meson setup build -Dfuzz=true -Dexamples=false -Dtests=true \
+            --buildtype=debugoptimized \
+            -Db_sanitize=address \
+            -Db_lundef=false
+
+      - name: Compile
+        run: meson compile -C build
+
+      # The standalone driver (fuzz_main.c) is used by `meson test`; here
+      # we invoke the libFuzzer-linked binaries directly, so the suite
+      # filters keep the plain-test runner from double-running them.
+      - name: Replay committed seed corpus (regression gate)
+        run: |
+          set -e
+          case '${{ matrix.target }}' in
+            fuzz_path_flatten)
+              corpus=tests/flux/fuzz/corpus/path_flatten ;;
+            fuzz_text_shape)
+              corpus=tests/flux/fuzz/corpus/text_shape ;;
+            fuzz_lens_store)
+              corpus=tests/lens/fuzz/corpus/lens_store ;;
+          esac
+          ASAN_OPTIONS=abort_on_error=1:detect_leaks=1 \
+            ./build/tests/flux/fuzz/${{ matrix.target }} \
+              -runs=0 "$corpus"
+
+      - name: Bounded fuzz campaign
+        id: campaign
+        run: |
+          set -e
+          case '${{ matrix.target }}' in
+            fuzz_path_flatten)
+              corpus=tests/flux/fuzz/corpus/path_flatten ;;
+            fuzz_text_shape)
+              corpus=tests/flux/fuzz/corpus/text_shape ;;
+            fuzz_lens_store)
+              corpus=tests/lens/fuzz/corpus/lens_store ;;
+          esac
+          # PR smoke: 60s. Daily run: 300s (5 min) per target.
+          runs_per_target=60
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            runs_per_target=300
+          fi
+          mkdir -p /tmp/fuzz-corpus /tmp/fuzz-artifacts
+          # -fork=1 parallelises across cores; -ignore_crashes=0 makes any
+          # finding fail the job immediately.
+          ASAN_OPTIONS=abort_on_error=1:detect_leaks=1 \
+            timeout 600 ./build/tests/flux/fuzz/${{ matrix.target }} \
+              -fork=1 -ignore_crashes=0 \
+              -max_total_time=$runs_per_target \
+              -rss_limit_mb=2560 \
+              -artifact_prefix=/tmp/fuzz-artifacts/ \
+              /tmp/fuzz-corpus "$corpus"
+
+      - name: Upload crash artifacts
+        if: failure() && steps.campaign.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: crashes-${{ matrix.target }}
+          path: /tmp/fuzz-artifacts/
+          if-no-files-found: ignore

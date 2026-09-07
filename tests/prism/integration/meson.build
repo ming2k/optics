@@ -13,3 +13,17 @@ test_backdrop_layer = executable('test_backdrop_layer',
   dependencies : [test_helpers_dep, prism_dep],
 )
 test('backdrop_layer', test_backdrop_layer, suite : 'integration')
+
+# Golden regression test (prism liquid glass, default recipe). The
+# committed reference lives in tests/prism/golden/; the test reads it via
+# PRISM_GOLDEN_SRC so it works from any build dir. Regenerate with
+# PRISM_GOLDEN_UPDATE=1 after an *intentional* recipe change — the diff
+# in that commit must show the new reference.
+test_prism_golden = executable('test_prism_golden',
+  'test_prism_golden.c',
+  dependencies : [test_helpers_dep, prism_dep],
+)
+test('prism_golden', test_prism_golden,
+  suite : 'integration',
+  env : ['PRISM_GOLDEN_SRC=' + meson.project_source_root() / 'tests' / 'prism' / 'golden'],
+)

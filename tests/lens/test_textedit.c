@@ -18,9 +18,8 @@ static void focus_field(lens *ui, const char *label, char *buf, size_t cap) {
 
 static void focus_area(lens *ui, const char *label, char *buf, size_t cap) {
     lens_begin(ui, &IN0);
-    lens_textedit(ui,
-                  &(lens_textedit_opts){
-                      .box = {.id = label}, .buf = buf, .cap = cap, .multiline = true});
+    lens_textedit(
+        ui, &(lens_textedit_opts){.box = {.id = label}, .buf = buf, .cap = cap, .multiline = true});
     lens_end(ui);
     lens_set_focus(ui, lens_current_id(ui, label));
 }
@@ -192,8 +191,8 @@ static void test_textedit_cursor_hint(void) {
     /* Frame 1: render textedit at known position */
     lens_begin(ui, &IN0);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf", .width = 200.0f, .height = 36.0f},
-                                           .buf = buf,
-                                           .cap = sizeof buf});
+                                            .buf = buf,
+                                            .cap = sizeof buf});
     lens_end(ui);
 
     /* Frame 2: hover cursor over the textedit */
@@ -220,8 +219,8 @@ static void test_textedit_vertical_centering(void) {
     /* Render textedit with 40px height */
     lens_begin(ui, &IN0);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf", .width = 200.0f, .height = 40.0f},
-                                           .buf = buf,
-                                           .cap = sizeof buf});
+                                            .buf = buf,
+                                            .cap = sizeof buf});
     lens_end(ui);
 
     lens_node *n = lens_find(ui, lens_current_id(ui, "tf"));
@@ -300,7 +299,8 @@ static void test_textedit_ime_preedit_and_commit(void) {
     /* Node must have preedit underline draw command */
     bool found_preedit_underline = false;
     for (uint32_t i = 0; i < n->cmd_count; i++) {
-        if (n->cmds[i].kind == LENS_DRAW_RECT && n->cmds[i].rel.h == 1.5f && n->cmds[i].rel.w > 0.0f) {
+        if (n->cmds[i].kind == LENS_DRAW_RECT && n->cmds[i].rel.h == 1.5f &&
+            n->cmds[i].rel.w > 0.0f) {
             found_preedit_underline = true;
             break;
         }
@@ -311,7 +311,9 @@ static void test_textedit_ime_preedit_and_commit(void) {
     in = IN0;
     strncpy(in.text_utf8, "你好", sizeof in.text_utf8 - 1);
     lens_begin(ui, &in);
-    bool changed = lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf}).changed;
+    bool changed =
+        lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf})
+            .changed;
     lens_end(ui);
 
     CHECK(changed);

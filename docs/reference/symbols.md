@@ -19,40 +19,72 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_version_check` |  |
 | `flux_get_last_error` | Copies the most recent thread-local diagnostic into *out. |
 | `flux_console_logger` |  |
+| `flux_icc_profile_create` | Parses and validates an ICC v2/v4 display/scanner-class RGB profile. |
 | `flux_icc_profile_release` |  |
 | `flux_icc_profile_color_space` | When the profile is exactly representable in the parametric model (matrix + a transfer curve from the flux set), fills `out` and returns true. |
+| `flux_image_create` |  |
 | `flux_image_release` |  |
 | `flux_image_width` |  |
 | `flux_image_height` |  |
 | `flux_image_format` |  |
+| `flux_image_create_render_target` | Create a COLOR_ATTACHMENT \| SAMPLED image with undefined initial contents. |
+| `flux_frame_prepare_image_target` |  |
+| `flux_frame_finish_image_target` |  |
+| `flux_image_create_compute_writable` | Create a STORAGE \| SAMPLED image with undefined initial contents, in VK_IMAGE_LAYOUT_GENERAL, registered into both the sampled and the storage bindless slots (read them via flux_image_bindless_handle and flux_image_bindless_storage_handle in <flux/vulkan.h>). |
 | `flux_device_supports_image_usage` |  |
+| `flux_image_update_region` | Upload tightly packed pixels into an in-bounds sub-region. |
+| `flux_image_update_region_strided` | `flux_image_update_region` for source rows that are wider than the uploaded region: row `i` of `data` starts at `i * row_bytes`. |
+| `flux_image_update_region_premultiply` | `flux_image_update_region_strided` that takes straight (non-premultiplied) RGBA8 and premultiplies during the upload, so callers never replicate the canvas premultiplied-alpha convention themselves. |
 | `flux_device_log` | Emit a printf-style diagnostic through a device's logger (if any). |
+| `flux_device_create` |  |
 | `flux_device_enabled_features` | Semantic capabilities enabled on the logical device. |
+| `flux_device_get_limits` | Fill `out` with the device's limits. |
 | `flux_device_get_drm_identity` | Returns the DRM primary/render identities of the selected Vulkan physical device. |
 | `flux_device_release` |  |
 | `flux_device_wait_idle` |  |
 | `flux_device_free` |  |
 | `flux_device_memory_budget` |  |
 | `flux_device_memory_stats` | Sample live allocator counters. |
+| `flux_uploads_begin` | Batched uploads. |
+| `flux_uploads_flush` |  |
+| `flux_buffer_create` |  |
 | `flux_buffer_release` | Destruction is deferred: a released buffer may still be referenced by in-flight frames, so the VkBuffer and its memory are destroyed by the device retire queue only after the GPU provably passed every batch that could reference them. |
 | `flux_buffer_size` |  |
+| `flux_target_create` |  |
 | `flux_target_release` | Destruction is deferred: a released target may still be an attachment of in-flight frames, so the image, view, and memory are destroyed by the device retire queue only after the GPU provably passed every batch that could reference them. |
 | `flux_target_width` |  |
 | `flux_target_height` |  |
 | `flux_frame_prepare_target` | Record the layout transition that makes `target` usable as the attachment selected by its usage. |
+| `flux_surface_create` |  |
 | `flux_surface_release` |  |
+| `flux_surface_resize` | Recreate the swapchain at the new extent. |
 | `flux_surface_get_info` |  |
+| `flux_surface_read_pixels` | Read back a captured frame as tightly packed RGBA8, row-major, top-left origin (`captured_width * captured_height * 4` bytes; `bytes` must be at least that). |
+| `flux_surface_prepare_readback` | Allocate persistent readback staging ahead of the first capture. |
+| `flux_surface_prepare_readback_region` | Preallocate persistent staging for a future region readback. |
+| `flux_surface_read_pixels_ready` | Non-blocking readiness query for a frame copied to persistent readback staging. |
+| `flux_surface_take_readback` | Detach a completed on-demand snapshot from its surface without copying its pixels. |
+| `flux_readback_read_pixels` |  |
 | `flux_readback_get_region` | Return the exact surface region captured by an immutable readback. |
 | `flux_readback_release` |  |
 | `flux_surface_exportable` | Offscreen surfaces only (and only when the device had the dma-buf extensions enabled at creation): export the most recently submitted frame's image memory as a Linux dma-buf file descriptor. |
 | `flux_surface_dmabuf_modifier` |  |
 | `flux_surface_dmabuf_stride` |  |
+| `flux_surface_export_dmabuf` |  |
+| `flux_surface_export_dmabuf_explicit` | Explicit-sync export for a submitted exportable offscreen frame. |
 | `flux_surface_last_slot` | Offscreen surfaces: the frame slot index of the most recently submitted frame (0..frames_in_flight-1), or UINT32_MAX before the first submit. |
+| `flux_surface_begin_frame` |  |
 | `flux_frame_get_state` |  |
 | `flux_frame_has_active_pass` | True between flux_frame_begin_pass and flux_frame_end_pass. |
+| `flux_frame_request_readback` | Capture the exact color attachment produced by this recording frame. |
+| `flux_frame_request_readback_region` | Capture only `region` from this frame into tightly packed staging. |
+| `flux_frame_submit` | Frames follow a strict single-use state machine: begin_frame -> submit -> present. |
+| `flux_frame_present` |  |
+| `flux_frame_alloc_transient` | `alignment` must be a power of two between 1 and 256 inclusive. |
 | `flux_frame_index` |  |
-| `flux_frame_timestamp_begin` | ================================================================== */ /* GPU profiling — timestamp queries */ /* ================================================================== |
+| `flux_frame_timestamp_begin` | ================================================================== |
 | `flux_frame_timestamp_end` |  |
+| `flux_frame_collect_timestamps` | Returns timestamps from the most recent COMPLETED frame at this frame's slot. |
 
 ### `flux/math.h`
 
@@ -103,7 +135,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_mat3_multiply` |  |
 | `flux_mat3_transform_vec3` |  |
 | `flux_mat3_invert` |  |
-| `flux_quat_identity` | ================================================================== */ /* Quaternion operations */ /* ================================================================== |
+| `flux_quat_identity` | ================================================================== |
 | `flux_quat_axis_angle` |  |
 | `flux_quat_multiply` |  |
 | `flux_quat_normalize` |  |
@@ -114,11 +146,12 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_color_unpack` |  |
 | `flux_color_to_linear` |  |
 | `flux_color_from_linear` |  |
-| `flux_color_space_is_valid` | ================================================================== */ /* Color-space math (ADR-0069) */ /* ================================================================== */ /* Validation and equality for flux_color_space values. |
+| `flux_color_space_is_valid` | Validation and equality for flux_color_space values. |
 | `flux_color_space_equal` |  |
 | `flux_transfer_encode` | Scalar transfer functions between linear light and the encoded domain. |
 | `flux_transfer_decode` |  |
 | `flux_color_space_transform_matrix` | Builds the 3×3 matrix converting linear-light RGB in `from` to linear-light RGB in `to` (primaries only — transfer functions are applied separately). |
+| `flux_arena_init` |  |
 | `flux_arena_destroy` |  |
 | `flux_arena_reset` |  |
 
@@ -126,7 +159,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
-| `flux_buffer_vk_buffer` | ================================================================== */ /* Raw handle accessors */ /* ================================================================== |
+| `flux_buffer_vk_buffer` | ================================================================== |
 | `flux_buffer_device_address` |  |
 | `flux_device_vk_instance` |  |
 | `flux_device_vk_physical_device` |  |
@@ -147,22 +180,31 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_frame_vk_image_view` |  |
 | `flux_image_vk_image` |  |
 | `flux_image_vk_image_view` |  |
-| `flux_target_vk_view` | flux_image_bindless_handle is declared in the bindless section below because it returns flux_bindless_handle, which is typedef'd there. |
+| `flux_target_vk_view` | Render-target image view: hand this to flux_pass_attachment.view / flux_pass_depth_attachment.view. |
 | `flux_target_vk_image` |  |
 | `flux_frame_vk_transient_buffer` | The transient ring buffer underlying flux_frame_alloc_transient. |
-| `flux_format_to_vk` | ================================================================== */ /* Format <-> VkFormat */ /* ================================================================== |
+| `flux_format_to_vk` | ================================================================== |
 | `flux_format_from_vk` |  |
+| `flux_bindless_register_image` |  |
+| `flux_bindless_register_storage_image` | Register a storage-image view (writable from shaders). |
+| `flux_bindless_register_sampler` |  |
 | `flux_bindless_release` |  |
 | `flux_device_bindless_set` |  |
 | `flux_device_bindless_layout` |  |
 | `flux_device_default_sampler_handle` | Lazily creates and returns the bindless handle of the device-owned default sampler (linear filtering, clamp-to-edge). |
+| `flux_oneshot_begin` | Begin a one-shot recording. |
+| `flux_oneshot_submit_and_end` | Submit `cmd` on the device's graphics queue and WAIT for completion (fence with a finite timeout, queue-idle fallback), then recycle the buffer. |
+| `flux_oneshot_run` | Single-recording convenience: begin, call `record` (non-NULL), submit, wait, recycle. |
 | `flux_image_bindless_handle` | The sampled bindless handle the image was registered into at create time. |
 | `flux_image_bindless_storage_handle` | The storage bindless handle of the image, valid only for images created with flux_image_create_compute_writable (FLUX_BINDLESS_INVALID otherwise). |
+| `flux_graphics_pipeline_create` |  |
+| `flux_graphics_pipeline_retain` |  |
 | `flux_graphics_pipeline_release` | DESTROY-INLINE SEMANTICS — see the fuller note on flux_compute_pipeline_release in <flux/compute.h>. |
 | `flux_graphics_pipeline_release_deferred` | Deferred-release counterpart for graphics pipelines: parks on the device retire queue, destroyed once in-flight batches complete. |
 | `flux_graphics_pipeline_vk_pipeline` |  |
 | `flux_graphics_pipeline_vk_layout` |  |
 | `flux_graphics_pipeline_bind` | Bind the pipeline and push `push_bytes` of `push_constants` (may be NULL/0). |
+| `flux_sampler_create` |  |
 | `flux_sampler_release` | Release is deferred through the device retire queue: the bindless slot and VkSampler are destroyed only once every in-flight batch that could still carry the slot in its push constants has retired, so callers need no keep-alive window after a draw that sampled through it. |
 | `flux_sampler_vk_sampler` |  |
 | `flux_sampler_bindless_handle` |  |
@@ -179,6 +221,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_paint_solid` | Convenience constructors. |
 | `flux_paint_linear_gradient` |  |
 | `flux_paint_radial_gradient` |  |
+| `flux_path_create` |  |
 | `flux_path_move_to` |  |
 | `flux_path_line_to` |  |
 | `flux_path_quad_to` |  |
@@ -188,11 +231,18 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_path_add_round_rect` |  |
 | `flux_path_add_circle` |  |
 | `flux_path_dropped_count` | Number of segments rejected due to arena exhaustion. |
+| `flux_canvas_create` | Create a canvas on the selected backend. |
 | `flux_canvas_destroy` |  |
 | `flux_canvas_set_scale` | Content scale (device-pixel ratio). |
 | `flux_canvas_get_scale` |  |
+| `flux_canvas_begin_frame` | Begin / end a recording session. |
 | `flux_canvas_end_frame` |  |
+| `flux_canvas_end_frame_checked` | Checked counterpart: always closes a valid frame pass and returns its first sticky draw-time error (notably a stencil-dependent draw attempted inside a no-stencil pass). |
+| `flux_canvas_begin_pass` | Descriptor form of flux_canvas_begin_frame. |
+| `flux_canvas_begin_target` | Render the draws between begin_target/end_target into `target` (a flux_image from flux_image_create_render_target) instead of the frame's swapchain image. |
+| `flux_canvas_begin_target_pass` |  |
 | `flux_canvas_end_target` |  |
+| `flux_canvas_end_target_checked` | Checked target-pass counterpart; see flux_canvas_end_frame_checked. |
 | `flux_canvas_save` | State stack. |
 | `flux_canvas_restore` |  |
 | `flux_canvas_clip_rect` | Intersect the current clip with `r`. |
@@ -229,14 +279,20 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `flux_canvas_create_cpu` | Create a headless CPU canvas with a `width`x`height` (physical pixels) framebuffer. |
+| `flux_canvas_create_cpu_aa` | flux_canvas_create_cpu with an explicit antialiasing request. |
+| `flux_canvas_cpu_begin` | Begin a recording pass, clearing to `clear` (premultiplied; NULL = fully transparent). |
 | `flux_canvas_cpu_end` | End the recording pass. |
 
 ### `flux/dmabuf.h`
 
 | Symbol | Description |
 |--------|-------------|
+| `flux_image_import_dmabuf` | Import a dma-buf as a sampled flux_image. |
+| `flux_canvas_wait_dmabuf_acquire` | Wait a new producer sync_file before the current canvas frame samples an already-imported dma-buf image. |
 | `flux_dmabuf_supported` | Whether the logical device has the complete dma-buf import capability. |
 | `flux_dmabuf_sync_supported` | Whether acquire_sync_fd can be imported through VK_KHR_external_semaphore_fd. |
+| `flux_dmabuf_format_modifiers` | Enumerate the single-plane DRM format modifiers a buffer of `format` may use to be both sampleable by this device and importable as external memory, i.e. |
 
 ### `flux/scene.h`
 
@@ -244,10 +300,12 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 |--------|-------------|
 | `flux_camera_perspective` |  |
 | `flux_camera_look_at` |  |
+| `flux_mesh_create` |  |
 | `flux_mesh_release` | Destruction is deferred: a released mesh's vertex/index buffers may still be bound by in-flight frames, so they are destroyed by the device retire queue only after the GPU provably passed every batch that could reference them. |
+| `flux_material_create` |  |
 | `flux_material_release` | Release destroys the material's pipelines inline — they do NOT go through the device retire queue (the retained texture/sampler do). |
 | `flux_material_get_alpha_mode` |  |
-| `flux_scene_draw_mesh` | ------------------------------------------------------------------ */ /* Scene draw (records into the current pass) */ /* ------------------------------------------------------------------ */ /* Records a single mesh+material draw into the frame's currently active pass. |
+| `flux_scene_draw_mesh` | Records a single mesh+material draw into the frame's currently active pass. |
 | `flux_scene_draw_mesh_lit` | Same as flux_scene_draw_mesh with an explicit light. |
 | `flux_scene_draw_mesh_skinned` | GPU-skinned variants. |
 | `flux_scene_draw_mesh_skinned_lit` |  |
@@ -256,6 +314,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `flux_compute_pipeline_create` |  |
+| `flux_compute_pipeline_retain` |  |
 | `flux_compute_pipeline_release` | DESTROY-INLINE SEMANTICS — different from every retire-queued resource (image/buffer/mesh/sampler/target), where *_release is safe at any time. |
 | `flux_pipeline_release_deferred` | Deferred-release counterpart: parks the pipeline on the device retire queue and destroys it once every submitted batch has completed. |
 | `flux_compute_pipeline_vk_pipeline` |  |
@@ -266,9 +326,16 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `flux_effect_blur` | Record the blur into `cmd`. |
+| `flux_blur_filter_create` |  |
 | `flux_blur_filter_release` |  |
+| `flux_blur_filter_apply` |  |
+| `flux_effect_shadow` | Record the shadow into `cmd`. |
+| `flux_shadow_filter_create` |  |
 | `flux_shadow_filter_release` |  |
-| `flux_effect_reset` | ------------------------------------------------------------------ */ /* Lifecycle */ /* ------------------------------------------------------------------ */ /* End the current effect lease epoch and return its intermediate/output slots to the per-device pool. |
+| `flux_shadow_filter_apply` |  |
+| `flux_effect_promote` | Copy `transient` (an image returned by flux_effect_blur or any later effect operator) into a fresh caller-owned flux_image with the same width, height, and format. |
+| `flux_effect_reset` | End the current effect lease epoch and return its intermediate/output slots to the per-device pool. |
 
 ## flux-text — text shaping (sibling of flux)
 
@@ -276,6 +343,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `flux_text_create` | Create a text context. |
 | `flux_text_destroy` |  |
 | `flux_text_set_scale` | Scale contract (single source of truth): - flux_text_draw rasterises at the *canvas's* effective scale (flux_canvas_get_scale — content scale composed with any stacked flux_canvas_scale), so drawn glyphs always match the target surface. |
 | `flux_text_scale` |  |
@@ -283,10 +351,10 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_text_set_default_family` |  |
 | `flux_text_compact` | Release the per-context scratch high-water marks (the placed-glyph buffer, the run list, and the layout cache). |
 | `flux_text_get_stats` |  |
-| `flux_text_measure` | ================================================================== */ /* Measure */ /* ================================================================== */ /* Shape `len` bytes of `utf8` in `style` and report the extent. |
-| `flux_text_draw` | ================================================================== */ /* Draw */ /* ================================================================== */ /* Shape `len` bytes of `utf8` and paint them as a single batched glyph run with the top-left at (x, y) in logical pixels, using `style` (including its colour). |
+| `flux_text_measure` | Shape `len` bytes of `utf8` in `style` and report the extent. |
+| `flux_text_draw` | Shape `len` bytes of `utf8` and paint them as a single batched glyph run with the top-left at (x, y) in logical pixels, using `style` (including its colour). |
 | `flux_text_draw_outlined` | Draw a run with a contour behind the foreground glyphs. |
-| `flux_text_x_for_byte` | ================================================================== */ /* Caret and selection mapping (BiDi-correct) */ /* ================================================================== */ /* Logical x of the glyph boundary before byte `byte`. |
+| `flux_text_x_for_byte` | Logical x of the glyph boundary before byte `byte`. |
 | `flux_text_byte_for_x` | Source byte offset of the glyph boundary nearest logical x `local_x`. |
 | `flux_text_selection_rects` | Fill `out` (capacity `max`) with the on-screen spans covering byte range [lo, hi). |
 | `flux_text_visual_move` | Move the caret one glyph in visual order (forward = rightward on screen) and return the resulting source byte offset. |
@@ -297,13 +365,17 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `flux_sg_load_glb` | Parse a .glb (binary glTF 2.0) and build GPU resources on `device`. |
 | `flux_sg_scene_release` |  |
+| `flux_sg_scene_set_materials` | Transactionally replace the scene-owned per-index material table and fallback material. |
 | `flux_sg_scene_primitive_count` | Number of mesh primitives in the scene (diagnostic). |
 | `flux_sg_scene_bounds` | World-space axis-aligned bounding box of every primitive the scene draws (each primitive's local AABB is transformed by its owning node's world matrix). |
 | `flux_sg_scene_humanoid_bone_position` | Current model-space position of a VRM humanoid bone (for example "head" or "hips"). |
+| `flux_sg_load_animation_glb` | Load the first animation from a binary glTF/VRMA file and bind its channels to `target`. |
 | `flux_sg_animation_release` |  |
 | `flux_sg_animation_duration` |  |
 | `flux_sg_animation_channel_count` |  |
+| `flux_sg_scene_apply_animation` | Reset to the model rest pose, then sample and apply the clip. |
 | `flux_sg_scene_reset_pose` |  |
 | `flux_sg_draw` | Record one flux_scene_draw_mesh(_lit) per primitive, composed with each node's world matrix. |
 
@@ -335,6 +407,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_skin_clip_push` | Nested logical clip for skins that clip sub-regions (the table's cells). |
 | `lens_skin_clip_pop` |  |
 | `lens_skin_emit_user` | Emit a skin record for a HOST-RESERVED widget kind (ADR-0073). |
+| `lens_create` |  |
 | `lens_destroy` |  |
 | `lens_set_theme` |  |
 | `lens_get_theme` |  |
@@ -346,15 +419,16 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_scale` |  |
 | `lens_set_text_scale` | Accessibility text scale — the OS "make text bigger" preference. |
 | `lens_text_scale` |  |
-| `lens_begin` | ================================================================== */ /* Frame lifecycle (ADR-0024, frame-lifecycle.md) */ /* ================================================================== |
+| `lens_begin` | ================================================================== |
 | `lens_end` |  |
+| `lens_render` |  |
 | `lens_overflowed` | True if the per-frame arena overflowed during the frame just built. |
 | `lens_has_duplicate_ids` | True if the same widget id was linked more than once under one parent in the frame just built. |
 | `lens_anim_pending` | True if an eased value (hover/active fade, …) was still in transit during the frame just built. |
 | `lens_frame_needs_repaint` | True if the frame just built would paint anything different from what is already on screen: base-tree or placed-subtree damage (geometry, draw lists, lifecycle), an appearing/disappearing transient node or tooltip, an eased value still in transit, or a focused text caret that needs its blink clock. |
 | `lens_set_reduced_motion` | Accessibility reduced-motion switch. |
 | `lens_reduced_motion` |  |
-| `lens_push_id` | ================================================================== */ /* Identity (ADR-0026) */ /* ================================================================== |
+| `lens_push_id` | ================================================================== |
 | `lens_push_id_int` |  |
 | `lens_pop_id` |  |
 | `lens_current_id` |  |
@@ -395,18 +469,22 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_textedit` |  |
 | `lens_textedit_set_caret` |  |
 | `lens_textedit_set_selection` |  |
-| `lens_get_response` | ================================================================== */ /* Interaction queries (ADR-0029) */ /* ================================================================== |
+| `lens_get_response` | ================================================================== |
 | `lens_get_cursor_hint` |  |
 | `lens_focused` |  |
 | `lens_set_focus` |  |
 | `lens_active` |  |
-| `lens_caret_rect` | ================================================================== */ /* Clipboard and IME (ADR-0036) */ /* ================================================================== */ /* Caret rect of the focused text widget in UI-space, zero when none. |
+| `lens_caret_rect` | Caret rect of the focused text widget in UI-space, zero when none. |
 | `lens_text_context_get` |  |
 | `lens_copy` | Place text on the system clipboard (calls the host lens_clipboard.set_text if any). |
 | `lens_request_paste` | Ask the host for clipboard text (calls lens_clipboard.request_text). |
 | `lens_paste` | Host-driven delivery of clipboard text into lens. |
 | `lens_take_paste` | Drain a pending paste payload for an app-owned editing surface (one that renders text outside lens widgets and therefore has no focused widget to consume the queue). |
 | `lens_set_caret_rect` | Report the caret rect of an app-owned editing surface, same consumer as the widget-reported rect: the platform layer forwards it to the IME so the candidate window follows the caret. |
+| `lens_dnd_source` | Declare a node as a drag source. |
+| `lens_dnd_drop_target` | Declare a node as a drop target zone. |
+| `lens_deliver_drop` | Platform delivery of drop payload into lens. |
+| `lens_take_drop` | Retrieve and consume pending drop payload during drop frame. |
 | `lens_node_id` |  |
 | `lens_node_bounds` |  |
 | `lens_node_phase_of` |  |
@@ -432,7 +510,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
-| `iris_window_minimize` | ================================================================== */ /* Window state */ /* ================================================================== */ /* Minimize (iconify) the active window. |
+| `iris_window_minimize` | Minimize (iconify) the active window. |
 | `iris_window_maximize` | Ask the compositor to maximise the active window. |
 | `iris_window_unmaximize` | Ask the compositor to un-maximise the active window. |
 | `iris_window_fullscreen` | Enter fullscreen on the output the active window is currently on. |
@@ -440,9 +518,10 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `iris_window_restore` | Restore the window from minimised / maximised state (when allowed). |
 | `iris_window_focus` | Request keyboard focus (raise / activate). |
 | `iris_window_close` | Request the compositor to close the active window. |
-| `iris_window_set_min_size` | ================================================================== */ /* Size hints */ /* ================================================================== */ /* Configure the minimum and maximum logical window size the compositor should respect. |
+| `iris_window_start_move` | Request the compositor / window manager to start an interactive move of the active window (e.g. |
+| `iris_window_set_min_size` | Configure the minimum and maximum logical window size the compositor should respect. |
 | `iris_window_set_max_size` |  |
-| `iris_window_get_geometry` | ================================================================== */ /* Queries */ /* ================================================================== */ /* Snapshot of the active window's logical geometry. |
+| `iris_window_get_geometry` | Snapshot of the active window's logical geometry. |
 
 ### `iris/cursor.h`
 
@@ -497,25 +576,39 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `prism_liquid_glass_filter_create` |  |
+| `prism_liquid_glass_filter_retain` |  |
 | `prism_liquid_glass_filter_release` | Release only after every submission that references the filter's outputs has completed (its frame-slot fence has signalled, or after flux_device_wait_idle): release destroys the filter's compute pipelines inline. |
+| `prism_liquid_glass_filter_apply` | Requires a recording frame with no active pass (flux_frame_get_state(frame) == FLUX_FRAME_STATE_RECORDING and !flux_frame_has_active_pass(frame)). |
+| `prism_liquid_glass_filter_stats` | Reads the stats this frame slot last submitted (FLUX_MAX_FRAMES_IN_FLIGHT frames ago): begin_frame has waited that slot's fence, so the mapped buffer is stable while `frame` records. |
 
 ### `prism/frosted.h`
 
 | Symbol | Description |
 |--------|-------------|
+| `prism_frosted_filter_create` |  |
+| `prism_frosted_filter_retain` |  |
 | `prism_frosted_filter_release` |  |
+| `prism_frosted_filter_apply` |  |
 
 ### `prism/acrylic.h`
 
 | Symbol | Description |
 |--------|-------------|
+| `prism_acrylic_filter_create` |  |
+| `prism_acrylic_filter_retain` |  |
 | `prism_acrylic_filter_release` |  |
+| `prism_acrylic_filter_apply` |  |
 
 ### `prism/backdrop_layer.h`
 
 | Symbol | Description |
 |--------|-------------|
+| `prism_backdrop_layer_filter_create` |  |
+| `prism_backdrop_layer_filter_retain` |  |
 | `prism_backdrop_layer_filter_release` | Release only after every submission that references the filter's outputs has completed (its frame-slot fence has signalled, or after flux_device_wait_idle): release destroys the filter's compute pipelines inline. |
+| `prism_backdrop_layer_filter_apply` | Requires a recording frame with no active pass. |
+| `prism_backdrop_layer_filter_stats` | Reads the glass statistics this frame slot last submitted (see prism_liquid_glass_filter_stats; group i of the stats aligns with group i of that submission's glass array). |
 
 ## anim — motion vocabulary
 
@@ -531,9 +624,9 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `anim_spring_settled` | True when the spring rests on `target` within the given tolerances and can be dropped from the frame-cadence decision. |
 | `anim_spring_advance` | Advance toward `target` by clamped `dt_seconds`; returns the new value. |
 | `anim_spring_snap_to` | One-step resolve (reduced motion, or an animation that must end now). |
-| `anim_approach` | ================================================================== */ /* Approach / decay — exponential, frame-rate independent */ /* ================================================================== */ /* Move `current` toward `target` by rate per second: after t seconds the remaining distance is e^(−rate·t) of the original. |
+| `anim_approach` | Move `current` toward `target` by rate per second: after t seconds the remaining distance is e^(−rate·t) of the original. |
 | `anim_decay` | Exponential decay toward zero (opacity tails, trailing values). |
-| `anim_ease_out_cubic` | ================================================================== */ /* Easing — normalized [0,1] curves */ /* ================================================================== |
+| `anim_ease_out_cubic` | ================================================================== |
 | `anim_ease_in_cubic` |  |
 | `anim_ease_in_out_cubic` |  |
 | `anim_ease_out_back` |  |
