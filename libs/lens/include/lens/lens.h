@@ -609,7 +609,15 @@ typedef enum lens_checkbox_appearance {
     LENS_CHECKBOX_RADIO = 2,  /* radio circle */
 } lens_checkbox_appearance;
 
-/* Per-kind content payload for lens_widget_record. */
+/* Per-kind content payload for lens_widget_record.
+ *
+ * Borrow contract (ADR-0084): every string/line pointer in this struct
+ * is valid only for the skin-emission call that carries it — the widget
+ * build path either copies into the frame arena (semantics.name, wrapped
+ * lines, preedit display) or points directly at the caller's own label
+ * buffer (label/checkbox/selectable/slider), which the caller guarantees
+ * is stable through the frame. Skins must not cache these pointers past
+ * the emit call; skins that need the text later must copy it. */
 typedef struct lens_widget_content {
     const char *label;
     lens_text_metrics text;

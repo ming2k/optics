@@ -17,6 +17,13 @@ typedef struct liquid_glass_region {
     uint32_t height;
 } liquid_glass_region;
 
+/* Shape capacity per glass body: the shader's SDF slots. Single fact
+ * source for regions.h validation, the public max_shapes() accessor,
+ * and (via the assert below) the dispatch's explicit shape0/shape1
+ * copies — raising the ceiling means raising it here and teaching the
+ * shader, never re-validating count literals in N places. */
+#define LIQUID_GLASS_MAX_SHAPES 2u
+
 static inline bool liquid_glass_finite_rect(flux_rect rect) {
     return isfinite(rect.x) && isfinite(rect.y) && isfinite(rect.w) && isfinite(rect.h) &&
            rect.w > 0.0f && rect.h > 0.0f;
@@ -38,8 +45,8 @@ static inline bool liquid_glass_rect_contains(flux_rect outer, flux_rect inner) 
  * backdrop_energy are sentinel-driven (<0 disables), so only values above
  * their [0,1] range are rejected. */
 static inline bool liquid_glass_group_is_valid(const prism_liquid_glass_group *group) {
-    if (!group || group->shape_count < 1u || group->shape_count > 2u ||
-        !isfinite(group->blend_radius) || !isfinite(group->opacity) ||
+    if (!group || group->shape_count < 1u || group->shape_count > LIQUID_GLASS_MAX_SHAPES ||
+        !group->shapes || !isfinite(group->blend_radius) || !isfinite(group->opacity) ||
         !isfinite(group->shadow_alpha) || !isfinite(group->shadow_blur) ||
         !isfinite(group->shadow_offset_y) || !isfinite(group->focus_strength) ||
         !isfinite(group->frost_strength) || !isfinite(group->tint_strength) ||
@@ -74,8 +81,8 @@ static inline bool liquid_glass_group_dispatch_bounds(const prism_liquid_glass_g
                                                       float shadow_reach, uint32_t image_width,
                                                       uint32_t image_height,
                                                       liquid_glass_region *out) {
-    if (!group || !out || group->shape_count < 1u || group->shape_count > 2u || image_width == 0u ||
-        image_height == 0u)
+    if (!group || !out || group->shape_count < 1u || group->shape_count > LIQUID_GLASS_MAX_SHAPES ||
+        image_width == 0u || image_height == 0u)
         return false;
 
     float x0 = group->shapes[0].bounds.x;

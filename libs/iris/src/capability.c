@@ -54,6 +54,7 @@ static const int irisi_caps_wayland[] = {
     1, /* IRIS_CAP_DRAG_SOURCE     */
 };
 
+#if defined(IRIS_BACKEND_WIN32)
 static const int irisi_caps_win32[] = {
     1, /* WINDOW_CONTROL  */
     1, /* THEME_WATCH     */
@@ -67,7 +68,9 @@ static const int irisi_caps_win32[] = {
     1, /* FRACTIONAL_SCALE — per-monitor DPI v2 */
     1, /* DRAG_SOURCE — OLE DoDragDrop (ADR-0086) */
 };
+#endif
 
+#if defined(IRIS_BACKEND_COCOA)
 static const int irisi_caps_cocoa[] = {
     1, /* WINDOW_CONTROL  */
     1, /* THEME_WATCH     */
@@ -81,19 +84,20 @@ static const int irisi_caps_cocoa[] = {
     0, /* FRACTIONAL_SCALE — integer backingScaleFactor */
     1, /* DRAG_SOURCE — NSDraggingSource (ADR-0086) */
 };
-
-static const int irisi_caps_none[] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-};
+#endif
 
 #define IRISI_CAP_COUNT ((int)(sizeof(irisi_caps_wayland) / sizeof(irisi_caps_wayland[0])))
 
 /* Compile-time guard: every table must answer every capability. A new
- * enum value that is not wired into all four tables fails the build
- * here rather than reading out of bounds at runtime. */
+ * enum value that is not wired into all three tables fails the build
+ * here rather than reading out of bounds at runtime. (The no-backend
+ * fallback answers 0 inline in iris_supports below.) */
+#if defined(IRIS_BACKEND_WIN32)
 _Static_assert(sizeof(irisi_caps_win32) == sizeof(irisi_caps_wayland), "capability table drift");
+#endif
+#if defined(IRIS_BACKEND_COCOA)
 _Static_assert(sizeof(irisi_caps_cocoa) == sizeof(irisi_caps_wayland), "capability table drift");
-_Static_assert(sizeof(irisi_caps_none) == sizeof(irisi_caps_wayland), "capability table drift");
+#endif
 
 int iris_supports(iris_capability cap) {
     if ((int)cap < 0 || (int)cap >= IRISI_CAP_COUNT)
@@ -105,6 +109,6 @@ int iris_supports(iris_capability cap) {
 #elif defined(IRIS_BACKEND_COCOA)
     return irisi_caps_cocoa[(int)cap];
 #else
-    return irisi_caps_none[(int)cap];
+    return 0; /* no backend compiled in: every capability unsupported */
 #endif
 }

@@ -1,0 +1,14 @@
+# abi-supprs.abignore — libabigail suppressions for the ABI gate
+# (.github/workflows/ci-abi.yml).
+#
+# Philosophy: everything is checked by default; a suppression here is a
+# reviewed exception, never a shadow valve. Each entry states WHY it can
+# never break a consumer.
+#
+# Reach into library-private runtime allocations: the symbol is exported
+# only because the allocator is a public callback type; its struct layout
+# is opaque to consumers (they never declare one).
+[suppress_type]
+  name = flux_allocator
+  reason = user-instantiated; adding fields appends only (size-guarded
+           ADR-0032 pattern in flux headers)

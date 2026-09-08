@@ -966,7 +966,10 @@ static void parse_style_attr(const char *str, svg_style *st) {
 }
 
 static void apply_element_style(const char *tag, svg_style *st) {
-    char val[256];
+    /* Zero-initialized: get_attr_val fills only up to the attribute's
+     * length; the analyzer (and any future reader that stops scanning
+     * at a non-NUL) must never see stack garbage past it. */
+    char val[256] = {0};
     const char *attr;
 
     if ((attr = find_attr(tag, "style"))) {
@@ -1010,8 +1013,8 @@ static void apply_element_style(const char *tag, svg_style *st) {
 /* -------------------------------------------------------------------------- */
 
 static void parse_element(svg_parser *ctx, const char *elem, size_t elen) {
+    char val[128] = {0}; /* zero-init: see apply_element_style */
     if (strncmp(elem, "svg", 3) == 0 && (isspace((unsigned char)elem[3]) || elem[3] == '>')) {
-        char val[128];
         const char *attr;
         if ((attr = find_attr(elem, "viewBox"))) {
             get_attr_val(attr, val, sizeof(val));

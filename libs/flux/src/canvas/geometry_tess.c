@@ -97,9 +97,10 @@ static uint32_t find_rightmost(const flux_point *pts, uint32_t n) {
  * the blocking scan can skip it — `outer` itself may point at a
  * merged copy outside the contour data. */
 static int32_t find_bridge_vertex(const flux_point *outer, uint32_t outer_n, flux_point hole_pt,
-                                  uint32_t hole_idx, uint32_t outer_start,
-                                  const flux_point *all_pts, const struct contour_info *infos,
-                                  uint32_t info_count) {
+                                  uint32_t hole_idx /* unused: kept for call-site clarity */,
+                                  uint32_t outer_start, const flux_point *all_pts,
+                                  const struct contour_info *infos, uint32_t info_count) {
+    (void)hole_idx;
     float best_dist = 1e30f;
     int32_t best = -1;
 

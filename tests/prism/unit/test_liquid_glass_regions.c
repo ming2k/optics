@@ -18,54 +18,65 @@ static bool contains_region(const liquid_glass_region *regions, uint32_t count,
 }
 
 int main(void) {
-    /* Focus is an interior field of one body, not a second outline/body. */
-    prism_liquid_glass_group focused = PRISM_LIQUID_GLASS_GROUP_INIT;
-    focused.shapes[0] = (prism_liquid_glass_shape){
-        .bounds = {10.0f, 20.0f, 100.0f, 60.0f},
-        .corner_radius = 18.0f,
+    /* Focus is an interior field of one body, not a second outline/body.
+     * Shapes are a caller-owned borrowed array (see the group doc). */
+    prism_liquid_glass_shape focused_shapes[2] = {
+        {.bounds = {10.0f, 20.0f, 100.0f, 60.0f}, .corner_radius = 18.0f},
+        {0},
     };
+    prism_liquid_glass_group focused = PRISM_LIQUID_GLASS_GROUP_INIT;
+    focused.shapes = focused_shapes;
+    focused.shape_count = 1u;
     focused.focus = (prism_liquid_glass_shape){
         .bounds = {20.0f, 28.0f, 40.0f, 44.0f},
         .corner_radius = 12.0f,
     };
     focused.focus_strength = 1.0f;
     EXPECT(liquid_glass_group_is_valid(&focused));
+    focused_shapes[1] = focused.focus;
     focused.shape_count = 2u;
-    focused.shapes[1] = focused.focus;
     EXPECT(!liquid_glass_group_is_valid(&focused));
     focused.shape_count = 1u;
     focused.focus.bounds.x = 80.0f;
     focused.focus.bounds.w = 40.0f;
     EXPECT(!liquid_glass_group_is_valid(&focused));
 
+    /* A group without a shapes array is invalid (the borrowed pointer is
+     * part of the contract — INIT leaves it unset on purpose). */
+    prism_liquid_glass_group null_shapes = PRISM_LIQUID_GLASS_GROUP_INIT;
+    EXPECT(!liquid_glass_group_is_valid(&null_shapes));
+
     /* Bounds include smooth-union/shadow padding, round outward, and clamp. */
-    prism_liquid_glass_group group = PRISM_LIQUID_GLASS_GROUP_INIT;
-    group.shapes[0] = (prism_liquid_glass_shape){
-        .bounds = {10.25f, 20.5f, 30.0f, 10.0f},
-        .corner_radius = 5.0f,
+    prism_liquid_glass_shape group_shapes[2] = {
+        {.bounds = {10.25f, 20.5f, 30.0f, 10.0f}, .corner_radius = 5.0f},
+        {0},
     };
+    prism_liquid_glass_group group = PRISM_LIQUID_GLASS_GROUP_INIT;
+    group.shapes = group_shapes;
+    group.shape_count = 1u;
     group.blend_radius = 4.0f;
     liquid_glass_region bounds;
     EXPECT(liquid_glass_group_dispatch_bounds(&group, 0.0f, 100u, 80u, &bounds));
     EXPECT(same_region(bounds, (liquid_glass_region){4u, 14u, 43u, 23u}));
 
     group.shape_count = 2u;
-    group.shapes[0].bounds = (flux_rect){-5.0f, 2.0f, 10.0f, 8.0f};
-    group.shapes[1].bounds = (flux_rect){90.0f, 70.0f, 20.0f, 20.0f};
+    group_shapes[0].bounds = (flux_rect){-5.0f, 2.0f, 10.0f, 8.0f};
+    group_shapes[1].bounds = (flux_rect){90.0f, 70.0f, 20.0f, 20.0f};
     EXPECT(liquid_glass_group_dispatch_bounds(&group, 12.0f, 100u, 80u, &bounds));
     EXPECT(same_region(bounds, (liquid_glass_region){0u, 0u, 100u, 80u}));
     group.shape_count = 1u;
-    group.shapes[0].bounds = (flux_rect){200.0f, 10.0f, 8.0f, 8.0f};
+    group_shapes[0].bounds = (flux_rect){200.0f, 10.0f, 8.0f, 8.0f};
     EXPECT(!liquid_glass_group_dispatch_bounds(&group, 0.0f, 100u, 80u, &bounds));
 
     /* Override/adaptive fields: INIT macro defaults are the inherit/disabled
      * sentinel and validate; zero-init is an explicit zero override, not
      * inherit. */
-    prism_liquid_glass_group overrides = PRISM_LIQUID_GLASS_GROUP_INIT;
-    overrides.shapes[0] = (prism_liquid_glass_shape){
-        .bounds = {0.0f, 0.0f, 16.0f, 16.0f},
-        .corner_radius = 4.0f,
+    prism_liquid_glass_shape override_shapes[1] = {
+        {.bounds = {0.0f, 0.0f, 16.0f, 16.0f}, .corner_radius = 4.0f},
     };
+    prism_liquid_glass_group overrides = PRISM_LIQUID_GLASS_GROUP_INIT;
+    overrides.shapes = override_shapes;
+    overrides.shape_count = 1u;
     EXPECT(overrides.frost_strength < 0.0f && overrides.tint_strength < 0.0f &&
            overrides.saturation < 0.0f && overrides.plate_polarity < 0.0f &&
            overrides.backdrop_energy < 0.0f);
@@ -112,10 +123,10 @@ int main(void) {
      * off-screen or zero-area bodies reduce an empty region. */
     liquid_glass_region stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
     EXPECT(stats.width == 0u && stats.height == 0u); /* group sits at x=200 */
-    group.shapes[0].bounds = (flux_rect){-4.25f, 10.5f, 20.0f, 30.0f};
+    group_shapes[0].bounds = (flux_rect){-4.25f, 10.5f, 20.0f, 30.0f};
     stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
     EXPECT(same_region(stats, (liquid_glass_region){0u, 10u, 16u, 31u}));
-    group.shapes[0].bounds = (flux_rect){90.0f, 60.0f, 40.0f, 40.0f};
+    group_shapes[0].bounds = (flux_rect){90.0f, 60.0f, 40.0f, 40.0f};
     stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
     EXPECT(same_region(stats, (liquid_glass_region){90u, 60u, 10u, 20u}));
 

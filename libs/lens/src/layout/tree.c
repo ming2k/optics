@@ -46,6 +46,11 @@ void lensi_link_child(lens *ui, lens_node *n) {
 }
 
 void lensi_open_container_push(lens *ui, lens_node *n) {
+    /* Internal contract: callers pass a live context and a stored node.
+     * The guards are analyzer teeth, not error handling — a NULL here is
+     * a library bug, and the overflow path keeps the diagnostic. */
+    if (!ui || !n)
+        return;
     if (ui->cont_top < LENSI_CONTAINER_STACK_MAX)
         ui->cont_stack[ui->cont_top++] = n;
     else

@@ -93,8 +93,12 @@ int main(void) {
          * exists to provide. */
         prism_backdrop_frost frost = PRISM_BACKDROP_FROST_INIT;
         frost.bounds = (flux_rect){0.0f, 0.0f, (float)W, (float)H};
+        prism_liquid_glass_shape body_shapes[1] = {
+            {.bounds = {20, 24, 24, 16}, .corner_radius = 8},
+        };
         prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
-        body.shapes[0] = (prism_liquid_glass_shape){.bounds = {20, 24, 24, 16}, .corner_radius = 8};
+        body.shapes = body_shapes;
+        body.shape_count = 1;
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
         ld.blurred_input = blurred;
@@ -146,9 +150,12 @@ int main(void) {
     {
         prism_backdrop_frost frost = PRISM_BACKDROP_FROST_INIT;
         frost.bounds = (flux_rect){4.0f, 24.0f, 16.0f, 16.0f};
+        prism_liquid_glass_shape body_shapes[1] = {
+            {.bounds = {8.0f, 28.0f, 8.0f, 8.0f}, .corner_radius = 4.0f},
+        };
         prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
-        body.shapes[0] =
-            (prism_liquid_glass_shape){.bounds = {8.0f, 28.0f, 8.0f, 8.0f}, .corner_radius = 4.0f};
+        body.shapes = body_shapes;
+        body.shape_count = 1;
 
         bool seen[TEST_FRAME_SLOTS] = {false};
         for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
@@ -196,7 +203,7 @@ int main(void) {
         /* Re-submit with the frost moved to the right: the old footprint
          * must clear, the new one must appear. */
         frost.bounds = (flux_rect){44.0f, 24.0f, 16.0f, 16.0f};
-        body.shapes[0] =
+        body_shapes[0] =
             (prism_liquid_glass_shape){.bounds = {48.0f, 28.0f, 8.0f, 8.0f}, .corner_radius = 4.0f};
         bool reused = false;
         for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
@@ -355,8 +362,12 @@ int main(void) {
         prism_backdrop_frost frost = PRISM_BACKDROP_FROST_INIT;
         frost.bounds = (flux_rect){0.0f, 0.0f, (float)(W / 2), (float)H};
         frost.opacity = 0.5f;
+        prism_liquid_glass_shape body_shapes[1] = {
+            {.bounds = {20, 24, 24, 16}, .corner_radius = 8},
+        };
         prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
-        body.shapes[0] = (prism_liquid_glass_shape){.bounds = {20, 24, 24, 16}, .corner_radius = 8};
+        body.shapes = body_shapes;
+        body.shape_count = 1;
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
         ld.blurred_input = blurred;
@@ -417,8 +428,12 @@ int main(void) {
         /* Glass only: no frost rects at all. The layer pass must still
          * write the sharp capture as the opaque base under the body, or
          * the lens samples cleared-transparent pixels (black). */
+        prism_liquid_glass_shape body_shapes[1] = {
+            {.bounds = {20, 24, 24, 16}, .corner_radius = 8},
+        };
         prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
-        body.shapes[0] = (prism_liquid_glass_shape){.bounds = {20, 24, 24, 16}, .corner_radius = 8};
+        body.shapes = body_shapes;
+        body.shape_count = 1;
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
         ld.blurred_input = blurred;
@@ -461,15 +476,15 @@ int main(void) {
         prism_liquid_glass_group bodies[3] = {PRISM_LIQUID_GLASS_GROUP_INIT,
                                               PRISM_LIQUID_GLASS_GROUP_INIT,
                                               PRISM_LIQUID_GLASS_GROUP_INIT};
-        /* Body 0: top chip (e.g. HUD status) */
-        bodies[0].shapes[0] =
-            (prism_liquid_glass_shape){.bounds = {4.0f, 4.0f, 24.0f, 16.0f}, .corner_radius = 4.0f};
-        /* Body 1: middle chip (e.g. HUD workspace) */
-        bodies[1].shapes[0] = (prism_liquid_glass_shape){.bounds = {36.0f, 4.0f, 24.0f, 16.0f},
-                                                         .corner_radius = 4.0f};
-        /* Body 2: bottom panel (e.g. Dock) */
-        bodies[2].shapes[0] = (prism_liquid_glass_shape){.bounds = {8.0f, 36.0f, 48.0f, 20.0f},
-                                                         .corner_radius = 6.0f};
+        prism_liquid_glass_shape body_shapes[3][1] = {
+            {{.bounds = {4.0f, 4.0f, 24.0f, 16.0f}, .corner_radius = 4.0f}},
+            {{.bounds = {36.0f, 4.0f, 24.0f, 16.0f}, .corner_radius = 4.0f}},
+            {{.bounds = {8.0f, 36.0f, 48.0f, 20.0f}, .corner_radius = 6.0f}},
+        };
+        for (size_t bi = 0; bi < 3; ++bi) {
+            bodies[bi].shapes = body_shapes[bi];
+            bodies[bi].shape_count = 1;
+        }
 
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;

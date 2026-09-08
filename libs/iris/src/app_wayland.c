@@ -2882,6 +2882,11 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     pl.display = wl_display_connect(NULL);
     if (!pl.display) {
         fprintf(stderr, "no Wayland display (is a compositor running?)\n");
+        /* Unpublish before the stack frame dies: the globals must never
+         * outlive `pl` (an iris_set_cursor after a failed start would
+         * otherwise read freed stack). Same invariant as the fail path. */
+        g_active_pl = NULL;
+        tablet_host_bridge.user = NULL;
         return 1;
     }
 
@@ -3420,8 +3425,12 @@ fail:
         cfg->stop(ui, device, cfg->user);
 
     /* Stop publishing this wp_platform to iris_set_cursor() — any host
-     * call after this returns is a no-op rather than a use-after-free. */
+     * call after this returns is a no-op rather than a use-after-free.
+     * The tablet bridge borrows `pl` too; clearing both here (instead
+     * of relying on the success path alone) keeps the stack address
+     * from escaping every return path. */
     g_active_pl = NULL;
+    tablet_host_bridge.user = NULL;
 
     /* GPU side first: let in-flight work finish before tearing down objects.
      * flux/lens calls are guarded so an early failure (before a resource

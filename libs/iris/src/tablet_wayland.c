@@ -225,8 +225,10 @@ static const struct zwp_tablet_seat_v2_listener tablet_seat_listener = {
 /*  Public bridge (called from app_wayland.c)                          */
 /* ------------------------------------------------------------------ */
 
-void iris_wayland__tablet_bind_manager(struct wl_registry *reg, uint32_t name, uint32_t version,
+void iris_wayland__tablet_bind_manager(struct wl_registry *reg, uint32_t name,
+                                       uint32_t version, /* unused: v1 only (bind below) */
                                        const iris_tablet_host *host) {
+    (void)version;
     if (g_tablet.mgr)
         return;
     /* v1 is the only protocol version. */

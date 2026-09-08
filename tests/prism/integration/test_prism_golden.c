@@ -156,9 +156,12 @@ static void render_golden_scene(flux_surface *s, flux_canvas *canvas, flux_image
     /* Default recipe: PRISM_LIQUID_GLASS_DESC_INIT untouched, neutral
      * group (no shadow), refraction 0 so the plate reads the backdrop
      * flat and the rim/plate split is the discriminating signal. */
+    prism_liquid_glass_shape body_shapes[1] = {
+        {.bounds = {BODY_X, BODY_Y, BODY_W, BODY_H}, .corner_radius = BODY_R},
+    };
     prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
-    body.shapes[0] = (prism_liquid_glass_shape){.bounds = {BODY_X, BODY_Y, BODY_W, BODY_H},
-                                                .corner_radius = BODY_R};
+    body.shapes = body_shapes;
+    body.shape_count = 1;
     prism_liquid_glass_desc gd = PRISM_LIQUID_GLASS_DESC_INIT;
     gd.input = target;
     gd.blurred_input = blurred;

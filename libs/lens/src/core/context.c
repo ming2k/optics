@@ -97,9 +97,11 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
     /* Read the caller's descriptor through the size guard: a caller built
      * against a different lens_desc layout never makes the library read
      * past its own struct. All field reads below come from this local
-     * copy, never from `desc` directly. */
+     * copy, never from `desc` directly. (The parameter re-point is what
+     * the dead-store check flags; the parameter itself is never read
+     * again after this line — drop the re-point and read the copy `d`
+     * directly.) */
     const lens_desc d = lensi_desc_copy_in(desc);
-    desc = &d;
 
     ui->device = d.device;
     if (ui->device) {
@@ -428,6 +430,16 @@ void lens_begin(lens *ui, const lens_input *input) {
     }
     ui->prev_tooltip_active = ui->tooltip.active;
     ui->tooltip.active = false;
+
+#ifdef LENS_DEBUG_BORROWS
+    /* Borrow-checker reset (ADR-0084): a new frame starts with an empty
+     * registered-borrow set; widgets re-register each label pointer as
+     * they build. The check fires only when a *cross-frame* borrow
+     * slips through (a pointer from frame N-1 handed to frame N), which
+     * is the dangling-stack-string hazard. Same-frame pointers are
+     * always registered by the widget that uses them. */
+    ui->borrow_count = 0;
+#endif
 
     /* implicit root: a column container covering the display (ADR-0028) */
     lens_id root_id = lensi_hash("##root", 6, 0);

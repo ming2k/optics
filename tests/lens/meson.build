@@ -67,6 +67,20 @@ test_style_cascade = executable('test_style_cascade',
 )
 test('style_cascade', test_style_cascade)
 
+# ADR-0084 borrow-checker self-test. The registry accessors are hidden
+# symbols, so this test links borrow.c directly (same direct-link
+# pattern as test_icon_runtime_content); the live registry in the
+# shared library still runs during the in-process legitimate-pattern
+# section. The violation case forks and expects SIGABRT.
+test_borrow_check = executable('test_borrow_check',
+  'test_borrow_check.c',
+  '../../libs/lens/src/core/borrow.c',
+  dependencies        : [lens_dep, m_dep],
+  include_directories : lens_inc,
+  c_args              : ['-DLENS_DEBUG_BORROWS=1'],
+)
+test('borrow_check', test_borrow_check)
+
 # Content of registered runtime-icon streams. Compiles the registration
 # sources directly (same pattern as test_drawlist_hash): the registry
 # accessors are hidden symbols that do not link from liblens.so.

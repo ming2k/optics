@@ -115,9 +115,12 @@ int main(void) {
         flux_image *blurred = nullptr;
         EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
+        prism_liquid_glass_shape body_shapes[1] = {
+            {.bounds = {16, 16, 32, 32}, .corner_radius = 16},
+        };
         prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
-        body.shapes[0] =
-            (prism_liquid_glass_shape){.bounds = {16, 16, 32, 32}, .corner_radius = 16};
+        body.shapes = body_shapes;
+        body.shape_count = 1;
         prism_liquid_glass_desc gd = PRISM_LIQUID_GLASS_DESC_INIT;
         gd.input = target;
         gd.blurred_input = blurred;
@@ -152,11 +155,12 @@ int main(void) {
         EXPECT(prism_liquid_glass_filter_create(d, &persistent_filter) == FLUX_OK);
         bool seen[TEST_FRAME_SLOTS] = {false};
 
-        prism_liquid_glass_group left = PRISM_LIQUID_GLASS_GROUP_INIT;
-        left.shapes[0] = (prism_liquid_glass_shape){
-            .bounds = {4.0f, 24.0f, 16.0f, 16.0f},
-            .corner_radius = 8.0f,
+        prism_liquid_glass_shape left_shapes[1] = {
+            {.bounds = {4.0f, 24.0f, 16.0f, 16.0f}, .corner_radius = 8.0f},
         };
+        prism_liquid_glass_group left = PRISM_LIQUID_GLASS_GROUP_INIT;
+        left.shapes = left_shapes;
+        left.shape_count = 1;
         for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
             uint32_t slot = render_liquid_glass_frame(s, canvas, target, blur_filter,
                                                       persistent_filter, &left, 1u, px);
@@ -170,11 +174,12 @@ int main(void) {
         }
         /* Reusing each slot with a disjoint body must remove the old body
          * without clearing the empty middle of the output. */
-        prism_liquid_glass_group right = PRISM_LIQUID_GLASS_GROUP_INIT;
-        right.shapes[0] = (prism_liquid_glass_shape){
-            .bounds = {44.0f, 24.0f, 16.0f, 16.0f},
-            .corner_radius = 8.0f,
+        prism_liquid_glass_shape right_shapes[1] = {
+            {.bounds = {44.0f, 24.0f, 16.0f, 16.0f}, .corner_radius = 8.0f},
         };
+        prism_liquid_glass_group right = PRISM_LIQUID_GLASS_GROUP_INIT;
+        right.shapes = right_shapes;
+        right.shape_count = 1;
         bool reused_previous_slot = false;
         for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
             uint32_t slot = render_liquid_glass_frame(s, canvas, target, blur_filter,
@@ -199,14 +204,14 @@ int main(void) {
             PRISM_LIQUID_GLASS_GROUP_INIT,
             PRISM_LIQUID_GLASS_GROUP_INIT,
         };
-        overlapping[0].shapes[0] = (prism_liquid_glass_shape){
-            .bounds = {16.0f, 24.0f, 16.0f, 16.0f},
-            .corner_radius = 2.0f,
+        prism_liquid_glass_shape overlapping_shapes[2][1] = {
+            {{.bounds = {16.0f, 24.0f, 16.0f, 16.0f}, .corner_radius = 2.0f}},
+            {{.bounds = {30.0f, 24.0f, 16.0f, 16.0f}, .corner_radius = 2.0f}},
         };
-        overlapping[1].shapes[0] = (prism_liquid_glass_shape){
-            .bounds = {30.0f, 24.0f, 16.0f, 16.0f},
-            .corner_radius = 2.0f,
-        };
+        overlapping[0].shapes = overlapping_shapes[0];
+        overlapping[0].shape_count = 1;
+        overlapping[1].shapes = overlapping_shapes[1];
+        overlapping[1].shape_count = 1;
         bool overlap_seen[TEST_FRAME_SLOTS] = {false};
         for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
             uint32_t slot = render_liquid_glass_frame(s, canvas, target, blur_filter,
@@ -227,14 +232,14 @@ int main(void) {
             PRISM_LIQUID_GLASS_GROUP_INIT,
             PRISM_LIQUID_GLASS_GROUP_INIT,
         };
-        shadow_overlap[0].shapes[0] = (prism_liquid_glass_shape){
-            .bounds = {8.0f, 36.0f, 48.0f, 20.0f},
-            .corner_radius = 6.0f,
+        prism_liquid_glass_shape shadow_shapes[2][1] = {
+            {{.bounds = {8.0f, 36.0f, 48.0f, 20.0f}, .corner_radius = 6.0f}},
+            {{.bounds = {16.0f, 8.0f, 32.0f, 20.0f}, .corner_radius = 6.0f}},
         };
-        shadow_overlap[1].shapes[0] = (prism_liquid_glass_shape){
-            .bounds = {16.0f, 8.0f, 32.0f, 20.0f},
-            .corner_radius = 6.0f,
-        };
+        shadow_overlap[0].shapes = shadow_shapes[0];
+        shadow_overlap[0].shape_count = 1;
+        shadow_overlap[1].shapes = shadow_shapes[1];
+        shadow_overlap[1].shape_count = 1;
         shadow_overlap[1].shadow_alpha = 0.7f;
         shadow_overlap[1].shadow_blur = 6.0f;
         shadow_overlap[1].shadow_offset_y = 6.0f;

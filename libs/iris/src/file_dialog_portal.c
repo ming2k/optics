@@ -171,7 +171,13 @@ static int on_picker_response(sd_bus_message *message, void *userdata, sd_bus_er
         response->result = IRIS_PICK_UNAVAILABLE; /* malformed portal reply */
         return 0;
     }
-    while ((rc = sd_bus_message_enter_container(message, SD_BUS_TYPE_DICT_ENTRY, "sv")) > 0) {
+    /* rc drives the loop condition directly; the analyzer flags the
+     * assignment-in-condition because rc is not re-read in the body.
+     * Named variable, used for the loop, is the honest form. */
+    for (;;) {
+        rc = sd_bus_message_enter_container(message, SD_BUS_TYPE_DICT_ENTRY, "sv");
+        if (rc <= 0)
+            break;
         const char *key = NULL;
         if (sd_bus_message_read(message, "s", &key) < 0)
             break;

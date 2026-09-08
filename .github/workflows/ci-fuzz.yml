@@ -113,6 +113,22 @@ jobs:
               -artifact_prefix=/tmp/fuzz-artifacts/ \
               /tmp/fuzz-corpus "$corpus"
 
+      # Corpus feedback loop (daily runs only): the campaign's explored
+      # corpus — every input that reached new coverage — is uploaded as
+      # an artifact so the next maintainer action can fold it back into
+      # the committed seeds (tests/*/fuzz/corpus/*). Without this, every
+      # cron run re-explores from the same starting set. Fold manually:
+      # download the artifact, run each file through the standalone
+      # driver (meson test --suite fuzz), dedupe by coverage if large,
+      # and commit the survivors as a "fuzz corpus refresh" commit.
+      - name: Upload explored corpus (daily)
+        if: github.event_name == 'schedule'
+        uses: actions/upload-artifact@v4
+        with:
+          name: explored-corpus-${{ matrix.target }}
+          path: /tmp/fuzz-corpus/
+          if-no-files-found: ignore
+
       - name: Upload crash artifacts
         if: failure() && steps.campaign.outcome == 'failure'
         uses: actions/upload-artifact@v4

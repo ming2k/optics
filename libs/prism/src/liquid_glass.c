@@ -23,6 +23,10 @@
 #include "glass_dispatch.h"
 #include "regions.h"
 
+uint32_t prism_liquid_glass_max_shapes(void) {
+    return LIQUID_GLASS_MAX_SHAPES;
+}
+
 #include <math.h>
 #include <stdalign.h>
 #include <stdatomic.h>

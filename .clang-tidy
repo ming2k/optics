@@ -1,0 +1,44 @@
+# clang-tidy configuration for the optics stack.
+#
+# Philosophy: checks that catch real bugs are warnings; style checks
+# live in clang-format (already enforced); checks that merely state a
+# preference are off. Two families are explicitly excluded after review:
+#
+#   - security.insecureAPI.DeprecatedOrUnsafeBufferHandling: flags every
+#     memcpy/snprintf regardless of correctness. This codebase bounds
+#     every call by construction (count checks precede them); the
+#     suggested _s replacements are Annex-K, not portable, and rejected
+#     by the project's compiler-support policy.
+#
+#   - optin.performance.Padding: struct layout here is ABI — the order
+#     is chosen for header readability and stable offsets, not density.
+#     A padding note is not worth a layout break.
+#
+# The remaining set is what has historically found memory/lifetime/logic
+# bugs in C codebases of this shape.
+---
+Checks: >
+  bugprone-assert-with-side-effect,
+  bugprone-dangling-handle,
+  bugprone-fold-init-type,
+  bugprone-integer-division,
+  bugprone-misplaced-widening-cast,
+  bugprone-sizeof-expression,
+  bugprone-suspicious-enum-usage,
+  bugprone-suspicious-memset-usage,
+  bugprone-undefined-memory-manipulation,
+  clang-analyzer-core.*,
+  clang-analyzer-unix.*,
+  clang-analyzer-deadcode.*,
+  clang-analyzer-nullability.*,
+  clang-analyzer-security.insecureAPI.UncheckedReturn,
+  clang-analyzer-valist.*,
+  misc-definitions-in-headers,
+  misc-unused-alias-decls,
+  misc-unused-parameters,
+  misc-unused-using-decls,
+  misc-unused-variable,
+
+WarningsAsErrors: 'bugprone-undefined-memory-manipulation,bugprone-suspicious-memset-usage,clang-analyzer-core.*,clang-analyzer-unix.*'
+HeaderFilterRegex: 'libs/[^/]+/include/.*\.h$'
+FormatStyle: file

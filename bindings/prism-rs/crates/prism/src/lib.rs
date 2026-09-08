@@ -83,7 +83,10 @@ pub struct LiquidGlassGroup {
 }
 
 impl LiquidGlassGroup {
-    pub fn as_raw(&self) -> sys::prism_liquid_glass_group {
+    /// Build the C-side group. The returned [`RawGroup`] owns the
+    /// heap-allocated borrowed-shape array; keep it alive for the
+    /// duration of the C call that reads the group (`apply` does).
+    fn as_raw(&self) -> RawGroup {
         let raw_shape = |shape: LiquidGlassShape| sys::prism_liquid_glass_shape {
             bounds: sys::flux_rect {
                 x: shape.x,
@@ -94,15 +97,15 @@ impl LiquidGlassGroup {
             corner_radius: shape.corner_radius,
         };
         let sentinel = |value: Option<f32>| value.unwrap_or(-1.0);
-        let mut shapes = [raw_shape(self.primary), raw_shape(self.primary)];
+        let mut shapes = Box::new([raw_shape(self.primary), raw_shape(self.primary)]);
         let shape_count = if let Some(merged) = self.merged {
             shapes[1] = raw_shape(merged);
             2
         } else {
             1
         };
-        sys::prism_liquid_glass_group {
-            shapes,
+        let group = sys::prism_liquid_glass_group {
+            shapes: shapes.as_ptr(),
             shape_count,
             blend_radius: self.blend_radius,
             opacity: self.opacity,
@@ -122,6 +125,29 @@ impl LiquidGlassGroup {
             saturation: sentinel(self.saturation),
             plate_polarity: sentinel(self.plate_polarity),
             backdrop_energy: sentinel(self.backdrop_energy),
+        };
+        RawGroup {
+            group,
+            _shapes: Box::into_raw(shapes),
+        }
+    }
+}
+
+/// C-side view of a [`LiquidGlassGroup`] plus the owned shape storage the
+/// group borrows. Dropping this frees the array; the raw group pointer
+/// inside is only valid while this value is alive.
+struct RawGroup {
+    group: sys::prism_liquid_glass_group,
+    // Owned storage for the borrowed `shapes` array (2 slots: primary
+    // + merged/focus); released on drop.
+    _shapes: *mut [sys::prism_liquid_glass_shape; 2],
+}
+
+impl Drop for RawGroup {
+    fn drop(&mut self) {
+        // SAFETY: allocated by Box::into_raw in as_raw; freed exactly once.
+        if !self._shapes.is_null() {
+            unsafe { drop(Box::from_raw(self._shapes)) };
         }
     }
 }
@@ -196,18 +222,24 @@ impl LiquidGlassFilter {
         groups: &[LiquidGlassGroup],
         params: LiquidGlassParams,
     ) -> Result<LiquidGlassImage<'filter>, Error> {
-        let raw_groups: Vec<sys::prism_liquid_glass_group> =
-            groups.iter().map(LiquidGlassGroup::as_raw).collect();
+        let raw_groups: Vec<RawGroup> = groups.iter().map(LiquidGlassGroup::as_raw).collect();
+        // RawGroup is a plain-Data group descriptor plus its owned shapes
+        // box; copy the descriptor (the borrowed shapes pointer stays valid
+        // because the RawGroup vector outlives the call below).
+        let group_ptrs: Vec<sys::prism_liquid_glass_group> = raw_groups
+            .iter()
+            .map(|g| unsafe { std::ptr::read(&g.group) })
+            .collect();
         let desc = sys::prism_liquid_glass_desc {
             type_: sys::prism_struct_type::PRISM_TYPE_LIQUID_GLASS_DESC,
             input: input.as_raw(),
             blurred_input: blurred.as_raw(),
-            groups: if raw_groups.is_empty() {
+            groups: if group_ptrs.is_empty() {
                 std::ptr::null()
             } else {
-                raw_groups.as_ptr()
+                group_ptrs.as_ptr()
             },
-            group_count: u32::try_from(raw_groups.len()).unwrap_or(u32::MAX),
+            group_count: u32::try_from(group_ptrs.len()).unwrap_or(u32::MAX),
             refraction: params.refraction,
             chromatic_aberration: params.chromatic_aberration,
             saturation: params.saturation,
@@ -360,8 +392,11 @@ impl BackdropLayerFilter {
     ) -> Result<BackdropLayerImage<'filter>, Error> {
         let raw_frost: Vec<sys::prism_backdrop_frost> =
             frost.iter().map(BackdropFrost::as_raw).collect();
-        let raw_groups: Vec<sys::prism_liquid_glass_group> =
-            groups.iter().map(LiquidGlassGroup::as_raw).collect();
+        let raw_groups: Vec<RawGroup> = groups.iter().map(LiquidGlassGroup::as_raw).collect();
+        let group_ptrs: Vec<sys::prism_liquid_glass_group> = raw_groups
+            .iter()
+            .map(|g| unsafe { std::ptr::read(&g.group) })
+            .collect();
         let desc = sys::prism_backdrop_layer_desc {
             type_: sys::prism_struct_type::PRISM_TYPE_BACKDROP_LAYER_DESC,
             next: std::ptr::null(),
@@ -373,12 +408,12 @@ impl BackdropLayerFilter {
                 raw_frost.as_ptr()
             },
             frost_count: u32::try_from(raw_frost.len()).unwrap_or(u32::MAX),
-            groups: if raw_groups.is_empty() {
+            groups: if group_ptrs.is_empty() {
                 std::ptr::null()
             } else {
-                raw_groups.as_ptr()
+                group_ptrs.as_ptr()
             },
-            group_count: u32::try_from(raw_groups.len()).unwrap_or(u32::MAX),
+            group_count: u32::try_from(group_ptrs.len()).unwrap_or(u32::MAX),
             refraction: params.refraction,
             chromatic_aberration: params.chromatic_aberration,
             saturation: params.saturation,

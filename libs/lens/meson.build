@@ -8,6 +8,7 @@ lens_inc = include_directories('include')
 lens_sources = files(
   'src/core/context.c',
   'src/core/id.c',
+  'src/core/borrow.c',
   'src/store/store.c',
   'src/store/node.c',
   'src/layout/tree.c',
@@ -57,7 +58,12 @@ lens_sources = files(
 lens_lib = library('lens',
   lens_sources,
   include_directories   : lens_inc,
-  c_args                : ['-DLENS_BUILDING=1'],
+  # LENS_DEBUG_BORROWS (ADR-0084): the borrowed-string registry is always
+  # on in the shipped library — its cost is one bounded array walk per
+  # label (nanoseconds) and its abort-on-violation catches the single
+  # most common lens misuse (stack temporaries) in debug AND release
+  # alike. Builds that must not abort can define LENS_NO_BORROW_CHECK.
+  c_args                : ['-DLENS_BUILDING=1', '-DLENS_DEBUG_BORROWS=1'],
   dependencies          : [flux_dep, flux_text_dep, m_dep],
   gnu_symbol_visibility : 'hidden',
   soversion             : optics_soname,

@@ -41,16 +41,17 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
         g->cmd_count = n->cmd_count;
     }
 
-    lens_ghost_node *prev_child = NULL;
+    /* Tail-pointer append: `next` always points at a real link slot
+     * (either &g->first_child or &prev->next_sibling), so the "is this
+     * the first child" branch disappears and the analyzer's flow
+     * sensitivity isn't load-bearing for memory safety. */
+    lens_ghost_node **next = &g->first_child;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         lens_ghost_node *cg = snapshot_node(ui, c);
         if (!cg)
             continue;
-        if (!g->first_child)
-            g->first_child = cg;
-        else
-            prev_child->next_sibling = cg;
-        prev_child = cg;
+        *next = cg;
+        next = &cg->next_sibling;
     }
     return g;
 }

@@ -59,6 +59,15 @@ jobs:
       - name: Version lockstep check
         run: tools/check-version-lockstep.sh
 
+      # Static analysis (clang-tidy, clang + compile_commands). Baseline
+      # policy: zero warnings; fix, don't silence. Platform TUs that only
+      # compile under their own backend are cross-checked in ci-cross.
+      - name: clang-tidy
+        run: |
+          CC=clang meson setup build-tidy -Dtests=true -Dexamples=false \
+            --buildtype=debug -Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled
+          sh tools/check-tidy.sh build-tidy
+
       # Library stdout guardrail: diagnostics go to stderr, never stdout —
       # a consumer's stdout may be an IPC wire (e.g. the portal prompter).
       - name: No library stdout writes

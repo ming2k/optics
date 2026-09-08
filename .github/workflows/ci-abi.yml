@@ -1,0 +1,111 @@
+name: abi
+
+# ABI compatibility gate (libabigail): every library's exported surface
+# must stay compatible across patch releases, and additive across minor
+# releases. The reference ABI is dumped from the previous tag; a PR that
+# changes the ABI fails here with a typed report (fn-symbol / fn-para /
+# data-member kind) instead of breaking a downstream consumer silently.
+#
+# Reference: the most recent tag reachable from this commit (typically
+# the previous release). A release commit itself compares against the
+# release before it, so every release-to-release ABI diff is reviewed.
+#
+# Suppressible: genuine intentional breaks (pre-1.0, one line in
+# docs/reference/api.md + a minor-version bump) are recorded in
+# tools/abi-supprs.abignore — the suppression file is part of the
+# review, not a shadow valve.
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  abidiff:
+    name: ABI compatibility (abidiff vs last tag)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags for the reference build
+
+      - name: Install build dependencies + libabigail
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential meson ninja-build pkg-config abigail-tools \
+            libvulkan-dev libfreetype-dev
+
+      - name: Determine reference tag
+        id: ref
+        run: |
+          # Latest tag on the merge base (not on HEAD — HEAD's tag would
+          # be this PR's own release). Falls back to the most recent tag
+          # overall when the base carries none (early history).
+          base="${{ github.event.pull_request.base.sha }}"
+          base="${base:-${{ github.sha }}~1}"
+          tag=$(git describe --tags --abbrev=0 "$base" 2>/dev/null || \
+                git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$tag" ]; then
+            echo "No reference tag — nothing to compare against yet."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "Comparing against $tag"
+          fi
+
+      - name: Build reference (tagged) libraries
+        if: steps.ref.outputs.skip != 'true'
+        run: |
+          git worktree add /tmp/abi-ref "${{ steps.ref.outputs.tag }}"
+          meson setup /tmp/abi-ref/build /tmp/abi-ref \
+            -Dtests=false -Dexamples=false --buildtype=debug \
+            -Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled
+          meson compile -C /tmp/abi-ref/build
+
+      - name: Build current (PR) libraries
+        if: steps.ref.outputs.skip != 'true'
+        run: |
+          meson setup build-abi -Dtests=false -Dexamples=false \
+            --buildtype=debug \
+            -Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled
+          meson compile -C build-abi
+
+      # One abidiff per library, against the same-named reference .so.
+      # --leaf-changes-only keeps the report to the leaf differences
+      # (what a consumer actually sees); --impacted-interfaces lists the
+      # affected symbols when something breaks.
+      - name: Compare ABIs
+        if: steps.ref.outputs.skip != 'true'
+        run: |
+          set -e
+          REF_LIBS=$(find /tmp/abi-ref/build -name 'lib*.so.*' ! -name '*.*.*.*' | sort)
+          FAIL=0
+          for ref in $REF_LIBS; do
+            name=$(basename "$ref" | sed 's/\.so\..*//')
+            cur=$(find build-abi -name "$(basename "$ref")" | head -1)
+            if [ -z "$cur" ]; then
+              echo "FAIL: $name missing from current build"
+              FAIL=1
+              continue
+            fi
+            echo "=== $name: $(basename "$ref") vs $(basename "$cur")"
+            if ! abidiff --leaf-changes-only \
+                 --suppressions tools/abi-supprs.abignore \
+                 "$ref" "$cur" > /tmp/abidiff-$name.txt; then
+              echo "ABI BREAK in $name:"
+              cat /tmp/abidiff-$name.txt
+              FAIL=1
+            else
+              head -5 /tmp/abidiff-$name.txt || true
+            fi
+          done
+          exit $FAIL

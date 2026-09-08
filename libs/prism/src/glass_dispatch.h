@@ -199,6 +199,16 @@ static inline void prism_glass_record_group(VkCommandBuffer command,
     else
         memset(push.focus_shape, 0, sizeof(push.focus_shape));
 
+    /* Capacity guard: the push-constant block carries exactly two SDF
+     * slots (shape0/shape1). This must never fire in practice — the
+     * validation layer already clamps shape_count to
+     * LIQUID_GLASS_MAX_SHAPES — but a capacity raise in regions.h
+     * without a matching shader-slot raise must fail loudly here, not
+     * silently truncate geometry. */
+    _Static_assert(LIQUID_GLASS_MAX_SHAPES <= 2u,
+                   "dispatch pushes two SDF slots; raise the push-constant "
+                   "block before raising LIQUID_GLASS_MAX_SHAPES");
+
     uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
     uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
     flux_compute_dispatch(command, pipeline, &push, sizeof(push), gx, gy, 1u);

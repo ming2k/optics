@@ -731,7 +731,7 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
                 /* Follow the fresh page 0; swap the batch's own retain. */
                 flux_image *fresh = t->atlas_pages[t->atlas_page];
                 if (fresh)
-                    flux_image_retain(fresh);
+                    (void)flux_image_retain(fresh);
                 if (batch_atlas)
                     flux_image_release(batch_atlas);
                 batch_atlas = fresh;
@@ -759,7 +759,7 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
             run_page = e->atlas_page;
             flux_image *page_img = t->atlas_pages[e->atlas_page];
             if (page_img)
-                flux_image_retain(page_img);
+                (void)flux_image_retain(page_img);
             if (batch_atlas)
                 flux_image_release(batch_atlas);
             batch_atlas = page_img;

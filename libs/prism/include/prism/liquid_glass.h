@@ -35,9 +35,16 @@ typedef struct prism_liquid_glass_shape {
     float corner_radius;
 } prism_liquid_glass_shape;
 
-/* One glass body. A second shape may be smoothly fused into the first,
- * allowing spring-driven droplets or controls to merge without a seam.
- * shape_count must be 1 or 2.
+/* One glass body: an array of one or more rounded-rectangle shapes,
+ * smoothly fused when more than one. The count supported by this build
+ * is returned by prism_liquid_glass_max_shapes(); passing more shapes
+ * than that fails the apply call instead of being silently truncated.
+ * (Today that ceiling is 2 — the dispatch pushes two SDFs; the pointer
+ * form exists so raising it later is a shader change, not an ABI
+ * break.)
+ *
+ * `shapes` is a borrowed array: the caller owns it and only reads it
+ * during the prism_liquid_glass_filter_apply call.
  *
  * Per-body optical character is caller policy, used verbatim:
  * - shadow_alpha / shadow_blur / shadow_offset_y: the drop shadow cast by
@@ -47,8 +54,8 @@ typedef struct prism_liquid_glass_shape {
  * - focus / focus_strength: one soft optical emphasis field inside a
  *   single-shape body. It changes clarity and directional light without
  *   creating or outlining another glass body. Focus bounds must remain
- *   inside shapes[0]. Focus and smooth union are mutually exclusive because
- *   both reuse the secondary-shape shader slot.
+ *   inside the first shape. Focus and smooth union are mutually exclusive
+ *   because both reuse the secondary-shape shader slot.
  *
  * The five trailing fields override dispatch-wide desc policy per body and
  * carry adaptive-plate inputs; each is armed by a non-negative value and
@@ -67,10 +74,17 @@ typedef struct prism_liquid_glass_shape {
  *
  * Build groups from PRISM_LIQUID_GLASS_GROUP_INIT: zero-init is NOT inherit
  * — a zeroed group pins frost/tint/saturation to explicit zeros instead of
- * inheriting the desc values. */
+ * inheriting the desc values. The INIT's .shapes needs a caller-owned
+ * array; the common single-body pattern is:
+ *
+ *   const prism_liquid_glass_shape shapes[] = {{.bounds = {…}, .corner_radius = …}};
+ *   prism_liquid_glass_group g = PRISM_LIQUID_GLASS_GROUP_INIT;
+ *   g.shapes = shapes;
+ *   g.shape_count = 1;
+ */
 typedef struct prism_liquid_glass_group {
-    prism_liquid_glass_shape shapes[2];
-    uint32_t shape_count;
+    const prism_liquid_glass_shape *shapes; /* borrowed, len = shape_count */
+    uint32_t shape_count;                   /* 1 .. prism_liquid_glass_max_shapes() */
     float blend_radius;
     float opacity;
     float shadow_alpha;
@@ -92,16 +106,22 @@ typedef struct prism_liquid_glass_group {
 /* Neutral baseline for designated-initializer use: a single visible body
  * with no shadow and the neutral tint, so omitted fields can never turn
  * the glass black, and with every override/adaptive field in its
- * inherit/disabled (<0) state. Override the fields a body actually needs. */
+ * inherit/disabled (<0) state. Override the fields a body actually needs.
+ * `shapes`/`shape_count` are NOT initialized — see the doc comment above
+ * for the caller-owned-array pattern. */
 #define PRISM_LIQUID_GLASS_GROUP_INIT                                                              \
-    {.shape_count = 1,                                                                             \
-     .opacity = 1.0f,                                                                              \
+    {.opacity = 1.0f,                                                                              \
      .tint_color = 0xFFFFFFu,                                                                      \
      .frost_strength = -1.0f,                                                                      \
      .tint_strength = -1.0f,                                                                       \
      .saturation = -1.0f,                                                                          \
      .plate_polarity = -1.0f,                                                                      \
      .backdrop_energy = -1.0f}
+
+/* Number of shapes this build supports per glass body (the dispatch
+ * pushes one SDF per shape; the shader fuses them pairwise). Callers
+ * that want to be forward-compatible size their arrays from this. */
+PRISM_API uint32_t prism_liquid_glass_max_shapes(void);
 
 /* Dispatch-wide caller policy. Distances are capture-image pixels.
  * refraction controls the lens offset, chromatic_aberration separates the

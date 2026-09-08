@@ -317,13 +317,13 @@ int main(void) {
             fprintf(stderr, "blur: %s\n", flux_result_string(r));
             break;
         }
-        prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
-        body.shapes[0] =
-            (prism_liquid_glass_shape){.bounds = {gx, gy, gw, gh}, .corner_radius = gr};
-        body.shapes[1] = (prism_liquid_glass_shape){
-            .bounds = {gx + gw - 22.0f + droplet_position * 84.0f, gy + 11.0f, 78.0f, 78.0f},
-            .corner_radius = 39.0f,
+        prism_liquid_glass_shape body_shapes[2] = {
+            {.bounds = {gx, gy, gw, gh}, .corner_radius = gr},
+            {.bounds = {gx + gw - 22.0f + droplet_position * 84.0f, gy + 11.0f, 78.0f, 78.0f},
+             .corner_radius = 39.0f},
         };
+        prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
+        body.shapes = body_shapes;
         body.shape_count = 2;
         body.blend_radius = 24.0f;
         body.opacity = 1.0f;

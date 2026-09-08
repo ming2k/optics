@@ -37,6 +37,11 @@ size_t lensi_label_visible_len(const char *label) {
  * steal its node and leave its real children unarranged. Use a sentinel so
  * empty labels scope under the container instead of replacing it. */
 lens_id lensi_gen_widget_id(lens *ui, const char *label) {
+    /* Register the borrowed label/id string (ADR-0084, debug only): the
+     * id hash consumes it this frame; every widget that derives its id
+     * from a caller string funnels through here, so one registration
+     * point covers all 16 call sites. */
+    lensi_borrow_register(ui, label);
     uint64_t scope = lensi_id_top(ui);
     static const char empty_seed[] = "##__flux_empty__";
     const char *seed = label ? label : "";

@@ -11,6 +11,11 @@
  * compiled directly into test binaries (test_drawlist_hash): the single
  * writer for ui->overflow must link wherever the drawlist does. */
 void lensi_set_overflow(lens *ui) {
+    /* Internal contract: callers pass a live context. The guard is
+     * analyzer teeth (clang-analyzer-core.NullDereference), not error
+     * handling — every internal call site has a non-NULL ui. */
+    if (!ui)
+        return;
     ui->overflow = true;
 #ifndef NDEBUG
     /* One shot per process: the flag is per frame, the warning is not — a

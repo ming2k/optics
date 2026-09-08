@@ -176,16 +176,26 @@ int main(int argc, char **argv) {
 
     const flux_rect pill = {60.0f, 560.0f, 1160.0f, 90.0f};
     const flux_rect panel = {430.0f, 140.0f, 420.0f, 260.0f};
+    prism_liquid_glass_shape shapes[5][2] = {
+        {{.bounds = pill, .corner_radius = 45.0f}, {0}},
+        {{.bounds = panel, .corner_radius = 32.0f}, {0}},
+        {{.bounds = {120.0f, 200.0f, 96.0f, 96.0f}, .corner_radius = 48.0f},
+         {.bounds = {252.0f, 224.0f, 72.0f, 72.0f}, .corner_radius = 36.0f}},
+        {{.bounds = {880.0f, 500.0f, 240.0f, 32.0f}, .corner_radius = 16.0f}, {0}},
+        {{.bounds = {560.0f, 700.0f, 140.0f, 6.0f}, .corner_radius = 3.0f}, {0}},
+    };
     prism_liquid_glass_group groups[5] = {
         PRISM_LIQUID_GLASS_GROUP_INIT, PRISM_LIQUID_GLASS_GROUP_INIT, PRISM_LIQUID_GLASS_GROUP_INIT,
         PRISM_LIQUID_GLASS_GROUP_INIT, PRISM_LIQUID_GLASS_GROUP_INIT,
     };
-    groups[0].shapes[0] = (prism_liquid_glass_shape){.bounds = pill, .corner_radius = 45.0f};
+    for (size_t i = 0; i < 5; ++i) {
+        groups[i].shapes = shapes[i];
+        groups[i].shape_count = (i == 2) ? 2 : 1;
+    }
     groups[0].shadow_alpha = 0.20f;
     groups[0].shadow_blur = 12.0f;
     groups[0].shadow_offset_y = 6.0f;
 
-    groups[1].shapes[0] = (prism_liquid_glass_shape){.bounds = panel, .corner_radius = 32.0f};
     groups[1].shadow_alpha = 0.22f;
     groups[1].shadow_blur = 14.0f;
     groups[1].shadow_offset_y = 7.0f;
@@ -195,11 +205,6 @@ int main(int argc, char **argv) {
                                                  .corner_radius = 18.0f};
     groups[1].focus_strength = 1.0f;
 
-    groups[2].shapes[0] = (prism_liquid_glass_shape){.bounds = {120.0f, 200.0f, 96.0f, 96.0f},
-                                                     .corner_radius = 48.0f};
-    groups[2].shapes[1] = (prism_liquid_glass_shape){.bounds = {252.0f, 224.0f, 72.0f, 72.0f},
-                                                     .corner_radius = 36.0f};
-    groups[2].shape_count = 2;
     groups[2].blend_radius = 28.0f;
     groups[2].shadow_alpha = 0.20f;
     groups[2].shadow_blur = 10.0f;
@@ -208,15 +213,11 @@ int main(int argc, char **argv) {
     groups[2].tint_color = 0xC8E0FFu;
 
     /* HUD-chip scale with its own component shadow. */
-    groups[3].shapes[0] = (prism_liquid_glass_shape){.bounds = {880.0f, 500.0f, 240.0f, 32.0f},
-                                                     .corner_radius = 16.0f};
     groups[3].shadow_alpha = 0.16f;
     groups[3].shadow_blur = 4.0f;
     groups[3].shadow_offset_y = 2.0f;
 
     /* Dock-handle scale: a 6 px stadium indicator still casts a shadow. */
-    groups[4].shapes[0] =
-        (prism_liquid_glass_shape){.bounds = {560.0f, 700.0f, 140.0f, 6.0f}, .corner_radius = 3.0f};
     groups[4].shadow_alpha = 0.20f;
     groups[4].shadow_blur = 4.2f;
     groups[4].shadow_offset_y = 2.1f;

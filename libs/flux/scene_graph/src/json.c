@@ -188,12 +188,16 @@ static jv *parse_array(parser *ps) {
         if (!item)
             goto fail;
         if (v->arr.count == cap) {
+            /* calloc: slots beyond count stay NULL, so jv_free's walk is
+             * provably initialized even if a future edit loosens the
+             * count coupling (the analyzer flags the realloc form). */
             size_t nc = cap ? cap * 2 : 8;
             jv **np = realloc(v->arr.items, nc * sizeof(jv *));
             if (!np) {
                 jv_free(item);
                 goto fail;
             }
+            memset(np + v->arr.count, 0, (nc - v->arr.count) * sizeof(jv *));
             v->arr.items = np;
             cap = nc;
         }

@@ -141,6 +141,13 @@ static bool external_image_importable(flux_device *d, VkFormat format, uint64_t 
 static flux_result dmabuf_enum_sampleable_importable_modifiers(flux_device *d, VkFormat vfmt,
                                                                uint64_t *out,
                                                                uint32_t *inout_count) {
+    /* The caller's contract (flux_dmabuf_format_modifiers) guarantees
+     * out != NULL whenever *inout_count != 0; assert it here so the
+     * analyzer can prove the write below, and a future caller passing
+     * a NULL out with a nonzero capacity fails loudly at the boundary
+     * instead of writing through a null pointer. */
+    if (!out && *inout_count != 0)
+        return FLUX_ERROR_INVALID_ARGUMENT;
     VkDrmFormatModifierPropertiesListEXT list = {
         .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
     };
@@ -185,8 +192,13 @@ static flux_result dmabuf_enum_sampleable_importable_modifiers(flux_device *d, V
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
 
+    /* From here, written <= *inout_count <= caller's capacity, and the
+     * boundary guard above proved out != NULL for any nonzero capacity;
+     * written stays 0 when the capacity is 0, so the write below is
+     * unreachable with a NULL out. The analyzer needs the coupling made
+     * local: only touch `out` while written < the capacity. */
     uint32_t written = 0;
-    for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {
+    for (uint32_t i = 0; i < list.drmFormatModifierCount && written < *inout_count; ++i) {
         const VkDrmFormatModifierPropertiesEXT *m = &mods[i];
         if ((m->drmFormatModifierTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0)
             continue;
