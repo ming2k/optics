@@ -611,7 +611,7 @@ typedef enum lens_checkbox_appearance {
 
 /* Per-kind content payload for lens_widget_record.
  *
- * Borrow contract (ADR-0084): every string/line pointer in this struct
+ * Borrow contract (ADR-0085): every string/line pointer in this struct
  * is valid only for the skin-emission call that carries it — the widget
  * build path either copies into the frame arena (semantics.name, wrapped
  * lines, preedit display) or points directly at the caller's own label

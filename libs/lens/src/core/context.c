@@ -432,7 +432,7 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->tooltip.active = false;
 
 #ifdef LENS_DEBUG_BORROWS
-    /* Borrow-checker reset (ADR-0084): a new frame starts with an empty
+    /* Borrow-checker reset (ADR-0085): a new frame starts with an empty
      * registered-borrow set; widgets re-register each label pointer as
      * they build. The check fires only when a *cross-frame* borrow
      * slips through (a pointer from frame N-1 handed to frame N), which

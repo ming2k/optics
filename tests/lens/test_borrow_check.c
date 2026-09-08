@@ -1,5 +1,5 @@
 /*
- * ADR-0084 borrow-checker self-test: the registry must catch the exact
+ * ADR-0085 borrow-checker self-test: the registry must catch the exact
  * misuse it exists for — a label pointer that was NOT registered this
  * frame — and must never fire on legitimate patterns.
  *

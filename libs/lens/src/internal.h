@@ -270,7 +270,7 @@ typedef struct lens_store {
 #define LENSI_GHOST_MAX 16
 #define LENSI_GHOST_MAX_FRAMES 64
 
-/* ADR-0084 borrowed-string registry capacity (debug builds). Sized for
+/* ADR-0085 borrowed-string registry capacity (debug builds). Sized for
  * the densest practical frame (~4k widgets); the ring wraps, weakening
  * the net without misfiring it. */
 #define LENSI_BORROW_SET_MAX 4096
@@ -337,7 +337,7 @@ struct lens {
     bool click_hit_focusable; /* mouse pressed inside a focusable widget */
 
 #ifdef LENS_DEBUG_BORROWS
-    /* ADR-0084 debug borrow registry: label pointers handed to widgets
+    /* ADR-0085 debug borrow registry: label pointers handed to widgets
      * this frame. The registry is a bounded ring: the frame's widget
      * count is far below the cap in practice, and the oldest entry
      * wrapping away only weakens the check (never a false positive — a
@@ -695,9 +695,9 @@ lens_style lensi_style_effective(lens *ui); /* drains ui->next_style */
  * behind lens_default_skin. */
 void lensi_skin_emit(lens *ui, lens_node *n, const lens_widget_record *rec);
 #ifdef LENS_DEBUG_BORROWS
-/* ADR-0084: register a caller-borrowed string for this frame. */
+/* ADR-0085: register a caller-borrowed string for this frame. */
 void lensi_borrow_register(lens *ui, const char *ptr);
-/* ADR-0084: assert `ptr` was registered this frame (or is arena-owned).
+/* ADR-0085: assert `ptr` was registered this frame (or is arena-owned).
  * Aborts with a diagnostic on violation; see core/borrow.c. */
 void lensi_borrow_check(lens *ui, const char *ptr, const char *what);
 #endif

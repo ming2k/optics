@@ -93,3 +93,4 @@ a decision, write a new ADR and update the old one's status to
 | 0082 | [Lens minimal orthogonal components and single descriptor API](0082-lens-minimal-orthogonal-components-and-single-descriptor-api.md) | Accepted |
 | 0083 | [Flux orthogonal shape-paint model and full C23 baseline](0083-flux-orthogonal-shape-paint-model-and-c23-baseline.md) | Accepted |
 | 0084 | [Iris tripartite architecture and C23 app-opts descriptor](0084-iris-tripartite-architecture-and-c23-app-opts.md) | Accepted |
+| 0085 | [Lens borrowed-string registry — always-on debug borrow checker](0085-lens-borrowed-string-registry.md) | Accepted |

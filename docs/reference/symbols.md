@@ -598,6 +598,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `prism_liquid_glass_max_shapes` | Number of shapes this build supports per glass body (the dispatch pushes one SDF per shape; the shader fuses them pairwise). |
 | `prism_liquid_glass_filter_create` |  |
 | `prism_liquid_glass_filter_retain` |  |
 | `prism_liquid_glass_filter_release` | Release only after every submission that references the filter's outputs has completed (its frame-slot fence has signalled, or after flux_device_wait_idle): release destroys the filter's compute pipelines inline. |

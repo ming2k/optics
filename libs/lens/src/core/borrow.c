@@ -1,4 +1,4 @@
-/* borrow.c — debug-only borrowed-string registry (ADR-0084).
+/* borrow.c — debug-only borrowed-string registry (ADR-0085).
  *
  * The lens API hands caller-owned strings to widgets (`label`, `box.id`,
  * `placeholder`) and documents that they must remain stable through the
@@ -58,7 +58,7 @@ void lensi_borrow_check(lens *ui, const char *ptr, const char *what) {
             "lens borrow-check FAILED: %s pointer %p was not registered this frame\n"
             "  most likely: a stack temporary or freed buffer passed to a lens widget\n"
             "  (label/id/placeholder strings must stay stable through the frame;\n"
-            "  copy into caller-owned storage if they cannot). See lens.h ADR-0084.\n",
+            "  copy into caller-owned storage if they cannot). See lens.h ADR-0085.\n",
             what, (const void *)ptr);
     abort();
 }
