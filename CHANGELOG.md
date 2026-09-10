@@ -13,6 +13,25 @@ either.
 
 ## [Unreleased]
 
+## [0.0.37] - 2026-09-10
+
+### Added
+
+- **flux-scene-graph**: Device-free GLB parse seam (`flux_sg_parse_glb`, `flux_sg_scene_data_build`, `_free`, `_primitive_count`, `_bounds`); `flux_sg_load_glb` is now their parse+build composition.
+- **api**: Every library exposes the unified `*_version` / `*_version_number` / `*_version_check` / `*_version_string` accessors, all derived from the header macros.
+- **prism**: `prism_liquid_glass_max_shapes()` reports the caller-owned shape-array capacity.
+- **lens**: Borrowed-string registry (ADR-0084) aborts with a diagnostic when a stack-temporary string is passed to a widget.
+
+### Changed
+
+- **prism** (breaking, pre-1.0): `prism_liquid_glass_group.shapes` is now a caller-owned borrowed array (`const prism_liquid_glass_shape *`) instead of the inline `shapes[2]`; the shader slot ceiling is one validated `LIQUID_GLASS_MAX_SHAPES` constant.
+
+### Fixed
+
+- **flux-text**: Leading combining marks no longer produce negative measured width or inverted selection rects.
+- **flux-scene-graph**: Clamp chunk-header walking in `sg_glb_parse` to avoid an out-of-bounds read on a zero-length container.
+- **iris**: Unpublish `g_active_pl` and `tablet_host_bridge.user` on the `app_wayland` early-return path; fix a text-atlas use-after-free under ASan.
+
 ## [0.0.36] - 2026-09-05
 
 ### Fixed
