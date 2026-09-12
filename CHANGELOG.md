@@ -13,6 +13,18 @@ either.
 
 ## [Unreleased]
 
+## [0.0.40] - 2026-09-12
+
+### Changed
+
+- **lens**: Increased drag threshold from 4px to 14px to prevent accidental drag initiation during clicks.
+- **iris**: Synchronized accumulator cursor position on Wayland drag enter/motion events, and cleanly reset pointer state on drag cleanup.
+
+### Added — Rust bindings
+
+- **lens-rs**: Added `Ui::deliver_drop`, `Frame::dnd_source`, and `Frame::dnd_drop_target` bindings with `DndDropInfo`.
+- **iris-rs**: Re-exported `DndDropInfo` from `lens`.
+
 ## [0.0.39] - 2026-09-12
 
 ### Added
