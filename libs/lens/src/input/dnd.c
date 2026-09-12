@@ -3,7 +3,7 @@
 #include "../internal.h"
 #include <string.h>
 
-#define LENS_DRAG_THRESHOLD_SQ 16.0f /* 4px Euclidean movement threshold */
+#define LENS_DRAG_THRESHOLD_SQ 196.0f /* 14px Euclidean movement threshold */
 
 bool lens_dnd_source(lens *ui, const lens_dnd_source_desc *desc) {
     if (!ui || !desc || !desc->id)

@@ -390,6 +390,15 @@ impl Align {
     }
 }
 
+/// Drop information from a drag-and-drop target check.
+#[derive(Debug, Clone, Default)]
+pub struct DndDropInfo {
+    pub is_hovered: bool,
+    pub is_dropped: bool,
+    pub action: u32,
+    pub payload: Option<String>,
+}
+
 /// The interaction result of the most recently built widget.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Response {

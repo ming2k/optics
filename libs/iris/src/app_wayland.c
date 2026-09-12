@@ -1576,6 +1576,8 @@ static void ddev_enter(void *d, struct wl_data_device *dev, uint32_t s, struct w
     wp_platform *pl = d;
     pl->dnd_inside = true;
     pl->dnd_pos = (flux_point){wl_fixed_to_double(x), wl_fixed_to_double(y)};
+    pl->acc.cx = pl->dnd_pos.x;
+    pl->acc.cy = pl->dnd_pos.y;
     if (pl->dnd_offer != o) {
         if (pl->dnd_offer)
             wl_data_offer_destroy(pl->dnd_offer);
@@ -1614,6 +1616,8 @@ static void ddev_motion(void *d, struct wl_data_device *dev, uint32_t t, wl_fixe
     (void)t;
     wp_platform *pl = d;
     pl->dnd_pos = (flux_point){wl_fixed_to_double(x), wl_fixed_to_double(y)};
+    pl->acc.cx = pl->dnd_pos.x;
+    pl->acc.cy = pl->dnd_pos.y;
 }
 static void ddev_drop(void *d, struct wl_data_device *dev) {
     (void)dev;
@@ -1702,6 +1706,9 @@ static void drag_source_cleanup(wp_platform *pl) {
         pl->drag_text_len = 0;
     }
     pl->drag_active = false;
+    pl->dnd_inside = false;
+    pl->acc.down[0] = false;
+    pl->acc.released[0] = true;
     memset(&pl->drag_info, 0, sizeof(pl->drag_info));
 }
 

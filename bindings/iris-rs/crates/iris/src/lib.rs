@@ -46,7 +46,7 @@ pub use iris_sys as sys;
 pub use lens::key;
 pub use lens::mods;
 pub use lens::{
-    Align, Band, Color, CursorHint, Frame, Icon, Input, LayoutOpts, MouseButton, PlaceMode,
+    Align, Band, Color, CursorHint, DndDropInfo, Frame, Icon, Input, LayoutOpts, MouseButton, PlaceMode,
     PlaceOpts, Rect, Response, Style, TextBuf, Theme, Ui,
 };
 

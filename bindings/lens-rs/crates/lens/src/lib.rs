@@ -40,7 +40,7 @@ mod types;
 pub mod view;
 
 pub use input::{Input, MouseButton, key, mods};
-pub use types::{Align, Band, ButtonVariant, CheckboxAppearance, Color, CursorHint, FontFamily, Icon, LayoutOpts, PlaceMode, PlaceOpts, Rect, Response, SkinFn, Style, StyleResolved, TextLine, TextMetrics, Theme, WidgetContent, WidgetKind, WidgetRecord, WidgetState};
+pub use types::{Align, Band, ButtonVariant, CheckboxAppearance, Color, CursorHint, DndDropInfo, FontFamily, Icon, LayoutOpts, PlaceMode, PlaceOpts, Rect, Response, SkinFn, Style, StyleResolved, TextLine, TextMetrics, Theme, WidgetContent, WidgetKind, WidgetRecord, WidgetState};
 
 /// The retained UI context. Owns the persistent tree, layout, and draw list.
 /// Dropping a `Ui` calls `lens_destroy`.
@@ -123,6 +123,13 @@ impl Ui {
     pub fn has_duplicate_ids(&self) -> bool {
         // SAFETY: self.raw is live; the call only reads frame diagnostics.
         unsafe { sys::lens_has_duplicate_ids(self.raw as *const sys::lens) }
+    }
+
+    /// Deliver a drag-and-drop payload into the Lens UI at the given position.
+    pub fn deliver_drop(&mut self, payload: &str, pos: (f32, f32)) {
+        let c = cstr(payload);
+        let pt = sys::flux_point { x: pos.0, y: pos.1 };
+        unsafe { sys::lens_deliver_drop(self.raw, c.as_ptr(), payload.len(), pt) };
     }
 
     /// Run one immediate-mode frame. The closure receives a [`Frame`] that
@@ -1067,6 +1074,53 @@ impl Frame {
 
     pub fn consume_key(&mut self, key: i32) {
         unsafe { sys::lens_consume_key(self.ui, key) };
+    }
+
+    pub fn dnd_source(&mut self, id: &str, text: &str, actions: u32) -> bool {
+        let c_id = cstr(id);
+        let raw_id = unsafe { sys::lens_current_id(self.ui, c_id.as_ptr()) };
+        let c_text = cstr(text);
+        let desc = sys::lens_dnd_source_desc {
+            id: raw_id,
+            text: c_text.as_ptr(),
+            text_len: text.len(),
+            actions,
+            preview_rect: sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+        };
+        unsafe { sys::lens_dnd_source(self.ui, &desc) }
+    }
+
+    pub fn dnd_drop_target(&mut self, id: &str, accepted_actions: u32) -> Option<DndDropInfo> {
+        let c_id = cstr(id);
+        let raw_id = unsafe { sys::lens_current_id(self.ui, c_id.as_ptr()) };
+        let mut info = sys::lens_dnd_drop_info {
+            is_hovered: false,
+            is_dropped: false,
+            drop_pos: sys::flux_point { x: 0.0, y: 0.0 },
+            action: 0,
+        };
+        let hit = unsafe { sys::lens_dnd_drop_target(self.ui, raw_id, accepted_actions, &mut info) };
+        if hit || info.is_hovered || info.is_dropped {
+            let payload = if info.is_dropped {
+                let mut buf = [0u8; 1024];
+                let len = unsafe { sys::lens_take_drop(self.ui, buf.as_mut_ptr() as *mut std::os::raw::c_char, buf.len() as u32) };
+                if len > 0 {
+                    Some(String::from_utf8_lossy(&buf[..len as usize]).into_owned())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            Some(DndDropInfo {
+                is_hovered: info.is_hovered,
+                is_dropped: info.is_dropped,
+                action: info.action,
+                payload,
+            })
+        } else {
+            None
+        }
     }
 
     pub fn textedit(&mut self, label: &str, buf: &mut TextBuf, multiline: bool) -> bool {
