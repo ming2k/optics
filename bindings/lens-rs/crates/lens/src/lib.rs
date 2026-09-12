@@ -135,15 +135,20 @@ impl Ui {
     /// Run one immediate-mode frame. The closure receives a [`Frame`] that
     /// borrows the context; widget calls on it build the tree, which is
     /// reconciled and laid out when the closure returns.
-    pub fn frame<R>(&mut self, input: &Input, build: impl FnOnce(&mut Frame) -> R) -> R {
+    pub fn frame<R>(&mut self, input: &Input, build: impl for<'frame> FnOnce(&mut Frame<'frame>) -> R) -> R {
         // SAFETY: self.raw is live; input outlives the call.
         unsafe { sys::lens_begin(self.raw, input.as_raw()) };
+        struct EndFrame(*mut sys::lens);
+        impl Drop for EndFrame {
+            fn drop(&mut self) {
+                // SAFETY: guard is confined to the owning Ui borrow.
+                unsafe { sys::lens_end(self.0) };
+            }
+        }
+        let _end = EndFrame(self.raw);
         // SAFETY: raw is live and inside a begin/end pair.
         let mut f = unsafe { Frame::from_raw(self.raw) };
-        let r = build(&mut f);
-        // SAFETY: matched begin/end on the same live context.
-        unsafe { sys::lens_end(self.raw) };
-        r
+        build(&mut f)
     }
 
     /// Draw the last built frame into a flux canvas. Call between
@@ -309,20 +314,30 @@ impl Drop for Ui {
 }
 
 /// Builder handle valid only for the duration of one frame. It borrows the
-/// context and must not escape the frame closure.
-pub struct Frame {
+/// context and must not escape the frame closure. Independent frame scopes
+/// cannot exchange their handles:
+/// ```compile_fail
+/// use lens::{Ui, Input};
+/// let mut a = Ui::headless().unwrap();
+/// let mut b = Ui::headless().unwrap();
+/// a.frame(&Input::default(), |fa| {
+///     b.frame(&Input::default(), |fb| std::mem::swap(fa, fb));
+/// });
+/// ```
+pub struct Frame<'frame> {
     ui: *mut sys::lens,
+    _scope: std::marker::PhantomData<&'frame mut &'frame ()>,
 }
 
-impl Frame {
+impl<'frame> Frame<'frame> {
     /// Wrap a raw `lens` that the caller has already `lens_begin`'d. Used by
     /// `lens-shell-wayland`, whose host owns the begin/end envelope.
     ///
     /// # Safety
     /// `ui` must be a live context currently inside a `lens_begin` /
     /// `lens_end` pair, and the returned `Frame` must not outlive it.
-    pub unsafe fn from_raw(ui: *mut sys::lens) -> Frame {
-        Frame { ui }
+    pub unsafe fn from_raw(ui: *mut sys::lens) -> Frame<'frame> {
+        Frame { ui, _scope: std::marker::PhantomData }
     }
 
     /// The raw context pointer, for widgets not yet wrapped here.
@@ -462,7 +477,7 @@ impl Frame {
 
     /// Start a horizontal flex container (row) with a fluent builder.
     #[inline]
-    pub fn row(&mut self) -> FlexBuilder<'_> {
+    pub fn row(&mut self) -> FlexBuilder<'_, 'frame> {
         FlexBuilder::new(self, false)
     }
 
@@ -474,7 +489,7 @@ impl Frame {
 
     /// Start a vertical flex container (column) with a fluent builder.
     #[inline]
-    pub fn col(&mut self) -> FlexBuilder<'_> {
+    pub fn col(&mut self) -> FlexBuilder<'_, 'frame> {
         FlexBuilder::new(self, true)
     }
 
@@ -486,7 +501,7 @@ impl Frame {
 
     /// Start a vertical flex container (column) with a fluent builder (alias for [`Self::col`]).
     #[inline]
-    pub fn column(&mut self) -> FlexBuilder<'_> {
+    pub fn column(&mut self) -> FlexBuilder<'_, 'frame> {
         FlexBuilder::new(self, true)
     }
 
@@ -1403,15 +1418,15 @@ pub fn version_check(major: i32, minor: i32, patch: i32) -> bool {
 /// Combines layout options, visual styling (background, border, radius), and
 /// optional interactive target semantics (`id` / pressable) into a single,
 /// unified container primitive.
-pub struct FlexBuilder<'a> {
-    frame: &'a mut Frame,
+pub struct FlexBuilder<'a, 'frame> {
+    frame: &'a mut Frame<'frame>,
     is_col: bool,
     opts: LayoutOpts,
     id: Option<(&'a str, &'a str)>,
 }
 
-impl<'a> FlexBuilder<'a> {
-    pub(crate) fn new(frame: &'a mut Frame, is_col: bool) -> Self {
+impl<'a, 'frame> FlexBuilder<'a, 'frame> {
+    pub(crate) fn new(frame: &'a mut Frame<'frame>, is_col: bool) -> Self {
         Self {
             frame,
             is_col,

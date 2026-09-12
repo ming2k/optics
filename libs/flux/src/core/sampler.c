@@ -136,3 +136,7 @@ VkSampler flux_sampler_vk_sampler(const flux_sampler *s) {
 flux_bindless_handle flux_sampler_bindless_handle(const flux_sampler *s) {
     return s ? s->bindless : FLUX_BINDLESS_INVALID;
 }
+
+flux_device *flux_sampler_owner(const flux_sampler *sampler) {
+    return sampler ? sampler->device : nullptr;
+}

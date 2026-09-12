@@ -16,7 +16,7 @@ test('smoke', test_smoke, suite : 'unit')
 test_version_lockstep = executable('test_version_lockstep',
   'test_version_lockstep.c',
   dependencies : [test_helpers_dep, anim_dep, prism_dep, iris_dep,
-                  flux_sg_dep, lens_dep],
+                  flux_sg_dep, lens_dep, flux_text_dep],
 )
 test('version_lockstep', test_version_lockstep, suite : 'unit')
 
@@ -166,3 +166,6 @@ test_glyph_cache = executable('test_glyph_cache',
   'test_glyph_cache.c',
 )
 test('glyph_cache', test_glyph_cache, suite : 'unit')
+
+shape_test = executable('test_canvas_shapes', 'test_canvas_shapes.c', dependencies : [test_helpers_dep])
+test('canvas_shapes', shape_test, suite : 'unit')

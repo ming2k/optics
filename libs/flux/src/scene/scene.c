@@ -609,6 +609,30 @@ void flux_material_release(flux_material *m) {
     flux_device_release(d);
 }
 
+void flux_material_release_deferred(flux_device *d, flux_material *m) {
+    if (!m)
+        return;
+    if (atomic_fetch_sub_explicit(&m->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return;
+    if (!d)
+        d = m->device;
+    if (m->pipeline) {
+        flux_vk_retire_pipeline(d, m->pipeline);
+        m->pipeline = VK_NULL_HANDLE;
+    }
+    if (m->skinned_pipeline) {
+        flux_vk_retire_pipeline(d, m->skinned_pipeline);
+        m->skinned_pipeline = VK_NULL_HANDLE;
+    }
+    flux_device *md = m->device;
+    if (m->layout)
+        vkDestroyPipelineLayout(md->device, m->layout, nullptr);
+    flux_sampler_release(m->base_color_sampler);
+    flux_image_release(m->base_color_image);
+    flux_internal_free(md, m);
+    flux_device_release(md);
+}
+
 flux_material_alpha_mode flux_material_get_alpha_mode(const flux_material *m) {
     return m ? m->alpha_mode : FLUX_MATERIAL_ALPHA_OPAQUE;
 }

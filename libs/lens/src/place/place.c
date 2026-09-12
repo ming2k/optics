@@ -132,6 +132,10 @@ bool lens_place_begin(lens *ui, const lens_place_opts *opts) {
     if (!opts)
         opts = &default_opts;
 
+    lens_place_opts effective = *opts;
+    effective.layout.box = lensi_merge_box(opts->layout.box, opts->box);
+    opts = &effective;
+
     const char *id_str =
         opts->box.id ? opts->box.id : (opts->layout.box.id ? opts->layout.box.id : "##place");
     lens_id id = lensi_gen_widget_id(ui, id_str);
@@ -148,6 +152,7 @@ bool lens_place_begin(lens *ui, const lens_place_opts *opts) {
      * container sub-roots may be ABS — this begin is the single place that
      * sets LENS_PLACE_ABS, so leaf widgets cannot place. */
     lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts->layout.box);
 
     n->is_container = true;
     n->place = LENS_PLACE_ABS;
@@ -175,6 +180,7 @@ bool lens_place_begin(lens *ui, const lens_place_opts *opts) {
 
     /* The subtree's internal flexbox (same contract as open_flex). */
     n->axis = LENS_COLUMN;
+    n->align = opts->layout.align;
     n->gap = opts->layout.gap;
     n->pad = opts->layout.pad;
     n->cross = opts->layout.cross;

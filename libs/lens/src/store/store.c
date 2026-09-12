@@ -24,6 +24,7 @@ static uint32_t slot_index(lens_id id, uint32_t cap) {
 #define LENSI_STORE_LINK_NONE UINT32_MAX
 
 static void live_link(lens_store *s, uint32_t i) {
+    s->slots[i].prev_live = s->live_tail;
     if (s->live_tail != LENSI_STORE_LINK_NONE)
         s->slots[s->live_tail].next_live = i;
     else
@@ -32,27 +33,46 @@ static void live_link(lens_store *s, uint32_t i) {
     s->live_tail = i;
 }
 
-/* Unlink slot `i` from the live list. O(live) via head walk — called
- * only from reap's GC, which re-anchors at the head afterwards anyway
- * (a cluster clear can invalidate any saved index), so no successor
- * plumbing is needed here. */
+/* O(1) unlink; moving a probe slot repairs both neighbouring links. */
 static void live_unlink(lens_store *s, uint32_t i) {
-    uint32_t prev = LENSI_STORE_LINK_NONE;
-    uint32_t cur = s->live_head;
-    while (cur != LENSI_STORE_LINK_NONE) {
-        uint32_t next = s->slots[cur].next_live;
-        if (cur == i) {
+    uint32_t prev = s->slots[i].prev_live, next = s->slots[i].next_live;
+    if (prev != LENSI_STORE_LINK_NONE)
+        s->slots[prev].next_live = next;
+    else
+        s->live_head = next;
+    if (next != LENSI_STORE_LINK_NONE)
+        s->slots[next].prev_live = prev;
+    else
+        s->live_tail = prev;
+}
+
+/* Backward-shift deletion preserves probe reachability without allocating.
+ * cursor is the next live-list slot in the ongoing reap pass. */
+static void store_erase(lens_store *s, uint32_t hole, uint32_t *cursor) {
+    live_unlink(s, hole);
+    s->count--;
+    uint32_t mask = s->cap - 1;
+    uint32_t j = (hole + 1) & mask;
+    while (s->slots[j].id) {
+        uint32_t home = slot_index(s->slots[j].id, s->cap);
+        if (((hole - home) & mask) < ((j - home) & mask)) {
+            s->slots[hole] = s->slots[j];
+            uint32_t prev = s->slots[hole].prev_live, next = s->slots[hole].next_live;
             if (prev != LENSI_STORE_LINK_NONE)
-                s->slots[prev].next_live = next;
+                s->slots[prev].next_live = hole;
             else
-                s->live_head = next;
-            if (s->live_tail == i)
-                s->live_tail = prev;
-            return;
+                s->live_head = hole;
+            if (next != LENSI_STORE_LINK_NONE)
+                s->slots[next].prev_live = hole;
+            else
+                s->live_tail = hole;
+            if (*cursor == j)
+                *cursor = hole;
+            hole = j;
         }
-        prev = cur;
-        cur = next;
+        j = (j + 1) & mask;
     }
+    s->slots[hole] = (lens_store_slot){};
 }
 
 static flux_result store_grow(lens *ui, uint32_t new_cap) {
@@ -72,6 +92,7 @@ static flux_result store_grow(lens *ui, uint32_t new_cap) {
             j = (j + 1) & (new_cap - 1);
         slots[j] = s->slots[i];
         slots[j].next_live = LENSI_STORE_LINK_NONE;
+        slots[j].prev_live = new_tail;
         if (new_tail != LENSI_STORE_LINK_NONE)
             slots[new_tail].next_live = j;
         else
@@ -87,7 +108,9 @@ static flux_result store_grow(lens *ui, uint32_t new_cap) {
 }
 
 flux_result lensi_store_init(lens *ui, uint32_t cap) {
-    uint32_t c = 1;
+    if (cap > (1u << 30))
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    uint32_t c = 4;
     while (c < cap)
         c <<= 1; /* round up to power of two */
     ui->store.slots = lensi_alloc(ui, c * sizeof(lens_store_slot));
@@ -135,12 +158,12 @@ lens_node *lensi_store_find(const lens *ui, lens_id id) {
     return NULL;
 }
 
-static void store_insert(lens *ui, lens_node *n) {
+static bool store_insert(lens *ui, lens_node *n) {
     lens_store *s = &ui->store;
     /* keep load factor < 0.75 */
-    if ((s->count + 1) * 4 >= s->cap * 3) {
-        if (store_grow(ui, s->cap * 2) != FLUX_OK)
-            return;
+    if (((uint64_t)s->count + 1) * 4 >= (uint64_t)s->cap * 3) {
+        if (s->cap >= (1u << 30) || store_grow(ui, s->cap * 2) != FLUX_OK)
+            return false;
     }
     uint32_t i = slot_index(n->id, s->cap);
     while (s->slots[i].id)
@@ -149,6 +172,7 @@ static void store_insert(lens *ui, lens_node *n) {
     s->slots[i].node = n;
     s->count++;
     live_link(s, i);
+    return true;
 }
 
 lens_node *lensi_store_touch(lens *ui, lens_id id) {
@@ -163,7 +187,11 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
         n->id = id;
         n->ui = ui;
         n->phase = LENS_NODE_ENTERING;
-        store_insert(ui, n);
+        if (!store_insert(ui, n)) {
+            lensi_free(ui, n);
+            lensi_set_overflow(ui);
+            return NULL;
+        }
     }
     if (n->last_seen != ui->frame) {
         /* A node re-entering from the LEAVING grace window must not be
@@ -185,97 +213,26 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
     return n;
 }
 
-/* Phase advance + GC, run at lens_end after the frame is built.
- *
- * O(live) since the live-list rework: the walk follows `next_live`
- * links, so a table inflated by a transient spike (a scrolled 100
- * k-row table leaves cap at 262 144 for the 300-frame shrink
- * hysteresis) no longer costs an O(cap) scan per frame while it
- * dwells. */
-/* Phase advance + GC, run at lens_end after the frame is built.
- *
- * O(live) since the live-list rework: the walk follows `next_live`
- * links, so a table inflated by a transient spike (a scrolled 100
- * k-row table leaves cap at 262 144 for the 300-frame shrink
- * hysteresis) no longer costs an O(cap) scan per frame while it
- * dwells.
- *
- * Slot removal is transactional: a reaped slot's probe cluster is
- * cleared FIRST and the displaced entries collected, THEN re-inserted.
- * store_insert may trigger store_grow (rehash), which rebuilds the
- * live list from the current links — so every unlink happens before
- * any insert can observe a half-updated list. An earlier interleaved
- * version unlinked inside the cluster walk and corrupted the list
- * exactly when a rehash fired mid-cluster. */
+/* Visit each live node once. Deletion shifts only its probe cluster and
+ * cannot fail; surviving nodes are never temporarily unreachable. */
 void lensi_store_reap(lens *ui) {
     lens_store *s = &ui->store;
-
-    /* Displaced-by-cluster-clear entries awaiting re-insert. Grown
-     * on demand; freed before the next GC victim is processed, so an
-     * empty GC frame pays nothing. */
-    lens_node **reinsert = NULL;
-    uint32_t reinsert_cap = 0;
-
     uint32_t cursor = s->live_head;
     while (cursor != LENSI_STORE_LINK_NONE) {
         uint32_t i = cursor;
         lens_node *n = s->slots[i].node;
-
-        if (n->last_seen != ui->frame) {
-            n->phase = LENS_NODE_LEAVING;
-            if (++n->leaving_frames > LENSI_LEAVE_GRACE_FRAMES) {
-                /* Reap this node, then clear its probe cluster. The
-                 * cluster clear makes intermediate live-list state
-                 * visible to store_insert (which may rehash), so the
-                 * order below is load-bearing: (1) unlink the victim,
-                 * (2) unlink + clear EVERY displaced slot, (3) only
-                 * then re-insert. The saved `cursor` is invalidated by
-                 * step 2 — the walk re-anchors at the head instead. */
-                live_unlink(s, i);
-                lensi_node_drop_record(ui, n);
-                if (n->state)
-                    lensi_free(ui, n->state);
-                lensi_free(ui, n);
-                s->slots[i].id = 0;
-                s->slots[i].node = NULL;
-                s->count--;
-
-                uint32_t moved_n = 0;
-                uint32_t j = (i + 1) & (s->cap - 1);
-                while (s->slots[j].id) {
-                    if (moved_n == reinsert_cap) {
-                        uint32_t ncap = reinsert_cap ? reinsert_cap * 2 : 16;
-                        lens_node **ni = realloc(reinsert, (size_t)ncap * sizeof *ni);
-                        if (!ni)
-                            break; /* OOM: leave the rest of the cluster;
-                                    * find() may miss entries until the
-                                    * next GC pass clears them. */
-                        reinsert = ni;
-                        reinsert_cap = ncap;
-                    }
-                    reinsert[moved_n++] = s->slots[j].node;
-                    live_unlink(s, j);
-                    s->slots[j].id = 0;
-                    s->slots[j].node = NULL;
-                    s->count--;
-                    j = (j + 1) & (s->cap - 1);
-                }
-
-                for (uint32_t k = 0; k < moved_n; k++)
-                    store_insert(ui, reinsert[k]);
-                if (reinsert) {
-                    free(reinsert);
-                    reinsert = NULL;
-                    reinsert_cap = 0;
-                }
-                cursor = s->live_head; /* old index untrustworthy */
-                continue;
-            }
-        }
         cursor = s->slots[i].next_live;
+        if (n->last_seen == ui->frame)
+            continue;
+        n->phase = LENS_NODE_LEAVING;
+        if (++n->leaving_frames <= LENSI_LEAVE_GRACE_FRAMES)
+            continue;
+        lensi_node_drop_record(ui, n);
+        if (n->state)
+            lensi_free(ui, n->state);
+        lensi_free(ui, n);
+        store_erase(s, i, &cursor);
     }
-
-    free(reinsert);
 
     /* Shrink after a sustained population collapse. A transient spike (a
      * long list or a notification burst) previously left the slot table at
@@ -286,10 +243,10 @@ void lensi_store_reap(lens *ui) {
      * frames, and never below the initial capacity. The shrink itself is
      * the same full-rehash path as growth (amortised away by the long
      * dwell time before it can trigger again). */
-    if (s->cap > LENSI_STORE_MIN_CAP && s->count * 8 <= s->cap) {
+    if (s->cap > LENSI_STORE_MIN_CAP && (uint64_t)s->count * 8 <= s->cap) {
         if (++s->idle_frames >= LENSI_STORE_SHRINK_FRAMES) {
             uint32_t want = s->cap / 2;
-            while (want > LENSI_STORE_MIN_CAP && s->count * 8 > want)
+            while (want > LENSI_STORE_MIN_CAP && (uint64_t)s->count * 8 > want)
                 want /= 2;
             if (want < s->cap && store_grow(ui, want) == FLUX_OK)
                 s->idle_frames = 0;

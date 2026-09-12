@@ -17,6 +17,7 @@ lens_response lens_separator(lens *ui, const lens_separator_opts *opts) {
         return (lens_response){0};
 
     lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts->box);
     n->is_container = false;
 
     lens_node *parent = lensi_open_container(ui);

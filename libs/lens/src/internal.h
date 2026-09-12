@@ -145,6 +145,11 @@ struct lens_node {
     lens_axis axis;
     float gap, pad;
     lens_align cross;
+    lens_align align;
+    bool space_between, fit;
+    bool box_disabled;
+    uint32_t grid_columns;
+    float grid_row_gap;
     float flex_grow;
     float fixed_w, fixed_h; /* 0 = intrinsic */
     float min_w, max_w;     /* 0 = unconstrained */
@@ -235,6 +240,7 @@ typedef struct lens_store_slot {
      * insertion order, LENSI_STORE_LINK_NONE at the tail. Stored per
      * slot so the table stays one flat array. */
     uint32_t next_live;
+    uint32_t prev_live;
 } lens_store_slot;
 
 typedef struct lens_store {
@@ -336,19 +342,10 @@ struct lens {
 
     bool click_hit_focusable; /* mouse pressed inside a focusable widget */
 
-#ifdef LENS_DEBUG_BORROWS
-    /* ADR-0085 debug borrow registry: label pointers handed to widgets
-     * this frame. The registry is a bounded ring: the frame's widget
-     * count is far below the cap in practice, and the oldest entry
-     * wrapping away only weakens the check (never a false positive — a
-     * registered pointer never becomes "unregistered" in the same
-     * frame). Compiled out entirely without LENS_DEBUG_BORROWS (the
-     * shipped library defines it; consumers wanting an abort-free
-     * build rebuild with LENS_NO_BORROW_CHECK, which turns the checks
-     * into no-ops while keeping the registry for diagnosis). */
+    /* Keep the internal layout identical for library and direct-source tests.
+     * Registration code is optional; its diagnostic storage has a fixed slot. */
     const char *borrow_set[LENSI_BORROW_SET_MAX];
     uint32_t borrow_count;
-#endif
 
     /* interaction state (ADR-0029). There is deliberately no `hot_id`:
      * hover is reported per-widget through lens_response.hovered, and a
@@ -665,6 +662,8 @@ void lensi_open_container_push(lens *ui, lens_node *n);
 void lensi_open_container_pop(lens *ui);
 
 /* descriptor plumbing (tree.c) — used by the *_ex widget wrappers. */
+void lensi_node_box(lens *ui, lens_node *n, const lens_box *box);
+lens_box lensi_merge_box(lens_box base, lens_box override);
 void lensi_apply_box(lens *ui, lens_box box); /* stage flex/size/disabled/error */
 void lensi_set_placeholder(lens *ui, const char *text);
 void lensi_tooltip(lens *ui, const char *text); /* anchored to last widget */

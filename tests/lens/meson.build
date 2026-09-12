@@ -109,3 +109,9 @@ test('icon_runtime_runs', test_icon_runtime_runs)
 if get_option('fuzz')
   subdir('fuzz')
 endif
+
+contract_test = executable('test_contracts', 'test_contracts.c', dependencies : [lens_dep, m_dep])
+test('lens_contracts', contract_test)
+store_fault_test = executable('test_store_fault', 'test_store_fault.c',
+  '../../libs/lens/src/store/store.c', dependencies : [lens_dep, m_dep])
+test('lens_store_fault', store_fault_test)

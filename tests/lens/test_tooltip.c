@@ -1,6 +1,8 @@
 /* test_tooltip.c — lens_box.tooltip records a tooltip for hovered widgets. */
 
+#include "../../libs/lens/src/internal.h"
 #include "test_helpers.h"
+#include <flux/canvas_cpu.h>
 #include <lens/lens.h>
 
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
@@ -33,6 +35,8 @@ static void test_tooltip_hover_does_not_crash(void) {
     lens_button(ui, &(lens_button_opts){.label = "btn", .box = {.tooltip = "Hovered!"}});
     lens_end(ui);
 
+    CHECK(ui->tooltip.active);
+    CHECK(strcmp(ui->tooltip.text, "Hovered!") == 0);
     CHECK(lens_overflowed(ui) == false);
     lens_destroy(ui);
 }
@@ -43,16 +47,40 @@ static void test_tooltip_render_path(void) {
 
     /* Two frames so prev_rect exists for hover hit-testing. */
     lens_begin(ui, &IN0);
-    lens_button(ui, &(lens_button_opts){.label = "btn", .box = {.tooltip = "regression"}});
+    lens_button(ui, &(lens_button_opts){.label = "btn", .box = {.tooltip = "Tip text"}});
     lens_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){20, 15};
     lens_begin(ui, &in);
-    lens_button(ui, &(lens_button_opts){.label = "btn", .box = {.tooltip = "regression"}});
-    (void)lens_render(ui, NULL); /* headless: NULL canvas is a documented no-op */
+    lens_button(ui, &(lens_button_opts){.label = "btn", .box = {.tooltip = "Tip text"}});
     lens_end(ui);
 
+    CHECK(ui->tooltip.active);
+    CHECK(strcmp(ui->tooltip.text, "Tip text") == 0);
+
+    flux_canvas *canvas = NULL;
+    CHECK(flux_canvas_create_cpu(200, 100, 1.0f, &canvas) == FLUX_OK);
+    flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
+    CHECK(flux_canvas_cpu_begin(canvas, &black) == FLUX_OK);
+    CHECK(lens_render(ui, canvas) == FLUX_OK);
+    flux_canvas_cpu_end(canvas);
+
+    uint32_t width = 0, height = 0, stride = 0;
+    const uint8_t *fb = flux_canvas_cpu_pixels(canvas, &width, &height, &stride);
+    CHECK(fb != NULL && width == 200 && height == 100);
+
+    size_t lit_pixels = 0;
+    for (uint32_t y = 0; y < height; y++) {
+        for (uint32_t x = 0; x < width; x++) {
+            const uint8_t *p = fb + (size_t)y * stride + (size_t)x * 4;
+            if (p[0] > 0 || p[1] > 0 || p[2] > 0)
+                lit_pixels++;
+        }
+    }
+    CHECK(lit_pixels > 0);
+
+    flux_canvas_destroy(canvas);
     CHECK(lens_overflowed(ui) == false);
     lens_destroy(ui);
 }

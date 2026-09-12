@@ -946,4 +946,7 @@ void flux_transient_ring_destroy(flux_transient_ring *r, flux_device *d);
 flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t w, uint32_t h);
 void flux_surface_destroy_swapchain(flux_surface *s);
 
+struct flux_sampler;
+flux_device *flux_sampler_owner(const struct flux_sampler *sampler);
+
 #endif /* FLUX_CORE_INTERNAL_H */

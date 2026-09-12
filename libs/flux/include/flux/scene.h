@@ -154,6 +154,11 @@ FLUX_NODISCARD FLUX_API flux_material *flux_material_retain(flux_material *m);
  * completed (its frame-slot fence has signalled, or after
  * flux_device_wait_idle). */
 FLUX_API void flux_material_release(flux_material *m);
+/* Deferred flavour: parks the underlying Vulkan pipelines on the device's
+ * retire queue so they are safely destroyed after all in-flight GPU batches
+ * have finished executing. Safe to call at any time without waiting for idle.
+ * If d is NULL, m->device is used. */
+FLUX_API void flux_material_release_deferred(flux_device *d, flux_material *m);
 FLUX_API flux_material_alpha_mode flux_material_get_alpha_mode(const flux_material *m);
 
 /* ------------------------------------------------------------------ */

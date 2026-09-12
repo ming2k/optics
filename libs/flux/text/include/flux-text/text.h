@@ -81,6 +81,17 @@ extern "C" {
 #define FLUX_TEXT_VERSION_MINOR 0
 #define FLUX_TEXT_VERSION_PATCH 40
 
+/* Packed integer version, monotonic — identical layout to
+ * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
+ * The whole stack shares one versioning scheme so a consumer can check
+ * every library it loads the same way. */
+#define FLUX_TEXT_VERSION_NUMBER                                                                   \
+    (((uint32_t)FLUX_TEXT_VERSION_MAJOR << 16) | ((uint32_t)FLUX_TEXT_VERSION_MINOR << 8) |        \
+     (uint32_t)FLUX_TEXT_VERSION_PATCH)
+
+FLUX_TEXT_API void flux_text_version(int *major, int *minor, int *patch);
+FLUX_TEXT_API uint32_t flux_text_version_number(void);
+FLUX_TEXT_API bool flux_text_version_check(int major, int minor, int patch);
 FLUX_TEXT_API const char *flux_text_version_string(void);
 
 /* ================================================================== */

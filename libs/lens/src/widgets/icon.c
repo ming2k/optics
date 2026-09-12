@@ -23,6 +23,7 @@ lens_response lens_icon(lens *ui, const lens_icon_opts *opts) {
         return (lens_response){0};
 
     lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts->box);
     n->is_container = false;
 
     float glyph = opts->size > 0 ? opts->size : lensi_style_font_size(ui, &eff, t);

@@ -10,6 +10,9 @@ bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts) {
         opts = &default_opts;
 
     lensi_apply_box(ui, opts->box);
+    ui->next_disabled = false;
+    ui->next_error = false;
+    ui->next_style = (lens_style){};
     const lens_theme *t = &ui->theme;
     const char *id_str = opts->box.id ? opts->box.id : "##scroll";
     lens_id fid = lensi_gen_widget_id(ui, id_str);
@@ -17,6 +20,7 @@ bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts) {
     if (!n)
         return false;
     lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts->box);
 
     n->is_container = true;
     n->is_scroll = true;

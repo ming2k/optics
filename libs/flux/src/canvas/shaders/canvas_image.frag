@@ -98,7 +98,7 @@ void main()
     /* Alpha-free RGB import (kind 6): the X channel is semantically
      * undefined and premultiplied decode would zero a=0 texels, so pin
      * alpha before any decode — the content is opaque straight sRGB. */
-    if (kind == 6u)
+    if ((kind == 6u || kind == 7u))
         texel.a = 1.0;
     if ((pc.kind & FLUX_CANVAS_PUSH_HAS_COLOR_PARAMS) != 0u) {
         /* Tagged content (ADR-0069/0070): explicit parametric space or
@@ -134,9 +134,9 @@ void main()
         /* Alpha-free RGB import (kind 6): DRM XRGB/XBGR leaves the X bits
          * semantically undefined, so never feed the sampled value into the
          * output alpha channel or the blend equation. */
-        if (kind == 6u)
+        if ((kind == 6u || kind == 7u))
             out_color.a = 1.0;
-        if (kind == 5u) {
+        if ((kind == 5u || kind == 7u)) {
             vec2 q = abs(v_pos - pc.image_dst.xy) - (pc.image_dst.zw - pc.grad_radius);
             float distance = min(max(q.x, q.y), 0.0)
                            + length(max(q, vec2(0.0))) - pc.grad_radius;

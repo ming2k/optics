@@ -80,8 +80,10 @@ static lens_node *open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
     if (!n)
         return NULL;
     lensi_link_child(ui, n); /* link into parent BEFORE pushing */
+    lensi_node_box(ui, n, &opts.box);
     n->is_container = true;
     n->axis = axis;
+    n->align = opts.align;
     n->gap = opts.gap;
     n->pad = opts.pad;
     n->cross = opts.cross;
@@ -156,7 +158,11 @@ void lens_grid_begin(lens *ui, const lens_grid_opts *opts) {
         .pad = opts->pad,
         .cross = LENS_STRETCH,
     };
-    open_flex(ui, LENS_ROW, lopts);
+    lens_node *n = open_flex(ui, LENS_ROW, lopts);
+    if (n) {
+        n->grid_columns = opts->columns > 0 ? (uint32_t)opts->columns : 1;
+        n->grid_row_gap = opts->row_gap;
+    }
 }
 void lens_grid_end(lens *ui) {
     lensi_open_container_pop(ui);
@@ -176,21 +182,20 @@ lens_response lens_pressable_begin(lens *ui, const lens_pressable_opts *opts) {
         opts = &default_opts;
 
     lens_layout_opts lopts = opts->layout;
-    if (opts->box.id)
-        lopts.box.id = opts->box.id;
-    if (opts->box.width > 0.0f)
-        lopts.box.width = opts->box.width;
-    if (opts->box.height > 0.0f)
-        lopts.box.height = opts->box.height;
-    if (opts->box.disabled)
-        lopts.box.disabled = true;
+    lopts.box = lensi_merge_box(lopts.box, opts->box);
 
     lens_node *n = open_flex(ui, LENS_ROW, lopts);
     if (!n)
         return empty;
 
     bool disabled = lopts.box.disabled;
+    for (lens_node *parent = n->parent; parent; parent = parent->parent)
+        disabled = disabled || parent->box_disabled;
     lens_response r = lensi_interact(ui, n, true, disabled);
+    if (opts->mouse_button == LENS_MOUSE_RIGHT)
+        r.clicked = r.right_clicked;
+    else if (opts->mouse_button == LENS_MOUSE_MIDDLE)
+        r.clicked = r.middle_clicked;
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0);
     lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, opts->label ? opts->label : "", NULL, sem_flags);
 
@@ -232,19 +237,76 @@ void lens_pressable_end(lens *ui) {
         lens_close(ui);
 }
 
-/* ---- descriptor plumbing (internal; drained by the next widget body) ----
- *
- * The *_ex wrappers stage an lens_box's fields here just before invoking
- * the terse widget body, which consumes and clears them. Because a box
- * is applied immediately before the one call it belongs to, there is no
- * "applies to the next/last widget" ambiguity at the public surface. */
+/* Descriptor fields are applied by every node builder. Legacy layout
+ * hints remain supported; explicit nonzero descriptor values take precedence. */
+lens_box lensi_merge_box(lens_box base, lens_box override) {
+#define OVERRIDE(field)                                                                            \
+    if (override.field)                                                                            \
+    base.field = override.field
+    OVERRIDE(id);
+    OVERRIDE(flex);
+    OVERRIDE(width);
+    OVERRIDE(height);
+    OVERRIDE(min_width);
+    OVERRIDE(max_width);
+    OVERRIDE(min_height);
+    OVERRIDE(max_height);
+    OVERRIDE(disabled);
+    OVERRIDE(error);
+    OVERRIDE(tooltip);
+#undef OVERRIDE
+    if (override.style.fields)
+        base.style = override.style;
+    return base;
+}
+
+void lensi_node_box(lens *ui, lens_node *n, const lens_box *box) {
+    n->min_w = box->min_width;
+    n->max_w = box->max_width;
+    n->min_h = box->min_height;
+    n->max_h = box->max_height;
+    n->box_disabled = box->disabled;
+    if (box->flex != 0)
+        n->flex_grow = box->flex;
+    if (box->width > 0)
+        n->fixed_w = box->width;
+    if (box->height > 0)
+        n->fixed_h = box->height;
+    if (box->tooltip && n->has_prev && lensi_point_in(ui->input.cursor, n->prev_rect) &&
+        !lensi_point_clipped_by_scroll(n, ui->input.cursor) && !lensi_widget_occluded(ui, n)) {
+        ui->tooltip.active = true;
+        ui->tooltip.anchor = n->prev_rect;
+        ui->tooltip.opacity = ui->opacity;
+        size_t len = strlen(box->tooltip);
+        if (len >= sizeof ui->tooltip.text)
+            len = sizeof ui->tooltip.text - 1;
+        memcpy(ui->tooltip.text, box->tooltip, len);
+        ui->tooltip.text[len] = '\0';
+    }
+}
+
+void lens_space_between(lens *ui) {
+    lens_node *n = ui ? lensi_open_container(ui) : NULL;
+    if (n)
+        n->space_between = true;
+}
+
+void lens_fit(lens *ui) {
+    lens_node *n = ui ? lensi_open_container(ui) : NULL;
+    if (n)
+        n->fit = true;
+}
 
 /* Positional layout hints for the next node (widget or container). */
 void lens_flex(lens *ui, float grow) {
+    if (!ui)
+        return;
     ui->next_flex = grow;
     ui->have_next_flex = true;
 }
 void lens_size(lens *ui, float w, float h) {
+    if (!ui)
+        return;
     ui->next_w = w;
     ui->next_h = h;
     ui->have_next_size = true;

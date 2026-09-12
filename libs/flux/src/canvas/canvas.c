@@ -926,69 +926,147 @@ uint64_t flux_canvas_recorded_draws(const flux_canvas *c) {
     return c ? c->recorded_draws : 0;
 }
 
-void flux_canvas_draw(flux_canvas *c, const flux_shape *shape, const flux_paint *paint) {
-    if (!c || !c->recording || !shape)
-        return;
+static void canvas_shape_error(flux_canvas *c, flux_result result, const char *message) {
+    if (c->pass_error == FLUX_OK) {
+        c->pass_error = result;
+        FLUX_FAIL(result, message);
+    }
+}
 
+/* Analytic rounded clipping currently supports translation and positive
+ * uniform scale. Other shape transforms use the general path renderer. */
+static bool canvas_axis_uniform(const flux_canvas *c) {
+    flux_mat3x2 t = c->states[c->state_top].transform;
+    return fabsf(t.m[1]) < 0.000001f && fabsf(t.m[2]) < 0.000001f && t.m[0] > 0 &&
+           fabsf(t.m[0] - t.m[3]) < 0.000001f;
+}
+
+void flux_canvas_draw(flux_canvas *c, const flux_shape *shape, const flux_paint *paint) {
+    if (!c || !c->recording)
+        return;
+    if (!shape) {
+        canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "draw requires a shape");
+        return;
+    }
+    flux_paint p = paint ? *paint : flux_paint_default();
+    if (p.kind < FLUX_PAINT_SOLID || p.kind > FLUX_PAINT_RADIAL_GRADIENT ||
+        !isfinite(shape->stroke_width) || shape->stroke_width < 0) {
+        canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "invalid shape paint or stroke width");
+        return;
+    }
+    /* The shape is the single source of stroke geometry for unified draws. */
+    p.stroke_width = shape->stroke_width;
+    p.cap = shape->stroke_cap;
+    p.join = shape->stroke_join;
+    if (shape->kind == FLUX_SHAPE_IMAGE) {
+        if (!shape->image) {
+            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "image shape requires an image");
+            return;
+        }
+        if (!c->device || p.kind != FLUX_PAINT_SOLID || shape->stroke_width > 0) {
+            canvas_shape_error(c, FLUX_ERROR_UNSUPPORTED,
+                               "image draws require GPU, solid tint, and no stroke");
+            return;
+        }
+        if (shape->image->device != c->device ||
+            (shape->sampler && flux_sampler_owner(shape->sampler) != c->device)) {
+            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "image/sampler device mismatch");
+            return;
+        }
+        bool clipped = shape->clip_rect.w > 0 && shape->clip_rect.h > 0;
+        bool rounded = clipped || shape->radius > 0;
+        if (rounded && !canvas_axis_uniform(c)) {
+            canvas_shape_error(
+                c, FLUX_ERROR_UNSUPPORTED,
+                "rounded image clips require positive uniform scale and translation");
+            return;
+        }
+        if (clipped && shape->radius > 0) {
+            canvas_shape_error(c, FLUX_ERROR_UNSUPPORTED, "use one rounded image clip per draw");
+            return;
+        }
+        flux_rect src = shape->src_rect;
+        if (src.w == 0 && src.h == 0)
+            src = FLUX_SRC_WHOLE;
+        if (src.w <= 0 || src.h <= 0) {
+            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "invalid image source rectangle");
+            return;
+        }
+        flux_bindless_handle sh = shape->sampler ? flux_sampler_bindless_handle(shape->sampler)
+                                                 : flux_device_default_sampler_handle(c->device);
+        const flux_rect *clip = rounded ? (clipped ? &shape->clip_rect : &shape->rect) : nullptr;
+        uint32_t kind = shape->opaque_only ? (rounded ? 7u : 6u) : (rounded ? 5u : 3u);
+        draw_image_with_sampler_handle(c, shape->image, shape->sampler, sh, shape->rect, src,
+                                       paint ? paint->color : 0xffffffffu,
+                                       shape->opaque_only && !rounded ? FLUX_BLEND_SRC : p.blend,
+                                       kind, clip, clipped ? shape->clip_radius : shape->radius);
+        return;
+    }
+    if (shape->kind == FLUX_SHAPE_GLYPHS) {
+        if (!shape->glyph_run) {
+            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "glyph shape requires a run");
+        } else if (paint || shape->stroke_width > 0) {
+            canvas_shape_error(c, FLUX_ERROR_UNSUPPORTED,
+                               "glyph runs carry per-quad colors; pass no paint");
+        } else {
+            flux_canvas_draw_glyph_run(c, shape->glyph_run);
+        }
+        return;
+    }
+    if (shape->kind == FLUX_SHAPE_PATH) {
+        if (!shape->path) {
+            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "path shape requires a path");
+        } else if (shape->stroke_width > 0) {
+            flux_canvas_stroke_path(c, shape->path, &p);
+        } else {
+            flux_canvas_fill_path(c, shape->path, &p);
+        }
+        return;
+    }
+    if (shape->kind == FLUX_SHAPE_RECT && shape->stroke_width == 0) {
+        flux_canvas_fill_rect(c, shape->rect, &p);
+        return;
+    }
+    flux_path_segment segments[16];
+    flux_path path = {.segments = segments, .capacity = 16};
     switch (shape->kind) {
     case FLUX_SHAPE_RECT:
-        flux_canvas_fill_rect(c, shape->rect, paint);
+        flux_path_add_rect(&path, shape->rect);
         break;
     case FLUX_SHAPE_RRECT:
-    case FLUX_SHAPE_CIRCLE:
-        if (shape->stroke_width > 0.0f) {
-            flux_color col = paint ? paint->color : 0xFF000000u;
-            flux_canvas_stroke_rrect(c, shape->rect, shape->radius, col, shape->stroke_width);
-        } else {
-            flux_color col = paint ? paint->color : 0xFF000000u;
-            flux_canvas_fill_rrect(c, shape->rect, shape->radius, col);
+    case FLUX_SHAPE_CIRCLE: {
+        flux_rect rect = shape->rect;
+        float radius = shape->radius;
+        if (shape->kind == FLUX_SHAPE_CIRCLE) {
+            float diameter = fminf(rect.w, rect.h);
+            rect.x += (rect.w - diameter) * 0.5f;
+            rect.y += (rect.h - diameter) * 0.5f;
+            rect.w = rect.h = diameter;
+            radius = diameter * 0.5f;
         }
-        break;
-    case FLUX_SHAPE_LINE: {
-        flux_path_segment segs[2];
-        flux_path p = {
-            .segments = segs,
-            .capacity = 2,
-            .count = 0,
-            .dropped = 0,
-            .cursor_x = 0,
-            .cursor_y = 0,
-            .arena = nullptr,
-        };
-        flux_path_move_to(&p, shape->rect.x, shape->rect.y);
-        flux_path_line_to(&p, shape->rect.x + shape->rect.w, shape->rect.y + shape->rect.h);
-        flux_canvas_stroke_path(c, &p, paint);
+        if (p.kind == FLUX_PAINT_SOLID && p.blend == FLUX_BLEND_SRC_OVER &&
+            canvas_axis_uniform(c)) {
+            draw_sdf_rrect(c, rect, radius, p.color, shape->stroke_width * 0.5f);
+            return;
+        }
+        flux_path_add_round_rect(&path, rect, radius);
         break;
     }
-    case FLUX_SHAPE_PATH:
-        if (shape->path) {
-            if (shape->stroke_width > 0.0f)
-                flux_canvas_stroke_path(c, shape->path, paint);
-            else
-                flux_canvas_fill_path(c, shape->path, paint);
+    case FLUX_SHAPE_LINE:
+        if (shape->stroke_width == 0) {
+            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT,
+                               "line requires positive stroke width");
+            return;
         }
-        break;
-    case FLUX_SHAPE_IMAGE:
-        if (shape->image) {
-            if (shape->clip_rect.w > 0.0f && shape->clip_rect.h > 0.0f) {
-                flux_canvas_draw_image_clipped_rrect(c, shape->image, shape->rect, shape->clip_rect,
-                                                     shape->clip_radius, paint);
-            } else if (shape->radius > 0.0f) {
-                flux_canvas_draw_image_rrect(c, shape->image, shape->rect, shape->radius, paint);
-            } else if (shape->opaque_only) {
-                flux_canvas_draw_image_opaque(c, shape->image, shape->rect);
-            } else if (shape->sampler) {
-                flux_canvas_draw_image_sampled(c, shape->image, shape->sampler, shape->rect, paint);
-            } else {
-                flux_canvas_draw_image(c, shape->image, shape->rect, paint);
-            }
-        }
-        break;
-    case FLUX_SHAPE_GLYPHS:
-        if (shape->glyph_run)
-            flux_canvas_draw_glyph_run(c, shape->glyph_run);
+        flux_path_move_to(&path, shape->rect.x, shape->rect.y);
+        flux_path_line_to(&path, shape->rect.x + shape->rect.w, shape->rect.y + shape->rect.h);
         break;
     default:
-        break;
+        canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "unknown shape kind");
+        return;
     }
+    if (shape->stroke_width > 0)
+        flux_canvas_stroke_path(c, &path, &p);
+    else
+        flux_canvas_fill_path(c, &path, &p);
 }

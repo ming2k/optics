@@ -295,6 +295,8 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     lensi_apply_box(ui, opts->box);
     const lens_theme *t = &ui->theme;
     bool disabled = ui->next_disabled;
+    for (lens_node *parent = lensi_open_container(ui); parent; parent = parent->parent)
+        disabled = disabled || parent->box_disabled;
     bool error = ui->next_error || opts->box.error;
     const char *placeholder = opts->placeholder;
     ui->next_disabled = false;
@@ -310,6 +312,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     if (!n)
         return (lens_response){0};
     lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts->box);
     n->is_container = false;
 
     char *buf = opts->buf;

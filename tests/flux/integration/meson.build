@@ -83,6 +83,12 @@ if opt_scene
     dependencies : [test_helpers_dep],
   )
   test('mesh_retire', test_mesh_retire, suite : 'integration')
+
+  test_material_retire = executable('test_material_retire',
+    'test_material_retire.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('material_retire', test_material_retire, suite : 'integration')
 endif
 
 # Scene GPU rendering with pixel assertions: offscreen surface

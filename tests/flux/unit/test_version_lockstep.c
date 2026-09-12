@@ -21,6 +21,7 @@
 #include "test_helpers.h"
 #include <anim/anim.h>
 #include <flux-scene-graph/scene-graph.h>
+#include <flux-text/text.h>
 #include <flux/flux.h>
 #include <iris/app.h>
 #include <lens/lens.h>
@@ -84,6 +85,7 @@ int main(void) {
     CHECK_VERSION_SUITE(prism, PRISM);
     CHECK_VERSION_SUITE(anim, ANIM);
     CHECK_VERSION_SUITE(flux_sg, FLUX_SG);
+    CHECK_VERSION_SUITE(flux_text, FLUX_TEXT);
 
     /* One packed-number scheme across the whole stack: a consumer can
      * compare every library's version_number() with the same code. */
@@ -95,6 +97,7 @@ int main(void) {
     EXPECT(FLUX_VERSION_NUMBER == PRISM_VERSION_NUMBER);
     EXPECT(FLUX_VERSION_NUMBER == ANIM_VERSION_NUMBER);
     EXPECT(FLUX_VERSION_NUMBER == FLUX_SG_VERSION_NUMBER);
+    EXPECT(FLUX_VERSION_NUMBER == FLUX_TEXT_VERSION_NUMBER);
 
     TEST_SUMMARY();
 }

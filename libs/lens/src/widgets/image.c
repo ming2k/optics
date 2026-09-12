@@ -19,6 +19,7 @@ lens_response lens_image(lens *ui, const lens_image_opts *opts) {
         return (lens_response){0};
 
     lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts->box);
     n->is_container = false;
 
     float w = opts->width;

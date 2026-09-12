@@ -10,6 +10,8 @@ lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts) {
     lensi_apply_box(ui, opts->box);
     const lens_theme *t = &ui->theme;
     bool disabled = ui->next_disabled;
+    for (lens_node *parent = lensi_open_container(ui); parent; parent = parent->parent)
+        disabled = disabled || parent->box_disabled;
     ui->next_disabled = false;
     ui->next_error = false;
 
@@ -22,6 +24,7 @@ lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts) {
         return (lens_response){0};
 
     lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts->box);
     n->is_container = false;
 
     float font_size = lensi_style_font_size(ui, &eff, t);

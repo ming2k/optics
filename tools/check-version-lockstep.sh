@@ -58,6 +58,7 @@ for spec in \
     "libs/iris/include/iris/app.h IRIS iris" \
     "libs/prism/include/prism/types.h PRISM prism" \
     "libs/anim/include/anim/anim.h ANIM anim" \
+    "libs/flux/text/include/flux-text/text.h FLUX_TEXT flux-text" \
     "libs/flux/scene_graph/include/flux-scene-graph/scene-graph.h FLUX_SG flux-scene-graph"
 do
     set -- $spec

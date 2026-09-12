@@ -521,8 +521,11 @@ bool txt_text_layout_build(flux_text *t, const char *utf8, size_t len, float siz
          * real advance) is the honest width in that case. Take the max
          * of the two: the bracket recomputation wins only when it
          * extends the line, never drags it left of the pen. */
+        pen -= shift;
         float trailing = t->layout_buf[count - 1].x + t->layout_buf[count - 1].advance;
         pen = fmaxf(pen, trailing);
+        if (pen < 0.0f)
+            pen = 0.0f;
     }
 
     out->glyphs = t->layout_buf;

@@ -2221,7 +2221,7 @@ impl Drop for Sampler {
 
 impl Drop for Material {
     fn drop(&mut self) {
-        unsafe { sys::flux_material_release(self.raw) };
+        unsafe { sys::flux_material_release_deferred(std::ptr::null_mut(), self.raw) };
     }
 }
 
@@ -2594,8 +2594,8 @@ impl Canvas {
     /// Snapshot the canvas' pixels as premultiplied RGBA8 (row-major). Returns
     /// `(width, height, stride_bytes, pixels)` on the CPU backend; `None` on the
     /// GPU backend (use an offscreen surface / target for GPU readback). The
-    /// slice borrows canvas-owned memory, valid until the next call or drop.
-    pub fn read_pixels(&self) -> Option<(u32, u32, u32, &[u8])> {
+    /// returned vector owns its pixels and is unaffected by later canvas calls.
+    pub fn read_pixels(&self) -> Option<(u32, u32, u32, Vec<u8>)> {
         let (mut w, mut h, mut stride) = (0u32, 0u32, 0u32);
         let ptr = unsafe { sys::flux_canvas_read_pixels(self.raw, &mut w, &mut h, &mut stride) };
         if ptr.is_null() {
@@ -2605,7 +2605,7 @@ impl Canvas {
         // SAFETY: ptr is a valid buffer of `len` bytes owned by the canvas and
         // stable until the next read_pixels / destroy.
         let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-        Some((w, h, stride, slice))
+        Some((w, h, stride, slice.to_vec()))
     }
 
     /// Set the content scale (device-pixel ratio). The canvas then draws in
@@ -2684,12 +2684,12 @@ impl Canvas {
     }
 
     /// Fill `path` with `paint` (the paint's fill rule applies).
-    pub fn fill_path(&self, path: &Path, paint: &Paint) {
+    pub fn fill_path(&self, path: &Path<'_>, paint: &Paint) {
         unsafe { sys::flux_canvas_fill_path(self.raw, path.raw, &paint.raw) };
     }
 
     /// Stroke `path` with `paint` (width, cap, and join apply).
-    pub fn stroke_path(&self, path: &Path, paint: &Paint) {
+    pub fn stroke_path(&self, path: &Path<'_>, paint: &Paint) {
         unsafe { sys::flux_canvas_stroke_path(self.raw, path.raw, &paint.raw) };
     }
 
@@ -3038,7 +3038,7 @@ impl Arena {
     }
 
     /// Drop everything allocated since creation/last reset, keeping the buffer.
-    pub fn reset(&self) {
+    pub fn reset(&mut self) {
         unsafe { sys::flux_arena_reset(self.raw) };
     }
 
@@ -3194,16 +3194,35 @@ impl Paint {
 /// or drop, so a `Path` must not outlive the frame's arena cycle. Mutators
 /// take `&self` because the path is a C-side growable buffer; overflow is
 /// reported by [`Path::dropped_count`].
-pub struct Path {
+///
+/// Paths cannot outlive their arena:
+/// ```compile_fail
+/// use flux::{Arena, Path};
+/// let path = {
+///     let arena = Arena::with_capacity(4096).unwrap();
+///     Path::new(&arena).unwrap()
+/// };
+/// path.move_to(1.0, 2.0);
+/// ```
+/// Nor can an arena be reset while a path is still in use:
+/// ```compile_fail
+/// use flux::{Arena, Path};
+/// let mut arena = Arena::with_capacity(4096).unwrap();
+/// let path = Path::new(&arena).unwrap();
+/// arena.reset();
+/// path.move_to(1.0, 2.0);
+/// ```
+pub struct Path<'arena> {
     raw: *mut sys::flux_path,
+    _arena: std::marker::PhantomData<&'arena Arena>,
 }
 
-impl Path {
+impl<'arena> Path<'arena> {
     /// Create an empty path in `arena`.
-    pub fn new(arena: &Arena) -> Result<Path, Error> {
+    pub fn new(arena: &'arena Arena) -> Result<Path<'arena>, Error> {
         let mut out = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_path_create(&mut out, arena.as_raw()) })?;
-        Ok(Path { raw: out })
+        Ok(Path { raw: out, _arena: std::marker::PhantomData })
     }
 
     /// Begin a new subpath at `(x, y)`.

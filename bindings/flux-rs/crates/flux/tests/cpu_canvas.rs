@@ -153,3 +153,16 @@ fn linear_gradient_follows_canvas_transform() {
         pixels[mid]
     );
 }
+
+#[test]
+fn pixel_snapshot_survives_subsequent_frames() {
+    let c = Canvas::new_cpu(8, 8, 1.0).unwrap();
+    c.begin_cpu(Some(rgba(255, 0, 0, 255))).unwrap();
+    c.end_frame_checked().unwrap();
+    let (_, _, _, first) = c.read_pixels().unwrap();
+    c.begin_cpu(Some(rgba(0, 0, 255, 255))).unwrap();
+    c.end_frame_checked().unwrap();
+    let (_, _, _, second) = c.read_pixels().unwrap();
+    assert_eq!(&first[..4], &[255, 0, 0, 255]);
+    assert_eq!(&second[..4], &[0, 0, 255, 255]);
+}

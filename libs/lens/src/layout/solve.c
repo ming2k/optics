@@ -53,6 +53,7 @@ static flux_point measure(lens_node *n) {
     }
 
     float main = 0, cross = 0;
+    float grid_w = 0, grid_h = 0, row_h = 0;
     uint32_t n_children = 0;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         flux_point cm = measure(c);
@@ -66,6 +67,14 @@ static flux_point measure(lens_node *n) {
         if (cc > cross)
             cross = cc;
         n_children++;
+        if (n->grid_columns) {
+            grid_w = fmaxf(grid_w, cm.x);
+            row_h = fmaxf(row_h, cm.y);
+            if (n_children % n->grid_columns == 0) {
+                grid_h += row_h;
+                row_h = 0;
+            }
+        }
     }
     if (n_children > 1)
         main += n->gap * (float)(n_children - 1);
@@ -73,6 +82,12 @@ static flux_point measure(lens_node *n) {
     cross += 2.0f * n->pad;
 
     flux_point m = (n->axis == LENS_ROW) ? (flux_point){main, cross} : (flux_point){cross, main};
+    if (n->grid_columns) {
+        uint32_t cols = n_children < n->grid_columns ? n_children : n->grid_columns;
+        uint32_t rows = n_children / n->grid_columns + (n_children % n->grid_columns != 0);
+        m.x = cols * grid_w + (cols > 1 ? (cols - 1) * n->gap : 0) + 2 * n->pad;
+        m.y = grid_h + row_h + (rows > 1 ? (rows - 1) * n->grid_row_gap : 0) + 2 * n->pad;
+    }
     if (n->fixed_w > 0)
         m.x = n->fixed_w;
     if (n->fixed_h > 0)
@@ -266,6 +281,45 @@ static void arrange(lens_node *n, flux_rect rect) {
         inner.x -= n->scroll_x;
         inner.y -= n->scroll_y;
     }
+    if (n->grid_columns) {
+        uint32_t count = 0;
+        for (lens_node *c = n->first_child; c; c = c->next_sibling)
+            if (c->place != LENS_PLACE_ABS)
+                count++;
+        uint32_t cols = count < n->grid_columns ? count : n->grid_columns;
+        float cell_w = cols ? fmaxf(0, (inner.w - (cols - 1) * n->gap) / cols) : 0;
+        float y = inner.y;
+        lens_node *start = n->first_child;
+        while (start) {
+            uint32_t used = 0;
+            float row_h = 0;
+            lens_node *end = start;
+            while (end && used < cols) {
+                if (end->place != LENS_PLACE_ABS) {
+                    row_h = fmaxf(row_h, end->measured.y);
+                    used++;
+                }
+                end = end->next_sibling;
+            }
+            if (cols == 0)
+                break;
+            uint32_t col = 0;
+            for (lens_node *c = start; c != end; c = c->next_sibling) {
+                if (c->place == LENS_PLACE_ABS)
+                    continue;
+                float w = c->fixed_w > 0 || c->fit ? c->measured.x : cell_w;
+                w = constrain_extent(w, c->min_w, c->max_w);
+                arrange(c, (flux_rect){inner.x + col * (cell_w + n->gap), y, w, c->measured.y});
+                col++;
+            }
+            y += row_h + n->grid_row_gap;
+            start = end;
+        }
+        for (lens_node *c = n->first_child; c; c = c->next_sibling)
+            if (c->place == LENS_PLACE_ABS)
+                arrange(c, resolve_abs_rect(n->ui, c));
+        return;
+    }
     float inner_main = (ax == LENS_ROW) ? inner.w : inner.h;
     float inner_cross = (ax == LENS_ROW) ? inner.h : inner.w;
 
@@ -300,7 +354,17 @@ static void arrange(lens_node *n, flux_rect rect) {
         inner_cross = inner.w;
     }
 
-    float cursor = (ax == LENS_ROW) ? inner.x : inner.y;
+    float used_adjustment = 0;
+    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place == LENS_PLACE_ABS)
+            continue;
+        used_adjustment += flex_adjustment(c, ax, grow_level, true);
+        used_adjustment -= flex_adjustment(c, ax, shrink_level, false);
+    }
+    float remaining = fmaxf(0, free - used_adjustment);
+    float gap = n->gap + (n->space_between && cnt > 1 ? remaining / (cnt - 1) : 0);
+    float cursor = ((ax == LENS_ROW) ? inner.x : inner.y) +
+                   (n->space_between ? 0 : align_offset(n->align, remaining));
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->place == LENS_PLACE_ABS)
             continue; /* resolved after the flow children (ADR-0060) */
@@ -315,9 +379,12 @@ static void arrange(lens_node *n, flux_rect rect) {
         if (c->is_scroll && main_sz > inner_main)
             main_sz = inner_main;
 
-        float cross_sz = (n->cross == LENS_STRETCH) ? inner_cross : pt_cross(c->measured, ax);
+        float cross_sz =
+            (n->cross == LENS_STRETCH && !c->fit && (ax == LENS_ROW ? c->fixed_h : c->fixed_w) <= 0)
+                ? inner_cross
+                : pt_cross(c->measured, ax);
         cross_sz = constrain_extent(cross_sz, node_min_cross(c, ax), node_max_cross(c, ax));
-        if (cross_sz > inner_cross)
+        if (cross_sz > inner_cross && node_min_cross(c, ax) <= inner_cross)
             cross_sz = inner_cross;
 
         float cross_off = align_offset(n->cross, inner_cross - cross_sz);
@@ -326,7 +393,7 @@ static void arrange(lens_node *n, flux_rect rect) {
         flux_rect cr = (ax == LENS_ROW) ? (flux_rect){cursor, cross_pos, main_sz, cross_sz}
                                         : (flux_rect){cross_pos, cursor, cross_sz, main_sz};
         arrange(c, cr);
-        cursor += main_sz + n->gap;
+        cursor += main_sz + gap;
     }
 
     /* ABS children: measured but excluded from the flow above, each is now

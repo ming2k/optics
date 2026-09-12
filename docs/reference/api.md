@@ -333,8 +333,9 @@ more than the call; instead the canvas defers error reporting:
 
 - The **first** error during a canvas pass is recorded (the "sticky"
   pass error); later errors this pass do not overwrite it.
-- The error surfaces when the pass completes: `flux_canvas_end_frame`
-  (or `flux_canvas_end_target`) returns it as the pass result.
+- The error surfaces when the pass completes: `flux_canvas_end_frame_checked`
+  (or `flux_canvas_end_target_checked`) returns it as the pass result (`flux_canvas_end_frame`
+  closes the pass without returning the error code).
 - Between the failing call and pass end, `flux_get_last_error` already
   carries the diagnostic — a caller that needs the reason inline (not
   just the pass outcome) can read it there.
@@ -342,7 +343,7 @@ more than the call; instead the canvas defers error reporting:
 Rules for callers:
 
 1. Treat `void` draw calls as fallible at the *pass boundary* — check
-   what `end_frame`/`end_target` returns; do not assume per-call success.
+   what `end_frame_checked`/`end_target_checked` returns; do not assume per-call success.
 2. Do not try to "retry after error" mid-pass: the pass is poisoned.
    Build a new frame instead.
 3. Error reason for logging: read `flux_get_last_error` right after the
@@ -433,8 +434,9 @@ submit-and-end, nothing recorded is pending. Required reading for
 - Destroy-inline (caller proves quiescence): `flux_compute_pipeline_release`,
   `flux_graphics_pipeline_release`, `flux_material_release` destroy the
   underlying Vulkan objects immediately (VUID-vkDestroyPipeline-00765).
-  The safe-at-any-time spelling for pipelines is
-  `flux_pipeline_release_deferred` / `flux_graphics_pipeline_release_deferred`.
+  The safe-at-any-time spelling for pipelines and materials is
+  `flux_pipeline_release_deferred`, `flux_graphics_pipeline_release_deferred`,
+  and `flux_material_release_deferred`.
 
 ## Library versioning
 

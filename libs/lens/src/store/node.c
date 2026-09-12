@@ -26,6 +26,10 @@ void lensi_node_reset_frame(lens_node *n) {
     n->axis = LENS_ROW;
     n->gap = n->pad = 0.0f;
     n->cross = LENS_STRETCH;
+    n->align = LENS_START;
+    n->space_between = n->fit = n->box_disabled = false;
+    n->grid_columns = 0;
+    n->grid_row_gap = 0;
     n->flex_grow = 0.0f;
     n->fixed_w = n->fixed_h = 0.0f;
     n->min_w = n->max_w = 0.0f;
@@ -88,8 +92,10 @@ void *lens_node_state(lens_node *n, size_t bytes) {
     /* Allocate through the owning context's persistent allocator and zero-init
      * on first touch (ADR-0027). Freed at reap or lens_destroy. */
     void *mem = lensi_alloc(n->ui, bytes);
-    if (!mem)
+    if (!mem) {
+        lensi_set_overflow(n->ui);
         return NULL;
+    }
     memset(mem, 0, bytes);
     n->state = mem;
     n->state_bytes = bytes;

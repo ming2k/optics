@@ -304,6 +304,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_mesh_release` | Destruction is deferred: a released mesh's vertex/index buffers may still be bound by in-flight frames, so they are destroyed by the device retire queue only after the GPU provably passed every batch that could reference them. |
 | `flux_material_create` |  |
 | `flux_material_release` | Release destroys the material's pipelines inline — they do NOT go through the device retire queue (the retained texture/sampler do). |
+| `flux_material_release_deferred` | Deferred flavour: parks the underlying Vulkan pipelines on the device's retire queue so they are safely destroyed after all in-flight GPU batches have finished executing. |
 | `flux_material_get_alpha_mode` |  |
 | `flux_scene_draw_mesh` | Records a single mesh+material draw into the frame's currently active pass. |
 | `flux_scene_draw_mesh_lit` | Same as flux_scene_draw_mesh with an explicit light. |
@@ -343,6 +344,9 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
+| `flux_text_version` |  |
+| `flux_text_version_number` |  |
+| `flux_text_version_check` |  |
 | `flux_text_create` | Create a text context. |
 | `flux_text_destroy` |  |
 | `flux_text_set_scale` | Scale contract (single source of truth): - flux_text_draw rasterises at the *canvas's* effective scale (flux_canvas_get_scale — content scale composed with any stacked flux_canvas_scale), so drawn glyphs always match the target surface. |

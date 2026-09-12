@@ -40,7 +40,9 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas, draw_fn dr
     if (r != FLUX_OK)
         return r;
     draw(canvas, user);
-    flux_canvas_end_frame(canvas);
+    r = flux_canvas_end_frame_checked(canvas);
+    if (r != FLUX_OK)
+        return r;
 
     r = flux_frame_submit(frame);
     if (r != FLUX_OK)
@@ -176,6 +178,22 @@ static void draw_image_through_independent_round_clip(flux_canvas *canvas, void 
     image_transform_case *tc = user;
     flux_canvas_draw_image_clipped_rrect(canvas, tc->image, (flux_rect){16, 16, 96, 96},
                                          (flux_rect){32, 32, 64, 64}, 16.0f, &tc->paint);
+}
+
+static void draw_combined_image(flux_canvas *canvas, void *user) {
+    image_transform_case *tc = user;
+    flux_canvas_draw(canvas,
+                     &(flux_shape){
+                         .kind = FLUX_SHAPE_IMAGE,
+                         .image = tc->image,
+                         .sampler = tc->sampler,
+                         .rect = {16, 16, 96, 96},
+                         .src_rect = {0, 0, 0.5f, 0.5f},
+                         .clip_rect = {32, 32, 64, 64},
+                         .clip_radius = 16,
+                         .opaque_only = true,
+                     },
+                     nullptr);
 }
 
 static void draw_opaque_image(flux_canvas *canvas, void *user) {
@@ -495,6 +513,13 @@ int main(void) {
                 },
             .record = FLUX_CANVAS_RECORD_INIT,
         };
+        EXPECT(render_frame(s, canvas, draw_combined_image, &tc.image) == FLUX_OK);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, 48, 48)[0] > 245);
+        EXPECT(px_at(px, 80, 80)[0] > 245);
+        EXPECT(px_at(px, 80, 80)[1] < 8 && px_at(px, 80, 80)[2] < 8);
+        EXPECT(px_at(px, 24, 64)[0] < 8);
+        EXPECT(px_at(px, 33, 33)[0] < 8);
         EXPECT(render_frame(s, canvas, draw_round_image, &tc.image) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);

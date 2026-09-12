@@ -308,7 +308,7 @@ impl Application {
     /// surface and the crate docs for the callback model.
     pub fn run<B, P>(config: Config, build: B, paint: Option<P>) -> Result<(), RunError>
     where
-        B: FnMut(&mut Frame, &Input),
+        B: FnMut(&mut Frame<'_>, &Input),
         P: FnMut(PaintHost) + 'static,
     {
         Self::run_impl(
@@ -330,7 +330,7 @@ impl Application {
         paint: Option<P>,
     ) -> Result<(), RunError>
     where
-        B: FnMut(&mut Frame, &Input),
+        B: FnMut(&mut Frame<'_>, &Input),
         P: FnMut(PaintHost) + 'static,
         S: FnMut(StartHost) -> bool,
     {
@@ -350,7 +350,7 @@ impl Application {
         paint: Option<P>,
     ) -> Result<(), RunError>
     where
-        B: FnMut(&mut Frame, &Input),
+        B: FnMut(&mut Frame<'_>, &Input),
         P: FnMut(PaintHost) + 'static,
         S: FnMut(StartHost) -> bool,
         T: FnMut(StopHost),
@@ -366,7 +366,7 @@ impl Application {
         paint: Option<P>,
     ) -> Result<(), RunError>
     where
-        B: FnMut(&mut Frame, &Input),
+        B: FnMut(&mut Frame<'_>, &Input),
         P: FnMut(PaintHost) + 'static,
         S: FnMut(StartHost) -> bool,
         T: FnMut(StopHost),
@@ -394,7 +394,7 @@ impl Application {
             in_: *const sys::lens_input,
             user: *mut std::os::raw::c_void,
         ) where
-            B: FnMut(&mut Frame, &Input),
+            B: FnMut(&mut Frame<'_>, &Input),
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
@@ -417,7 +417,7 @@ impl Application {
             scale: f32,
             user: *mut std::os::raw::c_void,
         ) where
-            B: FnMut(&mut Frame, &Input),
+            B: FnMut(&mut Frame<'_>, &Input),
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
@@ -440,7 +440,7 @@ impl Application {
             user: *mut std::os::raw::c_void,
         ) -> bool
         where
-            B: FnMut(&mut Frame, &Input),
+            B: FnMut(&mut Frame<'_>, &Input),
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
@@ -460,7 +460,7 @@ impl Application {
             device: *mut sys::flux_device,
             user: *mut std::os::raw::c_void,
         ) where
-            B: FnMut(&mut Frame, &Input),
+            B: FnMut(&mut Frame<'_>, &Input),
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
@@ -524,7 +524,7 @@ impl Application {
 /// matching trampoline is never installed.
 struct RunState<B, P, S, T>
 where
-    B: FnMut(&mut Frame, &Input),
+    B: FnMut(&mut Frame<'_>, &Input),
     P: FnMut(PaintHost),
     S: FnMut(StartHost) -> bool,
     T: FnMut(StopHost),
@@ -1074,7 +1074,7 @@ impl<'a> FileFilter<'a> {
 /// [`FileDialog::pick_path`] / [`FileDialog::pick_paths`] /
 /// [`FileDialog::pick_save_path`].
 ///
-/// ```
+/// ```no_run
 /// use iris::{FileDialog, FileFilter};
 ///
 /// let chosen = FileDialog::new()
@@ -1684,7 +1684,7 @@ mod tests {
             cfg,
             None::<fn(StartHost) -> bool>,
             None::<fn(StopHost)>,
-            |_f: &mut Frame, _i: &Input| {},
+            |_f: &mut Frame<'_>, _i: &Input| {},
             None::<fn(PaintHost)>,
         );
     }

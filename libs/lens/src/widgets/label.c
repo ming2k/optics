@@ -153,6 +153,7 @@ lens_response lens_label(lens *ui, const lens_label_opts *opts) {
         return (lens_response){0};
 
     lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts->box);
     n->is_container = false;
 
     lens_text_metrics intrinsic = lensi_text_measure_label(ui, text, size, opts->weight);
