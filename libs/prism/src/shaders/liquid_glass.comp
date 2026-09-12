@@ -279,8 +279,11 @@ void main()
     vec2 strengths = strength_params();
     float tint_strength = strengths.x;
     float frost_strength = strengths.y;
+    float interior_frost = frost_strength <= 1.0
+                               ? 0.08 * frost_strength
+                               : clamp(0.08 + (frost_strength - 1.0) * 0.20, 0.0, 1.0);
     float frost_amount =
-        clamp(0.08 * frost_strength + 0.20 * u * u * min(frost_strength, 1.0), 0.0, 1.0);
+        clamp(interior_frost + 0.20 * u * u * min(frost_strength, 1.0), 0.0, 1.0);
     frost_amount *= 1.0 - 0.62 * focus;
     vec3 colour = mix(refracted, frost, frost_amount);
     colour = adjust_saturation(colour, max(pc.saturation, 0.0));

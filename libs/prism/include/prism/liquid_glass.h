@@ -101,6 +101,9 @@ typedef struct prism_liquid_glass_group {
                               per-pixel adaptive behaviour */
     float backdrop_energy; /* [0,1] region high-frequency energy; boosts body tint;
                               <0 = disabled */
+    float curvature;       /* [0, 1] continuous curvature (squircle) blend factor:
+                              0 = Euclidean rounded rect, 1 = G2 superellipse (p=4);
+                              <0 = inherit desc value */
 } prism_liquid_glass_group;
 
 /* Neutral baseline for designated-initializer use: a single visible body
@@ -116,7 +119,8 @@ typedef struct prism_liquid_glass_group {
      .tint_strength = -1.0f,                                                                       \
      .saturation = -1.0f,                                                                          \
      .plate_polarity = -1.0f,                                                                      \
-     .backdrop_energy = -1.0f}
+     .backdrop_energy = -1.0f,                                                                     \
+     .curvature = -1.0f}
 
 /* Number of shapes this build supports per glass body (the dispatch
  * pushes one SDF per shape; the shader fuses them pairwise). Callers
@@ -162,6 +166,7 @@ typedef struct prism_liquid_glass_desc {
     float size_scale_min;
     float tint_strength;
     float frost_strength;
+    float curvature; /* [0, 1] continuous curvature (squircle) blend factor: 0 = rounded rect, 1 = G2 superellipse */
 } prism_liquid_glass_desc;
 
 #define PRISM_LIQUID_GLASS_DESC_INIT                                                               \
@@ -177,7 +182,8 @@ typedef struct prism_liquid_glass_desc {
      .size_reference = 72.0f,                                                                      \
      .size_scale_min = 0.15f,                                                                      \
      .tint_strength = 1.0f,                                                                        \
-     .frost_strength = 1.0f}
+     .frost_strength = 1.0f,                                                                       \
+     .curvature = 0.0f}
 
 typedef struct prism_liquid_glass_filter prism_liquid_glass_filter;
 

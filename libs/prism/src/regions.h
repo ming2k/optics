@@ -51,9 +51,9 @@ static inline bool liquid_glass_group_is_valid(const prism_liquid_glass_group *g
         !isfinite(group->shadow_offset_y) || !isfinite(group->focus_strength) ||
         !isfinite(group->frost_strength) || !isfinite(group->tint_strength) ||
         !isfinite(group->saturation) || !isfinite(group->plate_polarity) ||
-        !isfinite(group->backdrop_energy))
+        !isfinite(group->backdrop_energy) || !isfinite(group->curvature))
         return false;
-    if (group->plate_polarity > 1.0f || group->backdrop_energy > 1.0f)
+    if (group->plate_polarity > 1.0f || group->backdrop_energy > 1.0f || group->curvature > 1.0f)
         return false;
     for (uint32_t j = 0; j < group->shape_count; ++j) {
         if (!liquid_glass_finite_rect(group->shapes[j].bounds) ||

@@ -80,6 +80,7 @@ pub struct LiquidGlassGroup {
     pub saturation: Option<f32>,
     pub plate_polarity: Option<f32>,
     pub backdrop_energy: Option<f32>,
+    pub curvature: Option<f32>,
 }
 
 impl LiquidGlassGroup {
@@ -125,6 +126,7 @@ impl LiquidGlassGroup {
             saturation: sentinel(self.saturation),
             plate_polarity: sentinel(self.plate_polarity),
             backdrop_energy: sentinel(self.backdrop_energy),
+            curvature: sentinel(self.curvature),
         };
         RawGroup {
             group,
@@ -167,6 +169,7 @@ pub struct LiquidGlassParams {
     pub size_scale_min: f32,
     pub tint_strength: f32,
     pub frost_strength: f32,
+    pub curvature: f32,
 }
 
 impl Default for LiquidGlassParams {
@@ -184,6 +187,7 @@ impl Default for LiquidGlassParams {
             size_scale_min: 0.15,
             tint_strength: 1.0,
             frost_strength: 1.0,
+            curvature: 0.0,
         }
     }
 }
@@ -255,6 +259,7 @@ impl LiquidGlassFilter {
             size_scale_min: params.size_scale_min,
             tint_strength: params.tint_strength,
             frost_strength: params.frost_strength,
+            curvature: params.curvature,
             ..Default::default()
         };
         let mut raw = std::ptr::null_mut();
@@ -429,6 +434,7 @@ impl BackdropLayerFilter {
             size_scale_min: params.size_scale_min,
             tint_strength: params.tint_strength,
             frost_strength: params.frost_strength,
+            curvature: params.curvature,
         };
         let mut raw = std::ptr::null_mut();
         check(unsafe {

@@ -410,7 +410,8 @@ static bool valid_liquid_glass_desc(const prism_liquid_glass_desc *desc) {
         !isfinite(desc->rim_light) || !isfinite(desc->light_direction.x) ||
         !isfinite(desc->light_direction.y) || !isfinite(desc->opacity) ||
         !isfinite(desc->size_reference) || !isfinite(desc->size_scale_min) ||
-        !isfinite(desc->tint_strength) || !isfinite(desc->frost_strength))
+        !isfinite(desc->tint_strength) || !isfinite(desc->frost_strength) ||
+        !isfinite(desc->curvature))
         return false;
     for (uint32_t i = 0; i < desc->group_count; ++i) {
         if (!liquid_glass_group_is_valid(&desc->groups[i]))
@@ -565,6 +566,7 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
         .size_scale_min = desc->size_scale_min,
         .tint_strength = desc->tint_strength,
         .frost_strength = desc->frost_strength,
+        .curvature = desc->curvature,
     };
     for (uint32_t i = 0; i < current_count; ++i) {
         const prism_liquid_glass_group *group = &desc->groups[current_group_indices[i]];

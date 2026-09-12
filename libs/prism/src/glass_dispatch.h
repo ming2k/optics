@@ -129,6 +129,7 @@ typedef struct prism_glass_policy {
     float size_scale_min;
     float tint_strength;
     float frost_strength;
+    float curvature;
 } prism_glass_policy;
 
 /* Record one glass-group dispatch. `input`/`blurred` are what the lens
@@ -151,7 +152,8 @@ static inline void prism_glass_record_group(VkCommandBuffer command,
     float size_reference = fmaxf(policy->size_reference, 0.0f);
     float size_scale_min = fminf(fmaxf(policy->size_scale_min, 0.0f), 1.0f);
     float focus_strength = fminf(fmaxf(group->focus_strength, 0.0f), 1.0f);
-    float curvature = 0.0f;
+    float curvature = liquid_glass_group_or_desc(group->curvature, policy->curvature);
+    curvature = fminf(fmaxf(curvature, 0.0f), 1.0f);
 
     liquid_glass_push push = {
         .input_handle = flux_image_bindless_handle(input),
