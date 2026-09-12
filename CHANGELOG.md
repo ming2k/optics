@@ -13,6 +13,17 @@ either.
 
 ## [Unreleased]
 
+## [0.0.39] - 2026-09-12
+
+### Added
+
+- **lens**: `lens_consume_key` API to mark input keys as consumed, preventing bubbling and tab navigation for handled keys.
+- **lens**: `lens_textedit_get_caret` and `lens_textedit_get_selection` APIs to inspect textedit caret position and selection range.
+
+### Changed
+
+- **lens**: Enhanced textedit navigation and selection with word boundary jumping, multi-line navigation, and UTF-8 boundary handling.
+
 ## [0.0.38] - 2026-09-12
 
 ### Added
