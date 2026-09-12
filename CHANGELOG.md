@@ -13,6 +13,16 @@ either.
 
 ## [Unreleased]
 
+## [0.0.38] - 2026-09-12
+
+### Added
+
+- **prism**: Squircle `curvature` blend factor parameter on `prism_liquid_glass_group`, `prism_liquid_glass_desc`, and `prism_backdrop_layer_desc` (along with safe Rust bindings).
+
+### Changed
+
+- **prism**: Scale deep interior frost for high frost strengths (`frost_strength > 1.0`) in liquid glass compute shader.
+
 ## [0.0.37] - 2026-09-10
 
 ### Added
