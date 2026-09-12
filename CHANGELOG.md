@@ -13,6 +13,27 @@ either.
 
 ## [Unreleased]
 
+## [0.0.41] - 2026-09-12
+
+### Added
+
+- **lens**: Added grid layout support (`lens_grid_begin`, `lens_grid_end`), `lens_space_between`, and `lens_fit`.
+- **flux**: Added shape error validation, transform checks, and unified image draw support in `flux_canvas_draw`.
+- **flux**: Added `flux_material_release_deferred` for retire-queued material pipeline destruction.
+- **flux-text**: Added `FLUX_TEXT_VERSION_NUMBER`, `flux_text_version`, `flux_text_version_number`, and `flux_text_version_check` accessors for stack-wide version lockstep.
+
+### Changed
+
+- **lens**: Implemented O(1) store live-list unlink and backward-shift erasure on slot deletion.
+- **flux-rs**: Enforced path arena lifetime via `'arena` parameter, made `read_pixels` return an owned `Vec<u8>`, and updated `Material::drop` to use deferred release.
+- **lens-rs**: Scoped `Frame<'frame>` to prevent cross-frame handle leakage and added drop guard for `lens_end`.
+
+### Fixed
+
+- **flux-text**: Fixed CJK full-width bracket compression pen width calculation so trailing extents correctly reflect the compacted line.
+- **iris-rs**: Fixed lifetime parameters on `Frame<'_>` closures and avoided interactive dialog hangs during test runs.
+- **lens**: Hardened `test_tooltip` with CPU canvas rasterization and pixel assertions.
+
 ## [0.0.40] - 2026-09-12
 
 ### Changed
