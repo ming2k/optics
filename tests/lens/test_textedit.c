@@ -322,6 +322,147 @@ static void test_textedit_ime_preedit_and_commit(void) {
     lens_destroy(ui);
 }
 
+static void test_double_click_selects_word(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    char buf[64] = "hello world /path/test";
+
+    /* Frame 1: layout text field at known position */
+    lens_begin(ui, &IN0);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf", .width = 300.0f, .height = 36.0f},
+                                            .buf = buf,
+                                            .cap = sizeof buf});
+    lens_end(ui);
+
+    /* Click 1: single click on "world" (around x = 55px, y = 18px) */
+    lens_input in = IN0;
+    in.cursor = (flux_point){55.0f, 18.0f};
+    in.mouse_pressed[LENS_MOUSE_LEFT] = true;
+    in.mouse_down[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf", .width = 300.0f, .height = 36.0f},
+                                            .buf = buf,
+                                            .cap = sizeof buf});
+    lens_end(ui);
+
+    /* Release mouse */
+    in.mouse_pressed[LENS_MOUSE_LEFT] = false;
+    in.mouse_down[LENS_MOUSE_LEFT] = false;
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf", .width = 300.0f, .height = 36.0f},
+                                            .buf = buf,
+                                            .cap = sizeof buf});
+    lens_end(ui);
+
+    /* Click 2 (double-click): click again at the same spot within 400ms */
+    in.mouse_pressed[LENS_MOUSE_LEFT] = true;
+    in.mouse_down[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf", .width = 300.0f, .height = 36.0f},
+                                            .buf = buf,
+                                            .cap = sizeof buf});
+    lens_end(ui);
+
+    uint32_t sel_lo = 0, sel_hi = 0;
+    CHECK(lens_textedit_get_selection(ui, "tf", &sel_lo, &sel_hi));
+    /* "world" is at index 6..11 */
+    CHECK(sel_lo == 6);
+    CHECK(sel_hi == 11);
+
+    /* Click 3 (triple-click): click third time to select entire line */
+    in.mouse_pressed[LENS_MOUSE_LEFT] = true;
+    in.mouse_down[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf", .width = 300.0f, .height = 36.0f},
+                                            .buf = buf,
+                                            .cap = sizeof buf});
+    lens_end(ui);
+
+    CHECK(lens_textedit_get_selection(ui, "tf", &sel_lo, &sel_hi));
+    CHECK(sel_lo == 0);
+    CHECK(sel_hi == (uint32_t)strlen(buf));
+
+    lens_destroy(ui);
+}
+
+static void test_ctrl_arrow_word_navigation(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    char buf[64] = "/home/ming/test";
+
+    focus_field(ui, "tf", buf, sizeof buf);
+
+    /* Start at end: cursor = 15 */
+    lens_textedit_set_caret(ui, "tf", 15);
+    uint32_t cur = 0;
+    CHECK(lens_textedit_get_caret(ui, "tf", &cur));
+    CHECK(cur == 15);
+
+    /* Ctrl+Left moves to start of "test" (11) */
+    lens_input in = IN0;
+    in.mods = LENS_MOD_CTRL;
+    in.key_count = 1;
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_LEFT, .pressed = true};
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
+    lens_end(ui);
+    CHECK(lens_textedit_get_caret(ui, "tf", &cur));
+    CHECK(cur == 11);
+
+    /* Ctrl+Left moves across '/' to start of "ming" (6) */
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
+    lens_end(ui);
+    CHECK(lens_textedit_get_caret(ui, "tf", &cur));
+    CHECK(cur == 6);
+
+    /* Ctrl+Left moves across '/' to start of "home" (1) */
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
+    lens_end(ui);
+    CHECK(lens_textedit_get_caret(ui, "tf", &cur));
+    CHECK(cur == 1);
+
+    /* Ctrl+Left moves to 0 */
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
+    lens_end(ui);
+    CHECK(lens_textedit_get_caret(ui, "tf", &cur));
+    CHECK(cur == 0);
+
+    /* Ctrl+Shift+Right selects "home" (0 to 5) */
+    in.mods = LENS_MOD_CTRL | LENS_MOD_SHIFT;
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_RIGHT, .pressed = true};
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
+    lens_end(ui);
+    uint32_t sel_lo = 0, sel_hi = 0;
+    CHECK(lens_textedit_get_selection(ui, "tf", &sel_lo, &sel_hi));
+    CHECK(sel_lo == 0);
+    CHECK(sel_hi == 5);
+
+    /* Shift+End selects to end */
+    in.mods = LENS_MOD_SHIFT;
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_END, .pressed = true};
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
+    lens_end(ui);
+    CHECK(lens_textedit_get_selection(ui, "tf", &sel_lo, &sel_hi));
+    CHECK(sel_lo == 0);
+    CHECK(sel_hi == 15);
+
+    /* Shift+Home selects back to 0 */
+    in.mods = LENS_MOD_SHIFT;
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_HOME, .pressed = true};
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
+    lens_end(ui);
+    CHECK(lens_textedit_get_caret(ui, "tf", &cur));
+    CHECK(cur == 0);
+
+    lens_destroy(ui);
+}
+
 int main(void) {
     test_insert_ascii();
     test_backspace_and_delete();
@@ -332,5 +473,7 @@ int main(void) {
     test_textedit_vertical_centering();
     test_textedit_caret_coverage();
     test_textedit_ime_preedit_and_commit();
+    test_double_click_selects_word();
+    test_ctrl_arrow_word_navigation();
     return TEST_REPORT();
 }

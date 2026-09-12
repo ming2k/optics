@@ -10,8 +10,10 @@ void lensi_focus_tab(lens *ui) {
 
     bool tab = false;
     for (uint32_t i = 0; i < ui->input.key_count; i++) {
-        if (ui->input.keys[i].key == LENS_KEY_TAB && ui->input.keys[i].pressed) {
+        if (ui->input.keys[i].key == LENS_KEY_TAB && ui->input.keys[i].pressed &&
+            !ui->key_consumed[i]) {
             tab = true;
+            ui->key_consumed[i] = 1;
             break;
         }
     }

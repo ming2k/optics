@@ -477,9 +477,12 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_checkbox` |  |
 | `lens_selectable` |  |
 | `lens_slider` |  |
+| `lens_consume_key` |  |
 | `lens_textedit` |  |
 | `lens_textedit_set_caret` |  |
+| `lens_textedit_get_caret` |  |
 | `lens_textedit_set_selection` |  |
+| `lens_textedit_get_selection` |  |
 | `lens_get_response` | ================================================================== |
 | `lens_get_cursor_hint` |  |
 | `lens_focused` |  |

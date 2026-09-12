@@ -166,7 +166,8 @@ typedef struct prism_liquid_glass_desc {
     float size_scale_min;
     float tint_strength;
     float frost_strength;
-    float curvature; /* [0, 1] continuous curvature (squircle) blend factor: 0 = rounded rect, 1 = G2 superellipse */
+    float curvature; /* [0, 1] continuous curvature (squircle) blend factor: 0 = rounded rect, 1 =
+                        G2 superellipse */
 } prism_liquid_glass_desc;
 
 #define PRISM_LIQUID_GLASS_DESC_INIT                                                               \

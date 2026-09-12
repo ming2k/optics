@@ -1118,10 +1118,14 @@ typedef struct lens_textedit_opts {
     bool readonly;
 } lens_textedit_opts;
 
+LENS_API void lens_consume_key(lens *ui, int32_t key);
 LENS_API lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts);
 LENS_API void lens_textedit_set_caret(lens *ui, const char *label, uint32_t caret);
+LENS_API bool lens_textedit_get_caret(const lens *ui, const char *label, uint32_t *caret);
 LENS_API void lens_textedit_set_selection(lens *ui, const char *label, uint32_t sel_start,
                                           uint32_t sel_end);
+LENS_API bool lens_textedit_get_selection(const lens *ui, const char *label, uint32_t *sel_start,
+                                          uint32_t *sel_end);
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 static_assert(offsetof(lens_layout_opts, box) == 0, "lens_layout_opts.box must be at offset 0");

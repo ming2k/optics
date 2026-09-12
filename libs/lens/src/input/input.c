@@ -221,3 +221,13 @@ lens_response lensi_interact(lens *ui, lens_node *n, bool focusable, bool disabl
     }
     return r;
 }
+
+void lens_consume_key(lens *ui, int32_t key) {
+    if (!ui)
+        return;
+    for (uint32_t i = 0; i < ui->input.key_count; i++) {
+        if (ui->input.keys[i].key == key) {
+            ui->key_consumed[i] = 1;
+        }
+    }
+}

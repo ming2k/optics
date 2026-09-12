@@ -1065,6 +1065,10 @@ impl Frame {
         unsafe { sys::lens_set_focus(self.ui, 0) };
     }
 
+    pub fn consume_key(&mut self, key: i32) {
+        unsafe { sys::lens_consume_key(self.ui, key) };
+    }
+
     pub fn textedit(&mut self, label: &str, buf: &mut TextBuf, multiline: bool) -> bool {
         let c = cstr(label);
         let opts = sys::lens_textedit_opts {
