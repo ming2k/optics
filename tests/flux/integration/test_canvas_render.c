@@ -200,6 +200,18 @@ static void draw_combined_image(flux_canvas *canvas, void *user) {
     flux_canvas_draw_geometry(canvas, &g, &b);
 }
 
+static void draw_save_layer_opacity_group(flux_canvas *canvas, void *user) {
+    (void)user;
+    /* Isolated opacity group (ADR-0091) on GPU Vulkan backend:
+     * Two overlapping fully-opaque red rectangles inside a 0.5 opacity layer.
+     * Overlap must NOT produce double-blend artifact. */
+    flux_canvas_save_layer(canvas, nullptr, 0.5f);
+    flux_color red = flux_color_rgba_premul(255, 0, 0, 255);
+    flux_canvas_fill_rect_color(canvas, (flux_rect){8.0f, 8.0f, 24.0f, 24.0f}, red);
+    flux_canvas_fill_rect_color(canvas, (flux_rect){20.0f, 8.0f, 24.0f, 24.0f}, red);
+    flux_canvas_restore(canvas);
+}
+
 static void draw_opaque_image(flux_canvas *canvas, void *user) {
     flux_canvas_draw_image_opaque(canvas, user, (flux_rect){0, 0, (float)W, (float)H});
 }
@@ -711,6 +723,18 @@ int main(void) {
         flux_text_release(text);
     }
 #endif
+
+    /* ADR-0091: Vulkan GPU isolated opacity group verification */
+    EXPECT(render_frame(s, canvas, draw_save_layer_opacity_group, nullptr) == FLUX_OK);
+    memset(px, 0, BYTES);
+    EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+    const uint8_t *px_single = px_at(px, 12, 16);
+    const uint8_t *px_overlap = px_at(px, 24, 16);
+    EXPECT(abs((int)px_single[0] - 188) <= 4);
+    EXPECT(abs((int)px_overlap[0] - 188) <= 4);
+    EXPECT(abs((int)px_single[0] - (int)px_overlap[0]) <= 2);
+    EXPECT(px_single[3] == 255);
+    EXPECT(px_overlap[3] == 255);
 
     flux_arena_deinit(&arena);
     flux_canvas_release(canvas);

@@ -16,6 +16,7 @@
 #include "backend.h"
 
 #include <flux/vulkan.h>
+#include <math.h>
 #include <stdalign.h>
 #include <string.h>
 
@@ -57,6 +58,18 @@ typedef struct canvas_target_slot {
     uint32_t count;
     uint64_t use_counter;
 } canvas_target_slot;
+
+#define FLUX_VK_MAX_LAYERS 4
+
+typedef struct canvas_vk_layer {
+    canvas_attachment_set attachments;
+    float opacity;
+    VkSampleCountFlagBits saved_samples;
+    bool saved_stencil;
+    flux_pass_desc parent_pass;
+    flux_pass_attachment parent_color_att;
+    flux_pass_depth_attachment parent_stencil_att;
+} canvas_vk_layer;
 
 typedef struct flux_vk_canvas {
     VkPipelineLayout layout;   /* borrowed from the device canvas cache */
@@ -110,6 +123,13 @@ typedef struct flux_vk_canvas {
     canvas_attachment_set surface_attachments[FLUX_MAX_FRAMES_IN_FLIGHT];
     canvas_target_slot target_slots[FLUX_MAX_FRAMES_IN_FLIGHT];
     canvas_attachment_set *active_attachments;
+
+    /* Layer stack for isolated compositing (ADR-0091) */
+    canvas_vk_layer layers[FLUX_VK_MAX_LAYERS];
+    uint32_t layer_top;
+    flux_pass_desc current_pass;
+    flux_pass_attachment current_color_att;
+    flux_pass_depth_attachment current_stencil_att;
 
     /* ADR-0069 output-transform state for the active pass, filled by
      * begin_pass and consumed by end_pass (and by the LOAD seed blit). */
@@ -500,6 +520,9 @@ static void vk_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) {
         }
         ts->count = 0;
     }
+    for (uint32_t i = 0; i < FLUX_VK_MAX_LAYERS; ++i) {
+        attachments_destroy(c, &v->layers[i].attachments);
+    }
     /* Pipeline + layout are owned by the device's canvas cache; we just drop
      * the borrowed references. */
     flux_internal_free(c->device, v);
@@ -881,6 +904,11 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
         .render_offset_y = area.y,
     };
 
+    v->current_pass = pass;
+    v->current_color_att = att;
+    if (has_stencil)
+        v->current_stencil_att = stencil_att;
+
     flux_frame_begin_pass(f, &pass);
     c->pass_active = true;
     c->target_pass = (target != nullptr);
@@ -1126,6 +1154,134 @@ static void vk_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_pi
     v->batch.vertex_count = vertex_count;
 }
 
+static flux_result vk_save_layer(const flux_canvas_backend *self, flux_canvas *c,
+                                 const flux_rect *bounds, float opacity) {
+    (void)self;
+    (void)bounds;
+    flux_vk_canvas *v = vkc(c);
+    if (!v || !c->frame || !v->active_attachments)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (v->layer_top >= FLUX_VK_MAX_LAYERS)
+        return FLUX_ERROR_OUT_OF_RANGE;
+
+    batch_flush(c);
+    flux_frame_end_pass(c->frame);
+
+    uint32_t layer_idx = v->layer_top;
+    canvas_vk_layer *layer = &v->layers[layer_idx];
+    layer->opacity = opacity;
+    layer->saved_samples = v->active_samples;
+    layer->saved_stencil = v->active_stencil;
+    layer->parent_pass = v->current_pass;
+    layer->parent_color_att = v->current_color_att;
+    layer->parent_stencil_att = v->current_stencil_att;
+
+    v->active_samples = VK_SAMPLE_COUNT_1_BIT;
+    v->active_stencil = false;
+
+    uint32_t w = c->fb_width;
+    uint32_t h = c->fb_height;
+    if (!linear_ensure(c, &layer->attachments, w, h)) {
+        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas layer linear attachment unavailable");
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+
+    canvas_owned_image *linear = &layer->attachments.linear;
+    VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
+
+    color_barrier2(cmd, linear->image,
+                   linear->layout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                   linear->layout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_2_SHADER_READ_BIT,
+                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                   linear->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    linear->layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    /* Layer clears to transparent black */
+    v->current_color_att = (flux_pass_attachment){
+        .load_op = FLUX_LOAD_CLEAR,
+        .store_op = FLUX_STORE_STORE,
+        .clear_color = {0.0f, 0.0f, 0.0f, 0.0f},
+        .view = linear->view,
+        .format = FLUX_CANVAS_LINEAR_FORMAT,
+    };
+    v->current_pass = (flux_pass_desc){
+        .type = FLUX_TYPE_PASS_DESC,
+        .color_attachment_count = 1,
+        .color_attachments = &v->current_color_att,
+        .stencil = nullptr,
+        .width = w,
+        .height = h,
+    };
+    flux_frame_begin_pass(c->frame, &v->current_pass);
+
+    v->pipeline_memo.valid = false;
+    v->bound_pipeline = VK_NULL_HANDLE;
+    vk_set_scissor(self, c, c->states[c->state_top].scissor);
+
+    v->layer_top++;
+    return FLUX_OK;
+}
+
+static void vk_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
+    (void)self;
+    flux_vk_canvas *v = vkc(c);
+    if (!v || v->layer_top == 0 || !c->frame)
+        return;
+
+    batch_flush(c);
+    flux_frame_end_pass(c->frame);
+
+    v->layer_top--;
+    uint32_t layer_idx = v->layer_top;
+    canvas_vk_layer *layer = &v->layers[layer_idx];
+    canvas_owned_image *layer_linear = &layer->attachments.linear;
+
+    VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
+
+    /* Transition layer image to shader read */
+    color_barrier2(cmd, layer_linear->image,
+                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                   VK_ACCESS_2_SHADER_READ_BIT,
+                   layer_linear->layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    layer_linear->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    /* Resume parent pass with previous MSAA/stencil configuration */
+    v->active_samples = layer->saved_samples;
+    v->active_stencil = layer->saved_stencil;
+    v->current_pass = layer->parent_pass;
+    v->current_color_att = layer->parent_color_att;
+    v->current_color_att.load_op = FLUX_LOAD_LOAD;
+    v->current_stencil_att = layer->parent_stencil_att;
+    v->current_stencil_att.load_op = FLUX_LOAD_LOAD;
+    v->current_pass.color_attachments = &v->current_color_att;
+    v->current_pass.stencil = layer->saved_stencil ? &v->current_stencil_att : nullptr;
+    flux_frame_begin_pass(c->frame, &v->current_pass);
+
+    v->pipeline_memo.valid = false;
+    v->bound_pipeline = VK_NULL_HANDLE;
+    vk_set_scissor(self, c, c->states[c->state_top].scissor);
+
+    /* Composite layer onto parent with layer->opacity modulation */
+    float opacity = fminf(fmaxf(layer->opacity, 0.0f), 1.0f);
+    uint32_t a = (uint32_t)(255.0f * opacity + 0.5f);
+    uint32_t tint = (a << 24) | (a << 16) | (a << 8) | a;
+
+    flux_mat3x2 saved_tx = c->states[c->state_top].transform;
+    c->states[c->state_top].transform = flux_mat3x2_identity();
+
+    draw_image_with_sampler_handle(
+        c, nullptr, layer_linear->bindless, nullptr,
+        flux_device_default_sampler_handle(c->device),
+        (flux_rect){0, 0, (float)c->fb_width, (float)c->fb_height},
+        (flux_rect){0.0f, 0.0f, 1.0f, 1.0f}, tint, FLUX_BLEND_SRC_OVER, 3u, nullptr, 0.0f);
+    batch_flush(c);
+
+    c->states[c->state_top].transform = saved_tx;
+}
+
 static const flux_canvas_backend vk_backend = {
     .name = "vulkan",
     .canvas_init = vk_canvas_init,
@@ -1133,6 +1289,8 @@ static const flux_canvas_backend vk_backend = {
     .begin_pass = vk_begin_pass,
     .end_pass = vk_end_pass,
     .set_scissor = vk_set_scissor,
+    .save_layer = vk_save_layer,
+    .restore_layer = vk_restore_layer,
     .bind_program = vk_bind_program,
     .submit = vk_submit,
 };

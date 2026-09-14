@@ -306,6 +306,8 @@ struct lens {
     lens_store store;
     lens_node *root;
     uint64_t frame;
+    uint64_t generation;
+    uint64_t last_presented_generation;
 
     lens_input input;    /* copy for the frame */
     bool overflow;       /* arena overflowed this frame */

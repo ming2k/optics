@@ -537,6 +537,10 @@ void submit_triangles(flux_canvas *c, const flux_paint *paint, const flux_canvas
                       uint32_t vertex_count);
 void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id id,
                          const flux_canvas_vertex *verts, uint32_t vertex_count);
+void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, uint32_t image_handle,
+                                   flux_sampler *sampler, flux_bindless_handle sh, flux_rect dst,
+                                   flux_rect src, flux_color tint, flux_blend_mode blend,
+                                   uint32_t kind, const flux_rect *rounded_clip, float radius);
 
 /* ------------------------------------------------------------------ */
 /*  Display-list record/replay (record.c)                             */

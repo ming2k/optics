@@ -851,7 +851,32 @@ FLUX_NODISCARD LENS_API flux_result lens_render(lens *ui, flux_canvas *canvas);
 typedef struct lens_draw_list {
     flux_display_list *display_list;
     bool has_damage;
+    uint64_t generation;
 } lens_draw_list;
+
+/* ================================================================== */
+/*  Scene Snapshots & Presentation Generations (ADR-0094)             */
+/* ================================================================== */
+
+typedef struct lens_scene_snapshot lens_scene_snapshot;
+
+/* Create an immutable snapshot of the resolved layout tree and compiled visuals.
+ * The published snapshot is GPU-independent, owned, and survives destruction of
+ * the mutable lens context. */
+FLUX_NODISCARD LENS_API flux_result lens_snapshot_create(lens *ui, flux_arena *arena,
+                                                         lens_scene_snapshot **out_snapshot);
+LENS_API lens_scene_snapshot *lens_snapshot_retain(lens_scene_snapshot *snapshot);
+LENS_API void lens_snapshot_release(lens_scene_snapshot *snapshot);
+LENS_API uint64_t lens_snapshot_generation(const lens_scene_snapshot *snapshot);
+FLUX_NODISCARD LENS_API flux_result lens_snapshot_submit(const lens_scene_snapshot *snapshot,
+                                                         flux_canvas *canvas);
+
+/* Generation progression & presentation handshake (ADR-0094).
+ * A new generation is published at each lens_end. The presentation engine
+ * calls lens_notify_presented upon successful frame presentation. */
+LENS_API uint64_t lens_generation(const lens *ui);
+LENS_API void lens_notify_presented(lens *ui, uint64_t presented_generation);
+LENS_API uint64_t lens_last_presented_generation(const lens *ui);
 
 /* Pure CPU compile phase: transforms the resolved layout tree into an
  * immutable, GPU-independent draw list allocated on `arena`. Can run on worker

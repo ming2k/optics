@@ -100,7 +100,57 @@ int main(void) {
 
     flux_display_list_release(draw_list.display_list);
     flux_canvas_release(c);
+
+    /* ADR-0094: Lens Scene Snapshot Independence & Survives UI Context Destruction */
+    lens_scene_snapshot *snapshot = nullptr;
+    CHECK(lens_snapshot_create(ui, &snapshot_arena, &snapshot) == FLUX_OK);
+    CHECK(snapshot != nullptr);
+    uint64_t gen = lens_snapshot_generation(snapshot);
+    CHECK(gen == lens_generation(ui));
+    CHECK(lens_last_presented_generation(ui) == 0);
+
+    /* Retain snapshot */
+    lens_scene_snapshot *retained_snap = lens_snapshot_retain(snapshot);
+    CHECK(retained_snap == snapshot);
+    lens_snapshot_release(retained_snap);
+
+    /* Destroy mutable UI context and all temporary arena inputs */
+    lens_release(ui);
     flux_arena_deinit(&snapshot_arena);
+
+    /* Replay published snapshot on a fresh canvas — must succeed even after UI is destroyed */
+    CHECK(flux_canvas_create(&cd, &c) == FLUX_OK);
+    CHECK(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    CHECK(lens_snapshot_submit(snapshot, c) == FLUX_OK);
+    CHECK(flux_canvas_end(c) == FLUX_OK);
+    px = flux_canvas_read_pixels(c, &pw, &ph, &pstride);
+    CHECK(px != nullptr);
+
+    lens_snapshot_release(snapshot);
+    flux_canvas_release(c);
+
+    /* Presentation Handshake & Generation Progression (ADR-0094) */
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    uint64_t g0 = lens_generation(ui);
+    lens_begin(ui, &in);
+    lens_button(ui, &(lens_button_opts){.label = "Frame 1"});
+    lens_end(ui);
+    uint64_t g1 = lens_generation(ui);
+    CHECK(g1 > g0);
+    CHECK(lens_last_presented_generation(ui) == 0);
+
+    /* Simulate successful presentation of Frame 1 */
+    lens_notify_presented(ui, g1);
+    CHECK(lens_last_presented_generation(ui) == g1);
+
+    /* Frame 2: simulated presentation failure (drop without notify) */
+    lens_begin(ui, &in);
+    lens_button(ui, &(lens_button_opts){.label = "Frame 2"});
+    lens_end(ui);
+    uint64_t g2 = lens_generation(ui);
+    CHECK(g2 > g1);
+    /* Failed presentation: last presented generation MUST NOT advance! */
+    CHECK(lens_last_presented_generation(ui) == g1);
 
     lens_release(ui);
     lens_fit(nullptr);

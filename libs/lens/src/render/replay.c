@@ -3,6 +3,15 @@
 
 #include "../internal.h"
 #include <math.h>
+#include <stdatomic.h>
+
+struct lens_scene_snapshot {
+    atomic_uint ref_count;
+    uint64_t generation;
+    flux_display_list *display_list;
+    bool has_damage;
+    uint32_t command_count;
+};
 
 /* Resolve a node-relative rect against the final box. A non-positive
  * rel.w / rel.h means "extend symmetrically to the box edge" (inset by
@@ -1087,6 +1096,7 @@ flux_result lens_compile_draw_list(lens *ui, flux_arena *arena, lens_draw_list *
         return r;
 
     out_list->has_damage = lens_frame_needs_repaint(ui);
+    out_list->generation = ui->generation;
     return FLUX_OK;
 }
 
@@ -1094,4 +1104,56 @@ flux_result lens_draw_list_submit(const lens_draw_list *list, flux_canvas *canva
     if (!list || !canvas)
         return FLUX_ERROR_INVALID_ARGUMENT;
     return flux_canvas_submit_display_list(canvas, list->display_list);
+}
+
+flux_result lens_snapshot_create(lens *ui, flux_arena *arena, lens_scene_snapshot **out_snapshot) {
+    if (!ui || !arena || !out_snapshot)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_snapshot = nullptr;
+
+    lens_draw_list dl = {0};
+    flux_result r = lens_compile_draw_list(ui, arena, &dl);
+    if (r != FLUX_OK)
+        return r;
+
+    lens_scene_snapshot *s = calloc(1, sizeof(*s));
+    if (!s) {
+        if (dl.display_list)
+            flux_display_list_release(dl.display_list);
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    atomic_init(&s->ref_count, 1u);
+    s->generation = ui->generation;
+    s->display_list = dl.display_list;
+    s->has_damage = dl.has_damage;
+    s->command_count = flux_display_list_command_count(dl.display_list);
+
+    *out_snapshot = s;
+    return FLUX_OK;
+}
+
+lens_scene_snapshot *lens_snapshot_retain(lens_scene_snapshot *snapshot) {
+    if (snapshot)
+        atomic_fetch_add_explicit(&snapshot->ref_count, 1u, memory_order_relaxed);
+    return snapshot;
+}
+
+void lens_snapshot_release(lens_scene_snapshot *snapshot) {
+    if (!snapshot)
+        return;
+    if (atomic_fetch_sub_explicit(&snapshot->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return;
+    if (snapshot->display_list)
+        flux_display_list_release(snapshot->display_list);
+    free(snapshot);
+}
+
+uint64_t lens_snapshot_generation(const lens_scene_snapshot *snapshot) {
+    return snapshot ? snapshot->generation : 0;
+}
+
+flux_result lens_snapshot_submit(const lens_scene_snapshot *snapshot, flux_canvas *canvas) {
+    if (!snapshot || !canvas)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    return flux_canvas_submit_display_list(canvas, snapshot->display_list);
 }

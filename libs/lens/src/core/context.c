@@ -494,6 +494,9 @@ void lens_end(lens *ui) {
     ui->modal_active = false;
     ui->modal_tab_lo = ui->modal_tab_hi = 0;
     ui->modal_trap_depth = 0;
+
+    /* Advance immutable scene snapshot generation (ADR-0094) */
+    ui->generation++;
 }
 
 void lens_set_focus(lens *ui, lens_id id) {
@@ -530,4 +533,18 @@ lens_node *lens_root(lens *ui) {
 }
 lens_node *lens_find(lens *ui, lens_id id) {
     return ui ? lensi_store_find(ui, id) : NULL;
+}
+
+uint64_t lens_generation(const lens *ui) {
+    return ui ? ui->generation : 0;
+}
+
+void lens_notify_presented(lens *ui, uint64_t presented_generation) {
+    if (ui && presented_generation > ui->last_presented_generation) {
+        ui->last_presented_generation = presented_generation;
+    }
+}
+
+uint64_t lens_last_presented_generation(const lens *ui) {
+    return ui ? ui->last_presented_generation : 0;
 }

@@ -680,11 +680,11 @@ bool canvas_track_foreign_image(flux_canvas *c, flux_image *img) {
                                           frame_release_image, foreign_owned);
 }
 
-static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux_sampler *sampler,
-                                           flux_bindless_handle sh, flux_rect dst, flux_rect src,
-                                           flux_color tint, flux_blend_mode blend, uint32_t kind,
-                                           const flux_rect *rounded_clip, float radius) {
-    /* Image draws need a GPU-resident texture (img->bindless): unsupported on
+void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, uint32_t image_handle,
+                                   flux_sampler *sampler, flux_bindless_handle sh, flux_rect dst,
+                                   flux_rect src, flux_color tint, flux_blend_mode blend,
+                                   uint32_t kind, const flux_rect *rounded_clip, float radius) {
+    /* Image draws need a GPU-resident texture (img->bindless or image_handle): unsupported on
      * a headless CPU canvas. */
     if (!c->device || sh == FLUX_BINDLESS_INVALID)
         return;
@@ -707,7 +707,7 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
     push_vertex(&v[5], p3, tx, tint);
     if (!image_quad_intersects_scissor(c, v))
         return;
-    if (!canvas_track_foreign_image(c, img))
+    if (img && !canvas_track_foreign_image(c, img))
         return;
     v[0]._pad = pack_uv(0.0f, 0.0f);
     v[1]._pad = pack_uv(1.0f, 0.0f);
@@ -724,15 +724,15 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
      * images are decoded by the sampler hardware and 16F images are
      * already linear — both stay raw — and R8 coverage (kind 4) is not
      * a colour. */
-    pc.color_params_address = img->color_params_address;
-    if (img->color_params_address != 0)
+    pc.color_params_address = img ? img->color_params_address : 0;
+    if (img && img->color_params_address != 0)
         kind |= FLUX_CANVAS_PUSH_HAS_COLOR_PARAMS;
-    else if (kind != 4u &&
+    else if (img && kind != 4u &&
              (img->format == FLUX_FORMAT_RGBA8_UNORM || img->format == FLUX_FORMAT_BGRA8_UNORM ||
               img->format == FLUX_FORMAT_RGB10A2_UNORM))
         kind |= FLUX_CANVAS_PUSH_DECODE_SRGB;
     pc.kind = kind;
-    pc.image_handle = img->bindless;
+    pc.image_handle = img ? img->bindless : image_handle;
     pc.sampler_handle = sh;
     pc.image_src[0] = src.x;
     pc.image_src[1] = src.y;
@@ -751,7 +751,8 @@ static void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, flux
             fminf(fmaxf(radius * scale, 0.0f), fminf(pc.image_dst[2], pc.image_dst[3]));
     }
 
-    canvas_record_retain_image(c, img);
+    if (img)
+        canvas_record_retain_image(c, img);
     canvas_record_retain_sampler(c, sampler);
     c->pending_blend = blend;
     canvas_emit(c, CANVAS_PIPE_IMAGE, &pc, v, 6);
@@ -1104,7 +1105,9 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom,
             uint32_t bl = (uint32_t)((tint_color & 0xFF) * alpha_scale + 0.5f);
             tint_color = (a << 24) | (r << 16) | (g << 8) | bl;
         }
-        draw_image_with_sampler_handle(c, b.image.image, b.image.sampler, sh, dst, src,
+        draw_image_with_sampler_handle(c, b.image.image,
+                                       b.image.image ? b.image.image->bindless : FLUX_BINDLESS_INVALID,
+                                       b.image.sampler, sh, dst, src,
                                        tint_color,
                                        b.image.opaque_only && !rounded ? FLUX_BLEND_SRC : b.blend,
                                        kind, clip, radius);
