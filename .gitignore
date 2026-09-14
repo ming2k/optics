@@ -36,3 +36,7 @@ __pycache__/
 subprojects/*
 !subprojects/*.wrap
 !subprojects/packagefiles/
+
+# Codex session files
+codex-*
+.codex/
