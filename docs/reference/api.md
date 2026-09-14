@@ -171,10 +171,9 @@ The frame's command buffer is reset (pool-level) at the start of
 every frame, so per-frame allocations and recorded commands do not
 accumulate across frames.
 
-The Rust [`flux-composition-graph`](composition-graph.md) companion plans
-explicit multi-pass image dependencies, reverse ROI, forward damage, and
-target lifetimes above this immediate-recording layer. It owns no Flux
-resources and does not change the C execution model.
+Multi-pass image dependencies, reverse ROI, forward damage, and target
+lifetimes are planned through Flux's RenderPlan compiler (ADR-0089 / ADR-0092),
+replacing external graph planning with a single dependency-driven execution path.
 
 ## Tagged descriptors
 

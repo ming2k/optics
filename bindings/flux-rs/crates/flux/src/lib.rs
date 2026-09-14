@@ -1772,10 +1772,11 @@ impl<'surface> Frame<'surface> {
         })
     }
 
-    /// Borrow the render target bound to this presentation frame (ADR-0088).
+    /// Borrow the render target bound to this presentation frame (ADR-0088 / ADR-0093).
     ///
-    /// Statically bound to the lifetime of `self`, preventing reference escape.
-    pub fn target(&self) -> TargetRef<'_> {
+    /// Statically bound to the mutable lifetime of `self`, preventing reference escape
+    /// or concurrent presentation while the target is in use.
+    pub fn target(&mut self) -> TargetRef<'_> {
         unsafe { TargetRef::from_raw(sys::flux_frame_target(self.raw)) }
     }
 
@@ -2314,6 +2315,16 @@ mod sealed {
 }
 
 /// Trait for render targets, enabling polymorphic Canvas operations across owned and borrowed targets.
+///
+/// External crates cannot implement this sealed trait (ADR-0093):
+/// ```compile_fail
+/// struct ForgedTarget;
+/// impl flux::AsTarget for ForgedTarget {
+///     fn as_raw_target(&self) -> *mut flux::sys::flux_target {
+///         std::ptr::null_mut()
+///     }
+/// }
+/// ```
 pub trait AsTarget: sealed::Sealed {
     fn as_raw_target(&self) -> *mut sys::flux_target;
 }
@@ -2335,6 +2346,16 @@ impl AsTarget for Target {
 /// let session = canvas.begin_session(&mut target, None).unwrap();
 /// target.cpu_pixels();
 /// let _ = session;
+/// ```
+///
+/// Overlapping writable sessions on the same target are rejected at compile time:
+/// ```compile_fail
+/// use flux::{Canvas, Target};
+/// let canvas = Canvas::new_cpu(64, 64, 1.0).unwrap();
+/// let mut target = Target::create_cpu(64, 64).unwrap();
+/// let session1 = canvas.begin_session(&mut target, None).unwrap();
+/// let session2 = canvas.begin_session(&mut target, None).unwrap();
+/// let _ = (session1, session2);
 /// ```
 pub struct CanvasSession<'canvas, 'target, T: AsTarget> {
     canvas: &'canvas Canvas,
@@ -2370,13 +2391,27 @@ impl<'canvas, 'target, T: AsTarget> Drop for CanvasSession<'canvas, 'target, T> 
     }
 }
 
-/// A borrowed render target bound to a Frame's presentation lifecycle (ADR-0088).
+/// A borrowed render target bound to a Frame's presentation lifecycle (ADR-0088 / ADR-0093).
 ///
-/// Statically constrained by the lifetime `'frame`. Cannot outlive the parent `Frame`
-/// and does NOT release the underlying target on drop, preventing double-free.
+/// Statically constrained by the exclusive lifetime `'frame`. Cannot outlive the parent `Frame`,
+/// cannot alias another target borrow on the same frame, and does NOT release the underlying
+/// target on drop, preventing double-free.
+///
+/// A presentation frame cannot be submitted while an active CanvasSession holds its target:
+/// ```compile_fail
+/// use flux::{Canvas, Surface, Device};
+/// let device = Device::new_headless().unwrap();
+/// let surface = Surface::new_offscreen(&device, 64, 64).unwrap();
+/// let mut frame = surface.begin_frame().unwrap();
+/// let canvas = Canvas::new_cpu(64, 64, 1.0).unwrap();
+/// let mut target = frame.target();
+/// let session = canvas.begin_session(&mut target, None).unwrap();
+/// frame.submit().unwrap();
+/// let _ = session;
+/// ```
 pub struct TargetRef<'frame> {
     raw: *mut sys::flux_target,
-    _marker: std::marker::PhantomData<&'frame ()>,
+    _marker: std::marker::PhantomData<&'frame mut ()>,
 }
 
 impl<'frame> TargetRef<'frame> {
@@ -2400,6 +2435,158 @@ impl<'frame> TargetRef<'frame> {
 impl<'frame> AsTarget for TargetRef<'frame> {
     fn as_raw_target(&self) -> *mut sys::flux_target {
         self.raw
+    }
+}
+
+/// An immutable, relocatable display list owning all command payloads (ADR-0088 / ADR-0090).
+///
+/// Produced exclusively by consuming an [`Encoder`]. Safe to share across threads or retain across frames.
+#[derive(Debug)]
+pub struct DisplayList {
+    raw: *mut sys::flux_display_list,
+}
+
+impl DisplayList {
+    pub(crate) unsafe fn from_raw(raw: *mut sys::flux_display_list) -> Self {
+        Self { raw }
+    }
+
+    pub fn as_raw(&self) -> *mut sys::flux_display_list {
+        self.raw
+    }
+
+    /// Number of serialized commands in this list.
+    pub fn command_count(&self) -> u32 {
+        if self.raw.is_null() {
+            0
+        } else {
+            unsafe { sys::flux_display_list_command_count(self.raw) }
+        }
+    }
+
+    /// Total byte size of serialized command payloads.
+    pub fn size(&self) -> usize {
+        if self.raw.is_null() {
+            0
+        } else {
+            unsafe { sys::flux_display_list_size(self.raw) }
+        }
+    }
+}
+
+impl Clone for DisplayList {
+    fn clone(&self) -> Self {
+        if self.raw.is_null() {
+            Self { raw: std::ptr::null_mut() }
+        } else {
+            unsafe { Self::from_raw(sys::flux_display_list_retain(self.raw)) }
+        }
+    }
+}
+
+impl Drop for DisplayList {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe { sys::flux_display_list_release(self.raw) };
+        }
+    }
+}
+
+unsafe impl Send for DisplayList {}
+unsafe impl Sync for DisplayList {}
+
+/// A pure CPU, memory-only command encoder operating on an arena/buffer (ADR-0088 / ADR-0090).
+///
+/// Records draw and state commands concurrently on any thread with zero GPU dependencies.
+/// Consumed into an immutable [`DisplayList`] via [`Encoder::finish`].
+pub struct Encoder {
+    raw: *mut sys::flux_encoder,
+}
+
+impl Encoder {
+    /// Create a new command encoder with the default budget (64 MiB).
+    pub fn new() -> Result<Self, Error> {
+        Self::with_budget(0)
+    }
+
+    /// Create a command encoder with an explicit maximum byte budget.
+    pub fn with_budget(max_bytes: usize) -> Result<Self, Error> {
+        let desc = sys::flux_encoder_desc { max_bytes };
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe {
+            sys::flux_encoder_create(if max_bytes > 0 { &desc } else { std::ptr::null() }, &mut raw)
+        })?;
+        Ok(Self { raw })
+    }
+
+    /// Push canvas state (transform and scissor).
+    pub fn save(&mut self) {
+        unsafe { sys::flux_encoder_save(self.raw) };
+    }
+
+    /// Pop canvas state.
+    pub fn restore(&mut self) {
+        unsafe { sys::flux_encoder_restore(self.raw) };
+    }
+
+    /// Push a rectangular clip region.
+    pub fn clip_rect(&mut self, rect: (f32, f32, f32, f32)) {
+        let r = sys::flux_rect {
+            x: rect.0,
+            y: rect.1,
+            w: rect.2,
+            h: rect.3,
+        };
+        unsafe { sys::flux_encoder_clip_rect(self.raw, r) };
+    }
+
+    /// Push an isolated opacity layer (ADR-0091).
+    pub fn save_layer(&mut self, bounds: Option<(f32, f32, f32, f32)>, opacity: f32) {
+        let b = bounds.map(|(x, y, w, h)| sys::flux_rect { x, y, w, h });
+        let b_ptr = b.as_ref().map(|r| r as *const _).unwrap_or(std::ptr::null());
+        unsafe { sys::flux_encoder_save_layer(self.raw, b_ptr, opacity) };
+    }
+
+    /// Apply an affine translation.
+    pub fn translate(&mut self, x: f32, y: f32) {
+        unsafe { sys::flux_encoder_translate(self.raw, x, y) };
+    }
+
+    /// Apply an affine scale.
+    pub fn scale(&mut self, sx: f32, sy: f32) {
+        unsafe { sys::flux_encoder_scale(self.raw, sx, sy) };
+    }
+
+    /// Apply a rotation in radians.
+    pub fn rotate(&mut self, radians: f32) {
+        unsafe { sys::flux_encoder_rotate(self.raw, radians) };
+    }
+
+    /// Finish recording and publish an immutable, relocatable [`DisplayList`] (ADR-0090).
+    ///
+    /// Consumes the encoder. An encoder cannot be recorded into after finish:
+    /// ```compile_fail
+    /// use flux::Encoder;
+    /// let mut encoder = Encoder::new().unwrap();
+    /// let dl = encoder.finish().unwrap();
+    /// encoder.save();
+    /// let _ = dl;
+    /// ```
+    pub fn finish(mut self) -> Result<DisplayList, Error> {
+        let mut dl = std::ptr::null_mut();
+        let res = Error::check(unsafe { sys::flux_encoder_finish(self.raw, &mut dl) });
+        unsafe { sys::flux_encoder_destroy(self.raw) };
+        self.raw = std::ptr::null_mut();
+        res?;
+        Ok(unsafe { DisplayList::from_raw(dl) })
+    }
+}
+
+impl Drop for Encoder {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe { sys::flux_encoder_destroy(self.raw) };
+        }
     }
 }
 
@@ -2741,55 +2928,64 @@ impl Canvas {
         })
     }
 
-    /// Target-driven pass bracket (ADR-0088 / Clean-Break).
-    /// Polymorphically drives CPU and GPU canvases via an owned or borrowed target.
-    pub fn begin<T: AsTarget>(&self, target: &T, clear: Option<u32>) -> Result<(), Error> {
-        let ptr = clear
-            .as_ref()
-            .map(|c| c as *const u32)
-            .unwrap_or(std::ptr::null());
-        Error::check(unsafe {
-            sys::flux_canvas_begin(self.raw, target.as_raw_target(), ptr)
-        })
+    /// Submit a compiled DisplayList for hardware execution (ADR-0088 / ADR-0090).
+    pub fn submit_display_list(&self, list: &DisplayList) -> Result<(), Error> {
+        Error::check(unsafe { sys::flux_canvas_submit_display_list(self.raw, list.as_raw()) })
     }
 
-    fn draw_shape(&self, shape: &sys::flux_shape, paint: Option<&Paint>) {
-        let p_ptr = paint.map(|p| &p.raw as *const _).unwrap_or(std::ptr::null());
-        unsafe { sys::flux_canvas_draw(self.raw, shape, p_ptr) };
-    }
-
-    pub(crate) fn default_shape(kind: sys::flux_shape_kind) -> sys::flux_shape {
-        sys::flux_shape {
-            kind,
-            rect: sys::flux_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_image_rect_internal(
+        &self,
+        image: *mut sys::flux_image,
+        sampler: *mut sys::flux_sampler,
+        dst: sys::flux_rect,
+        src: sys::flux_rect,
+        clip: sys::flux_rect,
+        clip_radius: f32,
+        rrect_radius: f32,
+        tint: u32,
+        blend: sys::flux_blend_mode,
+        opaque_only: bool,
+    ) {
+        let is_rrect = rrect_radius > 0.0;
+        let geom = sys::flux_geometry {
+            kind: if is_rrect {
+                sys::flux_geom_kind::FLUX_GEOM_RRECT
+            } else {
+                sys::flux_geom_kind::FLUX_GEOM_RECT
             },
-            radius: 0.0,
+            _pad: [0; 3],
             stroke_width: 0.0,
-            stroke_cap: sys::flux_line_cap::FLUX_CAP_BUTT,
-            stroke_join: sys::flux_line_join::FLUX_JOIN_MITER,
-            path: std::ptr::null(),
-            image: std::ptr::null_mut(),
-            src_rect: sys::flux_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
+            __bindgen_anon_1: if is_rrect {
+                sys::flux_geometry__bindgen_ty_1 {
+                    rrect: sys::flux_geom_rrect_data {
+                        rect: dst,
+                        radius: rrect_radius,
+                    },
+                }
+            } else {
+                sys::flux_geometry__bindgen_ty_1 {
+                    rect: sys::flux_geom_rect_data { rect: dst },
+                }
             },
-            clip_rect: sys::flux_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
+        };
+        let brush = sys::flux_brush {
+            kind: sys::flux_brush_kind::FLUX_BRUSH_IMAGE_PATTERN,
+            blend,
+            opacity: 1.0,
+            __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
+                image: sys::flux_brush_image_data {
+                    image,
+                    sampler,
+                    src_rect: src,
+                    opaque_only,
+                    tint,
+                    clip_rect: clip,
+                    clip_radius,
+                },
             },
-            clip_radius: 0.0,
-            sampler: std::ptr::null_mut(),
-            opaque_only: false,
-            glyph_run: std::ptr::null(),
-        }
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
     }
 
     /// End the pass opened by `begin`.
@@ -2870,20 +3066,50 @@ impl Canvas {
 
     /// Fill a rectangle with a packed solid color.
     pub fn fill_rect(&self, x: f32, y: f32, w: f32, h: f32, color: u32) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_RECT);
-        shape.rect = sys::flux_rect { x, y, w, h };
-        let paint = Paint::solid(color);
-        self.draw_shape(&shape, Some(&paint));
+        let geom = sys::flux_geometry {
+            kind: sys::flux_geom_kind::FLUX_GEOM_RECT,
+            _pad: [0; 3],
+            stroke_width: 0.0,
+            __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
+                rect: sys::flux_geom_rect_data {
+                    rect: sys::flux_rect { x, y, w, h },
+                },
+            },
+        };
+        let brush = sys::flux_brush {
+            kind: sys::flux_brush_kind::FLUX_BRUSH_SOLID,
+            blend: sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            opacity: 1.0,
+            __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
+                solid: sys::flux_brush_solid_data { color },
+            },
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
     }
 
     /// Fill a rounded rectangle with a packed solid color (analytic-AA SDF).
     /// Works on both backends.
     pub fn fill_rrect(&self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_RRECT);
-        shape.rect = sys::flux_rect { x, y, w, h };
-        shape.radius = radius;
-        let paint = Paint::solid(color);
-        self.draw_shape(&shape, Some(&paint));
+        let geom = sys::flux_geometry {
+            kind: sys::flux_geom_kind::FLUX_GEOM_RRECT,
+            _pad: [0; 3],
+            stroke_width: 0.0,
+            __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
+                rrect: sys::flux_geom_rrect_data {
+                    rect: sys::flux_rect { x, y, w, h },
+                    radius,
+                },
+            },
+        };
+        let brush = sys::flux_brush {
+            kind: sys::flux_brush_kind::FLUX_BRUSH_SOLID,
+            blend: sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            opacity: 1.0,
+            __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
+                solid: sys::flux_brush_solid_data { color },
+            },
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
     }
 
     /// Stroke an analytic rounded rectangle with a premultiplied colour.
@@ -2898,27 +3124,60 @@ impl Canvas {
         color: u32,
         width: f32,
     ) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_RRECT);
-        shape.rect = sys::flux_rect { x, y, w, h };
-        shape.radius = radius;
-        shape.stroke_width = width;
-        let paint = Paint::solid(color).with_stroke(width);
-        self.draw_shape(&shape, Some(&paint));
+        let geom = sys::flux_geometry {
+            kind: sys::flux_geom_kind::FLUX_GEOM_RRECT,
+            _pad: [0; 3],
+            stroke_width: width,
+            __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
+                rrect: sys::flux_geom_rrect_data {
+                    rect: sys::flux_rect { x, y, w, h },
+                    radius,
+                },
+            },
+        };
+        let brush = sys::flux_brush {
+            kind: sys::flux_brush_kind::FLUX_BRUSH_SOLID,
+            blend: sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            opacity: 1.0,
+            __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
+                solid: sys::flux_brush_solid_data { color },
+            },
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
     }
 
     /// Fill `path` with `paint` (the paint's fill rule applies).
     pub fn fill_path(&self, path: &Path<'_>, paint: &Paint) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_PATH);
-        shape.path = path.raw;
-        self.draw_shape(&shape, Some(paint));
+        let geom = sys::flux_geometry {
+            kind: sys::flux_geom_kind::FLUX_GEOM_PATH,
+            _pad: [0; 3],
+            stroke_width: 0.0,
+            __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
+                path: sys::flux_geom_path_data {
+                    path: path.raw,
+                    fill_rule: paint.raw.fill_rule,
+                },
+            },
+        };
+        let brush = paint.to_brush();
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
     }
 
     /// Stroke `path` with `paint` (width, cap, and join apply).
     pub fn stroke_path(&self, path: &Path<'_>, paint: &Paint) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_PATH);
-        shape.path = path.raw;
-        shape.stroke_width = paint.raw.stroke_width;
-        self.draw_shape(&shape, Some(paint));
+        let geom = sys::flux_geometry {
+            kind: sys::flux_geom_kind::FLUX_GEOM_PATH,
+            _pad: [0; 3],
+            stroke_width: paint.raw.stroke_width,
+            __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
+                path: sys::flux_geom_path_data {
+                    path: path.raw,
+                    fill_rule: paint.raw.fill_rule,
+                },
+            },
+        };
+        let brush = paint.to_brush();
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
     }
 
     /// Fill a rectangle with a linear gradient in canvas pixel space.
@@ -2935,25 +3194,41 @@ impl Canvas {
         if raw_stops.is_empty() {
             return;
         }
-        let paint = unsafe {
-            sys::flux_paint_linear_gradient(
-                sys::flux_point {
-                    x: from.0,
-                    y: from.1,
+        let geom = sys::flux_geometry {
+            kind: sys::flux_geom_kind::FLUX_GEOM_RECT,
+            _pad: [0; 3],
+            stroke_width: 0.0,
+            __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
+                rect: sys::flux_geom_rect_data {
+                    rect: sys::flux_rect {
+                        x: rect.0,
+                        y: rect.1,
+                        w: rect.2,
+                        h: rect.3,
+                    },
                 },
-                sys::flux_point { x: to.0, y: to.1 },
-                raw_stops.as_ptr(),
-                u32::try_from(raw_stops.len()).unwrap_or(8),
-            )
+            },
         };
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_RECT);
-        shape.rect = sys::flux_rect {
-            x: rect.0,
-            y: rect.1,
-            w: rect.2,
-            h: rect.3,
+        let mut stops_arr = [sys::flux_gradient_stop { t: 0.0, color: 0 }; 8];
+        let count = raw_stops.len().min(8);
+        stops_arr[..count].copy_from_slice(&raw_stops[..count]);
+        let brush = sys::flux_brush {
+            kind: sys::flux_brush_kind::FLUX_BRUSH_LINEAR_GRADIENT,
+            blend: sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            opacity: 1.0,
+            __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
+                gradient: sys::flux_brush_gradient_data {
+                    stops: sys::flux_gradient_stops {
+                        stops: stops_arr,
+                        count: count as u32,
+                    },
+                    start: sys::flux_point { x: from.0, y: from.1 },
+                    end: sys::flux_point { x: to.0, y: to.1 },
+                    radius: 0.0,
+                },
+            },
         };
-        unsafe { sys::flux_canvas_draw(self.raw, &shape, &paint) };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
     }
 
     /// Fill a rectangle with a radial gradient in canvas pixel space.
@@ -2970,41 +3245,63 @@ impl Canvas {
         if raw_stops.is_empty() {
             return;
         }
-        let paint = unsafe {
-            sys::flux_paint_radial_gradient(
-                sys::flux_point {
-                    x: center.0,
-                    y: center.1,
+        let geom = sys::flux_geometry {
+            kind: sys::flux_geom_kind::FLUX_GEOM_RECT,
+            _pad: [0; 3],
+            stroke_width: 0.0,
+            __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
+                rect: sys::flux_geom_rect_data {
+                    rect: sys::flux_rect {
+                        x: rect.0,
+                        y: rect.1,
+                        w: rect.2,
+                        h: rect.3,
+                    },
                 },
-                radius.max(0.0),
-                raw_stops.as_ptr(),
-                u32::try_from(raw_stops.len()).unwrap_or(8),
-            )
+            },
         };
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_RECT);
-        shape.rect = sys::flux_rect {
-            x: rect.0,
-            y: rect.1,
-            w: rect.2,
-            h: rect.3,
+        let mut stops_arr = [sys::flux_gradient_stop { t: 0.0, color: 0 }; 8];
+        let count = raw_stops.len().min(8);
+        stops_arr[..count].copy_from_slice(&raw_stops[..count]);
+        let brush = sys::flux_brush {
+            kind: sys::flux_brush_kind::FLUX_BRUSH_RADIAL_GRADIENT,
+            blend: sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            opacity: 1.0,
+            __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
+                gradient: sys::flux_brush_gradient_data {
+                    stops: sys::flux_gradient_stops {
+                        stops: stops_arr,
+                        count: count as u32,
+                    },
+                    start: sys::flux_point {
+                        x: center.0,
+                        y: center.1,
+                    },
+                    end: sys::flux_point { x: 0.0, y: 0.0 },
+                    radius: radius.max(0.0),
+                },
+            },
         };
-        unsafe { sys::flux_canvas_draw(self.raw, &shape, &paint) };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
     }
 
     /// Draw an image into the destination rectangle (pixel space).
     pub fn draw_image(&self, image: &Image, x: f32, y: f32, w: f32, h: f32) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = sys::flux_rect { x, y, w, h };
-        shape.image = image.raw;
-        self.draw_shape(&shape, None);
+        self.draw_image_rect_internal(
+            image.raw,
+            std::ptr::null_mut(),
+            sys::flux_rect { x, y, w, h },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            0.0,
+            0xFFFFFFFF,
+            sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            false,
+        );
     }
 
     /// Draw an image sampled with `sampler` instead of the canvas default.
-    ///
-    /// This is the pixel-art / atlas path: pass a `NEAREST`/`NEAREST`
-    /// sampler (see [`SamplerDesc`]) so pixel-aligned blits stay crisp —
-    /// the default bilinear filter blurs sub-pixel positions. `sampler` is
-    /// borrowed for the call only; the caller keeps ownership.
     pub fn draw_image_sampled(
         &self,
         image: &Image,
@@ -3014,11 +3311,18 @@ impl Canvas {
         w: f32,
         h: f32,
     ) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = sys::flux_rect { x, y, w, h };
-        shape.image = image.raw;
-        shape.sampler = sampler.raw;
-        self.draw_shape(&shape, None);
+        self.draw_image_rect_internal(
+            image.raw,
+            sampler.raw,
+            sys::flux_rect { x, y, w, h },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            0.0,
+            0xFFFFFFFF,
+            sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            false,
+        );
     }
 
     /// [`Canvas::draw_image_sampled`] with a tint / fixed-function blend
@@ -3034,21 +3338,35 @@ impl Canvas {
         h: f32,
         paint: &Paint,
     ) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = sys::flux_rect { x, y, w, h };
-        shape.image = image.raw;
-        shape.sampler = sampler.raw;
-        self.draw_shape(&shape, Some(paint));
+        self.draw_image_rect_internal(
+            image.raw,
+            sampler.raw,
+            sys::flux_rect { x, y, w, h },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            0.0,
+            paint.raw.color,
+            paint.raw.blend,
+            false,
+        );
     }
 
     /// Draw an alpha-free RGB image, forcing opaque output and replacing the
-    /// destination. This is the correct path for XRGB/XBGR DMA-BUF imports.
+    /// destination.
     pub fn draw_image_opaque(&self, image: &Image, x: f32, y: f32, w: f32, h: f32) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = sys::flux_rect { x, y, w, h };
-        shape.image = image.raw;
-        shape.opaque_only = true;
-        self.draw_shape(&shape, None);
+        self.draw_image_rect_internal(
+            image.raw,
+            std::ptr::null_mut(),
+            sys::flux_rect { x, y, w, h },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            0.0,
+            0xFFFFFFFF,
+            sys::flux_blend_mode::FLUX_BLEND_SRC,
+            true,
+        );
     }
 
     /// Draw an image using the tint and fixed-function blend mode in `paint`.
@@ -3061,26 +3379,38 @@ impl Canvas {
         h: f32,
         paint: &Paint,
     ) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = sys::flux_rect { x, y, w, h };
-        shape.image = image.raw;
-        self.draw_shape(&shape, Some(paint));
+        self.draw_image_rect_internal(
+            image.raw,
+            std::ptr::null_mut(),
+            sys::flux_rect { x, y, w, h },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            0.0,
+            paint.raw.color,
+            paint.raw.blend,
+            false,
+        );
     }
 
-    /// Draw an image clipped to an antialiased rounded rectangle. Set
-    /// `radius` to half the destination size for a circular portrait.
-    #[allow(clippy::too_many_arguments)]
+    /// Draw an image clipped to an antialiased rounded rectangle.
     pub fn draw_image_rrect(&self, image: &Image, x: f32, y: f32, w: f32, h: f32, radius: f32) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = sys::flux_rect { x, y, w, h };
-        shape.image = image.raw;
-        shape.radius = radius;
-        self.draw_shape(&shape, None);
+        self.draw_image_rect_internal(
+            image.raw,
+            std::ptr::null_mut(),
+            sys::flux_rect { x, y, w, h },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            radius,
+            0xFFFFFFFF,
+            sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            false,
+        );
     }
 
     /// Draw an image through one antialiased rounded clip independent of its
-    /// destination. Reuse the same clip for every image in a composed surface
-    /// tree so only the complete preview receives rounded corners.
+    /// destination.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_image_clipped_rrect_with_paint(
         &self,
@@ -3096,23 +3426,26 @@ impl Canvas {
         radius: f32,
         paint: &Paint,
     ) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = sys::flux_rect { x, y, w, h };
-        shape.image = image.raw;
-        shape.clip_rect = sys::flux_rect {
-            x: clip_x,
-            y: clip_y,
-            w: clip_w,
-            h: clip_h,
-        };
-        shape.clip_radius = radius;
-        self.draw_shape(&shape, Some(paint));
+        self.draw_image_rect_internal(
+            image.raw,
+            std::ptr::null_mut(),
+            sys::flux_rect { x, y, w, h },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: clip_x,
+                y: clip_y,
+                w: clip_w,
+                h: clip_h,
+            },
+            radius,
+            0.0,
+            paint.raw.color,
+            paint.raw.blend,
+            false,
+        );
     }
 
-    /// Draw a sub-rectangle of `image` into `dst`. `src` is the sampled
-    /// region in normalised texture coordinates `{u, v, du, dv}` where
-    /// `(0.0, 0.0, 1.0, 1.0)` samples the whole image. Used for
-    /// `wp_viewport.set_source` source-crop without a tint.
+    /// Draw a sub-rectangle of `image` into `dst`.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_image_sub(
         &self,
@@ -3126,28 +3459,32 @@ impl Canvas {
         src_du: f32,
         src_dv: f32,
     ) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = sys::flux_rect {
-            x: dst_x,
-            y: dst_y,
-            w: dst_w,
-            h: dst_h,
-        };
-        shape.src_rect = sys::flux_rect {
-            x: src_u,
-            y: src_v,
-            w: src_du,
-            h: src_dv,
-        };
-        shape.image = image.raw;
-        self.draw_shape(&shape, None);
+        self.draw_image_rect_internal(
+            image.raw,
+            std::ptr::null_mut(),
+            sys::flux_rect {
+                x: dst_x,
+                y: dst_y,
+                w: dst_w,
+                h: dst_h,
+            },
+            sys::flux_rect {
+                x: src_u,
+                y: src_v,
+                w: src_du,
+                h: src_dv,
+            },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            0.0,
+            0xFFFFFFFF,
+            sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            false,
+        );
     }
 
     /// Draw a sub-rectangle of an alpha-free RGB image, SRC-replace with
-    /// alpha forced opaque (no destination read). Combines the source-crop of
-    /// [`Self::draw_image_sub`] with the opaque behaviour of
-    /// [`Self::draw_image_opaque`]. For XRGB/XBGR dma-bufs using
-    /// `wp_viewport.set_source`.
+    /// alpha forced opaque.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_image_opaque_sub(
         &self,
@@ -3161,22 +3498,28 @@ impl Canvas {
         src_du: f32,
         src_dv: f32,
     ) {
-        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = sys::flux_rect {
-            x: dst_x,
-            y: dst_y,
-            w: dst_w,
-            h: dst_h,
-        };
-        shape.src_rect = sys::flux_rect {
-            x: src_u,
-            y: src_v,
-            w: src_du,
-            h: src_dv,
-        };
-        shape.image = image.raw;
-        shape.opaque_only = true;
-        self.draw_shape(&shape, None);
+        self.draw_image_rect_internal(
+            image.raw,
+            std::ptr::null_mut(),
+            sys::flux_rect {
+                x: dst_x,
+                y: dst_y,
+                w: dst_w,
+                h: dst_h,
+            },
+            sys::flux_rect {
+                x: src_u,
+                y: src_v,
+                w: src_du,
+                h: src_dv,
+            },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            0.0,
+            0xFFFFFFFF,
+            sys::flux_blend_mode::FLUX_BLEND_SRC,
+            true,
+        );
     }
 
     /// The underlying raw `flux_canvas` pointer. Borrowed; the `Canvas`
@@ -3412,6 +3755,39 @@ impl Paint {
     /// Borrow the raw C paint.
     pub fn as_raw(&self) -> &sys::flux_paint {
         &self.raw
+    }
+
+    pub(crate) fn to_brush(&self) -> sys::flux_brush {
+        let mut b = sys::flux_brush {
+            kind: sys::flux_brush_kind::FLUX_BRUSH_SOLID,
+            blend: self.raw.blend,
+            opacity: 1.0,
+            __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
+                solid: sys::flux_brush_solid_data { color: self.raw.color },
+            },
+        };
+        if self.raw.kind == sys::flux_paint_kind::FLUX_PAINT_LINEAR_GRADIENT {
+            b.kind = sys::flux_brush_kind::FLUX_BRUSH_LINEAR_GRADIENT;
+            b.__bindgen_anon_1 = sys::flux_brush__bindgen_ty_1 {
+                gradient: sys::flux_brush_gradient_data {
+                    stops: unsafe { self.raw.gradient.linear.stops },
+                    start: unsafe { self.raw.gradient.linear.from },
+                    end: unsafe { self.raw.gradient.linear.to },
+                    radius: 0.0,
+                },
+            };
+        } else if self.raw.kind == sys::flux_paint_kind::FLUX_PAINT_RADIAL_GRADIENT {
+            b.kind = sys::flux_brush_kind::FLUX_BRUSH_RADIAL_GRADIENT;
+            b.__bindgen_anon_1 = sys::flux_brush__bindgen_ty_1 {
+                gradient: sys::flux_brush_gradient_data {
+                    stops: unsafe { self.raw.gradient.radial.stops },
+                    start: unsafe { self.raw.gradient.radial.center },
+                    end: sys::flux_point { x: 0.0, y: 0.0 },
+                    radius: unsafe { self.raw.gradient.radial.radius },
+                },
+            };
+        }
+        b
     }
 }
 
@@ -4088,16 +4464,23 @@ pub struct BlurredImage<'filter> {
 impl BlurredImage<'_> {
     /// Draw the blurred output through the Canvas image pipeline.
     pub fn draw(&self, canvas: &Canvas, x: f32, y: f32, width: f32, height: f32) {
-        let destination = sys::flux_rect {
-            x,
-            y,
-            w: width,
-            h: height,
-        };
-        let mut shape = Canvas::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = destination;
-        shape.image = self.raw;
-        unsafe { sys::flux_canvas_draw(canvas.raw, &shape, std::ptr::null()) };
+        canvas.draw_image_rect_internal(
+            self.raw,
+            std::ptr::null_mut(),
+            sys::flux_rect {
+                x,
+                y,
+                w: width,
+                h: height,
+            },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            0.0,
+            0xFFFFFFFF,
+            sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            false,
+        );
     }
 
     /// Raw `flux_image` pointer of the borrowed blur output. Borrowed: it
@@ -4204,16 +4587,23 @@ impl EffectImage {
     /// Same borrowed-lifetime rules as [`Self::as_raw`]: the pool owns the
     /// image until the next `effect_reset` on the device.
     pub fn draw(&self, canvas: &Canvas, x: f32, y: f32, width: f32, height: f32) {
-        let destination = sys::flux_rect {
-            x,
-            y,
-            w: width,
-            h: height,
-        };
-        let mut shape = Canvas::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = destination;
-        shape.image = self.raw;
-        unsafe { sys::flux_canvas_draw(canvas.raw, &shape, std::ptr::null()) };
+        canvas.draw_image_rect_internal(
+            self.raw,
+            std::ptr::null_mut(),
+            sys::flux_rect {
+                x,
+                y,
+                w: width,
+                h: height,
+            },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            0.0,
+            0xFFFFFFFF,
+            sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            false,
+        );
     }
 
     /// Promote the leased output into a caller-owned, refcounted image
@@ -4291,16 +4681,23 @@ impl ShadowedImage<'_> {
     /// (rgb = tint * a), so straight `draw_image` blending composites
     /// correctly.
     pub fn draw(&self, canvas: &Canvas, x: f32, y: f32, width: f32, height: f32) {
-        let destination = sys::flux_rect {
-            x,
-            y,
-            w: width,
-            h: height,
-        };
-        let mut shape = Canvas::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
-        shape.rect = destination;
-        shape.image = self.raw;
-        unsafe { sys::flux_canvas_draw(canvas.raw, &shape, std::ptr::null()) };
+        canvas.draw_image_rect_internal(
+            self.raw,
+            std::ptr::null_mut(),
+            sys::flux_rect {
+                x,
+                y,
+                w: width,
+                h: height,
+            },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            0.0,
+            0.0,
+            0xFFFFFFFF,
+            sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+            false,
+        );
     }
 
     /// Raw `flux_image` pointer of the borrowed shadow output, for sibling

@@ -1,7 +1,7 @@
 //! Headless software-canvas smoke test: exercises the CPU backend end to end
 //! from the safe Rust API with no GPU, device, or window.
 
-use flux::{Canvas, GradientStop, rgba};
+use flux::{Canvas, Encoder, GradientStop, Target, rgba};
 
 #[test]
 fn cpu_canvas_renders_and_reads_back() {
@@ -165,4 +165,53 @@ fn pixel_snapshot_survives_subsequent_frames() {
     let (_, _, _, second) = c.read_pixels().unwrap();
     assert_eq!(&first[..4], &[255, 0, 0, 255]);
     assert_eq!(&second[..4], &[0, 0, 255, 255]);
+}
+
+#[test]
+fn canvas_session_renders_to_cpu_target() {
+    let mut target = Target::create_cpu(32, 32).expect("create CPU target");
+    let c = Canvas::new_cpu(32, 32, 1.0).expect("create CPU canvas");
+
+    let green = rgba(0, 255, 0, 255);
+    let red = rgba(255, 0, 0, 255);
+
+    let session = c.begin_session(&mut target, Some(green)).expect("begin session");
+    session.fill_rect(8.0, 8.0, 16.0, 16.0, red);
+    session.end().expect("end session cleanly");
+
+    let pixels = target.cpu_pixels().expect("read CPU target pixels");
+    assert_eq!(pixels.len(), 32 * 32 * 4);
+
+    // Corner at (0, 0) should be cleared green
+    assert_eq!(&pixels[..4], &[0, 255, 0, 255]);
+
+    // Center at (16, 16) should be filled red
+    let center_idx = (16 * 32 + 16) * 4;
+    assert_eq!(&pixels[center_idx..center_idx + 4], &[255, 0, 0, 255]);
+}
+
+#[test]
+fn encoder_display_list_playback_to_target() {
+    let mut target = Target::create_cpu(32, 32).expect("create CPU target");
+    let c = Canvas::new_cpu(32, 32, 1.0).expect("create CPU canvas");
+
+    let mut enc = Encoder::new().expect("create encoder");
+    enc.save_layer(None, 0.5);
+    enc.translate(4.0, 4.0);
+    enc.clip_rect((0.0, 0.0, 16.0, 16.0));
+    enc.restore();
+    let dl = enc.finish().expect("finish display list");
+
+    assert!(dl.command_count() >= 4);
+    assert!(dl.size() > 0);
+
+    let cloned_dl = dl.clone();
+    drop(dl);
+
+    let session = c.begin_session(&mut target, Some(rgba(0, 0, 0, 255))).expect("begin session");
+    c.submit_display_list(&cloned_dl).expect("submit display list");
+    session.end().expect("end session");
+
+    let pixels = target.cpu_pixels().expect("read CPU target pixels");
+    assert_eq!(pixels.len(), 32 * 32 * 4);
 }

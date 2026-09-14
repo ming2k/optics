@@ -82,9 +82,8 @@ int main(void) {
     lens_draw_list draw_list = {0};
     CHECK(lens_compile_draw_list(ui, &snapshot_arena, &draw_list) == FLUX_OK);
     /* Verify that compile_draw_list captured the complete UI tree into commands (NOT just 1 dummy command!) */
-    CHECK(draw_list.command_count >= 3);
-    CHECK(draw_list.display_list.count >= 3);
-    CHECK(draw_list.display_list.size > 0);
+    CHECK(flux_display_list_command_count(draw_list.display_list) >= 3);
+    CHECK(flux_display_list_size(draw_list.display_list) > 0);
 
     /* Submit to CPU canvas and verify replay */
     flux_canvas_desc cd = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 500, .height = 300);
@@ -99,7 +98,7 @@ int main(void) {
     const uint8_t *px = flux_canvas_read_pixels(c, &pw, &ph, &pstride);
     CHECK(px != nullptr);
 
-    flux_display_list_destroy(&draw_list.display_list);
+    flux_display_list_release(draw_list.display_list);
     flux_canvas_release(c);
     flux_arena_deinit(&snapshot_arena);
 

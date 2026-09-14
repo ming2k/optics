@@ -175,6 +175,7 @@ struct flux_canvas {
     bool pass_active;
     bool target_pass;   /* true: active pass renders into target, not the frame */
     flux_image *target; /* borrowed during begin_target..end_target */
+    flux_target *bound_target;     /* target leased exclusively for recording interval (ADR-0093) */
     flux_target *bound_cpu_target; /* CPU target receiving readback pixels on end */
 
     /* Stencil-then-cover availability (ADR-0014). Set by the backend at
@@ -193,6 +194,7 @@ struct flux_canvas {
      * stencil-contract violation directly, so checked pass termination exposes
      * it without relying on thread-local diagnostic polling. First error wins. */
     flux_result pass_error;
+    flux_recti pass_scissor;
 
     /* Physical framebuffer size of the active pass, set by the backend at
      * begin_pass. build_push reads it for the NDC transform, so the front end

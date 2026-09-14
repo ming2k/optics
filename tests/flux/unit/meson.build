@@ -175,3 +175,8 @@ test_rfc0094 = executable('test_rfc0094_contracts',
   dependencies : [test_helpers_dep, flux_text_dep],
 )
 test('rfc0094_contracts', test_rfc0094, suite : 'unit')
+
+test_display_list = executable('test_display_list', 'test_display_list.c',
+  dependencies : [test_helpers_dep],
+)
+test('display_list', test_display_list, suite : 'unit')

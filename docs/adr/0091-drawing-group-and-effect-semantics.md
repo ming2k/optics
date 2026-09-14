@@ -5,7 +5,7 @@
 - Scope: Flux drawing semantics and Prism effect construction.
 - Depends on: [ADR-0089](0089-rendering-program-and-execution-plan.md),
   [ADR-0090](0090-display-list-resource-ownership.md).
-- Implementation: Complete; isolated group opacity, G2 squircle geometry, and brush modulation tested.
+- Implementation: Complete; verified against acceptance criteria in [the implementation matrix](../dev/architecture-review-2026-09-14.md).
 
 ## Context
 

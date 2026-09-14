@@ -1,7 +1,10 @@
-# Composition Graph Reference
+# Composition Graph Reference (Superseded)
 
-`flux-composition-graph` plans explicit image dependencies above Flux. It
-does not allocate images or record GPU commands.
+> **Note**: As decided in [ADR-0089](../adr/0089-rendering-program-and-execution-plan.md)
+> and [ADR-0092](../adr/0092-resource-planning-and-retirement.md), the separate
+> `flux-composition-graph` Rust companion crate has been retired. Explicit dependencies,
+> transient aliasing, and damage planning are unified into Flux's native RenderPlan compiler.
+> This document is retained for historical design reference.
 
 ## Graph Model
 

@@ -4,7 +4,7 @@
 - Date: 2026-09-14
 - Scope: Recording, resources, caches, and cross-thread publication.
 - Depends on: [ADR-0089](0089-rendering-program-and-execution-plan.md).
-- Implementation: Complete; owned transitive payloads, path/gradient/quad capture, and lifecycle tested.
+- Implementation: Complete; verified against acceptance criteria in [the implementation matrix](../dev/architecture-review-2026-09-14.md).
 
 ## Context
 

@@ -845,6 +845,87 @@ static void lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
             }
             break;
         }
+        case LENS_DRAW_ICON: {
+            if (c->icon_id < 0)
+                break;
+            const lens_icon_desc *desc = lensi_icon_desc(c->icon_id);
+            if (!desc || !desc->cmds || desc->count == 0)
+                break;
+
+            float s = r.w / 24.0f;
+            float ox = r.x;
+            float oy = r.y;
+
+            if (desc->runs && desc->run_count > 0) {
+                for (uint32_t run = 0; run < desc->run_count; run++) {
+                    const lens_icon_run *ri = &desc->runs[run];
+                    uint32_t end = ri->first_cmd + ri->count;
+                    if (end > desc->count)
+                        break;
+                    flux_path *p = NULL;
+                    if (flux_path_create(&p, &ui->arena) != FLUX_OK)
+                        break;
+                    for (uint32_t i = ri->first_cmd; i < end; i++) {
+                        const lens_icon_cmd *cmd = &desc->cmds[i];
+                        const float *pp = cmd->params;
+                        switch (cmd->type) {
+                        case 0: flux_path_move_to(p, pp[0] * s + ox, pp[1] * s + oy); break;
+                        case 1: flux_path_line_to(p, pp[0] * s + ox, pp[1] * s + oy); break;
+                        case 2: flux_path_cubic_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox, pp[3] * s + oy, pp[4] * s + ox, pp[5] * s + oy); break;
+                        case 3: flux_path_quad_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox, pp[3] * s + oy); break;
+                        case 4: flux_path_close(p); break;
+                        case 5: flux_path_add_circle(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s); break;
+                        case 6: {
+                            flux_rect ir = {pp[0] * s + ox, pp[1] * s + oy, pp[2] * s, pp[3] * s};
+                            flux_path_add_rect(p, ir);
+                            break;
+                        }
+                        }
+                    }
+                    uint32_t rc = ri->color;
+                    uint8_t rr = (uint8_t)(rc >> 16), rg = (uint8_t)(rc >> 8), rb = (uint8_t)rc,
+                            ra = (uint8_t)(rc >> 24);
+                    flux_color color = rc == 0 ? c->color : flux_color_rgba_premul(rr, rg, rb, ra);
+                    flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
+                    if (!ri->fill) {
+                        g.stroke_width = c->width > 0 ? c->width : 2.0f * s;
+                    }
+                    flux_brush b = flux_brush_solid(color);
+                    flux_encoder_draw_geometry(enc, &g, &b);
+                }
+                break;
+            }
+
+            flux_path *p = NULL;
+            if (flux_path_create(&p, &ui->arena) != FLUX_OK)
+                break;
+
+            for (uint32_t i = 0; i < desc->count; i++) {
+                const lens_icon_cmd *cmd = &desc->cmds[i];
+                const float *pp = cmd->params;
+                switch (cmd->type) {
+                case 0: flux_path_move_to(p, pp[0] * s + ox, pp[1] * s + oy); break;
+                case 1: flux_path_line_to(p, pp[0] * s + ox, pp[1] * s + oy); break;
+                case 2: flux_path_cubic_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox, pp[3] * s + oy, pp[4] * s + ox, pp[5] * s + oy); break;
+                case 3: flux_path_quad_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox, pp[3] * s + oy); break;
+                case 4: flux_path_close(p); break;
+                case 5: flux_path_add_circle(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s); break;
+                case 6: {
+                    flux_rect ir = {pp[0] * s + ox, pp[1] * s + oy, pp[2] * s, pp[3] * s};
+                    flux_path_add_rect(p, ir);
+                    break;
+                }
+                }
+            }
+
+            flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
+            if (lensi_icon_mode(c->icon_id) != LENSI_ICON_RENDER_FILL) {
+                g.stroke_width = c->width > 0 ? c->width : 2.0f * s;
+            }
+            flux_brush b = flux_brush_solid(c->color);
+            flux_encoder_draw_geometry(enc, &g, &b);
+            break;
+        }
         case LENS_DRAW_CLIP_PUSH: {
             if (command_clip_depth < 16) {
                 command_clip_stack[command_clip_depth++] = command_clip;
@@ -943,7 +1024,7 @@ flux_result lens_compile_draw_list(lens *ui, flux_arena *arena, lens_draw_list *
     if (!ui || !arena || !out_list)
         return FLUX_ERROR_INVALID_ARGUMENT;
     flux_encoder *enc = nullptr;
-    flux_result r = flux_encoder_create(arena, &enc);
+    flux_result r = flux_encoder_create(nullptr, &enc);
     if (r != FLUX_OK)
         return r;
 
@@ -1001,10 +1082,10 @@ flux_result lens_compile_draw_list(lens *ui, flux_arena *arena, lens_draw_list *
         flux_encoder_restore(enc);
 
     r = flux_encoder_finish(enc, &out_list->display_list);
+    flux_encoder_destroy(enc);
     if (r != FLUX_OK)
         return r;
 
-    out_list->command_count = out_list->display_list.count;
     out_list->has_damage = lens_frame_needs_repaint(ui);
     return FLUX_OK;
 }
@@ -1012,5 +1093,5 @@ flux_result lens_compile_draw_list(lens *ui, flux_arena *arena, lens_draw_list *
 flux_result lens_draw_list_submit(const lens_draw_list *list, flux_canvas *canvas) {
     if (!list || !canvas)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    return flux_canvas_submit_display_list(canvas, &list->display_list);
+    return flux_canvas_submit_display_list(canvas, list->display_list);
 }

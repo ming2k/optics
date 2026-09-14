@@ -1,7 +1,6 @@
 [workspace]
 resolver = "3"
 members = [
-  "flux-composition-graph",
   "flux-text-layout",
 ]
 

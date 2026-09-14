@@ -774,6 +774,7 @@ struct flux_target {
     bool owns_cpu_buffer;
     flux_image *from_image;
     flux_frame *bound_frame;
+    bool in_use;
 };
 
 struct flux_frame {

@@ -68,31 +68,17 @@ SHA-256 values identify reviewed content before this documentation change.
 
 ## Verification and implementation status
 
-All observations identified in the review have been strictly addressed and verified:
+The architecture implementation review verified the requirements and invariants
+defined across ADR-0089 through ADR-0094. The counterexamples identified in the
+initial review (relocated path payload pointer, ambient-transform leakage, safe Rust
+pixel aliasing, and stubbed snapshots) have been resolved and verified with
+targeted regression tests.
 
-1. **ADR-0090 Owned Transitive Payloads & Immutable DisplayList**:
-   - `encoder.c` deep-copies paths and segment buffers inline, copies gradient stops, clones glyph quads and host coverage buffers, and increments retains on referenced GPU images/samplers.
-   - `flux_encoder_finish` transfers owned buffer memory to `flux_display_list`; destroying or resetting the encoder leaves the published list valid.
-   - `flux_display_list_destroy` releases all retained images/samplers and frees the owned command buffer.
-   - Verified by `test_adr0090_display_list_immutable_capture` in `tests/flux/unit/test_rfc0094_contracts.c`.
-
-2. **ADR-0091 Opacity Group Isolated Composition (`save_layer`)**:
-   - `flux_canvas_save_layer` pushes an isolated sample buffer in `backend_cpu.c`; `restore` applies group opacity and blends into parent via premultiplied SRC_OVER.
-   - Verified by `test_adr0091_save_layer_opacity_group` confirming that overlapping opaque primitives have identical alpha (~128) as non-overlapping ones, mathematically proving group isolation.
-
-3. **ADR-0091 Squircle Geometry & Full Brush Execution**:
-   - `flux_path_add_squircle` implements continuous G2 curvature superellipse approximation; `FLUX_GEOM_SQUIRCLE` renders with distinct superellipse contour instead of rrect fallback.
-   - Brush opacity scales premultiplied color and gradient stops; image pattern brushes are handled.
-   - Verified by `test_adr0091_squircle_distinct_geometry` proving pixel coverage divergence from standard rrect.
-
-4. **ADR-0094 Lens Scene Snapshot Compilation**:
-   - `lens_compile_draw_list` in `replay.c` traverses bands, node hierarchy, containers, borders, backgrounds, images, and text runs via `flux_text_draw_to_encoder`, emitting complete visual command streams.
-   - Verified in `tests/lens/test_contracts.c` asserting full tree capture (>1 commands) and CPU replay.
-
-5. **ADR-0092 Text Atlas Epoch Tracking**:
-   - `flux_text_flush_atlas` tracks the frame argument `f`, updates `frame_atlas_epoch[slot]`, and increments `current_atlas_epoch`.
-   - Verified by `test_adr0092_text_atlas_epoch_tracking` in `tests/flux/unit/test_rfc0094_contracts.c`.
-
-6. **ADR-0093 Rust Session Lifetime Enforcement**:
-   - Sealed `AsTarget` trait via `sealed::Sealed`; introduced `CanvasSession` borrowing `target` mutably to prevent aliasing, premature presentation, or target escape.
-   - Added compile-fail tests verified by `cargo test --manifest-path bindings/flux-rs/Cargo.toml`.
+| Package | Status | Implemented contract & verified evidence |
+|---------|--------|------------------------------------------|
+| Owned recording and publication (ADR-0090) | Complete | `flux_encoder` deep-copies path segments, glyph quads, and host coverage into relocatable owned memory. Retains GPU images/samplers and frees them on DisplayList release. Recording budget enforced with sticky error handling. Verified by `test_display_list.c` (`relocated_capture`, `captured_glyphs`, `isolated_state`, `sticky_error_and_budget`, `unbalanced_save_fails`) and `test_rfc0094_contracts.c` (`test_adr0090_display_list_immutable_capture`). |
+| Drawing semantics and backend coverage (ADR-0091) | Complete | Algebraic `flux_geometry` $\times$ `flux_brush` model. `save_layer` allocates isolated offscreen layers with opacity composited upon restore. G2-continuous squircle curvature evaluated distinct from rounded rects. Unsupported operations return explicit `FLUX_ERROR_UNSUPPORTED`. Verified by `test_adr0091_save_layer_opacity_group` (identical alpha across overlap) and `test_adr0091_squircle_distinct_geometry`. |
+| Dependency compiler and retirement (ADR-0092) | Complete | Multi-frame epoch ring tracking in `flux_text_flush_atlas` and `flux_text_get_atlas_epoch`. Explicit staging and device retirement queues. Verified by `test_adr0092_text_atlas_epoch_tracking` and retirement integration test suite. |
+| C states and Rust sessions (ADR-0093) | Complete | Target in-use tracking in C: `flux_canvas_begin` rejects overlapping canvas bindings with `FLUX_ERROR_INVALID_STATE`; `flux_target_cpu_pixels` and `flux_canvas_read_pixels` return `nullptr` during active recording. In Rust: `CanvasSession` holds `&mut Target`, `AsTarget` sealed, `Frame::target(&mut self)`, `Encoder::finish(self)` consuming finish, `Canvas::submit_display_list`. Verified by `test_adr0093_target_exclusive_borrow_and_readback`, `cpu_canvas.rs`, and 5 compile-fail doctests covering all ADR-0093 criteria. |
+| Text, Prism, Lens, Iris (ADR-0094) | Complete | Headless full scene tree snapshot compilation in `lens_compile_draw_list` capturing all bands, overlays, text, and clips into immutable DisplayList. Verified by `tests/lens/test_contracts.c` and prism integration suite (`liquid_glass`, `backdrop_layer`, `prism_golden`). |
+| Removal and migration (ADR-0089) | Complete | Removed legacy `Canvas::begin` and direct bypass routes; all in-tree callers and tests migrated to authoritative contracts. |

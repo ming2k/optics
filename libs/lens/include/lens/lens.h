@@ -849,8 +849,7 @@ FLUX_NODISCARD LENS_API flux_result lens_render(lens *ui, flux_canvas *canvas);
 /* ================================================================== */
 
 typedef struct lens_draw_list {
-    flux_display_list display_list;
-    uint32_t command_count;
+    flux_display_list *display_list;
     bool has_damage;
 } lens_draw_list;
 

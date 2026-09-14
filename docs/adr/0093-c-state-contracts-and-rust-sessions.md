@@ -6,7 +6,7 @@
 - Depends on: [ADR-0089](0089-rendering-program-and-execution-plan.md),
   [ADR-0090](0090-display-list-resource-ownership.md),
   [ADR-0092](0092-resource-planning-and-retirement.md).
-- Implementation: Complete; sealed AsTarget, CanvasSession target borrow safety, and compile-fail tests verified.
+- Implementation: Complete; verified against acceptance criteria in [the implementation matrix](../dev/architecture-review-2026-09-14.md).
 
 ## Context
 

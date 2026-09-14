@@ -259,9 +259,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_canvas_scale` |  |
 | `flux_canvas_rotate` |  |
 | `flux_canvas_transform` |  |
-| `flux_canvas_draw` | The single unified 2D drawing primitive (ADR-0083) |
-| `flux_canvas_draw_geometry` |  |
-| `flux_encoder_create` | Create a pure CPU, zero-GPU memory command encoder allocated on `arena`. |
+| `flux_canvas_draw_geometry` | Authoritative orthogonal Geometry x Brush drawing primitive (ADR-0089 / ADR-0091) |
+| `flux_encoder_create` | Create a pure CPU command encoder for building an immutable display list (ADR-0090). |
 | `flux_encoder_draw_geometry` |  |
 | `flux_encoder_draw_glyph_run` |  |
 | `flux_encoder_save` |  |

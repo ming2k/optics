@@ -12,10 +12,9 @@ library. Eight crates provide the native wrappers and companion layers:
 | [`flux-scene-graph-sys`] | Raw bindgen FFI to `libflux-scene-graph`.          |
 | [`flux-scene-graph`] | Safe glTF scene, material/texture, animation, bounds, and drawing layer. |
 
-Two **pure-Rust layers above these bindings** live in the monorepo's
-top-level `crates/` workspace (they are not bindings, so they do not live
-here): `crates/flux-text-layout` (Layer-1 line wrapping) and
-`crates/flux-composition-graph` (offscreen DAG / ROI / damage planning).
+The **pure-Rust text layout layer** lives in the monorepo's
+top-level `crates/` workspace (it is not a C binding, so it does not live
+here): `crates/flux-text-layout` (Layer-1 Knuth-Plass line wrapping and layout).
 
 [flux]: https://github.com/ming2k/flux
 [`flux-sys`]: crates/flux-sys/

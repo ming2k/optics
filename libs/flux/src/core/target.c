@@ -193,7 +193,7 @@ flux_target *flux_frame_target(flux_frame *f) {
 
 const uint8_t *flux_target_cpu_pixels(const flux_target *t, uint32_t *out_width,
                                       uint32_t *out_height, uint32_t *out_stride) {
-    if (!t || !t->is_cpu)
+    if (!t || !t->is_cpu || t->in_use)
         return nullptr;
     if (out_width)
         *out_width = t->width;

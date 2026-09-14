@@ -356,50 +356,10 @@ FLUX_API void flux_canvas_scale(flux_canvas *c, float sx, float sy);
 FLUX_API void flux_canvas_rotate(flux_canvas *c, float radians);
 FLUX_API void flux_canvas_transform(flux_canvas *c, flux_mat3x2 m);
 
-/* ================================================================== */
-/*  Geometry shapes & unified draw (ADR-0083)                         */
-/* ================================================================== */
-
 typedef struct flux_glyph_run_desc flux_glyph_run_desc;
 
-typedef enum flux_shape_kind : uint32_t {
-    FLUX_SHAPE_RECT = 0,
-    FLUX_SHAPE_RRECT = 1,
-    FLUX_SHAPE_CIRCLE = 2,
-    FLUX_SHAPE_LINE = 3,
-    FLUX_SHAPE_PATH = 4,
-    FLUX_SHAPE_IMAGE = 5,
-    FLUX_SHAPE_GLYPHS = 6,
-} flux_shape_kind;
-
-typedef struct flux_shape {
-    flux_shape_kind kind;
-    flux_rect rect;     /* target geometry in canvas space */
-    float radius;       /* corner radius for RRECT / CIRCLE */
-    float stroke_width; /* 0 = fill; > 0 = stroke width */
-    flux_line_cap stroke_cap;
-    flux_line_join stroke_join;
-
-    /* Path geometry */
-    const flux_path *path;
-
-    /* Image parameters */
-    flux_image *image;
-    flux_rect src_rect;  /* normalized UV coordinates {u, v, du, dv} */
-    flux_rect clip_rect; /* analytic clip bounds */
-    float clip_radius;
-    flux_sampler *sampler; /* optional sampler (nullptr = default linear) */
-    bool opaque_only;      /* force opaque SRC blend */
-
-    /* Glyphs parameters */
-    const flux_glyph_run_desc *glyph_run;
-} flux_shape;
-
-/* The single unified 2D drawing primitive (ADR-0083) */
-FLUX_API void flux_canvas_draw(flux_canvas *c, const flux_shape *shape, const flux_paint *paint);
-
 /* ================================================================== */
-/*  Algebraic Geometry & Brush Model (ADR-0088 Clean-Break)           */
+/*  Algebraic Geometry & Brush Model (ADR-0088 / ADR-0091 Clean-Break)*/
 /* ================================================================== */
 
 typedef enum flux_geom_kind : uint8_t {
@@ -436,6 +396,7 @@ typedef struct flux_geom_line_data {
 
 typedef struct flux_geom_path_data {
     const flux_path *path;
+    flux_fill_rule fill_rule;
 } flux_geom_path_data;
 
 typedef struct flux_geometry {
@@ -475,6 +436,9 @@ typedef struct flux_brush_image_data {
     flux_sampler *sampler; /* optional (nullptr = default linear) */
     flux_rect src_rect;    /* normalized UV {u, v, du, dv}, 0,0,0,0 = full */
     bool opaque_only;
+    flux_color tint;
+    flux_rect clip_rect;
+    float clip_radius;
 } flux_brush_image_data;
 
 typedef struct flux_brush {
@@ -495,17 +459,20 @@ FLUX_API void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geo
 /*  Immutable DisplayList & Encoder (ADR-0088 Clean-Break)            */
 /* ================================================================== */
 
-typedef struct flux_display_list {
-    const uint8_t *commands;
-    size_t size;
-    uint32_t count;
-    flux_rect bounds;
-} flux_display_list;
+/* Shared immutable owner. Payload storage is private; copying a pointer does
+ * not acquire ownership. Each retained reference must be released once. */
+typedef struct flux_display_list flux_display_list;
 
 typedef struct flux_encoder flux_encoder;
 
-/* Create a pure CPU, zero-GPU memory command encoder allocated on `arena`. */
-FLUX_NODISCARD FLUX_API flux_result flux_encoder_create(flux_arena *arena, flux_encoder **out);
+typedef struct flux_encoder_desc {
+    size_t max_bytes; /* Owned command storage budget; zero selects 64 MiB. */
+} flux_encoder_desc;
+
+/* Unique recorder. Creation owns all scratch storage. Finish is terminal;
+ * destroy the recorder after finish or to abort unfinished recording. */
+FLUX_NODISCARD FLUX_API flux_result flux_encoder_create(const flux_encoder_desc *desc,
+                                                       flux_encoder **out);
 FLUX_API void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
                                          const flux_brush *brush);
 FLUX_API void flux_encoder_draw_glyph_run(flux_encoder *enc, const flux_glyph_run_desc *desc);
@@ -518,18 +485,17 @@ FLUX_API void flux_encoder_scale(flux_encoder *enc, float sx, float sy);
 FLUX_API void flux_encoder_rotate(flux_encoder *enc, float radians);
 FLUX_API void flux_encoder_transform(flux_encoder *enc, flux_mat3x2 m);
 
-/* Reset encoder for reuse, releasing any uncommitted commands. */
-FLUX_API void flux_encoder_reset(flux_encoder *enc);
-
 /* Destroy an encoder and release its scratch resources. Published display lists survive. */
 FLUX_API void flux_encoder_destroy(flux_encoder *enc);
 
 /* Freeze encoder commands into an immutable display list. */
 FLUX_NODISCARD FLUX_API flux_result flux_encoder_finish(flux_encoder *enc,
-                                                        flux_display_list *out_list);
+                                                        flux_display_list **out_list);
 
-/* Destroy a published display list and release retained resources. */
-FLUX_API void flux_display_list_destroy(flux_display_list *list);
+FLUX_API flux_display_list *flux_display_list_retain(flux_display_list *list);
+FLUX_API void flux_display_list_release(flux_display_list *list);
+FLUX_API size_t flux_display_list_size(const flux_display_list *list);
+FLUX_API uint32_t flux_display_list_command_count(const flux_display_list *list);
 
 /* Submit an immutable display list to a canvas for batch execution. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_submit_display_list(flux_canvas *c,

@@ -310,33 +310,41 @@ pub struct LiquidGlassImage<'filter> {
 }
 
 fn draw_image_rect(canvas: &flux::Canvas, image: *mut flux_sys::flux_image, dst: sys::flux_rect) {
-    let shape = flux_sys::flux_shape {
-        kind: flux_sys::flux_shape_kind::FLUX_SHAPE_IMAGE,
-        rect: dst,
-        radius: 0.0,
+    let geom = flux_sys::flux_geometry {
+        kind: flux_sys::flux_geom_kind::FLUX_GEOM_RECT,
+        _pad: [0; 3],
         stroke_width: 0.0,
-        stroke_cap: flux_sys::flux_line_cap::FLUX_CAP_BUTT,
-        stroke_join: flux_sys::flux_line_join::FLUX_JOIN_MITER,
-        path: std::ptr::null(),
-        image,
-        src_rect: flux_sys::flux_rect {
-            x: 0.0,
-            y: 0.0,
-            w: 0.0,
-            h: 0.0,
+        __bindgen_anon_1: flux_sys::flux_geometry__bindgen_ty_1 {
+            rect: flux_sys::flux_geom_rect_data { rect: dst },
         },
-        clip_rect: flux_sys::flux_rect {
-            x: 0.0,
-            y: 0.0,
-            w: 0.0,
-            h: 0.0,
-        },
-        clip_radius: 0.0,
-        sampler: std::ptr::null_mut(),
-        opaque_only: false,
-        glyph_run: std::ptr::null(),
     };
-    unsafe { flux_sys::flux_canvas_draw(canvas.as_raw(), &shape, std::ptr::null()) };
+    let brush = flux_sys::flux_brush {
+        kind: flux_sys::flux_brush_kind::FLUX_BRUSH_IMAGE_PATTERN,
+        blend: flux_sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+        opacity: 1.0,
+        __bindgen_anon_1: flux_sys::flux_brush__bindgen_ty_1 {
+            image: flux_sys::flux_brush_image_data {
+                image,
+                sampler: std::ptr::null_mut(),
+                src_rect: flux_sys::flux_rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 0.0,
+                    h: 0.0,
+                },
+                opaque_only: false,
+                tint: 0xFFFFFFFF,
+                clip_rect: flux_sys::flux_rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 0.0,
+                    h: 0.0,
+                },
+                clip_radius: 0.0,
+            },
+        },
+    };
+    unsafe { flux_sys::flux_canvas_draw_geometry(canvas.as_raw(), &geom, &brush) };
 }
 
 impl LiquidGlassImage<'_> {
