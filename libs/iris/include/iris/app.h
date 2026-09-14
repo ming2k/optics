@@ -72,7 +72,7 @@ extern "C" {
 
 #define IRIS_VERSION_MAJOR 0
 #define IRIS_VERSION_MINOR 0
-#define IRIS_VERSION_PATCH 41
+#define IRIS_VERSION_PATCH 42
 
 /* Packed integer version, monotonic — identical layout to
  * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).

@@ -13,6 +13,32 @@ either.
 
 ## [Unreleased]
 
+## [0.0.42] - 2026-09-14
+
+### Added
+
+- **flux**: Implemented clean-break DisplayList architecture with relocatable command capture, private command storage, and independent refcounted lifecycle (`flux_encoder_create`, `flux_encoder_finish`, `flux_display_list_retain`, `flux_display_list_release`) (ADR-0089 / ADR-0090).
+- **flux**: Implemented orthogonal `flux_geometry` $\times$ `flux_brush` drawing model with G2-continuous squircle curvature, independent rounded image clips, and brush opacity modulation (`flux_canvas_draw_geometry`) (ADR-0091).
+- **flux**: Added native Vulkan backend `save_layer` and `restore_layer` with isolated dynamic rendering passes, intermediate linear pooling, and opacity composite blitting without double-blend artifacts (ADR-0091 / ADR-0092).
+- **flux**: Added production-grade binary serialization protocol for DisplayList (`flux_display_list_serialize`, `flux_display_list_deserialize`) with versioning, Adler-32 checksums, and fuzzing-grade float/bounds validation (ADR-0090).
+- **flux**: Added DisplayList slice splicing (`flux_encoder_append_display_list`) with automatic GPU resource retention.
+- **flux**: Added RenderPlan execution diagnostics (`flux_canvas_get_plan_stats`) tracking pass counts, peak layer depth, and transient aliasing memory savings (ADR-0089 / ADR-0092).
+- **lens**: Added decoupled scene snapshots and presentation generations (`lens_snapshot_create`, `lens_snapshot_generation`, `lens_snapshot_submit`, `lens_generation`, `lens_notify_presented`, `lens_last_presented_generation`) (ADR-0094).
+- **lens**: Added node-level DisplayList slice caching and incremental diffing for clean subtrees in `lens_compile_draw_list` (ADR-0094).
+- **iris**: Integrated presentation handshake (`lens_notify_presented`) across Wayland, Win32, and Cocoa loops upon successful frame presentation (ADR-0084 / ADR-0094).
+- **flux-rs**: Added `DisplayList` and `Encoder` safe bindings with consuming `finish(self)` and sealed `AsTarget` trait (ADR-0093).
+
+### Changed
+
+- **flux**: Enforced runtime exclusive target lease in `flux_canvas_begin` (`FLUX_ERROR_INVALID_STATE` on overlapping canvas bindings) and prevented concurrent CPU readback while recording (ADR-0093).
+- **flux**: Rewrote `<flux/canvas_helpers.h>` convenience functions to exclusively construct `flux_geometry` $\times$ `flux_brush` and route to `flux_canvas_draw_geometry`.
+- **flux-rs**: Removed `Canvas::begin` and `Canvas::begin_target` bypasses, enforcing `CanvasSession` with exclusive `&mut Target` borrow and `Frame::target(&mut self)`.
+
+### Removed
+
+- **flux**: Physically removed legacy `flux_shape`, `flux_shape_kind`, `flux_shape_*` helpers, and `flux_canvas_draw`.
+- **workspace**: Retired and removed independent Rust planner `crates/flux-composition-graph` per ADR-0089.
+
 ## [0.0.41] - 2026-09-12
 
 ### Added
