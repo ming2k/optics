@@ -92,6 +92,6 @@ int main(void) {
     lens_accessibility_walk(ui, saw_button, NULL);
     CHECK(g_seen_button);
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

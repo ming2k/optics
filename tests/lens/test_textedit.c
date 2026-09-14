@@ -43,7 +43,7 @@ static void test_insert_ascii(void) {
     CHECK(changed);
     CHECK(strcmp(buf, "hello") == 0);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_backspace_and_delete(void) {
@@ -80,7 +80,7 @@ static void test_backspace_and_delete(void) {
     CHECK(changed);
     CHECK(strcmp(buf, "b") == 0);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_cursor_navigation(void) {
@@ -113,7 +113,7 @@ static void test_cursor_navigation(void) {
     CHECK(changed);
     CHECK(strcmp(buf, "aworld") == 0);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_multiline_enter_inserts_newline(void) {
@@ -154,7 +154,7 @@ static void test_multiline_enter_inserts_newline(void) {
     CHECK(changed);
     CHECK(strcmp(buf, "line1\nline2") == 0);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_multiline_selection_and_copy(void) {
@@ -180,7 +180,7 @@ static void test_multiline_selection_and_copy(void) {
     CHECK(changed);
     CHECK(strcmp(buf, "\nworld") == 0);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_textedit_cursor_hint(void) {
@@ -208,7 +208,7 @@ static void test_textedit_cursor_hint(void) {
     CHECK(r.hovered);
     CHECK(lens_get_cursor_hint(ui) == LENS_CURSOR_TEXT);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_textedit_vertical_centering(void) {
@@ -239,7 +239,7 @@ static void test_textedit_vertical_centering(void) {
     CHECK(text_cmd->rel.y > 0.0f);
     CHECK(text_cmd->rel.y < 20.0f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_textedit_caret_coverage(void) {
@@ -273,7 +273,7 @@ static void test_textedit_caret_coverage(void) {
         CHECK(caret_cmd->rel.h >= 14.0f);
     }
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_textedit_ime_preedit_and_commit(void) {
@@ -319,7 +319,7 @@ static void test_textedit_ime_preedit_and_commit(void) {
     CHECK(changed);
     CHECK(strcmp(buf, "hello 你好") == 0);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_double_click_selects_word(void) {
@@ -382,7 +382,7 @@ static void test_double_click_selects_word(void) {
     CHECK(sel_lo == 0);
     CHECK(sel_hi == (uint32_t)strlen(buf));
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_ctrl_arrow_word_navigation(void) {
@@ -460,7 +460,7 @@ static void test_ctrl_arrow_word_navigation(void) {
     CHECK(lens_textedit_get_caret(ui, "tf", &cur));
     CHECK(cur == 0);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

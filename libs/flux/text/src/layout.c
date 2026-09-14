@@ -646,8 +646,9 @@ flux_text_metrics flux_text_measure(flux_text *t, const char *utf8, size_t len,
 /* Emit one already-shaped layout pass. Keeping the offset outside glyph
  * rasterisation means every contour sample reuses the exact same cache entry
  * and subpixel phase as the foreground; only destination vertices move. */
-static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_layout *L, float x,
-                             float y, float offset_x, float offset_y, flux_color color) {
+static void draw_layout_pass(flux_text *t, flux_canvas *canvas, flux_encoder *encoder,
+                             const txt_text_layout *L, float x, float y, float offset_x,
+                             float offset_y, flux_color color) {
     float scale = L->scale;
     float inv_scale = L->inv_scale;
 
@@ -786,14 +787,20 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
         if (n == TEXT_RUN_BATCH) {
             txt_atlas_flush(t);
             run.quad_count = n;
-            flux_canvas_draw_glyph_run(canvas, &run);
+            if (canvas)
+                flux_canvas_draw_glyph_run(canvas, &run);
+            else if (encoder)
+                flux_encoder_draw_glyph_run(encoder, &run);
             n = 0;
         }
     }
     if (n > 0) {
         txt_atlas_flush(t);
         run.quad_count = n;
-        flux_canvas_draw_glyph_run(canvas, &run);
+        if (canvas)
+            flux_canvas_draw_glyph_run(canvas, &run);
+        else if (encoder)
+            flux_encoder_draw_glyph_run(encoder, &run);
     }
     /* The batch's atlas retain was handed over to every flush via the
      * frame's foreign-image tracking (canvas_record_retain_image), so one
@@ -802,14 +809,15 @@ static void draw_layout_pass(flux_text *t, flux_canvas *canvas, const txt_text_l
         flux_image_release(batch_atlas);
 }
 
-static void text_draw_impl(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
-                           const char *utf8, size_t len, const flux_text_style *style,
-                           flux_color outline_color, float outline_width) {
+static void text_draw_impl(flux_text *t, flux_canvas *canvas, flux_encoder *encoder,
+                           flux_arena *arena, float x, float y, const char *utf8, size_t len,
+                           const flux_text_style *style, flux_color outline_color,
+                           float outline_width) {
     (void)arena;
     /* `atlas` is NULL on a device-less CPU canvas, but the host R8 coverage
      * buffer `atlas_pixels` is still live (txt_atlas_init allocates it
      * unconditionally). The run desc routes via host_coverage then. */
-    if (!t || !canvas || !t->has_backend || !t->atlas_pixels || !utf8 || len == 0)
+    if (!t || (!canvas && !encoder) || !t->has_backend || !t->atlas_pixels || !utf8 || len == 0)
         return;
 
     float size_px, weight;
@@ -821,7 +829,7 @@ static void text_draw_impl(flux_text *t, flux_canvas *canvas, flux_arena *arena,
      * canvas's base transform maps the logical quads onto physical pixels
      * crisply. Fall back to the context's own scale (measure-only contexts,
      * or a canvas left at the default). */
-    float scale = flux_canvas_get_scale(canvas);
+    float scale = canvas ? flux_canvas_get_scale(canvas) : t->scale;
     if (scale <= 0.0f)
         scale = (t->scale > 0.0f) ? t->scale : 1.0f;
 
@@ -842,20 +850,25 @@ static void text_draw_impl(flux_text *t, flux_canvas *canvas, flux_arena *arena,
             {-diagonal, diagonal},  {diagonal, diagonal},
         };
         for (size_t i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++)
-            draw_layout_pass(t, canvas, &L, x, y, offsets[i].x, offsets[i].y, outline_color);
+            draw_layout_pass(t, canvas, encoder, &L, x, y, offsets[i].x, offsets[i].y, outline_color);
     }
-    draw_layout_pass(t, canvas, &L, x, y, 0.0f, 0.0f, color);
+    draw_layout_pass(t, canvas, encoder, &L, x, y, 0.0f, 0.0f, color);
 }
 
 void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
                     const char *utf8, size_t len, const flux_text_style *style) {
-    text_draw_impl(t, canvas, arena, x, y, utf8, len, style, 0, 0.0f);
+    text_draw_impl(t, canvas, nullptr, arena, x, y, utf8, len, style, 0, 0.0f);
+}
+
+void flux_text_draw_to_encoder(flux_text *t, flux_encoder *encoder, flux_arena *arena, float x, float y,
+                              const char *utf8, size_t len, const flux_text_style *style) {
+    text_draw_impl(t, nullptr, encoder, arena, x, y, utf8, len, style, 0, 0.0f);
 }
 
 void flux_text_draw_outlined(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
                              const char *utf8, size_t len, const flux_text_style *style,
                              flux_color outline_color, float outline_width) {
-    text_draw_impl(t, canvas, arena, x, y, utf8, len, style, outline_color, outline_width);
+    text_draw_impl(t, canvas, nullptr, arena, x, y, utf8, len, style, outline_color, outline_width);
 }
 
 /* ------------------------------------------------------------------ */

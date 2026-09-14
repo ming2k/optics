@@ -92,6 +92,6 @@ int main(void) {
         CHECK(pid != 0 && lens_find(ui, pid) != NULL);
     }
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

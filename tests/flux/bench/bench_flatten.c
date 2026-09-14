@@ -99,7 +99,7 @@ int main(void) {
 
     free(pts);
     free(cons);
-    flux_arena_destroy(&arena);
+    flux_arena_deinit(&arena);
 
     fprintf(stdout, "\n");
     return 0;

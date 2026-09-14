@@ -388,7 +388,7 @@ int main(void) {
         flux_get_last_error(&ei);
         fprintf(stderr, "flux_compute_pipeline_create -> %s\n  %s\n", flux_result_string(r),
                 ei.message ? ei.message : "(no info)");
-        flux_canvas_destroy(canvas);
+        flux_canvas_release(canvas);
         flux_surface_release(surface);
         vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
         flux_device_release(device);
@@ -520,7 +520,7 @@ int main(void) {
     flux_device_wait_idle(device);
     target_destroy(device, &target);
     flux_compute_pipeline_release(pipe);
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_surface_release(surface);
     vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
     flux_device_release(device);

@@ -100,7 +100,7 @@ int main(void) {
 
     flux_arena arena_store;
     if (flux_arena_init(&arena_store, 1u << 20, nullptr) != FLUX_OK) {
-        flux_text_destroy(text);
+        flux_text_release(text);
         goto teardown;
     }
 
@@ -149,11 +149,11 @@ int main(void) {
     }
 
     flux_device_wait_idle(device);
-    flux_arena_destroy(&arena_store);
-    flux_text_destroy(text);
+    flux_arena_deinit(&arena_store);
+    flux_text_release(text);
 teardown:
     if (canvas)
-        flux_canvas_destroy(canvas);
+        flux_canvas_release(canvas);
     flux_surface_release(surface);
     vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
     flux_device_release(device);

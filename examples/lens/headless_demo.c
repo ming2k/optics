@@ -66,6 +66,6 @@ int main(void) {
     }
 
     printf("clicks=%d wrap=%d zoom=%.2f\n", clicks, wrap, zoom);
-    lens_destroy(ui);
+    lens_release(ui);
     return 0;
 }

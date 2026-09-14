@@ -1772,6 +1772,13 @@ impl<'surface> Frame<'surface> {
         })
     }
 
+    /// Borrow the render target bound to this presentation frame (ADR-0088).
+    ///
+    /// Statically bound to the lifetime of `self`, preventing reference escape.
+    pub fn target(&self) -> TargetRef<'_> {
+        unsafe { TargetRef::from_raw(sys::flux_frame_target(self.raw)) }
+    }
+
     /// Frame-in-flight slot index. Resources written by the GPU should keep
     /// one instance per slot when the previous frame may still be executing.
     pub fn index(&self) -> u32 {
@@ -2264,6 +2271,136 @@ impl Target {
     pub fn as_raw(&self) -> *mut sys::flux_target {
         self.raw
     }
+
+    /// Create an owned CPU raster target (ADR-0088).
+    pub fn create_cpu(width: u32, height: u32) -> Result<Target, Error> {
+        let desc = sys::flux_cpu_target_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_TARGET_DESC,
+            next: std::ptr::null(),
+            width,
+            height,
+            format: sys::flux_format::FLUX_FORMAT_RGBA8_UNORM,
+            user_buffer: std::ptr::null_mut(),
+            stride_bytes: 0,
+        };
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_target_create_cpu(&desc, &mut raw) })?;
+        Ok(Target {
+            raw,
+            format: Format::Rgba8Unorm,
+        })
+    }
+
+    /// Readback CPU target pixels as a byte slice.
+    pub fn cpu_pixels(&self) -> Option<&[u8]> {
+        let mut w = 0;
+        let mut h = 0;
+        let mut stride = 0;
+        let ptr = unsafe { sys::flux_target_cpu_pixels(self.raw, &mut w, &mut h, &mut stride) };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(unsafe { std::slice::from_raw_parts(ptr, (h * stride) as usize) })
+        }
+    }
+}
+
+pub type OwnedTarget = Target;
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::Target {}
+    impl<'frame> Sealed for super::TargetRef<'frame> {}
+}
+
+/// Trait for render targets, enabling polymorphic Canvas operations across owned and borrowed targets.
+pub trait AsTarget: sealed::Sealed {
+    fn as_raw_target(&self) -> *mut sys::flux_target;
+}
+
+impl AsTarget for Target {
+    fn as_raw_target(&self) -> *mut sys::flux_target {
+        self.raw
+    }
+}
+
+/// An exclusive canvas recording session bound to a borrowed render target (ADR-0093).
+/// Prevents concurrent mutation, presentation, or target escape during recording.
+///
+/// A target cannot be concurrently accessed or mutated while a session is active:
+/// ```compile_fail
+/// use flux::{Canvas, Target};
+/// let canvas = Canvas::new_cpu(64, 64, 1.0).unwrap();
+/// let mut target = Target::create_cpu(64, 64).unwrap();
+/// let session = canvas.begin_session(&mut target, None).unwrap();
+/// target.cpu_pixels();
+/// let _ = session;
+/// ```
+pub struct CanvasSession<'canvas, 'target, T: AsTarget> {
+    canvas: &'canvas Canvas,
+    _target: &'target mut T,
+    ended: bool,
+}
+
+impl<'canvas, 'target, T: AsTarget> CanvasSession<'canvas, 'target, T> {
+    /// End the execution session cleanly.
+    pub fn end(mut self) -> Result<(), Error> {
+        self.ended = true;
+        Error::check(unsafe { sys::flux_canvas_end(self.canvas.raw) })
+    }
+
+    /// Access the underlying canvas.
+    pub fn canvas(&self) -> &Canvas {
+        self.canvas
+    }
+}
+
+impl<'canvas, 'target, T: AsTarget> std::ops::Deref for CanvasSession<'canvas, 'target, T> {
+    type Target = Canvas;
+    fn deref(&self) -> &Canvas {
+        self.canvas
+    }
+}
+
+impl<'canvas, 'target, T: AsTarget> Drop for CanvasSession<'canvas, 'target, T> {
+    fn drop(&mut self) {
+        if !self.ended {
+            unsafe { sys::flux_canvas_end(self.canvas.raw) };
+        }
+    }
+}
+
+/// A borrowed render target bound to a Frame's presentation lifecycle (ADR-0088).
+///
+/// Statically constrained by the lifetime `'frame`. Cannot outlive the parent `Frame`
+/// and does NOT release the underlying target on drop, preventing double-free.
+pub struct TargetRef<'frame> {
+    raw: *mut sys::flux_target,
+    _marker: std::marker::PhantomData<&'frame ()>,
+}
+
+impl<'frame> TargetRef<'frame> {
+    pub(crate) unsafe fn from_raw(raw: *mut sys::flux_target) -> Self {
+        Self {
+            raw,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        unsafe {
+            (
+                sys::flux_target_width(self.raw),
+                sys::flux_target_height(self.raw),
+            )
+        }
+    }
+}
+
+impl<'frame> AsTarget for TargetRef<'frame> {
+    fn as_raw_target(&self) -> *mut sys::flux_target {
+        self.raw
+    }
 }
 
 impl Drop for Target {
@@ -2413,7 +2550,7 @@ fn with_raw_canvas_pass_desc<T>(
 
 impl Canvas {
     /// Wrap a raw `flux_canvas*` as a non-owning view. The returned handle does
-    /// **not** call `flux_canvas_destroy` on drop — the real owner (e.g. iris,
+    /// **not** call `flux_canvas_release` on drop — the real owner (e.g. iris,
     /// for its window's canvas) stays in charge. Use this when a host hands
     /// you a live `flux_canvas*` that is already inside an open
     /// `flux_canvas_begin_frame`/`flux_canvas_end_frame` pair and you want to
@@ -2583,6 +2720,83 @@ impl Canvas {
         unsafe { sys::flux_canvas_end_frame(self.raw) };
     }
 
+    /// Open a target-driven pass bracket returning an execution session (ADR-0088 / ADR-0093).
+    /// Holds a mutable borrow of `target` preventing aliasing or premature presentation during the session.
+    pub fn begin_session<'c, 't, T: AsTarget>(
+        &'c self,
+        target: &'t mut T,
+        clear: Option<u32>,
+    ) -> Result<CanvasSession<'c, 't, T>, Error> {
+        let ptr = clear
+            .as_ref()
+            .map(|c| c as *const u32)
+            .unwrap_or(std::ptr::null());
+        Error::check(unsafe {
+            sys::flux_canvas_begin(self.raw, target.as_raw_target(), ptr)
+        })?;
+        Ok(CanvasSession {
+            canvas: self,
+            _target: target,
+            ended: false,
+        })
+    }
+
+    /// Target-driven pass bracket (ADR-0088 / Clean-Break).
+    /// Polymorphically drives CPU and GPU canvases via an owned or borrowed target.
+    pub fn begin<T: AsTarget>(&self, target: &T, clear: Option<u32>) -> Result<(), Error> {
+        let ptr = clear
+            .as_ref()
+            .map(|c| c as *const u32)
+            .unwrap_or(std::ptr::null());
+        Error::check(unsafe {
+            sys::flux_canvas_begin(self.raw, target.as_raw_target(), ptr)
+        })
+    }
+
+    fn draw_shape(&self, shape: &sys::flux_shape, paint: Option<&Paint>) {
+        let p_ptr = paint.map(|p| &p.raw as *const _).unwrap_or(std::ptr::null());
+        unsafe { sys::flux_canvas_draw(self.raw, shape, p_ptr) };
+    }
+
+    pub(crate) fn default_shape(kind: sys::flux_shape_kind) -> sys::flux_shape {
+        sys::flux_shape {
+            kind,
+            rect: sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            radius: 0.0,
+            stroke_width: 0.0,
+            stroke_cap: sys::flux_line_cap::FLUX_CAP_BUTT,
+            stroke_join: sys::flux_line_join::FLUX_JOIN_MITER,
+            path: std::ptr::null(),
+            image: std::ptr::null_mut(),
+            src_rect: sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            clip_rect: sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            clip_radius: 0.0,
+            sampler: std::ptr::null_mut(),
+            opaque_only: false,
+            glyph_run: std::ptr::null(),
+        }
+    }
+
+    /// End the pass opened by `begin`.
+    pub fn end(&self) -> Result<(), Error> {
+        Error::check(unsafe { sys::flux_canvas_end(self.raw) })
+    }
+
     /// End the pass and surface any sticky draw-time contract error (e.g. a
     /// stencil-dependent draw attempted inside a no-stencil pass). Prefer this
     /// over [`end_frame`](Self::end_frame) in compositor-style code so a
@@ -2656,15 +2870,20 @@ impl Canvas {
 
     /// Fill a rectangle with a packed solid color.
     pub fn fill_rect(&self, x: f32, y: f32, w: f32, h: f32, color: u32) {
-        let r = sys::flux_rect { x, y, w, h };
-        unsafe { sys::flux_canvas_fill_rect_color(self.raw, r, color) };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_RECT);
+        shape.rect = sys::flux_rect { x, y, w, h };
+        let paint = Paint::solid(color);
+        self.draw_shape(&shape, Some(&paint));
     }
 
     /// Fill a rounded rectangle with a packed solid color (analytic-AA SDF).
     /// Works on both backends.
     pub fn fill_rrect(&self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
-        let r = sys::flux_rect { x, y, w, h };
-        unsafe { sys::flux_canvas_fill_rrect(self.raw, r, radius, color) };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_RRECT);
+        shape.rect = sys::flux_rect { x, y, w, h };
+        shape.radius = radius;
+        let paint = Paint::solid(color);
+        self.draw_shape(&shape, Some(&paint));
     }
 
     /// Stroke an analytic rounded rectangle with a premultiplied colour.
@@ -2679,18 +2898,27 @@ impl Canvas {
         color: u32,
         width: f32,
     ) {
-        let rect = sys::flux_rect { x, y, w, h };
-        unsafe { sys::flux_canvas_stroke_rrect(self.raw, rect, radius, color, width) };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_RRECT);
+        shape.rect = sys::flux_rect { x, y, w, h };
+        shape.radius = radius;
+        shape.stroke_width = width;
+        let paint = Paint::solid(color).with_stroke(width);
+        self.draw_shape(&shape, Some(&paint));
     }
 
     /// Fill `path` with `paint` (the paint's fill rule applies).
     pub fn fill_path(&self, path: &Path<'_>, paint: &Paint) {
-        unsafe { sys::flux_canvas_fill_path(self.raw, path.raw, &paint.raw) };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_PATH);
+        shape.path = path.raw;
+        self.draw_shape(&shape, Some(paint));
     }
 
     /// Stroke `path` with `paint` (width, cap, and join apply).
     pub fn stroke_path(&self, path: &Path<'_>, paint: &Paint) {
-        unsafe { sys::flux_canvas_stroke_path(self.raw, path.raw, &paint.raw) };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_PATH);
+        shape.path = path.raw;
+        shape.stroke_width = paint.raw.stroke_width;
+        self.draw_shape(&shape, Some(paint));
     }
 
     /// Fill a rectangle with a linear gradient in canvas pixel space.
@@ -2718,13 +2946,14 @@ impl Canvas {
                 u32::try_from(raw_stops.len()).unwrap_or(8),
             )
         };
-        let rect = sys::flux_rect {
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_RECT);
+        shape.rect = sys::flux_rect {
             x: rect.0,
             y: rect.1,
             w: rect.2,
             h: rect.3,
         };
-        unsafe { sys::flux_canvas_fill_rect(self.raw, rect, &paint) };
+        unsafe { sys::flux_canvas_draw(self.raw, &shape, &paint) };
     }
 
     /// Fill a rectangle with a radial gradient in canvas pixel space.
@@ -2752,19 +2981,22 @@ impl Canvas {
                 u32::try_from(raw_stops.len()).unwrap_or(8),
             )
         };
-        let rect = sys::flux_rect {
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_RECT);
+        shape.rect = sys::flux_rect {
             x: rect.0,
             y: rect.1,
             w: rect.2,
             h: rect.3,
         };
-        unsafe { sys::flux_canvas_fill_rect(self.raw, rect, &paint) };
+        unsafe { sys::flux_canvas_draw(self.raw, &shape, &paint) };
     }
 
     /// Draw an image into the destination rectangle (pixel space).
     pub fn draw_image(&self, image: &Image, x: f32, y: f32, w: f32, h: f32) {
-        let dst = sys::flux_rect { x, y, w, h };
-        unsafe { sys::flux_canvas_draw_image(self.raw, image.raw, dst, std::ptr::null()) };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = sys::flux_rect { x, y, w, h };
+        shape.image = image.raw;
+        self.draw_shape(&shape, None);
     }
 
     /// Draw an image sampled with `sampler` instead of the canvas default.
@@ -2782,16 +3014,11 @@ impl Canvas {
         w: f32,
         h: f32,
     ) {
-        let dst = sys::flux_rect { x, y, w, h };
-        unsafe {
-            sys::flux_canvas_draw_image_sampled(
-                self.raw,
-                image.raw,
-                sampler.raw,
-                dst,
-                std::ptr::null(),
-            )
-        };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = sys::flux_rect { x, y, w, h };
+        shape.image = image.raw;
+        shape.sampler = sampler.raw;
+        self.draw_shape(&shape, None);
     }
 
     /// [`Canvas::draw_image_sampled`] with a tint / fixed-function blend
@@ -2807,23 +3034,21 @@ impl Canvas {
         h: f32,
         paint: &Paint,
     ) {
-        let dst = sys::flux_rect { x, y, w, h };
-        unsafe {
-            sys::flux_canvas_draw_image_sampled(
-                self.raw,
-                image.raw,
-                sampler.raw,
-                dst,
-                paint.as_raw(),
-            )
-        };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = sys::flux_rect { x, y, w, h };
+        shape.image = image.raw;
+        shape.sampler = sampler.raw;
+        self.draw_shape(&shape, Some(paint));
     }
 
     /// Draw an alpha-free RGB image, forcing opaque output and replacing the
     /// destination. This is the correct path for XRGB/XBGR DMA-BUF imports.
     pub fn draw_image_opaque(&self, image: &Image, x: f32, y: f32, w: f32, h: f32) {
-        let dst = sys::flux_rect { x, y, w, h };
-        unsafe { sys::flux_canvas_draw_image_opaque(self.raw, image.raw, dst) };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = sys::flux_rect { x, y, w, h };
+        shape.image = image.raw;
+        shape.opaque_only = true;
+        self.draw_shape(&shape, None);
     }
 
     /// Draw an image using the tint and fixed-function blend mode in `paint`.
@@ -2836,18 +3061,21 @@ impl Canvas {
         h: f32,
         paint: &Paint,
     ) {
-        let dst = sys::flux_rect { x, y, w, h };
-        unsafe { sys::flux_canvas_draw_image(self.raw, image.raw, dst, paint.as_raw()) };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = sys::flux_rect { x, y, w, h };
+        shape.image = image.raw;
+        self.draw_shape(&shape, Some(paint));
     }
 
     /// Draw an image clipped to an antialiased rounded rectangle. Set
     /// `radius` to half the destination size for a circular portrait.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_image_rrect(&self, image: &Image, x: f32, y: f32, w: f32, h: f32, radius: f32) {
-        let dst = sys::flux_rect { x, y, w, h };
-        unsafe {
-            sys::flux_canvas_draw_image_rrect(self.raw, image.raw, dst, radius, std::ptr::null())
-        };
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = sys::flux_rect { x, y, w, h };
+        shape.image = image.raw;
+        shape.radius = radius;
+        self.draw_shape(&shape, None);
     }
 
     /// Draw an image through one antialiased rounded clip independent of its
@@ -2868,23 +3096,17 @@ impl Canvas {
         radius: f32,
         paint: &Paint,
     ) {
-        let dst = sys::flux_rect { x, y, w, h };
-        let clip = sys::flux_rect {
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = sys::flux_rect { x, y, w, h };
+        shape.image = image.raw;
+        shape.clip_rect = sys::flux_rect {
             x: clip_x,
             y: clip_y,
             w: clip_w,
             h: clip_h,
         };
-        unsafe {
-            sys::flux_canvas_draw_image_clipped_rrect(
-                self.raw,
-                image.raw,
-                dst,
-                clip,
-                radius,
-                paint.as_raw(),
-            )
-        };
+        shape.clip_radius = radius;
+        self.draw_shape(&shape, Some(paint));
     }
 
     /// Draw a sub-rectangle of `image` into `dst`. `src` is the sampled
@@ -2904,19 +3126,21 @@ impl Canvas {
         src_du: f32,
         src_dv: f32,
     ) {
-        let dst = sys::flux_rect {
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = sys::flux_rect {
             x: dst_x,
             y: dst_y,
             w: dst_w,
             h: dst_h,
         };
-        let src = sys::flux_rect {
+        shape.src_rect = sys::flux_rect {
             x: src_u,
             y: src_v,
             w: src_du,
             h: src_dv,
         };
-        unsafe { sys::flux_canvas_draw_image_sub(self.raw, image.raw, dst, src) };
+        shape.image = image.raw;
+        self.draw_shape(&shape, None);
     }
 
     /// Draw a sub-rectangle of an alpha-free RGB image, SRC-replace with
@@ -2937,19 +3161,22 @@ impl Canvas {
         src_du: f32,
         src_dv: f32,
     ) {
-        let dst = sys::flux_rect {
+        let mut shape = Self::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = sys::flux_rect {
             x: dst_x,
             y: dst_y,
             w: dst_w,
             h: dst_h,
         };
-        let src = sys::flux_rect {
+        shape.src_rect = sys::flux_rect {
             x: src_u,
             y: src_v,
             w: src_du,
             h: src_dv,
         };
-        unsafe { sys::flux_canvas_draw_image_opaque_sub(self.raw, image.raw, dst, src) };
+        shape.image = image.raw;
+        shape.opaque_only = true;
+        self.draw_shape(&shape, None);
     }
 
     /// The underlying raw `flux_canvas` pointer. Borrowed; the `Canvas`
@@ -2996,7 +3223,7 @@ impl Drop for Canvas {
         // Only destroy when this handle actually owns the canvas. A view built
         // via `borrow_raw` leaves the real owner in charge.
         if !self.borrowed {
-            unsafe { sys::flux_canvas_destroy(self.raw) };
+            unsafe { sys::flux_canvas_release(self.raw) };
         }
     }
 }
@@ -3055,7 +3282,7 @@ impl Drop for Arena {
         // SAFETY: raw came from Box::into_raw and was initialised by
         // flux_arena_init; destroy frees the buffer, then we reclaim the box.
         unsafe {
-            sys::flux_arena_destroy(self.raw);
+            sys::flux_arena_deinit(self.raw);
             drop(Box::from_raw(self.raw));
         }
     }
@@ -3867,7 +4094,10 @@ impl BlurredImage<'_> {
             w: width,
             h: height,
         };
-        unsafe { sys::flux_canvas_draw_image(canvas.raw, self.raw, destination, std::ptr::null()) };
+        let mut shape = Canvas::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = destination;
+        shape.image = self.raw;
+        unsafe { sys::flux_canvas_draw(canvas.raw, &shape, std::ptr::null()) };
     }
 
     /// Raw `flux_image` pointer of the borrowed blur output. Borrowed: it
@@ -3980,7 +4210,10 @@ impl EffectImage {
             w: width,
             h: height,
         };
-        unsafe { sys::flux_canvas_draw_image(canvas.raw, self.raw, destination, std::ptr::null()) };
+        let mut shape = Canvas::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = destination;
+        shape.image = self.raw;
+        unsafe { sys::flux_canvas_draw(canvas.raw, &shape, std::ptr::null()) };
     }
 
     /// Promote the leased output into a caller-owned, refcounted image
@@ -4064,7 +4297,10 @@ impl ShadowedImage<'_> {
             w: width,
             h: height,
         };
-        unsafe { sys::flux_canvas_draw_image(canvas.raw, self.raw, destination, std::ptr::null()) };
+        let mut shape = Canvas::default_shape(sys::flux_shape_kind::FLUX_SHAPE_IMAGE);
+        shape.rect = destination;
+        shape.image = self.raw;
+        unsafe { sys::flux_canvas_draw(canvas.raw, &shape, std::ptr::null()) };
     }
 
     /// Raw `flux_image` pointer of the borrowed shadow output, for sibling

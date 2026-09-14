@@ -93,7 +93,7 @@ int main(void) {
     EXPECT(stray != nullptr);
     flux_image_release(stray);
 
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_surface_release(surface);
     flux_device_release(d);
     TEST_SUMMARY();

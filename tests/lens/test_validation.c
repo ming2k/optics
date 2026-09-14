@@ -50,7 +50,7 @@ static void test_textfield_error_reaches_skin(void) {
     CHECK(!lens_overflowed(ui));
 
     lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, NULL); /* restore */
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_slider_error_reaches_skin(void) {
@@ -70,7 +70,7 @@ static void test_slider_error_reaches_skin(void) {
     CHECK(!lens_overflowed(ui));
 
     lens_set_skin(ui, LENS_WIDGET_SLIDER, NULL);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_error_scoped_to_its_own_widget(void) {
@@ -88,7 +88,7 @@ static void test_error_scoped_to_its_own_widget(void) {
     CHECK(g_saw_any && g_saw_error && g_saw_clean);
 
     lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, NULL);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

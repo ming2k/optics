@@ -54,7 +54,7 @@ The forces that shaped the choices below:
    ([ADR-0038](0038-lens-node-state-gc.md)).
 5. **`lens` is the only lifecycle object.** Theme, scale, device, arena,
    store, input, interaction state, and overlay open-set all live on
-   `struct lens`. Created via `lens_create`, destroyed via `lens_destroy`.
+   `struct lens`. Created via `lens_create`, destroyed via `lens_release`.
 6. **Implicit root container.** `lens_begin` opens a column container
    covering `input.display_size` so the first caller `lens_row`/`lens_label`
    need not seed a root.

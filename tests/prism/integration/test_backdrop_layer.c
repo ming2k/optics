@@ -535,7 +535,7 @@ int main(void) {
 
     prism_backdrop_layer_filter_release(layer_filter);
     flux_blur_filter_release(blur_filter);
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_image_release(target);
     flux_surface_release(s);
     flux_device_release(d);

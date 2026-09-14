@@ -88,6 +88,6 @@ int main(void) {
     CHECK(frame_with_cmd(ui, text) == true);
     CHECK(frame_with_cmd(ui, text) == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

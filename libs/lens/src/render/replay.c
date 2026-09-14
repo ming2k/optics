@@ -736,3 +736,281 @@ flux_result lens_render(lens *ui, flux_canvas *canvas) {
     }
     return FLUX_OK;
 }
+
+static void lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, flux_rect clip,
+                                  const lens_draw_cmd *cmds, uint32_t cmd_count, float alpha) {
+    float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
+    flux_rect command_clip = clip;
+    flux_rect command_clip_stack[16];
+    uint32_t command_clip_depth = 0;
+
+    for (uint32_t i = 0; i < cmd_count; i++) {
+        const lens_draw_cmd *c = &cmds[i];
+        flux_rect r = offset_rel(box, c->rel);
+        r = snap_rect(r, scale);
+
+        bool is_clip_cmd = (c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP);
+        if (!is_clip_cmd && !rect_overlaps(r, command_clip))
+            continue;
+
+        if (c->radius > 0.5f && c->radius >= fminf(r.w, r.h) * 0.5f - 0.001f && c->rel.w > 0.0f &&
+            c->rel.h > 0.0f && fabsf(c->rel.w - c->rel.h) < 0.5f) {
+            float side = fminf(r.w, r.h);
+            r.x += (r.w - side) * 0.5f;
+            r.y += (r.h - side) * 0.5f;
+            r.w = side;
+            r.h = side;
+        }
+
+        lens_draw_cmd faded;
+        if (alpha < 1.0f) {
+            faded = *c;
+            faded.color = lensi_opacity_color(faded.color, alpha);
+            faded.outline_color = lensi_opacity_color(faded.outline_color, alpha);
+            c = &faded;
+        }
+
+        switch (c->kind) {
+        case LENS_DRAW_RECT: {
+            flux_geometry g = (c->radius > 0.5f) ? flux_geom_rrect(r, c->radius) : flux_geom_rect(r);
+            flux_brush b = flux_brush_solid(c->color);
+            flux_encoder_draw_geometry(enc, &g, &b);
+            break;
+        }
+        case LENS_DRAW_BORDER: {
+            float bw = c->width > 0 ? c->width : 1.0f;
+            flux_geometry g = (c->radius > 0.5f) ? flux_geom_rrect(r, c->radius) : flux_geom_rect(r);
+            g.stroke_width = bw;
+            flux_brush b = flux_brush_solid(c->color);
+            flux_encoder_draw_geometry(enc, &g, &b);
+            break;
+        }
+        case LENS_DRAW_TAB_INDICATOR: {
+            float thickness = c->width > 0.0f ? c->width : 3.0f;
+            flux_rect indicator = {r.x, box.y + box.h - thickness, r.w, thickness};
+            indicator = snap_rect(indicator, scale);
+            flux_geometry g = flux_geom_rrect(indicator, thickness * 0.5f);
+            flux_brush b = flux_brush_solid(c->color);
+            flux_encoder_draw_geometry(enc, &g, &b);
+            break;
+        }
+        case LENS_DRAW_CONNECTED_TAB: {
+            float shoulder = fminf(c->width, fminf(r.w * 0.25f, r.h * 0.45f));
+            float depth = fmaxf(0.0f, c->text_size);
+            float bottom = r.y + r.h + depth;
+            float radius = fminf(c->radius, fminf(r.w * 0.5f, r.h * 0.5f));
+            bool connect_left = (c->flags & LENSI_TAB_CONNECT_LEFT) != 0;
+            bool connect_right = (c->flags & LENSI_TAB_CONNECT_RIGHT) != 0;
+
+            flux_path *p = NULL;
+            if (flux_path_create(&p, &ui->arena) == FLUX_OK) {
+                if (connect_left) {
+                    flux_path_move_to(p, r.x - shoulder, bottom);
+                    flux_path_cubic_to(p, r.x - shoulder * 0.42f, bottom, r.x,
+                                       bottom - shoulder * 0.42f, r.x, bottom - shoulder);
+                } else {
+                    flux_path_move_to(p, r.x, bottom);
+                }
+                flux_path_line_to(p, r.x, r.y + radius);
+                flux_path_cubic_to(p, r.x, r.y + radius * 0.45f, r.x + radius * 0.45f, r.y,
+                                   r.x + radius, r.y);
+                flux_path_line_to(p, r.x + r.w - radius, r.y);
+                flux_path_cubic_to(p, r.x + r.w - radius * 0.45f, r.y, r.x + r.w, r.y + radius * 0.45f,
+                                   r.x + r.w, r.y + radius);
+                if (connect_right) {
+                    flux_path_line_to(p, r.x + r.w, bottom - shoulder);
+                    flux_path_cubic_to(p, r.x + r.w, bottom - shoulder * 0.42f,
+                                       r.x + r.w + shoulder * 0.42f, bottom, r.x + r.w + shoulder,
+                                       bottom);
+                } else {
+                    flux_path_line_to(p, r.x + r.w, bottom);
+                }
+                flux_path_close(p);
+
+                flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
+                flux_brush b = flux_brush_solid(c->color);
+                flux_encoder_draw_geometry(enc, &g, &b);
+            }
+            break;
+        }
+        case LENS_DRAW_IMAGE: {
+            if (c->image) {
+                flux_geometry g = flux_geom_rect(r);
+                flux_brush b = (flux_brush){
+                    .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                    .image = {.image = c->image},
+                    .opacity = 1.0f,
+                };
+                flux_encoder_draw_geometry(enc, &g, &b);
+            }
+            break;
+        }
+        case LENS_DRAW_CLIP_PUSH: {
+            if (command_clip_depth < 16) {
+                command_clip_stack[command_clip_depth++] = command_clip;
+                command_clip = rect_intersect(command_clip, r);
+                flux_encoder_save(enc);
+                flux_encoder_clip_rect(enc, command_clip);
+            }
+            break;
+        }
+        case LENS_DRAW_CLIP_POP: {
+            if (command_clip_depth > 0) {
+                flux_encoder_restore(enc);
+                command_clip = command_clip_stack[--command_clip_depth];
+            }
+            break;
+        }
+        case LENS_DRAW_TEXT: {
+            if (ui->text && c->text && c->text[0]) {
+                const char *end = strstr(c->text, "##");
+                size_t vlen = end ? (size_t)(end - c->text) : strlen(c->text);
+                if (vlen) {
+                    float x = r.x;
+                    float y = r.y;
+                    const flux_text_style style = {
+                        .size_px = c->text_size,
+                        .weight = c->text_weight,
+                        .color = c->color,
+                        .family = (flux_text_family)c->text_family,
+                    };
+                    if (c->rel.w < 0.0f || c->rel.h < 0.0f) {
+                        flux_text_metrics tm = flux_text_measure(ui->text, c->text, vlen, &style);
+                        if (c->rel.w < 0.0f) {
+                            x = r.x + (r.w - tm.width) * 0.5f;
+                            if (x < r.x) x = r.x;
+                        }
+                        if (c->rel.h < 0.0f) {
+                            y = r.y + (r.h - tm.height) * 0.5f;
+                            if (y < r.y) y = r.y;
+                        }
+                    }
+                    flux_text_draw_to_encoder(ui->text, enc, &ui->arena, x, y, c->text, vlen, &style);
+                }
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+}
+
+static void lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip) {
+    if (!n)
+        return;
+    flux_rect box = n->final_rect;
+    if (box.w <= 0.0f && box.h <= 0.0f)
+        return;
+
+    bool has_group_opacity = (n->opacity >= 0.0f && n->opacity < 0.999f);
+    if (has_group_opacity) {
+        flux_encoder_save_layer(enc, &box, n->opacity);
+    }
+
+    lensi_compile_commands(ui, enc, box, clip, n->cmds, n->cmd_count, 1.0f);
+
+    bool pushed_clip = false;
+    if (n->is_scroll && n->first_child) {
+        float viewport_w = box.w - 2.0f * n->pad - n->scroll_gutter;
+        if (viewport_w < 0.0f)
+            viewport_w = 0.0f;
+        flux_rect viewport = {box.x + n->pad, box.y + n->pad, viewport_w, box.h - 2.0f * n->pad};
+        clip = rect_intersect(clip, viewport);
+        if (clip.w <= 0.0f || clip.h <= 0.0f) {
+            if (has_group_opacity)
+                flux_encoder_restore(enc);
+            return;
+        }
+        flux_encoder_save(enc);
+        flux_encoder_clip_rect(enc, clip);
+        pushed_clip = true;
+    }
+
+    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place == LENS_PLACE_ABS)
+            continue;
+        lensi_compile_node(ui, enc, c, clip);
+    }
+
+    if (pushed_clip)
+        flux_encoder_restore(enc);
+    if (has_group_opacity)
+        flux_encoder_restore(enc);
+}
+
+flux_result lens_compile_draw_list(lens *ui, flux_arena *arena, lens_draw_list *out_list) {
+    if (!ui || !arena || !out_list)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_encoder *enc = nullptr;
+    flux_result r = flux_encoder_create(arena, &enc);
+    if (r != FLUX_OK)
+        return r;
+
+    bool scaled = ui->scale > 0.0f && ui->scale != 1.0f;
+    if (scaled) {
+        flux_encoder_save(enc);
+        flux_encoder_scale(enc, ui->scale, ui->scale);
+    }
+    flux_rect no_clip = {-1e6f, -1e6f, 2e6f, 2e6f};
+
+    for (uint32_t i = 0; i < ui->band_counts[LENS_BAND_BACKDROP]; ++i) {
+        lens_node *n = ui->bands[LENS_BAND_BACKDROP][i];
+        lensi_compile_node(ui, enc, n, n->has_place_bounds ? n->place_bounds : no_clip);
+    }
+
+    if (ui->root) {
+        lensi_compile_node(ui, enc, ui->root, no_clip);
+    }
+
+    for (lens_band b = LENS_BAND_CHROME; b < LENS_BAND_COUNT; b++) {
+        for (uint32_t i = 0; i < ui->band_counts[b]; ++i) {
+            lens_node *n = ui->bands[b][i];
+            lensi_compile_node(ui, enc, n, n->has_place_bounds ? n->place_bounds : no_clip);
+        }
+    }
+
+    if (ui->tooltip.active) {
+        const lens_theme *t = &ui->theme;
+        float pad = 4.0f;
+        float size = lensi_font_px(ui, t->font_size * 0.85f);
+        lens_text_metrics tm = lensi_text_measure_label(ui, ui->tooltip.text, size, 0.0f);
+        float w = tm.width + 2.0f * pad;
+        float h = tm.height + 2.0f * pad;
+        float x = ui->tooltip.anchor.x;
+        float y = ui->tooltip.anchor.y + ui->tooltip.anchor.h + 4.0f;
+        flux_rect bg = {x, y, w, h};
+        flux_geometry g_bg = flux_geom_rect(bg);
+        flux_brush b_bg = flux_brush_solid(lensi_opacity_color(t->color_bg, ui->tooltip.opacity));
+        flux_encoder_draw_geometry(enc, &g_bg, &b_bg);
+
+        flux_geometry g_border = flux_geom_rect(bg);
+        g_border.stroke_width = 1.0f;
+        flux_brush b_border = flux_brush_solid(lensi_opacity_color(t->color_border, ui->tooltip.opacity));
+        flux_encoder_draw_geometry(enc, &g_border, &b_border);
+
+        if (ui->text) {
+            flux_text_style ts = {.size_px = size,
+                                  .color = lensi_opacity_color(t->color_fg, ui->tooltip.opacity)};
+            flux_text_draw_to_encoder(ui->text, enc, &ui->arena, x + pad, y + pad,
+                                      ui->tooltip.text, strlen(ui->tooltip.text), &ts);
+        }
+    }
+
+    if (scaled)
+        flux_encoder_restore(enc);
+
+    r = flux_encoder_finish(enc, &out_list->display_list);
+    if (r != FLUX_OK)
+        return r;
+
+    out_list->command_count = out_list->display_list.count;
+    out_list->has_damage = lens_frame_needs_repaint(ui);
+    return FLUX_OK;
+}
+
+flux_result lens_draw_list_submit(const lens_draw_list *list, flux_canvas *canvas) {
+    if (!list || !canvas)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    return flux_canvas_submit_display_list(canvas, &list->display_list);
+}

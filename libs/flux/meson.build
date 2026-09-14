@@ -99,6 +99,7 @@ if opt_canvas
     'src/canvas/backend_vk.c',
     'src/canvas/backend_cpu.c',
     'src/canvas/dmabuf_acquire.c',
+    'src/canvas/encoder.c',
   )
   flux_c_args += '-DFLUX_HAVE_CANVAS=1'
 
@@ -372,6 +373,7 @@ install_headers(
 )
 if opt_canvas
   install_headers('include/flux/canvas.h', subdir : 'flux')
+  install_headers('include/flux/canvas_helpers.h', subdir : 'flux')
   install_headers('include/flux/canvas_cpu.h', subdir : 'flux')
 endif
 if opt_scene

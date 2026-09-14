@@ -13,7 +13,7 @@ static void test_measure_ascii(void) {
     CHECK(m.height > 0.0f);
     CHECK(m.baseline > 0.0f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_measure_mixed_no_crash(void) {
@@ -39,7 +39,7 @@ static void test_measure_mixed_no_crash(void) {
     CHECK(m3.width > 0.0f);
     CHECK(m3.width >= m3pre.width); /* fallback adds non-negative width */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_bold_slot_on_demand(void) {
@@ -50,7 +50,7 @@ static void test_bold_slot_on_demand(void) {
     CHECK(m.width > 0.0f);
     CHECK(m.height > 0.0f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_fallback_layout_and_render_no_crash(void) {
@@ -71,7 +71,7 @@ static void test_fallback_layout_and_render_no_crash(void) {
     CHECK(r.w > 0.0f);
     CHECK(r.h > 0.0f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

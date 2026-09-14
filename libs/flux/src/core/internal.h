@@ -755,6 +755,27 @@ typedef struct flux_transient_ring {
     VkDeviceSize cursor[FLUX_MAX_FRAMES_IN_FLIGHT];
 } flux_transient_ring;
 
+struct flux_target {
+    atomic_uint ref_count;
+    flux_device *device; /* retained, NULL for pure CPU target */
+    VkImage image;
+    VkImageView view;
+    flux_vk_alloc alloc;
+    VkFormat format;
+    uint32_t usage;
+    uint32_t width;
+    uint32_t height;
+
+    /* Extended fields (RFC-0094 / ADR-0087) */
+    bool is_cpu;
+    bool is_borrowed;
+    uint8_t *cpu_buffer;
+    size_t cpu_stride;
+    bool owns_cpu_buffer;
+    flux_image *from_image;
+    flux_frame *bound_frame;
+};
+
 struct flux_frame {
     flux_surface *surface; /* not retained — surface owns the frame slot */
     uint32_t slot;         /* 0..frames_in_flight-1; matches per_frame[] */
@@ -764,6 +785,9 @@ struct flux_frame {
     /* Exact physical-pixel source region copied when readback_requested is
      * true. Full-frame compatibility requests populate the surface extent. */
     flux_readback_region readback_region;
+
+    flux_target frame_target;
+    bool frame_target_valid;
 
     /* Scene-draw caches (scene.c). begin_frame re-initialises this
      * whole struct, so they are per-frame by construction.

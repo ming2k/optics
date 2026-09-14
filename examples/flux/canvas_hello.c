@@ -132,7 +132,7 @@ int main(void) {
     /* Arena for per-frame path allocations. */
     flux_arena arena;
     if (flux_arena_init(&arena, 64 * 1024, nullptr) != FLUX_OK) {
-        flux_canvas_destroy(canvas);
+        flux_canvas_release(canvas);
         flux_surface_release(surface);
         vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
         flux_device_release(device);
@@ -375,8 +375,8 @@ int main(void) {
     flux_device_wait_idle(device);
     if (texture)
         flux_image_release(texture);
-    flux_canvas_destroy(canvas);
-    flux_arena_destroy(&arena);
+    flux_canvas_release(canvas);
+    flux_arena_deinit(&arena);
     flux_surface_release(surface);
     vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
     flux_device_release(device);

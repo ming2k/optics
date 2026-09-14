@@ -704,12 +704,12 @@ int main(void) {
             EXPECT(region_has_ink(px, 10, (uint32_t)cases[i].y, 120, (uint32_t)cases[i].y + 32));
         }
 
-        flux_text_destroy(text);
+        flux_text_release(text);
     }
 #endif
 
-    flux_arena_destroy(&arena);
-    flux_canvas_destroy(canvas);
+    flux_arena_deinit(&arena);
+    flux_canvas_release(canvas);
     flux_surface_release(s);
     flux_device_release(d);
     TEST_SUMMARY();

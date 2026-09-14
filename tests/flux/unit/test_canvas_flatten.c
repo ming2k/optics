@@ -108,6 +108,6 @@ int main(void) {
         EXPECT_NEAR(tail.y, 40.0f, 1e-4);
     }
 
-    flux_arena_destroy(&arena);
+    flux_arena_deinit(&arena);
     TEST_SUMMARY();
 }

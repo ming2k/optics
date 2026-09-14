@@ -25,7 +25,7 @@ static void test_return_activates_focused_button(void) {
     lens_end(ui);
     CHECK(clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_space_toggles_focused_checkbox(void) {
@@ -46,7 +46,7 @@ static void test_space_toggles_focused_checkbox(void) {
     lens_end(ui);
     CHECK(on == true);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- C5: a11y roles -------------------------------------------------- */
@@ -87,7 +87,7 @@ static void test_roles_are_wired(void) {
     CHECK(seen.progress);
     CHECK(seen.link);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- R3: prev-band truncation flags overflow ------------------------- */
@@ -116,7 +116,7 @@ static void test_band_overflow_is_flagged(void) {
     lens_end(ui);
     CHECK(lens_overflowed(ui)); /* snapshot of 17 ids truncated + flagged */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- R6: key_count is clamped to the keys[] capacity ----------------- */
@@ -141,7 +141,7 @@ static void test_key_count_clamped(void) {
     CHECK(clicked); /* index 3 is inside the clamped range */
     CHECK(!lens_overflowed(ui));
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- R5: paste is target-bound and frame-stamped --------------------- */
@@ -198,7 +198,7 @@ static void test_paste_bound_to_requester(void) {
     lens_end(ui);
     CHECK(strcmp(buf, "abc") == 0); /* focus drifted: not delivered */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- O5: reaped nodes release interaction-owned ids ------------------- */
@@ -232,7 +232,7 @@ static void test_reap_reconciles_focus_and_capture(void) {
     CHECK(lens_active(ui) == 0);
     CHECK(!lens_focused(ui, btn));
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- O7: a node re-entering from the grace window is not clickable ---- */
@@ -284,7 +284,7 @@ static void test_grace_reentry_not_interactive(void) {
     lens_end(ui);
     CHECK(clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- C6: empty-label ids unify --------------------------------------- */
@@ -300,7 +300,7 @@ static void test_empty_label_current_id_matches(void) {
      * produced (the sentinel hash), not the raw scope id. */
     CHECK(lens_find(ui, lens_current_id(ui, "")) != NULL);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

@@ -17,7 +17,7 @@ static void test_reduced_motion_getter_roundtrip(void) {
     /* NULL-safety, matching the other accessors. */
     CHECK(!lens_reduced_motion(NULL));
     lens_set_reduced_motion(NULL, true);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_reduced_motion_approach_snaps_to_target(void) {
@@ -34,7 +34,7 @@ static void test_reduced_motion_approach_snaps_to_target(void) {
     CHECK_NEAR(eased, 1.0f, 0.0001f);
     CHECK(!lens_anim_pending(ui));
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_reduced_motion_hover_stays_settled(void) {
@@ -58,7 +58,7 @@ static void test_reduced_motion_hover_stays_settled(void) {
     lens_end(ui);
     CHECK(!lens_anim_pending(ui));
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

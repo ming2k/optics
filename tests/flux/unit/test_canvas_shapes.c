@@ -63,6 +63,6 @@ int main(void) {
     flux_canvas_draw(c, &shapes[1], &white);
     EXPECT(flux_canvas_end_frame_checked(c) == FLUX_OK);
     EXPECT(pixel(c, 32, 32)[3] > 250);
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
     TEST_SUMMARY();
 }

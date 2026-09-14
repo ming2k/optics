@@ -16,7 +16,7 @@ static void test_tooltip_no_hover_no_crash(void) {
     lens_end(ui);
 
     CHECK(lens_overflowed(ui) == false);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_tooltip_hover_does_not_crash(void) {
@@ -38,7 +38,7 @@ static void test_tooltip_hover_does_not_crash(void) {
     CHECK(ui->tooltip.active);
     CHECK(strcmp(ui->tooltip.text, "Hovered!") == 0);
     CHECK(lens_overflowed(ui) == false);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_tooltip_render_path(void) {
@@ -80,9 +80,9 @@ static void test_tooltip_render_path(void) {
     }
     CHECK(lit_pixels > 0);
 
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     CHECK(lens_overflowed(ui) == false);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

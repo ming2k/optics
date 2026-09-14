@@ -46,6 +46,27 @@ uint32_t flux_path_dropped_count(const flux_path *p) {
     return p ? p->dropped : 0;
 }
 
+flux_result flux_path_init(flux_path *p, flux_arena *arena) {
+    if (!p || !arena) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "flux_path_init requires non-NULL path and arena");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    memset(p, 0, sizeof(*p));
+    p->arena = arena;
+    return FLUX_OK;
+}
+
+void flux_path_reset(flux_path *p) {
+    if (!p)
+        return;
+    p->count = 0;
+    p->capacity = 0;
+    p->segments = nullptr;
+    p->dropped = 0;
+    p->cursor_x = 0.0f;
+    p->cursor_y = 0.0f;
+}
+
 flux_result flux_path_create(flux_path **out, flux_arena *arena) {
     if (!out)
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -149,6 +170,49 @@ void flux_path_add_round_rect(flux_path *p, flux_rect r, float radius) {
     flux_path_cubic_to(p, x0 + rr - k, y1, x0, y1 - rr + k, x0, y1 - rr);
     flux_path_line_to(p, x0, y0 + rr);
     flux_path_cubic_to(p, x0, y0 + rr - k, x0 + rr - k, y0, x0 + rr, y0);
+    flux_path_close(p);
+}
+
+void flux_path_add_squircle(flux_path *p, flux_rect r, float radius, float curvature) {
+    if (!p)
+        return;
+    if (radius <= 0.0f) {
+        flux_path_add_rect(p, r);
+        return;
+    }
+    float c = curvature;
+    if (c < 0.0f)
+        c = 0.0f;
+    if (c > 1.0f)
+        c = 1.0f;
+
+    if (c <= 0.001f) {
+        flux_path_add_round_rect(p, r, radius);
+        return;
+    }
+
+    float max_r = fminf(r.w * 0.5f, r.h * 0.5f);
+    float rr = fminf(radius, max_r);
+
+    /* Apple/Figma-style continuous curvature superellipse approximation:
+     * Corner transition extends into edges by factor (1 + 0.52 * c). */
+    float L = fminf(rr * (1.0f + 0.52f * c), max_r);
+    float x0 = r.x, y0 = r.y;
+    float x1 = r.x + r.w, y1 = r.y + r.h;
+
+    /* Control point tension parameters */
+    float k1 = L * (0.55228475f * (1.0f - 0.45f * c));
+    float k2 = L * (0.55228475f * (1.0f + 0.35f * c));
+
+    flux_path_move_to(p, x0 + L, y0);
+    flux_path_line_to(p, x1 - L, y0);
+    flux_path_cubic_to(p, x1 - L + k1, y0, x1, y0 + L - k2, x1, y0 + L);
+    flux_path_line_to(p, x1, y1 - L);
+    flux_path_cubic_to(p, x1, y1 - L + k2, x1 - L + k1, y1, x1 - L, y1);
+    flux_path_line_to(p, x0 + L, y1);
+    flux_path_cubic_to(p, x0 + L - k1, y1, x0, y1 - L + k2, x0, y1 - L);
+    flux_path_line_to(p, x0, y0 + L);
+    flux_path_cubic_to(p, x0, y0 + L - k2, x0 + L - k1, y0, x0 + L, y0);
     flux_path_close(p);
 }
 

@@ -42,7 +42,7 @@ static void test_radio_focus_selects(void) {
     CHECK(changed_b == true);
     CHECK(opt_b == true);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_radio_no_change_when_disabled(void) {
@@ -66,7 +66,7 @@ static void test_radio_no_change_when_disabled(void) {
     CHECK(changed == false);
     CHECK(opt_a == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

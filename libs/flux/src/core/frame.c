@@ -1118,3 +1118,93 @@ VkImageView flux_frame_vk_image_view(const flux_frame *f) {
 VkBuffer flux_frame_vk_transient_buffer(const flux_frame *f) {
     return (f && f->surface) ? f->surface->transient.buffer : VK_NULL_HANDLE;
 }
+
+static VkPipelineStageFlags2 stage_to_vk(flux_pipeline_stage stage) {
+    VkPipelineStageFlags2 flags = 0;
+    if (stage & FLUX_STAGE_TOP_OF_PIPE) flags |= VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+    if (stage & FLUX_STAGE_DRAW_INDIRECT) flags |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+    if (stage & FLUX_STAGE_VERTEX_INPUT) flags |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+    if (stage & FLUX_STAGE_VERTEX_SHADER) flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    if (stage & FLUX_STAGE_FRAGMENT_SHADER) flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    if (stage & FLUX_STAGE_EARLY_FRAGMENT_TESTS) flags |= VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+    if (stage & FLUX_STAGE_LATE_FRAGMENT_TESTS) flags |= VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    if (stage & FLUX_STAGE_COLOR_ATTACHMENT_OUTPUT) flags |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    if (stage & FLUX_STAGE_COMPUTE_SHADER) flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    if (stage & FLUX_STAGE_TRANSFER) flags |= VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    if (stage & FLUX_STAGE_BOTTOM_OF_PIPE) flags |= VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+    return flags;
+}
+
+static VkAccessFlags2 access_to_vk(flux_access_flags access) {
+    VkAccessFlags2 flags = 0;
+    if (access & FLUX_ACCESS_INDIRECT_COMMAND_READ) flags |= VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+    if (access & FLUX_ACCESS_INDEX_READ) flags |= VK_ACCESS_2_INDEX_READ_BIT;
+    if (access & FLUX_ACCESS_VERTEX_ATTRIBUTE_READ) flags |= VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
+    if (access & FLUX_ACCESS_UNIFORM_READ) flags |= VK_ACCESS_2_UNIFORM_READ_BIT;
+    if (access & FLUX_ACCESS_SHADER_READ) flags |= VK_ACCESS_2_SHADER_READ_BIT;
+    if (access & FLUX_ACCESS_SHADER_WRITE) flags |= VK_ACCESS_2_SHADER_WRITE_BIT;
+    if (access & FLUX_ACCESS_COLOR_ATTACHMENT_READ) flags |= VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT;
+    if (access & FLUX_ACCESS_COLOR_ATTACHMENT_WRITE) flags |= VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    if (access & FLUX_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ) flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+    if (access & FLUX_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE) flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    if (access & FLUX_ACCESS_TRANSFER_READ) flags |= VK_ACCESS_2_TRANSFER_READ_BIT;
+    if (access & FLUX_ACCESS_TRANSFER_WRITE) flags |= VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    return flags;
+}
+
+void flux_frame_pipeline_barrier(flux_frame *f, const flux_image_barrier *image_barriers,
+                                  uint32_t count) {
+    if (!f || !image_barriers || count == 0)
+        return;
+    VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
+    if (!cmd)
+        return;
+
+    VkImageMemoryBarrier2 stack_barriers[16];
+    VkImageMemoryBarrier2 *vk_barriers = (count <= 16) ? stack_barriers : malloc(count * sizeof(*vk_barriers));
+    if (!vk_barriers)
+        return;
+
+    uint32_t valid_count = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        const flux_image_barrier *b = &image_barriers[i];
+        if (!b->image)
+            continue;
+        VkImage img = flux_image_vk_image(b->image);
+        if (!img)
+            continue;
+
+        uint32_t src_qf = (b->src_queue_family == FLUX_QUEUE_FAMILY_IGNORED) ? VK_QUEUE_FAMILY_IGNORED : b->src_queue_family;
+        uint32_t dst_qf = (b->dst_queue_family == FLUX_QUEUE_FAMILY_IGNORED) ? VK_QUEUE_FAMILY_IGNORED : b->dst_queue_family;
+
+        vk_barriers[valid_count++] = (VkImageMemoryBarrier2){
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = stage_to_vk(b->src_stage),
+            .srcAccessMask = access_to_vk(b->src_access),
+            .dstStageMask = stage_to_vk(b->dst_stage),
+            .dstAccessMask = access_to_vk(b->dst_access),
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = src_qf,
+            .dstQueueFamilyIndex = dst_qf,
+            .image = img,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+        };
+    }
+
+    if (valid_count > 0) {
+        VkDependencyInfo di = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = valid_count,
+            .pImageMemoryBarriers = vk_barriers,
+        };
+        vkCmdPipelineBarrier2(cmd, &di);
+    }
+
+    if (vk_barriers != stack_barriers)
+        free(vk_barriers);
+}

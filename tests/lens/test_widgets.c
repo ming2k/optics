@@ -74,7 +74,7 @@ static void test_scroll_thumb_drag(void) {
     float y_after_drag = lens_node_bounds(first).y;
     CHECK(y_after_drag < y_after_scroll - 5.0f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_label_sizes(void) {
@@ -109,7 +109,7 @@ static void test_label_sizes(void) {
     CHECK(h_h >= b_h);
     CHECK(l_h > b_h);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_compact_outlined_label_preserves_intrinsic_metrics(void) {
@@ -140,7 +140,7 @@ static void test_compact_outlined_label_preserves_intrinsic_metrics(void) {
     lens_node *outlined = lens_node_next_sibling(plain);
     CHECK_NEAR(lens_node_bounds(plain).w, lens_node_bounds(outlined).w, 0.01f);
     CHECK_NEAR(lens_node_bounds(plain).h, lens_node_bounds(outlined).h, 0.01f);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_wrapped_label_respects_width_and_grows_height(void) {
@@ -173,7 +173,7 @@ static void test_wrapped_label_respects_width_and_grows_height(void) {
     CHECK(ra.y >= rw.y + rw.h);
     CHECK(rw.x + rw.w <= 200.0f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_label_zero_padding_by_default(void) {
@@ -196,7 +196,7 @@ static void test_label_zero_padding_by_default(void) {
     CHECK_NEAR(r.w, m.width, 0.5f);
     CHECK_NEAR(r.h, m.height, 0.5f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

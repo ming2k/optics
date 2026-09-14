@@ -142,6 +142,8 @@ FLUX_API flux_paint flux_paint_radial_gradient(flux_point center, float radius,
 
 typedef struct flux_path flux_path; /* opaque-in-this-header; see implementation */
 
+FLUX_NODISCARD FLUX_API flux_result flux_path_init(flux_path *p, flux_arena *arena);
+FLUX_API void flux_path_reset(flux_path *p);
 FLUX_NODISCARD FLUX_API flux_result flux_path_create(flux_path **out, flux_arena *arena);
 FLUX_API void flux_path_move_to(flux_path *p, float x, float y);
 FLUX_API void flux_path_line_to(flux_path *p, float x, float y);
@@ -151,6 +153,7 @@ FLUX_API void flux_path_cubic_to(flux_path *p, float c1x, float c1y, float c2x, 
 FLUX_API void flux_path_close(flux_path *p);
 FLUX_API void flux_path_add_rect(flux_path *p, flux_rect r);
 FLUX_API void flux_path_add_round_rect(flux_path *p, flux_rect r, float radius);
+FLUX_API void flux_path_add_squircle(flux_path *p, flux_rect r, float radius, float curvature);
 FLUX_API void flux_path_add_circle(flux_path *p, float cx, float cy, float radius);
 
 /* Number of segments rejected due to arena exhaustion. Non-zero means
@@ -260,10 +263,11 @@ typedef struct flux_canvas_antialias_desc {
 
 /* Create a canvas on the selected backend. GPU canvases need desc->surface;
  * CPU canvases need desc->width/height (see flux/canvas_cpu.h for a convenience
- * wrapper and pixel readback). Destroy with flux_canvas_destroy. */
+ * wrapper and pixel readback). Release with flux_canvas_release. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_create(const flux_canvas_desc *desc,
                                                        flux_canvas **out);
-FLUX_API void flux_canvas_destroy(flux_canvas *c);
+FLUX_NODISCARD FLUX_API flux_canvas *flux_canvas_retain(flux_canvas *c);
+FLUX_API void flux_canvas_release(flux_canvas *c);
 
 /* Content scale (device-pixel ratio). flux_canvas_set_scale makes each
  * flux_canvas_begin_frame start with this as the base transform, so all drawing is
@@ -274,6 +278,12 @@ FLUX_API void flux_canvas_destroy(flux_canvas *c);
  * when the surface scale changes. */
 FLUX_API void flux_canvas_set_scale(flux_canvas *c, float scale);
 FLUX_API float flux_canvas_get_scale(const flux_canvas *c);
+
+/* Unified target-driven pass bracket (RFC-0094 / ADR-0087).
+ * Drives both CPU and GPU canvases polymorphically through a unified target. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin(flux_canvas *c, flux_target *target,
+                                                      const flux_color *clear_color);
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_end(flux_canvas *c);
 
 /* Begin / end a recording session. `f` is the open frame for a GPU canvas
  * (from flux_surface_begin_frame); for a CPU canvas pass NULL. This is the
@@ -333,6 +343,10 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_target_checked(flux_canvas *
  * window are silent no-ops (consult flux_get_last_error). */
 FLUX_API void flux_canvas_save(flux_canvas *c);
 FLUX_API void flux_canvas_restore(flux_canvas *c);
+/* Save a compositing layer (ADR-0088 / Opacity Group).
+ * Subtree draws are recorded into a tightly scissored transient offscreen buffer
+ * and composited back into the parent target with `opacity` on flux_canvas_restore. */
+FLUX_API void flux_canvas_save_layer(flux_canvas *c, const flux_rect *bounds, float opacity);
 /* Intersect the current clip with `r`. The rectangle is expressed in the
  * current logical coordinate system and transformed to the physical-pixel
  * scissor, including content scale and affine transforms. */
@@ -384,82 +398,144 @@ typedef struct flux_shape {
 /* The single unified 2D drawing primitive (ADR-0083) */
 FLUX_API void flux_canvas_draw(flux_canvas *c, const flux_shape *shape, const flux_paint *paint);
 
-/* Drawing helpers. */
-FLUX_API void flux_canvas_fill_rect(flux_canvas *c, flux_rect r, const flux_paint *paint);
-FLUX_API void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint *paint);
-FLUX_API void flux_canvas_stroke_path(flux_canvas *c, const flux_path *p, const flux_paint *paint);
+/* ================================================================== */
+/*  Algebraic Geometry & Brush Model (ADR-0088 Clean-Break)           */
+/* ================================================================== */
 
-/* Rounded rectangles and circles via a signed-distance field: analytic,
- * resolution-independent anti-aliasing (crisp at any DPI, unlike tessellated
- * fills which rely on MSAA). `radius` is the corner radius in logical pixels,
- * clamped to half the shorter side; pass radius == min(w,h)/2 on a square for
- * a circle. Evaluated for axis-aligned rects under translation + uniform
- * scale (the UI case); rotation is not modelled. `color` is a packed
- * premultiplied flux_color. Prefer these over fill_path for UI shapes. */
-FLUX_API void flux_canvas_fill_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color);
-FLUX_API void flux_canvas_stroke_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color,
-                                       float width);
-/* Draw an RGBA image. When `optional_paint` is non-NULL, its premultiplied
- * solid `color` modulates the image and its blend mode controls compositing;
- * opaque white preserves it and white with a lower alpha fades it. Other paint
- * fields are ignored. Canvas transforms, including rotation and non-uniform
- * scale, apply to the quad. */
-FLUX_API void flux_canvas_draw_image(flux_canvas *c, flux_image *image, flux_rect dst,
-                                     const flux_paint *optional_paint);
+typedef enum flux_geom_kind : uint8_t {
+    FLUX_GEOM_RECT = 0,
+    FLUX_GEOM_RRECT = 1,
+    FLUX_GEOM_SQUIRCLE = 2,
+    FLUX_GEOM_CIRCLE = 3,
+    FLUX_GEOM_LINE = 4,
+    FLUX_GEOM_PATH = 5,
+} flux_geom_kind;
 
-/* Draw an alpha-free RGB image. The sampled alpha channel is ignored and the
- * result is forced opaque, then replaces the destination with SRC blending.
- * Intended for XRGB/XBGR dma-bufs whose unused X bits are not alpha data. */
-FLUX_API void flux_canvas_draw_image_opaque(flux_canvas *c, flux_image *image, flux_rect dst);
+typedef struct flux_geom_rect_data {
+    flux_rect rect;
+} flux_geom_rect_data;
 
-/* Draw an image clipped by an analytic rounded rectangle. The clip follows
- * translation and uniform scale and is antialiased in framebuffer space;
- * radius >= min(dst.w,dst.h)/2 produces a circle. */
-FLUX_API void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *image, flux_rect dst,
-                                           float radius, const flux_paint *optional_paint);
+typedef struct flux_geom_rrect_data {
+    flux_rect rect;
+    float radius;
+} flux_geom_rrect_data;
 
-/* Draw an image through an analytic rounded clip that is independent of the
- * image destination. This is the compositor path for a window assembled from
- * several surface images: every draw receives the same clip, so the complete
- * subtree has one antialiased silhouette instead of rounding each surface.
- * The clip follows translation and uniform scale. */
-FLUX_API void flux_canvas_draw_image_clipped_rrect(flux_canvas *c, flux_image *image, flux_rect dst,
-                                                   flux_rect clip, float radius,
-                                                   const flux_paint *optional_paint);
+typedef struct flux_geom_squircle_data {
+    flux_rect rect;
+    float radius;
+    float curvature; /* 0.0f = standard rrect, 1.0f = G2 continuous superellipse */
+} flux_geom_squircle_data;
 
-/* Draw a sub-rectangle of `image` into `dst`. `src` is the sampled region
- * in NORMALISED texture coordinates {u, v, du, dv} where (0,0,1,1) is the
- * whole image. Used by compositors that need source-crop (Wayland
- * `wp_viewport.set_source`) without tinting or coverage-style alpha
- * handling. The plain-image pipeline already implements full sub-rect
- * remap in the fragment shader; this entry point only exposes it. */
-FLUX_API void flux_canvas_draw_image_sub(flux_canvas *c, flux_image *image, flux_rect dst,
-                                         flux_rect src);
+typedef struct flux_geom_circle_data {
+    float cx, cy, radius;
+} flux_geom_circle_data;
 
-/* Draw a sub-rectangle of an alpha-free RGB image. Combines the source-crop
- * of flux_canvas_draw_image_sub with the SRC-replace, alpha-forced-opaque
- * behaviour of flux_canvas_draw_image_opaque: the sampled alpha channel is
- * ignored, the result is forced opaque, and the destination is replaced with
- * SRC blending (no destination read). For XRGB/XBGR dma-bufs that use Wayland
- * `wp_viewport.set_source` — the undefined X bits are never interpreted as
- * sampled alpha and no framebuffer readback occurs even when cropped. */
-FLUX_API void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image *image, flux_rect dst,
-                                                flux_rect src);
+typedef struct flux_geom_line_data {
+    float x0, y0, x1, y1;
+} flux_geom_line_data;
 
-/* Sample `image` with `sampler` instead of the canvas-internal linear
- * default. Pass FLUX_FILTER_NEAREST samplers for pixel-aligned blits
- * (e.g. glyph atlases) where the default bilinear filter blurs
- * sub-pixel positions. `sampler` is borrowed for the call; the caller
- * keeps ownership and may release it at any time — destruction of the
- * VkSampler and its bindless slot is deferred by the library
- * (flux_sampler_release parks them on the device retire queue) until
- * every in-flight frame that could reference the slot has retired. */
-FLUX_API void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *image,
-                                             flux_sampler *sampler, flux_rect dst,
-                                             const flux_paint *optional_paint);
+typedef struct flux_geom_path_data {
+    const flux_path *path;
+} flux_geom_path_data;
 
-/* Convenience: fill a rectangle with a solid colour, no paint setup. */
-FLUX_API void flux_canvas_fill_rect_color(flux_canvas *c, flux_rect r, flux_color color);
+typedef struct flux_geometry {
+    flux_geom_kind kind;
+    uint8_t _pad[3];
+    float stroke_width; /* 0 = fill, > 0 = stroke width */
+    union {
+        flux_geom_rect_data     rect;
+        flux_geom_rrect_data    rrect;
+        flux_geom_squircle_data squircle;
+        flux_geom_circle_data   circle;
+        flux_geom_line_data     line;
+        flux_geom_path_data     path;
+    };
+} flux_geometry;
+
+typedef enum flux_brush_kind : uint8_t {
+    FLUX_BRUSH_SOLID = 0,
+    FLUX_BRUSH_LINEAR_GRADIENT = 1,
+    FLUX_BRUSH_RADIAL_GRADIENT = 2,
+    FLUX_BRUSH_IMAGE_PATTERN = 3,
+} flux_brush_kind;
+
+typedef struct flux_brush_solid_data {
+    flux_color color;
+} flux_brush_solid_data;
+
+typedef struct flux_brush_gradient_data {
+    flux_gradient_stops stops;
+    flux_point start;
+    flux_point end;
+    float radius;
+} flux_brush_gradient_data;
+
+typedef struct flux_brush_image_data {
+    flux_image *image;
+    flux_sampler *sampler; /* optional (nullptr = default linear) */
+    flux_rect src_rect;    /* normalized UV {u, v, du, dv}, 0,0,0,0 = full */
+    bool opaque_only;
+} flux_brush_image_data;
+
+typedef struct flux_brush {
+    flux_brush_kind kind;
+    flux_blend_mode blend;
+    float opacity; /* [0.0f, 1.0f] */
+    union {
+        flux_brush_solid_data    solid;
+        flux_brush_gradient_data gradient;
+        flux_brush_image_data    image;
+    };
+} flux_brush;
+
+FLUX_API void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom,
+                                        const flux_brush *brush);
+
+/* ================================================================== */
+/*  Immutable DisplayList & Encoder (ADR-0088 Clean-Break)            */
+/* ================================================================== */
+
+typedef struct flux_display_list {
+    const uint8_t *commands;
+    size_t size;
+    uint32_t count;
+    flux_rect bounds;
+} flux_display_list;
+
+typedef struct flux_encoder flux_encoder;
+
+/* Create a pure CPU, zero-GPU memory command encoder allocated on `arena`. */
+FLUX_NODISCARD FLUX_API flux_result flux_encoder_create(flux_arena *arena, flux_encoder **out);
+FLUX_API void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
+                                         const flux_brush *brush);
+FLUX_API void flux_encoder_draw_glyph_run(flux_encoder *enc, const flux_glyph_run_desc *desc);
+FLUX_API void flux_encoder_save(flux_encoder *enc);
+FLUX_API void flux_encoder_restore(flux_encoder *enc);
+FLUX_API void flux_encoder_clip_rect(flux_encoder *enc, flux_rect r);
+FLUX_API void flux_encoder_save_layer(flux_encoder *enc, const flux_rect *bounds, float opacity);
+FLUX_API void flux_encoder_translate(flux_encoder *enc, float x, float y);
+FLUX_API void flux_encoder_scale(flux_encoder *enc, float sx, float sy);
+FLUX_API void flux_encoder_rotate(flux_encoder *enc, float radians);
+FLUX_API void flux_encoder_transform(flux_encoder *enc, flux_mat3x2 m);
+
+/* Reset encoder for reuse, releasing any uncommitted commands. */
+FLUX_API void flux_encoder_reset(flux_encoder *enc);
+
+/* Destroy an encoder and release its scratch resources. Published display lists survive. */
+FLUX_API void flux_encoder_destroy(flux_encoder *enc);
+
+/* Freeze encoder commands into an immutable display list. */
+FLUX_NODISCARD FLUX_API flux_result flux_encoder_finish(flux_encoder *enc,
+                                                        flux_display_list *out_list);
+
+/* Destroy a published display list and release retained resources. */
+FLUX_API void flux_display_list_destroy(flux_display_list *list);
+
+/* Submit an immutable display list to a canvas for batch execution. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_submit_display_list(flux_canvas *c,
+                                                                    const flux_display_list *list);
+
+#include <flux/canvas_helpers.h>
 
 /* ------------------------------------------------------------------ */
 /*  Glyph runs (ADR-0010)                                             */
@@ -491,7 +567,7 @@ typedef struct flux_glyph_run_desc {
      *
      * Lifetime + invalidation: the buffer is borrowed, never copied. It
      * must outlive every display-list segment that recorded the run —
-     * release such segments (or destroy the canvas) before the producer
+     * release such segments (or release the canvas) before the producer
      * frees or reallocates the buffer. A producer that rearranges texels
      * in place (e.g. a full-atlas reclaim) should attach
      * flux_glyph_run_host_atlas_desc so replay of pre-rearrangement

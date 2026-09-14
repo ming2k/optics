@@ -288,7 +288,7 @@ int main(void) {
         EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
     }
 
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_surface_release(s);
 
     /* --- on-demand snapshot is the requested frame, not later frames --- */
@@ -334,7 +334,7 @@ int main(void) {
         EXPECT(px_at(px, 1, 1)[3] == 255);
         flux_readback_release(snapshot);
 
-        flux_canvas_destroy(snapshot_canvas);
+        flux_canvas_release(snapshot_canvas);
         flux_surface_release(snapshot_surface);
     }
 
@@ -388,7 +388,7 @@ int main(void) {
                near8(outside[2], CLEAR_B));
         flux_readback_release(snapshot);
 
-        flux_canvas_destroy(region_canvas);
+        flux_canvas_release(region_canvas);
         flux_surface_release(region_surface);
     }
 
@@ -443,7 +443,7 @@ int main(void) {
         int fd = -1;
         EXPECT(flux_surface_export_dmabuf(rs, &fd) != FLUX_OK);
 
-        flux_canvas_destroy(rc);
+        flux_canvas_release(rc);
         flux_surface_release(rs);
     }
 

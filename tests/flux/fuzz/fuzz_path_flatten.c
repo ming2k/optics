@@ -50,7 +50,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
     flux_path *p = NULL;
     if (flux_path_create(&p, &arena) != FLUX_OK) {
-        flux_arena_destroy(&arena);
+        flux_arena_deinit(&arena);
         return 0;
     }
 
@@ -101,6 +101,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             break;
     }
 
-    flux_arena_destroy(&arena);
+    flux_arena_deinit(&arena);
     return 0;
 }

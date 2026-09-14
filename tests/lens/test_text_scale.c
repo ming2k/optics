@@ -50,7 +50,7 @@ static void test_getter_setter_and_clamp(void) {
     lens_set_text_scale(NULL, 1.5f);
     CHECK_NEAR(lens_text_scale(NULL), 1.0f, 0.001f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- resolver effects ------------------------------------------------ */
@@ -81,7 +81,7 @@ static void test_resolver_scales_font_only(void) {
     lens_style_resolved r_inst = lensi_style_resolve(ui, &s, &t, 0);
     CHECK_NEAR(r_inst.font_size, 20.0f * 1.5f, 0.001f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- widget geometry effects ----------------------------------------- */
@@ -110,7 +110,7 @@ static void test_widget_intrinsic_height_scales(void) {
 
     CHECK(h2 > h1 * 1.3f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* The text draw command's size scales: measurement and paint agree. */
@@ -128,7 +128,7 @@ static void test_text_command_size_scales(void) {
     CHECK(n != NULL);
     CHECK(lens_node_bounds(n).h > 14.0f * 1.5f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Explicit point sizes scale too. */
@@ -158,7 +158,7 @@ static void test_explicit_label_size_scales(void) {
     if (wr)
         CHECK(lens_node_bounds(wr).h > 8.0f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Headings scale proportionally. */
@@ -182,7 +182,7 @@ static void test_heading_size_scales(void) {
     CHECK(h1 != NULL);
     CHECK(lens_node_bounds(h1).h > t.font_size_h1 * 1.4f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* A factor switch must re-key cached canvas records. */
@@ -196,7 +196,7 @@ static void test_text_scale_switch_invalidates(void) {
     lens_style_resolved r2 = lensi_style_resolve(ui, NULL, &t, 0);
     CHECK(r1.font_size != r2.font_size);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

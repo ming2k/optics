@@ -11,6 +11,8 @@ These pages cover maintenance of the Optics monorepo:
 - [Project layout](project-layout.md) — find the owner of code, tests,
   examples, bindings, and documentation.
 - [Release](release.md) — prepare and verify a source release.
+- [Architecture implementation review](architecture-review-2026-09-14.md) —
+  inspected implementation gaps, work packages, and verification evidence for ADR-0089–0094.
 
 User-facing rendering tasks belong in the [tutorials](../tutorials/01-getting-started.md)
 and [how-to guides](../how-to/record-and-present-a-frame.md).

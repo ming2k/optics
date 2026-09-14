@@ -34,7 +34,7 @@ static void test_scroll_offset(void) {
     CHECK(lens_scroll_offset(ui, "log", &sx, &sy));
     CHECK(sy > 0.0f); /* scrolled down -> positive offset */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_precise_scroll_uses_pixel_distance(void) {
@@ -63,7 +63,7 @@ static void test_precise_scroll_uses_pixel_distance(void) {
     CHECK(lens_scroll_offset(ui, "log", &sx, &sy));
     CHECK_NEAR(sy, 12.0f, 0.001f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_programmatic_scroll_is_applied_and_clamped(void) {
@@ -89,7 +89,7 @@ static void test_programmatic_scroll_is_applied_and_clamped(void) {
     CHECK(scroll != NULL && first != NULL);
     CHECK(fabsf(lens_node_bounds(first).y + 60.0f) < 0.01f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_scrollbar_gutter_clips_overflowing_descendants(void) {
@@ -141,8 +141,8 @@ static void test_scrollbar_gutter_clips_overflowing_descendants(void) {
     }
     CHECK(gutter_is_clear);
 
-    flux_canvas_destroy(canvas);
-    lens_destroy(ui);
+    flux_canvas_release(canvas);
+    lens_release(ui);
 }
 
 int main(void) {

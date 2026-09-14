@@ -54,7 +54,7 @@ int main(void) {
     /* No shaping backend → measure-only context → nothing to check. */
     flux_text_metrics m = flux_text_measure(t, "A", 1, nullptr);
     if (m.width <= 0.0f) {
-        flux_text_destroy(t);
+        flux_text_release(t);
         TEST_SUMMARY();
     }
 
@@ -152,7 +152,7 @@ int main(void) {
 
     flux_canvas_record_release(c, rec);
     flux_canvas_record_release(c, rec2);
-    flux_canvas_destroy(c);
-    flux_text_destroy(t);
+    flux_canvas_release(c);
+    flux_text_release(t);
     TEST_SUMMARY();
 }

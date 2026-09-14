@@ -161,7 +161,7 @@ if (prism_liquid_glass_filter_stats(filter, frame, stats, 8, &stat_count) == FLU
 tint, and frost are dispatch-wide caller policy; saturation, tint, and
 frost additionally accept per-group overrides (see the group table above).
 `rim_light` scales the
-entire rim-lighting set — key line, sheen, fresnel, shadow side, trough —
+entire rim-lighting set — key line, sheen, fresnel, diagonal secondary catchlight, trough —
 one knob for overall rim energy (default 0.55; named `glare` before the
 move to prism). `PRISM_LIQUID_GLASS_DESC_INIT` provides the reference
 neutral recipe. Prism owns the material curves; it does not infer

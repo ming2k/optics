@@ -43,7 +43,7 @@ pub use input::{Input, MouseButton, key, mods};
 pub use types::{Align, Band, ButtonVariant, CheckboxAppearance, Color, CursorHint, DndDropInfo, FontFamily, Icon, LayoutOpts, PlaceMode, PlaceOpts, Rect, Response, SkinFn, Style, StyleResolved, TextLine, TextMetrics, Theme, WidgetContent, WidgetKind, WidgetRecord, WidgetState};
 
 /// The retained UI context. Owns the persistent tree, layout, and draw list.
-/// Dropping a `Ui` calls `lens_destroy`.
+/// Dropping a `Ui` calls `lens_release`.
 pub struct Ui {
     raw: *mut sys::lens,
     /// True when this handle was borrowed (`borrow_raw`) rather than created;
@@ -309,7 +309,7 @@ impl Drop for Ui {
             return; // the owner (e.g. iris) destroys the context
         }
         // SAFETY: raw was created by lens_create and not yet destroyed.
-        unsafe { sys::lens_destroy(self.raw) };
+        unsafe { sys::lens_release(self.raw) };
     }
 }
 

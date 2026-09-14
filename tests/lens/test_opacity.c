@@ -68,6 +68,6 @@ int main(void) {
     CHECK(dim_cmd != NULL);
     CHECK(alpha_of(dim_cmd->color) == (uint8_t)full);
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

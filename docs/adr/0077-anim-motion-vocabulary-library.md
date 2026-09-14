@@ -1,9 +1,10 @@
 # ADR-0077: The `anim` motion vocabulary library — provable math, host-owned clocks
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-23
 - Scope: new sibling library `libs/anim` (+ `anim-rs` binding); amends
   [ADR-0074](0074-effect-intake-path.md) item 3. No existing library links it.
+- Implementation: Complete in libs/anim and tests/anim/test_anim.c.
 
 ## Context
 

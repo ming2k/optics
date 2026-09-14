@@ -65,7 +65,7 @@ int main(void) {
     CHECK(plain_emissions == 1); /* no more plain-skin emissions */
     CHECK(spring.emissions == frozen);
 
-    lens_destroy(ui);
+    lens_release(ui);
     printf("skin_userdata: %d checks, %d failures\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
 }

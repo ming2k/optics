@@ -48,6 +48,6 @@ int main(void) {
     const lens_draw_cmd *loose_cmd = first_text_cmd(loose);
     CHECK(loose_cmd != NULL);
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

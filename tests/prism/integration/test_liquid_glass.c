@@ -273,7 +273,7 @@ int main(void) {
     prism_liquid_glass_filter_release(glass_filter);
     flux_blur_filter_release(blur_filter);
     flux_image_release(target);
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_surface_release(s);
     flux_device_release(d);
     TEST_SUMMARY();

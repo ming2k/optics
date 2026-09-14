@@ -156,13 +156,20 @@ typedef struct flux_text_desc {
  * measure even when no shaping backend is compiled in (it degrades to
  * monospace metrics internally), so callers never branch on backend
  * availability. Returns an error only on real failure (e.g. allocation).
- * Destroy with flux_text_destroy.
+ * Release with flux_text_release.
  * A non-NULL `desc->device` is retained by the context (released at
- * flux_text_destroy), so the caller may drop its own reference right after
+ * flux_text_release), so the caller may drop its own reference right after
  * creation. */
 FLUX_NODISCARD FLUX_TEXT_API flux_result flux_text_create(const flux_text_desc *desc,
                                                           flux_text **out);
-FLUX_TEXT_API void flux_text_destroy(flux_text *t);
+FLUX_NODISCARD FLUX_TEXT_API flux_text *flux_text_retain(flux_text *t);
+FLUX_TEXT_API void flux_text_release(flux_text *t);
+
+/* Atlas synchronization contract (RFC-0094 / ADR-0087 / ADR-0092).
+ * Query pending dirty atlas uploads and flush them explicitly to the GPU frame. */
+FLUX_NODISCARD FLUX_TEXT_API bool flux_text_has_pending_uploads(const flux_text *t);
+FLUX_NODISCARD FLUX_TEXT_API flux_result flux_text_flush_atlas(flux_text *t, flux_frame *f);
+FLUX_NODISCARD FLUX_TEXT_API uint64_t flux_text_get_atlas_epoch(const flux_text *t, const flux_frame *f);
 
 /* Scale contract (single source of truth):
  *   - flux_text_draw rasterises at the *canvas's* effective scale
@@ -236,6 +243,11 @@ FLUX_TEXT_API flux_text_metrics flux_text_measure(flux_text *t, const char *utf8
 FLUX_TEXT_API void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena *arena, float x,
                                   float y, const char *utf8, size_t len,
                                   const flux_text_style *style);
+
+/* Shape and encode batched glyph runs directly to an immutable flux_encoder (ADR-0094). */
+FLUX_TEXT_API void flux_text_draw_to_encoder(flux_text *t, flux_encoder *encoder, flux_arena *arena,
+                                             float x, float y, const char *utf8, size_t len,
+                                             const flux_text_style *style);
 
 /* Draw a run with a contour behind the foreground glyphs. `outline_width`
  * is the outward visual radius in logical pixels; values <= 0 preserve the

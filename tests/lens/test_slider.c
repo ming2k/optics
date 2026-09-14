@@ -33,7 +33,7 @@ static void test_slider_drag(void) {
     /* Value should have increased from the click */
     CHECK(changed || value > 0.1f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_slider_disabled(void) {
@@ -62,7 +62,7 @@ static void test_slider_disabled(void) {
     CHECK(!changed);
     CHECK_NEAR(value, 0.5f, 0.001f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_slider_hover_schedules_feedback_transition(void) {
@@ -84,7 +84,7 @@ static void test_slider_hover_schedules_feedback_transition(void) {
     lens_end(ui);
     CHECK(lens_anim_pending(ui));
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_slider_geometry_uses_theme_tokens(void) {
@@ -124,7 +124,7 @@ static void test_slider_geometry_uses_theme_tokens(void) {
         CHECK_NEAR(knob->rel.h, 10.0f, 0.01f);
     }
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_vertical_slider_drag_and_wheel(void) {
@@ -176,7 +176,7 @@ static void test_vertical_slider_drag_and_wheel(void) {
     CHECK(changed);
     CHECK_NEAR(value, 0.55f, 0.001f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

@@ -282,8 +282,8 @@ int main(int argc, char **argv) {
     prism_liquid_glass_filter_release(glass);
     flux_blur_filter_release(blur);
     flux_image_release(capture);
-    flux_arena_destroy(&arena);
-    flux_canvas_destroy(canvas);
+    flux_arena_deinit(&arena);
+    flux_canvas_release(canvas);
     flux_surface_release(surface);
     flux_device_release(device);
     return 0;

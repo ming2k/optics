@@ -465,7 +465,7 @@ fail_images:
         flux_image_release(card_b);
     if (card_a)
         flux_image_release(card_a);
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
 fail_surface:
     flux_surface_release(surface);
 fail_vk_surface:

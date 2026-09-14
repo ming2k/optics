@@ -168,7 +168,7 @@ int main(void) {
          * INSIDE the gamut — red channel drops well below 255. */
         EXPECT(centre[0] < 250 && centre[0] > 200);
 
-        flux_canvas_destroy(p3c);
+        flux_canvas_release(p3c);
         flux_surface_release(p3s);
     }
 
@@ -260,7 +260,7 @@ int main(void) {
         EXPECT(near_ch(centre[1], eg, 4));
         EXPECT(near_ch(centre[2], eb, 4));
 
-        flux_canvas_destroy(bc);
+        flux_canvas_release(bc);
         flux_surface_release(bs);
     }
 
@@ -290,7 +290,7 @@ int main(void) {
         const uint8_t *centre = px_at(px, W / 2, H / 2);
         EXPECT(near_ch(centre[0], 128, 3));
 
-        flux_canvas_destroy(lc);
+        flux_canvas_release(lc);
         flux_surface_release(ls);
     }
 
@@ -340,7 +340,7 @@ int main(void) {
         EXPECT(near_ch(centre[1], eg, 4));
         EXPECT(near_ch(centre[2], eb, 4));
 
-        flux_canvas_destroy(oc);
+        flux_canvas_release(oc);
         flux_surface_release(os);
     }
 
@@ -516,7 +516,7 @@ int main(void) {
          * numbers — the encode stage provably ran. */
         EXPECT(centre[0] > 100 && centre[0] < 160);
 
-        flux_canvas_destroy(pqc);
+        flux_canvas_release(pqc);
         flux_surface_release(pqs);
     }
 
@@ -554,7 +554,7 @@ int main(void) {
         const uint8_t *centre = px_at(px, W / 2, H / 2);
         EXPECT(near_ch(centre[0], 255, 2) && centre[1] < 3 && centre[2] < 3);
 
-        flux_canvas_destroy(fc);
+        flux_canvas_release(fc);
         flux_surface_release(fs);
     }
 
@@ -629,7 +629,7 @@ int main(void) {
         flux_icc_profile_release(lab_v4);
     }
 
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_surface_release(s);
     flux_device_release(d);
     TEST_SUMMARY();

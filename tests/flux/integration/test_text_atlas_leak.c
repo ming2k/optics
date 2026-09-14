@@ -169,9 +169,9 @@ int main(void) {
     if (have_first_clear)
         EXPECT(mem_after.live_allocations <= mem_first_clear_after.live_allocations + 2);
 
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_surface_release(s);
-    flux_text_destroy(text);
+    flux_text_release(text);
     flux_device_release(d);
     TEST_SUMMARY();
 }

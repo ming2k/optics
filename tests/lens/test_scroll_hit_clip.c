@@ -106,7 +106,7 @@ static void test_scroll_clips_hit_testing(void) {
     lens_end(ui);
     CHECK(clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

@@ -52,7 +52,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         if (!isfinite(m.width) || !isfinite(m.height) || !isfinite(m.baseline) || m.width < 0.0f ||
             m.height < 0.0f) {
             fprintf(stderr, "fuzz_text_shape: non-finite/negative metrics at len=%zu\n", len);
-            flux_text_destroy(t);
+            flux_text_release(t);
             return 1;
         }
 
@@ -61,13 +61,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         float x = flux_text_x_for_byte(t, text, len, byte, &st);
         if (!isfinite(x) || x < 0.0f) {
             fprintf(stderr, "fuzz_text_shape: bad x_for_byte at len=%zu byte=%zu\n", len, byte);
-            flux_text_destroy(t);
+            flux_text_release(t);
             return 1;
         }
         size_t back = flux_text_byte_for_x(t, text, len, x, &st);
         if (back > len) {
             fprintf(stderr, "fuzz_text_shape: byte_for_x out of range at len=%zu\n", len);
-            flux_text_destroy(t);
+            flux_text_release(t);
             return 1;
         }
 
@@ -76,7 +76,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         size_t moved = flux_text_visual_move(t, text, len, byte, forward, &st);
         if (moved > len) {
             fprintf(stderr, "fuzz_text_shape: visual_move out of range at len=%zu\n", len);
-            flux_text_destroy(t);
+            flux_text_release(t);
             return 1;
         }
 
@@ -93,18 +93,18 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         int n = flux_text_selection_rects(t, text, len, lo, hi, &st, rects, 4);
         if (n > 4) {
             fprintf(stderr, "fuzz_text_shape: selection_rects overflow at len=%zu\n", len);
-            flux_text_destroy(t);
+            flux_text_release(t);
             return 1;
         }
         for (int r = 0; r < n; r++) {
             if (!isfinite(rects[r].x0) || !isfinite(rects[r].x1) || rects[r].x0 > rects[r].x1) {
                 fprintf(stderr, "fuzz_text_shape: inverted selection rect at len=%zu\n", len);
-                flux_text_destroy(t);
+                flux_text_release(t);
                 return 1;
             }
         }
     }
 
-    flux_text_destroy(t);
+    flux_text_release(t);
     return 0;
 }

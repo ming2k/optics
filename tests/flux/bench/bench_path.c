@@ -76,7 +76,7 @@ int main(void) {
     BENCH_RUN("path_line_to x1000", N, bench_path_line_to_1000, &ctx);
     BENCH_RUN("path_cubic_to x1000", N, bench_path_cubic_to_1000, &ctx);
 
-    flux_arena_destroy(&arena);
+    flux_arena_deinit(&arena);
 
     fprintf(stdout, "\n");
     return 0;

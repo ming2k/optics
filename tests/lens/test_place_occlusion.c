@@ -63,7 +63,7 @@ static void test_popup_card_occludes_base_widget(void) {
 
     CHECK(!base_clicked);
     CHECK(card_clicked);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static lens_place_opts popup_at(const char *id, flux_rect rect) {
@@ -127,7 +127,7 @@ static void test_later_popup_occludes_earlier_same_band(void) {
     CHECK(second_r.clicked);
 
 #undef BUILD_TWO
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

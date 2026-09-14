@@ -192,7 +192,7 @@ int main(void) {
 
     flux_arena arena;
     if (flux_arena_init(&arena, 128 * 1024, nullptr) != FLUX_OK) {
-        flux_canvas_destroy(canvas);
+        flux_canvas_release(canvas);
         flux_surface_release(surface);
         vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
         flux_device_release(device);
@@ -465,8 +465,8 @@ int main(void) {
         flux_image_release(noise_img);
     if (capture)
         flux_image_release(capture);
-    flux_arena_destroy(&arena);
-    flux_canvas_destroy(canvas);
+    flux_arena_deinit(&arena);
+    flux_canvas_release(canvas);
     flux_surface_release(surface);
     vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
     flux_device_release(device);

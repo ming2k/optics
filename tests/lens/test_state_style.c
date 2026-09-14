@@ -38,7 +38,7 @@ static void test_hover_and_press_bits(void) {
     lens_end(ui);
     CHECK((press_state & LENS_STATE_PRESSED) && (press_state & LENS_STATE_HOVERED));
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_disabled_bit_excludes_hover_and_press(void) {
@@ -60,7 +60,7 @@ static void test_disabled_bit_excludes_hover_and_press(void) {
     CHECK(state & LENS_STATE_DISABLED);
     CHECK(!(state & (LENS_STATE_HOVERED | LENS_STATE_PRESSED | LENS_STATE_FOCUSED)));
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_focus_visible_is_keyboard_only(void) {
@@ -105,7 +105,7 @@ static void test_focus_visible_is_keyboard_only(void) {
     CHECK(!(b_state & LENS_STATE_FOCUS_VISIBLE));
     CHECK(b_state & LENS_STATE_PRESSED);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_widget_owned_bits(void) {
@@ -126,7 +126,7 @@ static void test_widget_owned_bits(void) {
     CHECK(!(unsel & LENS_STATE_SELECTED));
     CHECK(toggle & LENS_STATE_ACTIVE);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- resolver: fallback, override, derivation, dim order ------------ */
@@ -151,7 +151,7 @@ static void test_resolver_null_instance_is_verbatim_theme(void) {
     CHECK_NEAR(r.gap, t.gap, 0.0f);
     CHECK_NEAR(r.font_size, t.font_size, 0.0f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_resolver_override_and_derivation(void) {
@@ -182,7 +182,7 @@ static void test_resolver_override_and_derivation(void) {
     CHECK(r.bg_hover == green);
     CHECK(r.bg_pressed == lensi_lerp_color(red, t.color_fg, LENSI_STYLE_PRESSED_DEPTH));
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_resolver_disabled_dims_last(void) {
@@ -213,7 +213,7 @@ static void test_resolver_disabled_dims_last(void) {
     CHECK(inst.fields == LENS_STYLE_BG);
     CHECK(inst.bg == red);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

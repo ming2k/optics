@@ -218,7 +218,7 @@ int main(void) {
                                     EXPECT(flux_frame_submit(consumer_frame) == FLUX_OK);
                                     EXPECT(flux_frame_present(consumer_frame) == FLUX_OK);
                                 }
-                                flux_canvas_destroy(canvas);
+                                flux_canvas_release(canvas);
                             }
                             flux_surface_release(consumer);
                         }

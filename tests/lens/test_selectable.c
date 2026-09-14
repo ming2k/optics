@@ -45,7 +45,7 @@ static void test_selectable_click(void) {
     lens_end(ui);
     CHECK(clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* The selected flag is surfaced to assistive tech as a checked state, and a
@@ -69,7 +69,7 @@ static void test_selectable_selected_and_disabled(void) {
     lens_end(ui);
     CHECK(!clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_selected_surface_uses_theme(void) {
@@ -103,8 +103,8 @@ static void test_selected_surface_uses_theme(void) {
     pixel(fb, stride, 1, 1, p);
     CHECK(p[0] < 5 && p[1] < 5 && p[2] < 5); /* left corner remains rounded */
 
-    flux_canvas_destroy(canvas);
-    lens_destroy(ui);
+    flux_canvas_release(canvas);
+    lens_release(ui);
 }
 
 int main(void) {

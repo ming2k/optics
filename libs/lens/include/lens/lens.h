@@ -784,7 +784,7 @@ FLUX_NODISCARD LENS_API flux_result lens_create(const lens_desc *desc, lens **ou
 #define LENS_DESC_INIT /* clang-format off */ \
     { .size = sizeof(lens_desc) } /* clang-format on */
 
-LENS_API void lens_destroy(lens *ui);
+LENS_API void lens_release(lens *ui);
 LENS_API void lens_set_theme(lens *ui, lens_theme theme);
 LENS_API lens_theme lens_get_theme(const lens *ui);
 
@@ -843,6 +843,26 @@ LENS_API float lens_text_scale(const lens *ui);
 LENS_API void lens_begin(lens *ui, const lens_input *input);
 LENS_API void lens_end(lens *ui);
 FLUX_NODISCARD LENS_API flux_result lens_render(lens *ui, flux_canvas *canvas);
+
+/* ================================================================== */
+/*  Decoupled DrawList Pipeline (ADR-0088 Clean-Break)                */
+/* ================================================================== */
+
+typedef struct lens_draw_list {
+    flux_display_list display_list;
+    uint32_t command_count;
+    bool has_damage;
+} lens_draw_list;
+
+/* Pure CPU compile phase: transforms the resolved layout tree into an
+ * immutable, GPU-independent draw list allocated on `arena`. Can run on worker
+ * threads or headless environments without an active Canvas or GPU device. */
+FLUX_NODISCARD LENS_API flux_result lens_compile_draw_list(lens *ui, flux_arena *arena,
+                                                           lens_draw_list *out_list);
+
+/* Submit a compiled draw list to a canvas for rasterization. */
+FLUX_NODISCARD LENS_API flux_result lens_draw_list_submit(const lens_draw_list *list,
+                                                          flux_canvas *canvas);
 
 /* True if the per-frame arena overflowed during the frame just built. */
 LENS_API bool lens_overflowed(const lens *ui);

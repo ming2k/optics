@@ -69,7 +69,7 @@ static void test_replay_pixel_identical(void) {
     EXPECT(memcmp(live, replayed, sizeof live) == 0);
     EXPECT(flux_canvas_records_replayed(c) == 1);
 
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
 }
 
 static void test_replay_refuses_clip_change(void) {
@@ -101,7 +101,7 @@ static void test_replay_refuses_clip_change(void) {
     flux_canvas_cpu_end(c);
     EXPECT(flux_canvas_records_replayed(c) == 1);
 
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
 }
 
 static void test_replay_refuses_transform_change(void) {
@@ -126,7 +126,7 @@ static void test_replay_refuses_transform_change(void) {
     flux_canvas_cpu_end(c);
     EXPECT(flux_canvas_records_replayed(c) == 1);
 
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
 }
 
 static void test_replay_refuses_released_handle(void) {
@@ -150,7 +150,7 @@ static void test_replay_refuses_released_handle(void) {
     EXPECT(flux_canvas_replay(c, rec2));
     flux_canvas_cpu_end(c);
 
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
 }
 
 static void test_nested_recording_captures_replay(void) {
@@ -186,7 +186,7 @@ static void test_nested_recording_captures_replay(void) {
     snapshot(c, replayed);
     EXPECT(memcmp(live, replayed, sizeof live) == 0);
 
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
 }
 
 int main(void) {

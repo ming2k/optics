@@ -500,7 +500,7 @@ int main(void) {
             EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
             got[variant] = px_at(px, W / 2, H / 2)[0];
 
-            flux_canvas_destroy(canvas);
+            flux_canvas_release(canvas);
             flux_mesh_release(quad);
             flux_material_release(mat);
             flux_image_release(rt);

@@ -140,7 +140,7 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
     return FLUX_OK;
 
 fail_store:
-    flux_arena_destroy(&ui->arena);
+    flux_arena_deinit(&ui->arena);
 fail_arena:
     if (ui->device)
         flux_device_release(ui->device);
@@ -148,13 +148,13 @@ fail_arena:
     return r;
 }
 
-void lens_destroy(lens *ui) {
+void lens_release(lens *ui) {
     if (!ui)
         return;
     lensi_ghost_destroy(ui);
-    flux_text_destroy(ui->text); /* null-safe */
+    flux_text_release(ui->text); /* null-safe */
     lensi_store_destroy(ui);
-    flux_arena_destroy(&ui->arena);
+    flux_arena_deinit(&ui->arena);
     if (ui->device)
         flux_device_release(ui->device);
     free(ui);

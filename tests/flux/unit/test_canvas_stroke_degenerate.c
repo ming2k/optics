@@ -68,7 +68,7 @@ int main(void) {
     EXPECT(any_ink(fb, 70, 70, 80, 80));  /* handle diagonal        */
     EXPECT(!any_ink(fb, 44, 44, 49, 49)); /* circle interior empty  */
 
-    flux_canvas_destroy(c);
-    flux_arena_destroy(&arena);
+    flux_canvas_release(c);
+    flux_arena_deinit(&arena);
     TEST_SUMMARY();
 }

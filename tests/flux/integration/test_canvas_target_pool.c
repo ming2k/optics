@@ -104,7 +104,7 @@ int main(void) {
             parked, baseline.live_allocations, after.live_allocations);
     EXPECT(parked < 2u * SLOTS * 4u);
 
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_surface_release(s);
     flux_device_release(d);
     TEST_SUMMARY();

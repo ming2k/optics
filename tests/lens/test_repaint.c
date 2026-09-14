@@ -42,8 +42,8 @@ static void test_first_frames_repaint_then_settle(void) {
     build_frame(ui, 0.5f);
     CHECK(!lens_frame_needs_repaint(ui));
 
-    flux_canvas_destroy(canvas);
-    lens_destroy(ui);
+    flux_canvas_release(canvas);
+    lens_release(ui);
 }
 
 static void test_leaf_change_repaints(void) {
@@ -62,8 +62,8 @@ static void test_leaf_change_repaints(void) {
     build_frame(ui, 0.75f);
     CHECK(lens_frame_needs_repaint(ui));
 
-    flux_canvas_destroy(canvas);
-    lens_destroy(ui);
+    flux_canvas_release(canvas);
+    lens_release(ui);
 }
 
 static void test_place_open_close_repaints(void) {
@@ -126,8 +126,8 @@ static void test_place_open_close_repaints(void) {
     lens_end(ui);
     CHECK(lens_frame_needs_repaint(ui));
 
-    flux_canvas_destroy(canvas);
-    lens_destroy(ui);
+    flux_canvas_release(canvas);
+    lens_release(ui);
 }
 
 int main(void) {

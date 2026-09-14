@@ -9,21 +9,10 @@
  * image/memory/view plumbing every depth-using example used to carry.
  */
 #include "internal.h"
+#include "image_internal.h"
 #include <flux/vulkan.h>
 
 #include <stdatomic.h>
-
-struct flux_target {
-    atomic_uint ref_count;
-    flux_device *device; /* retained */
-    VkImage image;
-    VkImageView view;
-    flux_vk_alloc alloc;
-    VkFormat format;
-    uint32_t usage;
-    uint32_t width;
-    uint32_t height;
-};
 
 flux_result flux_target_create(flux_device *d, const flux_target_desc *desc, flux_target **out) {
     if (!d || !desc || !out)
@@ -128,8 +117,95 @@ fail:
     return r;
 }
 
+flux_result flux_target_create_cpu(const flux_cpu_target_desc *desc, flux_target **out) {
+    if (!desc || !out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (desc->type != FLUX_TYPE_TARGET_DESC) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_TARGET_DESC");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->width == 0 || desc->height == 0) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "target width/height is 0");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    *out = nullptr;
+
+    flux_target *t = calloc(1, sizeof(*t));
+    if (!t)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    atomic_init(&t->ref_count, 1u);
+    t->is_cpu = true;
+    t->width = desc->width;
+    t->height = desc->height;
+    t->usage = FLUX_TARGET_COLOR;
+    t->cpu_stride = desc->stride_bytes ? desc->stride_bytes : (size_t)desc->width * 4u;
+
+    if (desc->user_buffer) {
+        t->cpu_buffer = (uint8_t *)desc->user_buffer;
+        t->owns_cpu_buffer = false;
+    } else {
+        t->cpu_buffer = calloc(t->height, t->cpu_stride);
+        if (!t->cpu_buffer) {
+            free(t);
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        }
+        t->owns_cpu_buffer = true;
+    }
+    *out = t;
+    return FLUX_OK;
+}
+
+flux_result flux_target_create_from_image(flux_device *d, flux_image *image, flux_target **out) {
+    if (!d || !image || !out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = nullptr;
+
+    flux_target *t = flux_internal_alloc(d, sizeof(*t));
+    if (!t)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    atomic_init(&t->ref_count, 1u);
+    t->device = flux_device_retain(d);
+    t->from_image = flux_image_retain(image);
+    t->image = image->image;
+    t->view = image->view;
+    t->width = image->width;
+    t->height = image->height;
+    t->usage = FLUX_TARGET_COLOR;
+    *out = t;
+    return FLUX_OK;
+}
+
+flux_target *flux_frame_target(flux_frame *f) {
+    if (!f)
+        return nullptr;
+    if (!f->frame_target_valid) {
+        atomic_init(&f->frame_target.ref_count, 1u);
+        f->frame_target.device = f->surface ? f->surface->device : nullptr;
+        f->frame_target.usage = FLUX_TARGET_COLOR;
+        f->frame_target.width = f->surface ? f->surface->extent.width : 0;
+        f->frame_target.height = f->surface ? f->surface->extent.height : 0;
+        f->frame_target.is_borrowed = true;
+        f->frame_target.bound_frame = f;
+        f->frame_target_valid = true;
+    }
+    return &f->frame_target;
+}
+
+const uint8_t *flux_target_cpu_pixels(const flux_target *t, uint32_t *out_width,
+                                      uint32_t *out_height, uint32_t *out_stride) {
+    if (!t || !t->is_cpu)
+        return nullptr;
+    if (out_width)
+        *out_width = t->width;
+    if (out_height)
+        *out_height = t->height;
+    if (out_stride)
+        *out_stride = (uint32_t)t->cpu_stride;
+    return t->cpu_buffer;
+}
+
 flux_target *flux_target_retain(flux_target *t) {
-    if (t)
+    if (t && !t->is_borrowed)
         atomic_fetch_add_explicit(&t->ref_count, 1u, memory_order_relaxed);
     return t;
 }
@@ -137,8 +213,26 @@ flux_target *flux_target_retain(flux_target *t) {
 void flux_target_release(flux_target *t) {
     if (!t)
         return;
+    if (t->is_borrowed)
+        return; /* borrowed target lifetime bound to owner frame */
     if (atomic_fetch_sub_explicit(&t->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
+
+    if (t->is_cpu) {
+        if (t->owns_cpu_buffer && t->cpu_buffer)
+            free(t->cpu_buffer);
+        free(t);
+        return;
+    }
+
+    if (t->from_image) {
+        flux_image_release(t->from_image);
+        flux_device *d = t->device;
+        flux_internal_free(d, t);
+        flux_device_release(d);
+        return;
+    }
+
     flux_device *d = t->device;
     /* Same in-flight hazard as flux_image_release: the target may still
      * be an attachment of batches executing on the graphics queue. Park

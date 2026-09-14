@@ -48,7 +48,7 @@ static void test_activate_fires_and_focuses(void) {
     build_button_frame(ui, &clicked);
     CHECK(!clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* A request for a nonexistent id is dropped at frame end and never fires. */
@@ -69,7 +69,7 @@ static void test_activate_unknown_id_dropped(void) {
     build_button_frame(ui, &clicked);
     CHECK(!clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* A newer request replaces an unconsumed older one (single pending slot). */
@@ -86,7 +86,7 @@ static void test_activate_replaces_pending(void) {
     build_button_frame(ui, &clicked);
     CHECK(clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Disabled widgets do not activate, and the request is consumed/dropped so
@@ -134,7 +134,7 @@ static void test_activate_disabled_blocked(void) {
     CHECK(clicked);
     CHECK(lens_focused(ui, id));
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Occlusion does not block AT activation: a transient popup over the
@@ -199,7 +199,7 @@ static void test_activate_bypasses_occlusion(void) {
     lens_end(ui);
     CHECK(clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

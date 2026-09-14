@@ -270,7 +270,7 @@ static void stroke_one_contour(flux_canvas *c, const flux_paint *paint, flux_mat
     *v_count_io = v_count;
 }
 
-void flux_canvas_stroke_path(flux_canvas *c, const flux_path *p, const flux_paint *paint) {
+void canvas_stroke_path_internal(flux_canvas *c, const flux_path *p, const flux_paint *paint) {
     if (!c || !c->recording || !p || !paint)
         return;
     if (p->count == 0)

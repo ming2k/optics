@@ -442,7 +442,7 @@ void tess_cache_store_and_transform(flux_canvas *c, const flux_path *p, const fl
     }
 }
 
-void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint *paint) {
+void canvas_fill_path_internal(flux_canvas *c, const flux_path *p, const flux_paint *paint) {
     if (!c || !c->recording || !p || !paint)
         return;
     if (p->count == 0)

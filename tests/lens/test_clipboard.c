@@ -48,7 +48,7 @@ static void test_copy_and_request(void) {
     lens_copy(ui, "x", 0);
     CHECK(host.copied_len == 5);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_copy_without_clipboard_is_noop(void) {
@@ -58,7 +58,7 @@ static void test_copy_without_clipboard_is_noop(void) {
     lens_copy(ui, "x", 1);
     lens_request_paste(ui);
     lens_paste(ui, "y", 1); /* queues but no consumer */
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_caret_rect_default_zero(void) {
@@ -69,7 +69,7 @@ static void test_caret_rect_default_zero(void) {
     lens_end(ui);
     flux_rect c = lens_caret_rect(ui);
     CHECK(c.x == 0 && c.y == 0 && c.w == 0 && c.h == 0);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* The size guard: a zero-sized lens_input (legacy callers) must still copy
@@ -104,7 +104,7 @@ static void test_input_size_guard(void) {
     lens_begin(ui, &small);
     lens_end(ui);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- focused-widget text context (lens_text_context_get, ADR-0036) ---- */
@@ -118,7 +118,7 @@ static void test_text_context_default_null(void) {
     lens_text_context tc = lens_text_context_get(ui);
     CHECK(tc.utf8 == NULL);
     CHECK(tc.len == 0 && tc.cursor == 0 && tc.multiline == false);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* A focused textfield reports its buffer, caret offset, and
@@ -160,7 +160,7 @@ static void test_text_context_textfield(void) {
     CHECK(tc.utf8 == NULL);
     CHECK(tc.len == 0 && tc.cursor == 0 && tc.multiline == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* A focused textarea reports multiline=true (focus pattern from
@@ -197,7 +197,7 @@ static void test_text_context_textarea(void) {
     tc = lens_text_context_get(ui);
     CHECK(tc.utf8 == NULL);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

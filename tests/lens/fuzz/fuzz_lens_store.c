@@ -68,6 +68,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
 
     lens_end(ui);
-    lens_destroy(ui);
+    lens_release(ui);
     return 0;
 }

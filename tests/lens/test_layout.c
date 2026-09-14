@@ -51,7 +51,7 @@ static void test_row_packs_children(void) {
     CHECK_NEAR(ra.h, h, 0.5f);
     CHECK_NEAR(rb.x, wa + gap, 0.5f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_flex_distributes_slack(void) {
@@ -82,7 +82,7 @@ static void test_flex_distributes_slack(void) {
     CHECK_NEAR(rb.x, 100.0f, 0.5f);
     CHECK_NEAR(rb.w, 100.0f, 0.5f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_flex_child_shrinks_between_fixed_siblings(void) {
@@ -120,7 +120,7 @@ static void test_flex_child_shrinks_between_fixed_siblings(void) {
     CHECK_NEAR(ri.w, 50.0f, 0.5f);
     CHECK_NEAR(ri.x + ri.w, 200.0f, 0.5f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_column_stacks_children(void) {
@@ -148,7 +148,7 @@ static void test_column_stacks_children(void) {
     CHECK_NEAR(rb.y, h + gap, 0.5f);
     CHECK_NEAR(ra.w, 200.0f, 0.5f); /* stretched across */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* lens_flex(...) must apply to the *next node whether it is a widget OR a
@@ -173,7 +173,7 @@ static void test_flex_applies_to_terse_container(void) {
     flux_rect rr = lens_node_bounds(row);
     CHECK_NEAR(rr.h, 300.0f, 0.5f); /* grew to the full display height */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_container_width_constraints_bound_intrinsic_size(void) {
@@ -207,7 +207,7 @@ static void test_container_width_constraints_bound_intrinsic_size(void) {
     CHECK_NEAR(lens_node_bounds(intrinsic).w, natural, 0.5f);
     CHECK_NEAR(lens_node_bounds(maximum).w, 100.0f, 0.5f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_flex_redistributes_space_after_max_width(void) {
@@ -232,7 +232,7 @@ static void test_flex_redistributes_space_after_max_width(void) {
     CHECK_NEAR(lens_node_bounds(capped).w, 100.0f, 0.5f);
     CHECK_NEAR(lens_node_bounds(remainder).w, 200.0f, 0.5f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_flex_respects_min_width_while_shrinking(void) {
@@ -258,7 +258,7 @@ static void test_flex_respects_min_width_while_shrinking(void) {
     CHECK_NEAR(lens_node_bounds(floored).w, 80.0f, 0.5f);
     CHECK_NEAR(lens_node_bounds(remainder).w, 20.0f, 0.5f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

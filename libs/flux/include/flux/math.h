@@ -196,7 +196,7 @@ typedef struct flux_arena {
 FLUX_NODISCARD FLUX_API flux_result flux_arena_init(flux_arena *a, size_t capacity,
                                                     const flux_allocator *alloc /* nullable */);
 
-FLUX_API void flux_arena_destroy(flux_arena *a);
+FLUX_API void flux_arena_deinit(flux_arena *a);
 FLUX_API void *flux_arena_alloc(flux_arena *a, size_t bytes);
 FLUX_API void *flux_arena_alloc_aligned(flux_arena *a, size_t bytes, size_t align);
 FLUX_API void flux_arena_reset(flux_arena *a);

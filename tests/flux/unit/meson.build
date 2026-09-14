@@ -169,3 +169,9 @@ test('glyph_cache', test_glyph_cache, suite : 'unit')
 
 shape_test = executable('test_canvas_shapes', 'test_canvas_shapes.c', dependencies : [test_helpers_dep])
 test('canvas_shapes', shape_test, suite : 'unit')
+
+test_rfc0094 = executable('test_rfc0094_contracts',
+  'test_rfc0094_contracts.c',
+  dependencies : [test_helpers_dep, flux_text_dep],
+)
+test('rfc0094_contracts', test_rfc0094, suite : 'unit')

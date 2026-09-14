@@ -58,7 +58,7 @@ int main(void) {
     arena_reset_ctx rctx = {&arena};
     BENCH_RUN("arena_reset (after 1000 x 32B)", N, bench_arena_reset, &rctx);
 
-    flux_arena_destroy(&arena);
+    flux_arena_deinit(&arena);
 
     fprintf(stdout, "\n");
     return 0;

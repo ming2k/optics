@@ -68,7 +68,42 @@ int main(void) {
     lens_row_end(ui);
     lens_end(ui);
     CHECK((disabled.state & LENS_STATE_DISABLED) != 0);
-    lens_destroy(ui);
+
+    /* ADR-0094: Full Scene Snapshot Compilation into DisplayList without GPU */
+    lens_begin(ui, &in);
+    lens_column_begin(ui, &(lens_layout_opts){.box = {.width = 300, .height = 200}});
+    lens_button(ui, &(lens_button_opts){.label = "OK", .box = {.width = 100, .height = 40}});
+    lens_label(ui, &(lens_label_opts){.text = "Snapshot Test", .box = {.width = 150, .height = 25}});
+    lens_column_end(ui);
+    lens_end(ui);
+
+    flux_arena snapshot_arena;
+    CHECK(flux_arena_init(&snapshot_arena, 65536, nullptr) == FLUX_OK);
+    lens_draw_list draw_list = {0};
+    CHECK(lens_compile_draw_list(ui, &snapshot_arena, &draw_list) == FLUX_OK);
+    /* Verify that compile_draw_list captured the complete UI tree into commands (NOT just 1 dummy command!) */
+    CHECK(draw_list.command_count >= 3);
+    CHECK(draw_list.display_list.count >= 3);
+    CHECK(draw_list.display_list.size > 0);
+
+    /* Submit to CPU canvas and verify replay */
+    flux_canvas_desc cd = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 500, .height = 300);
+    flux_canvas *c = nullptr;
+    CHECK(flux_canvas_create(&cd, &c) == FLUX_OK);
+    flux_color clear = 0;
+    CHECK(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    CHECK(lens_draw_list_submit(&draw_list, c) == FLUX_OK);
+    CHECK(flux_canvas_end(c) == FLUX_OK);
+
+    uint32_t pw = 0, ph = 0, pstride = 0;
+    const uint8_t *px = flux_canvas_read_pixels(c, &pw, &ph, &pstride);
+    CHECK(px != nullptr);
+
+    flux_display_list_destroy(&draw_list.display_list);
+    flux_canvas_release(c);
+    flux_arena_deinit(&snapshot_arena);
+
+    lens_release(ui);
     lens_fit(nullptr);
     lens_space_between(nullptr);
     return TEST_REPORT();

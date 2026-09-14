@@ -238,7 +238,7 @@ int main(void) {
         }
     }
 
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_surface_release(surf);
     flux_sampler_release(nearest);
     flux_image_release(img);

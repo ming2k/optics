@@ -61,6 +61,6 @@ int main(void) {
         lens_end(ui);
     }
 
-    lens_destroy(ui);
+    lens_release(ui);
     return 0;
 }

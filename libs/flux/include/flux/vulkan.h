@@ -406,6 +406,55 @@ FLUX_API void flux_frame_set_viewport(flux_frame *f, float x, float y, float wid
 FLUX_API void flux_frame_set_scissor(flux_frame *f, int32_t x, int32_t y, uint32_t width,
                                      uint32_t height);
 
+/* ================================================================== */
+/*  Explicit Pipeline Barriers & Queue Transitions (RFC-0094 / ADR-0087) */
+/* ================================================================== */
+
+typedef enum flux_pipeline_stage {
+    FLUX_STAGE_TOP_OF_PIPE             = 1u << 0,
+    FLUX_STAGE_DRAW_INDIRECT           = 1u << 1,
+    FLUX_STAGE_VERTEX_INPUT            = 1u << 2,
+    FLUX_STAGE_VERTEX_SHADER           = 1u << 3,
+    FLUX_STAGE_FRAGMENT_SHADER         = 1u << 4,
+    FLUX_STAGE_EARLY_FRAGMENT_TESTS    = 1u << 5,
+    FLUX_STAGE_LATE_FRAGMENT_TESTS     = 1u << 6,
+    FLUX_STAGE_COLOR_ATTACHMENT_OUTPUT = 1u << 7,
+    FLUX_STAGE_COMPUTE_SHADER          = 1u << 8,
+    FLUX_STAGE_TRANSFER                = 1u << 9,
+    FLUX_STAGE_BOTTOM_OF_PIPE          = 1u << 10,
+} flux_pipeline_stage;
+
+typedef enum flux_access_flags {
+    FLUX_ACCESS_NONE                        = 0,
+    FLUX_ACCESS_INDIRECT_COMMAND_READ       = 1u << 0,
+    FLUX_ACCESS_INDEX_READ                  = 1u << 1,
+    FLUX_ACCESS_VERTEX_ATTRIBUTE_READ       = 1u << 2,
+    FLUX_ACCESS_UNIFORM_READ                = 1u << 3,
+    FLUX_ACCESS_SHADER_READ                 = 1u << 4,
+    FLUX_ACCESS_SHADER_WRITE                = 1u << 5,
+    FLUX_ACCESS_COLOR_ATTACHMENT_READ       = 1u << 6,
+    FLUX_ACCESS_COLOR_ATTACHMENT_WRITE      = 1u << 7,
+    FLUX_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ  = 1u << 8,
+    FLUX_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE = 1u << 9,
+    FLUX_ACCESS_TRANSFER_READ               = 1u << 10,
+    FLUX_ACCESS_TRANSFER_WRITE              = 1u << 11,
+} flux_access_flags;
+
+#define FLUX_QUEUE_FAMILY_IGNORED (~0u)
+
+typedef struct flux_image_barrier {
+    flux_image *image;
+    flux_pipeline_stage src_stage;
+    flux_pipeline_stage dst_stage;
+    flux_access_flags   src_access;
+    flux_access_flags   dst_access;
+    uint32_t            src_queue_family;
+    uint32_t            dst_queue_family;
+} flux_image_barrier;
+
+FLUX_API void flux_frame_pipeline_barrier(flux_frame *f, const flux_image_barrier *image_barriers,
+                                          uint32_t count);
+
 #ifdef __cplusplus
 }
 #endif

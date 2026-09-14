@@ -51,6 +51,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_buffer_release` | Destruction is deferred: a released buffer may still be referenced by in-flight frames, so the VkBuffer and its memory are destroyed by the device retire queue only after the GPU provably passed every batch that could reference them. |
 | `flux_buffer_size` |  |
 | `flux_target_create` |  |
+| `flux_target_create_cpu` |  |
+| `flux_target_create_from_image` |  |
 | `flux_target_release` | Destruction is deferred: a released target may still be an attachment of in-flight frames, so the image, view, and memory are destroyed by the device retire queue only after the GPU provably passed every batch that could reference them. |
 | `flux_target_width` |  |
 | `flux_target_height` |  |
@@ -152,7 +154,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_transfer_decode` |  |
 | `flux_color_space_transform_matrix` | Builds the 3×3 matrix converting linear-light RGB in `from` to linear-light RGB in `to` (primaries only — transfer functions are applied separately). |
 | `flux_arena_init` |  |
-| `flux_arena_destroy` |  |
+| `flux_arena_deinit` |  |
 | `flux_arena_reset` |  |
 
 ### `flux/vulkan.h`
@@ -212,6 +214,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_frame_end_pass` |  |
 | `flux_frame_set_viewport` | Backend-neutral wrappers for the dynamic viewport and scissor state used by graphics pipelines. |
 | `flux_frame_set_scissor` |  |
+| `flux_frame_pipeline_barrier` |  |
 
 ### `flux/canvas.h`
 
@@ -221,6 +224,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_paint_solid` | Convenience constructors. |
 | `flux_paint_linear_gradient` |  |
 | `flux_paint_radial_gradient` |  |
+| `flux_path_init` |  |
+| `flux_path_reset` |  |
 | `flux_path_create` |  |
 | `flux_path_move_to` |  |
 | `flux_path_line_to` |  |
@@ -229,12 +234,15 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_path_close` |  |
 | `flux_path_add_rect` |  |
 | `flux_path_add_round_rect` |  |
+| `flux_path_add_squircle` |  |
 | `flux_path_add_circle` |  |
 | `flux_path_dropped_count` | Number of segments rejected due to arena exhaustion. |
 | `flux_canvas_create` | Create a canvas on the selected backend. |
-| `flux_canvas_destroy` |  |
+| `flux_canvas_release` |  |
 | `flux_canvas_set_scale` | Content scale (device-pixel ratio). |
 | `flux_canvas_get_scale` |  |
+| `flux_canvas_begin` | Unified target-driven pass bracket (RFC-0094 / ADR-0087). |
+| `flux_canvas_end` |  |
 | `flux_canvas_begin_frame` | Begin / end a recording session. |
 | `flux_canvas_end_frame` |  |
 | `flux_canvas_end_frame_checked` | Checked counterpart: always closes a valid frame pass and returns its first sticky draw-time error (notably a stencil-dependent draw attempted inside a no-stencil pass). |
@@ -245,25 +253,30 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_canvas_end_target_checked` | Checked target-pass counterpart; see flux_canvas_end_frame_checked. |
 | `flux_canvas_save` | State stack. |
 | `flux_canvas_restore` |  |
+| `flux_canvas_save_layer` | Save a compositing layer (ADR-0088 / Opacity Group). |
 | `flux_canvas_clip_rect` | Intersect the current clip with `r`. |
 | `flux_canvas_translate` |  |
 | `flux_canvas_scale` |  |
 | `flux_canvas_rotate` |  |
 | `flux_canvas_transform` |  |
 | `flux_canvas_draw` | The single unified 2D drawing primitive (ADR-0083) |
-| `flux_canvas_fill_rect` | Drawing helpers. |
-| `flux_canvas_fill_path` |  |
-| `flux_canvas_stroke_path` |  |
-| `flux_canvas_fill_rrect` | Rounded rectangles and circles via a signed-distance field: analytic, resolution-independent anti-aliasing (crisp at any DPI, unlike tessellated fills which rely on MSAA). |
-| `flux_canvas_stroke_rrect` |  |
-| `flux_canvas_draw_image` | Draw an RGBA image. |
-| `flux_canvas_draw_image_opaque` | Draw an alpha-free RGB image. |
-| `flux_canvas_draw_image_rrect` | Draw an image clipped by an analytic rounded rectangle. |
-| `flux_canvas_draw_image_clipped_rrect` | Draw an image through an analytic rounded clip that is independent of the image destination. |
-| `flux_canvas_draw_image_sub` | Draw a sub-rectangle of `image` into `dst`. |
-| `flux_canvas_draw_image_opaque_sub` | Draw a sub-rectangle of an alpha-free RGB image. |
-| `flux_canvas_draw_image_sampled` | Sample `image` with `sampler` instead of the canvas-internal linear default. |
-| `flux_canvas_fill_rect_color` | Convenience: fill a rectangle with a solid colour, no paint setup. |
+| `flux_canvas_draw_geometry` |  |
+| `flux_encoder_create` | Create a pure CPU, zero-GPU memory command encoder allocated on `arena`. |
+| `flux_encoder_draw_geometry` |  |
+| `flux_encoder_draw_glyph_run` |  |
+| `flux_encoder_save` |  |
+| `flux_encoder_restore` |  |
+| `flux_encoder_clip_rect` |  |
+| `flux_encoder_save_layer` |  |
+| `flux_encoder_translate` |  |
+| `flux_encoder_scale` |  |
+| `flux_encoder_rotate` |  |
+| `flux_encoder_transform` |  |
+| `flux_encoder_reset` | Reset encoder for reuse, releasing any uncommitted commands. |
+| `flux_encoder_destroy` | Destroy an encoder and release its scratch resources. |
+| `flux_encoder_finish` | Freeze encoder commands into an immutable display list. |
+| `flux_display_list_destroy` | Destroy a published display list and release retained resources. |
+| `flux_canvas_submit_display_list` | Submit an immutable display list to a canvas for batch execution. |
 | `flux_canvas_draw_glyph_run` | Draw a pre-shaped glyph run as a single batched draw call. |
 | `flux_canvas_dropped_draws` | Cumulative count of draw calls dropped due to transient ring exhaustion since canvas creation. |
 | `flux_canvas_submit_calls` | Vulkan batching diagnostics, cumulative since canvas creation. |
@@ -348,7 +361,10 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_text_version_number` |  |
 | `flux_text_version_check` |  |
 | `flux_text_create` | Create a text context. |
-| `flux_text_destroy` |  |
+| `flux_text_release` |  |
+| `flux_text_has_pending_uploads` | Atlas synchronization contract (RFC-0094 / ADR-0087 / ADR-0092). |
+| `flux_text_flush_atlas` |  |
+| `flux_text_get_atlas_epoch` |  |
 | `flux_text_set_scale` | Scale contract (single source of truth): - flux_text_draw rasterises at the *canvas's* effective scale (flux_canvas_get_scale — content scale composed with any stacked flux_canvas_scale), so drawn glyphs always match the target surface. |
 | `flux_text_scale` |  |
 | `flux_text_default_family` | Get/set the context's default typeface family — the family a style with FLUX_TEXT_FAMILY_DEFAULT resolves to. |
@@ -357,6 +373,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_text_get_stats` |  |
 | `flux_text_measure` | Shape `len` bytes of `utf8` in `style` and report the extent. |
 | `flux_text_draw` | Shape `len` bytes of `utf8` and paint them as a single batched glyph run with the top-left at (x, y) in logical pixels, using `style` (including its colour). |
+| `flux_text_draw_to_encoder` | Shape and encode batched glyph runs directly to an immutable flux_encoder (ADR-0094). |
 | `flux_text_draw_outlined` | Draw a run with a contour behind the foreground glyphs. |
 | `flux_text_x_for_byte` | Logical x of the glyph boundary before byte `byte`. |
 | `flux_text_byte_for_x` | Source byte offset of the glyph boundary nearest logical x `local_x`. |
@@ -423,7 +440,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_skin_clip_pop` |  |
 | `lens_skin_emit_user` | Emit a skin record for a HOST-RESERVED widget kind (ADR-0073). |
 | `lens_create` |  |
-| `lens_destroy` |  |
+| `lens_release` |  |
 | `lens_set_theme` |  |
 | `lens_get_theme` |  |
 | `lens_set_opacity` | Frame-scoped opacity switch (0..1; default 1.0): the single fade knob for enter/exit motion. |
@@ -437,6 +454,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_begin` | ================================================================== |
 | `lens_end` |  |
 | `lens_render` |  |
+| `lens_compile_draw_list` | Pure CPU compile phase: transforms the resolved layout tree into an immutable, GPU-independent draw list allocated on `arena`. |
+| `lens_draw_list_submit` | Submit a compiled draw list to a canvas for rasterization. |
 | `lens_overflowed` | True if the per-frame arena overflowed during the frame just built. |
 | `lens_has_duplicate_ids` | True if the same widget id was linked more than once under one parent in the frame just built. |
 | `lens_anim_pending` | True if an eased value (hover/active fade, …) was still in transit during the frame just built. |

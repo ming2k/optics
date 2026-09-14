@@ -46,43 +46,99 @@
 extern "C" {
 #endif
 
-/* One frosted rectangle in capture-image pixel coordinates. The rect
- * writes an OPAQUE pixel: the (optionally tinted) blurred backdrop
- * resolved over the sharp capture underneath, gated by analytic
- * rounded-rect coverage and the rect's opacity. Opacity therefore blends
- * frosted-vs-sharp, never frosted-vs-transparent — a partial-coverage
- * frost still reads as a true background colour to the glass lens above
- * it. `tint_color`/`tint_strength` blend a wash INTO the frost so veils
+/*
+ * Base Material Layer (底衬材质层):
+ * Represents a non-distorting foundation plate (e.g. frosted blur sheet,
+ * tinted acrylic, or protective scrim) in capture-image pixel coordinates.
+ *
+ * The plate writes an OPAQUE pixel: the (optionally tinted) blurred backdrop
+ * resolved over the sharp capture underneath, gated by analytic rounded-rect
+ * coverage and the plate's opacity. Opacity therefore blends base-vs-sharp,
+ * never base-vs-transparent — a partial-coverage base plate still reads as a
+ * true background colour to the optical glass lens above it.
+ *
+ * `tint_color`/`tint_strength` blend a wash INTO the base material so veils
  * and scheme-adaptive scrims live beneath the glass instead of being
- * painted over it by chrome. A radius of 0 is a plain rectangle. Frost
- * rects paint before every glass group regardless of array order — the
- * layer order is part of this material's identity, not caller policy. */
-typedef struct prism_backdrop_frost {
+ * painted over it by chrome. A radius of 0 is a plain rectangle. Base
+ * material plates paint before every glass group regardless of array order —
+ * the layer order is part of this composite material's identity, not caller policy.
+ */
+typedef struct prism_base_material {
     flux_rect bounds;
     float corner_radius;
     float opacity;       /* [0, 1] */
-    uint32_t tint_color; /* 0xRRGGBB wash blended into the frost */
+    uint32_t tint_color; /* 0xRRGGBB wash blended into the base material */
     float tint_strength; /* [0, 1]; 0 keeps the blurred backdrop */
-} prism_backdrop_frost;
+} prism_base_material;
 
-#define PRISM_BACKDROP_FROST_INIT                                                                  \
+#define PRISM_BASE_MATERIAL_INIT                                                                   \
     {.corner_radius = 0.0f, .opacity = 1.0f, .tint_color = 0xFFFFFFu, .tint_strength = 0.0f}
 
-#define PRISM_BACKDROP_MAX_FROST_RECTS 16u
+/* Backward-compatible alias for existing call sites. */
+typedef prism_base_material prism_backdrop_frost;
+#define PRISM_BACKDROP_FROST_INIT PRISM_BASE_MATERIAL_INIT
+
+#define PRISM_BACKDROP_MAX_BASE_MATERIALS 16u
+#define PRISM_BACKDROP_MAX_FROST_RECTS PRISM_BACKDROP_MAX_BASE_MATERIALS
 #define PRISM_BACKDROP_MAX_GLASS_GROUPS 64u
 
+/*
+ * Optical Glass Layer (高光与折射透镜层 policy):
+ * Defines dispatch-wide convex lens simulation, edge dispersion, and
+ * sculpted directional lighting (primary key line, diagonal secondary catchlight,
+ * fresnel sheen, and transmitted light trough).
+ */
+typedef struct prism_optical_glass_params {
+    float refraction;
+    float chromatic_aberration;
+    float saturation;
+    float brightness;
+    float edge_width;
+    float rim_light;
+    flux_point light_direction;
+    float opacity;
+    float size_reference;
+    float size_scale_min;
+    float tint_strength;
+    float frost_strength;
+    float curvature; /* [0, 1] continuous curvature (squircle) blend factor: 0 = rounded rect, 1 =
+                        G2 superellipse */
+} prism_optical_glass_params;
+
+#define PRISM_OPTICAL_GLASS_PARAMS_INIT                                                            \
+    {.refraction = 8.0f,                                                                           \
+     .chromatic_aberration = 1.25f,                                                                \
+     .saturation = 1.08f,                                                                          \
+     .brightness = 1.02f,                                                                          \
+     .edge_width = 18.0f,                                                                          \
+     .rim_light = 0.55f,                                                                           \
+     .light_direction = {-0.45f, -0.89f},                                                          \
+     .opacity = 1.0f,                                                                              \
+     .size_reference = 72.0f,                                                                      \
+     .size_scale_min = 0.15f,                                                                      \
+     .tint_strength = 1.0f,                                                                        \
+     .frost_strength = 1.0f,                                                                       \
+     .curvature = 0.0f}
+
+/*
+ * Multi-layering Compositor (多层级层叠复合描述符):
+ * Combines Base Material Layer (plates) beneath Optical Glass Layer (groups).
+ */
 typedef struct prism_backdrop_layer_desc {
     prism_struct_type type; /* PRISM_TYPE_BACKDROP_LAYER_DESC */
     const void *next;
     flux_image *input;                 /* sharp backdrop capture (required) */
     flux_image *blurred_input;         /* blurred backdrop (required, same extent) */
-    const prism_backdrop_frost *frost; /* may be NULL/0 */
+
+    /* 1. Base Material Layer (底衬材质层) */
+    const prism_base_material *frost;  /* may be NULL/0; base material plates */
     uint32_t frost_count;
+
+    /* 2. Optical Glass Layer (高光与折射透镜层) */
     const prism_liquid_glass_group *groups; /* may be NULL/0 */
     uint32_t group_count;
-    /* Dispatch-wide glass policy, identical in meaning to the fields of
-     * prism_liquid_glass_desc (the glass layer runs that material's
-     * reference recipe; PRISM_LIQUID_GLASS_DESC_INIT carries the values). */
+
+    /* Optical Glass policy parameters (mirrors prism_optical_glass_params) */
     float refraction;
     float chromatic_aberration;
     float saturation;

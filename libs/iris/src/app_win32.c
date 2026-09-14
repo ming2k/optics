@@ -2143,7 +2143,7 @@ fail:
     if (device)
         flux_device_wait_idle(device);
     if (ui)
-        lens_destroy(ui);
+        lens_release(ui);
     pl.ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
     /* The Win32 theme watcher holds no thread or handle; unwatch just drops
      * the backend's internal registration (the host's public watch, if any,
@@ -2162,7 +2162,7 @@ fail:
     iris_platform_wakeup_set_kick(NULL, NULL);
     iris_platform_wakeup_drain();
     if (canvas)
-        flux_canvas_destroy(canvas);
+        flux_canvas_release(canvas);
     if (surface)
         flux_surface_release(surface);
     if (vk_surface)

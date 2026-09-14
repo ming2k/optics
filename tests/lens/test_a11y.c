@@ -88,7 +88,7 @@ static void test_widget_roles(void) {
     /* layout-only row is decorative: not surfaced */
     CHECK(find_role(LENS_ROLE_GROUP) == NULL);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* lens_a11y overrides the most recent widget's name (icon-only control). */
@@ -108,7 +108,7 @@ static void test_a11y_override(void) {
     CHECK(b != NULL);
     CHECK(b && strcmp(b->name, "Save document") == 0);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* The walk reports the nearest *semantic* ancestor, skipping decorative
@@ -130,7 +130,7 @@ static void test_walk_parenting(void) {
     rec *p = find_role(LENS_ROLE_BUTTON);
     CHECK(p != NULL);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

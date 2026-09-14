@@ -48,6 +48,13 @@
  * flux_cpu_canvas::ss. */
 #define FLUX_CPU_SS_DEFAULT 2
 
+#define FLUX_CPU_MAX_LAYERS 8
+
+typedef struct flux_cpu_layer {
+    float *fb;
+    float opacity;
+} flux_cpu_layer;
+
 typedef struct flux_cpu_canvas {
     uint32_t width, height; /* logical (output) size */
     uint32_t sw, sh;        /* sample-buffer size = width*ss, height*ss */
@@ -57,7 +64,8 @@ typedef struct flux_cpu_canvas {
      * Fixed for the canvas lifetime: the sample buffer, stencil, and the
      * readback downsample are all sized from it. */
     uint32_t ss;
-    float *fb;      /* premultiplied RGBA, sw*sh*4, row-major */
+    float *fb;      /* premultiplied RGBA, sw*sh*4, row-major (active layer or base) */
+    float *base_fb; /* root destination sample buffer */
     uint8_t *rgba8; /* cached downsampled 8-bit view (width*height*4) */
     /* Stencil-then-cover accumulation (ADR-0014), one int8 per sample,
      * lazily allocated on the first stencil submit. STENCIL_WRITE adds the
@@ -67,6 +75,10 @@ typedef struct flux_cpu_canvas {
      * attachment (INCR_WRAP/DECR_WRAP vs INVERT, cover resets). */
     int8_t *stencil;
     bool stencil_active;
+
+    /* Isolated layer compositing stack (ADR-0091 Opacity Groups) */
+    flux_cpu_layer layers[FLUX_CPU_MAX_LAYERS];
+    uint32_t layer_top;
 } flux_cpu_canvas;
 
 static inline flux_cpu_canvas *cpu(flux_canvas *c) {
@@ -589,6 +601,8 @@ static flux_result cpu_canvas_init(const flux_canvas_backend *self, flux_canvas 
         free(v);
         return FLUX_ERROR_OUT_OF_MEMORY;
     }
+    v->base_fb = v->fb;
+    v->layer_top = 0;
     c->backend_data = v;
     return FLUX_OK;
 }
@@ -598,11 +612,74 @@ static void cpu_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) 
     flux_cpu_canvas *v = cpu(c);
     if (!v)
         return;
-    free(v->fb);
+    for (uint32_t i = 0; i < v->layer_top; ++i) {
+        free(v->layers[i].fb);
+    }
+    free(v->base_fb);
     free(v->rgba8);
     free(v->stencil);
     free(v);
     c->backend_data = nullptr;
+}
+
+static flux_result cpu_save_layer(const flux_canvas_backend *self, flux_canvas *c,
+                                 const flux_rect *bounds, float opacity) {
+    (void)self;
+    (void)bounds;
+    flux_cpu_canvas *v = cpu(c);
+    if (!v)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (v->layer_top >= FLUX_CPU_MAX_LAYERS)
+        return FLUX_ERROR_OUT_OF_RANGE;
+
+    size_t samples = (size_t)v->sw * v->sh;
+    float *layer_fb = calloc(samples * 4, sizeof(float));
+    if (!layer_fb)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+
+    v->layers[v->layer_top].fb = layer_fb;
+    v->layers[v->layer_top].opacity = opacity;
+    v->layer_top++;
+    v->fb = layer_fb;
+    return FLUX_OK;
+}
+
+static void cpu_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
+    (void)self;
+    flux_cpu_canvas *v = cpu(c);
+    if (!v || v->layer_top == 0)
+        return;
+
+    v->layer_top--;
+    float *layer_fb = v->layers[v->layer_top].fb;
+    float opacity = v->layers[v->layer_top].opacity;
+    if (opacity < 0.0f)
+        opacity = 0.0f;
+    if (opacity > 1.0f)
+        opacity = 1.0f;
+
+    float *parent_fb = (v->layer_top > 0) ? v->layers[v->layer_top - 1].fb : v->base_fb;
+
+    size_t samples = (size_t)v->sw * v->sh;
+    for (size_t i = 0; i < samples; ++i) {
+        float *l = &layer_fb[i * 4];
+        float la = l[3] * opacity;
+        if (la <= 0.0f)
+            continue;
+        float lr = l[0] * opacity;
+        float lg = l[1] * opacity;
+        float lb = l[2] * opacity;
+        float *p = &parent_fb[i * 4];
+        float inv_la = 1.0f - la;
+        p[0] = lr + p[0] * inv_la;
+        p[1] = lg + p[1] * inv_la;
+        p[2] = lb + p[2] * inv_la;
+        p[3] = la + p[3] * inv_la;
+    }
+
+    free(layer_fb);
+    v->layers[v->layer_top].fb = NULL;
+    v->fb = parent_fb;
 }
 
 static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *c, flux_frame *f,
@@ -788,6 +865,8 @@ static const flux_canvas_backend cpu_backend = {
     .bind_program = cpu_bind_program,
     .submit = cpu_submit,
     .read_pixels = cpu_read_pixels,
+    .save_layer = cpu_save_layer,
+    .restore_layer = cpu_restore_layer,
 };
 
 const flux_canvas_backend *flux_canvas_backend_cpu(void) {

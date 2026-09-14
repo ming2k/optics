@@ -37,7 +37,7 @@ static void test_checkbox_toggle(void) {
     CHECK(changed);
     CHECK(value);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_checkbox_no_toggle_when_disabled(void) {
@@ -63,7 +63,7 @@ static void test_checkbox_no_toggle_when_disabled(void) {
     CHECK(!changed);
     CHECK(!value);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_switch_toggle_and_disabled(void) {
@@ -118,7 +118,7 @@ static void test_switch_toggle_and_disabled(void) {
     CHECK(!r.changed);
     CHECK(value);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

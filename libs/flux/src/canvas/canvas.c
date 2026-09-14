@@ -96,7 +96,9 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
             }
             ext = ext->next;
         }
-        return flux_canvas_create_cpu_aa(desc->width, desc->height, desc->scale, aa, out);
+        uint32_t w = desc->width ? desc->width : 1024;
+        uint32_t h = desc->height ? desc->height : 1024;
+        return flux_canvas_create_cpu_aa(w, h, desc->scale, aa, out);
     }
 
     if (!desc->surface) {
@@ -143,9 +145,19 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
     return FLUX_OK;
 }
 
-void flux_canvas_destroy(flux_canvas *c) {
+flux_canvas *flux_canvas_retain(flux_canvas *c) {
+    if (!c)
+        return nullptr;
+    atomic_fetch_add_explicit(&c->ref_count, 1u, memory_order_relaxed);
+    return c;
+}
+
+void flux_canvas_release(flux_canvas *c) {
     if (!c)
         return;
+    if (atomic_fetch_sub_explicit(&c->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return;
+
     /* Recorded segments retain images; release them before the backend
      * (and its image teardown) goes away. */
     canvas_record_pool_destroy(c);
@@ -265,6 +277,36 @@ flux_result flux_canvas_begin_frame(flux_canvas *c, flux_frame *f, const flux_co
     return flux_canvas_begin_pass(c, f, &desc);
 }
 
+flux_result flux_canvas_begin(flux_canvas *c, flux_target *target, const flux_color *clear_color) {
+    if (!c)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+
+    if (!c->device) {
+        /* Headless CPU software canvas */
+        c->bound_cpu_target = target;
+        return flux_canvas_begin_frame(c, nullptr, clear_color);
+    }
+
+    /* GPU hardware-accelerated canvas */
+    if (target && target->bound_frame)
+        return flux_canvas_begin_frame(c, target->bound_frame, clear_color);
+
+    if (target && target->from_image)
+        return flux_canvas_begin_target(c, c->frame, target->from_image, clear_color);
+
+    return flux_canvas_begin_frame(c, c->frame, clear_color);
+}
+
+flux_result flux_canvas_end(flux_canvas *c) {
+    if (!c)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (!c->recording)
+        return FLUX_OK;
+    if (c->target_pass)
+        return flux_canvas_end_target_checked(c);
+    return flux_canvas_end_frame_checked(c);
+}
+
 static flux_result canvas_finish_pass_checked(flux_canvas *c, bool expect_target) {
     if (!c || !c->recording || c->target_pass != expect_target) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas pass termination does not match active pass");
@@ -272,6 +314,21 @@ static flux_result canvas_finish_pass_checked(flux_canvas *c, bool expect_target
     }
     flux_result result = c->pass_error;
     c->backend->end_pass(c->backend, c);
+
+    if (c->bound_cpu_target && c->bound_cpu_target->is_cpu && c->bound_cpu_target->cpu_buffer) {
+        uint32_t w = 0, h = 0, stride = 0;
+        const uint8_t *px = flux_canvas_read_pixels(c, &w, &h, &stride);
+        if (px) {
+            uint32_t copy_h = c->bound_cpu_target->height < h ? c->bound_cpu_target->height : h;
+            size_t dst_stride = c->bound_cpu_target->cpu_stride;
+            size_t copy_w_bytes = (c->bound_cpu_target->width < w ? c->bound_cpu_target->width : w) * 4;
+            for (uint32_t y = 0; y < copy_h; ++y) {
+                memcpy(c->bound_cpu_target->cpu_buffer + y * dst_stride, px + y * stride, copy_w_bytes);
+            }
+        }
+    }
+    c->bound_cpu_target = nullptr;
+
     c->target = nullptr;
     c->target_pass = false;
     c->frame = nullptr;
@@ -355,13 +412,47 @@ void flux_canvas_save(flux_canvas *c) {
     }
     c->states[c->state_top + 1] = c->states[c->state_top];
     c->state_top++;
+    c->states[c->state_top].is_layer = false;
+    c->states[c->state_top].layer_opacity = 1.0f;
+}
+
+void flux_canvas_save_layer(flux_canvas *c, const flux_rect *bounds, float opacity) {
+    if (!c)
+        return;
+    if (c->state_top + 1 >= FLUX_CANVAS_MAX_STATES) {
+        if (c->device && c->device->log) {
+            char buf[160];
+            snprintf(buf, sizeof(buf),
+                     "flux_canvas_save_layer: state stack overflow (depth > %d); "
+                     "save_layer was a no-op — check for unbalanced save/restore",
+                     FLUX_CANVAS_MAX_STATES);
+            c->device->log(FLUX_LOG_ERROR, "flux_canvas_save_layer", 0, "%s", buf, c->device->log_user);
+        }
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "flux_canvas_save_layer: state stack overflow");
+        return;
+    }
+    c->states[c->state_top + 1] = c->states[c->state_top];
+    c->state_top++;
+    c->states[c->state_top].is_layer = true;
+    c->states[c->state_top].layer_opacity = opacity;
+
+    if (bounds && bounds->w > 0.0f && bounds->h > 0.0f)
+        flux_canvas_clip_rect(c, *bounds);
+
+    if (c->backend && c->backend->save_layer) {
+        c->backend->save_layer(c->backend, c, bounds, opacity);
+    }
 }
 
 void flux_canvas_restore(flux_canvas *c) {
     if (!c || c->state_top == 0)
         return;
+    bool was_layer = c->states[c->state_top].is_layer;
     c->state_top--;
     c->backend->set_scissor(c->backend, c, c->states[c->state_top].scissor);
+    if (was_layer && c->backend && c->backend->restore_layer) {
+        c->backend->restore_layer(c->backend, c);
+    }
 }
 
 void flux_canvas_translate(flux_canvas *c, float x, float y) {
@@ -460,7 +551,7 @@ void flux_canvas_clip_rect(flux_canvas *c, flux_rect r) {
 /*  Public draws                                                      */
 /* ------------------------------------------------------------------ */
 
-void flux_canvas_fill_rect(flux_canvas *c, flux_rect r, const flux_paint *paint) {
+void canvas_fill_rect_internal(flux_canvas *c, flux_rect r, const flux_paint *paint) {
     if (!c || !c->recording)
         return;
     flux_mat3x2 tx = c->states[c->state_top].transform;
@@ -479,12 +570,6 @@ void flux_canvas_fill_rect(flux_canvas *c, flux_rect r, const flux_paint *paint)
     push_vertex(&v[4], p2, tx, vc);
     push_vertex(&v[5], p3, tx, vc);
     submit_triangles(c, paint, v, 6);
-}
-
-void flux_canvas_fill_rect_color(flux_canvas *c, flux_rect r, flux_color color) {
-    flux_paint p = flux_paint_default();
-    p.color = color;
-    flux_canvas_fill_rect(c, r, &p);
 }
 
 /* Pack a normalised UV pair into the vertex `_pad` field as unorm16x2.
@@ -679,91 +764,8 @@ static void draw_sdf_rrect(flux_canvas *c, flux_rect r, float radius, flux_color
     canvas_emit(c, CANVAS_PIPE_SDF, &pc, v, 6);
 }
 
-void flux_canvas_fill_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color) {
-    draw_sdf_rrect(c, r, radius, color, 0.0f);
-}
-
-void flux_canvas_stroke_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color,
-                              float width) {
-    if (width <= 0.0f)
-        width = 1.0f;
-    draw_sdf_rrect(c, r, radius, color, width * 0.5f);
-}
-
 /* Whole-image sub-rect: sample the entire texture across dst. */
 static const flux_rect FLUX_SRC_WHOLE = {0.0f, 0.0f, 1.0f, 1.0f};
-
-void flux_canvas_draw_image(flux_canvas *c, flux_image *img, flux_rect dst,
-                            const flux_paint *paint) {
-    if (!c || !c->recording || !img)
-        return;
-    flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
-    flux_blend_mode blend = paint ? paint->blend : FLUX_BLEND_SRC_OVER;
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, blend, 3u, NULL,
-                                   0.0f);
-}
-
-void flux_canvas_draw_image_opaque(flux_canvas *c, flux_image *img, flux_rect dst) {
-    if (!c || !c->recording || !img)
-        return;
-    flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE,
-                                   flux_color_rgba_premul(255, 255, 255, 255), FLUX_BLEND_SRC, 6u,
-                                   NULL, 0.0f);
-}
-
-void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *img, flux_rect dst, float radius,
-                                  const flux_paint *paint) {
-    if (!c || !c->recording || !img)
-        return;
-    flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
-    flux_blend_mode blend = paint ? paint->blend : FLUX_BLEND_SRC_OVER;
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, blend, 5u, &dst,
-                                   radius);
-}
-
-void flux_canvas_draw_image_clipped_rrect(flux_canvas *c, flux_image *img, flux_rect dst,
-                                          flux_rect clip, float radius, const flux_paint *paint) {
-    if (!c || !c->recording || !img || clip.w <= 0.0f || clip.h <= 0.0f)
-        return;
-    flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
-    flux_blend_mode blend = paint ? paint->blend : FLUX_BLEND_SRC_OVER;
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, FLUX_SRC_WHOLE, tint, blend, 5u, &clip,
-                                   radius);
-}
-
-void flux_canvas_draw_image_sub(flux_canvas *c, flux_image *img, flux_rect dst, flux_rect src) {
-    if (!c || !c->recording || !img)
-        return;
-    flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, src,
-                                   flux_color_rgba_premul(255, 255, 255, 255), FLUX_BLEND_SRC_OVER,
-                                   3u, NULL, 0.0f);
-}
-
-void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image *img, flux_rect dst,
-                                       flux_rect src) {
-    if (!c || !c->recording || !img)
-        return;
-    flux_bindless_handle sh = flux_device_default_sampler_handle(c->device);
-    draw_image_with_sampler_handle(c, img, NULL, sh, dst, src,
-                                   flux_color_rgba_premul(255, 255, 255, 255), FLUX_BLEND_SRC, 6u,
-                                   NULL, 0.0f);
-}
-
-void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *img, flux_sampler *sampler,
-                                    flux_rect dst, const flux_paint *paint) {
-    if (!c || !c->recording || !img || !sampler)
-        return;
-    flux_bindless_handle sh = flux_sampler_bindless_handle(sampler);
-    flux_color tint = paint ? paint->color : flux_color_rgba_premul(255, 255, 255, 255);
-    flux_blend_mode blend = paint ? paint->blend : FLUX_BLEND_SRC_OVER;
-    draw_image_with_sampler_handle(c, img, sampler, sh, dst, FLUX_SRC_WHOLE, tint, blend, 3u, NULL,
-                                   0.0f);
-}
 
 /* ------------------------------------------------------------------ */
 /*  Glyph runs (ADR-0010)                                             */
@@ -1017,14 +1019,14 @@ void flux_canvas_draw(flux_canvas *c, const flux_shape *shape, const flux_paint 
         if (!shape->path) {
             canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "path shape requires a path");
         } else if (shape->stroke_width > 0) {
-            flux_canvas_stroke_path(c, shape->path, &p);
+            canvas_stroke_path_internal(c, shape->path, &p);
         } else {
-            flux_canvas_fill_path(c, shape->path, &p);
+            canvas_fill_path_internal(c, shape->path, &p);
         }
         return;
     }
     if (shape->kind == FLUX_SHAPE_RECT && shape->stroke_width == 0) {
-        flux_canvas_fill_rect(c, shape->rect, &p);
+        canvas_fill_rect_internal(c, shape->rect, &p);
         return;
     }
     flux_path_segment segments[16];
@@ -1066,7 +1068,7 @@ void flux_canvas_draw(flux_canvas *c, const flux_shape *shape, const flux_paint 
         return;
     }
     if (shape->stroke_width > 0)
-        flux_canvas_stroke_path(c, &path, &p);
+        canvas_stroke_path_internal(c, &path, &p);
     else
-        flux_canvas_fill_path(c, &path, &p);
+        canvas_fill_path_internal(c, &path, &p);
 }

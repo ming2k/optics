@@ -100,8 +100,8 @@ this frame, and try again on the next iteration.
 `flux_device_wait_idle`, then release in reverse creation order:
 
     flux_device_wait_idle(device);
-    flux_canvas_destroy(canvas);
-    flux_arena_destroy(&path_arena);
+    flux_canvas_release(canvas);
+    flux_arena_deinit(&path_arena);
     flux_surface_release(surface);
     vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
     flux_device_release(device);

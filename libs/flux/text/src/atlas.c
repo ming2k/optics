@@ -372,6 +372,43 @@ void txt_atlas_flush(flux_text *t) {
     }
 }
 
+bool flux_text_has_pending_uploads(const flux_text *t) {
+    if (!t)
+        return false;
+    for (uint8_t p = 0; p < t->atlas_page_count && p < TXT_ATLAS_MAX_PAGES; p++) {
+        if (t->atlas_page_dirty[p])
+            return true;
+    }
+    return false;
+}
+
+flux_result flux_text_flush_atlas(flux_text *t, flux_frame *f) {
+    if (!t)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (f) {
+        uint32_t slot = flux_frame_index(f);
+        if (slot < FLUX_MAX_FRAMES_IN_FLIGHT) {
+            t->current_atlas_epoch++;
+            t->frame_atlas_epoch[slot] = t->current_atlas_epoch;
+        }
+    } else {
+        t->current_atlas_epoch++;
+    }
+    txt_atlas_flush(t);
+    return FLUX_OK;
+}
+
+uint64_t flux_text_get_atlas_epoch(const flux_text *t, const flux_frame *f) {
+    if (!t)
+        return 0;
+    if (f) {
+        uint32_t slot = flux_frame_index(f);
+        if (slot < FLUX_MAX_FRAMES_IN_FLIGHT)
+            return t->frame_atlas_epoch[slot];
+    }
+    return t->current_atlas_epoch;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Public: fetch (rasterising + caching on miss)                      */
 /* ------------------------------------------------------------------ */

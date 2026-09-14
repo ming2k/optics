@@ -70,6 +70,6 @@ int main(void) {
     lens_end(ui);
     CHECK(ok_save != ok_discard);
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

@@ -144,7 +144,7 @@ int main(void) {
      * while replaying resident content. */
     EXPECT(wb.atlas_clears <= wa.atlas_clears);
 
-    flux_canvas_destroy(c);
-    flux_text_destroy(t);
+    flux_canvas_release(c);
+    flux_text_release(t);
     TEST_SUMMARY();
 }

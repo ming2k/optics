@@ -43,7 +43,7 @@ static void test_exact_always_entered(void) {
     }
     CHECK(body_runs == 2);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Placement is exactly at the rect's top-left — no below-anchor drop. */
@@ -75,7 +75,7 @@ static void test_exact_place_at_rect(void) {
     CHECK(label_rect.y < 74.0f);
     CHECK(label_rect.x >= 40.0f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* The supplied rect is a minimum extent, not only a position anchor. This
@@ -114,7 +114,7 @@ static void test_rect_extent_tracks_updates(void) {
     CHECK_NEAR(bounds.w, 120.0f, 0.001f);
     CHECK_NEAR(bounds.h, 90.0f, 0.001f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Escape and click-outside must not remove a non-transient node — it has
@@ -157,7 +157,7 @@ static void test_persistent_not_dismissed(void) {
     lens_end(ui);
     CHECK(runs_after_click == 1); /* click-outside did not dismiss either */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- band-ordered hit-testing -------------------------------------- */
@@ -196,7 +196,7 @@ static void test_chrome_occludes_base(void) {
     lens_end(ui);
     CHECK(base_clicked == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Strict band order: a widget inside a CHROME node is occluded by a POPUP
@@ -239,7 +239,7 @@ static void test_popup_occludes_chrome_contents(void) {
     lens_end(ui);
     CHECK(dock_clicked == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* A BACKDROP node renders BELOW the base tree and does not eat hits: a
@@ -290,7 +290,7 @@ static void test_backdrop_hit_transparent(void) {
     CHECK(base_clicked == true);   /* BACKDROP does not occlude the base tree */
     CHECK(ghost_clicked == false); /* default BACKDROP swallows no hits */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* The opt-in flag makes a BACKDROP subtree hit-testable. */
@@ -331,7 +331,7 @@ static void test_backdrop_interactive_opt_in(void) {
     lens_end(ui);
     CHECK(clicked == true);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- global emission order, verified with pixels -------------------- */
@@ -447,8 +447,8 @@ static void test_band_render_order(void) {
     render(ui, canvas);
     CHECK(sample(canvas, 50, 50) == 255); /* BACKDROP still paints, below all */
 
-    flux_canvas_destroy(canvas);
-    lens_destroy(ui);
+    flux_canvas_release(canvas);
+    lens_release(ui);
 }
 
 /* Within one band there is no weight: later registration paints (and
@@ -476,8 +476,8 @@ static void test_intra_band_registration_order(void) {
     g_px_channel = 2;
     CHECK(sample(canvas, 50, 50) == 0); /* yellow B=0 beat cyan B=255: later wins */
 
-    flux_canvas_destroy(canvas);
-    lens_destroy(ui);
+    flux_canvas_release(canvas);
+    lens_release(ui);
 }
 
 /* ADR-0060 reserves LENS_BAND_BASE for flow content: an ABS node asking
@@ -525,8 +525,8 @@ static void test_base_band_request_clamped_to_chrome(void) {
     lens_end(ui);
     CHECK(base_clicked == false); /* and it hit-tests above, too */
 
-    flux_canvas_destroy(canvas);
-    lens_destroy(ui);
+    flux_canvas_release(canvas);
+    lens_release(ui);
 }
 
 int main(void) {

@@ -45,7 +45,7 @@ static void test_link_click_and_intrinsic_size(void) {
     lens_close(ui);
     lens_end(ui);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_button_click(void) {
@@ -76,7 +76,7 @@ static void test_button_click(void) {
     lens_end(ui);
     CHECK(clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_button_no_click_when_disabled(void) {
@@ -98,7 +98,7 @@ static void test_button_no_click_when_disabled(void) {
     lens_end(ui);
     CHECK(!clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_lit,
@@ -148,8 +148,8 @@ static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_
         }
     }
 
-    flux_canvas_destroy(canvas);
-    lens_destroy(ui);
+    flux_canvas_release(canvas);
+    lens_release(ui);
     if (outline_pixels)
         *outline_pixels = contour;
     return lit;
@@ -196,7 +196,7 @@ static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(voi
     lens_node *outlined = lens_node_next_sibling(plain);
     CHECK_NEAR(lens_node_bounds(plain).w, lens_node_bounds(outlined).w, 0.01f);
     CHECK_NEAR(lens_node_bounds(plain).h, lens_node_bounds(outlined).h, 0.01f);
-    lens_destroy(ui);
+    lens_release(ui);
 
     bool center_lit = false;
     size_t contour = 0;
@@ -227,7 +227,7 @@ static void test_icon_button_requests_pointer_cursor(void) {
     CHECK(lens_get_cursor_hint(ui) == LENS_CURSOR_DEFAULT);
     lens_end(ui);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_button_mouse_secondary(void) {
@@ -261,7 +261,7 @@ static void test_button_mouse_secondary(void) {
     CHECK(right);
     CHECK(!left);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

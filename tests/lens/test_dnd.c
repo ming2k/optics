@@ -123,6 +123,6 @@ int main(void) {
     lens_close(ui);
     lens_end(ui);
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

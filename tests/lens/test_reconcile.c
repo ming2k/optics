@@ -45,6 +45,6 @@ int main(void) {
     CHECK(found_before_reap);         /* grace kept it for a while */
     CHECK(lens_find(ui, id) == NULL); /* eventually reaped */
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

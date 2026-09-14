@@ -90,7 +90,7 @@ void *lens_node_state(lens_node *n, size_t bytes) {
         return n->state_bytes == bytes ? n->state : NULL;
     }
     /* Allocate through the owning context's persistent allocator and zero-init
-     * on first touch (ADR-0027). Freed at reap or lens_destroy. */
+     * on first touch (ADR-0027). Freed at reap or lens_release. */
     void *mem = lensi_alloc(n->ui, bytes);
     if (!mem) {
         lensi_set_overflow(n->ui);

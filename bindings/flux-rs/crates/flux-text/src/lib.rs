@@ -281,7 +281,7 @@ impl Text {
 
 impl Drop for Text {
     fn drop(&mut self) {
-        unsafe { flux_text_sys::flux_text_destroy(self.raw) };
+        unsafe { flux_text_sys::flux_text_release(self.raw) };
     }
 }
 

@@ -265,7 +265,7 @@ int main(void) {
     flux_image_release(red);
     flux_image_release(green);
     flux_image_release(blue);
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_surface_release(s);
     flux_device_release(d);
     TEST_SUMMARY();

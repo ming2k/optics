@@ -147,6 +147,6 @@ int main(void) {
     lens_accessibility_walk(ui, a11y_visitor, &depth);
     printf("-------------------------------\n");
 
-    lens_destroy(ui);
+    lens_release(ui);
     return 0;
 }

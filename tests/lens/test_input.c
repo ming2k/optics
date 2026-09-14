@@ -42,7 +42,7 @@ static void test_hover_press_click(void) {
     CHECK(r3.pressed == false);
     CHECK(r3.clicked == true);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_drag_outside_no_click(void) {
@@ -75,7 +75,7 @@ static void test_drag_outside_no_click(void) {
     lens_response r3 = lens_get_response(ui);
     CHECK(r3.clicked == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_tab_focus(void) {
@@ -104,7 +104,7 @@ static void test_tab_focus(void) {
     /* After first Tab, focus should be on A (first focusable) if none was focused before */
     CHECK(lens_focused(ui, aid) == true || lens_focused(ui, bid) == true);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

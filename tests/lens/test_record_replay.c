@@ -22,8 +22,8 @@ static void fixture_open(fixture *f) {
 }
 
 static void fixture_close(fixture *f) {
-    flux_canvas_destroy(f->canvas);
-    lens_destroy(f->ui);
+    flux_canvas_release(f->canvas);
+    lens_release(f->ui);
 }
 
 static void render_frame(fixture *f) {
@@ -216,8 +216,8 @@ static void test_hidpi_scroll_clip_alignment(void) {
     }
     CHECK(found_non_zero == true);
 
-    flux_canvas_destroy(f.canvas);
-    lens_destroy(f.ui);
+    flux_canvas_release(f.canvas);
+    lens_release(f.ui);
 }
 
 static void test_child_removal_invalidates_record(void) {

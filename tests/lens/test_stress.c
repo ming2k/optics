@@ -48,7 +48,7 @@ static void test_many_nodes(void) {
 
     CHECK(lens_overflowed(ui) == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ------------------------------------------------------------------ */
@@ -98,7 +98,7 @@ static void test_deep_nesting(void) {
     /* root (1) + max 63 additional containers = depth 63 */
     CHECK(depth == 63);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ------------------------------------------------------------------ */
@@ -133,7 +133,7 @@ static void test_arena_pressure(void) {
     lens_end(ui);
     CHECK(lens_overflowed(ui) == false); /* flag is per frame */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ------------------------------------------------------------------ */
@@ -181,7 +181,7 @@ static void test_rapid_churn(void) {
 
     CHECK(lens_overflowed(ui) == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ------------------------------------------------------------------ */
@@ -208,7 +208,7 @@ static void test_id_collision_reuses_node(void) {
     CHECK(second == NULL);
     CHECK(first != NULL);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

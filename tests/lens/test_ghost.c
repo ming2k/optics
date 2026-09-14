@@ -26,8 +26,8 @@ static void fixture_open(fixture *f) {
 }
 
 static void fixture_close(fixture *f) {
-    flux_canvas_destroy(f->canvas);
-    lens_destroy(f->ui);
+    flux_canvas_release(f->canvas);
+    lens_release(f->ui);
 }
 
 static void snapshot(const fixture *f, uint8_t *out) {

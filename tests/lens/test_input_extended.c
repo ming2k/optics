@@ -73,7 +73,7 @@ static void test_right_and_middle_click(void) {
     lens_response ro = lens_get_response(ui);
     CHECK(ro.right_clicked == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ------------------------------------------------------------------ */
@@ -121,7 +121,7 @@ static void test_multi_button_left_wins(void) {
     lens_end(ui);
     CHECK(clicked == true);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ------------------------------------------------------------------ */
@@ -163,7 +163,7 @@ static void test_drag_back_inside_yields_click(void) {
     lens_end(ui);
     CHECK(clicked == true);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ------------------------------------------------------------------ */
@@ -207,7 +207,7 @@ static void test_wheel_scrolls_content(void) {
     float y1 = lens_node_bounds(first1).y;
     CHECK(y1 < y0); /* content scrolled down */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ------------------------------------------------------------------ */
@@ -268,7 +268,7 @@ static void test_shift_tab_reverse_focus(void) {
     lens_end(ui);
     CHECK(lens_focused(ui, cid) == true);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

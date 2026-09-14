@@ -91,6 +91,6 @@ int main(void) {
     lens_end(ui);
     CHECK(lens_overflowed(ui));
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

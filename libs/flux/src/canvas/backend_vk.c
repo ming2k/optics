@@ -130,7 +130,7 @@ static inline flux_vk_canvas *vkc(flux_canvas *c) {
 /* Release an owned attachment through the device retire queue. A previous
  * extent's image may still be referenced by batches in flight on the
  * graphics queue (a resize during recording swaps the attachment while an
- * earlier frame reads it), and flux_canvas_destroy runs while the surface's
+ * earlier frame reads it), and flux_canvas_release runs while the surface's
  * frames are in flight; destroying the VkImage inline can fault the engine
  * mid-batch. Retiring defers destruction until the queue provably passed
  * every referencing batch — no wait, no stall. */

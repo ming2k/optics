@@ -40,7 +40,7 @@ flux_result flux_arena_init(flux_arena *a, size_t capacity, const flux_allocator
     return FLUX_OK;
 }
 
-void flux_arena_destroy(flux_arena *a) {
+void flux_arena_deinit(flux_arena *a) {
     if (!a)
         return;
     if (a->owns_buffer && a->base && a->alloc.free)

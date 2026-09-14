@@ -31,6 +31,7 @@
 
 #if defined(FLUX_HAVE_CANVAS)
 #include <flux/canvas.h>
+#include <flux/canvas_helpers.h>
 #endif
 
 #if defined(FLUX_HAVE_SCENE)

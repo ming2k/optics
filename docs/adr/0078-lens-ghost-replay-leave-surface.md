@@ -1,10 +1,11 @@
 # ADR-0078: Ghost replay — the render surface for leave animations
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-23
 - Scope: lens (L2 toolkit). Amends the deferred note on
   [ADR-0038](0038-lens-node-state-gc.md) (leaving nodes had no render path)
   and pairs with [ADR-0068](0068-lens-frame-scoped-node-stamped-opacity.md).
+- Implementation: Complete in libs/lens/src/render/ghost.c and tests/lens/test_ghost.c.
 
 ## Context
 

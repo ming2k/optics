@@ -99,6 +99,6 @@ int main(int argc, char **argv) {
     /* The checker aborts => abnormal termination (SIGABRT). */
     CHECK(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

@@ -124,7 +124,7 @@ int main(void) {
 
     for (uint32_t i = 0; i < TARGETS; ++i)
         flux_image_release(targets[i]);
-    flux_canvas_destroy(canvas);
+    flux_canvas_release(canvas);
     flux_surface_release(s);
     flux_device_release(d);
     return 0;

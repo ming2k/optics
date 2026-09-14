@@ -187,7 +187,7 @@ int main(void) {
     EXPECT(frames_equal(first, second));
     EXPECT(c->tess_cache_hits == hits_before + 2);
 
-    flux_canvas_destroy(c);
-    flux_arena_destroy(&arena);
+    flux_canvas_release(c);
+    flux_arena_deinit(&arena);
     TEST_SUMMARY();
 }

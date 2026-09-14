@@ -11,6 +11,6 @@ int main(void) {
     CHECK(lens_render(NULL, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
     CHECK(lens_render(ui, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
 
-    lens_destroy(ui);
+    lens_release(ui);
     return TEST_REPORT();
 }

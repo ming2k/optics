@@ -485,12 +485,24 @@ flux_result flux_text_create(const flux_text_desc *desc, flux_text **out) {
         t->dev = flux_device_retain(dev);
         t->has_backend = false;
     }
+    atomic_init(&t->ref_count, 1u);
     t->scale = scale;
     *out = t;
     return FLUX_OK;
 }
 
-void flux_text_destroy(flux_text *t) {
+flux_text *flux_text_retain(flux_text *t) {
+    if (!t)
+        return nullptr;
+    atomic_fetch_add_explicit(&t->ref_count, 1u, memory_order_relaxed);
+    return t;
+}
+
+void flux_text_release(flux_text *t) {
+    if (!t)
+        return;
+    if (atomic_fetch_sub_explicit(&t->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return;
     txt_engine_shutdown(t);
 }
 

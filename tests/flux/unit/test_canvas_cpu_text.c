@@ -31,7 +31,7 @@ static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
     flux_text_style small = {.size_px = 17.0f, .color = flux_color_rgba_premul(255, 255, 255, 255)};
     flux_text_style large = {.size_px = 33.0f, .color = flux_color_rgba_premul(255, 255, 255, 255)};
     if (flux_text_measure(text, "sf", 2, &small).width <= 0.0f) {
-        flux_text_destroy(text);
+        flux_text_release(text);
         return false;
     }
     if (interleaved) {
@@ -41,13 +41,13 @@ static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
 
     flux_canvas *canvas = nullptr;
     if (flux_canvas_create_cpu(W, H, 1.0f, &canvas) != FLUX_OK || !canvas) {
-        flux_text_destroy(text);
+        flux_text_release(text);
         return false;
     }
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     if (flux_canvas_cpu_begin(canvas, &black) != FLUX_OK) {
-        flux_canvas_destroy(canvas);
-        flux_text_destroy(text);
+        flux_canvas_release(canvas);
+        flux_text_release(text);
         return false;
     }
     flux_text_draw(text, canvas, nullptr, 4.0f, 4.0f, "sf", 2, &small);
@@ -58,8 +58,8 @@ static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
     bool ok = pixels && w == W && h == H && stride == W * 4;
     if (ok)
         memcpy(out, pixels, sizeof(uint8_t[W * H * 4]));
-    flux_canvas_destroy(canvas);
-    flux_text_destroy(text);
+    flux_canvas_release(canvas);
+    flux_text_release(text);
     return ok;
 }
 
@@ -120,7 +120,7 @@ int main(void) {
     EXPECT(render_size_probe(true, interleaved));
     EXPECT(memcmp(cold, interleaved, sizeof cold) == 0);
 
-    flux_canvas_destroy(c);
-    flux_text_destroy(t);
+    flux_canvas_release(c);
+    flux_text_release(t);
     TEST_SUMMARY();
 }

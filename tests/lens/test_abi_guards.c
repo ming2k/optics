@@ -41,7 +41,7 @@ static void test_theme_older_caller_prefix_only(void) {
     /* Normalization ran: title size derives from font_size, never 0. */
     CHECK(got.font_size_title > 0.0f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* A caller built against a NEWER header (size > library layout) must be
@@ -55,7 +55,7 @@ static void test_theme_newer_caller_clamped(void) {
     CHECK(lens_create(&(lens_desc){.theme = t}, &ui) == FLUX_OK);
     lens_theme got = lens_get_theme(ui);
     CHECK(got.size == sizeof(lens_theme));
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* lens_desc guard: size 0 (every existing caller today) still works and
@@ -64,14 +64,14 @@ static void test_desc_guard_both_spellings(void) {
     lens *a = NULL, *b = NULL;
     CHECK(lens_create(&(lens_desc){0}, &a) == FLUX_OK); /* legacy */
     CHECK(a != NULL);
-    lens_destroy(a);
+    lens_release(a);
 
     lens_desc d = LENS_DESC_INIT;
     d.scale = 2.0f;
     CHECK(d.size == sizeof(lens_desc));
     CHECK(lens_create(&d, &b) == FLUX_OK);
     CHECK(lens_scale(b) == 2.0f);
-    lens_destroy(b);
+    lens_release(b);
 }
 
 /* set_theme with a guarded (smaller) theme must clamp on the way in and
@@ -89,7 +89,7 @@ static void test_set_theme_clamps(void) {
     /* Fields beyond the caller's 16 bytes fall back to normalized
      * defaults, never garbage: font_weight normalizes to 400. */
     CHECK(got.font_weight >= 100.0f && got.font_weight <= 1000.0f);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

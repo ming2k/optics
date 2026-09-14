@@ -52,8 +52,8 @@ static void check_null_override(const char *label, build_fn plain, build_fn skin
     }
 
     CHECK(cmds_equal(find_widget(a, label), find_widget(b, label)));
-    lens_destroy(a);
-    lens_destroy(b);
+    lens_release(a);
+    lens_release(b);
 }
 
 static void build_button_plain(lens *ui, bool s) {
@@ -139,7 +139,7 @@ static void test_custom_skin_record_and_output(void) {
         CHECK(n->cmds[1].kind == LENS_DRAW_TEXT);
     }
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- context-wide override ------------------------------------------- */
@@ -190,7 +190,7 @@ static void test_context_skin_override(void) {
     CHECK(n && n->cmd_count == default_cmds);
     CHECK(n && n->cmds[0].kind == LENS_DRAW_RECT);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- every kind dispatches and is replaceable ------------------------ */
@@ -264,7 +264,7 @@ static void check_kind(const char *name, lens_widget_kind kind, probe_build_fn b
     build(ui);
     lens_end(ui);
     CHECK(n && n->cmd_count == default_cmds);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_every_kind_dispatches_and_is_replaceable(void) {

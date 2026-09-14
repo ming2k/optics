@@ -36,3 +36,20 @@
 | Transient memory    | flux-core's per-frame GPU-visible ring buffer for vertex/index/uniform data.          |
 | Vtable              | Function-pointer table; flux deliberately does not use one ([ADR-0001](../adr/0001-project-foundations.md)). |
 | Working space       | The fixed space all flux rendering happens in: extended linear BT.709 (scRGB), 1.0 = 80 cd/m², on RGBA16F intermediates ([ADR-0069](../adr/0069-color-management.md)). |
+
+## Rendering architecture terms (ADR-0089–0094)
+
+These terms define the Clean-Break rendering architecture established by
+ADR-0089 through ADR-0094.
+
+| Term | Architecture contract |
+|------|-------------------|
+| DisplayList | Device-independent ordered drawing program owning its payloads and immutable resource versions; dynamic inputs are explicit ([ADR-0090](../adr/0090-display-list-resource-ownership.md)). |
+| Dynamic input slot | Typed input bound to a resource version and access lease for each execution; participates in cache and lifetime validation ([ADR-0090](../adr/0090-display-list-resource-ownership.md)). |
+| Resource version | Stable immutable content identity including a generation, independent of a device realization ([ADR-0090](../adr/0090-display-list-resource-ownership.md)). |
+| DrawStyle | Fill or stroke parameters, opacity, and blend mode, separate from geometry and brush ([ADR-0091](../adr/0091-drawing-group-and-effect-semantics.md)). |
+| Group | Ordered isolated content whose opacity is applied once before composition into its parent ([ADR-0091](../adr/0091-drawing-group-and-effect-semantics.md)). |
+| RenderPlan | Target-specific validated execution structure containing passes, resource accesses, dependencies, and allocation requirements ([ADR-0089](../adr/0089-rendering-program-and-execution-plan.md)). |
+| Submission | In-flight execution owner retaining dependencies until completion or terminal failure with safe retirement ([ADR-0092](../adr/0092-resource-planning-and-retirement.md)). |
+| Execution session | Scoped exclusive recording access to execution state and a target; transfers in-flight obligations on submission ([ADR-0093](../adr/0093-c-state-contracts-and-rust-sessions.md)). |
+| SceneSnapshot | Owned immutable UI publication containing visuals, placement, stable identities, hit-test data, accessibility semantics, and generation ([ADR-0094](../adr/0094-lens-scene-snapshots-and-invalidation.md)). |

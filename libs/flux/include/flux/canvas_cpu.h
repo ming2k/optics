@@ -26,7 +26,7 @@
  *   uint32_t w, h, stride;
  *   const uint8_t *px = flux_canvas_cpu_pixels(c, &w, &h, &stride); // RGBA8
  *   ... write px ...
- *   flux_canvas_destroy(c);
+ *   flux_canvas_release(c);
  */
 #ifndef FLUX_CANVAS_CPU_H
 #define FLUX_CANVAS_CPU_H
@@ -41,7 +41,7 @@ extern "C" {
 /* Create a headless CPU canvas with a `width`x`height` (physical pixels)
  * framebuffer. `scale` is the content/device-pixel ratio applied by the base
  * transform (pass 1.0 for logical == physical). Destroy with
- * flux_canvas_destroy.
+ * flux_canvas_release.
  *
  * Antialiasing: the CPU rasterizer supersamples 2x per axis (4 samples per
  * pixel) by default, mirroring the GPU backend's 4x MSAA — that is what the

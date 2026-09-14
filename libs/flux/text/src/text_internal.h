@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -245,6 +246,7 @@ typedef struct txt_layout_entry {
 } txt_layout_entry;
 
 struct flux_text {
+    atomic_uint ref_count;
     float scale;      /* device-pixel raster scale (flux_text_set_scale) */
     bool has_backend; /* false => degraded to monospace metrics only     */
 
@@ -304,6 +306,10 @@ struct flux_text {
      * frame to re-rasterise every visible glyph. Exposed via
      * flux_text_get_stats for long-session diagnostics. */
     uint64_t atlas_clears;
+
+    /* Multi-frame epoch ring tracking (ADR-0092) */
+    uint64_t current_atlas_epoch;
+    uint64_t frame_atlas_epoch[FLUX_MAX_FRAMES_IN_FLIGHT];
 
     flux_sampler *nearest_sampler;
 

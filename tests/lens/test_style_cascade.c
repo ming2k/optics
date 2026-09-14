@@ -80,7 +80,7 @@ static void test_scope_reaches_terse_widgets(void) {
     CHECK(first_text_color(find_widget(ui, "before")) == themed);
     CHECK(first_text_color(find_widget(ui, "scoped")) == red);
     CHECK(first_text_color(find_widget(ui, "after")) == themed);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_nested_scopes_merge_and_nearest_wins(void) {
@@ -112,7 +112,7 @@ static void test_nested_scopes_merge_and_nearest_wins(void) {
     lens_node *back = find_widget(ui, "back-to-outer");
     CHECK(first_text_color(back) == red); /* pop restored the outer scope */
     CHECK(back && back->cmds[0].text_size == 21.0f);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_forgotten_pop_cannot_leak_across_frames(void) {
@@ -131,7 +131,7 @@ static void test_forgotten_pop_cannot_leak_across_frames(void) {
     lens_label(ui, &(lens_label_opts){.text = "next-frame"});
     lens_end(ui);
     CHECK(first_text_color(find_widget(ui, "next-frame")) == lens_get_theme(ui).color_fg);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- precedence: per-call > scope > theme ---------------------------- */
@@ -172,7 +172,7 @@ static void test_box_style_beats_scope_beats_theme(void) {
     CHECK(first_rect_color(find_widget(ui, "themed")) == themed);
     CHECK(first_rect_color(find_widget(ui, "scoped")) == red);
     CHECK(first_rect_color(find_widget(ui, "per-call")) == blue);
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- outline atoms ---------------------------------------------------- */
@@ -205,7 +205,7 @@ static void test_outline_atoms_reach_draw_commands(void) {
         CHECK(outlined->cmds[0].outline_color == contour);
         CHECK_NEAR(outlined->cmds[0].outline_width, 0.75f, 0.0f);
     }
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* ---- per-node scratch (ADR-0061 item 9) ------------------------------- */
@@ -250,7 +250,7 @@ static void test_skin_scratch_lifecycle(void) {
     CHECK(find_widget(ui, "Host") == NULL);
     CHECK(lens_skin_scratch(ui, NULL) == NULL); /* NULL-safety */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

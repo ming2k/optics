@@ -35,6 +35,8 @@ typedef struct flux_recti {
 typedef struct flux_canvas_state {
     flux_mat3x2 transform;
     flux_recti scissor;
+    bool is_layer;
+    float layer_opacity;
 } flux_canvas_state;
 
 /* Rendering backend vtable (defined in backend.h). The canvas holds a
@@ -77,7 +79,7 @@ typedef struct flux_path_segment {
 /*  draws are submitted live as usual while being captured.           */
 /*                                                                    */
 /*  Ownership: slots live in a fixed pool owned by the canvas, freed  */
-/*  at flux_canvas_destroy. The public handle is a {slot, generation} */
+/*  at flux_canvas_release. The public handle is a {slot, generation} */
 /*  pair; release or LRU eviction bumps the generation so stale       */
 /*  handles fail validation instead of replaying a reused slot. Total */
 /*  recorded bytes are capped (LRU eviction), as is each segment.     */
@@ -173,6 +175,7 @@ struct flux_canvas {
     bool pass_active;
     bool target_pass;   /* true: active pass renders into target, not the frame */
     flux_image *target; /* borrowed during begin_target..end_target */
+    flux_target *bound_cpu_target; /* CPU target receiving readback pixels on end */
 
     /* Stencil-then-cover availability (ADR-0014). Set by the backend at
      * begin_pass: true when a stencil attachment is present this pass, so
@@ -559,7 +562,7 @@ bool canvas_track_foreign_image(flux_canvas *c, flux_image *img);
 void canvas_host_atlas_gen_track(flux_canvas *c, const uint8_t *ptr, uint64_t gen);
 
 /* Release every slot's buffers + retained images and free the pool.
- * Called from flux_canvas_destroy. */
+ * Called from flux_canvas_release. */
 void canvas_record_pool_destroy(flux_canvas *c);
 
 /* ------------------------------------------------------------------ */
@@ -665,5 +668,13 @@ static inline flux_point pt_scale(flux_point a, float k) {
 
 void emit_tri(flux_canvas_vertex *verts, uint32_t *count, uint32_t cap, flux_mat3x2 tx,
               flux_color color, flux_point a, flux_point b, flux_point e);
+
+/* ------------------------------------------------------------------ */
+/*  Internal rasterization primitives (RFC-0094)                      */
+/* ------------------------------------------------------------------ */
+
+void canvas_fill_rect_internal(flux_canvas *c, flux_rect r, const flux_paint *paint);
+void canvas_fill_path_internal(flux_canvas *c, const flux_path *p, const flux_paint *paint);
+void canvas_stroke_path_internal(flux_canvas *c, const flux_path *p, const flux_paint *paint);
 
 #endif /* FLUX_CANVAS_INTERNAL_H */

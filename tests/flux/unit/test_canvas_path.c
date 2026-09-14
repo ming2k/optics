@@ -80,7 +80,7 @@ int main(void) {
 
         EXPECT(flux_path_dropped_count(nullptr) == 0);
 
-        flux_arena_destroy(&tiny);
+        flux_arena_deinit(&tiny);
     }
 
     /* --- flux_path_create rejects NULL arena --- */
@@ -91,6 +91,6 @@ int main(void) {
         EXPECT(flux_path_create(nullptr, &arena) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
-    flux_arena_destroy(&arena);
+    flux_arena_deinit(&arena);
     TEST_SUMMARY();
 }

@@ -217,7 +217,7 @@ int main(void) {
         void *al = flux_arena_alloc_aligned(&arena, 16, 64);
         EXPECT(al != nullptr);
         EXPECT(((uintptr_t)al & 63u) == 0);
-        flux_arena_destroy(&arena);
+        flux_arena_deinit(&arena);
     }
 
     /* --- arena: zero-size init rejected; OOM after exhaustion --- */
@@ -229,7 +229,7 @@ int main(void) {
         EXPECT(flux_arena_alloc(&a, 1024) == nullptr); /* immediate OOM */
         flux_arena_reset(&a);
         EXPECT(flux_arena_alloc(&a, 200) != nullptr);
-        flux_arena_destroy(&a);
+        flux_arena_deinit(&a);
     }
 
     /* --- vec4 ops (gaps in original smoke) --- */

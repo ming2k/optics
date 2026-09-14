@@ -55,7 +55,7 @@ each call:
     const uint8_t *rgba = flux_canvas_read_pixels(c, &w, &h, &stride);
     /* ... encode to PNG, hash, upload ... */
 
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
 
 `flux_canvas_read_pixels` is backend-polymorphic: it returns the framebuffer
 on a CPU canvas and `NULL` on a GPU canvas (use the offscreen surface /

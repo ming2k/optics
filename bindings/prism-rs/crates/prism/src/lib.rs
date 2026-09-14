@@ -87,7 +87,7 @@ impl LiquidGlassGroup {
     /// Build the C-side group. The returned [`RawGroup`] owns the
     /// heap-allocated borrowed-shape array; keep it alive for the
     /// duration of the C call that reads the group (`apply` does).
-    fn as_raw(&self) -> RawGroup {
+    pub fn as_raw(&self) -> RawGroup {
         let raw_shape = |shape: LiquidGlassShape| sys::prism_liquid_glass_shape {
             bounds: sys::flux_rect {
                 x: shape.x,
@@ -138,8 +138,8 @@ impl LiquidGlassGroup {
 /// C-side view of a [`LiquidGlassGroup`] plus the owned shape storage the
 /// group borrows. Dropping this frees the array; the raw group pointer
 /// inside is only valid while this value is alive.
-struct RawGroup {
-    group: sys::prism_liquid_glass_group,
+pub struct RawGroup {
+    pub group: sys::prism_liquid_glass_group,
     // Owned storage for the borrowed `shapes` array (2 slots: primary
     // + merged/focus); released on drop.
     _shapes: *mut [sys::prism_liquid_glass_shape; 2],
@@ -151,6 +151,13 @@ impl Drop for RawGroup {
         if !self._shapes.is_null() {
             unsafe { drop(Box::from_raw(self._shapes)) };
         }
+    }
+}
+
+impl std::ops::Deref for RawGroup {
+    type Target = sys::prism_liquid_glass_group;
+    fn deref(&self) -> &Self::Target {
+        &self.group
     }
 }
 
@@ -302,6 +309,36 @@ pub struct LiquidGlassImage<'filter> {
     _filter: PhantomData<&'filter mut LiquidGlassFilter>,
 }
 
+fn draw_image_rect(canvas: &flux::Canvas, image: *mut flux_sys::flux_image, dst: sys::flux_rect) {
+    let shape = flux_sys::flux_shape {
+        kind: flux_sys::flux_shape_kind::FLUX_SHAPE_IMAGE,
+        rect: dst,
+        radius: 0.0,
+        stroke_width: 0.0,
+        stroke_cap: flux_sys::flux_line_cap::FLUX_CAP_BUTT,
+        stroke_join: flux_sys::flux_line_join::FLUX_JOIN_MITER,
+        path: std::ptr::null(),
+        image,
+        src_rect: flux_sys::flux_rect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        },
+        clip_rect: flux_sys::flux_rect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        },
+        clip_radius: 0.0,
+        sampler: std::ptr::null_mut(),
+        opaque_only: false,
+        glyph_run: std::ptr::null(),
+    };
+    unsafe { flux_sys::flux_canvas_draw(canvas.as_raw(), &shape, std::ptr::null()) };
+}
+
 impl LiquidGlassImage<'_> {
     pub fn draw(&self, canvas: &flux::Canvas, x: f32, y: f32, width: f32, height: f32) {
         let destination = sys::flux_rect {
@@ -310,14 +347,7 @@ impl LiquidGlassImage<'_> {
             w: width,
             h: height,
         };
-        unsafe {
-            flux_sys::flux_canvas_draw_image(
-                canvas.as_raw(),
-                self.raw,
-                destination,
-                std::ptr::null(),
-            )
-        };
+        draw_image_rect(canvas, self.raw, destination);
     }
 }
 
@@ -327,27 +357,39 @@ impl LiquidGlassImage<'_> {
 
 /// One frosted rectangle of a [`BackdropLayerFilter`] layer stack: the
 /// blurred backdrop written with rounded-rect SDF coverage. Frost rects
-/// always paint beneath every glass body — the layer order is the
-/// material's identity, not caller policy.
+/// Base Material Layer (底衬材质层):
+/// Represents a non-distorting foundation plate (e.g. frosted blur sheet,
+/// tinted acrylic, or protective scrim) in capture-image pixel coordinates.
+///
+/// The plate writes an OPAQUE pixel: the (optionally tinted) blurred backdrop
+/// resolved over the sharp capture underneath, gated by analytic rounded-rect
+/// coverage and the plate's opacity. Opacity therefore blends base-vs-sharp,
+/// never base-vs-transparent — a partial-coverage base plate still reads as a
+/// true background colour to the optical glass lens above it.
+///
+/// `tint_color`/`tint_strength` blend a wash INTO the base material so veils
+/// and scheme-adaptive scrims live beneath the glass instead of being
+/// painted over it by chrome. Base material plates always paint beneath every
+/// optical glass body — the layer order is the material's identity, not caller policy.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BackdropFrost {
+pub struct BaseMaterial {
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
     pub corner_radius: f32,
-    /// `[0, 1]`; blends frosted-vs-sharp (the rect writes an opaque
+    /// `[0, 1]`; blends base-vs-sharp (the rect writes an opaque
     /// resolve, never a transparent fragment).
     pub opacity: f32,
-    /// `0xRRGGBB` wash blended into the frost, beneath the glass.
+    /// `0xRRGGBB` wash blended into the base material, beneath the glass.
     pub tint_color: [u8; 3],
     /// `[0, 1]`; `0.0` keeps the plain blurred backdrop.
     pub tint_strength: f32,
 }
 
-impl BackdropFrost {
-    pub fn as_raw(&self) -> sys::prism_backdrop_frost {
-        sys::prism_backdrop_frost {
+impl BaseMaterial {
+    pub fn as_raw(&self) -> sys::prism_base_material {
+        sys::prism_base_material {
             bounds: sys::flux_rect {
                 x: self.x,
                 y: self.y,
@@ -363,6 +405,9 @@ impl BackdropFrost {
         }
     }
 }
+
+/// Backward-compatible alias for existing call sites.
+pub type BackdropFrost = BaseMaterial;
 
 /// Reusable layered backdrop compositor: frosted rectangles carrying
 /// analytic liquid-glass bodies, composed in one ordered dispatch into one
@@ -446,6 +491,21 @@ impl BackdropLayerFilter {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    /// Compose Base Material Layer (foundation plates) beneath Optical Glass Layer (groups) —
+    /// clean layered multi-pass architecture in one dispatch.
+    pub fn apply_layered<'filter>(
+        &'filter mut self,
+        frame: &flux::Frame<'_>,
+        input: &flux::Image,
+        blurred: &flux::BlurredImage<'_>,
+        base_materials: &[BaseMaterial],
+        groups: &[LiquidGlassGroup],
+        params: LiquidGlassParams,
+    ) -> Result<BackdropLayerImage<'filter>, Error> {
+        self.apply(frame, input, blurred, base_materials, groups, params)
+    }
+
     /// Glass statistics of this frame slot's previous submission; see
     /// [`LiquidGlassFilter::stats`].
     pub fn stats(
@@ -491,14 +551,7 @@ impl BackdropLayerImage<'_> {
             w: width,
             h: height,
         };
-        unsafe {
-            flux_sys::flux_canvas_draw_image(
-                canvas.as_raw(),
-                self.raw,
-                destination,
-                std::ptr::null(),
-            )
-        };
+        draw_image_rect(canvas, self.raw, destination);
     }
 }
 
@@ -647,14 +700,7 @@ impl FrostedImage<'_> {
             w: width,
             h: height,
         };
-        unsafe {
-            flux_sys::flux_canvas_draw_image(
-                canvas.as_raw(),
-                self.raw,
-                destination,
-                std::ptr::null(),
-            )
-        };
+        draw_image_rect(canvas, self.raw, destination);
     }
 }
 
@@ -812,13 +858,6 @@ impl AcrylicImage<'_> {
             w: width,
             h: height,
         };
-        unsafe {
-            flux_sys::flux_canvas_draw_image(
-                canvas.as_raw(),
-                self.raw,
-                destination,
-                std::ptr::null(),
-            )
-        };
+        draw_image_rect(canvas, self.raw, destination);
     }
 }

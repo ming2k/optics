@@ -123,7 +123,7 @@ int main(void) {
     EXPECT(p[0] > 100 && p[0] < 200);
     EXPECT(p[1] < 5 && p[2] < 5 && p[3] > 250);
 
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
 
     /* ---- Clip follows the current HiDPI transform and cannot expand ---- */
     EXPECT(flux_canvas_create_cpu(W, H, 2.0f, &c) == FLUX_OK);
@@ -138,7 +138,7 @@ int main(void) {
     EXPECT(p[0] > 250 && p[3] > 250);
     px(fb, stride, 40, 32, p); /* logical x=20: outside transformed clip */
     EXPECT(p[0] < 5 && p[3] > 250);
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
 
     /* ---- Linear gradient ---- */
     EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
@@ -156,7 +156,7 @@ int main(void) {
     EXPECT(p[0] > 200 && p[2] < 60);
     px(fb, stride, 61, 32, p); /* right → blue end */
     EXPECT(p[2] > 200 && p[0] < 60);
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
 
     /* Dimensions that overflow the supersample buffer are rejected before any
      * allocation or wrapped size calculation. */
@@ -231,7 +231,7 @@ int main(void) {
     /* The sticky error was consumed by end; the next pass starts clean. */
     EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_OK);
     EXPECT(flux_canvas_end_frame_checked(c) == FLUX_OK);
-    flux_arena_destroy(&arena);
+    flux_arena_deinit(&arena);
     pd.next = nullptr;
 
     /* Restore the blue baseline used by the partial-clear preservation check. */
@@ -312,8 +312,8 @@ int main(void) {
         EXPECT(solid2 >= 32 * 32);
         EXPECT(solid1 >= 32 * 32);
 
-        flux_canvas_destroy(ss2);
-        flux_canvas_destroy(ss1);
+        flux_canvas_release(ss2);
+        flux_canvas_release(ss1);
     }
 
     /* The descriptor route honours the same extension. */
@@ -328,10 +328,10 @@ int main(void) {
         flux_canvas *c = nullptr;
         EXPECT(flux_canvas_create(&cd, &c) == FLUX_OK);
         EXPECT(c != nullptr);
-        flux_canvas_destroy(c);
+        flux_canvas_release(c);
     }
 
-    flux_canvas_destroy(c);
+    flux_canvas_release(c);
 
     TEST_SUMMARY();
 }

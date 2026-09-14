@@ -4,6 +4,12 @@ ADRs are numbered, append-only, and immutable once Accepted. To revise
 a decision, write a new ADR and update the old one's status to
 "Superseded by ADR-NNNN".
 
+The [rendering architecture](0089-rendering-program-and-execution-plan.md)
+in ADR-0089 through ADR-0094 defines a clean-break replacement without
+compatibility forwarders. ADR-0089 records the exact replacement scope,
+superseding ADR-0088 and amending earlier lifecycle and drawing contracts.
+ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
+
 | #    | Title                                                                          | Status   |
 |------|--------------------------------------------------------------------------------|----------|
 | 0001 | [Project foundations](0001-project-foundations.md)                             | Accepted |
@@ -85,8 +91,8 @@ a decision, write a new ADR and update the old one's status to
 | 0074 | [Effect intake path — new visual operators and where choreography never enters](0074-effect-intake-path.md) | Accepted |
 | 0075 | [System accessibility preferences — lens executes, iris observes, the OS owns](0075-system-accessibility-preferences.md) | Accepted |
 | 0076 | [Per-shape paint runs for runtime SVG icons](0076-lens-icon-paint-runs.md) | Accepted |
-| 0077 | [The `anim` motion vocabulary library — provable math, host-owned clocks](0077-anim-motion-vocabulary-library.md) | Proposed |
-| 0078 | [Ghost replay — the render surface for leave animations](0078-lens-ghost-replay-leave-surface.md) | Proposed |
+| 0077 | [The `anim` motion vocabulary library — provable math, host-owned clocks](0077-anim-motion-vocabulary-library.md) | Accepted |
+| 0078 | [Ghost replay — the render surface for leave animations](0078-lens-ghost-replay-leave-surface.md) | Accepted |
 | 0079 | [Layered backdrop material — frost beneath glass in one dispatch](0079-layered-backdrop-material.md) | Accepted (glass-over-glass scope superseded by [0080](0080-explicit-offscreen-composition-graph.md)) |
 | 0080 | [Explicit offscreen composition graph above flux](0080-explicit-offscreen-composition-graph.md) | Accepted |
 | 0081 | [Lens unified fluent flex containers and component orthogonality](0081-lens-unified-fluent-flex-containers-and-component-orthogonality.md) | Accepted |
@@ -94,3 +100,13 @@ a decision, write a new ADR and update the old one's status to
 | 0083 | [Flux orthogonal shape-paint model and full C23 baseline](0083-flux-orthogonal-shape-paint-model-and-c23-baseline.md) | Accepted |
 | 0084 | [Iris tripartite architecture and C23 app-opts descriptor](0084-iris-tripartite-architecture-and-c23-app-opts.md) | Accepted |
 | 0085 | [Lens borrowed-string registry — always-on debug borrow checker](0085-lens-borrowed-string-registry.md) | Accepted |
+| 0085 | [Lens box model orthogonality, legacy layout cleanup, and C23 baseline](0085-lens-box-model-orthogonality-legacy-layout-cleanup-and-c23-baseline.md) | Accepted |
+| 0086 | [Cross-platform drag-and-drop subsystem](0086-cross-platform-drag-and-drop-subsystem.md) | Accepted |
+| 0087 | [Flux architecture consistency, lifecycle contracts, and orthogonal refactoring](0087-flux-architecture-consistency-lifecycle-and-orthogonal-refactoring.md) | Accepted (amended in part by [0089](0089-rendering-program-and-execution-plan.md)) |
+| 0088 | [Optics clean-break architecture — immutable display lists, orthogonal brushes, and transient graphs](0088-optics-clean-break-architecture-display-lists-orthogonal-brushes-and-transient-graphs.md) | Superseded by [ADR-0089](0089-rendering-program-and-execution-plan.md) through [ADR-0094](0094-lens-scene-snapshots-and-invalidation.md) |
+| 0089 | [Rendering programs and dependency-driven execution](0089-rendering-program-and-execution-plan.md) | Accepted |
+| 0090 | [DisplayList snapshots and resource ownership](0090-display-list-resource-ownership.md) | Accepted |
+| 0091 | [Drawing, group composition, and explicit effects](0091-drawing-group-and-effect-semantics.md) | Accepted |
+| 0092 | [Resource planning, synchronization, and retirement](0092-resource-planning-and-retirement.md) | Accepted |
+| 0093 | [C state contracts and Rust execution sessions](0093-c-state-contracts-and-rust-sessions.md) | Accepted |
+| 0094 | [Lens scene snapshots and explicit invalidation](0094-lens-scene-snapshots-and-invalidation.md) | Accepted |

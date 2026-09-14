@@ -30,7 +30,7 @@ static void test_disabled_button_no_click(void) {
 
     CHECK(clicked == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_disabled_slider_no_change(void) {
@@ -62,7 +62,7 @@ static void test_disabled_slider_no_change(void) {
     CHECK(changed == false);
     CHECK_NEAR(val, 0.5f, 0.001f);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_disabled_checkbox_no_toggle(void) {
@@ -81,7 +81,7 @@ static void test_disabled_checkbox_no_toggle(void) {
 
     CHECK(on == false);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_disabled_textfield_no_input(void) {
@@ -112,7 +112,7 @@ static void test_disabled_textfield_no_input(void) {
     CHECK(changed == false);
     CHECK(strcmp(buf, "hello") == 0);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void a11y_cb(const lens_semantics *s, flux_rect bounds, lens_id id, lens_id parent,
@@ -137,7 +137,7 @@ static void test_disabled_a11y_flag(void) {
 
     CHECK(found == true);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

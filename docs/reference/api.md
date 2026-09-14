@@ -90,7 +90,7 @@ the canvas / scene that uses them, releasing only after
 
 `flux_path` and `flux_paint` are value-typed objects allocated inside
 a `flux_arena`. Their lifetime is the arena's lifetime; freeing the
-arena (`flux_arena_destroy`) or resetting it (`flux_arena_reset`)
+arena (`flux_arena_deinit`) or resetting it (`flux_arena_reset`)
 invalidates every pointer previously returned.
 
 **Passing a stale `flux_path*` into any canvas call after its arena
@@ -100,26 +100,47 @@ reset the arena for the next frame.
 
 ## Execution model
 
-flux is **immediate-recording** as its default path — a draw call
-tessellates and records into the frame's transient ring right away —
-with three explicit batching layers on top:
+Flux supports both immediate target-driven execution and pure CPU command
+encoding with immutable publication (ADR-0089 through ADR-0094):
 
 1. **Draw merging** (automatic): consecutive canvas submits with an
    identical pipeline, scissor, and push constants merge into a single
    `vkCmdDraw`, so `recorded_draws <= submit_calls`
    (`flux_canvas_recorded_draws` / `flux_canvas_submit_calls` report
    both).
-2. **Display lists** (opt-in): `flux_canvas_begin_record` /
-   `flux_canvas_end_record` capture a subtree's emission into a
-   replayable segment; `flux_canvas_replay` re-emits it without
-   re-tessellating. lens uses this to skip unchanged subtrees
-   (ADR-0030's disabled-subtree-skip decision, delivered).
-3. **Deferred uploads** (automatic): `flux_uploads_begin`/`flush`
+2. **Immutable DisplayLists & Encoder** (ADR-0089, ADR-0090): `flux_encoder`
+   records drawing commands into an owned command stream on CPU with zero
+   GPU dependency. `flux_encoder_finish` transfers buffer ownership to
+   `flux_display_list`. Commands embed deep-copied path segments, inlined
+   gradient stops, cloned glyph quads/coverage, and retain GPU image/sampler
+   references. Destroying or resetting the encoder leaves published display lists
+   fully intact. `flux_canvas_submit_display_list` submits a published list to
+   the active canvas pass.
+3. **Algebraic Geometry x Brush Model** (ADR-0091): Primitives are expressed
+   strictly as the orthogonal product `flux_geometry` $\times$ `flux_brush`
+   dispatched via `flux_canvas_draw_geometry`. Geometries support Rect, RRect,
+   G2 continuous curvature Squircle (`flux_path_add_squircle`), Circle, Line,
+   and Path.
+4. **Opacity Groups (`save_layer`)** (ADR-0091): `flux_canvas_save_layer` and
+   `flux_encoder_save_layer` allocate isolated compositing layers. Subtree draws
+   render in isolation and are composed back into parent targets with layer
+   opacity and premultiplied SRC_OVER upon `restore`, eliminating double-blending
+   artifacts on overlapping child elements.
+5. **Deferred uploads** (automatic): `flux_uploads_begin`/`flush`
    accumulate buffer/image copies into one queue submission that is
    ordered before every later batch on the same queue (ADR-0022).
+6. **Rust Session Lifetimes** (ADR-0093): `Canvas::begin_session` returns an
+   exclusive `CanvasSession<'canvas, 'target, T>` that holds a mutable borrow
+   of the target and canvas, statically preventing concurrent mutation,
+   presentation, or reference escape during recording. Safe targets implement
+   sealed `AsTarget`.
 
 | Layer              | What happens on each call                                                |
 |--------------------|--------------------------------------------------------------------------|
+| `flux_encoder_*`   | CPU-only stream recording with owned transitive payload cloning. No GPU device required. |
+| `flux_canvas_draw_geometry` | Direct dispatch of orthogonal Geometry x Brush primitive (ADR-0091). |
+| `flux_canvas_save_layer` | Pushes an isolated layer buffer for group opacity compositing. |
+| `flux_canvas_submit_display_list` | Unpacks and executes an immutable `flux_display_list`. |
 | `flux_canvas_*`    | Flattens / tessellates geometry, writes vertices into the frame's transient ring, records `vkCmdDraw` against the active pipeline. |
 | `flux_scene_draw_mesh` | Records `vkCmdBindPipeline` + push constants + `vkCmdBindVertexBuffers` + `vkCmdDrawIndexed`. |
 | `flux_compute_dispatch` | Records `vkCmdBindPipeline` + bindless set + push constants + `vkCmdDispatch`. |

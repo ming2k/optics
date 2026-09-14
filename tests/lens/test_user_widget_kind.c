@@ -71,7 +71,7 @@ int main(void) {
     lens_skin_emit_user(ui, NULL, MY_DIAL_KIND, (lens_widget_record){0});
     CHECK(dial_emissions == 1);
 
-    lens_destroy(ui);
+    lens_release(ui);
     printf("user_widget_kind: %d checks, %d failures\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
 }

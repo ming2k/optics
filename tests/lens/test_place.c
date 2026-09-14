@@ -40,7 +40,7 @@ static void test_open_close_persist(void) {
     CHECK(lens_place_is_open(ui, "menu") == false);
     lens_end(ui);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* The body only enters when the transient node is currently open. */
@@ -69,7 +69,7 @@ static void test_begin_gated_by_open_state(void) {
     lens_end(ui);
     CHECK(body_runs == 1); /* open → entered */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 static void test_open_place_reports_hover_for_its_whole_surface(void) {
@@ -97,7 +97,7 @@ static void test_open_place_reports_hover_for_its_whole_surface(void) {
 
     lens_place_close(ui, "hover-card");
     CHECK(!lens_place_hovered(ui, "hover-card"));
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Anchored placement: by default, below the anchor; flips above when
@@ -151,7 +151,7 @@ static void test_anchor_placement_and_flip(void) {
     lens_end(ui);
     CHECK(bounds_flip.y < anchor_bot.y); /* flipped above */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Occlusion IS the hit-test order: a base widget under a POPUP-band node
@@ -188,7 +188,7 @@ static void test_higher_band_blocks_base(void) {
     lens_end(ui);
     CHECK(base_clicked == false); /* occluded by the POPUP band */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Click outside an open transient closes it (with a same-frame grace). */
@@ -220,7 +220,7 @@ static void test_click_outside_dismisses(void) {
     lens_end(ui);
     CHECK(lens_place_is_open(ui, "m") == false); /* dismissed */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* Escape closes the top open transient. */
@@ -243,7 +243,7 @@ static void test_escape_dismisses_top(void) {
     CHECK(lens_place_is_open(ui, "b") == false); /* top closed */
     CHECK(lens_place_is_open(ui, "a") == true);  /* below stays */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* A CENTERED placed node resolves to the middle of the display (the modal
@@ -271,7 +271,7 @@ static void test_centered_on_display(void) {
     CHECK_NEAR(r.y + r.h * 0.5f, 150.0f, 0.01f); /* centred in 300 */
     CHECK_NEAR(r.w, 200.0f, 0.01f);              /* min_width fixed the width */
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 /* A placed node keeps its parent chain in the one tree: it appears in the
@@ -300,7 +300,7 @@ static void test_placed_node_parents_into_tree(void) {
     CHECK(label != NULL);
     CHECK(lens_node_parent(label) == popup);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

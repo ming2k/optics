@@ -201,7 +201,7 @@ int main(void) {
         void *c = flux_arena_alloc(&arena, 64);
         EXPECT(c == a);                                           /* reset rewinds */
         EXPECT(flux_arena_alloc(&arena, 1024 * 1024) == nullptr); /* OOM */
-        flux_arena_destroy(&arena);
+        flux_arena_deinit(&arena);
     }
 
     /* --- color packs predictably --- */

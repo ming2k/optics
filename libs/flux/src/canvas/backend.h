@@ -61,6 +61,11 @@ struct flux_canvas_backend {
      * Called on clip changes and save/restore. No-op when no pass is active. */
     void (*set_scissor)(const flux_canvas_backend *self, flux_canvas *c, flux_recti clip);
 
+    /* Save/restore isolated compositing layer (ADR-0091). */
+    flux_result (*save_layer)(const flux_canvas_backend *self, flux_canvas *c,
+                              const flux_rect *bounds, float opacity);
+    void (*restore_layer)(const flux_canvas_backend *self, flux_canvas *c);
+
     /* Ensure the program for `id` at the canvas's colour format is ready and
      * selected for subsequent draws. GPU: build/cache + bind the VkPipeline
      * (idempotent). CPU: select the raster routine. Returns false when

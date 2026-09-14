@@ -50,7 +50,7 @@ static void test_complete_row_is_one_hit_target(void) {
     lens_end(ui);
     CHECK(released.clicked);
 
-    lens_destroy(ui);
+    lens_release(ui);
 }
 
 int main(void) {

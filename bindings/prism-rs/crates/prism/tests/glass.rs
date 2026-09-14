@@ -52,6 +52,7 @@ fn shape_focus_group_are_plain_copy_data() {
         saturation: None,
         plate_polarity: None,
         backdrop_energy: None,
+        curvature: None,
     };
     let copied = group; // Copy
     assert_eq!(group, copied);
@@ -83,6 +84,7 @@ fn group_overrides_map_none_to_inherit_sentinel() {
         saturation: Some(1.2),
         plate_polarity: Some(0.4),
         backdrop_energy: None,
+        curvature: None,
     };
     let raw = group.as_raw();
     // None → the C header's <0 inherit/disabled sentinel; Some → verbatim.

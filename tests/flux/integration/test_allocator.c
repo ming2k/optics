@@ -46,7 +46,7 @@ static void *canvas_init_worker(void *p) {
     flux_canvas *canvas = NULL;
     if (flux_canvas_create(&cd, &canvas) == FLUX_OK) {
         a->completed = 1;
-        flux_canvas_destroy(canvas);
+        flux_canvas_release(canvas);
     }
     flux_surface_release(surface);
     return NULL;

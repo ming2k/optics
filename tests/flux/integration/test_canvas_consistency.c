@@ -188,10 +188,10 @@ int main(void) {
         fprintf(stderr, "  mean|diff|=%.4f edge_frac=%.4f (edges=%u)\n", mean, edge_frac,
                 edge_pixels);
 
-    flux_canvas_destroy(gpu);
+    flux_canvas_release(gpu);
     flux_surface_release(s);
     flux_device_release(d);
-    flux_canvas_destroy(cpu);
-    flux_arena_destroy(&arena);
+    flux_canvas_release(cpu);
+    flux_arena_deinit(&arena);
     TEST_SUMMARY();
 }

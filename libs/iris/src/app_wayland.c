@@ -3445,7 +3445,7 @@ fail:
     if (device)
         flux_device_wait_idle(device);
     if (ui)
-        lens_destroy(ui);
+        lens_release(ui);
     pl.ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
     if (pl.theme_watching)
         iris_theme__unwatch_backend();
@@ -3471,7 +3471,7 @@ fail:
         pl.repeat_fd = -1;
     }
     if (canvas)
-        flux_canvas_destroy(canvas);
+        flux_canvas_release(canvas);
     if (surface)
         flux_surface_release(surface);
     if (vk_surface)
