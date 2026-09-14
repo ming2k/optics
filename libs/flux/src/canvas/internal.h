@@ -209,6 +209,12 @@ struct flux_canvas {
      * backend ignores it (its MSAA choice is per pass). */
     flux_canvas_antialias create_antialias;
 
+    /* RenderPlan execution diagnostics (ADR-0089 / ADR-0092) */
+    uint32_t pass_count;
+    uint32_t layer_depth_peak;
+    size_t transient_bytes_allocated;
+    size_t transient_bytes_aliased_saved;
+
     /* Content scale (device-pixel ratio). The base transform at index 0 is
      * this scale, so callers draw in logical units; 1.0 means logical ==
      * physical. flux_text reads it via flux_canvas_get_scale. */

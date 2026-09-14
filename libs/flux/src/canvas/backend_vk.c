@@ -1181,10 +1181,13 @@ static flux_result vk_save_layer(const flux_canvas_backend *self, flux_canvas *c
 
     uint32_t w = c->fb_width;
     uint32_t h = c->fb_height;
+    bool was_cached = layer->attachments.linear.image != VK_NULL_HANDLE;
     if (!linear_ensure(c, &layer->attachments, w, h)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas layer linear attachment unavailable");
         return FLUX_ERROR_BACKEND_FAILURE;
     }
+    if (was_cached)
+        c->transient_bytes_aliased_saved += (size_t)w * h * 8;
 
     canvas_owned_image *linear = &layer->attachments.linear;
     VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);

@@ -79,6 +79,10 @@ static inline bool rect_equal(flux_rect a, flux_rect b) {
 void lensi_node_drop_record(lens *ui, lens_node *n) {
     (void)ui;
     n->record = (flux_canvas_record)FLUX_CANVAS_RECORD_INIT;
+    if (n->cached_dl) {
+        flux_display_list_release(n->cached_dl);
+        n->cached_dl = nullptr;
+    }
 }
 
 /* Drop every record handle without releasing — used when the render
@@ -986,13 +990,10 @@ static void lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
     }
 }
 
-static void lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip) {
-    if (!n)
-        return;
-    flux_rect box = n->final_rect;
-    if (box.w <= 0.0f && box.h <= 0.0f)
-        return;
+static void lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip);
 
+static void lensi_compile_node_body(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip) {
+    flux_rect box = n->final_rect;
     bool has_group_opacity = (n->opacity >= 0.0f && n->opacity < 0.999f);
     if (has_group_opacity) {
         flux_encoder_save_layer(enc, &box, n->opacity);
@@ -1027,6 +1028,39 @@ static void lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n, flux_r
         flux_encoder_restore(enc);
     if (has_group_opacity)
         flux_encoder_restore(enc);
+}
+
+static void lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip) {
+    if (!n)
+        return;
+    flux_rect box = n->final_rect;
+    if (box.w <= 0.0f && box.h <= 0.0f)
+        return;
+
+    /* Incremental diffing & subtree DisplayList caching (ADR-0094):
+     * If the subtree did not change and clip matches, splice cached commands in O(1). */
+    if (!n->subtree_changed && n->cached_dl && rect_equal(n->cached_clip, clip)) {
+        flux_encoder_append_display_list(enc, n->cached_dl);
+        return;
+    }
+
+    if (n->cached_dl) {
+        flux_display_list_release(n->cached_dl);
+        n->cached_dl = nullptr;
+    }
+
+    /* Subtree changed or cache miss: compile into a node-local encoder, cache, and splice */
+    flux_encoder *sub_enc = nullptr;
+    if (flux_encoder_create(nullptr, &sub_enc) == FLUX_OK) {
+        lensi_compile_node_body(ui, sub_enc, n, clip);
+        if (flux_encoder_finish(sub_enc, &n->cached_dl) == FLUX_OK) {
+            n->cached_clip = clip;
+            flux_encoder_append_display_list(enc, n->cached_dl);
+        }
+        flux_encoder_destroy(sub_enc);
+    } else {
+        lensi_compile_node_body(ui, enc, n, clip);
+    }
 }
 
 flux_result lens_compile_draw_list(lens *ui, flux_arena *arena, lens_draw_list *out_list) {

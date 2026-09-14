@@ -1766,6 +1766,7 @@ static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t act
                     } else if (r != FLUX_OK) {
                         break;
                     } else if (drew) {
+                        lens_notify_presented(ui, lens_generation(ui));
                         surface_needs_paint = false;
                     }
 

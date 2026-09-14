@@ -275,6 +275,10 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_encoder_destroy` | Destroy an encoder and release its scratch resources. |
 | `flux_encoder_finish` | Freeze encoder commands into an immutable display list. |
 | `flux_display_list_destroy` | Destroy a published display list and release retained resources. |
+| `flux_display_list_serialize` | Serialize an immutable display list into a safe binary format (ADR-0090). |
+| `flux_display_list_deserialize` | Deserialize and validate a display list from untrusted binary input (ADR-0090). |
+| `flux_encoder_append_display_list` | Splice a published display list into the encoder in O(1) (ADR-0089 / ADR-0094). |
+| `flux_canvas_get_plan_stats` | Retrieve RenderPlan execution diagnostics (passes, layer depth, memory aliasing) (ADR-0089 / ADR-0092). |
 | `flux_canvas_submit_display_list` | Submit an immutable display list to a canvas for batch execution. |
 | `flux_canvas_draw_glyph_run` | Draw a pre-shaped glyph run as a single batched draw call. |
 | `flux_canvas_dropped_draws` | Cumulative count of draw calls dropped due to transient ring exhaustion since canvas creation. |

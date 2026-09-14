@@ -2082,8 +2082,10 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                                           (uint32_t)lroundf((float)pl.height * pl.scale));
             else if (r != FLUX_OK)
                 break;
-            else if (drew)
+            else if (drew) {
+                lens_notify_presented(ui, lens_generation(ui));
                 surface_needs_paint = false;
+            }
 
             if (++frame_no == 1)
                 fprintf(stderr, "first frame presented: %dx%d logical, %ux%u device (scale=%.2f)\n",

@@ -200,6 +200,10 @@ struct lens_node {
     flux_rect record_clip;
     uint64_t record_text_gen;
 
+    /* Cached DisplayList for static subtrees (ADR-0094) */
+    flux_display_list *cached_dl;
+    flux_rect cached_clip;
+
     /* persistent per-node user state (lens_node_state) */
     void *state;
     size_t state_bytes;

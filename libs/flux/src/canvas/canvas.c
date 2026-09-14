@@ -262,6 +262,7 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
         c->frame = nullptr;
         return r;
     }
+    c->pass_count++;
     c->recording = true;
     c->pass_scissor = c->states[0].scissor;
     return FLUX_OK;
@@ -497,6 +498,12 @@ void flux_canvas_save_layer(flux_canvas *c, const flux_rect *bounds, float opaci
     c->state_top++;
     c->states[c->state_top].is_layer = true;
     c->states[c->state_top].layer_opacity = opacity;
+
+    uint32_t depth = c->state_top;
+    if (depth > c->layer_depth_peak)
+        c->layer_depth_peak = depth;
+    size_t layer_bytes = (size_t)c->fb_width * c->fb_height * 8;
+    c->transient_bytes_allocated += layer_bytes;
 
     /* Bounds are allocation hints. Only an explicit clip truncates content. */
 }
@@ -1253,4 +1260,15 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom,
         canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "unknown geometry kind");
         break;
     }
+}
+
+flux_render_plan_stats flux_canvas_get_plan_stats(const flux_canvas *c) {
+    if (!c)
+        return (flux_render_plan_stats){0};
+    return (flux_render_plan_stats){
+        .pass_count = c->pass_count,
+        .layer_depth_peak = c->layer_depth_peak,
+        .transient_bytes_allocated = c->transient_bytes_allocated,
+        .transient_bytes_aliased_saved = c->transient_bytes_aliased_saved,
+    };
 }

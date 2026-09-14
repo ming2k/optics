@@ -1,5 +1,6 @@
 #include "test_helpers.h"
 #include <flux/canvas.h>
+#include <string.h>
 
 static flux_canvas *canvas(void) {
     flux_canvas *c = nullptr;
@@ -164,11 +165,111 @@ static void layer_bounds_are_hints(void) {
     flux_canvas_release(c);
 }
 
+static void append_and_splice(void) {
+    flux_encoder *enc1 = nullptr;
+    EXPECT(flux_encoder_create(nullptr, &enc1) == FLUX_OK);
+    flux_geometry g1 = flux_geom_rect((flux_rect){2, 2, 8, 8});
+    flux_brush white = flux_brush_solid(0xffffffff);
+    flux_encoder_draw_geometry(enc1, &g1, &white);
+    flux_display_list *dl1 = nullptr;
+    EXPECT(flux_encoder_finish(enc1, &dl1) == FLUX_OK);
+    flux_encoder_destroy(enc1);
+
+    flux_encoder *enc2 = nullptr;
+    EXPECT(flux_encoder_create(nullptr, &enc2) == FLUX_OK);
+    flux_geometry g2 = flux_geom_rect((flux_rect){20, 20, 8, 8});
+    flux_encoder_draw_geometry(enc2, &g2, &white);
+    EXPECT(flux_encoder_append_display_list(enc2, dl1) == FLUX_OK);
+    flux_display_list *dl2 = nullptr;
+    EXPECT(flux_encoder_finish(enc2, &dl2) == FLUX_OK);
+    flux_encoder_destroy(enc2);
+    flux_display_list_release(dl1);
+
+    EXPECT(flux_display_list_command_count(dl2) == 2);
+    EXPECT(flux_display_list_size(dl2) > 0);
+
+    flux_canvas *c = canvas();
+    flux_color clear = 0;
+    EXPECT(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_submit_display_list(c, dl2) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    EXPECT(alpha(c, 4, 4) == 255);
+    EXPECT(alpha(c, 22, 22) == 255);
+    EXPECT(alpha(c, 10, 10) == 0);
+    flux_canvas_release(c);
+    flux_display_list_release(dl2);
+}
+
+static void serialization_roundtrip_and_fuzz(void) {
+    flux_encoder *enc = nullptr;
+    EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
+    flux_geometry g = flux_geom_rect((flux_rect){5, 5, 10, 10});
+    flux_brush white = flux_brush_solid(0xffffffff);
+    flux_encoder_draw_geometry(enc, &g, &white);
+    flux_encoder_translate(enc, 2.0f, 3.0f);
+    flux_encoder_rotate(enc, 0.5f);
+    flux_display_list *dl = nullptr;
+    EXPECT(flux_encoder_finish(enc, &dl) == FLUX_OK);
+    flux_encoder_destroy(enc);
+
+    /* 1. Serialize */
+    void *bytes = nullptr;
+    size_t size = 0;
+    EXPECT(flux_display_list_serialize(dl, &bytes, &size) == FLUX_OK);
+    EXPECT(bytes != nullptr && size > sizeof(uint32_t) * 4);
+
+    /* 2. Deserialize back */
+    flux_display_list *deserialized = nullptr;
+    EXPECT(flux_display_list_deserialize(bytes, size, &deserialized) == FLUX_OK);
+    EXPECT(deserialized != nullptr);
+    EXPECT(flux_display_list_command_count(deserialized) == flux_display_list_command_count(dl));
+    EXPECT(flux_display_list_size(deserialized) == flux_display_list_size(dl));
+
+    flux_display_list_release(dl);
+
+    /* 3. Replay deserialized list into canvas */
+    flux_canvas *c = canvas();
+    flux_color clear = 0;
+    EXPECT(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_submit_display_list(c, deserialized) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    EXPECT(alpha(c, 8, 8) > 0);
+    flux_canvas_release(c);
+    flux_display_list_release(deserialized);
+
+    /* 4. Strict fuzzing & corruption resistance (ADR-0090) */
+    flux_display_list *bad = nullptr;
+    /* Null arguments */
+    EXPECT(flux_display_list_deserialize(nullptr, size, &bad) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(flux_display_list_deserialize(bytes, 0, &bad) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(flux_display_list_deserialize(bytes, 4, &bad) == FLUX_ERROR_INVALID_ARGUMENT);
+
+    /* Corrupt magic */
+    uint8_t corrupt[256];
+    memcpy(corrupt, bytes, size < 256 ? size : 256);
+    corrupt[0] ^= 0xFF;
+    EXPECT(flux_display_list_deserialize(corrupt, size, &bad) == FLUX_ERROR_UNSUPPORTED);
+
+    /* Corrupt checksum */
+    memcpy(corrupt, bytes, size < 256 ? size : 256);
+    corrupt[size - 1] ^= 0xFF;
+    EXPECT(flux_display_list_deserialize(corrupt, size, &bad) == FLUX_ERROR_BACKEND_FAILURE);
+
+    /* Truncated payload size */
+    memcpy(corrupt, bytes, size < 256 ? size : 256);
+    corrupt[12] = 0; /* payload_size field */
+    EXPECT(flux_display_list_deserialize(corrupt, size, &bad) == FLUX_ERROR_OUT_OF_RANGE);
+
+    free(bytes);
+}
+
 int main(void) {
     relocated_capture();
     captured_glyphs();
     isolated_state();
     terminal_and_failure();
     layer_bounds_are_hints();
+    append_and_splice();
+    serialization_roundtrip_and_fuzz();
     TEST_SUMMARY();
 }

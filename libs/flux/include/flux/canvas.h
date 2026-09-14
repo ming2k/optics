@@ -501,6 +501,31 @@ FLUX_API uint32_t flux_display_list_command_count(const flux_display_list *list)
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_submit_display_list(flux_canvas *c,
                                                                     const flux_display_list *list);
 
+/* Splice a published display list directly into the encoder (ADR-0089 / ADR-0094).
+ * Retains any referenced GPU images/samplers so the new display list shares ownership. */
+FLUX_NODISCARD FLUX_API flux_result flux_encoder_append_display_list(flux_encoder *enc,
+                                                                     const flux_display_list *list);
+
+/* Binary serialization & safe deserialization protocol (ADR-0090).
+ * Produces/consumes versioned FLUX_DL format with bounds and float validity verification. */
+FLUX_NODISCARD FLUX_API flux_result flux_display_list_serialize(const flux_display_list *list,
+                                                               void **out_bytes, size_t *out_size);
+FLUX_NODISCARD FLUX_API flux_result flux_display_list_deserialize(const void *bytes, size_t size,
+                                                                 flux_display_list **out_list);
+
+/* ================================================================== */
+/*  RenderPlan Execution Diagnostics (ADR-0089 / ADR-0092)            */
+/* ================================================================== */
+
+typedef struct flux_render_plan_stats {
+    uint32_t pass_count;
+    uint32_t layer_depth_peak;
+    size_t transient_bytes_allocated;
+    size_t transient_bytes_aliased_saved;
+} flux_render_plan_stats;
+
+FLUX_API flux_render_plan_stats flux_canvas_get_plan_stats(const flux_canvas *c);
+
 #include <flux/canvas_helpers.h>
 
 /* ------------------------------------------------------------------ */

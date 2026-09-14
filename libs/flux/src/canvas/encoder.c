@@ -478,3 +478,241 @@ flux_result flux_canvas_submit_display_list(flux_canvas *c, const flux_display_l
     c->backend->set_scissor(c->backend, c, c->states[c->state_top].scissor);
     return result;
 }
+
+flux_result flux_encoder_append_display_list(flux_encoder *enc, const flux_display_list *list) {
+    if (!enc || !list)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (!encoder_ready(enc))
+        return enc->error != FLUX_OK ? enc->error : FLUX_ERROR_INVALID_STATE;
+    if (list->size == 0 || !list->commands)
+        return FLUX_OK;
+
+    if (list->size > enc->budget - enc->used || enc->count > UINT32_MAX - list->count) {
+        encoder_fail(enc, FLUX_ERROR_OUT_OF_MEMORY);
+        return enc->error;
+    }
+
+    size_t required = enc->used + list->size;
+    if (required > enc->capacity) {
+        size_t cap = enc->capacity ? enc->capacity : 4096u;
+        while (cap < required && cap <= enc->budget / 2u)
+            cap *= 2u;
+        if (cap < required || cap > enc->budget)
+            cap = enc->budget;
+        uint8_t *buffer = realloc(enc->buffer, cap);
+        if (!buffer) {
+            encoder_fail(enc, FLUX_ERROR_OUT_OF_MEMORY);
+            return enc->error;
+        }
+        enc->buffer = buffer;
+        enc->capacity = cap;
+    }
+
+    /* Retain referenced resources */
+    for (size_t off = 0; off < list->size;) {
+        const flux_cmd_header *h = (const void *)(list->commands + off);
+        if (h->size == 0 || h->size > list->size - off) {
+            encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
+            return enc->error;
+        }
+        if (h->kind == FLUX_CMD_DRAW_GEOM) {
+            const flux_cmd_draw_geom *cmd = (const void *)h;
+            if (cmd->brush.kind == FLUX_BRUSH_IMAGE_PATTERN) {
+                (void)flux_image_retain(cmd->brush.image.image);
+                (void)flux_sampler_retain(cmd->brush.image.sampler);
+            }
+        } else if (h->kind == FLUX_CMD_DRAW_GLYPH_RUN) {
+            const flux_cmd_glyph_run *cmd = (const void *)h;
+            (void)flux_image_retain(cmd->desc.atlas);
+            (void)flux_sampler_retain(cmd->desc.sampler);
+        }
+        off += h->size;
+    }
+
+    memcpy(enc->buffer + enc->used, list->commands, list->size);
+    enc->used += list->size;
+    enc->count += list->count;
+    return FLUX_OK;
+}
+
+#define FLUX_DL_MAGIC 0x31584C46u /* 'F' 'L' 'X' '1' */
+#define FLUX_DL_VERSION 1u
+
+typedef struct flux_dl_file_header {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t flags;
+    uint32_t command_count;
+    uint32_t payload_size;
+    uint32_t checksum;
+} flux_dl_file_header;
+
+static uint32_t dl_checksum(const uint8_t *data, size_t len) {
+    uint32_t a = 1, b = 0;
+    for (size_t i = 0; i < len; ++i) {
+        a = (a + data[i]) % 65521;
+        b = (b + a) % 65521;
+    }
+    return (b << 16) | a;
+}
+
+flux_result flux_display_list_serialize(const flux_display_list *list,
+                                       void **out_bytes, size_t *out_size) {
+    if (!list || !out_bytes || !out_size)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_bytes = nullptr;
+    *out_size = 0;
+
+    if (list->size > UINT32_MAX - sizeof(flux_dl_file_header))
+        return FLUX_ERROR_OUT_OF_RANGE;
+
+    size_t total = sizeof(flux_dl_file_header) + list->size;
+    uint8_t *buf = malloc(total);
+    if (!buf)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+
+    flux_dl_file_header *hdr = (void *)buf;
+    hdr->magic = FLUX_DL_MAGIC;
+    hdr->version = FLUX_DL_VERSION;
+    hdr->flags = 0;
+    hdr->command_count = list->count;
+    hdr->payload_size = (uint32_t)list->size;
+    hdr->checksum = dl_checksum(list->commands, list->size);
+
+    if (list->size > 0 && list->commands)
+        memcpy(buf + sizeof(*hdr), list->commands, list->size);
+
+    *out_bytes = buf;
+    *out_size = total;
+    return FLUX_OK;
+}
+
+flux_result flux_display_list_deserialize(const void *bytes, size_t size,
+                                         flux_display_list **out_list) {
+    if (!bytes || size < sizeof(flux_dl_file_header) || !out_list)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_list = nullptr;
+
+    const flux_dl_file_header *hdr = bytes;
+    if (hdr->magic != FLUX_DL_MAGIC || hdr->version != FLUX_DL_VERSION)
+        return FLUX_ERROR_UNSUPPORTED;
+
+    if ((size_t)hdr->payload_size != size - sizeof(flux_dl_file_header))
+        return FLUX_ERROR_OUT_OF_RANGE;
+
+    const uint8_t *payload = (const uint8_t *)bytes + sizeof(*hdr);
+    if (dl_checksum(payload, hdr->payload_size) != hdr->checksum)
+        return FLUX_ERROR_BACKEND_FAILURE;
+
+    /* Strict verification pass over each command in untrusted payload */
+    uint32_t actual_count = 0;
+    for (size_t off = 0; off < hdr->payload_size;) {
+        if (off > hdr->payload_size - sizeof(flux_cmd_header))
+            return FLUX_ERROR_OUT_OF_RANGE;
+        const flux_cmd_header *h = (const void *)(payload + off);
+        if (h->size < sizeof(flux_cmd_header) || (h->size & 7u) != 0 ||
+            h->size > hdr->payload_size - off)
+            return FLUX_ERROR_OUT_OF_RANGE;
+
+        switch (h->kind) {
+        case FLUX_CMD_DRAW_GEOM: {
+            if (h->size < sizeof(flux_cmd_draw_geom))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            const flux_cmd_draw_geom *cmd = (const void *)h;
+            if (!valid_geometry(&cmd->geom) || !valid_brush(&cmd->brush))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            if (cmd->geom.kind == FLUX_GEOM_PATH) {
+                size_t segs_bytes = (size_t)cmd->path_seg_count * sizeof(flux_path_segment);
+                if (segs_bytes > h->size - sizeof(flux_cmd_draw_geom))
+                    return FLUX_ERROR_OUT_OF_RANGE;
+            }
+            break;
+        }
+        case FLUX_CMD_DRAW_GLYPH_RUN: {
+            if (h->size < sizeof(flux_cmd_glyph_run))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            const flux_cmd_glyph_run *cmd = (const void *)h;
+            size_t quads_bytes = (size_t)cmd->quad_count * sizeof(flux_glyph_quad);
+            if (quads_bytes > h->size - sizeof(flux_cmd_glyph_run) ||
+                cmd->host_cov_bytes > h->size - sizeof(flux_cmd_glyph_run) - quads_bytes)
+                return FLUX_ERROR_OUT_OF_RANGE;
+            break;
+        }
+        case FLUX_CMD_CLIP_RECT: {
+            if (h->size < sizeof(flux_cmd_clip))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            const flux_cmd_clip *cmd = (const void *)h;
+            if (!finite_rect(cmd->rect))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            break;
+        }
+        case FLUX_CMD_SAVE_LAYER: {
+            if (h->size < sizeof(flux_cmd_save_layer))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            const flux_cmd_save_layer *cmd = (const void *)h;
+            if (!isfinite(cmd->opacity) || cmd->opacity < 0.0f || cmd->opacity > 1.0f)
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            break;
+        }
+        case FLUX_CMD_TRANSLATE:
+        case FLUX_CMD_SCALE: {
+            if (h->size < sizeof(flux_cmd_vec2))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            const flux_cmd_vec2 *cmd = (const void *)h;
+            if (!isfinite(cmd->x) || !isfinite(cmd->y))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            break;
+        }
+        case FLUX_CMD_ROTATE: {
+            if (h->size < sizeof(flux_cmd_scalar))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            const flux_cmd_scalar *cmd = (const void *)h;
+            if (!isfinite(cmd->value))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            break;
+        }
+        case FLUX_CMD_TRANSFORM: {
+            if (h->size < sizeof(flux_cmd_transform))
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            const flux_cmd_transform *cmd = (const void *)h;
+            for (int i = 0; i < 6; i++) {
+                if (!isfinite(cmd->matrix.m[i]))
+                    return FLUX_ERROR_INVALID_ARGUMENT;
+            }
+            break;
+        }
+        case FLUX_CMD_SAVE:
+        case FLUX_CMD_RESTORE:
+            break;
+        default:
+            return FLUX_ERROR_INVALID_ARGUMENT;
+        }
+
+        off += h->size;
+        actual_count++;
+    }
+
+    if (actual_count != hdr->command_count)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+
+    uint8_t *commands = nullptr;
+    if (hdr->payload_size > 0) {
+        commands = malloc(hdr->payload_size);
+        if (!commands)
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        memcpy(commands, payload, hdr->payload_size);
+    }
+
+    flux_display_list *list = calloc(1, sizeof(*list));
+    if (!list) {
+        free(commands);
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    atomic_init(&list->refs, 1u);
+    list->commands = commands;
+    list->size = hdr->payload_size;
+    list->count = hdr->command_count;
+
+    *out_list = list;
+    return FLUX_OK;
+}

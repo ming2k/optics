@@ -3364,6 +3364,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             else if (r != FLUX_OK)
                 break;
             else if (drew) {
+                lens_notify_presented(ui, lens_generation(ui));
                 surface_needs_paint = false;
                 last_render_ns = render_anchor_ns;
             }
