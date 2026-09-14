@@ -1540,13 +1540,50 @@ mod tests {
     }
 
     #[test]
-    fn pick_save_path_args_validate_without_crashing() {
-        // A headless environment has no portal reachable from a unit
-        // test's thread; the call must degrade to an error, not crash.
-        // (On the CI host the portal may or may not answer; both paths
-        // are acceptable outcomes of THIS assertion, which only pins
-        // memory safety + the error mapping.)
+    #[ignore = "spawns interactive host file dialog; run with --ignored in an interactive session"]
+    fn pick_save_path_interactive_smoke() {
         let _ = pick_save_path(Some("t"), Some("out.txt"));
+    }
+
+    #[test]
+    fn pick_save_path_null_buffer_rejects_without_portal() {
+        // Pickers reject NULL buffers / zero capacity before contacting the
+        // portal (matching the C contract in tests/iris/test_app_api.c).
+        // A valid buffer in an active desktop session would pop up a live picker.
+        let opts = sys::iris_file_dialog_opts {
+            title: std::ptr::null(),
+            ..Default::default()
+        };
+        let rc = unsafe {
+            sys::iris_pick_save_path(
+                &opts,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        assert_eq!(rc, sys::IRIS_PICK_UNAVAILABLE);
+    }
+
+    #[test]
+    fn file_dialog_builders_set_fields() {
+        let filter = FileFilter {
+            name: Some("Text files"),
+            pattern: "*.txt",
+        };
+        let dlg = FileDialog::new()
+            .title("Save report")
+            .initial_uri("file:///tmp")
+            .filter(filter)
+            .multiple(true)
+            .directory_only(true);
+        assert_eq!(dlg.title, Some("Save report"));
+        assert_eq!(dlg.initial_uri, Some("file:///tmp"));
+        assert_eq!(dlg.filters.len(), 1);
+        assert_eq!(dlg.filters[0].name, Some("Text files"));
+        assert_eq!(dlg.filters[0].pattern, "*.txt");
+        assert!(dlg.multiple);
+        assert!(dlg.directory_only);
     }
 
     #[test]

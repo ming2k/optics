@@ -61,6 +61,12 @@ int main(void) {
     CHECK(iris_pick_folder(NULL, NULL, 0) != 0);
     CHECK(iris_pick_folder(NULL, buf, 0) != 0);
     CHECK(iris_pick_folder(NULL, NULL, sizeof buf) != 0);
+    CHECK(iris_pick_save_path(NULL, NULL, NULL, 0) != 0);
+    CHECK(iris_pick_save_path(NULL, NULL, buf, 0) != 0);
+    CHECK(iris_pick_save_path(NULL, NULL, NULL, sizeof buf) != 0);
+    CHECK(iris_pick_files(NULL, NULL, 0, NULL) != 0);
+    CHECK(iris_pick_files(NULL, buf, 0, NULL) != 0);
+    CHECK(iris_pick_files(NULL, NULL, sizeof buf, NULL) != 0);
 
     return TEST_REPORT();
 }
