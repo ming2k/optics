@@ -46,13 +46,13 @@ static void spike_and_dwell(lens *ui, int count, int idle_frames) {
         snprintf(label, sizeof label, "spike##%d", i);
         lens_button(ui, &(lens_button_opts){.label = label});
     }
-    lens_end(ui);
+    test_end(ui);
     /* Per-frame arena overflow is acceptable and expected for the big
      * spikes: draw calls get dropped, but the retained store still
      * tracks every node it created, which is what this test exercises. */
     for (int f = 0; f < idle_frames; f++) {
         lens_begin(ui, &(lens_input){.size = sizeof(lens_input)});
-        lens_end(ui);
+        test_end(ui);
     }
 }
 
@@ -87,7 +87,7 @@ int main(void) {
     lens_begin(ui, &(lens_input){.size = sizeof(lens_input)});
     lens_row_begin(ui, NULL);
     (void)lens_button(ui, &(lens_button_opts){.label = "stable##keep"});
-    lens_end(ui);
+    test_end(ui);
     g_seen_button = false;
     lens_accessibility_walk(ui, saw_button, NULL);
     CHECK(g_seen_button);

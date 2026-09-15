@@ -1,18 +1,30 @@
 /* ghost.c — leave-animation snapshots and their replay (ADR-0078). */
 
 #include "../internal.h"
+#include <math.h>
 #include <string.h>
+
+static inline flux_rect rect_intersect(flux_rect a, flux_rect b) {
+    float x = fmaxf(a.x, b.x), y = fmaxf(a.y, b.y);
+    return (flux_rect){x, y, fmaxf(0, fminf(a.x + a.w, b.x + b.w) - x),
+                       fmaxf(0, fminf(a.y + a.h, b.y + b.h) - y)};
+}
 
 /* ---- deep clone into lensi_alloc memory -------------------------------- */
 
+static void free_snapshot(lens *ui, lens_ghost_node *g);
+
 static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
     lens_ghost_node *g = lensi_alloc(ui, sizeof *g);
-    if (!g)
+    if (!g) {
+        lensi_set_overflow(ui);
         return NULL;
+    }
     memset(g, 0, sizeof *g);
     g->final_rect =
         (n->final_rect.w > 0.0f && n->final_rect.h > 0.0f) ? n->final_rect : n->prev_rect;
     g->is_scroll = n->is_scroll;
+    g->opacity = n->opacity;
     g->pad = n->pad;
     g->scroll_gutter = n->scroll_gutter;
     g->place_bounds = n->place_bounds;
@@ -22,11 +34,15 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
         g->cmds = lensi_alloc(ui, (size_t)n->cmd_count * sizeof *g->cmds);
         if (!g->cmds) {
             lensi_free(ui, g);
+            lensi_set_overflow(ui);
             return NULL;
         }
         for (uint32_t i = 0; i < n->cmd_count; i++) {
             lens_draw_cmd *c = &n->cmds[i];
             g->cmds[i].cmd = *c;
+            g->cmd_count++;
+            if (c->kind == LENS_DRAW_IMAGE)
+                g->cmds[i].cmd.image = flux_image_retain(c->image);
             if (c->kind == LENS_DRAW_TEXT && c->text) {
                 size_t len = strlen(c->text) + 1;
                 char *copy = lensi_alloc(ui, len);
@@ -35,6 +51,9 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
                     g->cmds[i].cmd.text = copy;
                 } else {
                     g->cmds[i].cmd.text = NULL;
+                    free_snapshot(ui, g);
+                    lensi_set_overflow(ui);
+                    return NULL;
                 }
             }
         }
@@ -48,8 +67,11 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
     lens_ghost_node **next = &g->first_child;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         lens_ghost_node *cg = snapshot_node(ui, c);
-        if (!cg)
-            continue;
+        if (!cg) {
+            free_snapshot(ui, g);
+            lensi_set_overflow(ui);
+            return NULL;
+        }
         *next = cg;
         next = &cg->next_sibling;
     }
@@ -63,6 +85,8 @@ static void free_snapshot(lens *ui, lens_ghost_node *g) {
             free_snapshot(ui, g->first_child);
         if (g->cmds) {
             for (uint32_t i = 0; i < g->cmd_count; i++) {
+                if (g->cmds[i].cmd.kind == LENS_DRAW_IMAGE)
+                    flux_image_release(g->cmds[i].cmd.image);
                 const char *t = g->cmds[i].cmd.text;
                 if (g->cmds[i].cmd.kind == LENS_DRAW_TEXT && t)
                     lensi_free(ui, (void *)t);
@@ -131,8 +155,10 @@ void lensi_ghost_capture(lens *ui) {
             continue;
 
         lens_ghost *gh = lensi_alloc(ui, sizeof *gh);
-        if (!gh)
+        if (!gh) {
+            lensi_set_overflow(ui);
             continue;
+        }
         memset(gh, 0, sizeof *gh);
         gh->root_id = n->id;
         gh->band = n->band;
@@ -230,45 +256,42 @@ bool lensi_ghost_active(const lens *ui) {
 
 /* ---- render ------------------------------------------------------------- */
 
-static void render_ghost_node(lens *ui, flux_canvas *canvas, const lens_ghost_node *g,
-                              flux_rect clip, float alpha) {
+static flux_result compile_ghost_node(lens *ui, flux_encoder *encoder, const lens_ghost_node *g,
+                                      flux_rect clip) {
     flux_rect box = g->final_rect;
     if (box.w <= 0.0f || box.h <= 0.0f)
-        return;
-
-    flux_rect command_clip = g->has_place_bounds && g->place_bounds.w >= 0.0f ? clip : clip;
-
-    lensi_emit_commands(ui, canvas, box, command_clip, &g->cmds[0].cmd, g->cmd_count, alpha);
-
-    bool pushed = false;
-    if (g->is_scroll && g->first_child) {
-        float viewport_w = box.w - 2.0f * g->pad - g->scroll_gutter;
-        if (viewport_w < 0.0f)
-            viewport_w = 0.0f;
-        flux_rect viewport = {box.x + g->pad, box.y + g->pad, viewport_w, box.h - 2.0f * g->pad};
-        if (viewport.w > 0.0f && viewport.h > 0.0f) {
-            flux_canvas_save(canvas);
-            flux_canvas_clip_rect(canvas, viewport);
-            pushed = true;
-        }
+        return FLUX_OK;
+    if (g->opacity < 1.0f)
+        flux_encoder_save_layer(encoder, nullptr, g->opacity);
+    flux_result result = lensi_compile_commands(
+        ui, encoder, box, clip, g->cmd_count ? &g->cmds[0].cmd : nullptr, g->cmd_count, 1.0f);
+    if (result != FLUX_OK)
+        return result;
+    if (g->opacity < 1.0f)
+        flux_encoder_restore(encoder);
+    bool pushed = g->is_scroll && g->first_child;
+    if (pushed) {
+        float width = fmaxf(0.0f, box.w - 2.0f * g->pad - g->scroll_gutter);
+        flux_rect viewport = {box.x + g->pad, box.y + g->pad, width,
+                              fmaxf(0.0f, box.h - 2.0f * g->pad)};
+        clip = rect_intersect(clip, viewport);
+        if (clip.w <= 0 || clip.h <= 0)
+            return FLUX_OK;
+        flux_encoder_save(encoder);
+        flux_encoder_clip_rect(encoder, clip);
     }
-    for (const lens_ghost_node *c = g->first_child; c; c = c->next_sibling)
-        render_ghost_node(ui, canvas, c, clip, alpha);
+    for (const lens_ghost_node *c = g->first_child; c; c = c->next_sibling) {
+        result = compile_ghost_node(ui, encoder, c, clip);
+        if (result != FLUX_OK)
+            return result;
+    }
     if (pushed)
-        flux_canvas_restore(canvas);
+        flux_encoder_restore(encoder);
+    return FLUX_OK;
 }
 
-void lensi_ghost_render(lens *ui, flux_canvas *canvas) {
-    if (!ui || !canvas || ui->ghost_count == 0)
-        return;
-
-    bool scaled = ui->scale > 0.0f && ui->scale != 1.0f;
-    if (scaled) {
-        flux_canvas_save(canvas);
-        flux_canvas_scale(canvas, ui->scale, ui->scale);
-    }
+flux_result lensi_ghost_compile(lens *ui, flux_encoder *encoder) {
     flux_rect no_clip = {-1e6f, -1e6f, 2e6f, 2e6f};
-
     for (lens_band b = LENS_BAND_BASE; b < LENS_BAND_COUNT; b++) {
         for (uint32_t i = 0; i < ui->ghost_count; i++) {
             lens_ghost *gh = ui->ghosts[i];
@@ -278,11 +301,18 @@ void lensi_ghost_render(lens *ui, flux_canvas *canvas) {
             if (live && live->phase != LENS_NODE_LEAVING)
                 continue;
             flux_rect clip = gh->root->has_place_bounds ? gh->root->place_bounds : no_clip;
-            render_ghost_node(ui, canvas, gh->root, clip, gh->alpha);
+            if (gh->alpha < 1.0f)
+                flux_encoder_save_layer(encoder, nullptr, gh->alpha);
+            else
+                flux_encoder_save(encoder);
+            flux_encoder_clip_rect(encoder, clip);
+            flux_result result = compile_ghost_node(ui, encoder, gh->root, clip);
+            if (result != FLUX_OK)
+                return result;
+            flux_encoder_restore(encoder);
         }
     }
-    if (scaled)
-        flux_canvas_restore(canvas);
+    return FLUX_OK;
 }
 
 void lensi_ghost_destroy(lens *ui) {

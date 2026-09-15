@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
                               .placeholder = stack_placeholder,
                           });
 
-        lens_end(ui);
+        test_end(ui);
     }
     CHECK(!lens_overflowed(ui));
 

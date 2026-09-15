@@ -132,7 +132,7 @@ void lensi_store_destroy(lens *ui) {
             if (!s->slots[i].id)
                 continue;
             lens_node *n = s->slots[i].node;
-            lensi_node_drop_record(ui, n);
+            lensi_node_release_cache(ui, n);
             if (n->state)
                 lensi_free(ui, n->state);
             lensi_free(ui, n);
@@ -185,6 +185,7 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
         }
         memset(n, 0, sizeof *n);
         n->id = id;
+        n->incarnation = ++ui->next_incarnation;
         n->ui = ui;
         n->phase = LENS_NODE_ENTERING;
         if (!store_insert(ui, n)) {
@@ -198,13 +199,15 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
          * interactive from its stale prev_rect: align with the first-frame
          * rule (no hit-testing until arranged this frame). */
         bool was_leaving = n->phase == LENS_NODE_LEAVING;
+        bool previously_seen = n->last_seen != 0;
         n->last_seen = ui->frame;
         n->leaving_frames = 0;
         if (was_leaving) {
+            n->incarnation = ++ui->next_incarnation;
             n->has_prev = false;
             n->prev_rect = (flux_rect){0, 0, 0, 0};
         }
-        n->phase = n->has_prev ? LENS_NODE_STABLE : LENS_NODE_ENTERING;
+        n->phase = previously_seen && !was_leaving ? LENS_NODE_STABLE : LENS_NODE_ENTERING;
         lensi_node_reset_frame(n);
         /* Stamp the build-time opacity context (lens_set_opacity): every
          * command pushed onto this node this frame bakes it in. */
@@ -227,7 +230,7 @@ void lensi_store_reap(lens *ui) {
         n->phase = LENS_NODE_LEAVING;
         if (++n->leaving_frames <= LENSI_LEAVE_GRACE_FRAMES)
             continue;
-        lensi_node_drop_record(ui, n);
+        lensi_node_release_cache(ui, n);
         if (n->state)
             lensi_free(ui, n->state);
         lensi_free(ui, n);

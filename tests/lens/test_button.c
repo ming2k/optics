@@ -15,7 +15,7 @@ static void test_link_click_and_intrinsic_size(void) {
     CHECK(!lens_button(ui, &(lens_button_opts){.label = "Playlists", .variant = LENS_BUTTON_LINK})
                .clicked);
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
     lens_node *row = lens_node_first_child(lens_root(ui));
     CHECK(row != NULL);
     lens_node *link = lens_node_first_child(row);
@@ -33,7 +33,7 @@ static void test_link_click_and_intrinsic_size(void) {
                .clicked);
     CHECK(lens_get_response(ui).hovered);
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     in = IN0;
     in.cursor = (flux_point){10.0f, 8.0f};
@@ -43,7 +43,7 @@ static void test_link_click_and_intrinsic_size(void) {
     CHECK(lens_button(ui, &(lens_button_opts){.label = "Playlists", .variant = LENS_BUTTON_LINK})
               .clicked);
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_release(ui);
 }
@@ -55,7 +55,7 @@ static void test_button_click(void) {
     /* Frame 1: establish prev_rect */
     lens_begin(ui, &IN0);
     bool clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(!clicked);
 
     /* Frame 2: mouse press */
@@ -64,7 +64,7 @@ static void test_button_click(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(!clicked); /* clicked only on release */
 
     /* Frame 3: mouse release */
@@ -73,7 +73,7 @@ static void test_button_click(void) {
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(clicked);
 
     lens_release(ui);
@@ -86,7 +86,7 @@ static void test_button_no_click_when_disabled(void) {
     /* Warm-up frame */
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){20, 20};
@@ -95,7 +95,7 @@ static void test_button_no_click_when_disabled(void) {
     lens_begin(ui, &in);
     bool clicked =
         lens_button(ui, &(lens_button_opts){.label = "OK", .box = {.disabled = true}}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(!clicked);
 
     lens_release(ui);
@@ -122,13 +122,13 @@ static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_
     } else {
         lens_icon(ui, &(lens_icon_opts){.id = icon, .size = 24.0f});
     }
-    lens_end(ui);
+    test_end(ui);
 
     flux_canvas *canvas = NULL;
     CHECK(flux_canvas_create_cpu(24, 24, 1.0f, &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     CHECK(flux_canvas_cpu_begin(canvas, &black) == FLUX_OK);
-    CHECK(lens_render(ui, canvas) == FLUX_OK);
+    CHECK(test_snapshot_render(ui, canvas) == FLUX_OK);
     flux_canvas_cpu_end(canvas);
 
     uint32_t width = 0, height = 0, stride = 0;
@@ -190,7 +190,7 @@ static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(voi
     lens_pop_style(ui);
     lens_pop_id(ui);
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *plain = lens_node_first_child(row);
     lens_node *outlined = lens_node_next_sibling(plain);
@@ -211,21 +211,21 @@ static void test_icon_button_requests_pointer_cursor(void) {
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.icon = LENS_ICON_PLAY});
-    lens_end(ui);
+    test_end(ui);
 
     lens_input hover = IN0;
     hover.cursor = (flux_point){10.0f, 10.0f};
     lens_begin(ui, &hover);
     lens_button(ui, &(lens_button_opts){.icon = LENS_ICON_PLAY});
     CHECK(lens_get_cursor_hint(ui) == LENS_CURSOR_POINTER);
-    lens_end(ui);
+    test_end(ui);
 
     lens_input away = IN0;
     away.cursor = (flux_point){300.0f, 150.0f};
     lens_begin(ui, &away);
     lens_button(ui, &(lens_button_opts){.icon = LENS_ICON_PLAY});
     CHECK(lens_get_cursor_hint(ui) == LENS_CURSOR_DEFAULT);
-    lens_end(ui);
+    test_end(ui);
 
     lens_release(ui);
 }
@@ -237,7 +237,7 @@ static void test_button_mouse_secondary(void) {
     /* Establish geometry. */
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "sw"});
-    lens_end(ui);
+    test_end(ui);
 
     /* Right-press then right-release inside: lens_button(mouse_button=RIGHT)
      * reports it; lens_button (left) does not. */
@@ -247,7 +247,7 @@ static void test_button_mouse_secondary(void) {
     in.mouse_pressed[LENS_MOUSE_RIGHT] = true;
     lens_begin(ui, &in);
     lens_button(ui, &(lens_button_opts){.label = "sw"});
-    lens_end(ui);
+    test_end(ui);
 
     in = IN0;
     in.cursor = (flux_point){20, 20};
@@ -257,7 +257,7 @@ static void test_button_mouse_secondary(void) {
         lens_button(ui, &(lens_button_opts){.label = "sw", .mouse_button = LENS_MOUSE_RIGHT})
             .clicked;
     bool left = lens_button(ui, &(lens_button_opts){.label = "sw"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(right);
     CHECK(!left);
 

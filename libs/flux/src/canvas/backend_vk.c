@@ -1192,12 +1192,12 @@ static flux_result vk_save_layer(const flux_canvas_backend *self, flux_canvas *c
     canvas_owned_image *linear = &layer->attachments.linear;
     VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
 
-    color_barrier2(cmd, linear->image,
-                   linear->layout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                   linear->layout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_2_SHADER_READ_BIT,
-                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                   linear->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    color_barrier2(
+        cmd, linear->image,
+        linear->layout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        linear->layout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_2_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        linear->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     linear->layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     /* Layer clears to transparent black */
@@ -1243,12 +1243,10 @@ static void vk_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
     VkCommandBuffer cmd = flux_frame_vk_command_buffer(c->frame);
 
     /* Transition layer image to shader read */
-    color_barrier2(cmd, layer_linear->image,
-                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                   VK_ACCESS_2_SHADER_READ_BIT,
-                   layer_linear->layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    color_barrier2(cmd, layer_linear->image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                   VK_ACCESS_2_SHADER_READ_BIT, layer_linear->layout,
+                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     layer_linear->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     /* Resume parent pass with previous MSAA/stencil configuration */
@@ -1276,8 +1274,7 @@ static void vk_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
     c->states[c->state_top].transform = flux_mat3x2_identity();
 
     draw_image_with_sampler_handle(
-        c, nullptr, layer_linear->bindless, nullptr,
-        flux_device_default_sampler_handle(c->device),
+        c, nullptr, layer_linear->bindless, nullptr, flux_device_default_sampler_handle(c->device),
         (flux_rect){0, 0, (float)c->fb_width, (float)c->fb_height},
         (flux_rect){0.0f, 0.0f, 1.0f, 1.0f}, tint, FLUX_BLEND_SRC_OVER, 3u, nullptr, 0.0f);
     batch_flush(c);

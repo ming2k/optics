@@ -259,8 +259,10 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_canvas_scale` |  |
 | `flux_canvas_rotate` |  |
 | `flux_canvas_transform` |  |
-| `flux_canvas_draw_geometry` | Authoritative orthogonal Geometry x Brush drawing primitive (ADR-0089 / ADR-0091) |
-| `flux_encoder_create` | Create a pure CPU command encoder for building an immutable display list (ADR-0090). |
+| `flux_canvas_draw_geometry` |  |
+| `flux_encoder_create` | Unique recorder. |
+| `flux_encoder_fail` | Producers propagate capture failures into the recorder's sticky result. |
+| `flux_encoder_status` |  |
 | `flux_encoder_draw_geometry` |  |
 | `flux_encoder_draw_glyph_run` |  |
 | `flux_encoder_save` |  |
@@ -271,15 +273,14 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_encoder_scale` |  |
 | `flux_encoder_rotate` |  |
 | `flux_encoder_transform` |  |
-| `flux_encoder_reset` | Reset encoder for reuse, releasing any uncommitted commands. |
 | `flux_encoder_destroy` | Destroy an encoder and release its scratch resources. |
 | `flux_encoder_finish` | Freeze encoder commands into an immutable display list. |
-| `flux_display_list_destroy` | Destroy a published display list and release retained resources. |
-| `flux_display_list_serialize` | Serialize an immutable display list into a safe binary format (ADR-0090). |
-| `flux_display_list_deserialize` | Deserialize and validate a display list from untrusted binary input (ADR-0090). |
-| `flux_encoder_append_display_list` | Splice a published display list into the encoder in O(1) (ADR-0089 / ADR-0094). |
-| `flux_canvas_get_plan_stats` | Retrieve RenderPlan execution diagnostics (passes, layer depth, memory aliasing) (ADR-0089 / ADR-0092). |
+| `flux_display_list_release` |  |
+| `flux_display_list_size` |  |
+| `flux_display_list_command_count` |  |
 | `flux_canvas_submit_display_list` | Submit an immutable display list to a canvas for batch execution. |
+| `flux_encoder_draw_display_list` | Record an owned child list under the recorder's current placement and clip. |
+| `flux_canvas_get_plan_stats` |  |
 | `flux_canvas_draw_glyph_run` | Draw a pre-shaped glyph run as a single batched draw call. |
 | `flux_canvas_dropped_draws` | Cumulative count of draw calls dropped due to transient ring exhaustion since canvas creation. |
 | `flux_canvas_submit_calls` | Vulkan batching diagnostics, cumulative since canvas creation. |
@@ -376,7 +377,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_text_get_stats` |  |
 | `flux_text_measure` | Shape `len` bytes of `utf8` in `style` and report the extent. |
 | `flux_text_draw` | Shape `len` bytes of `utf8` and paint them as a single batched glyph run with the top-left at (x, y) in logical pixels, using `style` (including its colour). |
-| `flux_text_draw_to_encoder` | Shape and encode batched glyph runs directly to an immutable flux_encoder (ADR-0094). |
+| `flux_text_record` | Capture text and its optional contour. |
 | `flux_text_draw_outlined` | Draw a run with a contour behind the foreground glyphs. |
 | `flux_text_x_for_byte` | Logical x of the glyph boundary before byte `byte`. |
 | `flux_text_byte_for_x` | Source byte offset of the glyph boundary nearest logical x `local_x`. |
@@ -456,9 +457,14 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_text_scale` |  |
 | `lens_begin` | ================================================================== |
 | `lens_end` |  |
-| `lens_render` |  |
-| `lens_compile_draw_list` | Pure CPU compile phase: transforms the resolved layout tree into an immutable, GPU-independent draw list allocated on `arena`. |
-| `lens_draw_list_submit` | Submit a compiled draw list to a canvas for rasterization. |
+| `lens_snapshot_create` | Create an immutable snapshot of the resolved layout tree and compiled visuals. |
+| `lens_snapshot_release` |  |
+| `lens_snapshot_generation` |  |
+| `lens_snapshot_submit` |  |
+| `lens_generation` | Generation progression & presentation handshake (ADR-0094). |
+| `lens_snapshot_activate` | Activate exactly the successfully presented snapshot, or explicitly select one in a headless host. |
+| `lens_snapshot_accessibility_walk` |  |
+| `lens_last_presented_generation` |  |
 | `lens_overflowed` | True if the per-frame arena overflowed during the frame just built. |
 | `lens_has_duplicate_ids` | True if the same widget id was linked more than once under one parent in the frame just built. |
 | `lens_anim_pending` | True if an eased value (hover/active fade, …) was still in transit during the frame just built. |

@@ -32,7 +32,7 @@ static void build_textfield_pair(lens *ui, char *buf_a, char *buf_b) {
         ui, &(lens_textedit_opts){.box = {.id = "tf1", .error = true}, .buf = buf_a, .cap = 64});
     lens_textedit(
         ui, &(lens_textedit_opts){.box = {.id = "tf2"}, .buf = buf_b, .cap = 64}); /* no error */
-    lens_end(ui);
+    test_end(ui);
 }
 
 static void test_textfield_error_reaches_skin(void) {
@@ -63,7 +63,7 @@ static void test_slider_error_reaches_skin(void) {
     lens_slider(ui,
                 &(lens_slider_opts){
                     .label = "s", .value = &val, .min = 0.0f, .max = 1.0f, .box = {.error = true}});
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(g_saw_any);
     CHECK(g_saw_error);

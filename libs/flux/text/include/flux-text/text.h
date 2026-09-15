@@ -169,7 +169,8 @@ FLUX_TEXT_API void flux_text_release(flux_text *t);
  * Query pending dirty atlas uploads and flush them explicitly to the GPU frame. */
 FLUX_NODISCARD FLUX_TEXT_API bool flux_text_has_pending_uploads(const flux_text *t);
 FLUX_NODISCARD FLUX_TEXT_API flux_result flux_text_flush_atlas(flux_text *t, flux_frame *f);
-FLUX_NODISCARD FLUX_TEXT_API uint64_t flux_text_get_atlas_epoch(const flux_text *t, const flux_frame *f);
+FLUX_NODISCARD FLUX_TEXT_API uint64_t flux_text_get_atlas_epoch(const flux_text *t,
+                                                                const flux_frame *f);
 
 /* Scale contract (single source of truth):
  *   - flux_text_draw rasterises at the *canvas's* effective scale
@@ -244,10 +245,19 @@ FLUX_TEXT_API void flux_text_draw(flux_text *t, flux_canvas *canvas, flux_arena 
                                   float y, const char *utf8, size_t len,
                                   const flux_text_style *style);
 
-/* Shape and encode batched glyph runs directly to an immutable flux_encoder (ADR-0094). */
-FLUX_TEXT_API void flux_text_draw_to_encoder(flux_text *t, flux_encoder *encoder, flux_arena *arena,
-                                             float x, float y, const char *utf8, size_t len,
-                                             const flux_text_style *style);
+typedef struct flux_text_record_desc {
+    float x, y;
+    const char *utf8;
+    size_t len;
+    flux_text_style style;
+    flux_color outline_color;
+    float outline_width;
+} flux_text_record_desc;
+
+/* Capture text and its optional contour. Failure poisons the encoder so a
+ * caller cannot accidentally publish a partially captured text run. */
+FLUX_NODISCARD FLUX_TEXT_API flux_result flux_text_record(flux_text *t, flux_encoder *encoder,
+                                                          const flux_text_record_desc *desc);
 
 /* Draw a run with a contour behind the foreground glyphs. `outline_width`
  * is the outward visual radius in logical pixels; values <= 0 preserve the

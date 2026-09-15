@@ -3342,32 +3342,49 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             /* Clear to the current theme's body background so empty areas
              * (e.g. short content in a tall window) don't show a hard-coded
              * dark color in light mode. The paint callback (if any) draws
-             * *under* lens's chrome: iris calls it before lens_render so the
+             * *under* lens's chrome: iris calls it before snapshot publication so the
              * host's document surface lands first and lens's widget layer
              * composites on top. */
             lens_theme th = lens_get_theme(ui);
             flux_color clear = th.color_bg;
             bool drew = false;
+            lens_scene_snapshot *snapshot = nullptr;
             if (flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK) {
                 if (cfg->paint)
                     cfg->paint(canvas, device, (float)pl.buffer_scale, cfg->user);
-                drew = lens_render(ui, canvas) == FLUX_OK;
-                flux_canvas_end_frame(canvas);
+                if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
+                    drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK;
+                }
+                if (flux_canvas_end(canvas) != FLUX_OK)
+                    drew = false;
             }
 
-            if (flux_frame_submit(frame) != FLUX_OK)
-                break;
+            if (!drew) {
+                lens_snapshot_release(snapshot);
+                goto fail;
+            }
+            if (flux_frame_submit(frame) != FLUX_OK) {
+                lens_snapshot_release(snapshot);
+                goto fail;
+            }
             r = flux_frame_present(frame);
             if (r == FLUX_ERROR_SURFACE_LOST)
                 (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
                                           (uint32_t)(pl.height * pl.buffer_scale));
-            else if (r != FLUX_OK)
-                break;
-            else if (drew) {
-                lens_notify_presented(ui, lens_generation(ui));
+            else if (r != FLUX_OK) {
+                lens_snapshot_release(snapshot);
+                goto fail;
+            } else if (drew) {
+                flux_result activated = lens_snapshot_activate(ui, snapshot);
+                if (activated != FLUX_OK) {
+                    lens_snapshot_release(snapshot);
+                    goto fail;
+                }
+                iris_a11y_update(ui);
                 surface_needs_paint = false;
                 last_render_ns = render_anchor_ns;
             }
+            lens_snapshot_release(snapshot);
 
             if (++frame_no == 1)
                 fprintf(stderr, "first frame presented: %dx%d logical, %ux%u device (scale=%d)\n",

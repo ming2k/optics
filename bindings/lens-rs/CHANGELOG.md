@@ -5,6 +5,11 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Replace live `Ui::render` with owning `Snapshot`, `Ui::snapshot` and explicit `Ui::activate`; reject stale and foreign snapshots.
+
+
 ### Added
 
 - **Stable identities and explicit scroll-list layout.** New

@@ -10,7 +10,7 @@
  *      builds its chrome (immediate-mode lens widgets) and reads `in`, the
  *      same lens_input snapshot lens is consuming this frame.
  *   3. paint(canvas) — runs inside an open flux_canvas_begin_frame/end pair,
- *      *before* lens_render(). Anything the host draws here lands *under*
+ *      *before* snapshot execution. Anything the host draws here lands *under*
  *      lens's chrome. Returning without drawing is fine.
  *   4. stop(ui, device) — releases host resources before Iris tears down
  *      Lens, Flux, and the device.
@@ -120,7 +120,7 @@ typedef void (*iris_build_fn)(lens *ui, const lens_input *in, void *user);
  * scale the chrome portion.
  *
  * Anything the host draws here lands *under* lens's chrome, because
- * iris calls lens_render(ui, canvas) after this returns.
+ * iris calls lens_snapshot_submit(snapshot, canvas) after this returns.
  *
  * `user` is the same pointer passed to iris_build_fn. The host typically
  * captures it in the same closure context. */
@@ -183,7 +183,7 @@ IRIS_API void iris_paint_mark_static(void);
  * the host knows the canvas content is unchanged *and* it still wants the
  * active-rate cadence to continue, call this instead of (not in addition
  * to) iris_paint_mark_static. The frame's begin_frame → clear → paint →
- * lens_render → present sequence is skipped entirely — no swapchain image
+ * snapshot publication → present sequence is skipped entirely — no swapchain image
  * is acquired and the previous buffer stays on screen — but the *scheduling*
  * branch sees an animation request as usual, so the loop keeps running at
  * the active rate. This is exactly the "present at the media cadence while

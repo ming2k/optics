@@ -15,14 +15,14 @@ static void test_return_activates_focused_button(void) {
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
     lens_set_focus(ui, lens_current_id(ui, "OK"));
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.key_count = 1;
     in.keys[0] = (lens_key_event){.key = LENS_KEY_RETURN, .pressed = true};
     lens_begin(ui, &in);
     bool clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(clicked);
 
     lens_release(ui);
@@ -36,14 +36,14 @@ static void test_space_toggles_focused_checkbox(void) {
     lens_begin(ui, &IN0);
     lens_checkbox(ui, &(lens_checkbox_opts){.label = "Flag", .value = &on});
     lens_set_focus(ui, lens_current_id(ui, "Flag"));
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.key_count = 1;
     in.keys[0] = (lens_key_event){.key = ' ', .pressed = true};
     lens_begin(ui, &in);
     lens_checkbox(ui, &(lens_checkbox_opts){.label = "Flag", .value = &on});
-    lens_end(ui);
+    test_end(ui);
     CHECK(on == true);
 
     lens_release(ui);
@@ -81,7 +81,7 @@ static void test_roles_are_wired(void) {
     lens_slider(ui,
                 &(lens_slider_opts){.label = "Volume", .value = &val, .min = 0.0f, .max = 1.0f});
     lens_button(ui, &(lens_button_opts){.label = "More", .variant = LENS_BUTTON_LINK});
-    lens_end(ui);
+    test_end(ui);
     seen = (role_seen){0};
     lens_accessibility_walk(ui, collect_roles, &seen);
     CHECK(seen.progress);
@@ -96,8 +96,7 @@ static void test_band_overflow_is_flagged(void) {
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
-    /* 17 CHROME nodes exceed LENSI_BAND_PREV_MAX (16): the next frame's
-     * prev-band snapshot must flag the truncation. */
+    /* Owned metadata must preserve more than 16 overlays without truncation. */
     lens_begin(ui, &IN0);
     for (int i = 0; i < 17; i++) {
         lens_push_id_int(ui, i);
@@ -108,13 +107,13 @@ static void test_band_overflow_is_flagged(void) {
             lens_place_end(ui);
         lens_pop_id(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(!lens_overflowed(ui)); /* first frame: buckets are fine */
 
     lens_begin(ui, &IN0);
     lens_label(ui, &(lens_label_opts){.text = "idle"});
-    lens_end(ui);
-    CHECK(lens_overflowed(ui)); /* snapshot of 17 ids truncated + flagged */
+    test_end(ui);
+    CHECK(!lens_overflowed(ui)); /* owned snapshots preserve all 17 overlays */
 
     lens_release(ui);
 }
@@ -128,7 +127,7 @@ static void test_key_count_clamped(void) {
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
     lens_set_focus(ui, lens_current_id(ui, "OK"));
-    lens_end(ui);
+    test_end(ui);
 
     /* A hostile count with the activating key past the array end must not
      * be read (and must not crash). */
@@ -137,7 +136,7 @@ static void test_key_count_clamped(void) {
     in.keys[3] = (lens_key_event){.key = LENS_KEY_RETURN, .pressed = true};
     lens_begin(ui, &in);
     bool clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(clicked); /* index 3 is inside the clamped range */
     CHECK(!lens_overflowed(ui));
 
@@ -166,20 +165,20 @@ static void test_paste_bound_to_requester(void) {
     /* focus the field (press at its top-left area) */
     lens_begin(ui, &IN0);
     build_field(ui, buf, sizeof buf);
-    lens_end(ui);
+    test_end(ui);
     click_at(ui, 20, 14);
     build_field(ui, buf, sizeof buf);
-    lens_end(ui);
+    test_end(ui);
 
     /* request + fulfil, then the focused field drains next frame */
     lens_begin(ui, &IN0);
     build_field(ui, buf, sizeof buf);
     lens_request_paste(ui);
-    lens_end(ui);
+    test_end(ui);
     lens_paste(ui, "zz", 2);
     lens_begin(ui, &IN0);
     build_field(ui, buf, sizeof buf);
-    lens_end(ui);
+    test_end(ui);
     CHECK(strcmp(buf, "zz") == 0);
 
     /* focus moves away, THEN a bound paste arrives: dropped, not delivered */
@@ -187,15 +186,15 @@ static void test_paste_bound_to_requester(void) {
     lens_begin(ui, &IN0);
     build_field(ui, buf, sizeof buf);
     lens_request_paste(ui); /* bound to the field */
-    lens_end(ui);
+    test_end(ui);
     /* click outside: focus clears */
     click_at(ui, 350, 280);
     build_field(ui, buf, sizeof buf);
-    lens_end(ui);
+    test_end(ui);
     lens_paste(ui, "QQ", 2);
     lens_begin(ui, &IN0);
     build_field(ui, buf, sizeof buf);
-    lens_end(ui);
+    test_end(ui);
     CHECK(strcmp(buf, "abc") == 0); /* focus drifted: not delivered */
 
     lens_release(ui);
@@ -210,7 +209,7 @@ static void test_reap_reconciles_focus_and_capture(void) {
     /* capture: press the button (active_id set) */
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "Hold"});
-    lens_end(ui);
+    test_end(ui);
     lens_input in = IN0;
     in.cursor = (flux_point){20, 16};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
@@ -218,7 +217,7 @@ static void test_reap_reconciles_focus_and_capture(void) {
     lens_begin(ui, &in);
     lens_button(ui, &(lens_button_opts){.label = "Hold"});
     lens_id btn = lens_current_id(ui, "Hold");
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_active(ui) == btn);
     lens_set_focus(ui, btn);
 
@@ -227,7 +226,7 @@ static void test_reap_reconciles_focus_and_capture(void) {
     for (int f = 0; f < 12; f++) {
         lens_begin(ui, &in); /* mouse still held down */
         lens_label(ui, &(lens_label_opts){.text = "other"});
-        lens_end(ui);
+        test_end(ui);
     }
     CHECK(lens_active(ui) == 0);
     CHECK(!lens_focused(ui, btn));
@@ -245,12 +244,12 @@ static void test_grace_reentry_not_interactive(void) {
     for (int f = 0; f < 2; f++) {
         lens_begin(ui, &IN0);
         lens_button(ui, &(lens_button_opts){.label = "Blink"});
-        lens_end(ui);
+        test_end(ui);
     }
     /* one frame absent (inside the grace window) */
     lens_begin(ui, &IN0);
     lens_label(ui, &(lens_label_opts){.text = "gap"});
-    lens_end(ui);
+    test_end(ui);
 
     /* re-appears the same frame a press lands on its old rect: the stale
      * prev_rect must not make it pressable (first-frame rule). */
@@ -262,26 +261,26 @@ static void test_grace_reentry_not_interactive(void) {
     bool pressed = false;
     if (lens_button(ui, &(lens_button_opts){.label = "Blink"}).clicked)
         pressed = true;
-    lens_end(ui);
+    test_end(ui);
     CHECK(!pressed);
 
     /* control: a frame later it is interactive again */
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "Blink"});
-    lens_end(ui);
+    test_end(ui);
     in = IN0;
     in.cursor = (flux_point){20, 16};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     lens_button(ui, &(lens_button_opts){.label = "Blink"});
-    lens_end(ui);
+    test_end(ui);
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     bool clicked = lens_button(ui, &(lens_button_opts){.label = "Blink"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(clicked);
 
     lens_release(ui);
@@ -295,7 +294,7 @@ static void test_empty_label_current_id_matches(void) {
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = ""});
-    lens_end(ui);
+    test_end(ui);
     /* lens_current_id with an empty label must resolve the node the build
      * produced (the sentinel hash), not the raw scope id. */
     CHECK(lens_find(ui, lens_current_id(ui, "")) != NULL);

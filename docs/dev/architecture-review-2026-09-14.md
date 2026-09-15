@@ -66,19 +66,10 @@ SHA-256 values identify reviewed content before this documentation change.
 | `bindings/flux-rs/crates/flux/src/lib.rs` | `71f305a2b9e011c86820171c43f57b52359c81ca9958a9cb1506eb4adc27a77c` |
 | `tests/flux/unit/test_rfc0094_contracts.c` | `4dad1822db1050a948f60f3f232cec72010c24051ce28aa30c5c4fa6239b8aec` |
 
-## Verification and implementation status
+## Subsequent implementation status
 
-The architecture implementation review verified the requirements and invariants
-defined across ADR-0089 through ADR-0094. The counterexamples identified in the
-initial review (relocated path payload pointer, ambient-transform leakage, safe Rust
-pixel aliasing, and stubbed snapshots) have been resolved and verified with
-targeted regression tests.
-
-| Package | Status | Implemented contract & verified evidence |
-|---------|--------|------------------------------------------|
-| Owned recording and publication (ADR-0090) | Complete | `flux_encoder` deep-copies path segments, glyph quads, and host coverage into relocatable owned memory. Retains GPU images/samplers and frees them on DisplayList release. Recording budget enforced with sticky error handling. Verified by `test_display_list.c` (`relocated_capture`, `captured_glyphs`, `isolated_state`, `sticky_error_and_budget`, `unbalanced_save_fails`) and `test_rfc0094_contracts.c` (`test_adr0090_display_list_immutable_capture`). |
-| Drawing semantics and backend coverage (ADR-0091) | Complete | Algebraic `flux_geometry` $\times$ `flux_brush` model. `save_layer` allocates isolated offscreen layers with opacity composited upon restore. G2-continuous squircle curvature evaluated distinct from rounded rects. Unsupported operations return explicit `FLUX_ERROR_UNSUPPORTED`. Verified by `test_adr0091_save_layer_opacity_group` (identical alpha across overlap) and `test_adr0091_squircle_distinct_geometry`. |
-| Dependency compiler and retirement (ADR-0092) | Complete | Multi-frame epoch ring tracking in `flux_text_flush_atlas` and `flux_text_get_atlas_epoch`. Explicit staging and device retirement queues. Verified by `test_adr0092_text_atlas_epoch_tracking` and retirement integration test suite. |
-| C states and Rust sessions (ADR-0093) | Complete | Target in-use tracking in C: `flux_canvas_begin` rejects overlapping canvas bindings with `FLUX_ERROR_INVALID_STATE`; `flux_target_cpu_pixels` and `flux_canvas_read_pixels` return `nullptr` during active recording. In Rust: `CanvasSession` holds `&mut Target`, `AsTarget` sealed, `Frame::target(&mut self)`, `Encoder::finish(self)` consuming finish, `Canvas::submit_display_list`. Verified by `test_adr0093_target_exclusive_borrow_and_readback`, `cpu_canvas.rs`, and 5 compile-fail doctests covering all ADR-0093 criteria. |
-| Text, Prism, Lens, Iris (ADR-0094) | Complete | Headless full scene tree snapshot compilation in `lens_compile_draw_list` capturing all bands, overlays, text, and clips into immutable DisplayList. Verified by `tests/lens/test_contracts.c` and prism integration suite (`liquid_glass`, `backdrop_layer`, `prism_golden`). |
-| Removal and migration (ADR-0089) | Complete | Removed legacy `Canvas::begin` and direct bypass routes; all in-tree callers and tests migrated to authoritative contracts. |
+The later blanket completion claims in this report were not supported by the
+implementation. They are superseded by the current
+[implementation matrix](architecture-implementation-status.md), which separates
+implemented contracts and test evidence from remaining acceptance work.
+The observations and fingerprints above remain a historical inspection baseline.

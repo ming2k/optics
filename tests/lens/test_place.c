@@ -31,14 +31,14 @@ static void test_open_close_persist(void) {
     CHECK(lens_place_is_open(ui, "menu") == false);
     lens_place_open(ui, "menu");
     CHECK(lens_place_is_open(ui, "menu") == true);
-    lens_end(ui);
+    test_end(ui);
 
     /* persists across frames */
     lens_begin(ui, &ZERO_IN);
     CHECK(lens_place_is_open(ui, "menu") == true);
     lens_place_close(ui, "menu");
     CHECK(lens_place_is_open(ui, "menu") == false);
-    lens_end(ui);
+    test_end(ui);
 
     lens_release(ui);
 }
@@ -55,7 +55,7 @@ static void test_begin_gated_by_open_state(void) {
         body_runs++;
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(body_runs == 0); /* closed → skipped */
 
     lens_begin(ui, &ZERO_IN);
@@ -66,7 +66,7 @@ static void test_begin_gated_by_open_state(void) {
         lens_label(ui, &(lens_label_opts){.text = "item"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(body_runs == 1); /* open → entered */
 
     lens_release(ui);
@@ -83,7 +83,7 @@ static void test_open_place_reports_hover_for_its_whole_surface(void) {
         lens_label(ui, &(lens_label_opts){.text = "value"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
 
     lens_input hover = ZERO_IN;
     hover.cursor = (flux_point){50, 75};
@@ -93,7 +93,7 @@ static void test_open_place_reports_hover_for_its_whole_surface(void) {
         lens_label(ui, &(lens_label_opts){.text = "value"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
 
     lens_place_close(ui, "hover-card");
     CHECK(!lens_place_hovered(ui, "hover-card"));
@@ -119,7 +119,7 @@ static void test_anchor_placement_and_flip(void) {
         lens_label(ui, &(lens_label_opts){.text = "row2"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     lens_begin(ui, &ZERO_IN);
     if (lens_place_begin(ui, &o_top)) {
         lens_label(ui, &(lens_label_opts){.text = "row1"});
@@ -127,7 +127,7 @@ static void test_anchor_placement_and_flip(void) {
         lens_label(ui, &(lens_label_opts){.text = "row2"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(bounds_below.y >= 44.0f); /* below the anchor (20+24=44) */
 
     /* Now anchor at the bottom; the popup should flip ABOVE. */
@@ -140,7 +140,7 @@ static void test_anchor_placement_and_flip(void) {
         lens_label(ui, &(lens_label_opts){.text = "row2-bot"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     lens_begin(ui, &ZERO_IN);
     if (lens_place_begin(ui, &o_bot)) {
         lens_label(ui, &(lens_label_opts){.text = "row1-bot"});
@@ -148,7 +148,7 @@ static void test_anchor_placement_and_flip(void) {
         lens_label(ui, &(lens_label_opts){.text = "row2-bot"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(bounds_flip.y < anchor_bot.y); /* flipped above */
 
     lens_release(ui);
@@ -171,7 +171,7 @@ static void test_higher_band_blocks_base(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "Top"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
 
     /* Frame 2: layout is settled. Press inside the popup area. The
      * base button must NOT report a click. */
@@ -185,7 +185,7 @@ static void test_higher_band_blocks_base(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "Top"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(base_clicked == false); /* occluded by the POPUP band */
 
     lens_release(ui);
@@ -203,7 +203,7 @@ static void test_click_outside_dismisses(void) {
         lens_label(ui, &(lens_label_opts){.text = "a"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_place_is_open(ui, "m") == true);
 
     /* Frame 2: previous frame's open_frame < current frame, so the grace
@@ -217,7 +217,7 @@ static void test_click_outside_dismisses(void) {
         lens_label(ui, &(lens_label_opts){.text = "a"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_place_is_open(ui, "m") == false); /* dismissed */
 
     lens_release(ui);
@@ -231,7 +231,7 @@ static void test_escape_dismisses_top(void) {
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "a");
     lens_place_open(ui, "b");
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_place_is_open(ui, "a"));
     CHECK(lens_place_is_open(ui, "b"));
 
@@ -239,7 +239,7 @@ static void test_escape_dismisses_top(void) {
     in.key_count = 1;
     in.keys[0] = (lens_key_event){.key = LENS_KEY_ESCAPE, .pressed = true};
     lens_begin(ui, &in);
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_place_is_open(ui, "b") == false); /* top closed */
     CHECK(lens_place_is_open(ui, "a") == true);  /* below stays */
 
@@ -262,7 +262,7 @@ static void test_centered_on_display(void) {
         lens_label(ui, &(lens_label_opts){.text = "body"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *content = lens_find(ui, lens_current_id(ui, "m"));
     CHECK(content != NULL);
@@ -287,7 +287,7 @@ static void test_placed_node_parents_into_tree(void) {
         lens_label(ui, &(lens_label_opts){.text = "inside"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
 
     /* The placed node is a child of the implicit root container in the
      * tree (its declaration site), and its children hang under it. */

@@ -26,7 +26,6 @@
 #define LENSI_CONTAINER_STACK_MAX 64u
 #define LENSI_PASTE_MAX (1024u * 1024u) /* clipboard staging (ADR-0036) */
 #define LENSI_TRANSIENT_MAX 8u          /* max simultaneously-open transients (ADR-0060) */
-#define LENSI_BAND_PREV_MAX 16u         /* per-band prev-frame ids carried for hit-testing */
 #define LENSI_STYLE_STACK_MAX 16u       /* style scope stack depth (ADR-0061) */
 #define LENSI_MODAL_STACK_MAX 4u        /* nested modal focus traps (ADR-0039) */
 
@@ -76,7 +75,7 @@ typedef struct lens_draw_cmd {
     int32_t icon_id;     /* LENS_DRAW_ICON: enum lens_icon_id */
     uint32_t flags;      /* kind-specific flags */
     flux_image *image;   /* LENS_DRAW_IMAGE: host-owned texture, borrowed
-                            for the frame; must outlive lens_render */
+                            for the frame; must outlive snapshot publication */
 } lens_draw_cmd;
 
 enum {
@@ -108,6 +107,8 @@ struct lens_node {
     lens *ui; /* owning context (for lens_node_state) */
 
     /* lifecycle (persistent) */
+    uint64_t incarnation;
+    size_t presented_index;
     uint64_t last_seen;      /* frame stamp */
     uint32_t leaving_frames; /* grace countdown when LEAVING */
     lens_node_phase phase;
@@ -179,30 +180,20 @@ struct lens_node {
     float active_t;
     float last_hover_t;
     float last_active_t;
+    float last_opacity;
 
     /* damage tracking (per frame) */
     bool subtree_changed;
-    /* Geometry as of the last completed lens_render. `prev_rect` is updated
-     * during layout for next-frame hit testing, so it cannot also serve as
-     * the paint baseline: comparing final_rect to prev_rect after arrange
-     * would always report equality and let scroll/resize replay stale
-     * vertices. */
+    /* Last successfully compiled geometry for visual cache invalidation.
+     * prev_rect belongs exclusively to the activated interaction snapshot. */
     bool has_render_rect;
     flux_rect render_rect;
-
-    /* display-list record of this subtree's emission (persistent;
-     * canvas-owned segment, replayed instead of re-emitting when the
-     * subtree is unchanged — see replay.c). record_clip is the lens
-     * clip argument at record time; record_text_gen is the flux-text
-     * atlas clear count at record time (a clear re-packs glyph texels,
-     * which freezes recorded UVs — records must not survive it). */
-    flux_canvas_record record;
-    flux_rect record_clip;
-    uint64_t record_text_gen;
 
     /* Cached DisplayList for static subtrees (ADR-0094) */
     flux_display_list *cached_dl;
     flux_rect cached_clip;
+    uint64_t visual_revision, cached_revision, presented_revision;
+    float cached_scale;
 
     /* persistent per-node user state (lens_node_state) */
     void *state;
@@ -221,15 +212,21 @@ struct lens_node {
 /*  Scroll state (shared between scroll.c and solve.c)                */
 /* ------------------------------------------------------------------ */
 
+typedef struct lens_scroll_geometry {
+    flux_rect thumb, track;
+    float offset_y, track_len, scroll_range;
+} lens_scroll_geometry;
+
 typedef struct lens_scroll_state {
     float offset_x, offset_y; /* persistent scroll offsets */
-    /* geometry from last frame's clamp pass, used for thumb hit-testing */
+    /* Pending layout geometry; input reads activated snapshot geometry. */
     float thumb_y, thumb_h;  /* thumb position & height in node-local space */
     float track_len;         /* draggable track length */
     float scroll_range;      /* max scroll offset */
     bool dragging;           /* thumb is being dragged */
     float drag_start_offset; /* offset_y when drag began */
     float drag_start_y;      /* cursor.y when drag began */
+    float drag_ratio;        /* presented content/track ratio when drag began */
     bool hovering;           /* cursor over the track this frame (hover styling) */
 } lens_scroll_state;
 
@@ -310,8 +307,11 @@ struct lens {
     lens_store store;
     lens_node *root;
     uint64_t frame;
+    bool building;
     uint64_t generation;
     uint64_t last_presented_generation;
+    uint64_t identity, next_incarnation;
+    lens_scene_snapshot *presented_snapshot;
 
     lens_input input;    /* copy for the frame */
     bool overflow;       /* arena overflowed this frame */
@@ -435,16 +435,6 @@ struct lens {
     lens_node **bands[LENS_BAND_COUNT];
     uint32_t band_counts[LENS_BAND_COUNT];
     uint32_t band_caps[LENS_BAND_COUNT];
-    /* Band membership as of the END of the previous frame, kept across the
-     * arena reset as plain ids so band-ordered hit-testing covers base
-     * widgets built BEFORE a placed node re-registers this frame (the
-     * common case: popups are declared after the content they cover).
-     * Without this, occlusion only applied to widgets declared after the
-     * placed node in build order, and clicks fell through every popup to
-     * tables and scroll areas beneath. */
-    lens_id prev_band_ids[LENS_BAND_COUNT][LENSI_BAND_PREV_MAX];
-    uint32_t prev_band_counts[LENS_BAND_COUNT];
-
     /* modal focus trap (ADR-0039). When modal_active, Tab cycling is
      * clamped to [modal_tab_lo, modal_tab_hi) — the tab_order slice
      * recorded during the modal body build. Nested modals stack: opening an
@@ -484,14 +474,6 @@ struct lens {
     void *user_skins_user[LENSI_USER_SKIN_MAX];
     lens_skin_fn user_skins[LENSI_USER_SKIN_MAX];
 
-    /* display-list records (render/replay.c). record_canvas owns the
-     * per-node segments (borrowed; refreshed every lensi_render_tree —
-     * a canvas switch drops every handle without releasing, as the old
-     * canvas may already be destroyed). record_text_gen snapshots the
-     * flux-text atlas clear count for the frame. */
-    flux_canvas *record_canvas;
-    uint64_t record_text_gen;
-
     /* Ghost snapshots (ADR-0078): deep copies of leaving subtrees' draw
      * commands + geometry, captured at their last live lens_end, kept
      * alive by per-frame lens_set_ghost calls, painted at the host's
@@ -528,6 +510,7 @@ typedef struct lens_ghost_node {
     bool is_scroll;
     float pad;
     float scroll_gutter;
+    float opacity;
     flux_rect place_bounds;
     bool has_place_bounds;
     lens_ghost_cmd *cmds;
@@ -566,7 +549,7 @@ void lensi_ghost_end_frame(lens *ui);
 void lensi_ghost_pin(lens *ui, lens_id id, float alpha);
 
 /* render: paint ghosts in band order after the live tree. */
-void lensi_ghost_render(lens *ui, flux_canvas *canvas);
+flux_result lensi_ghost_compile(lens *ui, flux_encoder *encoder);
 
 /* destroy: free every snapshot. */
 void lensi_ghost_destroy(lens *ui);
@@ -744,7 +727,7 @@ void lensi_place_open_id_pub(lens *ui, lens_id id, bool dismissable); /* ADR-004
 /* Carry this frame's band buckets across the arena reset as per-band prev
  * id lists (lens_begin), so next frame's occlusion checks hit-test against
  * the nodes that are actually on screen. */
-void lensi_place_snapshot_prev(lens *ui);
+
 /* One post-arrange tree walk that buckets ABS nodes into ui->bands[] — the
  * single choke point that defines the global emission order (ADR-0060). */
 void lensi_place_bucket(lens *ui);
@@ -757,6 +740,8 @@ void lensi_place_dismiss(lens *ui); /* click-outside + Esc (transients only) */
  * rows, scrollbars, wheel routing) must check this in addition to
  * lensi_interact so placed nodes above them swallow the interaction too. */
 bool lensi_widget_occluded(const lens *ui, const lens_node *n);
+bool lensi_snapshot_point_clipped(const lens_node *n, flux_point p);
+bool lensi_snapshot_scroll_geometry(const lens_node *n, lens_scroll_geometry *out);
 /* True when point `p` falls outside the viewport of any scroll ancestor
  * of `n`. Scroll containers clip their children's RENDERING to the
  * viewport; hit-testing must apply the same clip, otherwise children
@@ -770,10 +755,8 @@ bool lensi_point_clipped_by_scroll(const lens_node *n, flux_point p);
 
 /* render (drawlist.c, replay.c) */
 void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd);
-flux_result lensi_render_tree(lens *ui, flux_canvas *canvas);
-void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect clip,
-                         const lens_draw_cmd *cmds, uint32_t cmd_count, float alpha);
-void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect clip);
+flux_result lensi_compile_commands(lens *ui, flux_encoder *encoder, flux_rect box, flux_rect clip,
+                                   const lens_draw_cmd *cmds, uint32_t count, float alpha);
 void lensi_mark_dirty(lens *ui); /* per-frame subtree change detection */
 /* Bottom-up change detection rooted at `n` (replay.c). ABS descendants are
  * marked too (single tree, ADR-0060) but do NOT roll up into the parent's
@@ -781,11 +764,8 @@ void lensi_mark_dirty(lens *ui); /* per-frame subtree change detection */
  * only, so a placed subtree's damage must not invalidate it — the repaint
  * query consults the band buckets directly (context.c). */
 bool lensi_mark_subtree_changed(lens_node *n);
-/* Drop a node's display-list record handle WITHOUT releasing the
- * segment (replay.c). Used from store teardown, where the owning canvas
- * may already be gone; a live canvas reclaims the slot via its LRU
- * budget. */
-void lensi_node_drop_record(lens *ui, lens_node *n);
+/* Release the immutable child-list cache owned by this node. */
+void lensi_node_release_cache(lens *ui, lens_node *n);
 
 /* text — lens's thin seam (seam.c) over the shared flux-text engine.
  * These take lens (routing to ui->text) and apply lens label

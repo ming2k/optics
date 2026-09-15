@@ -8,42 +8,32 @@
  */
 
 #include "test_helpers.h"
+#include <flux-text/text.h>
 #include <flux/canvas.h>
 #include <flux/canvas_helpers.h>
 #include <flux/core.h>
 #include <flux/math.h>
-#include <flux-text/text.h>
 
 static void test_flux_init_macro(void) {
     /* Lowercase struct form */
-    flux_buffer_desc b1 = FLUX_INIT(buffer_desc,
-        .size = 1024,
-        .usage = FLUX_BUFFER_USAGE_VERTEX,
-        .location = FLUX_BUFFER_HOST_VISIBLE
-    );
+    flux_buffer_desc b1 = FLUX_INIT(buffer_desc, .size = 1024, .usage = FLUX_BUFFER_USAGE_VERTEX,
+                                    .location = FLUX_BUFFER_HOST_VISIBLE);
     EXPECT(b1.type == FLUX_TYPE_BUFFER_DESC);
     EXPECT(b1.next == nullptr);
     EXPECT(b1.size == 1024);
     EXPECT(b1.usage == FLUX_BUFFER_USAGE_VERTEX);
 
     /* Uppercase descriptor form */
-    flux_target_desc t1 = FLUX_INIT(TARGET_DESC,
-        .width = 800,
-        .height = 600,
-        .usage = FLUX_TARGET_COLOR,
-        .format = FLUX_FORMAT_RGBA8_UNORM
-    );
+    flux_target_desc t1 = FLUX_INIT(TARGET_DESC, .width = 800, .height = 600,
+                                    .usage = FLUX_TARGET_COLOR, .format = FLUX_FORMAT_RGBA8_UNORM);
     EXPECT(t1.type == FLUX_TYPE_TARGET_DESC);
     EXPECT(t1.next == nullptr);
     EXPECT(t1.width == 800);
     EXPECT(t1.height == 600);
 
     /* CPU target desc */
-    flux_cpu_target_desc ct1 = FLUX_INIT(CPU_TARGET_DESC,
-        .width = 64,
-        .height = 64,
-        .format = FLUX_FORMAT_RGBA8_UNORM
-    );
+    flux_cpu_target_desc ct1 =
+        FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
     EXPECT(ct1.type == FLUX_TYPE_TARGET_DESC);
     EXPECT(ct1.next == nullptr);
     EXPECT(ct1.width == 64);
@@ -79,11 +69,8 @@ static void test_arena_lifecycle(void) {
 
 static void test_cpu_target_and_canvas_polymorphism(void) {
     /* 1. Create CPU Target */
-    flux_cpu_target_desc t_desc = FLUX_INIT(CPU_TARGET_DESC,
-        .width = 64,
-        .height = 64,
-        .format = FLUX_FORMAT_RGBA8_UNORM
-    );
+    flux_cpu_target_desc t_desc =
+        FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *target = nullptr;
     flux_result r = flux_target_create_cpu(&t_desc, &target);
     EXPECT(r == FLUX_OK);
@@ -97,12 +84,8 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
     flux_target_release(retained);
 
     /* 2. Create CPU Canvas */
-    flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC,
-        .backend = FLUX_CANVAS_BACKEND_CPU,
-        .width = 64,
-        .height = 64,
-        .scale = 1.0f
-    );
+    flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU,
+                                        .width = 64, .height = 64, .scale = 1.0f);
     flux_canvas *canvas = nullptr;
     r = flux_canvas_create(&c_desc, &canvas);
     EXPECT(r == FLUX_OK);
@@ -119,11 +102,11 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
     EXPECT(r == FLUX_OK);
 
     /* 4. Use inline canvas helpers from <flux/canvas_helpers.h> */
-    flux_rect rect = { 4.0f, 4.0f, 24.0f, 24.0f };
+    flux_rect rect = {4.0f, 4.0f, 24.0f, 24.0f};
     flux_color rect_color = flux_color_rgba_premul(255, 0, 0, 255);
     flux_canvas_fill_rect_color(canvas, rect, rect_color);
 
-    flux_rect rrect = { 32.0f, 4.0f, 24.0f, 24.0f };
+    flux_rect rrect = {32.0f, 4.0f, 24.0f, 24.0f};
     flux_color rrect_color = flux_color_rgba_premul(0, 255, 0, 255);
     flux_canvas_fill_rrect(canvas, rrect, 4.0f, rrect_color);
 
@@ -179,7 +162,8 @@ static void test_adr0088_clean_break(void) {
     flux_geometry r_geom = flux_geom_rect((flux_rect){10.0f, 10.0f, 50.0f, 50.0f});
     EXPECT(r_geom.kind == FLUX_GEOM_RECT);
 
-    flux_geometry sq_geom = flux_geom_squircle((flux_rect){0.0f, 0.0f, 100.0f, 100.0f}, 16.0f, 0.8f);
+    flux_geometry sq_geom =
+        flux_geom_squircle((flux_rect){0.0f, 0.0f, 100.0f, 100.0f}, 16.0f, 0.8f);
     EXPECT(sq_geom.kind == FLUX_GEOM_SQUIRCLE);
     EXPECT(sq_geom.squircle.curvature == 0.8f);
 
@@ -208,17 +192,12 @@ static void test_adr0088_clean_break(void) {
     flux_encoder_destroy(enc);
 
     /* 4. Play back into CPU canvas via flux_canvas_submit_display_list */
-    flux_cpu_target_desc t_desc = FLUX_INIT(CPU_TARGET_DESC,
-        .width = 128,
-        .height = 128,
-        .format = FLUX_FORMAT_RGBA8_UNORM
-    );
+    flux_cpu_target_desc t_desc =
+        FLUX_INIT(CPU_TARGET_DESC, .width = 128, .height = 128, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *target = nullptr;
     EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
-    flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC,
-        .backend = FLUX_CANVAS_BACKEND_CPU
-    );
+    flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU);
     flux_canvas *c = nullptr;
     EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
@@ -261,14 +240,16 @@ static void test_adr0090_display_list_immutable_capture(void) {
     EXPECT(flux_display_list_command_count(dl) == 1);
     EXPECT(flux_display_list_size(dl) > 0);
 
-    /* Now destroy encoder, reset encoder arena, and completely reset/destroy caller's path and arena */
+    /* Now destroy encoder, reset encoder arena, and completely reset/destroy caller's path and
+     * arena */
     flux_encoder_destroy(enc);
     flux_arena_deinit(&enc_arena);
     flux_path_reset(path);
     flux_arena_deinit(&caller_arena);
 
     /* Play back display list into CPU canvas — the embedded path segments must survive! */
-    flux_cpu_target_desc t_desc = FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
+    flux_cpu_target_desc t_desc =
+        FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *target = nullptr;
     EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
@@ -295,7 +276,8 @@ static void test_adr0090_display_list_immutable_capture(void) {
 }
 
 static void test_adr0091_save_layer_opacity_group(void) {
-    flux_cpu_target_desc t_desc = FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
+    flux_cpu_target_desc t_desc =
+        FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *target = nullptr;
     EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
@@ -339,7 +321,8 @@ static void test_adr0091_save_layer_opacity_group(void) {
 }
 
 static void test_adr0091_squircle_distinct_geometry(void) {
-    flux_cpu_target_desc t_desc = FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
+    flux_cpu_target_desc t_desc =
+        FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *t_sq = nullptr;
     EXPECT(flux_target_create_cpu(&t_desc, &t_sq) == FLUX_OK);
 
@@ -380,7 +363,8 @@ static void test_adr0091_squircle_distinct_geometry(void) {
                 break;
             }
         }
-        if (diff_detected) break;
+        if (diff_detected)
+            break;
     }
     EXPECT(diff_detected);
 
@@ -403,11 +387,13 @@ static void test_adr0092_text_atlas_epoch_tracking(void) {
 }
 
 static void test_adr0093_target_exclusive_borrow_and_readback(void) {
-    flux_cpu_target_desc t_desc = FLUX_INIT(CPU_TARGET_DESC, .width = 32, .height = 32, .format = FLUX_FORMAT_RGBA8_UNORM);
+    flux_cpu_target_desc t_desc =
+        FLUX_INIT(CPU_TARGET_DESC, .width = 32, .height = 32, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *target = nullptr;
     EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
-    flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 32, .height = 32);
+    flux_canvas_desc c_desc =
+        FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 32, .height = 32);
     flux_canvas *c1 = nullptr;
     EXPECT(flux_canvas_create(&c_desc, &c1) == FLUX_OK);
     flux_canvas *c2 = nullptr;

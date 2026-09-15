@@ -45,10 +45,10 @@ static void check_null_override(const char *label, build_fn plain, build_fn skin
             in.cursor = (flux_point){20, 20};
         lens_begin(a, &in);
         plain(a, false);
-        lens_end(a);
+        test_end(a);
         lens_begin(b, &in);
         skinned_null(b, true);
-        lens_end(b);
+        test_end(b);
     }
 
     CHECK(cmds_equal(find_widget(a, label), find_widget(b, label)));
@@ -105,7 +105,7 @@ static void test_custom_skin_record_and_output(void) {
 
     lens_begin(ui, &IN0);
     lens_selectable(ui, &(lens_selectable_opts){.label = "Row", .selected = true});
-    lens_end(ui);
+    test_end(ui);
     lens_node *def = find_widget(ui, "Row");
     CHECK(def != NULL);
     uint32_t def_cmds = def ? def->cmd_count : 0;
@@ -115,7 +115,7 @@ static void test_custom_skin_record_and_output(void) {
     lens_set_skin(ui, LENS_WIDGET_SELECTABLE, underline_skin);
     lens_begin(ui, &in);
     lens_selectable(ui, &(lens_selectable_opts){.label = "Row", .selected = true});
-    lens_end(ui);
+    test_end(ui);
     lens_set_skin(ui, LENS_WIDGET_SELECTABLE, NULL);
 
     CHECK(g_seen.kind == LENS_WIDGET_SELECTABLE);
@@ -161,7 +161,7 @@ static void test_context_skin_override(void) {
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    lens_end(ui);
+    test_end(ui);
     lens_node *n = find_widget(ui, "OK");
     CHECK(n != NULL);
     uint32_t default_cmds = n ? n->cmd_count : 0;
@@ -171,7 +171,7 @@ static void test_context_skin_override(void) {
     g_context_skin_ran = false;
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(g_context_skin_ran);
     CHECK(n && n->cmd_count == 1);
     CHECK(n && n->cmds[0].kind == LENS_DRAW_RECT);
@@ -179,14 +179,14 @@ static void test_context_skin_override(void) {
     lens_set_skin(ui, LENS_WIDGET_BUTTON, hollow_button_skin);
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(n && n->cmd_count == 1);
     CHECK(n && n->cmds[0].kind == LENS_DRAW_BORDER);
 
     lens_set_skin(ui, LENS_WIDGET_BUTTON, NULL);
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(n && n->cmd_count == default_cmds);
     CHECK(n && n->cmds[0].kind == LENS_DRAW_RECT);
 
@@ -241,10 +241,10 @@ static void check_kind(const char *name, lens_widget_kind kind, probe_build_fn b
 
     lens_begin(ui, &IN0);
     build(ui);
-    lens_end(ui);
+    test_end(ui);
     lens_begin(ui, &IN0);
     build(ui);
-    lens_end(ui);
+    test_end(ui);
     lens_node *n = find(ui);
     CHECK(n != NULL);
     uint32_t default_cmds = n ? n->cmd_count : 0;
@@ -253,7 +253,7 @@ static void check_kind(const char *name, lens_widget_kind kind, probe_build_fn b
     g_probe_ran = false;
     lens_begin(ui, &IN0);
     build(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(g_probe_ran);
     CHECK(g_probe_seen.kind == kind);
     CHECK(n && n->cmd_count == 1);
@@ -262,7 +262,7 @@ static void check_kind(const char *name, lens_widget_kind kind, probe_build_fn b
     lens_set_skin(ui, kind, NULL);
     lens_begin(ui, &IN0);
     build(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(n && n->cmd_count == default_cmds);
     lens_release(ui);
 }

@@ -18,7 +18,7 @@ static void test_scroll_offset(void) {
     lens_size(ui, 200, 200);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* Frame 2: scroll down */
     lens_input in = IN0;
@@ -28,7 +28,7 @@ static void test_scroll_offset(void) {
     lens_size(ui, 200, 200);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     float sx = 0, sy = 0;
     CHECK(lens_scroll_offset(ui, "log", &sx, &sy));
@@ -48,7 +48,7 @@ static void test_precise_scroll_uses_pixel_distance(void) {
     lens_size(ui, 200, 200);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* Frame 2: 12 px touchpad scroll */
     in.scroll_y = 0.0f;
@@ -57,7 +57,7 @@ static void test_precise_scroll_uses_pixel_distance(void) {
     lens_size(ui, 200, 200);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     float sx = 0, sy = 0;
     CHECK(lens_scroll_offset(ui, "log", &sx, &sy));
@@ -82,7 +82,7 @@ static void test_programmatic_scroll_is_applied_and_clamped(void) {
     }
     lens_scroll_end(ui);
     lens_scroll_to(ui, "jump-scroll", 0, 60);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *scroll = lens_node_first_child(lens_root(ui));
     lens_node *first = lens_node_first_child(scroll);
@@ -120,13 +120,13 @@ static void test_scrollbar_gutter_clips_overflowing_descendants(void) {
         lens_close(ui);
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     flux_canvas *canvas = NULL;
     CHECK(flux_canvas_create_cpu(100, 40, 1.0f, &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     CHECK(flux_canvas_cpu_begin(canvas, &black) == FLUX_OK);
-    CHECK(lens_render(ui, canvas) == FLUX_OK);
+    CHECK(test_snapshot_render(ui, canvas) == FLUX_OK);
     flux_canvas_cpu_end(canvas);
 
     uint32_t width = 0, height = 0, stride = 0;

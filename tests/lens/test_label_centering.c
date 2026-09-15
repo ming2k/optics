@@ -28,7 +28,7 @@ int main(void) {
                            .box.height = 34.0f, .gap = 7.0f, .pad = 5.0f, .cross = LENS_CENTER});
     lens_label(ui, &(lens_label_opts){.text = "row label"});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *label = lens_node_first_child(row);
@@ -42,7 +42,7 @@ int main(void) {
     /* Unconstrained, the label keeps its intrinsic padded height. */
     lens_begin(ui, &IN0);
     lens_label(ui, &(lens_label_opts){.text = "loose label"});
-    lens_end(ui);
+    test_end(ui);
     lens_node *loose = lens_node_first_child(lens_root(ui));
     CHECK(loose != NULL);
     const lens_draw_cmd *loose_cmd = first_text_cmd(loose);

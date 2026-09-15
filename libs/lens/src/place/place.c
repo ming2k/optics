@@ -278,28 +278,6 @@ void lensi_place_bucket(lens *ui) {
         band_collect(ui, ui->root);
 }
 
-/* ---- prev-frame snapshot for band-ordered hit-testing -------------- */
-
-void lensi_place_snapshot_prev(lens *ui) {
-    if (!ui)
-        return;
-    for (uint32_t b = 0; b < (uint32_t)LENS_BAND_COUNT; b++) {
-        uint32_t count = 0;
-        for (uint32_t i = 0; i < ui->band_counts[b]; i++) {
-            if (count >= LENSI_BAND_PREV_MAX) {
-                /* A noisier band than the prev-list budget would silently
-                 * drop occlusion coverage — surface it, never truncate
-                 * quietly. */
-                lensi_set_overflow(ui);
-                break;
-            }
-            if (ui->bands[b][i])
-                ui->prev_band_ids[b][count++] = ui->bands[b][i]->id;
-        }
-        ui->prev_band_counts[b] = count;
-    }
-}
-
 /* ---- dismissal: Escape + click-outside (transients only) ----------- */
 /* Persistent placed nodes are never dismissed; they are not in the
  * open_transients[] slot table, so this pass leaves them alone. */

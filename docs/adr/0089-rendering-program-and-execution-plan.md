@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-14
 - Scope: Flux, flux-text, scene producers, Prism, Lens, Iris, C and Rust APIs.
-- Implementation: Complete; verified against acceptance criteria in [the implementation matrix](../dev/architecture-review-2026-09-14.md).
+- Implementation: In progress; acceptance evidence and remaining work are tracked in [the implementation matrix](../dev/architecture-implementation-status.md).
 
 ## Context
 

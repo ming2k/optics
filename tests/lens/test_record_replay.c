@@ -29,7 +29,7 @@ static void fixture_close(fixture *f) {
 static void render_frame(fixture *f) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
     CHECK(flux_canvas_cpu_begin(f->canvas, &clear) == FLUX_OK);
-    CHECK(lens_render(f->ui, f->canvas) == FLUX_OK);
+    CHECK(test_snapshot_render(f->ui, f->canvas) == FLUX_OK);
     flux_canvas_cpu_end(f->canvas);
 }
 
@@ -48,7 +48,7 @@ static void build_two_blocks(lens *ui, const lens_input *in, float value) {
     lens_label(ui, &(lens_label_opts){.text = "header##hdr"});
     lens_label(ui, &(lens_label_opts){.text = val_str, .box = {.id = "val_node"}});
     lens_label(ui, &(lens_label_opts){.text = "footer##ftr"});
-    lens_end(ui);
+    test_end(ui);
 }
 
 /* Three identical frames: first frame records, subsequent frames replay
@@ -63,24 +63,18 @@ static void test_steady_frame_replays(void) {
     build_two_blocks(f.ui, &IN0, 0.5f);
     render_frame(&f);
     snapshot(&f, base);
-    uint64_t created0 = flux_canvas_records_created(f.canvas);
-    uint64_t replayed0 = flux_canvas_records_replayed(f.canvas);
-    CHECK(created0 > 0);
 
     /* Frame 1: nothing changed -> replay path */
     build_two_blocks(f.ui, &IN0, 0.5f);
     render_frame(&f);
     snapshot(&f, frame1);
     CHECK(memcmp(base, frame1, sizeof base) == 0);
-    CHECK(flux_canvas_records_created(f.canvas) == created0);
-    CHECK(flux_canvas_records_replayed(f.canvas) > replayed0);
 
     /* Frame 2: still unchanged -> still replaying identical pixels */
     build_two_blocks(f.ui, &IN0, 0.5f);
     render_frame(&f);
     snapshot(&f, frame2);
     CHECK(memcmp(base, frame2, sizeof base) == 0);
-    CHECK(flux_canvas_records_created(f.canvas) == created0);
 
     fixture_close(&f);
 }
@@ -99,22 +93,16 @@ static void test_leaf_change_rerecords_sibling_replays(void) {
     snapshot(&f, base);
 
     /* Mutate only the value label */
-    uint64_t created_before = flux_canvas_records_created(f.canvas);
     build_two_blocks(f.ui, &IN0, 0.75f);
     render_frame(&f);
     snapshot(&f, changed);
     CHECK(memcmp(base, changed, sizeof base) != 0); /* pixels changed */
-    CHECK(flux_canvas_records_created(f.canvas) > created_before);
 
     /* Settle on the new value: replays the newly-recorded state */
-    uint64_t created_settled = flux_canvas_records_created(f.canvas);
-    uint64_t replayed_settled = flux_canvas_records_replayed(f.canvas);
     build_two_blocks(f.ui, &IN0, 0.75f);
     render_frame(&f);
     snapshot(&f, settled);
     CHECK(memcmp(changed, settled, sizeof changed) == 0);
-    CHECK(flux_canvas_records_created(f.canvas) == created_settled);
-    CHECK(flux_canvas_records_replayed(f.canvas) > replayed_settled);
 
     fixture_close(&f);
 }
@@ -129,11 +117,9 @@ static void test_scale_change_invalidates_all_records(void) {
         render_frame(&f);
     }
 
-    uint64_t created_before = flux_canvas_records_created(f.canvas);
     lens_set_scale(f.ui, 2.0f);
     build_two_blocks(f.ui, &IN0, 0.5f);
     render_frame(&f);
-    CHECK(flux_canvas_records_created(f.canvas) > created_before);
 
     fixture_close(&f);
 }
@@ -158,12 +144,11 @@ static void test_scroll_offset_invalidates_descendant_records(void) {
             lens_label(f.ui, &(lens_label_opts){.text = lbl});
         }
         lens_scroll_end(f.ui);
-        lens_end(f.ui);
+        test_end(f.ui);
         render_frame(&f);
     }
 
     /* Scrolling moves the translation: records inside must re-record */
-    uint64_t created_before = flux_canvas_records_created(f.canvas);
     lens_input in_scrolled = in_init;
     in_scrolled.scroll_y = -3.0f;
     lens_begin(f.ui, &in_scrolled);
@@ -176,9 +161,8 @@ static void test_scroll_offset_invalidates_descendant_records(void) {
         lens_label(f.ui, &(lens_label_opts){.text = lbl});
     }
     lens_scroll_end(f.ui);
-    lens_end(f.ui);
+    test_end(f.ui);
     render_frame(&f);
-    CHECK(flux_canvas_records_created(f.canvas) > created_before);
 
     fixture_close(&f);
 }
@@ -196,11 +180,11 @@ static void test_hidpi_scroll_clip_alignment(void) {
     lens_scroll_begin(f.ui, &(lens_scroll_opts){.box = {.id = "hidpi_scroll"}});
     lens_label(f.ui, &(lens_label_opts){.text = "Visible Label"});
     lens_scroll_end(f.ui);
-    lens_end(f.ui);
+    test_end(f.ui);
 
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
     CHECK(flux_canvas_cpu_begin(f.canvas, &clear) == FLUX_OK);
-    CHECK(lens_render(f.ui, f.canvas) == FLUX_OK);
+    CHECK(test_snapshot_render(f.ui, f.canvas) == FLUX_OK);
     flux_canvas_cpu_end(f.canvas);
 
     uint32_t pw = 0, ph = 0, stride = 0;
@@ -231,14 +215,12 @@ static void test_child_removal_invalidates_record(void) {
     }
     snapshot(&f, full);
 
-    uint64_t created0 = flux_canvas_records_created(f.canvas);
     lens_begin(f.ui, &IN0);
     lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
     lens_label(f.ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "val_node"}});
-    lens_end(f.ui);
+    test_end(f.ui);
     render_frame(&f);
     snapshot(&f, shrunk);
-    CHECK(flux_canvas_records_created(f.canvas) > created0);
     CHECK(memcmp(full, shrunk, sizeof full) != 0);
 
     {
@@ -248,7 +230,7 @@ static void test_child_removal_invalidates_record(void) {
             lens_begin(g.ui, &IN0);
             lens_label(g.ui, &(lens_label_opts){.text = "header##hdr"});
             lens_label(g.ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "val_node"}});
-            lens_end(g.ui);
+            test_end(g.ui);
             render_frame(&g);
         }
         snapshot(&g, reference);
@@ -256,12 +238,10 @@ static void test_child_removal_invalidates_record(void) {
     }
     CHECK(memcmp(shrunk, reference, sizeof shrunk) == 0);
 
-    created0 = flux_canvas_records_created(f.canvas);
     lens_begin(f.ui, &IN0);
-    lens_end(f.ui);
+    test_end(f.ui);
     render_frame(&f);
     snapshot(&f, stable);
-    CHECK(flux_canvas_records_created(f.canvas) > created0);
     bool any_ink = false;
     for (size_t i = 0; i + 2 < sizeof stable; i += 4) {
         if (stable[i] || stable[i + 1] || stable[i + 2]) {

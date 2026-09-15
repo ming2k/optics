@@ -296,12 +296,8 @@ static_assert(FLUX_TYPE_EFFECT_SHADOW_DESC == 40, "flux_struct_type: append only
 /*  C23 Type-Safe Compound Literal Initializer (RFC-0094 / ADR-0087)  */
 /* ================================================================== */
 
-#define FLUX_INIT(TypeName, ...) \
-    ((flux_##TypeName){ \
-        .type = FLUX_TYPE_##TypeName, \
-        .next = nullptr, \
-        __VA_ARGS__ \
-    })
+#define FLUX_INIT(TypeName, ...)                                                                   \
+    ((flux_##TypeName){.type = FLUX_TYPE_##TypeName, .next = nullptr, __VA_ARGS__})
 
 #define FLUX_TYPE_device_desc FLUX_TYPE_DEVICE_DESC
 #define FLUX_TYPE_surface_desc FLUX_TYPE_SURFACE_DESC
@@ -339,7 +335,6 @@ typedef struct flux_target_desc flux_TARGET_DESC;
 typedef struct flux_cpu_target_desc flux_CPU_TARGET_DESC;
 typedef struct flux_canvas_pass_desc flux_CANVAS_PASS_DESC;
 typedef struct flux_glyph_run_desc flux_GLYPH_RUN_DESC;
-
 
 /* ================================================================== */
 /*  Allocator & logger (caller-supplied)                              */
@@ -856,9 +851,9 @@ typedef struct flux_cpu_target_desc {
     const void *next;
     uint32_t width;
     uint32_t height;
-    flux_format format;    /* FLUX_FORMAT_RGBA8_UNORM, FLUX_FORMAT_BGRA8_UNORM */
-    void *user_buffer;     /* optional external host memory; if NULL, target allocates */
-    size_t stride_bytes;   /* optional row pitch (0 = tightly packed) */
+    flux_format format;  /* FLUX_FORMAT_RGBA8_UNORM, FLUX_FORMAT_BGRA8_UNORM */
+    void *user_buffer;   /* optional external host memory; if NULL, target allocates */
+    size_t stride_bytes; /* optional row pitch (0 = tightly packed) */
 } flux_cpu_target_desc;
 
 #define FLUX_CPU_TARGET_DESC_INIT {.type = FLUX_TYPE_TARGET_DESC}

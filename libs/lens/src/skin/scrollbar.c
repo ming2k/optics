@@ -6,9 +6,8 @@
  * draws scrollbars — it runs from lens_end after the whole tree (placed
  * subtrees included, ADR-0060) has been measured, arranged, and placed, so
  * every rect it reads is final for the frame. The geometry math is the
- * pre-skin code moved verbatim; the walk also persists the thumb geometry
- * that next frame's thumb hit-testing reads (same write timing as before:
- * after arrange, once per frame). */
+ * pre-skin code moved verbatim; the walk also stores pending thumb geometry
+ * for snapshot capture. Input reads the geometry activated after presentation. */
 
 #include "../internal.h"
 
@@ -99,7 +98,7 @@ static void lensi_skin_scrollbar(lens *ui, lens_node *n) {
                                             .radius = radius});
     }
 
-    /* persist thumb geometry for next frame's hit-testing (the clamped
+    /* Store pending thumb geometry for snapshot capture (the clamped
      * offsets are layout state; the clamp pass keeps those) */
     ss->thumb_y = thumb_pos;
     ss->thumb_h = thumb_h;

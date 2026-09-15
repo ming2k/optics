@@ -1,7 +1,7 @@
 /* test_opacity.c — lens_set_opacity: the frame-scoped, node-stamped fade.
  *
- * The switch must bake into every draw command's colour alpha at emission
- * (one knob fading text/rects/icons/images together), stamp per node so
+ * The switch stamps each node's isolated visual group without modifying
+ * its source paint colours, so
  * siblings built at different opacities coexist in one frame, and reset
  * to 1.0 at lens_begin so a forgotten restore cannot dim the next frame.
  * CPU-only; reads the node's draw list via internal.h (same pattern as
@@ -47,7 +47,7 @@ int main(void) {
     lens_label(ui, &(lens_label_opts){.text = "dimmed"});
     lens_set_opacity(ui, 1.0f);
     lens_label(ui, &(lens_label_opts){.text = "solid"});
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *dimmed = lens_node_first_child(lens_root(ui));
     lens_node *solid = dimmed ? dimmed->next_sibling : NULL;
@@ -55,14 +55,15 @@ int main(void) {
     const lens_draw_cmd *solid_cmd = first_text_cmd(solid);
     CHECK(dim_cmd != NULL);
     CHECK(solid_cmd != NULL);
-    CHECK(alpha_of(dim_cmd->color) == (uint8_t)(full * 0.5f + 0.5f));
+    CHECK(alpha_of(dim_cmd->color) == (uint8_t)full);
+    CHECK(dimmed->opacity == 0.5f);
     CHECK(alpha_of(solid_cmd->color) == (uint8_t)full);
 
     /* Frame 2: the switch reset with lens_begin — no restore needed. */
     lens_begin(ui, &IN0);
     lens_label(ui, &(lens_label_opts){.text = "dimmed"});
     lens_label(ui, &(lens_label_opts){.text = "solid"});
-    lens_end(ui);
+    test_end(ui);
     dimmed = lens_node_first_child(lens_root(ui));
     dim_cmd = first_text_cmd(dimmed);
     CHECK(dim_cmd != NULL);

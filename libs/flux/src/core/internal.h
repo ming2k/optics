@@ -820,6 +820,9 @@ struct flux_frame {
 bool flux_frame_track_foreign_image(flux_frame *frame, VkImage image, void *resource,
                                     flux_frame_resource_retain_fn retain,
                                     flux_frame_resource_release_fn release, bool *foreign_owned);
+bool flux_frame_track_resource(flux_frame *frame, void *resource,
+                               flux_frame_resource_retain_fn retain,
+                               flux_frame_resource_release_fn release);
 /* Attach a one-shot semaphore to an image already tracked by this frame.
  * Takes ownership of `semaphore` only on success. */
 bool flux_frame_set_foreign_image_acquire(flux_frame *frame, void *resource, VkSemaphore semaphore);

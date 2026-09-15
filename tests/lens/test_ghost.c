@@ -40,7 +40,7 @@ static void snapshot(const fixture *f, uint8_t *out) {
 static void render_frame(const fixture *f) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
     CHECK(flux_canvas_cpu_begin(f->canvas, &clear) == FLUX_OK);
-    CHECK(lens_render(f->ui, f->canvas) == FLUX_OK);
+    CHECK(test_snapshot_render(f->ui, f->canvas) == FLUX_OK);
     flux_canvas_cpu_end(f->canvas);
 }
 
@@ -51,7 +51,7 @@ static void build_with_footer(lens *ui, float progress) {
     lens_label(ui, &(lens_label_opts){.text = "header##hdr"});
     lens_label(ui, &(lens_label_opts){.text = val_str, .box = {.id = "load"}});
     lens_set_ghost(ui, lens_current_id(ui, "load"), 1.0f);
-    lens_end(ui);
+    test_end(ui);
 }
 
 static size_t ink_pixels(const uint8_t *fb) {
@@ -80,7 +80,7 @@ static void test_armed_subtree_ghosts_after_removal(void) {
     lens_begin(f.ui, &IN0);
     lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
     lens_set_ghost(f.ui, lens_current_id(f.ui, "load"), 1.0f); /* refresh pin */
-    lens_end(f.ui);
+    test_end(f.ui);
     render_frame(&f);
     snapshot(&f, ghosted);
     CHECK(memcmp(with_footer, ghosted, sizeof with_footer) == 0);
@@ -91,7 +91,7 @@ static void test_armed_subtree_ghosts_after_removal(void) {
     for (int i = 0; i < GHOST_MAX_FRAMES + 10; i++) {
         lens_begin(f.ui, &IN0);
         lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
-        lens_end(f.ui);
+        test_end(f.ui);
         render_frame(&f);
     }
     snapshot(&f, expired);
@@ -101,7 +101,7 @@ static void test_armed_subtree_ghosts_after_removal(void) {
         for (int i = 0; i < 3; i++) {
             lens_begin(g.ui, &IN0);
             lens_label(g.ui, &(lens_label_opts){.text = "header##hdr"});
-            lens_end(g.ui);
+            test_end(g.ui);
             render_frame(&g);
         }
         uint8_t reference[W * H * 4];
@@ -129,7 +129,7 @@ static void test_ghost_alpha_matches_live_opacity_path(void) {
         lens_begin(g.ui, &IN0);
         lens_label(g.ui, &(lens_label_opts){.text = "header##hdr"});
         lens_set_ghost(g.ui, lens_current_id(g.ui, "load"), alpha);
-        lens_end(g.ui);
+        test_end(g.ui);
         render_frame(&g);
         snapshot(&g, ghost_shot);
 
@@ -141,7 +141,7 @@ static void test_ghost_alpha_matches_live_opacity_path(void) {
             lens_begin(l.ui, &IN0);
             lens_label(l.ui, &(lens_label_opts){.text = "header##hdr"});
             lens_label(l.ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "load"}});
-            lens_end(l.ui);
+            test_end(l.ui);
             render_frame(&l);
         }
         lens_begin(l.ui, &IN0);
@@ -149,7 +149,7 @@ static void test_ghost_alpha_matches_live_opacity_path(void) {
         lens_set_opacity(l.ui, alpha);
         lens_label(l.ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "load"}});
         lens_set_opacity(l.ui, 1.0f);
-        lens_end(l.ui);
+        test_end(l.ui);
         render_frame(&l);
         snapshot(&l, live_shot);
 
@@ -175,7 +175,7 @@ static void test_refresh_extends_lifetime(void) {
     lens_begin(f.ui, &IN0);
     lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
     lens_set_ghost(f.ui, lens_current_id(f.ui, "load"), 1.0f);
-    lens_end(f.ui);
+    test_end(f.ui);
     render_frame(&f);
     snapshot(&f, first);
 
@@ -184,7 +184,7 @@ static void test_refresh_extends_lifetime(void) {
         lens_begin(f.ui, &IN0);
         lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
         lens_set_ghost(f.ui, lens_current_id(f.ui, "load"), 1.0f);
-        lens_end(f.ui);
+        test_end(f.ui);
         render_frame(&f);
     }
     snapshot(&f, later);
@@ -203,14 +203,14 @@ static void test_ghost_never_hit_tests(void) {
         lens_begin(f.ui, &IN0);
         lens_button(f.ui, &(lens_button_opts){.label = "target##btn"});
         lens_set_ghost(f.ui, lens_current_id(f.ui, "target##btn"), 1.0f);
-        lens_end(f.ui);
+        test_end(f.ui);
         render_frame(&f);
     }
     lens_input click = IN0;
     click.mouse_pressed[0] = true;
     lens_begin(f.ui, &click);
     lens_set_ghost(f.ui, lens_current_id(f.ui, "target##btn"), 1.0f);
-    lens_end(f.ui);
+    test_end(f.ui);
 
     bool clicked = false;
     for (int i = 0; i < 8; i++) {
@@ -221,7 +221,7 @@ static void test_ghost_never_hit_tests(void) {
             in.mouse_released[LENS_MOUSE_LEFT] = true;
         lens_begin(f.ui, &in);
         clicked = lens_button(f.ui, &(lens_button_opts){.label = "target##btn"}).clicked;
-        lens_end(f.ui);
+        test_end(f.ui);
         render_frame(&f);
     }
     CHECK(clicked);

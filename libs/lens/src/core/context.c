@@ -1,6 +1,7 @@
 /* context.c — lens lifecycle and the per-frame envelope (ADR-0024/0009). */
 
 #include "../internal.h"
+#include <stdatomic.h>
 
 void lens_version(int *major, int *minor, int *patch) {
     if (major)
@@ -103,6 +104,8 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
      * directly.) */
     const lens_desc d = lensi_desc_copy_in(desc);
 
+    static atomic_uint_fast64_t next_identity = 1;
+    ui->identity = atomic_fetch_add_explicit(&next_identity, 1, memory_order_relaxed);
     ui->device = d.device;
     if (ui->device) {
         flux_device *dev = flux_device_retain(ui->device);
@@ -151,6 +154,7 @@ fail_arena:
 void lens_release(lens *ui) {
     if (!ui)
         return;
+    lens_snapshot_release(ui->presented_snapshot);
     lensi_ghost_destroy(ui);
     flux_text_release(ui->text); /* null-safe */
     lensi_store_destroy(ui);
@@ -277,7 +281,7 @@ bool lens_anim_pending(const lens *ui) {
 }
 
 /* Read-only repaint query for damage-driven hosts (valid between lens_end
- * and the next lens_begin). True when anything the last lens_render would
+ * and the next lens_begin). True when anything the last snapshot publication would
  * have produced differs from what is already on screen. */
 bool lens_frame_needs_repaint(const lens *ui) {
     if (!ui)
@@ -285,7 +289,8 @@ bool lens_frame_needs_repaint(const lens *ui) {
 
     /* Base tree damage: lifecycle, geometry, hover/active eases and
      * draw-list hash changes, rolled up bottom-up by lensi_mark_dirty. */
-    if (ui->root && ui->root->subtree_changed)
+    if (ui->root &&
+        (ui->root->subtree_changed || ui->root->visual_revision != ui->root->presented_revision))
         return true;
 
     /* Placed subtrees (popups, menus, chrome, backdrops) carry their own
@@ -295,11 +300,13 @@ bool lens_frame_needs_repaint(const lens *ui) {
      * sequence, which the base-tree check above already catches. */
     for (uint32_t b = 0; b < (uint32_t)LENS_BAND_COUNT; b++)
         for (uint32_t i = 0; i < ui->band_counts[b]; i++)
-            if (ui->bands[b][i] && ui->bands[b][i]->subtree_changed)
+            if (ui->bands[b][i] &&
+                (ui->bands[b][i]->subtree_changed ||
+                 ui->bands[b][i]->visual_revision != ui->bands[b][i]->presented_revision))
                 return true;
 
-    /* The tooltip is painted straight from lens_render (no draw list, no
-     * node), so only its presence is observable here: active, or active
+    /* Tooltip visuals are captured separately from widget nodes. Repaint
+     * while active, or when active
      * last frame and now gone (its pixels must be erased). */
     if (ui->tooltip.active || ui->prev_tooltip_active)
         return true;
@@ -358,16 +365,11 @@ void lens_pop_style(lens *ui) {
 /* ------------------------------------------------------------------ */
 
 void lens_begin(lens *ui, const lens_input *input) {
+    ui->building = true;
     ui->frame++;
     ui->overflow = false;
     ui->duplicate_ids = false;
     ui->anim_pending = false; /* set true by any eased value still in transit */
-    /* Carry last frame's band buckets across the arena reset as per-band
-     * prev id lists, so this frame's occlusion checks use the placed nodes
-     * that are actually on screen (their prev_rect geometry), independent
-     * of build order (ADR-0060). Runs after the per-frame flag reset so a
-     * truncation it flags stays flagged. */
-    lensi_place_snapshot_prev(ui);
     flux_arena_reset(&ui->arena);
     lensi_ghost_begin_frame(ui); /* ghosts survive the reset; clear refresh marks */
 
@@ -497,6 +499,7 @@ void lens_end(lens *ui) {
 
     /* Advance immutable scene snapshot generation (ADR-0094) */
     ui->generation++;
+    ui->building = false;
 }
 
 void lens_set_focus(lens *ui, lens_id id) {
@@ -512,7 +515,8 @@ void lens_a11y_activate(lens *ui, lens_id id) {
     /* Record only; the next build's lensi_interact consumes it (ADR-0062).
      * A second call before the frame replaces the first — AT-SPI actions
      * are synchronous/sequential, so one pending slot is enough. */
-    if (ui)
+    lens_node *n = ui ? lensi_store_find(ui, id) : nullptr;
+    if (n && n->has_prev && n->phase != LENS_NODE_LEAVING)
         ui->a11y_activate_id = id;
 }
 lens_id lens_active(const lens *ui) {
@@ -537,12 +541,6 @@ lens_node *lens_find(lens *ui, lens_id id) {
 
 uint64_t lens_generation(const lens *ui) {
     return ui ? ui->generation : 0;
-}
-
-void lens_notify_presented(lens *ui, uint64_t presented_generation) {
-    if (ui && presented_generation > ui->last_presented_generation) {
-        ui->last_presented_generation = presented_generation;
-    }
 }
 
 uint64_t lens_last_presented_generation(const lens *ui) {

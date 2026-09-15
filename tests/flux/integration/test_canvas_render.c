@@ -187,15 +187,16 @@ static void draw_combined_image(flux_canvas *canvas, void *user) {
         .kind = FLUX_BRUSH_IMAGE_PATTERN,
         .blend = FLUX_BLEND_SRC_OVER,
         .opacity = 1.0f,
-        .image = {
-            .image = tc->image,
-            .sampler = tc->sampler,
-            .src_rect = {0, 0, 0.5f, 0.5f},
-            .clip_rect = {32, 32, 64, 64},
-            .clip_radius = 16,
-            .opaque_only = true,
-            .tint = 0xFFFFFFFF,
-        },
+        .image =
+            {
+                .image = tc->image,
+                .sampler = tc->sampler,
+                .src_rect = {0, 0, 0.5f, 0.5f},
+                .clip_rect = {32, 32, 64, 64},
+                .clip_radius = 16,
+                .opaque_only = true,
+                .tint = 0xFFFFFFFF,
+            },
     };
     flux_canvas_draw_geometry(canvas, &g, &b);
 }

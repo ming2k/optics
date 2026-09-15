@@ -13,7 +13,7 @@ static void test_checkbox_toggle(void) {
     /* Warm-up frame */
     lens_begin(ui, &IN0);
     lens_checkbox(ui, &(lens_checkbox_opts){.label = "Enable", .value = &value});
-    lens_end(ui);
+    test_end(ui);
 
     /* Press */
     lens_input in = IN0;
@@ -22,7 +22,7 @@ static void test_checkbox_toggle(void) {
     lens_begin(ui, &in);
     bool changed =
         lens_checkbox(ui, &(lens_checkbox_opts){.label = "Enable", .value = &value}).changed;
-    lens_end(ui);
+    test_end(ui);
     CHECK(!changed); /* clicked only on release */
     CHECK(!value);
 
@@ -32,7 +32,7 @@ static void test_checkbox_toggle(void) {
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     changed = lens_checkbox(ui, &(lens_checkbox_opts){.label = "Enable", .value = &value}).changed;
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(changed);
     CHECK(value);
@@ -48,7 +48,7 @@ static void test_checkbox_no_toggle_when_disabled(void) {
     /* Warm-up frame */
     lens_begin(ui, &IN0);
     lens_checkbox(ui, &(lens_checkbox_opts){.label = "Enable", .value = &value});
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){20, 20};
@@ -59,7 +59,7 @@ static void test_checkbox_no_toggle_when_disabled(void) {
                                                            .value = &value,
                                                            .box = {.disabled = true}})
                        .changed;
-    lens_end(ui);
+    test_end(ui);
     CHECK(!changed);
     CHECK(!value);
 
@@ -75,7 +75,7 @@ static void test_switch_toggle_and_disabled(void) {
     lens_checkbox(ui, &(lens_checkbox_opts){.label = "Tap to click",
                                             .appearance = LENS_CHECKBOX_SWITCH,
                                             .value = &value});
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){20, 20};
@@ -84,7 +84,7 @@ static void test_switch_toggle_and_disabled(void) {
     lens_checkbox(ui, &(lens_checkbox_opts){.label = "Tap to click",
                                             .appearance = LENS_CHECKBOX_SWITCH,
                                             .value = &value});
-    lens_end(ui);
+    test_end(ui);
 
     in = IN0;
     in.cursor = (flux_point){20, 20};
@@ -93,7 +93,7 @@ static void test_switch_toggle_and_disabled(void) {
     lens_response r = lens_checkbox(ui, &(lens_checkbox_opts){.label = "Tap to click",
                                                               .appearance = LENS_CHECKBOX_SWITCH,
                                                               .value = &value});
-    lens_end(ui);
+    test_end(ui);
     CHECK(r.changed);
     CHECK(value);
 
@@ -105,7 +105,7 @@ static void test_switch_toggle_and_disabled(void) {
                                             .label = "Tap to click",
                                             .appearance = LENS_CHECKBOX_SWITCH,
                                             .value = &value});
-    lens_end(ui);
+    test_end(ui);
     in = IN0;
     in.cursor = (flux_point){20, 20};
     in.mouse_released[LENS_MOUSE_LEFT] = true;
@@ -114,7 +114,7 @@ static void test_switch_toggle_and_disabled(void) {
                                                 .label = "Tap to click",
                                                 .appearance = LENS_CHECKBOX_SWITCH,
                                                 .value = &value});
-    lens_end(ui);
+    test_end(ui);
     CHECK(!r.changed);
     CHECK(value);
 

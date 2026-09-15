@@ -56,7 +56,7 @@ int main(void) {
     lens_icon(ui, &(lens_icon_opts){.id = LENS_ICON_SEARCH, .size = 16.0f});
     lens_button(ui, &(lens_button_opts){.icon = fill});
     lens_selectable(ui, &(lens_selectable_opts){.icon = stroke, .label = "row", .selected = false});
-    lens_end(ui);
+    test_end(ui);
     CHECK(!lens_overflowed(ui));
 
     lens_node *child = lens_node_first_child(lens_root(ui));
@@ -72,7 +72,7 @@ int main(void) {
      * is now a valid runtime id (the first registration took it). */
     lens_begin(ui, &IN0);
     lens_selectable(ui, &(lens_selectable_opts){.label = "plain", .selected = false});
-    lens_end(ui);
+    test_end(ui);
     lens_node *row = lens_node_first_child(lens_root(ui));
     CHECK(row && row->cmd_count == 1 && row->cmds[0].kind == LENS_DRAW_TEXT);
 
@@ -80,7 +80,7 @@ int main(void) {
     lens_begin(ui, &IN0);
     lens_icon(ui, &(lens_icon_opts){.id = LENS_ICON_INVALID, .size = 16.0f});
     lens_icon(ui, &(lens_icon_opts){.id = (lens_icon_id)(fill + 1000), .size = 16.0f});
-    lens_end(ui);
+    test_end(ui);
     CHECK(!lens_overflowed(ui));
     CHECK(lens_node_first_child(lens_root(ui)) == NULL);
 
@@ -88,7 +88,7 @@ int main(void) {
     lens_begin(ui, &IN0);
     for (int i = 0; i < 8000; i++)
         lens_icon(ui, &(lens_icon_opts){.id = stroke, .size = 16.0f});
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_overflowed(ui));
 
     lens_release(ui);

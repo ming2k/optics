@@ -17,7 +17,7 @@ static lens_id build_button_frame(lens *ui, bool *clicked) {
     lens_begin(ui, &IN0);
     *clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
     lens_id id = lens_get_response(ui).id;
-    lens_end(ui);
+    test_end(ui);
     return id;
 }
 
@@ -104,7 +104,7 @@ static void test_activate_disabled_blocked(void) {
     clicked =
         lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
     id = lens_get_response(ui).id;
-    lens_end(ui);
+    test_end(ui);
     CHECK(id != 0);
     CHECK(!clicked);
 
@@ -113,7 +113,7 @@ static void test_activate_disabled_blocked(void) {
     lens_begin(ui, &IN0);
     clicked =
         lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(!clicked);
     CHECK(!lens_focused(ui, id));
 
@@ -122,7 +122,7 @@ static void test_activate_disabled_blocked(void) {
     lens_begin(ui, &IN0);
     clicked =
         lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(!clicked);
 
     /* fresh request now fires */
@@ -130,7 +130,7 @@ static void test_activate_disabled_blocked(void) {
     lens_begin(ui, &IN0);
     clicked =
         lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(clicked);
     CHECK(lens_focused(ui, id));
 
@@ -159,7 +159,7 @@ static void test_activate_bypasses_occlusion(void) {
         lens_label(ui, &(lens_label_opts){.text = "cover"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(!clicked);
 
     /* frame 2: pointer press over the covered button — occluded, and the
@@ -179,7 +179,7 @@ static void test_activate_bypasses_occlusion(void) {
         lens_label(ui, &(lens_label_opts){.text = "cover"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(!clicked);
     CHECK(!pressed);
 
@@ -196,7 +196,7 @@ static void test_activate_bypasses_occlusion(void) {
         lens_label(ui, &(lens_label_opts){.text = "cover"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(clicked);
 
     lens_release(ui);

@@ -4,7 +4,7 @@
 //! Three ways in, lowest to highest level:
 //!
 //! 1. **Headless** ([`Ui::headless`]) — logic/layout/interaction with no GPU.
-//! 2. **Embedded** ([`Ui::with_device`] + [`Ui::render`]) — you own a flux
+//! 2. **Embedded** ([`Ui::with_device`] + [`Snapshot::submit`]) — you own a flux
 //!    device and canvas; lens draws the UI into your frame. This is the
 //!    seam for putting UI inside an existing flux/Vulkan app.
 //! 3. **Windowed** — use the `lens-shell-wayland` crate, which owns the window,
@@ -33,6 +33,39 @@ use std::ptr;
 /// deliberately as the one documented unsafe escape hatch.
 pub use lens_sys as sys;
 
+/// Owned immutable visual publication. It may outlive its source UI.
+pub struct Snapshot {
+    raw: *mut sys::lens_scene_snapshot,
+}
+
+impl Snapshot {
+    pub fn generation(&self) -> u64 {
+        // SAFETY: self owns a live snapshot.
+        unsafe { sys::lens_snapshot_generation(self.raw) }
+    }
+
+    /// Execute this snapshot inside an open Canvas session.
+    ///
+    /// # Safety
+    /// `canvas` must be live, exclusively writable, and inside an open session
+    /// on the device that owns any GPU resources captured by this snapshot.
+    pub unsafe fn submit(&self, canvas: *mut sys::flux_canvas) -> Result<(), Error> {
+        // SAFETY: caller guarantees the canvas state; self retains the snapshot.
+        let rc = unsafe { sys::lens_snapshot_submit(self.raw, canvas) };
+        if rc != sys::flux_result::FLUX_OK {
+            return Err(Error::Render(rc));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Snapshot {
+    fn drop(&mut self) {
+        // SAFETY: release exactly this owner's reference.
+        unsafe { sys::lens_snapshot_release(self.raw) };
+    }
+}
+
 mod input;
 pub mod patterns;
 pub mod reactive;
@@ -40,7 +73,11 @@ mod types;
 pub mod view;
 
 pub use input::{Input, MouseButton, key, mods};
-pub use types::{Align, Band, ButtonVariant, CheckboxAppearance, Color, CursorHint, DndDropInfo, FontFamily, Icon, LayoutOpts, PlaceMode, PlaceOpts, Rect, Response, SkinFn, Style, StyleResolved, TextLine, TextMetrics, Theme, WidgetContent, WidgetKind, WidgetRecord, WidgetState};
+pub use types::{
+    Align, Band, ButtonVariant, CheckboxAppearance, Color, CursorHint, DndDropInfo, FontFamily,
+    Icon, LayoutOpts, PlaceMode, PlaceOpts, Rect, Response, SkinFn, Style, StyleResolved, TextLine,
+    TextMetrics, Theme, WidgetContent, WidgetKind, WidgetRecord, WidgetState,
+};
 
 /// The retained UI context. Owns the persistent tree, layout, and draw list.
 /// Dropping a `Ui` calls `lens_release`.
@@ -53,8 +90,8 @@ pub struct Ui {
 
 impl Ui {
     /// Create a headless context (no flux device): immediate-mode logic,
-    /// layout, and interaction all run, but [`Ui::render`] is unavailable.
-    /// Ideal for tests and any logic that never touches the GPU.
+    /// layout and snapshot publication run without a GPU. Activate a snapshot
+    /// explicitly to use its geometry for headless interaction.
     pub fn headless() -> Result<Ui, Error> {
         Self::create(ptr::null_mut())
     }
@@ -79,7 +116,7 @@ impl Ui {
     /// Create a context bound to an existing flux device. The device is
     /// retained for the lifetime of the `Ui`. Use this to embed lens into
     /// an app that already manages its own flux/Vulkan setup; pair with
-    /// [`Ui::render`] inside your canvas envelope.
+    /// [`Snapshot::submit`] inside your canvas envelope.
     ///
     /// # Safety
     /// `device` must be a live `flux_device` obtained from the flux API and
@@ -135,7 +172,11 @@ impl Ui {
     /// Run one immediate-mode frame. The closure receives a [`Frame`] that
     /// borrows the context; widget calls on it build the tree, which is
     /// reconciled and laid out when the closure returns.
-    pub fn frame<R>(&mut self, input: &Input, build: impl for<'frame> FnOnce(&mut Frame<'frame>) -> R) -> R {
+    pub fn frame<R>(
+        &mut self,
+        input: &Input,
+        build: impl for<'frame> FnOnce(&mut Frame<'frame>) -> R,
+    ) -> R {
         // SAFETY: self.raw is live; input outlives the call.
         unsafe { sys::lens_begin(self.raw, input.as_raw()) };
         struct EndFrame(*mut sys::lens);
@@ -151,16 +192,21 @@ impl Ui {
         build(&mut f)
     }
 
-    /// Draw the last built frame into a flux canvas. Call between
-    /// `flux_canvas_begin` and `flux_canvas_end` on your own frame.
-    ///
-    /// # Safety
-    /// `canvas` must be a live `flux_canvas` inside an open canvas envelope,
-    /// and this `Ui` must have been created with [`Ui::with_device`].
-    pub unsafe fn render(&mut self, canvas: *mut sys::flux_canvas) -> Result<(), Error> {
-        // SAFETY: the caller guarantees the canvas state; `self.raw` remains
-        // live for the duration of this mutable borrow.
-        let rc = unsafe { sys::lens_render(self.raw, canvas) };
+    /// Publish owned visuals for the last built frame.
+    pub fn snapshot(&mut self) -> Result<Snapshot, Error> {
+        let mut raw = ptr::null_mut();
+        // SAFETY: the UI is uniquely borrowed and the output slot is valid.
+        let rc = unsafe { sys::lens_snapshot_create(self.raw, &mut raw) };
+        if rc != sys::flux_result::FLUX_OK {
+            return Err(Error::Render(rc));
+        }
+        Ok(Snapshot { raw })
+    }
+
+    /// Activate the snapshot that the host successfully presented.
+    pub fn activate(&mut self, snapshot: &Snapshot) -> Result<(), Error> {
+        // SAFETY: both objects are live; C validates their identity and generation.
+        let rc = unsafe { sys::lens_snapshot_activate(self.raw, snapshot.raw) };
         if rc != sys::flux_result::FLUX_OK {
             return Err(Error::Render(rc));
         }
@@ -173,7 +219,7 @@ impl Ui {
     }
 
     /// Set the device-pixel (HiDPI) scale. Layout, input, and
-    /// [`Input::set_display_size`] stay in logical pixels; [`Ui::render`]
+    /// [`Input::set_display_size`] stay in logical pixels; [`Snapshot::submit`]
     /// scales the canvas transform so 1 logical pixel maps to `scale` device
     /// pixels and rasterises text crisply. Report the window-system scale here.
     pub fn set_scale(&mut self, scale: f32) {
@@ -337,7 +383,10 @@ impl<'frame> Frame<'frame> {
     /// `ui` must be a live context currently inside a `lens_begin` /
     /// `lens_end` pair, and the returned `Frame` must not outlive it.
     pub unsafe fn from_raw(ui: *mut sys::lens) -> Frame<'frame> {
-        Frame { ui, _scope: std::marker::PhantomData }
+        Frame {
+            ui,
+            _scope: std::marker::PhantomData,
+        }
     }
 
     /// The raw context pointer, for widgets not yet wrapped here.
@@ -483,7 +532,11 @@ impl<'frame> Frame<'frame> {
 
     /// Start a horizontal flex container (row) with preconfigured options.
     #[inline]
-    pub fn row_ex<R>(&mut self, opts: &LayoutOpts, body: impl FnOnce(&mut Frame) -> R) -> (Response, R) {
+    pub fn row_ex<R>(
+        &mut self,
+        opts: &LayoutOpts,
+        body: impl FnOnce(&mut Frame) -> R,
+    ) -> (Response, R) {
         self.row().with_opts(opts).show(body)
     }
 
@@ -495,7 +548,11 @@ impl<'frame> Frame<'frame> {
 
     /// Start a vertical flex container (column) with preconfigured options.
     #[inline]
-    pub fn col_ex<R>(&mut self, opts: &LayoutOpts, body: impl FnOnce(&mut Frame) -> R) -> (Response, R) {
+    pub fn col_ex<R>(
+        &mut self,
+        opts: &LayoutOpts,
+        body: impl FnOnce(&mut Frame) -> R,
+    ) -> (Response, R) {
         self.col().with_opts(opts).show(body)
     }
 
@@ -507,7 +564,11 @@ impl<'frame> Frame<'frame> {
 
     /// Start a vertical flex container (column) with preconfigured options (alias for [`Self::col_ex`]).
     #[inline]
-    pub fn column_ex<R>(&mut self, opts: &LayoutOpts, body: impl FnOnce(&mut Frame) -> R) -> (Response, R) {
+    pub fn column_ex<R>(
+        &mut self,
+        opts: &LayoutOpts,
+        body: impl FnOnce(&mut Frame) -> R,
+    ) -> (Response, R) {
         self.col().with_opts(opts).show(body)
     }
 
@@ -561,9 +622,8 @@ impl<'frame> Frame<'frame> {
                 layout: opts.to_raw(),
                 ..Default::default()
             };
-            let response = Response::from_raw(unsafe {
-                sys::lens_pressable_begin(self.ui, &raw_opts)
-            });
+            let response =
+                Response::from_raw(unsafe { sys::lens_pressable_begin(self.ui, &raw_opts) });
             let result = body(self);
             unsafe { sys::lens_pressable_end(self.ui) };
             (response, result)
@@ -600,15 +660,12 @@ impl<'frame> Frame<'frame> {
             layout: opts.to_raw(),
             ..Default::default()
         };
-        let response = Response::from_raw(unsafe {
-            sys::lens_pressable_begin(self.ui, &raw_opts)
-        });
+        let response = Response::from_raw(unsafe { sys::lens_pressable_begin(self.ui, &raw_opts) });
         let result = body(self, response);
         unsafe { sys::lens_pressable_end(self.ui) };
         (response, result)
     }
 
-    
     /// A fixed empty gap along the main axis.
     pub fn spacer(&mut self, size: f32) {
         // SAFETY: ui is live for the frame.
@@ -617,7 +674,9 @@ impl<'frame> Frame<'frame> {
 
     /// A horizontal rule.
     pub fn separator(&mut self) {
-        unsafe { sys::lens_separator(self.ui, std::ptr::null()); }
+        unsafe {
+            sys::lens_separator(self.ui, std::ptr::null());
+        }
     }
 
     /// Fix the next node's size (pass 0 for an axis to keep its intrinsic size).
@@ -658,7 +717,9 @@ impl<'frame> Frame<'frame> {
             size,
             ..Default::default()
         };
-        unsafe { sys::lens_icon(self.ui, &opts); }
+        unsafe {
+            sys::lens_icon(self.ui, &opts);
+        }
     }
 
     pub unsafe fn image(&mut self, image: *mut sys::flux_image, w: f32, h: f32) {
@@ -668,7 +729,9 @@ impl<'frame> Frame<'frame> {
             height: h,
             ..Default::default()
         };
-        unsafe { sys::lens_image(self.ui, &opts); }
+        unsafe {
+            sys::lens_image(self.ui, &opts);
+        }
     }
 
     pub unsafe fn image_tinted(
@@ -685,7 +748,9 @@ impl<'frame> Frame<'frame> {
             tint: tint.raw(),
             ..Default::default()
         };
-        unsafe { sys::lens_image(self.ui, &opts); }
+        unsafe {
+            sys::lens_image(self.ui, &opts);
+        }
     }
 
     pub fn icon_button_raw(&mut self, id: sys::lens_icon_id) -> bool {
@@ -793,7 +858,14 @@ impl<'frame> Frame<'frame> {
         unsafe { sys::lens_slider(self.ui, &opts).changed }
     }
 
-    pub fn slider_vertical(&mut self, label: &str, value: &mut f32, min: f32, max: f32, step: f32) -> bool {
+    pub fn slider_vertical(
+        &mut self,
+        label: &str,
+        value: &mut f32,
+        min: f32,
+        max: f32,
+        step: f32,
+    ) -> bool {
         let c = cstr(label);
         let opts = sys::lens_slider_opts {
             label: c.as_ptr(),
@@ -876,7 +948,9 @@ impl<'frame> Frame<'frame> {
             text: c.as_ptr(),
             ..Default::default()
         };
-        unsafe { sys::lens_label(self.ui, &opts); }
+        unsafe {
+            sys::lens_label(self.ui, &opts);
+        }
     }
 
     pub fn label_sized(&mut self, text: &str, size: f32) {
@@ -886,7 +960,9 @@ impl<'frame> Frame<'frame> {
             size,
             ..Default::default()
         };
-        unsafe { sys::lens_label(self.ui, &opts); }
+        unsafe {
+            sys::lens_label(self.ui, &opts);
+        }
     }
 
     pub fn label_compact(&mut self, text: &str) {
@@ -905,7 +981,9 @@ impl<'frame> Frame<'frame> {
             weight,
             ..Default::default()
         };
-        unsafe { sys::lens_label(self.ui, &opts); }
+        unsafe {
+            sys::lens_label(self.ui, &opts);
+        }
     }
 
     pub fn heading(&mut self, text: &str, level: i32) {
@@ -923,7 +1001,9 @@ impl<'frame> Frame<'frame> {
             weight: theme.0.font_weight_bold,
             ..Default::default()
         };
-        unsafe { sys::lens_label(self.ui, &opts); }
+        unsafe {
+            sys::lens_label(self.ui, &opts);
+        }
     }
 
     pub fn label_wrapped(&mut self, text: &str, max_width: f32) {
@@ -937,7 +1017,9 @@ impl<'frame> Frame<'frame> {
             wrap: true,
             ..Default::default()
         };
-        unsafe { sys::lens_label(self.ui, &opts); }
+        unsafe {
+            sys::lens_label(self.ui, &opts);
+        }
     }
 
     pub fn label_wrapped_sized(&mut self, text: &str, size: f32, max_width: f32) {
@@ -952,7 +1034,9 @@ impl<'frame> Frame<'frame> {
             wrap: true,
             ..Default::default()
         };
-        unsafe { sys::lens_label(self.ui, &opts); }
+        unsafe {
+            sys::lens_label(self.ui, &opts);
+        }
     }
 
     pub fn selectable(&mut self, label: &str, selected: bool) -> bool {
@@ -965,7 +1049,12 @@ impl<'frame> Frame<'frame> {
         unsafe { sys::lens_selectable(self.ui, &opts).clicked }
     }
 
-    pub fn selectable_icon(&mut self, label: &str, icon: impl Into<sys::lens_icon_id>, selected: bool) -> bool {
+    pub fn selectable_icon(
+        &mut self,
+        label: &str,
+        icon: impl Into<sys::lens_icon_id>,
+        selected: bool,
+    ) -> bool {
         let c = cstr(label);
         let opts = sys::lens_selectable_opts {
             label: c.as_ptr(),
@@ -988,11 +1077,19 @@ impl<'frame> Frame<'frame> {
         Response::from_raw(unsafe { sys::lens_get_response(self.ui as *const sys::lens) })
     }
 
-    pub fn textfield_placeholder(&mut self, label: &str, buf: &mut TextBuf, placeholder: &str) -> bool {
+    pub fn textfield_placeholder(
+        &mut self,
+        label: &str,
+        buf: &mut TextBuf,
+        placeholder: &str,
+    ) -> bool {
         let c = cstr(label);
         let p = cstr(placeholder);
         let opts = sys::lens_textedit_opts {
-            box_: sys::lens_box { id: c.as_ptr(), ..Default::default() },
+            box_: sys::lens_box {
+                id: c.as_ptr(),
+                ..Default::default()
+            },
             buf: buf.as_mut_ptr(),
             cap: buf.cap(),
             multiline: false,
@@ -1002,11 +1099,19 @@ impl<'frame> Frame<'frame> {
         unsafe { sys::lens_textedit(self.ui, &opts).changed }
     }
 
-    pub fn textfield_password(&mut self, label: &str, buf: &mut TextBuf, placeholder: &str) -> bool {
+    pub fn textfield_password(
+        &mut self,
+        label: &str,
+        buf: &mut TextBuf,
+        placeholder: &str,
+    ) -> bool {
         let c = cstr(label);
         let p = cstr(placeholder);
         let opts = sys::lens_textedit_opts {
-            box_: sys::lens_box { id: c.as_ptr(), ..Default::default() },
+            box_: sys::lens_box {
+                id: c.as_ptr(),
+                ..Default::default()
+            },
             buf: buf.as_mut_ptr(),
             cap: buf.cap(),
             multiline: false,
@@ -1032,7 +1137,12 @@ impl<'frame> Frame<'frame> {
         r
     }
 
-    pub fn place<R>(&mut self, id: &str, opts: &PlaceOpts, body: impl FnOnce(&mut Frame) -> R) -> Option<R> {
+    pub fn place<R>(
+        &mut self,
+        id: &str,
+        opts: &PlaceOpts,
+        body: impl FnOnce(&mut Frame) -> R,
+    ) -> Option<R> {
         let c = cstr(id);
         let mut raw = opts.to_raw();
         raw.box_.id = c.as_ptr();
@@ -1100,7 +1210,12 @@ impl<'frame> Frame<'frame> {
             text: c_text.as_ptr(),
             text_len: text.len(),
             actions,
-            preview_rect: sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            preview_rect: sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
         };
         unsafe { sys::lens_dnd_source(self.ui, &desc) }
     }
@@ -1114,11 +1229,18 @@ impl<'frame> Frame<'frame> {
             drop_pos: sys::flux_point { x: 0.0, y: 0.0 },
             action: 0,
         };
-        let hit = unsafe { sys::lens_dnd_drop_target(self.ui, raw_id, accepted_actions, &mut info) };
+        let hit =
+            unsafe { sys::lens_dnd_drop_target(self.ui, raw_id, accepted_actions, &mut info) };
         if hit || info.is_hovered || info.is_dropped {
             let payload = if info.is_dropped {
                 let mut buf = [0u8; 1024];
-                let len = unsafe { sys::lens_take_drop(self.ui, buf.as_mut_ptr() as *mut std::os::raw::c_char, buf.len() as u32) };
+                let len = unsafe {
+                    sys::lens_take_drop(
+                        self.ui,
+                        buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                        buf.len() as u32,
+                    )
+                };
                 if len > 0 {
                     Some(String::from_utf8_lossy(&buf[..len as usize]).into_owned())
                 } else {
@@ -1141,7 +1263,10 @@ impl<'frame> Frame<'frame> {
     pub fn textedit(&mut self, label: &str, buf: &mut TextBuf, multiline: bool) -> bool {
         let c = cstr(label);
         let opts = sys::lens_textedit_opts {
-            box_: sys::lens_box { id: c.as_ptr(), ..Default::default() },
+            box_: sys::lens_box {
+                id: c.as_ptr(),
+                ..Default::default()
+            },
             buf: buf.as_mut_ptr(),
             cap: buf.cap(),
             multiline,
@@ -1226,7 +1351,7 @@ impl TextBuf {
 pub enum Error {
     /// `lens_create` returned a non-OK `flux_result`.
     Create(sys::flux_result),
-    /// `lens_render` returned a non-OK `flux_result`.
+    /// Snapshot publication or execution returned a non-OK `flux_result`.
     Render(sys::flux_result),
 }
 
@@ -1234,7 +1359,7 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Create(rc) => write!(f, "lens_create failed (flux_result = {rc:?})"),
-            Error::Render(rc) => write!(f, "lens_render failed (flux_result = {rc:?})"),
+            Error::Render(rc) => write!(f, "snapshot operation failed (flux_result = {rc:?})"),
         }
     }
 }

@@ -1,22 +1,40 @@
-/* replay.c — resolve the draw list against final_rect and emit canvas
- * calls (ADR-0030). Walks front-to-back (parent before children). */
-
+/* Publish immutable visuals from the resolved UI tree. Rendering consumes
+ * only the published snapshot; there is no live-tree Canvas replay path. */
 #include "../internal.h"
 #include <math.h>
 #include <stdatomic.h>
+
+static inline flux_rect rect_intersect(flux_rect a, flux_rect b) {
+    float x = fmaxf(a.x, b.x), y = fmaxf(a.y, b.y);
+    return (flux_rect){x, y, fmaxf(0, fminf(a.x + a.w, b.x + b.w) - x),
+                       fmaxf(0, fminf(a.y + a.h, b.y + b.h) - y)};
+}
+
+typedef struct snapshot_node {
+    lens_id id, semantic_parent;
+    uint64_t incarnation, visual_revision;
+    flux_rect bounds, clip;
+    lens_scroll_geometry scroll;
+    bool is_scroll;
+    lens_semantics semantics;
+    lens_band band;
+    uint32_t band_order;
+    bool overlay, hit_transparent;
+    size_t next_overlay;
+} snapshot_node;
 
 struct lens_scene_snapshot {
     atomic_uint ref_count;
     uint64_t generation;
     flux_display_list *display_list;
     bool has_damage;
-    uint32_t command_count;
+    uint64_t owner_identity;
+    snapshot_node *nodes;
+    size_t node_count, overlay_head;
 };
 
-/* Resolve a node-relative rect against the final box. A non-positive
- * rel.w / rel.h means "extend symmetrically to the box edge" (inset by
- * rel.x / rel.y on both sides), so widgets can say "fill me" with
- * rel = {0,0,0,0} before layout has assigned a size. */
+static flux_result capture_metadata(lens *ui, lens_scene_snapshot *snapshot);
+
 static flux_rect offset_rel(flux_rect box, flux_rect rel) {
     float w = rel.w > 0 ? rel.w : box.w - 2.0f * rel.x;
     float h = rel.h > 0 ? rel.h : box.h - 2.0f * rel.y;
@@ -51,114 +69,73 @@ static inline bool rect_equal(flux_rect a, flux_rect b) {
     return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Display-list records (ADR-0030 status note, 2026-07)              */
-/*                                                                    */
-/*  An unchanged subtree (subtree_changed == false) with a valid      */
-/*  recorded segment re-submits the recording instead of re-emitting  */
-/*  every command — glyph quad rebuilds, path tessellation and        */
-/*  measure calls are skipped; the pixels are still redrawn every     */
-/*  frame (the host clears the framebuffer), they just come from the  */
-/*  recording. Validity layers:                                       */
-/*    - subtree_changed: content + node rect (hash covers hover etc.) */
-/*    - record_clip: the lens clip argument (culling decisions were   */
-/*      baked against it; catches place-bounds / viewport changes     */
-/*      that never reach the canvas scissor)                          */
-/*    - record_text_gen: flux-text atlas clear count (a clear re-     */
-/*      packs glyph texels; recorded UVs would freeze stale)          */
-/*    - canvas anchor (flux_canvas_replay): framebuffer extent,       */
-/*      absolute transform (scale/scroll-origin), incoming scissor.   */
-/* ------------------------------------------------------------------ */
-
-/* Drop a node's record handle WITHOUT releasing the segment: store
- * teardown runs outside render, where the owning canvas may already be
- * destroyed — dereferencing the handle to release it would be a
- * use-after-free. A live canvas reclaims the orphaned slot through its
- * LRU budget. (Render-time replacement in lensi_render_node has the live
- * canvas at hand and releases properly.) */
-void lensi_node_drop_record(lens *ui, lens_node *n) {
+void lensi_node_release_cache(lens *ui, lens_node *n) {
     (void)ui;
-    n->record = (flux_canvas_record)FLUX_CANVAS_RECORD_INIT;
-    if (n->cached_dl) {
-        flux_display_list_release(n->cached_dl);
-        n->cached_dl = nullptr;
+    flux_display_list_release(n->cached_dl);
+    n->cached_dl = nullptr;
+}
+
+bool lensi_mark_subtree_changed(lens_node *n) {
+    bool changed = false;
+    if (n->phase != LENS_NODE_STABLE)
+        changed = true;
+    if (n->has_render_rect) {
+        if (n->final_rect.x != n->render_rect.x || n->final_rect.y != n->render_rect.y ||
+            n->final_rect.w != n->render_rect.w || n->final_rect.h != n->render_rect.h)
+            changed = true;
+    } else {
+        /* First rendered frame with geometry: must paint. */
+        if (n->final_rect.w > 0.0f || n->final_rect.h > 0.0f)
+            changed = true;
     }
-}
+    if (n->opacity != n->last_opacity)
+        changed = true;
+    n->last_opacity = n->opacity;
+    if (n->hover_t != n->last_hover_t || n->active_t != n->last_active_t)
+        changed = true;
+    if (n->cmd_hash != n->last_cmd_hash)
+        changed = true;
+    /* Child-list churn (removal/reorder/replacement) is invisible to the
+     * per-node checks above: untouched children simply vanish from the
+     * sibling walk. Compare the linked-child sequence hash instead. */
+    if (n->child_hash != n->last_child_hash)
+        changed = true;
+    n->last_hover_t = n->hover_t;
+    n->last_active_t = n->active_t;
 
-/* Drop every record handle without releasing — used when the render
- * canvas changes, because the old canvas (and its slot pool) may already
- * be destroyed, so dereferencing the handles to release them would be a
- * use-after-free. Live canvases reclaim the orphaned slots through their
- * LRU budget. */
-static void drop_all_records(lens *ui) {
-    const lens_store *s = &ui->store;
-    for (uint32_t i = 0; i < s->cap; i++) {
-        if (!s->slots[i].id)
-            continue;
-        lensi_node_drop_record(ui, s->slots[i].node);
+    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        bool child_changed = lensi_mark_subtree_changed(c);
+        if (c->place != LENS_PLACE_ABS && child_changed)
+            changed = true;
     }
+    if (changed)
+        n->visual_revision++;
+    n->subtree_changed = changed;
+    return changed;
 }
 
-static inline flux_rect rect_intersect(flux_rect a, flux_rect b) {
-    float x1 = a.x > b.x ? a.x : b.x;
-    float y1 = a.y > b.y ? a.y : b.y;
-    float x2 = a.x + a.w < b.x + b.w ? a.x + a.w : b.x + b.w;
-    float y2 = a.y + a.h < b.y + b.h ? a.y + a.h : b.y + b.h;
-    if (x2 <= x1 || y2 <= y1)
-        return (flux_rect){0, 0, 0, 0};
-    return (flux_rect){x1, y1, x2 - x1, y2 - y1};
+void lensi_mark_dirty(lens *ui) {
+    if (ui->root)
+        lensi_mark_subtree_changed(ui->root);
 }
 
-/* ------------------------------------------------------------------ */
-/*  Shared draw-command emitter (ADR-0078)                             */
-/*                                                                    */
-/*  The single translation from lens_draw_cmd to canvas calls. The     */
-/*  live tree path (lensi_render_node) and the ghost replay path       */
-/*  (ghost.c) both go through it, so a ghost's frozen commands paint    */
-/*  with identical geometry resolution and text/icon/image behaviour.  */
-/*  alpha == 1.0 is the identity (the live path, bit-identical); a     */
-/*  ghost passes its fade so one bake tints the whole snapshot         */
-/*  (ADR-0068 semantics). `box` is the node's final_rect (live or      */
-/*  snapshotted).                                                      */
-/* ------------------------------------------------------------------ */
-void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect clip,
-                         const lens_draw_cmd *cmds, uint32_t cmd_count, float alpha) {
+flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, flux_rect clip,
+                                   const lens_draw_cmd *cmds, uint32_t cmd_count, float alpha) {
     float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
-    /* Draw commands can nest logical clips (table viewport -> body -> cell).
-     * Flux's clip_rect sets an absolute scissor rather than intersecting it,
-     * so replay owns the intersection stack and always submits the effective
-     * device-space rectangle. */
     flux_rect command_clip = clip;
     flux_rect command_clip_stack[16];
     uint32_t command_clip_depth = 0;
+
     for (uint32_t i = 0; i < cmd_count; i++) {
+        size_t arena_mark = ui->arena.used;
         const lens_draw_cmd *c = &cmds[i];
         flux_rect r = offset_rel(box, c->rel);
         r = snap_rect(r, scale);
 
-        bool is_clip_cmd = c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP;
-        /* Clip commands must stay balanced even if their rectangle is empty;
-         * regular draws outside the current effective clip can be culled. */
+        bool is_clip_cmd = (c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP);
         if (!is_clip_cmd && !rect_overlaps(r, command_clip))
             continue;
 
-        /* Path tessellation and glyph shaping below allocate transient
-         * scratch from the per-frame arena. That scratch is consumed by the
-         * canvas immediately and never referenced again, so rewind the arena
-         * after each command — otherwise render scratch accumulates across
-         * the whole tree and a busy frame exhausts the arena, silently
-         * dropping later draws (notably placed nodes, which render last). */
-        size_t arena_mark = ui->arena.used;
-
-        /* snap_rect keeps far edges fixed so adjacent widgets don't drift,
-         * but for a circle (radius >= half the smaller side) this can turn
-         * a square into a rectangle.  Force it back to a square so the
-         * round-rect stays a perfect circle.
-         *
-         * Only do this when the original draw command was already a square
-         * (e.g. a radio knob or checkbox checkmark).  Long bars like
-         * progress tracks and slider rails have radius == height/2 but are
-         * intentionally rectangular and must not be squashed to a dot. */
         if (c->radius > 0.5f && c->radius >= fminf(r.w, r.h) * 0.5f - 0.001f && c->rel.w > 0.0f &&
             c->rel.h > 0.0f && fabsf(c->rel.w - c->rel.h) < 0.5f) {
             float side = fminf(r.w, r.h);
@@ -168,10 +145,6 @@ void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect
             r.h = side;
         }
 
-        /* Ghost fade: one bake per command, after the squaring pass so the
-         * alpha applies to the same resolved colours the live path paints.
-         * alpha == 1.0 is the identity: the pointer stays on the original
-         * command and this path is bit-identical to the live tree's. */
         lens_draw_cmd faded;
         if (alpha < 1.0f) {
             faded = *c;
@@ -181,19 +154,32 @@ void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect
         }
 
         switch (c->kind) {
-        case LENS_DRAW_RECT:
-            if (c->radius > 0.5f) {
-                /* SDF fill: analytic AA, crisp at any DPI (incl. 100%). */
-                flux_canvas_fill_rrect(canvas, r, c->radius, c->color);
-            } else {
-                flux_canvas_fill_rect_color(canvas, r, c->color);
-            }
+        case LENS_DRAW_RECT: {
+            flux_geometry g =
+                (c->radius > 0.5f) ? flux_geom_rrect(r, c->radius) : flux_geom_rect(r);
+            flux_brush b = flux_brush_solid(c->color);
+            flux_encoder_draw_geometry(enc, &g, &b);
             break;
-
+        }
+        case LENS_DRAW_BORDER: {
+            float bw = c->width > 0 ? c->width : 1.0f;
+            flux_geometry g =
+                (c->radius > 0.5f) ? flux_geom_rrect(r, c->radius) : flux_geom_rect(r);
+            g.stroke_width = bw;
+            flux_brush b = flux_brush_solid(c->color);
+            flux_encoder_draw_geometry(enc, &g, &b);
+            break;
+        }
+        case LENS_DRAW_TAB_INDICATOR: {
+            float thickness = c->width > 0.0f ? c->width : 3.0f;
+            flux_rect indicator = {r.x, box.y + box.h - thickness, r.w, thickness};
+            indicator = snap_rect(indicator, scale);
+            flux_geometry g = flux_geom_rrect(indicator, thickness * 0.5f);
+            flux_brush b = flux_brush_solid(c->color);
+            flux_encoder_draw_geometry(enc, &g, &b);
+            break;
+        }
         case LENS_DRAW_CONNECTED_TAB: {
-            /* The connected tab surface extends into the rail's lower inset.
-             * Optional shoulders curve into adjacent tab space, so selection
-             * reads as one continuous shape instead of an isolated pill. */
             float shoulder = fminf(c->width, fminf(r.w * 0.25f, r.h * 0.45f));
             float depth = fmaxf(0.0f, c->text_size);
             float bottom = r.y + r.h + depth;
@@ -202,155 +188,62 @@ void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect
             bool connect_right = (c->flags & LENSI_TAB_CONNECT_RIGHT) != 0;
 
             flux_path *p = NULL;
-            if (flux_path_create(&p, &ui->arena) != FLUX_OK)
-                break;
-
-            if (connect_left) {
-                flux_path_move_to(p, r.x - shoulder, bottom);
-                flux_path_cubic_to(p, r.x - shoulder * 0.42f, bottom, r.x,
-                                   bottom - shoulder * 0.42f, r.x, bottom - shoulder);
-            } else {
-                flux_path_move_to(p, r.x, bottom);
-            }
-            flux_path_line_to(p, r.x, r.y + radius);
-            flux_path_cubic_to(p, r.x, r.y + radius * 0.45f, r.x + radius * 0.45f, r.y,
-                               r.x + radius, r.y);
-            flux_path_line_to(p, r.x + r.w - radius, r.y);
-            flux_path_cubic_to(p, r.x + r.w - radius * 0.45f, r.y, r.x + r.w, r.y + radius * 0.45f,
-                               r.x + r.w, r.y + radius);
-            if (connect_right) {
-                flux_path_line_to(p, r.x + r.w, bottom - shoulder);
-                flux_path_cubic_to(p, r.x + r.w, bottom - shoulder * 0.42f,
-                                   r.x + r.w + shoulder * 0.42f, bottom, r.x + r.w + shoulder,
-                                   bottom);
-            } else {
-                flux_path_line_to(p, r.x + r.w, bottom);
-            }
-            flux_path_close(p);
-
-            flux_paint paint = flux_paint_solid(c->color);
-            flux_canvas_fill_path(canvas, p, &paint);
-            break;
-        }
-
-        case LENS_DRAW_TAB_INDICATOR: {
-            float thickness = c->width > 0.0f ? c->width : 3.0f;
-            flux_rect indicator = {r.x, box.y + box.h - thickness, r.w, thickness};
-            indicator = snap_rect(indicator, scale);
-            flux_canvas_fill_rrect(canvas, indicator, thickness * 0.5f, c->color);
-            break;
-        }
-
-        case LENS_DRAW_BORDER: {
-            float bw = c->width > 0 ? c->width : 1.0f;
-            if (c->radius > 0.5f) {
-                /* SDF ring: analytic AA for rounded/circular borders. */
-                flux_canvas_stroke_rrect(canvas, r, c->radius, c->color, bw);
-            } else {
-                flux_path *p = NULL;
-                if (flux_path_create(&p, &ui->arena) == FLUX_OK) {
-                    flux_path_add_rect(p, r);
-                    flux_paint paint = flux_paint_solid(c->color);
-                    paint.stroke_width = bw;
-                    flux_canvas_stroke_path(canvas, p, &paint);
+            flux_result path_result = flux_path_create(&p, &ui->arena);
+            if (path_result != FLUX_OK)
+                return path_result;
+            {
+                if (connect_left) {
+                    flux_path_move_to(p, r.x - shoulder, bottom);
+                    flux_path_cubic_to(p, r.x - shoulder * 0.42f, bottom, r.x,
+                                       bottom - shoulder * 0.42f, r.x, bottom - shoulder);
+                } else {
+                    flux_path_move_to(p, r.x, bottom);
                 }
+                flux_path_line_to(p, r.x, r.y + radius);
+                flux_path_cubic_to(p, r.x, r.y + radius * 0.45f, r.x + radius * 0.45f, r.y,
+                                   r.x + radius, r.y);
+                flux_path_line_to(p, r.x + r.w - radius, r.y);
+                flux_path_cubic_to(p, r.x + r.w - radius * 0.45f, r.y, r.x + r.w,
+                                   r.y + radius * 0.45f, r.x + r.w, r.y + radius);
+                if (connect_right) {
+                    flux_path_line_to(p, r.x + r.w, bottom - shoulder);
+                    flux_path_cubic_to(p, r.x + r.w, bottom - shoulder * 0.42f,
+                                       r.x + r.w + shoulder * 0.42f, bottom, r.x + r.w + shoulder,
+                                       bottom);
+                } else {
+                    flux_path_line_to(p, r.x + r.w, bottom);
+                }
+                flux_path_close(p);
+
+                flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
+                flux_brush b = flux_brush_solid(c->color);
+                flux_encoder_draw_geometry(enc, &g, &b);
             }
             break;
         }
-
-        case LENS_DRAW_TEXT:
-            /* Strip any "##key" id-disambiguation suffix and paint the
-             * visible prefix through flux-text, which takes (ptr, len) so no
-             * NUL-terminated copy is needed. The device scale is held on the
-             * text context (kept in sync by lens_set_scale). */
-            if (ui->text && c->text && c->text[0]) {
-                const char *end = strstr(c->text, "##");
-                size_t vlen = end ? (size_t)(end - c->text) : strlen(c->text);
-                if (vlen) {
-                    float x = r.x;
-                    float y = r.y;
-                    /* Centring re-measures with the family stamped onto the
-                     * command at build time (c->text_family), NOT the
-                     * render-moment ui->text_family — a family switch between
-                     * build and render would otherwise centre against
-                     * different metrics than it paints. */
-                    const flux_text_style style = {.size_px = c->text_size,
-                                                   .weight = c->text_weight,
-                                                   .color = c->color,
-                                                   .family = (flux_text_family)c->text_family};
-                    flux_text_metrics tm = {0};
-                    bool measured_text = false;
-                    if (c->rel.w < 0.0f) {
-                        /* Negative rel.w means "center in the resolved rect". */
-                        tm = flux_text_measure(ui->text, c->text, vlen, &style);
-                        measured_text = true;
-                        x = r.x + (r.w - tm.width) * 0.5f;
-                        if (x < r.x)
-                            x = r.x;
-                    }
-                    if (c->rel.h < 0.0f) {
-                        /* Negative rel.h means "center in the final node
-                         * height". Unlike a build-time y offset, this remains
-                         * correct when the parent constrains the node below
-                         * its intrinsic padded height. */
-                        if (!measured_text)
-                            tm = flux_text_measure(ui->text, c->text, vlen, &style);
-                        y = r.y + (r.h - tm.height) * 0.5f;
-                        if (y < r.y)
-                            y = r.y;
-                    }
-                    if (c->outline_width > 0.0f && c->outline_color != 0) {
-                        flux_text_draw_outlined(ui->text, canvas, &ui->arena, x, y, c->text, vlen,
-                                                &style, c->outline_color, c->outline_width);
-                    } else {
-                        flux_text_draw(ui->text, canvas, &ui->arena, x, y, c->text, vlen, &style);
-                    }
-                }
-            }
-            break;
-
-        case LENS_DRAW_IMAGE:
-            /* Host-owned raster texture (e.g. a decoded application icon),
-             * scaled to fill the resolved rect. NULL image is a no-op so a
-             * failed icon decode does not crash the frame. */
+        case LENS_DRAW_IMAGE: {
             if (c->image) {
+                flux_geometry g = flux_geom_rect(r);
+                flux_brush b = (flux_brush){
+                    .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                    .image = {.image = c->image, .tint = c->color},
+                    .opacity = 1.0f,
+                };
                 if (c->outline_width > 0.0f && c->outline_color != 0) {
                     float edge = c->outline_width;
-                    flux_rect underlay = {r.x - edge, r.y - edge, r.w + edge * 2.0f,
-                                          r.h + edge * 2.0f};
-                    flux_paint outline = flux_paint_default();
-                    outline.color = c->outline_color;
-                    flux_canvas_draw_image(canvas, c->image, underlay, &outline);
+                    flux_geometry underlay = flux_geom_rect(
+                        (flux_rect){r.x - edge, r.y - edge, r.w + edge * 2.0f, r.h + edge * 2.0f});
+                    flux_brush outline = b;
+                    outline.image.tint = c->outline_color;
+                    flux_encoder_draw_geometry(enc, &underlay, &outline);
                 }
-                flux_paint paint = flux_paint_default();
-                paint.color = c->color;
-                flux_canvas_draw_image(canvas, c->image, r, &paint);
+                flux_encoder_draw_geometry(enc, &g, &b);
             }
-            break;
-
-        case LENS_DRAW_CLIP_PUSH: {
-            if (command_clip_depth >= 16) {
-                lensi_set_overflow(ui);
-                break;
-            }
-            command_clip_stack[command_clip_depth++] = command_clip;
-            command_clip = rect_intersect(command_clip, r);
-            flux_canvas_save(canvas);
-            flux_canvas_clip_rect(canvas, command_clip);
             break;
         }
-        case LENS_DRAW_CLIP_POP:
-            if (command_clip_depth > 0) {
-                flux_canvas_restore(canvas);
-                command_clip = command_clip_stack[--command_clip_depth];
-            }
-            break;
-
         case LENS_DRAW_ICON: {
             if (c->icon_id < 0)
                 break;
-            /* Built-in or runtime-registered (lens_icon_register_svg) —
-             * both arrive normalized to the 24x24 icon box. */
             const lens_icon_desc *desc = lensi_icon_desc(c->icon_id);
             if (!desc || !desc->cmds || desc->count == 0)
                 break;
@@ -359,19 +252,16 @@ void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect
             float ox = r.x;
             float oy = r.y;
 
-            /* Paint-run path (runtime icons with explicit SVG colours):
-             * one flux paint per run; theme-coloured runs (color == 0)
-             * take the widget colour. The run table brackets the stream,
-             * so gaps between runs (if any) carry no ink. */
             if (desc->runs && desc->run_count > 0) {
                 for (uint32_t run = 0; run < desc->run_count; run++) {
                     const lens_icon_run *ri = &desc->runs[run];
                     uint32_t end = ri->first_cmd + ri->count;
-                    if (end > desc->count)
-                        break; /* malformed run table: stop drawing */
+                    if (end < ri->first_cmd || end > desc->count)
+                        return FLUX_ERROR_INVALID_ARGUMENT;
                     flux_path *p = NULL;
-                    if (flux_path_create(&p, &ui->arena) != FLUX_OK)
-                        break;
+                    flux_result path_result = flux_path_create(&p, &ui->arena);
+                    if (path_result != FLUX_OK)
+                        return path_result;
                     for (uint32_t i = ri->first_cmd; i < end; i++) {
                         const lens_icon_cmd *cmd = &desc->cmds[i];
                         const float *pp = cmd->params;
@@ -403,28 +293,24 @@ void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect
                         }
                         }
                     }
-                    /* Straight 0xRRGGBBAA run colour -> flux_color
-                     * 0xAARRGGBB premultiplied. */
                     uint32_t rc = ri->color;
                     uint8_t rr = (uint8_t)(rc >> 16), rg = (uint8_t)(rc >> 8), rb = (uint8_t)rc,
                             ra = (uint8_t)(rc >> 24);
                     flux_color color = rc == 0 ? c->color : flux_color_rgba_premul(rr, rg, rb, ra);
-                    flux_paint paint = flux_paint_solid(color);
-                    if (ri->fill) {
-                        flux_canvas_fill_path(canvas, p, &paint);
-                    } else {
-                        paint.stroke_width = c->width > 0 ? c->width : 2.0f * s;
-                        paint.cap = FLUX_CAP_ROUND;
-                        paint.join = FLUX_JOIN_ROUND;
-                        flux_canvas_stroke_path(canvas, p, &paint);
+                    flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
+                    if (!ri->fill) {
+                        g.stroke_width = c->width > 0 ? c->width : 2.0f * s;
                     }
+                    flux_brush b = flux_brush_solid(color);
+                    flux_encoder_draw_geometry(enc, &g, &b);
                 }
                 break;
             }
 
             flux_path *p = NULL;
-            if (flux_path_create(&p, &ui->arena) != FLUX_OK)
-                break;
+            flux_result path_result = flux_path_create(&p, &ui->arena);
+            if (path_result != FLUX_OK)
+                return path_result;
 
             for (uint32_t i = 0; i < desc->count; i++) {
                 const lens_icon_cmd *cmd = &desc->cmds[i];
@@ -458,489 +344,24 @@ void lensi_emit_commands(lens *ui, flux_canvas *canvas, flux_rect box, flux_rect
                 }
             }
 
-            flux_paint paint = flux_paint_solid(c->color);
-            if (lensi_icon_mode(c->icon_id) == LENSI_ICON_RENDER_FILL) {
-                if (c->outline_width > 0.0f && c->outline_color != 0) {
-                    flux_paint outline = flux_paint_solid(c->outline_color);
-                    outline.stroke_width = c->outline_width * 2.0f;
-                    outline.cap = FLUX_CAP_ROUND;
-                    outline.join = FLUX_JOIN_ROUND;
-                    flux_canvas_stroke_path(canvas, p, &outline);
-                }
-                flux_canvas_fill_path(canvas, p, &paint);
-            } else {
-                paint.stroke_width = c->width > 0 ? c->width : 2.0f * s;
-                paint.cap = FLUX_CAP_ROUND;
-                paint.join = FLUX_JOIN_ROUND;
-                if (c->outline_width > 0.0f && c->outline_color != 0) {
-                    flux_paint outline = flux_paint_solid(c->outline_color);
-                    outline.stroke_width = paint.stroke_width + c->outline_width * 2.0f;
-                    outline.cap = FLUX_CAP_ROUND;
-                    outline.join = FLUX_JOIN_ROUND;
-                    flux_canvas_stroke_path(canvas, p, &outline);
-                }
-                flux_canvas_stroke_path(canvas, p, &paint);
-            }
-            break;
-        }
-        }
-
-        ui->arena.used = arena_mark; /* free this command's scratch */
-    }
-    while (command_clip_depth > 0) {
-        flux_canvas_restore(canvas);
-        command_clip_depth--;
-    }
-}
-
-/* Walk a node and replay its draw list. ABS children are skipped: they are
- * emitted separately in band order by lensi_render_tree (ADR-0060), clipped
- * by their own place_bounds rather than by any ancestor clip. */
-void lensi_render_node(lens *ui, flux_canvas *canvas, lens_node *n, flux_rect clip) {
-    flux_rect box = n->final_rect;
-    /* The clip as seen by this node's own commands; `clip` is narrowed
-     * below for scroll children, but the record validates against the
-     * entry value. */
-    const flux_rect entry_clip = clip;
-
-    /* Cull nodes that are completely outside the clip region. */
-    if (!rect_overlaps(box, clip))
-        return;
-
-    /* Replay path: skip re-emitting an unchanged subtree. The canvas
-     * does its own anchor validation inside flux_canvas_replay; a false
-     * return means the segment went stale (move/scale/clip/extent), so
-     * fall through, re-emit and re-record below. */
-    if (!n->subtree_changed && n->record.slot && rect_equal(n->record_clip, clip) &&
-        n->record_text_gen == ui->record_text_gen && flux_canvas_replay(canvas, n->record))
-        return;
-
-    /* Re-emit + re-record. The segment belongs to the live render
-     * canvas (a canvas switch drops every handle up front), so it is
-     * safe to release here. */
-    if (n->record.slot) {
-        flux_canvas_record_release(canvas, n->record);
-        n->record = (flux_canvas_record)FLUX_CANVAS_RECORD_INIT;
-    }
-    bool recording = flux_canvas_begin_record(canvas);
-
-    lensi_emit_commands(ui, canvas, box, clip, n->cmds, n->cmd_count, 1.0f);
-
-    bool pushed_canvas_clip = false;
-    if (n->is_scroll && n->first_child) {
-        /* Layout reserves scroll_gutter from the children's cross axis when
-         * a vertical scrollbar is present. Apply the same reservation to
-         * the child clip: descendants such as long text can paint beyond
-         * their own arranged box, and otherwise cover the scrollbar because
-         * parent draw commands are replayed before child nodes. */
-        float viewport_w = box.w - 2.0f * n->pad - n->scroll_gutter;
-        if (viewport_w < 0.0f)
-            viewport_w = 0.0f;
-        flux_rect viewport = {box.x + n->pad, box.y + n->pad, viewport_w, box.h - 2.0f * n->pad};
-        clip = rect_intersect(clip, viewport);
-        if (clip.w <= 0.0f || clip.h <= 0.0f) {
-            /* Children are fully clipped away; close the recording with
-             * just this node's own commands in it. */
-            if (recording) {
-                n->record = flux_canvas_end_record(canvas);
-                n->record_clip = entry_clip;
-                n->record_text_gen = ui->record_text_gen;
-            }
-            return;
-        }
-        flux_canvas_save(canvas);
-        flux_canvas_clip_rect(canvas, clip);
-        pushed_canvas_clip = true;
-    }
-
-    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->place == LENS_PLACE_ABS)
-            continue; /* emitted in band order (ADR-0060), not in tree order */
-        lensi_render_node(ui, canvas, c, clip);
-    }
-
-    if (pushed_canvas_clip) {
-        flux_canvas_restore(canvas);
-    }
-
-    if (recording) {
-        n->record = flux_canvas_end_record(canvas);
-        n->record_clip = entry_clip;
-        n->record_text_gen = ui->record_text_gen;
-    }
-}
-
-/* ------------------------------------------------------------------ */
-/*  Damage tracking — mark nodes whose geometry or appearance changed  */
-/* ------------------------------------------------------------------ */
-
-/* Bottom-up change detection rooted at `n`. ABS descendants are marked as
- * usual — they live in the one tree now (ADR-0060) — but their changes do
- * NOT roll up into this node's subtree_changed: this node's display-list
- * record contains flow children only (render skips ABS nodes in the tree
- * walk), so placed-subtree damage must not invalidate it. The repaint query
- * consults the band buckets directly (context.c). Child-list churn still
- * propagates via child_hash: a placed child appearing or vanishing changes
- * the parent's child sequence, which is genuine parent damage. */
-bool lensi_mark_subtree_changed(lens_node *n) {
-    bool changed = false;
-    if (n->phase != LENS_NODE_STABLE)
-        changed = true;
-    if (n->has_render_rect) {
-        if (n->final_rect.x != n->render_rect.x || n->final_rect.y != n->render_rect.y ||
-            n->final_rect.w != n->render_rect.w || n->final_rect.h != n->render_rect.h)
-            changed = true;
-    } else {
-        /* First rendered frame with geometry: must paint. */
-        if (n->final_rect.w > 0.0f || n->final_rect.h > 0.0f)
-            changed = true;
-    }
-    if (n->hover_t != n->last_hover_t || n->active_t != n->last_active_t)
-        changed = true;
-    if (n->cmd_hash != n->last_cmd_hash)
-        changed = true;
-    /* Child-list churn (removal/reorder/replacement) is invisible to the
-     * per-node checks above: untouched children simply vanish from the
-     * sibling walk. Compare the linked-child sequence hash instead. */
-    if (n->child_hash != n->last_child_hash)
-        changed = true;
-    n->last_hover_t = n->hover_t;
-    n->last_active_t = n->active_t;
-
-    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
-        bool child_changed = lensi_mark_subtree_changed(c);
-        if (c->place != LENS_PLACE_ABS && child_changed)
-            changed = true;
-    }
-    n->subtree_changed = changed;
-    return changed;
-}
-
-/* Commit the geometry baseline only after the tree was actually emitted.
- * This deliberately includes clipped descendants: if they later become
- * visible, an ancestor geometry/clip change invalidates the enclosing
- * record, while keeping an off-screen stable child from forcing perpetual
- * repaint. */
-static void commit_render_rects(lens_node *n) {
-    if (!n)
-        return;
-    n->render_rect = n->final_rect;
-    n->has_render_rect = true;
-    for (lens_node *c = n->first_child; c; c = c->next_sibling)
-        commit_render_rects(c);
-}
-
-void lensi_mark_dirty(lens *ui) {
-    if (ui->root)
-        lensi_mark_subtree_changed(ui->root);
-}
-
-flux_result lensi_render_tree(lens *ui, flux_canvas *canvas) {
-    if (!canvas)
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    if (!ui->root)
-        return FLUX_OK;
-
-    /* Display-list records: the canvas owns the segments. A canvas switch
-     * means every handle may dangle (the old canvas may be destroyed), so
-     * drop them all without releasing; a live old canvas reclaims the
-     * orphaned slots via its LRU budget. */
-    if (ui->record_canvas != canvas) {
-        drop_all_records(ui);
-        ui->record_canvas = canvas;
-    }
-    /* Glyph UVs freeze into records; a flux-text atlas clear re-packs the
-     * texels, so records stamped with an older clear count must re-record. */
-    if (ui->text) {
-        flux_text_stats ts;
-        flux_text_get_stats(ui->text, &ts);
-        ui->record_text_gen = ts.atlas_clears;
-    }
-
-    /* HiDPI: layout and draw commands stay in logical pixels; here we
-     * scale the canvas transform so 1 logical px -> ui->scale device px.
-     * save/restore so any caller transform survives this. */
-    bool scaled = ui->scale > 0.0f && ui->scale != 1.0f;
-    if (scaled) {
-        flux_canvas_save(canvas);
-        flux_canvas_scale(canvas, ui->scale, ui->scale);
-    }
-    flux_rect no_clip = {-1e6f, -1e6f, 2e6f, 2e6f};
-
-    /* Global emission order (ADR-0060): BACKDROP below the base tree, then
-     * the base tree itself (skipping ABS nodes in-tree), then CHROME,
-     * POPUP and TOPMOST in band order (the BASE bucket is always empty:
-     * lens_place_begin clamps ABS+BASE to CHROME). An ABS node escapes
-     * every ancestor clip — including scroll viewports — and is clipped
-     * only by its place_bounds (default: the display). */
-    for (uint32_t i = 0; i < ui->band_counts[LENS_BAND_BACKDROP]; ++i) {
-        lens_node *n = ui->bands[LENS_BAND_BACKDROP][i];
-        lensi_render_node(ui, canvas, n, n->has_place_bounds ? n->place_bounds : no_clip);
-    }
-    lensi_render_node(ui, canvas, ui->root, no_clip);
-    for (lens_band b = LENS_BAND_CHROME; b < LENS_BAND_COUNT; b++) {
-        for (uint32_t i = 0; i < ui->band_counts[b]; ++i) {
-            lens_node *n = ui->bands[b][i];
-            lensi_render_node(ui, canvas, n, n->has_place_bounds ? n->place_bounds : no_clip);
-        }
-    }
-    /* Ghosts paint after every live band (ADR-0078): a leaving subtree is
-     * decoration over the frame the host already rebuilt without it. */
-    lensi_ghost_render(ui, canvas);
-    if (scaled)
-        flux_canvas_restore(canvas);
-    /* One tree now: the commit walk reaches placed subtrees through their
-     * parent chain, so a single pass baselines every node. */
-    commit_render_rects(ui->root);
-    return FLUX_OK;
-}
-
-flux_result lens_render(lens *ui, flux_canvas *canvas) {
-    if (!ui || !canvas)
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    flux_result res = lensi_render_tree(ui, canvas);
-    if (res != FLUX_OK)
-        return res;
-
-    /* Tooltip is drawn after the tree so it escapes any scroll clips. */
-    if (ui->tooltip.active) {
-        const lens_theme *t = &ui->theme;
-        float pad = 4.0f;
-        float size = lensi_font_px(ui, t->font_size * 0.85f);
-        float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
-
-        bool scaled = scale != 1.0f;
-        if (scaled) {
-            flux_canvas_save(canvas);
-            flux_canvas_scale(canvas, scale, scale);
-        }
-
-        lens_text_metrics tm = lensi_text_measure_label(ui, ui->tooltip.text, size, 0.0f);
-        float w = tm.width + 2.0f * pad;
-        float h = tm.height + 2.0f * pad;
-
-        float x = ui->tooltip.anchor.x;
-        float y = ui->tooltip.anchor.y + ui->tooltip.anchor.h + 4.0f;
-
-        /* The tooltip bypasses the draw list, so the build-time opacity
-         * stamped by lensi_tooltip is applied here at paint. */
-        flux_rect bg = {x, y, w, h};
-        flux_canvas_fill_rect_color(canvas, bg,
-                                    lensi_opacity_color(t->color_bg, ui->tooltip.opacity));
-
-        flux_path *p = NULL;
-        if (flux_path_create(&p, &ui->arena) == FLUX_OK) {
-            flux_path_add_rect(p, bg);
-            flux_paint paint =
-                flux_paint_solid(lensi_opacity_color(t->color_border, ui->tooltip.opacity));
-            paint.stroke_width = 1.0f;
-            flux_canvas_stroke_path(canvas, p, &paint);
-        }
-
-        if (ui->text) {
-            flux_text_draw(
-                ui->text, canvas, &ui->arena, x + pad, y + pad, ui->tooltip.text,
-                strlen(ui->tooltip.text),
-                &(flux_text_style){.size_px = size,
-                                   .color = lensi_opacity_color(t->color_fg, ui->tooltip.opacity)});
-        }
-        if (scaled)
-            flux_canvas_restore(canvas);
-    }
-    return FLUX_OK;
-}
-
-static void lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, flux_rect clip,
-                                  const lens_draw_cmd *cmds, uint32_t cmd_count, float alpha) {
-    float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
-    flux_rect command_clip = clip;
-    flux_rect command_clip_stack[16];
-    uint32_t command_clip_depth = 0;
-
-    for (uint32_t i = 0; i < cmd_count; i++) {
-        const lens_draw_cmd *c = &cmds[i];
-        flux_rect r = offset_rel(box, c->rel);
-        r = snap_rect(r, scale);
-
-        bool is_clip_cmd = (c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP);
-        if (!is_clip_cmd && !rect_overlaps(r, command_clip))
-            continue;
-
-        if (c->radius > 0.5f && c->radius >= fminf(r.w, r.h) * 0.5f - 0.001f && c->rel.w > 0.0f &&
-            c->rel.h > 0.0f && fabsf(c->rel.w - c->rel.h) < 0.5f) {
-            float side = fminf(r.w, r.h);
-            r.x += (r.w - side) * 0.5f;
-            r.y += (r.h - side) * 0.5f;
-            r.w = side;
-            r.h = side;
-        }
-
-        lens_draw_cmd faded;
-        if (alpha < 1.0f) {
-            faded = *c;
-            faded.color = lensi_opacity_color(faded.color, alpha);
-            faded.outline_color = lensi_opacity_color(faded.outline_color, alpha);
-            c = &faded;
-        }
-
-        switch (c->kind) {
-        case LENS_DRAW_RECT: {
-            flux_geometry g = (c->radius > 0.5f) ? flux_geom_rrect(r, c->radius) : flux_geom_rect(r);
-            flux_brush b = flux_brush_solid(c->color);
-            flux_encoder_draw_geometry(enc, &g, &b);
-            break;
-        }
-        case LENS_DRAW_BORDER: {
-            float bw = c->width > 0 ? c->width : 1.0f;
-            flux_geometry g = (c->radius > 0.5f) ? flux_geom_rrect(r, c->radius) : flux_geom_rect(r);
-            g.stroke_width = bw;
-            flux_brush b = flux_brush_solid(c->color);
-            flux_encoder_draw_geometry(enc, &g, &b);
-            break;
-        }
-        case LENS_DRAW_TAB_INDICATOR: {
-            float thickness = c->width > 0.0f ? c->width : 3.0f;
-            flux_rect indicator = {r.x, box.y + box.h - thickness, r.w, thickness};
-            indicator = snap_rect(indicator, scale);
-            flux_geometry g = flux_geom_rrect(indicator, thickness * 0.5f);
-            flux_brush b = flux_brush_solid(c->color);
-            flux_encoder_draw_geometry(enc, &g, &b);
-            break;
-        }
-        case LENS_DRAW_CONNECTED_TAB: {
-            float shoulder = fminf(c->width, fminf(r.w * 0.25f, r.h * 0.45f));
-            float depth = fmaxf(0.0f, c->text_size);
-            float bottom = r.y + r.h + depth;
-            float radius = fminf(c->radius, fminf(r.w * 0.5f, r.h * 0.5f));
-            bool connect_left = (c->flags & LENSI_TAB_CONNECT_LEFT) != 0;
-            bool connect_right = (c->flags & LENSI_TAB_CONNECT_RIGHT) != 0;
-
-            flux_path *p = NULL;
-            if (flux_path_create(&p, &ui->arena) == FLUX_OK) {
-                if (connect_left) {
-                    flux_path_move_to(p, r.x - shoulder, bottom);
-                    flux_path_cubic_to(p, r.x - shoulder * 0.42f, bottom, r.x,
-                                       bottom - shoulder * 0.42f, r.x, bottom - shoulder);
-                } else {
-                    flux_path_move_to(p, r.x, bottom);
-                }
-                flux_path_line_to(p, r.x, r.y + radius);
-                flux_path_cubic_to(p, r.x, r.y + radius * 0.45f, r.x + radius * 0.45f, r.y,
-                                   r.x + radius, r.y);
-                flux_path_line_to(p, r.x + r.w - radius, r.y);
-                flux_path_cubic_to(p, r.x + r.w - radius * 0.45f, r.y, r.x + r.w, r.y + radius * 0.45f,
-                                   r.x + r.w, r.y + radius);
-                if (connect_right) {
-                    flux_path_line_to(p, r.x + r.w, bottom - shoulder);
-                    flux_path_cubic_to(p, r.x + r.w, bottom - shoulder * 0.42f,
-                                       r.x + r.w + shoulder * 0.42f, bottom, r.x + r.w + shoulder,
-                                       bottom);
-                } else {
-                    flux_path_line_to(p, r.x + r.w, bottom);
-                }
-                flux_path_close(p);
-
-                flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
-                flux_brush b = flux_brush_solid(c->color);
-                flux_encoder_draw_geometry(enc, &g, &b);
-            }
-            break;
-        }
-        case LENS_DRAW_IMAGE: {
-            if (c->image) {
-                flux_geometry g = flux_geom_rect(r);
-                flux_brush b = (flux_brush){
-                    .kind = FLUX_BRUSH_IMAGE_PATTERN,
-                    .image = {.image = c->image},
-                    .opacity = 1.0f,
-                };
-                flux_encoder_draw_geometry(enc, &g, &b);
-            }
-            break;
-        }
-        case LENS_DRAW_ICON: {
-            if (c->icon_id < 0)
-                break;
-            const lens_icon_desc *desc = lensi_icon_desc(c->icon_id);
-            if (!desc || !desc->cmds || desc->count == 0)
-                break;
-
-            float s = r.w / 24.0f;
-            float ox = r.x;
-            float oy = r.y;
-
-            if (desc->runs && desc->run_count > 0) {
-                for (uint32_t run = 0; run < desc->run_count; run++) {
-                    const lens_icon_run *ri = &desc->runs[run];
-                    uint32_t end = ri->first_cmd + ri->count;
-                    if (end > desc->count)
-                        break;
-                    flux_path *p = NULL;
-                    if (flux_path_create(&p, &ui->arena) != FLUX_OK)
-                        break;
-                    for (uint32_t i = ri->first_cmd; i < end; i++) {
-                        const lens_icon_cmd *cmd = &desc->cmds[i];
-                        const float *pp = cmd->params;
-                        switch (cmd->type) {
-                        case 0: flux_path_move_to(p, pp[0] * s + ox, pp[1] * s + oy); break;
-                        case 1: flux_path_line_to(p, pp[0] * s + ox, pp[1] * s + oy); break;
-                        case 2: flux_path_cubic_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox, pp[3] * s + oy, pp[4] * s + ox, pp[5] * s + oy); break;
-                        case 3: flux_path_quad_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox, pp[3] * s + oy); break;
-                        case 4: flux_path_close(p); break;
-                        case 5: flux_path_add_circle(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s); break;
-                        case 6: {
-                            flux_rect ir = {pp[0] * s + ox, pp[1] * s + oy, pp[2] * s, pp[3] * s};
-                            flux_path_add_rect(p, ir);
-                            break;
-                        }
-                        }
-                    }
-                    uint32_t rc = ri->color;
-                    uint8_t rr = (uint8_t)(rc >> 16), rg = (uint8_t)(rc >> 8), rb = (uint8_t)rc,
-                            ra = (uint8_t)(rc >> 24);
-                    flux_color color = rc == 0 ? c->color : flux_color_rgba_premul(rr, rg, rb, ra);
-                    flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
-                    if (!ri->fill) {
-                        g.stroke_width = c->width > 0 ? c->width : 2.0f * s;
-                    }
-                    flux_brush b = flux_brush_solid(color);
-                    flux_encoder_draw_geometry(enc, &g, &b);
-                }
-                break;
-            }
-
-            flux_path *p = NULL;
-            if (flux_path_create(&p, &ui->arena) != FLUX_OK)
-                break;
-
-            for (uint32_t i = 0; i < desc->count; i++) {
-                const lens_icon_cmd *cmd = &desc->cmds[i];
-                const float *pp = cmd->params;
-                switch (cmd->type) {
-                case 0: flux_path_move_to(p, pp[0] * s + ox, pp[1] * s + oy); break;
-                case 1: flux_path_line_to(p, pp[0] * s + ox, pp[1] * s + oy); break;
-                case 2: flux_path_cubic_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox, pp[3] * s + oy, pp[4] * s + ox, pp[5] * s + oy); break;
-                case 3: flux_path_quad_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox, pp[3] * s + oy); break;
-                case 4: flux_path_close(p); break;
-                case 5: flux_path_add_circle(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s); break;
-                case 6: {
-                    flux_rect ir = {pp[0] * s + ox, pp[1] * s + oy, pp[2] * s, pp[3] * s};
-                    flux_path_add_rect(p, ir);
-                    break;
-                }
-                }
-            }
-
             flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
             if (lensi_icon_mode(c->icon_id) != LENSI_ICON_RENDER_FILL) {
                 g.stroke_width = c->width > 0 ? c->width : 2.0f * s;
+            }
+            if (c->outline_width > 0.0f && c->outline_color != 0) {
+                flux_geometry outline = g;
+                outline.stroke_width = g.stroke_width + c->outline_width * 2.0f;
+                flux_brush outline_brush = flux_brush_solid(c->outline_color);
+                flux_encoder_draw_geometry(enc, &outline, &outline_brush);
             }
             flux_brush b = flux_brush_solid(c->color);
             flux_encoder_draw_geometry(enc, &g, &b);
             break;
         }
         case LENS_DRAW_CLIP_PUSH: {
-            if (command_clip_depth < 16) {
+            if (command_clip_depth >= 16)
+                return FLUX_ERROR_OUT_OF_RANGE;
+            {
                 command_clip_stack[command_clip_depth++] = command_clip;
                 command_clip = rect_intersect(command_clip, r);
                 flux_encoder_save(enc);
@@ -949,7 +370,9 @@ static void lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
             break;
         }
         case LENS_DRAW_CLIP_POP: {
-            if (command_clip_depth > 0) {
+            if (!command_clip_depth)
+                return FLUX_ERROR_INVALID_STATE;
+            {
                 flux_encoder_restore(enc);
                 command_clip = command_clip_stack[--command_clip_depth];
             }
@@ -972,34 +395,55 @@ static void lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                         flux_text_metrics tm = flux_text_measure(ui->text, c->text, vlen, &style);
                         if (c->rel.w < 0.0f) {
                             x = r.x + (r.w - tm.width) * 0.5f;
-                            if (x < r.x) x = r.x;
+                            if (x < r.x)
+                                x = r.x;
                         }
                         if (c->rel.h < 0.0f) {
                             y = r.y + (r.h - tm.height) * 0.5f;
-                            if (y < r.y) y = r.y;
+                            if (y < r.y)
+                                y = r.y;
                         }
                     }
-                    flux_text_draw_to_encoder(ui->text, enc, &ui->arena, x, y, c->text, vlen, &style);
+                    flux_result result = flux_text_record(
+                        ui->text, enc,
+                        &(flux_text_record_desc){.x = x,
+                                                 .y = y,
+                                                 .utf8 = c->text,
+                                                 .len = vlen,
+                                                 .style = style,
+                                                 .outline_color = c->outline_color,
+                                                 .outline_width = c->outline_width});
+                    if (result != FLUX_OK)
+                        return result;
                 }
             }
             break;
         }
         default:
-            break;
+            return FLUX_ERROR_UNSUPPORTED;
         }
+        ui->arena.used = arena_mark;
     }
+    if (command_clip_depth)
+        return FLUX_ERROR_INVALID_STATE;
+    return FLUX_OK;
 }
 
-static void lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip);
+static flux_result lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip);
 
-static void lensi_compile_node_body(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip) {
+static flux_result lensi_compile_node_body(lens *ui, flux_encoder *enc, lens_node *n,
+                                           flux_rect clip) {
     flux_rect box = n->final_rect;
-    bool has_group_opacity = (n->opacity >= 0.0f && n->opacity < 0.999f);
+    bool has_group_opacity = (n->opacity >= 0.0f && n->opacity < 1.0f);
     if (has_group_opacity) {
         flux_encoder_save_layer(enc, &box, n->opacity);
     }
 
-    lensi_compile_commands(ui, enc, box, clip, n->cmds, n->cmd_count, 1.0f);
+    flux_result result = lensi_compile_commands(ui, enc, box, clip, n->cmds, n->cmd_count, 1.0f);
+    if (result != FLUX_OK)
+        return result;
+    if (has_group_opacity)
+        flux_encoder_restore(enc);
 
     bool pushed_clip = false;
     if (n->is_scroll && n->first_child) {
@@ -1009,9 +453,7 @@ static void lensi_compile_node_body(lens *ui, flux_encoder *enc, lens_node *n, f
         flux_rect viewport = {box.x + n->pad, box.y + n->pad, viewport_w, box.h - 2.0f * n->pad};
         clip = rect_intersect(clip, viewport);
         if (clip.w <= 0.0f || clip.h <= 0.0f) {
-            if (has_group_opacity)
-                flux_encoder_restore(enc);
-            return;
+            return FLUX_OK;
         }
         flux_encoder_save(enc);
         flux_encoder_clip_rect(enc, clip);
@@ -1021,51 +463,53 @@ static void lensi_compile_node_body(lens *ui, flux_encoder *enc, lens_node *n, f
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->place == LENS_PLACE_ABS)
             continue;
-        lensi_compile_node(ui, enc, c, clip);
+        result = lensi_compile_node(ui, enc, c, clip);
+        if (result != FLUX_OK)
+            return result;
     }
 
     if (pushed_clip)
         flux_encoder_restore(enc);
-    if (has_group_opacity)
-        flux_encoder_restore(enc);
+    return FLUX_OK;
 }
 
-static void lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip) {
-    if (!n)
-        return;
-    flux_rect box = n->final_rect;
-    if (box.w <= 0.0f && box.h <= 0.0f)
-        return;
+static flux_result lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip) {
+    if (!n || (n->final_rect.w <= 0.0f && n->final_rect.h <= 0.0f))
+        return FLUX_OK;
+    if (n->cached_dl && n->cached_revision == n->visual_revision && n->cached_scale == ui->scale &&
+        rect_equal(n->cached_clip, clip))
+        return flux_encoder_draw_display_list(enc, n->cached_dl);
 
-    /* Incremental diffing & subtree DisplayList caching (ADR-0094):
-     * If the subtree did not change and clip matches, splice cached commands in O(1). */
-    if (!n->subtree_changed && n->cached_dl && rect_equal(n->cached_clip, clip)) {
-        flux_encoder_append_display_list(enc, n->cached_dl);
-        return;
-    }
-
-    if (n->cached_dl) {
-        flux_display_list_release(n->cached_dl);
-        n->cached_dl = nullptr;
-    }
-
-    /* Subtree changed or cache miss: compile into a node-local encoder, cache, and splice */
     flux_encoder *sub_enc = nullptr;
-    if (flux_encoder_create(nullptr, &sub_enc) == FLUX_OK) {
-        lensi_compile_node_body(ui, sub_enc, n, clip);
-        if (flux_encoder_finish(sub_enc, &n->cached_dl) == FLUX_OK) {
-            n->cached_clip = clip;
-            flux_encoder_append_display_list(enc, n->cached_dl);
-        }
-        flux_encoder_destroy(sub_enc);
+    flux_result result = flux_encoder_create(nullptr, &sub_enc);
+    if (result != FLUX_OK)
+        return result;
+    flux_display_list *replacement = nullptr;
+    result = lensi_compile_node_body(ui, sub_enc, n, clip);
+    if (result == FLUX_OK)
+        result = flux_encoder_finish(sub_enc, &replacement);
+    flux_encoder_destroy(sub_enc);
+    if (result != FLUX_OK)
+        return result;
+
+    result = flux_encoder_draw_display_list(enc, replacement);
+    if (result == FLUX_OK) {
+        flux_display_list_release(n->cached_dl);
+        n->cached_dl = replacement;
+        n->cached_clip = clip;
+        n->cached_revision = n->visual_revision;
+        n->cached_scale = ui->scale;
     } else {
-        lensi_compile_node_body(ui, enc, n, clip);
+        flux_display_list_release(replacement);
     }
+    return result;
 }
 
-flux_result lens_compile_draw_list(lens *ui, flux_arena *arena, lens_draw_list *out_list) {
-    if (!ui || !arena || !out_list)
-        return FLUX_ERROR_INVALID_ARGUMENT;
+static flux_result compile_visuals(lens *ui, flux_display_list **out_list) {
+    *out_list = nullptr;
+    if (ui->overflow)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    size_t arena_mark = ui->arena.used;
     flux_encoder *enc = nullptr;
     flux_result r = flux_encoder_create(nullptr, &enc);
     if (r != FLUX_OK)
@@ -1080,19 +524,29 @@ flux_result lens_compile_draw_list(lens *ui, flux_arena *arena, lens_draw_list *
 
     for (uint32_t i = 0; i < ui->band_counts[LENS_BAND_BACKDROP]; ++i) {
         lens_node *n = ui->bands[LENS_BAND_BACKDROP][i];
-        lensi_compile_node(ui, enc, n, n->has_place_bounds ? n->place_bounds : no_clip);
+        r = lensi_compile_node(ui, enc, n, n->has_place_bounds ? n->place_bounds : no_clip);
+        if (r != FLUX_OK)
+            goto done;
     }
 
     if (ui->root) {
-        lensi_compile_node(ui, enc, ui->root, no_clip);
+        r = lensi_compile_node(ui, enc, ui->root, no_clip);
+        if (r != FLUX_OK)
+            goto done;
     }
 
     for (lens_band b = LENS_BAND_CHROME; b < LENS_BAND_COUNT; b++) {
         for (uint32_t i = 0; i < ui->band_counts[b]; ++i) {
             lens_node *n = ui->bands[b][i];
-            lensi_compile_node(ui, enc, n, n->has_place_bounds ? n->place_bounds : no_clip);
+            r = lensi_compile_node(ui, enc, n, n->has_place_bounds ? n->place_bounds : no_clip);
+            if (r != FLUX_OK)
+                goto done;
         }
     }
+
+    r = lensi_ghost_compile(ui, enc);
+    if (r != FLUX_OK)
+        goto done;
 
     if (ui->tooltip.active) {
         const lens_theme *t = &ui->theme;
@@ -1110,60 +564,66 @@ flux_result lens_compile_draw_list(lens *ui, flux_arena *arena, lens_draw_list *
 
         flux_geometry g_border = flux_geom_rect(bg);
         g_border.stroke_width = 1.0f;
-        flux_brush b_border = flux_brush_solid(lensi_opacity_color(t->color_border, ui->tooltip.opacity));
+        flux_brush b_border =
+            flux_brush_solid(lensi_opacity_color(t->color_border, ui->tooltip.opacity));
         flux_encoder_draw_geometry(enc, &g_border, &b_border);
 
         if (ui->text) {
             flux_text_style ts = {.size_px = size,
                                   .color = lensi_opacity_color(t->color_fg, ui->tooltip.opacity)};
-            flux_text_draw_to_encoder(ui->text, enc, &ui->arena, x + pad, y + pad,
-                                      ui->tooltip.text, strlen(ui->tooltip.text), &ts);
+            r = flux_text_record(ui->text, enc,
+                                 &(flux_text_record_desc){.x = x + pad,
+                                                          .y = y + pad,
+                                                          .utf8 = ui->tooltip.text,
+                                                          .len = strlen(ui->tooltip.text),
+                                                          .style = ts});
+            if (r != FLUX_OK)
+                goto done;
         }
     }
 
     if (scaled)
         flux_encoder_restore(enc);
 
-    r = flux_encoder_finish(enc, &out_list->display_list);
+    r = flux_encoder_finish(enc, out_list);
+done:
+    ui->arena.used = arena_mark;
     flux_encoder_destroy(enc);
     if (r != FLUX_OK)
         return r;
 
-    out_list->has_damage = lens_frame_needs_repaint(ui);
-    out_list->generation = ui->generation;
     return FLUX_OK;
 }
 
-flux_result lens_draw_list_submit(const lens_draw_list *list, flux_canvas *canvas) {
-    if (!list || !canvas)
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    return flux_canvas_submit_display_list(canvas, list->display_list);
-}
-
-flux_result lens_snapshot_create(lens *ui, flux_arena *arena, lens_scene_snapshot **out_snapshot) {
-    if (!ui || !arena || !out_snapshot)
+flux_result lens_snapshot_create(lens *ui, lens_scene_snapshot **out_snapshot) {
+    if (!out_snapshot)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out_snapshot = nullptr;
-
-    lens_draw_list dl = {0};
-    flux_result r = lens_compile_draw_list(ui, arena, &dl);
-    if (r != FLUX_OK)
-        return r;
-
+    if (!ui)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (ui->building || !ui->generation)
+        return FLUX_ERROR_INVALID_STATE;
     lens_scene_snapshot *s = calloc(1, sizeof(*s));
-    if (!s) {
-        if (dl.display_list)
-            flux_display_list_release(dl.display_list);
+    if (!s)
         return FLUX_ERROR_OUT_OF_MEMORY;
-    }
     atomic_init(&s->ref_count, 1u);
+    s->owner_identity = ui->identity;
+    s->overlay_head = SIZE_MAX;
+    s->has_damage = lens_frame_needs_repaint(ui);
+    flux_result result = capture_metadata(ui, s);
+    if (result == FLUX_OK)
+        result = compile_visuals(ui, &s->display_list);
+    if (result != FLUX_OK) {
+        lens_snapshot_release(s);
+        return result;
+    }
     s->generation = ui->generation;
-    s->display_list = dl.display_list;
-    s->has_damage = dl.has_damage;
-    s->command_count = flux_display_list_command_count(dl.display_list);
-
     *out_snapshot = s;
     return FLUX_OK;
+}
+
+const flux_display_list *lens_snapshot_display_list(const lens_scene_snapshot *snapshot) {
+    return snapshot ? snapshot->display_list : nullptr;
 }
 
 lens_scene_snapshot *lens_snapshot_retain(lens_scene_snapshot *snapshot) {
@@ -1179,6 +639,11 @@ void lens_snapshot_release(lens_scene_snapshot *snapshot) {
         return;
     if (snapshot->display_list)
         flux_display_list_release(snapshot->display_list);
+    for (size_t i = 0; i < snapshot->node_count; i++) {
+        free((void *)snapshot->nodes[i].semantics.name);
+        free((void *)snapshot->nodes[i].semantics.value);
+    }
+    free(snapshot->nodes);
     free(snapshot);
 }
 
@@ -1190,4 +655,176 @@ flux_result lens_snapshot_submit(const lens_scene_snapshot *snapshot, flux_canva
     if (!snapshot || !canvas)
         return FLUX_ERROR_INVALID_ARGUMENT;
     return flux_canvas_submit_display_list(canvas, snapshot->display_list);
+}
+
+static flux_result capture_node(lens *ui, lens_scene_snapshot *s, lens_node *n, flux_rect clip,
+                                lens_id semantic_parent, lens_band band, uint32_t order,
+                                bool hit_transparent) {
+    if (!n)
+        return FLUX_OK;
+    if (n->place == LENS_PLACE_ABS) {
+        clip = n->has_place_bounds ? n->place_bounds : (flux_rect){-1e6f, -1e6f, 2e6f, 2e6f};
+        band = n->band;
+        hit_transparent = band == LENS_BAND_BACKDROP && !n->interactive;
+        for (order = 0; order < ui->band_counts[band]; order++)
+            if (ui->bands[band][order] == n)
+                break;
+    }
+    snapshot_node *entry = &s->nodes[s->node_count++];
+    *entry = (snapshot_node){
+        .id = n->id,
+        .incarnation = n->incarnation,
+        .visual_revision = n->visual_revision,
+        .bounds = n->final_rect,
+        .clip = clip,
+        .semantic_parent = semantic_parent,
+        .band = band,
+        .band_order = order,
+        .overlay = n->place == LENS_PLACE_ABS,
+        .hit_transparent = hit_transparent,
+        .semantics = {.role = n->semantics.role, .flags = n->semantics.flags},
+    };
+    if (n->is_scroll) {
+        const lens_scroll_state *ss =
+            n->state_bytes == sizeof(lens_scroll_state) ? n->state : nullptr;
+        if (ss) {
+            float width = ui->theme.scrollbar_width;
+            float x = n->final_rect.x + n->final_rect.w - width;
+            entry->is_scroll = true;
+            entry->scroll = (lens_scroll_geometry){
+                .thumb = {x, n->final_rect.y + ss->thumb_y, width, ss->thumb_h},
+                .track = {x, n->final_rect.y, width, ss->track_len + ss->thumb_h},
+                .offset_y = ss->offset_y,
+                .track_len = ss->track_len,
+                .scroll_range = ss->scroll_range,
+            };
+        }
+    }
+    if (entry->overlay) {
+        entry->next_overlay = s->overlay_head;
+        s->overlay_head = s->node_count - 1;
+    }
+    if (n->semantics.name) {
+        entry->semantics.name = strdup(n->semantics.name);
+        if (!entry->semantics.name)
+            return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    if (n->semantics.value) {
+        entry->semantics.value = strdup(n->semantics.value);
+        if (!entry->semantics.value)
+            return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    if (n->semantics.role != LENS_ROLE_NONE)
+        semantic_parent = n->id;
+    if (n->is_scroll) {
+        flux_rect box = n->final_rect;
+        flux_rect viewport = {box.x + n->pad, box.y + n->pad,
+                              fmaxf(0, box.w - 2 * n->pad - n->scroll_gutter),
+                              fmaxf(0, box.h - 2 * n->pad)};
+        clip = rect_intersect(clip, viewport);
+    }
+    for (lens_node *child = n->first_child; child; child = child->next_sibling) {
+        flux_result result =
+            capture_node(ui, s, child, clip, semantic_parent, band, order, hit_transparent);
+        if (result != FLUX_OK)
+            return result;
+    }
+    return FLUX_OK;
+}
+
+static flux_result capture_metadata(lens *ui, lens_scene_snapshot *snapshot) {
+    if (!ui->root)
+        return FLUX_OK;
+    snapshot->nodes = calloc(ui->store.count, sizeof(*snapshot->nodes));
+    if (!snapshot->nodes)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    return capture_node(ui, snapshot, ui->root, (flux_rect){-1e6f, -1e6f, 2e6f, 2e6f}, 0,
+                        LENS_BAND_BASE, 0, false);
+}
+
+flux_result lens_snapshot_activate(lens *ui, lens_scene_snapshot *snapshot) {
+    if (!ui || !snapshot)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (ui->building || snapshot->owner_identity != ui->identity ||
+        snapshot->generation > ui->generation ||
+        snapshot->generation < ui->last_presented_generation)
+        return FLUX_ERROR_INVALID_STATE;
+    lens_snapshot_retain(snapshot);
+    lens_snapshot_release(ui->presented_snapshot);
+    ui->presented_snapshot = snapshot;
+    ui->last_presented_generation = snapshot->generation;
+    for (uint32_t i = 0; i < ui->store.cap; i++) {
+        if (ui->store.slots[i].id)
+            ui->store.slots[i].node->has_prev = false;
+    }
+    for (size_t i = 0; i < snapshot->node_count; i++) {
+        const snapshot_node *entry = &snapshot->nodes[i];
+        lens_node *n = lensi_store_find(ui, entry->id);
+        if (!n || n->incarnation != entry->incarnation || n->phase == LENS_NODE_LEAVING)
+            continue;
+        n->prev_rect = entry->bounds;
+        n->render_rect = entry->bounds;
+        n->has_render_rect = true;
+        n->presented_revision = entry->visual_revision;
+        n->presented_index = i;
+        n->has_prev = true;
+    }
+    return FLUX_OK;
+}
+
+static const snapshot_node *presented_node(const lens_node *n) {
+    if (!n || !n->has_prev || !n->ui->presented_snapshot)
+        return nullptr;
+    const lens_scene_snapshot *s = n->ui->presented_snapshot;
+    if (n->presented_index >= s->node_count)
+        return nullptr;
+    const snapshot_node *entry = &s->nodes[n->presented_index];
+    return entry->id == n->id && entry->incarnation == n->incarnation ? entry : nullptr;
+}
+
+bool lensi_snapshot_scroll_geometry(const lens_node *n, lens_scroll_geometry *out) {
+    const snapshot_node *entry = presented_node(n);
+    if (!entry || !entry->is_scroll || !out)
+        return false;
+    *out = entry->scroll;
+    return true;
+}
+
+bool lensi_snapshot_point_clipped(const lens_node *n, flux_point p) {
+    const snapshot_node *entry = presented_node(n);
+    return !entry || !lensi_point_in(p, entry->clip);
+}
+
+static unsigned band_rank(lens_band band) {
+    return band == LENS_BAND_BACKDROP ? 0 : band == LENS_BAND_BASE ? 1 : (unsigned)band;
+}
+
+bool lensi_widget_occluded(const lens *ui, const lens_node *n) {
+    const snapshot_node *entry = presented_node(n);
+    if (!entry || entry->hit_transparent)
+        return true;
+    const lens_scene_snapshot *s = ui->presented_snapshot;
+    for (size_t i = s->overlay_head; i != SIZE_MAX; i = s->nodes[i].next_overlay) {
+        const snapshot_node *above = &s->nodes[i];
+        if (!above->overlay || above->hit_transparent)
+            continue;
+        if (band_rank(above->band) > band_rank(entry->band) ||
+            (above->band == entry->band && above->band_order > entry->band_order)) {
+            if (lensi_point_in(ui->input.cursor, above->bounds) &&
+                lensi_point_in(ui->input.cursor, above->clip))
+                return true;
+        }
+    }
+    return false;
+}
+
+void lens_snapshot_accessibility_walk(const lens_scene_snapshot *snapshot, lens_a11y_visit_fn visit,
+                                      void *user) {
+    if (!snapshot || !visit)
+        return;
+    for (size_t i = 0; i < snapshot->node_count; i++) {
+        const snapshot_node *entry = &snapshot->nodes[i];
+        if (entry->semantics.role != LENS_ROLE_NONE)
+            visit(&entry->semantics, entry->bounds, entry->id, entry->semantic_parent, user);
+    }
 }

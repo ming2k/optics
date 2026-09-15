@@ -16,7 +16,7 @@ static void test_slider_drag(void) {
     lens_begin(ui, &IN0);
     lens_slider(ui,
                 &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
-    lens_end(ui);
+    test_end(ui);
 
     /* Click on right side of slider track to jump value up */
     lens_input in = IN0;
@@ -28,7 +28,7 @@ static void test_slider_drag(void) {
         lens_slider(
             ui, &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f})
             .changed;
-    lens_end(ui);
+    test_end(ui);
 
     /* Value should have increased from the click */
     CHECK(changed || value > 0.1f);
@@ -45,7 +45,7 @@ static void test_slider_disabled(void) {
     lens_begin(ui, &IN0);
     lens_slider(ui,
                 &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){300, 20};
@@ -58,7 +58,7 @@ static void test_slider_disabled(void) {
                                                        .max = 1.0f,
                                                        .box = {.disabled = true}})
                        .changed;
-    lens_end(ui);
+    test_end(ui);
     CHECK(!changed);
     CHECK_NEAR(value, 0.5f, 0.001f);
 
@@ -73,7 +73,7 @@ static void test_slider_hover_schedules_feedback_transition(void) {
     lens_begin(ui, &IN0);
     lens_slider(ui,
                 &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
-    lens_end(ui);
+    test_end(ui);
     CHECK(!lens_anim_pending(ui));
 
     lens_input hover = IN0;
@@ -81,7 +81,7 @@ static void test_slider_hover_schedules_feedback_transition(void) {
     lens_begin(ui, &hover);
     lens_slider(ui,
                 &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_anim_pending(ui));
 
     lens_release(ui);
@@ -107,7 +107,7 @@ static void test_slider_geometry_uses_theme_tokens(void) {
         lens_begin(ui, &hover);
         lens_slider(
             ui, &(lens_slider_opts){.label = "Compact", .value = &value, .min = 0.0f, .max = 1.0f});
-        lens_end(ui);
+        test_end(ui);
     }
 
     lens_node *slider = lens_node_first_child(lens_root(ui));
@@ -140,7 +140,7 @@ static void test_vertical_slider_drag_and_wheel(void) {
                                         .step = 0.05f,
                                         .axis = LENS_COLUMN,
                                         .box = {.width = 44.0f, .height = 160.0f}});
-    lens_end(ui);
+    test_end(ui);
 
     lens_input drag = IN0;
     drag.cursor = (flux_point){22.0f, 22.0f};
@@ -155,7 +155,7 @@ static void test_vertical_slider_drag_and_wheel(void) {
                                                        .axis = LENS_COLUMN,
                                                        .box = {.width = 44.0f, .height = 160.0f}})
                        .changed;
-    lens_end(ui);
+    test_end(ui);
     CHECK(changed);
     CHECK(value > 0.8f);
 
@@ -172,7 +172,7 @@ static void test_vertical_slider_drag_and_wheel(void) {
                                                   .axis = LENS_COLUMN,
                                                   .box = {.width = 44.0f, .height = 160.0f}})
                   .changed;
-    lens_end(ui);
+    test_end(ui);
     CHECK(changed);
     CHECK_NEAR(value, 0.55f, 0.001f);
 

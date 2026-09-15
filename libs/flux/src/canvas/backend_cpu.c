@@ -623,7 +623,7 @@ static void cpu_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) 
 }
 
 static flux_result cpu_save_layer(const flux_canvas_backend *self, flux_canvas *c,
-                                 const flux_rect *bounds, float opacity) {
+                                  const flux_rect *bounds, float opacity) {
     (void)self;
     (void)bounds;
     flux_cpu_canvas *v = cpu(c);

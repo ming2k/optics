@@ -173,8 +173,8 @@ struct flux_canvas {
     flux_frame *frame;
     bool recording;
     bool pass_active;
-    bool target_pass;   /* true: active pass renders into target, not the frame */
-    flux_image *target; /* borrowed during begin_target..end_target */
+    bool target_pass;              /* true: active pass renders into target, not the frame */
+    flux_image *target;            /* borrowed during begin_target..end_target */
     flux_target *bound_target;     /* target leased exclusively for recording interval (ADR-0093) */
     flux_target *bound_cpu_target; /* CPU target receiving readback pixels on end */
 
@@ -544,9 +544,9 @@ void submit_triangles(flux_canvas *c, const flux_paint *paint, const flux_canvas
 void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id id,
                          const flux_canvas_vertex *verts, uint32_t vertex_count);
 void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, uint32_t image_handle,
-                                   flux_sampler *sampler, flux_bindless_handle sh, flux_rect dst,
-                                   flux_rect src, flux_color tint, flux_blend_mode blend,
-                                   uint32_t kind, const flux_rect *rounded_clip, float radius);
+                                    flux_sampler *sampler, flux_bindless_handle sh, flux_rect dst,
+                                    flux_rect src, flux_color tint, flux_blend_mode blend,
+                                    uint32_t kind, const flux_rect *rounded_clip, float radius);
 
 /* ------------------------------------------------------------------ */
 /*  Display-list record/replay (record.c)                             */
@@ -567,6 +567,8 @@ void canvas_record_retain_sampler(flux_canvas *c, flux_sampler *sampler);
 /* Retain every sampled image through the current frame fence; imported
  * dma-bufs additionally receive ownership-transfer bookkeeping. */
 bool canvas_track_foreign_image(flux_canvas *c, flux_image *img);
+bool canvas_track_sampler(flux_canvas *c, flux_sampler *sampler);
+bool canvas_track_display_list(flux_canvas *c, const flux_display_list *list);
 
 /* Record the newest producer generation seen for a host coverage buffer
  * (flux_glyph_run_host_atlas_desc); replay consults it to refuse segments

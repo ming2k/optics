@@ -13,7 +13,7 @@ static void test_tooltip_no_hover_no_crash(void) {
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "btn", .box = {.tooltip = "Tip text"}});
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(lens_overflowed(ui) == false);
     lens_release(ui);
@@ -26,14 +26,14 @@ static void test_tooltip_hover_does_not_crash(void) {
     /* frame 1: build button */
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "btn"});
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 2: hover over button, attach tooltip */
     lens_input in = IN0;
     in.cursor = (flux_point){20, 15};
     lens_begin(ui, &in);
     lens_button(ui, &(lens_button_opts){.label = "btn", .box = {.tooltip = "Hovered!"}});
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(ui->tooltip.active);
     CHECK(strcmp(ui->tooltip.text, "Hovered!") == 0);
@@ -48,13 +48,13 @@ static void test_tooltip_render_path(void) {
     /* Two frames so prev_rect exists for hover hit-testing. */
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "btn", .box = {.tooltip = "Tip text"}});
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){20, 15};
     lens_begin(ui, &in);
     lens_button(ui, &(lens_button_opts){.label = "btn", .box = {.tooltip = "Tip text"}});
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(ui->tooltip.active);
     CHECK(strcmp(ui->tooltip.text, "Tip text") == 0);
@@ -63,7 +63,7 @@ static void test_tooltip_render_path(void) {
     CHECK(flux_canvas_create_cpu(200, 100, 1.0f, &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     CHECK(flux_canvas_cpu_begin(canvas, &black) == FLUX_OK);
-    CHECK(lens_render(ui, canvas) == FLUX_OK);
+    CHECK(test_snapshot_render(ui, canvas) == FLUX_OK);
     flux_canvas_cpu_end(canvas);
 
     uint32_t width = 0, height = 0, stride = 0;

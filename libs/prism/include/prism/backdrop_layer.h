@@ -127,11 +127,11 @@ typedef struct prism_optical_glass_params {
 typedef struct prism_backdrop_layer_desc {
     prism_struct_type type; /* PRISM_TYPE_BACKDROP_LAYER_DESC */
     const void *next;
-    flux_image *input;                 /* sharp backdrop capture (required) */
-    flux_image *blurred_input;         /* blurred backdrop (required, same extent) */
+    flux_image *input;         /* sharp backdrop capture (required) */
+    flux_image *blurred_input; /* blurred backdrop (required, same extent) */
 
     /* 1. Base Material Layer (底衬材质层) */
-    const prism_base_material *frost;  /* may be NULL/0; base material plates */
+    const prism_base_material *frost; /* may be NULL/0; base material plates */
     uint32_t frost_count;
 
     /* 2. Optical Glass Layer (高光与折射透镜层) */

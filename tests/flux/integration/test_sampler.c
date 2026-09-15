@@ -95,6 +95,103 @@ int main(void) {
      * the public contract documented for every draw call. */
     flux_canvas_draw_image_sampled(nullptr, nullptr, nullptr, (flux_rect){0, 0, 1, 1}, nullptr);
 
+    /* --- Frame resource tracking and retirement (ADR-0090 / ADR-0092) --- */
+    {
+        flux_surface *surface = nullptr;
+        flux_surface_desc sdesc = FLUX_SURFACE_DESC_INIT;
+        sdesc.width = 64;
+        sdesc.height = 64;
+        EXPECT(flux_surface_create(d, &sdesc, &surface) == FLUX_OK);
+
+        flux_canvas *canvas = nullptr;
+        flux_canvas_desc cdesc = FLUX_CANVAS_DESC_INIT;
+        cdesc.surface = surface;
+        EXPECT(flux_canvas_create(&cdesc, &canvas) == FLUX_OK);
+
+        uint32_t pixels[16 * 16];
+        for (int i = 0; i < 16 * 16; ++i)
+            pixels[i] = 0xFFFFFFFFu;
+        flux_image_desc im_desc = FLUX_IMAGE_DESC_INIT;
+        im_desc.width = 16;
+        im_desc.height = 16;
+        im_desc.format = FLUX_FORMAT_RGBA8_UNORM;
+        im_desc.initial_data = pixels;
+        flux_image *img = nullptr;
+        EXPECT(flux_image_create(d, &im_desc, &img) == FLUX_OK);
+
+        /* Case 1: Sampler released immediately after recording draw call.
+         * The frame holds a reference until fence retirement. */
+        {
+            flux_sampler_desc sd = FLUX_SAMPLER_DESC_INIT;
+            sd.min_filter = FLUX_FILTER_LINEAR;
+            sd.mag_filter = FLUX_FILTER_LINEAR;
+            flux_sampler *s = nullptr;
+            EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
+
+            flux_frame *frame = nullptr;
+            EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+            flux_color clear = flux_color_rgba(0, 0, 0, 255);
+            EXPECT(flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK);
+
+            flux_canvas_draw_image_sampled(canvas, img, s, (flux_rect){0, 0, 32, 32}, nullptr);
+
+            /* Caller drops ownership right away while frame is in-flight. */
+            flux_sampler_release(s);
+
+            flux_canvas_end_frame(canvas);
+            EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            EXPECT(flux_frame_present(frame) == FLUX_OK);
+        }
+
+        /* Case 2: DisplayList with sampler submitted and released immediately.
+         * The frame tracks the DisplayList and its samplers until completion. */
+        {
+            flux_sampler_desc sd = FLUX_SAMPLER_DESC_INIT;
+            sd.min_filter = FLUX_FILTER_NEAREST;
+            sd.mag_filter = FLUX_FILTER_NEAREST;
+            flux_sampler *s = nullptr;
+            EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
+
+            flux_encoder *enc = nullptr;
+            EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
+            flux_geometry geom = flux_geom_rect((flux_rect){10, 10, 20, 20});
+            flux_brush brush = {
+                .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                .blend = FLUX_BLEND_SRC_OVER,
+                .opacity = 1.0f,
+                .image =
+                    {
+                        .image = img,
+                        .sampler = s,
+                        .src_rect = (flux_rect){0, 0, 16, 16},
+                    },
+            };
+            flux_encoder_draw_geometry(enc, &geom, &brush);
+            flux_sampler_release(s);
+
+            flux_display_list *dl = nullptr;
+            EXPECT(flux_encoder_finish(enc, &dl) == FLUX_OK);
+            flux_encoder_destroy(enc);
+
+            flux_frame *frame = nullptr;
+            EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+            flux_color clear = flux_color_rgba(0, 0, 0, 255);
+            EXPECT(flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK);
+
+            EXPECT(flux_canvas_submit_display_list(canvas, dl) == FLUX_OK);
+            /* Caller drops ownership right away while frame is in-flight. */
+            flux_display_list_release(dl);
+
+            flux_canvas_end_frame(canvas);
+            EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            EXPECT(flux_frame_present(frame) == FLUX_OK);
+        }
+
+        flux_image_release(img);
+        flux_canvas_release(canvas);
+        flux_surface_release(surface);
+    }
+
     flux_device_release(d);
     TEST_SUMMARY();
 }

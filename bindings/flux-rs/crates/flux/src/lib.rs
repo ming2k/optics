@@ -2477,7 +2477,9 @@ impl DisplayList {
 impl Clone for DisplayList {
     fn clone(&self) -> Self {
         if self.raw.is_null() {
-            Self { raw: std::ptr::null_mut() }
+            Self {
+                raw: std::ptr::null_mut(),
+            }
         } else {
             unsafe { Self::from_raw(sys::flux_display_list_retain(self.raw)) }
         }
@@ -2506,17 +2508,26 @@ pub struct Encoder {
 impl Encoder {
     /// Create a new command encoder with the default budget (64 MiB).
     pub fn new() -> Result<Self, Error> {
-        Self::with_budget(0)
+        Self::with_limits(0, 0)
     }
 
-    /// Create a command encoder with an explicit maximum byte budget.
-    pub fn with_budget(max_bytes: usize) -> Result<Self, Error> {
-        let desc = sys::flux_encoder_desc { max_bytes };
+    /// Bound owned storage and expanded execution, including shared children.
+    /// A zero limit selects the C library default.
+    pub fn with_limits(max_bytes: usize, max_commands: u32) -> Result<Self, Error> {
+        let desc = sys::flux_encoder_desc {
+            max_bytes,
+            max_commands,
+        };
         let mut raw = std::ptr::null_mut();
-        Error::check(unsafe {
-            sys::flux_encoder_create(if max_bytes > 0 { &desc } else { std::ptr::null() }, &mut raw)
-        })?;
+        Error::check(unsafe { sys::flux_encoder_create(&desc, &mut raw) })?;
         Ok(Self { raw })
+    }
+
+    /// Retain a published child under the current transform and clip.
+    /// Changes to state inside the child cannot leak into following commands.
+    pub fn draw_display_list(&mut self, list: &DisplayList) -> Result<(), Error> {
+        // SAFETY: self uniquely owns the recorder; list is a live immutable owner.
+        Error::check(unsafe { sys::flux_encoder_draw_display_list(self.raw, list.raw) })
     }
 
     /// Push canvas state (transform and scissor).
@@ -2543,7 +2554,10 @@ impl Encoder {
     /// Push an isolated opacity layer (ADR-0091).
     pub fn save_layer(&mut self, bounds: Option<(f32, f32, f32, f32)>, opacity: f32) {
         let b = bounds.map(|(x, y, w, h)| sys::flux_rect { x, y, w, h });
-        let b_ptr = b.as_ref().map(|r| r as *const _).unwrap_or(std::ptr::null());
+        let b_ptr = b
+            .as_ref()
+            .map(|r| r as *const _)
+            .unwrap_or(std::ptr::null());
         unsafe { sys::flux_encoder_save_layer(self.raw, b_ptr, opacity) };
     }
 
@@ -2918,9 +2932,7 @@ impl Canvas {
             .as_ref()
             .map(|c| c as *const u32)
             .unwrap_or(std::ptr::null());
-        Error::check(unsafe {
-            sys::flux_canvas_begin(self.raw, target.as_raw_target(), ptr)
-        })?;
+        Error::check(unsafe { sys::flux_canvas_begin(self.raw, target.as_raw_target(), ptr) })?;
         Ok(CanvasSession {
             canvas: self,
             _target: target,
@@ -3222,7 +3234,10 @@ impl Canvas {
                         stops: stops_arr,
                         count: count as u32,
                     },
-                    start: sys::flux_point { x: from.0, y: from.1 },
+                    start: sys::flux_point {
+                        x: from.0,
+                        y: from.1,
+                    },
                     end: sys::flux_point { x: to.0, y: to.1 },
                     radius: 0.0,
                 },
@@ -3291,8 +3306,18 @@ impl Canvas {
             image.raw,
             std::ptr::null_mut(),
             sys::flux_rect { x, y, w, h },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             0.0,
             0xFFFFFFFF,
@@ -3315,8 +3340,18 @@ impl Canvas {
             image.raw,
             sampler.raw,
             sys::flux_rect { x, y, w, h },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             0.0,
             0xFFFFFFFF,
@@ -3342,8 +3377,18 @@ impl Canvas {
             image.raw,
             sampler.raw,
             sys::flux_rect { x, y, w, h },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             0.0,
             paint.raw.color,
@@ -3359,8 +3404,18 @@ impl Canvas {
             image.raw,
             std::ptr::null_mut(),
             sys::flux_rect { x, y, w, h },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             0.0,
             0xFFFFFFFF,
@@ -3383,8 +3438,18 @@ impl Canvas {
             image.raw,
             std::ptr::null_mut(),
             sys::flux_rect { x, y, w, h },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             0.0,
             paint.raw.color,
@@ -3399,8 +3464,18 @@ impl Canvas {
             image.raw,
             std::ptr::null_mut(),
             sys::flux_rect { x, y, w, h },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             radius,
             0xFFFFFFFF,
@@ -3430,7 +3505,12 @@ impl Canvas {
             image.raw,
             std::ptr::null_mut(),
             sys::flux_rect { x, y, w, h },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             sys::flux_rect {
                 x: clip_x,
                 y: clip_y,
@@ -3474,7 +3554,12 @@ impl Canvas {
                 w: src_du,
                 h: src_dv,
             },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             0.0,
             0xFFFFFFFF,
@@ -3513,7 +3598,12 @@ impl Canvas {
                 w: src_du,
                 h: src_dv,
             },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             0.0,
             0xFFFFFFFF,
@@ -3763,7 +3853,9 @@ impl Paint {
             blend: self.raw.blend,
             opacity: 1.0,
             __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
-                solid: sys::flux_brush_solid_data { color: self.raw.color },
+                solid: sys::flux_brush_solid_data {
+                    color: self.raw.color,
+                },
             },
         };
         if self.raw.kind == sys::flux_paint_kind::FLUX_PAINT_LINEAR_GRADIENT {
@@ -3825,7 +3917,10 @@ impl<'arena> Path<'arena> {
     pub fn new(arena: &'arena Arena) -> Result<Path<'arena>, Error> {
         let mut out = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_path_create(&mut out, arena.as_raw()) })?;
-        Ok(Path { raw: out, _arena: std::marker::PhantomData })
+        Ok(Path {
+            raw: out,
+            _arena: std::marker::PhantomData,
+        })
     }
 
     /// Begin a new subpath at `(x, y)`.
@@ -4473,8 +4568,18 @@ impl BlurredImage<'_> {
                 w: width,
                 h: height,
             },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             0.0,
             0xFFFFFFFF,
@@ -4596,8 +4701,18 @@ impl EffectImage {
                 w: width,
                 h: height,
             },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             0.0,
             0xFFFFFFFF,
@@ -4690,8 +4805,18 @@ impl ShadowedImage<'_> {
                 w: width,
                 h: height,
             },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            sys::flux_rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            sys::flux_rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             0.0,
             0.0,
             0xFFFFFFFF,

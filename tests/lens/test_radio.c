@@ -20,7 +20,7 @@ static void test_radio_focus_selects(void) {
     lens_checkbox(ui, &(lens_checkbox_opts){
                           .label = "B", .value = &opt_b, .appearance = LENS_CHECKBOX_RADIO});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 2: focus radio B and press Return */
     lens_input in = IN0;
@@ -37,7 +37,7 @@ static void test_radio_focus_selects(void) {
                                                              .appearance = LENS_CHECKBOX_RADIO})
                          .changed;
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(changed_b == true);
     CHECK(opt_b == true);
@@ -61,7 +61,7 @@ static void test_radio_no_change_when_disabled(void) {
                                                            .appearance = LENS_CHECKBOX_RADIO,
                                                            .box = {.disabled = true}})
                        .changed;
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(changed == false);
     CHECK(opt_a == false);

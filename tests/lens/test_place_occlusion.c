@@ -58,7 +58,7 @@ static void test_popup_card_occludes_base_widget(void) {
             card_clicked = true;
         lens_place_end(ui);
 
-        lens_end(ui);
+        test_end(ui);
     }
 
     CHECK(!base_clicked);
@@ -102,13 +102,13 @@ static void test_later_popup_occludes_earlier_same_band(void) {
     lens_response first_r = {0}, second_r = {0};
     lens_begin(ui, &IN0);
     BUILD_TWO();
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){150, 20};
     lens_begin(ui, &in);
     BUILD_TWO();
-    lens_end(ui);
+    test_end(ui);
     CHECK(!first_r.hovered);
     CHECK(second_r.hovered);
 
@@ -116,13 +116,13 @@ static void test_later_popup_occludes_earlier_same_band(void) {
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     BUILD_TWO();
-    lens_end(ui);
+    test_end(ui);
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     BUILD_TWO();
-    lens_end(ui);
+    test_end(ui);
     CHECK(!first_r.clicked);
     CHECK(second_r.clicked);
 

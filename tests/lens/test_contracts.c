@@ -13,7 +13,7 @@ int main(void) {
             ui, &(lens_button_opts){
                     .label = "A", .box = {.min_width = 200, .min_height = 80, .tooltip = "hint"}});
         lens_row_end(ui);
-        lens_end(ui);
+        test_end(ui);
         flux_rect rect = lens_node_bounds(lens_find(ui, r.id));
         CHECK_NEAR(rect.w, 200, 0.01);
         CHECK_NEAR(rect.h, 80, 0.01);
@@ -32,7 +32,7 @@ int main(void) {
     lens_response a = lens_button(ui, &(lens_button_opts){.label = "left", .box = {.width = 50}});
     lens_response b = lens_button(ui, &(lens_button_opts){.label = "right", .box = {.width = 50}});
     lens_row_end(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK_NEAR(lens_node_bounds(lens_find(ui, end.id)).x, 450, 0.01);
     CHECK_NEAR(lens_node_bounds(lens_find(ui, a.id)).x, 0, 0.01);
     CHECK_NEAR(lens_node_bounds(lens_find(ui, b.id)).x, 450, 0.01);
@@ -51,7 +51,7 @@ int main(void) {
         cells[i] = lens_button(ui, &(lens_button_opts){.label = id, .box = {.height = 20}});
     }
     lens_grid_end(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK_NEAR(lens_node_bounds(lens_node_first_child(lens_root(ui))).w, 60, 0.01);
     flux_rect c0 = lens_node_bounds(lens_find(ui, cells[0].id));
     flux_rect c1 = lens_node_bounds(lens_find(ui, cells[1].id));
@@ -66,48 +66,46 @@ int main(void) {
     lens_row_begin(ui, &(lens_layout_opts){.box = {.disabled = true}});
     lens_response disabled = lens_button(ui, &(lens_button_opts){.label = "child"});
     lens_row_end(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK((disabled.state & LENS_STATE_DISABLED) != 0);
 
     /* ADR-0094: Full Scene Snapshot Compilation into DisplayList without GPU */
     lens_begin(ui, &in);
     lens_column_begin(ui, &(lens_layout_opts){.box = {.width = 300, .height = 200}});
     lens_button(ui, &(lens_button_opts){.label = "OK", .box = {.width = 100, .height = 40}});
-    lens_label(ui, &(lens_label_opts){.text = "Snapshot Test", .box = {.width = 150, .height = 25}});
+    lens_label(ui,
+               &(lens_label_opts){.text = "Snapshot Test", .box = {.width = 150, .height = 25}});
     lens_column_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
-    flux_arena snapshot_arena;
-    CHECK(flux_arena_init(&snapshot_arena, 65536, nullptr) == FLUX_OK);
-    lens_draw_list draw_list = {0};
-    CHECK(lens_compile_draw_list(ui, &snapshot_arena, &draw_list) == FLUX_OK);
-    /* Verify that compile_draw_list captured the complete UI tree into commands (NOT just 1 dummy command!) */
-    CHECK(flux_display_list_command_count(draw_list.display_list) >= 3);
-    CHECK(flux_display_list_size(draw_list.display_list) > 0);
+    lens_scene_snapshot *first_snapshot = nullptr;
+    CHECK(lens_snapshot_create(ui, &first_snapshot) == FLUX_OK);
+    CHECK(flux_display_list_command_count(lens_snapshot_display_list(first_snapshot)) >= 3);
 
     /* Submit to CPU canvas and verify replay */
-    flux_canvas_desc cd = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 500, .height = 300);
+    flux_canvas_desc cd =
+        FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 500, .height = 300);
     flux_canvas *c = nullptr;
     CHECK(flux_canvas_create(&cd, &c) == FLUX_OK);
     flux_color clear = 0;
     CHECK(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
-    CHECK(lens_draw_list_submit(&draw_list, c) == FLUX_OK);
+    CHECK(lens_snapshot_submit(first_snapshot, c) == FLUX_OK);
     CHECK(flux_canvas_end(c) == FLUX_OK);
 
     uint32_t pw = 0, ph = 0, pstride = 0;
     const uint8_t *px = flux_canvas_read_pixels(c, &pw, &ph, &pstride);
     CHECK(px != nullptr);
 
-    flux_display_list_release(draw_list.display_list);
+    lens_snapshot_release(first_snapshot);
     flux_canvas_release(c);
 
     /* ADR-0094: Lens Scene Snapshot Independence & Survives UI Context Destruction */
     lens_scene_snapshot *snapshot = nullptr;
-    CHECK(lens_snapshot_create(ui, &snapshot_arena, &snapshot) == FLUX_OK);
+    CHECK(lens_snapshot_create(ui, &snapshot) == FLUX_OK);
     CHECK(snapshot != nullptr);
     uint64_t gen = lens_snapshot_generation(snapshot);
     CHECK(gen == lens_generation(ui));
-    CHECK(lens_last_presented_generation(ui) == 0);
+    CHECK(lens_last_presented_generation(ui) == lens_generation(ui));
 
     /* Retain snapshot */
     lens_scene_snapshot *retained_snap = lens_snapshot_retain(snapshot);
@@ -116,7 +114,6 @@ int main(void) {
 
     /* Destroy mutable UI context and all temporary arena inputs */
     lens_release(ui);
-    flux_arena_deinit(&snapshot_arena);
 
     /* Replay published snapshot on a fresh canvas — must succeed even after UI is destroyed */
     CHECK(flux_canvas_create(&cd, &c) == FLUX_OK);
@@ -140,7 +137,10 @@ int main(void) {
     CHECK(lens_last_presented_generation(ui) == 0);
 
     /* Simulate successful presentation of Frame 1 */
-    lens_notify_presented(ui, g1);
+    lens_scene_snapshot *presented = nullptr;
+    CHECK(lens_snapshot_create(ui, &presented) == FLUX_OK);
+    CHECK(lens_snapshot_activate(ui, presented) == FLUX_OK);
+    lens_snapshot_release(presented);
     CHECK(lens_last_presented_generation(ui) == g1);
 
     /* Frame 2: simulated presentation failure (drop without notify) */

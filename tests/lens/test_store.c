@@ -19,7 +19,7 @@ int main(void) {
     lens_begin(ui, &in);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_id aid = lens_get_response(ui).id;
-    lens_end(ui);
+    test_end(ui);
     CHECK(aid != 0);
 
     lens_node *n = lens_find(ui, aid);
@@ -34,7 +34,7 @@ int main(void) {
     /* frame 2: same id -> same node pointer, state carried forward */
     lens_begin(ui, &in);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *n2 = lens_find(ui, aid);
     CHECK(n2 == n); /* retained */
@@ -50,7 +50,7 @@ int main(void) {
     for (int f = 0; f < 4; f++) {
         lens_begin(ui, &in);
         /* build nothing */
-        lens_end(ui);
+        test_end(ui);
         if (lens_find(ui, aid))
             present_during_grace = true;
     }
@@ -58,7 +58,7 @@ int main(void) {
 
     for (int f = 0; f < 12; f++) {
         lens_begin(ui, &in);
-        lens_end(ui);
+        test_end(ui);
     }
     CHECK(lens_find(ui, aid) == NULL); /* reaped */
 
@@ -77,7 +77,7 @@ int main(void) {
          * floor, then spike it once and confirm it is still functional. */
         for (int f = 0; f < LENSI_STORE_SHRINK_FRAMES + 16; f++) {
             lens_begin(ui, &in);
-            lens_end(ui);
+            test_end(ui);
         }
         CHECK(ui->store.cap >= LENSI_STORE_MIN_CAP);
         /* The implicit root node is touched every frame, so the live count
@@ -88,7 +88,7 @@ int main(void) {
         lens_begin(ui, &in);
         (void)lens_button(ui, &(lens_button_opts){.label = "post-shrink"});
         lens_id pid = lens_get_response(ui).id;
-        lens_end(ui);
+        test_end(ui);
         CHECK(pid != 0 && lens_find(ui, pid) != NULL);
     }
 

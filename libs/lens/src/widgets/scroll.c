@@ -34,32 +34,24 @@ bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts) {
     if (opts->box.max_height > 0.0f)
         n->max_h = opts->box.max_height;
 
-    bool occluded = n->has_prev && lensi_widget_occluded(ui, n);
+    bool occluded = n->has_prev && (lensi_widget_occluded(ui, n) ||
+                                    lensi_snapshot_point_clipped(n, ui->input.cursor));
     if (n->has_prev && !occluded && lensi_point_in(ui->input.cursor, n->prev_rect)) {
         ui->scroll_hot_id = n->id;
     }
 
     lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
     if (ss) {
-        const float sb_w = t->scrollbar_width;
-        bool have_bar = (ss->thumb_h > 0.0f && n->has_prev);
-        flux_rect thumb_rect = {0, 0, 0, 0};
-        flux_rect track_rect = {0, 0, 0, 0};
-        float track_h = 0.0f;
-        float sb_y = 0.0f;
+        lens_scroll_geometry presented = {0};
+        bool have_bar = lensi_snapshot_scroll_geometry(n, &presented) && presented.thumb.h > 0;
+        flux_rect thumb_rect = presented.thumb;
+        flux_rect track_rect = presented.track;
         if (have_bar) {
-            float sb_x = n->prev_rect.x + n->prev_rect.w - sb_w;
-            sb_y = n->prev_rect.y + ss->thumb_y;
-            thumb_rect = (flux_rect){sb_x, sb_y, sb_w, ss->thumb_h};
-            track_h = ss->track_len + ss->thumb_h;
-            track_rect = (flux_rect){sb_x, n->prev_rect.y, sb_w, track_h};
-
             const int L = LENS_MOUSE_LEFT;
             if (ui->active_id == n->id) {
                 if (ui->input.mouse_down[L] && ss->dragging) {
                     float dy = ui->input.cursor.y - ss->drag_start_y;
-                    float dscroll =
-                        (ss->track_len > 0.0f) ? dy * ss->scroll_range / ss->track_len : 0.0f;
+                    float dscroll = dy * ss->drag_ratio;
                     ss->offset_y = ss->drag_start_offset + dscroll;
                 } else if (!ui->input.mouse_down[L]) {
                     ui->active_id = 0;
@@ -69,13 +61,15 @@ bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts) {
                        ui->input.mouse_pressed[L]) {
                 ui->active_id = n->id;
                 ss->dragging = true;
-                ss->drag_start_offset = ss->offset_y;
+                ss->drag_start_offset = presented.offset_y;
+                ss->drag_ratio =
+                    presented.track_len > 0 ? presented.scroll_range / presented.track_len : 0;
                 ss->drag_start_y = ui->input.cursor.y;
                 ui->input.mouse_pressed[L] = false;
             } else if (!occluded && lensi_point_in(ui->input.cursor, track_rect) &&
                        ui->input.mouse_pressed[L]) {
-                float page = track_h * 0.9f;
-                if (ui->input.cursor.y < sb_y)
+                float page = track_rect.h * 0.9f;
+                if (ui->input.cursor.y < thumb_rect.y)
                     ss->offset_y -= page;
                 else
                     ss->offset_y += page;

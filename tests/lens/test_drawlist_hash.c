@@ -35,7 +35,7 @@ static bool frame_with_cmd(lens *ui, lens_draw_cmd cmd) {
     lens_node *root = lens_root(ui);
     bool changed = root->subtree_changed;
     /* This unit isolates command hashing and deliberately does not invoke
-     * lens_render (the fake image pointer above must never be dereferenced).
+     * snapshot publication (the fake image pointer must never be dereferenced).
      * Acknowledge the geometry baseline exactly as a successful render would
      * so geometry damage does not mask the hash assertions. */
     root->render_rect = root->final_rect;

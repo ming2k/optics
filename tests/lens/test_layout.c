@@ -31,7 +31,7 @@ static void test_row_packs_children(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     (void)lens_button(ui, &(lens_button_opts){.label = "B"});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *root = lens_root(ui);
     lens_node *row = lens_node_first_child(root);
@@ -66,7 +66,7 @@ static void test_flex_distributes_slack(void) {
     lens_flex(ui, 1.0f);
     (void)lens_button(ui, &(lens_button_opts){.label = "B"});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *a = lens_node_first_child(row);
@@ -102,7 +102,7 @@ static void test_flex_child_shrinks_between_fixed_siblings(void) {
     lens_size(ui, 50.0f, 0.0f);
     (void)lens_button(ui, &(lens_button_opts){.label = "inspector"});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *sidebar = lens_node_first_child(row);
@@ -135,7 +135,7 @@ static void test_column_stacks_children(void) {
     (void)lens_button(ui,
                       &(lens_button_opts){.label = "A"}); /* direct children of the root column */
     (void)lens_button(ui, &(lens_button_opts){.label = "B"});
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *root = lens_root(ui);
     lens_node *a = lens_node_first_child(root);
@@ -166,7 +166,7 @@ static void test_flex_applies_to_terse_container(void) {
     lens_row_begin(ui, NULL);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     CHECK(row != NULL);
@@ -197,7 +197,7 @@ static void test_container_width_constraints_bound_intrinsic_size(void) {
         ui, &(lens_button_opts){.label = "content that is intentionally much wider than the cap"});
     lens_close(ui);
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *minimum = lens_node_first_child(row);
@@ -224,7 +224,7 @@ static void test_flex_redistributes_space_after_max_width(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "B"});
     lens_close(ui);
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *capped = lens_node_first_child(row);
@@ -250,7 +250,7 @@ static void test_flex_respects_min_width_while_shrinking(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "B"});
     lens_close(ui);
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *floored = lens_node_first_child(row);

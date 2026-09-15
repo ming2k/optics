@@ -360,13 +360,17 @@ static flux_result canvas_finish_pass_checked(flux_canvas *c, bool expect_target
 
     if (c->bound_cpu_target && c->bound_cpu_target->is_cpu && c->bound_cpu_target->cpu_buffer) {
         uint32_t w = 0, h = 0, stride = 0;
-        const uint8_t *px = c->backend->read_pixels ? c->backend->read_pixels(c->backend, c, &w, &h, &stride) : nullptr;
+        const uint8_t *px = c->backend->read_pixels
+                                ? c->backend->read_pixels(c->backend, c, &w, &h, &stride)
+                                : nullptr;
         if (px) {
             uint32_t copy_h = c->bound_cpu_target->height < h ? c->bound_cpu_target->height : h;
             size_t dst_stride = c->bound_cpu_target->cpu_stride;
-            size_t copy_w_bytes = (c->bound_cpu_target->width < w ? c->bound_cpu_target->width : w) * 4;
+            size_t copy_w_bytes =
+                (c->bound_cpu_target->width < w ? c->bound_cpu_target->width : w) * 4;
             for (uint32_t y = 0; y < copy_h; ++y) {
-                memcpy(c->bound_cpu_target->cpu_buffer + y * dst_stride, px + y * stride, copy_w_bytes);
+                memcpy(c->bound_cpu_target->cpu_buffer + y * dst_stride, px + y * stride,
+                       copy_w_bytes);
             }
         }
     }
@@ -483,7 +487,8 @@ void flux_canvas_save_layer(flux_canvas *c, const flux_rect *bounds, float opaci
                      "flux_canvas_save_layer: state stack overflow (depth > %d); "
                      "save_layer was a no-op — check for unbalanced save/restore",
                      FLUX_CANVAS_MAX_STATES);
-            c->device->log(FLUX_LOG_ERROR, "flux_canvas_save_layer", 0, "%s", buf, c->device->log_user);
+            c->device->log(FLUX_LOG_ERROR, "flux_canvas_save_layer", 0, "%s", buf,
+                           c->device->log_user);
         }
         FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "flux_canvas_save_layer: state stack overflow");
         c->pass_error = FLUX_ERROR_OUT_OF_RANGE;
@@ -687,10 +692,44 @@ bool canvas_track_foreign_image(flux_canvas *c, flux_image *img) {
                                           frame_release_image, foreign_owned);
 }
 
+static void *frame_retain_sampler(void *resource) {
+    return flux_sampler_retain(resource);
+}
+
+static void frame_release_sampler(void *resource) {
+    flux_sampler_release(resource);
+}
+
+bool canvas_track_sampler(flux_canvas *c, flux_sampler *sampler) {
+    if (!c || !sampler)
+        return true;
+    if (!c->frame)
+        return true;
+    return flux_frame_track_resource(c->frame, sampler, frame_retain_sampler,
+                                     frame_release_sampler);
+}
+
+static void *frame_retain_display_list(void *resource) {
+    return flux_display_list_retain(resource);
+}
+
+static void frame_release_display_list(void *resource) {
+    flux_display_list_release(resource);
+}
+
+bool canvas_track_display_list(flux_canvas *c, const flux_display_list *list) {
+    if (!c || !list)
+        return true;
+    if (!c->frame)
+        return true;
+    return flux_frame_track_resource(c->frame, (void *)list, frame_retain_display_list,
+                                     frame_release_display_list);
+}
+
 void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, uint32_t image_handle,
-                                   flux_sampler *sampler, flux_bindless_handle sh, flux_rect dst,
-                                   flux_rect src, flux_color tint, flux_blend_mode blend,
-                                   uint32_t kind, const flux_rect *rounded_clip, float radius) {
+                                    flux_sampler *sampler, flux_bindless_handle sh, flux_rect dst,
+                                    flux_rect src, flux_color tint, flux_blend_mode blend,
+                                    uint32_t kind, const flux_rect *rounded_clip, float radius) {
     /* Image draws need a GPU-resident texture (img->bindless or image_handle): unsupported on
      * a headless CPU canvas. */
     if (!c->device || sh == FLUX_BINDLESS_INVALID)
@@ -715,6 +754,8 @@ void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, uint32_t im
     if (!image_quad_intersects_scissor(c, v))
         return;
     if (img && !canvas_track_foreign_image(c, img))
+        return;
+    if (sampler && !canvas_track_sampler(c, sampler))
         return;
     v[0]._pad = pack_uv(0.0f, 0.0f);
     v[1]._pad = pack_uv(1.0f, 0.0f);
@@ -911,6 +952,8 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
         atlas_h = desc->atlas->height;
         if (!canvas_track_foreign_image(c, desc->atlas))
             return;
+        if (desc->sampler && !canvas_track_sampler(c, desc->sampler))
+            return;
     }
 
     flux_mat3x2 tx = c->states[c->state_top].transform;
@@ -1008,8 +1051,7 @@ static bool canvas_axis_uniform(const flux_canvas *c) {
            fabsf(t.m[0] - t.m[3]) < 0.000001f;
 }
 
-void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom,
-                               const flux_brush *brush) {
+void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const flux_brush *brush) {
     if (!c || !c->recording)
         return;
     if (!geom) {
@@ -1031,8 +1073,7 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom,
             return;
         }
         if (!c->device || geom->stroke_width > 0.0f) {
-            canvas_shape_error(c, FLUX_ERROR_UNSUPPORTED,
-                               "image draws require GPU and no stroke");
+            canvas_shape_error(c, FLUX_ERROR_UNSUPPORTED, "image draws require GPU and no stroke");
             return;
         }
         if (b.image.image->device != c->device ||
@@ -1062,17 +1103,15 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom,
                 break;
             case FLUX_GEOM_CIRCLE:
                 dst = (flux_rect){geom->circle.cx - geom->circle.radius,
-                                  geom->circle.cy - geom->circle.radius,
-                                  geom->circle.radius * 2.0f,
+                                  geom->circle.cy - geom->circle.radius, geom->circle.radius * 2.0f,
                                   geom->circle.radius * 2.0f};
                 radius = geom->circle.radius;
                 rounded = true;
                 break;
             case FLUX_GEOM_LINE:
-                dst = (flux_rect){fminf(geom->line.x0, geom->line.x1),
-                                  fminf(geom->line.y0, geom->line.y1),
-                                  fabsf(geom->line.x1 - geom->line.x0),
-                                  fabsf(geom->line.y1 - geom->line.y0)};
+                dst = (flux_rect){
+                    fminf(geom->line.x0, geom->line.x1), fminf(geom->line.y0, geom->line.y1),
+                    fabsf(geom->line.x1 - geom->line.x0), fabsf(geom->line.y1 - geom->line.y0)};
                 break;
             default:
                 dst = (flux_rect){0, 0, 100, 100};
@@ -1099,9 +1138,8 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom,
             return;
         }
 
-        flux_bindless_handle sh = b.image.sampler
-                                      ? flux_sampler_bindless_handle(b.image.sampler)
-                                      : flux_device_default_sampler_handle(c->device);
+        flux_bindless_handle sh = b.image.sampler ? flux_sampler_bindless_handle(b.image.sampler)
+                                                  : flux_device_default_sampler_handle(c->device);
         const flux_rect *clip = rounded ? (clipped ? &b.image.clip_rect : &dst) : nullptr;
         uint32_t kind = b.image.opaque_only ? (rounded ? 7u : 6u) : (rounded ? 5u : 3u);
         uint32_t tint_color = b.image.tint ? b.image.tint : 0xFFFFFFFFu;
@@ -1112,12 +1150,10 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom,
             uint32_t bl = (uint32_t)((tint_color & 0xFF) * alpha_scale + 0.5f);
             tint_color = (a << 24) | (r << 16) | (g << 8) | bl;
         }
-        draw_image_with_sampler_handle(c, b.image.image,
-                                       b.image.image ? b.image.image->bindless : FLUX_BINDLESS_INVALID,
-                                       b.image.sampler, sh, dst, src,
-                                       tint_color,
-                                       b.image.opaque_only && !rounded ? FLUX_BLEND_SRC : b.blend,
-                                       kind, clip, radius);
+        draw_image_with_sampler_handle(
+            c, b.image.image, b.image.image ? b.image.image->bindless : FLUX_BINDLESS_INVALID,
+            b.image.sampler, sh, dst, src, tint_color,
+            b.image.opaque_only && !rounded ? FLUX_BLEND_SRC : b.blend, kind, clip, radius);
         return;
     }
 
@@ -1233,7 +1269,8 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom,
     }
     case FLUX_GEOM_LINE: {
         if (geom->stroke_width <= 0.0f) {
-            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "line requires positive stroke width");
+            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT,
+                               "line requires positive stroke width");
             return;
         }
         flux_path_segment segs[3];

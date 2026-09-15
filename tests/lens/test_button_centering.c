@@ -27,7 +27,7 @@ int main(void) {
     lens_row_begin(ui, &(lens_layout_opts){.box.height = 60.0f});
     lens_button(ui, &(lens_button_opts){.label = "stretched"});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *button = lens_node_first_child(row);
@@ -41,7 +41,7 @@ int main(void) {
     /* Unstretched, the resolved box equals the measured one. */
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "loose"});
-    lens_end(ui);
+    test_end(ui);
     lens_node *loose = lens_node_first_child(lens_root(ui));
     CHECK(loose != NULL);
     const lens_draw_cmd *loose_cmd = first_text_cmd(loose);

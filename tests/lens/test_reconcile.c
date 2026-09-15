@@ -12,7 +12,7 @@ int main(void) {
     /* frame 1: button enters */
     lens_begin(ui, &in);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
-    lens_end(ui);
+    test_end(ui);
     lens_id id = lens_get_response(ui).id;
     CHECK(id != 0);
     lens_node *n = lens_find(ui, id);
@@ -22,14 +22,14 @@ int main(void) {
     /* frame 2: stable */
     lens_begin(ui, &in);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
-    lens_end(ui);
+    test_end(ui);
     n = lens_find(ui, id);
     CHECK(n != NULL);
     CHECK(lens_node_phase_of(n) == LENS_NODE_STABLE);
 
     /* frame 3: leave (not built) */
     lens_begin(ui, &in);
-    lens_end(ui);
+    test_end(ui);
     n = lens_find(ui, id);
     CHECK(n != NULL); /* still in grace window */
     CHECK(lens_node_phase_of(n) == LENS_NODE_LEAVING);
@@ -38,7 +38,7 @@ int main(void) {
     bool found_before_reap = false;
     for (int f = 0; f < 20; f++) {
         lens_begin(ui, &in);
-        lens_end(ui);
+        test_end(ui);
         if (lens_find(ui, id))
             found_before_reap = true;
     }

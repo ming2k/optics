@@ -57,10 +57,10 @@ bool lens_dnd_drop_target(lens *ui, lens_id id, uint32_t accepted_actions,
         return false;
 
     lens_node *n = lens_find(ui, id);
-    if (!n)
+    if (!n || !n->has_prev)
         return false;
 
-    flux_rect b = n->has_prev ? n->prev_rect : n->final_rect;
+    flux_rect b = n->prev_rect;
     flux_point p = ui->input.cursor;
     bool in_bounds = lensi_point_in(p, b);
 

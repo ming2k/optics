@@ -62,7 +62,7 @@ static void test_widget_roles(void) {
                 .label = "Zoom", .value = &zoom, .min = 0.0f, .max = 4.0f, .format = "%.4g"});
     lens_label(ui, &(lens_label_opts){.text = "Ready"});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     reset();
     lens_accessibility_walk(ui, collect, NULL);
@@ -100,7 +100,7 @@ static void test_a11y_override(void) {
     lens_begin(ui, &in);
     (void)lens_button(ui, &(lens_button_opts){.label = "##save-icon"});
     lens_a11y(ui, &(lens_a11y_desc){.name = "Save document"});
-    lens_end(ui);
+    test_end(ui);
 
     reset();
     lens_accessibility_walk(ui, collect, NULL);
@@ -122,7 +122,7 @@ static void test_walk_parenting(void) {
     lens_pressable_begin(ui, &(lens_pressable_opts){.box = {.id = "Section"}, .label = "Section"});
     (void)lens_button(ui, &(lens_button_opts){.label = "Top"});
     lens_pressable_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     reset();
     lens_accessibility_walk(ui, collect, NULL);

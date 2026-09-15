@@ -19,7 +19,7 @@ static void test_scroll_thumb_drag(void) {
         lens_label(ui, &(lens_label_opts){.text = lbl});
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 2: scroll so thumb appears */
     lens_input in2 = in;
@@ -33,7 +33,7 @@ static void test_scroll_thumb_drag(void) {
         lens_label(ui, &(lens_label_opts){.text = lbl});
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *first = lens_node_first_child(lens_node_first_child(lens_root(ui)));
     float y_after_scroll = lens_node_bounds(first).y;
@@ -53,7 +53,7 @@ static void test_scroll_thumb_drag(void) {
         lens_label(ui, &(lens_label_opts){.text = lbl});
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 4: drag thumb down */
     lens_input in4 = in;
@@ -68,7 +68,7 @@ static void test_scroll_thumb_drag(void) {
         lens_label(ui, &(lens_label_opts){.text = lbl});
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     first = lens_node_first_child(lens_node_first_child(lens_root(ui)));
     float y_after_drag = lens_node_bounds(first).y;
@@ -87,7 +87,7 @@ static void test_label_sizes(void) {
     lens_label(ui, &(lens_label_opts){.text = "Heading", .size = 18.0f});
     lens_label(ui, &(lens_label_opts){.text = "Body"});
     lens_label(ui, &(lens_label_opts){.text = "Large", .size = 28.0f});
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *root = lens_root(ui);
     lens_node *title = lens_node_first_child(root);
@@ -133,7 +133,7 @@ static void test_compact_outlined_label_preserves_intrinsic_metrics(void) {
     lens_pop_style(ui);
     lens_pop_id(ui);
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *plain = lens_node_first_child(row);
@@ -160,7 +160,7 @@ static void test_wrapped_label_respects_width_and_grows_height(void) {
                    });
     lens_label(ui, &(lens_label_opts){.text = "After"});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *column = lens_node_first_child(lens_root(ui));
     lens_node *wrapped = lens_node_first_child(column);
@@ -186,7 +186,7 @@ static void test_label_zero_padding_by_default(void) {
     lens_row_begin(ui, &(lens_layout_opts){.cross = LENS_START});
     lens_label(ui, &(lens_label_opts){.text = "Tight Label", .size = 14.0f});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *label = lens_node_first_child(row);

@@ -5,6 +5,11 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Replace `Encoder::with_budget` with `Encoder::with_limits` for storage and expanded execution budgets; add shared child composition through `Encoder::draw_display_list`.
+
+
 ### Fixed
 
 - **flux: bucket the canvas target attachment pool and bound the effect

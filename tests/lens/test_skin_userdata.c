@@ -36,7 +36,7 @@ int main(void) {
     lens_set_skin_userdata(ui, LENS_WIDGET_BUTTON, spring_skin, &spring);
     lens_begin(ui, NULL);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(spring.emissions >= 1);
     CHECK(spring.indicator >= 1.0f);
 
@@ -44,14 +44,14 @@ int main(void) {
     int before = spring.emissions;
     lens_begin(ui, NULL);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(spring.emissions > before);
 
     /* Plain registration supersedes the userdata form for that kind. */
     lens_set_skin(ui, LENS_WIDGET_BUTTON, plain_skin);
     lens_begin(ui, NULL);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(plain_emissions >= 1);
     int frozen = spring.emissions;
     CHECK(frozen >= 1);
@@ -61,7 +61,7 @@ int main(void) {
     lens_set_skin_userdata(ui, LENS_WIDGET_BUTTON, NULL, NULL);
     lens_begin(ui, NULL);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(plain_emissions == 1); /* no more plain-skin emissions */
     CHECK(spring.emissions == frozen);
 

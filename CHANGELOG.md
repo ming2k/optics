@@ -13,6 +13,21 @@ either.
 
 ## [Unreleased]
 
+### Changed
+
+- **lens / iris**: Publish owned scene snapshots and activate the exact snapshot after successful presentation. Input, scrollbar hit geometry, accessibility and repaint baselines follow the activated snapshot. Failed recording or submission does not publish a partial frame.
+- **flux**: Retain immutable child lists with isolated state and bounded nesting and expanded execution. Crop captured host glyph coverage to the sampled region. Track referenced samplers and display lists in frame retirement queues so in-flight execution holds ownership through fence retirement.
+- **flux-text**: Replace `flux_text_draw_to_encoder` with fallible `flux_text_record`; failures poison the recorder.
+
+### Removed
+
+- **lens**: Remove `lens_render`, `lens_draw_list`, `lens_compile_draw_list`, `lens_draw_list_submit` and `lens_notify_presented`. Use snapshot creation, submission and activation.
+- **flux**: Remove native-memory DisplayList serialization and `flux_encoder_append_display_list`. Use `flux_encoder_draw_display_list` for shared child composition. The encoder descriptor now includes an execution budget; this is a source/ABI-breaking change.
+
+### Corrected
+
+- The 0.0.42 architecture completion claims were premature. There is no authoritative RenderPlan compiler yet; the independent Rust planner remains on disk, and resource versioning and completion-driven retirement remain outstanding. See [implementation status](docs/dev/architecture-implementation-status.md).
+
 ## [0.0.42] - 2026-09-14
 
 ### Added

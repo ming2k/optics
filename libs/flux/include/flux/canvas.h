@@ -404,12 +404,12 @@ typedef struct flux_geometry {
     uint8_t _pad[3];
     float stroke_width; /* 0 = fill, > 0 = stroke width */
     union {
-        flux_geom_rect_data     rect;
-        flux_geom_rrect_data    rrect;
+        flux_geom_rect_data rect;
+        flux_geom_rrect_data rrect;
         flux_geom_squircle_data squircle;
-        flux_geom_circle_data   circle;
-        flux_geom_line_data     line;
-        flux_geom_path_data     path;
+        flux_geom_circle_data circle;
+        flux_geom_line_data line;
+        flux_geom_path_data path;
     };
 } flux_geometry;
 
@@ -446,9 +446,9 @@ typedef struct flux_brush {
     flux_blend_mode blend;
     float opacity; /* [0.0f, 1.0f] */
     union {
-        flux_brush_solid_data    solid;
+        flux_brush_solid_data solid;
         flux_brush_gradient_data gradient;
-        flux_brush_image_data    image;
+        flux_brush_image_data image;
     };
 } flux_brush;
 
@@ -466,13 +466,18 @@ typedef struct flux_display_list flux_display_list;
 typedef struct flux_encoder flux_encoder;
 
 typedef struct flux_encoder_desc {
-    size_t max_bytes; /* Owned command storage budget; zero selects 64 MiB. */
+    size_t max_bytes;      /* Owned command storage budget; zero selects 64 MiB. */
+    uint32_t max_commands; /* Expanded execution budget; zero selects 1,048,576 commands. */
 } flux_encoder_desc;
 
 /* Unique recorder. Creation owns all scratch storage. Finish is terminal;
  * destroy the recorder after finish or to abort unfinished recording. */
 FLUX_NODISCARD FLUX_API flux_result flux_encoder_create(const flux_encoder_desc *desc,
-                                                       flux_encoder **out);
+                                                        flux_encoder **out);
+/* Producers propagate capture failures into the recorder's sticky result.
+ * FLUX_OK is a no-op; the first failure cannot be replaced or cleared. */
+FLUX_API void flux_encoder_fail(flux_encoder *enc, flux_result error);
+FLUX_API flux_result flux_encoder_status(const flux_encoder *enc);
 FLUX_API void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
                                          const flux_brush *brush);
 FLUX_API void flux_encoder_draw_glyph_run(flux_encoder *enc, const flux_glyph_run_desc *desc);
@@ -501,17 +506,14 @@ FLUX_API uint32_t flux_display_list_command_count(const flux_display_list *list)
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_submit_display_list(flux_canvas *c,
                                                                     const flux_display_list *list);
 
-/* Splice a published display list directly into the encoder (ADR-0089 / ADR-0094).
- * Retains any referenced GPU images/samplers so the new display list shares ownership. */
-FLUX_NODISCARD FLUX_API flux_result flux_encoder_append_display_list(flux_encoder *enc,
-                                                                     const flux_display_list *list);
-
-/* Binary serialization & safe deserialization protocol (ADR-0090).
- * Produces/consumes versioned FLUX_DL format with bounds and float validity verification. */
-FLUX_NODISCARD FLUX_API flux_result flux_display_list_serialize(const flux_display_list *list,
-                                                               void **out_bytes, size_t *out_size);
-FLUX_NODISCARD FLUX_API flux_result flux_display_list_deserialize(const void *bytes, size_t size,
-                                                                 flux_display_list **out_list);
+/* Record an owned child list under the recorder's current placement and clip.
+ * Child state changes are isolated from subsequent commands. The child is
+ * retained without copying its payload. Cycles are impossible because only
+ * published immutable lists can be referenced; excessive nesting fails.
+ * max_bytes and display_list_size count local storage, excluding shared children.
+ * command_count includes expanded child commands. No serialization API is provided. */
+FLUX_NODISCARD FLUX_API flux_result flux_encoder_draw_display_list(flux_encoder *enc,
+                                                                   const flux_display_list *list);
 
 /* ================================================================== */
 /*  RenderPlan Execution Diagnostics (ADR-0089 / ADR-0092)            */

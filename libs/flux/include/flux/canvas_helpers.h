@@ -121,14 +121,15 @@ static inline void flux_canvas_fill_rect_color(flux_canvas *c, flux_rect r, flux
     flux_canvas_draw_geometry(c, &g, &b);
 }
 
-static inline void flux_canvas_fill_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color) {
+static inline void flux_canvas_fill_rrect(flux_canvas *c, flux_rect r, float radius,
+                                          flux_color color) {
     flux_geometry g = flux_geom_rrect(r, radius);
     flux_brush b = flux_brush_solid(color);
     flux_canvas_draw_geometry(c, &g, &b);
 }
 
 static inline void flux_canvas_stroke_rrect(flux_canvas *c, flux_rect r, float radius,
-                                           flux_color color, float width) {
+                                            flux_color color, float width) {
     flux_geometry g = flux_geom_rrect(r, radius);
     g.stroke_width = width;
     flux_brush b = flux_brush_solid(color);
@@ -136,21 +137,22 @@ static inline void flux_canvas_stroke_rrect(flux_canvas *c, flux_rect r, float r
 }
 
 static inline void flux_canvas_fill_circle(flux_canvas *c, float cx, float cy, float radius,
-                                          flux_color color) {
+                                           flux_color color) {
     flux_geometry g = flux_geom_circle(cx, cy, radius);
     flux_brush b = flux_brush_solid(color);
     flux_canvas_draw_geometry(c, &g, &b);
 }
 
 static inline void flux_canvas_stroke_circle(flux_canvas *c, float cx, float cy, float radius,
-                                            flux_color color, float width) {
+                                             flux_color color, float width) {
     flux_geometry g = flux_geom_circle(cx, cy, radius);
     g.stroke_width = width;
     flux_brush b = flux_brush_solid(color);
     flux_canvas_draw_geometry(c, &g, &b);
 }
 
-static inline void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, const flux_paint *paint) {
+static inline void flux_canvas_fill_path(flux_canvas *c, const flux_path *p,
+                                         const flux_paint *paint) {
     flux_geometry g = {
         .kind = FLUX_GEOM_PATH,
         .path = {.path = p, .fill_rule = paint ? paint->fill_rule : FLUX_FILL_NON_ZERO},
@@ -159,7 +161,8 @@ static inline void flux_canvas_fill_path(flux_canvas *c, const flux_path *p, con
     flux_canvas_draw_geometry(c, &g, &b);
 }
 
-static inline void flux_canvas_stroke_path(flux_canvas *c, const flux_path *p, const flux_paint *paint) {
+static inline void flux_canvas_stroke_path(flux_canvas *c, const flux_path *p,
+                                           const flux_paint *paint) {
     flux_geometry g = {
         .kind = FLUX_GEOM_PATH,
         .path = {.path = p},
@@ -170,7 +173,7 @@ static inline void flux_canvas_stroke_path(flux_canvas *c, const flux_path *p, c
 }
 
 static inline void flux_canvas_draw_image(flux_canvas *c, flux_image *image, flux_rect dst,
-                                         const flux_paint *optional_paint) {
+                                          const flux_paint *optional_paint) {
     flux_geometry g = flux_geom_rect(dst);
     flux_brush b = {
         .kind = FLUX_BRUSH_IMAGE_PATTERN,
@@ -193,7 +196,7 @@ static inline void flux_canvas_draw_image_opaque(flux_canvas *c, flux_image *ima
 }
 
 static inline void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *image, flux_rect dst,
-                                               float radius, const flux_paint *optional_paint) {
+                                                float radius, const flux_paint *optional_paint) {
     flux_geometry g = flux_geom_rrect(dst, radius);
     flux_brush b = {
         .kind = FLUX_BRUSH_IMAGE_PATTERN,
@@ -204,31 +207,27 @@ static inline void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *imag
     flux_canvas_draw_geometry(c, &g, &b);
 }
 
-static inline void flux_canvas_draw_image_clipped_rrect(
-    flux_canvas *c,
-    flux_image *image,
-    flux_rect dst,
-    flux_rect clip,
-    float radius,
-    const flux_paint *optional_paint
-) {
+static inline void flux_canvas_draw_image_clipped_rrect(flux_canvas *c, flux_image *image,
+                                                        flux_rect dst, flux_rect clip, float radius,
+                                                        const flux_paint *optional_paint) {
     flux_geometry g = flux_geom_rect(dst);
     flux_brush b = {
         .kind = FLUX_BRUSH_IMAGE_PATTERN,
         .blend = optional_paint ? optional_paint->blend : FLUX_BLEND_SRC_OVER,
         .opacity = 1.0f,
-        .image = {
-            .image = image,
-            .clip_rect = clip,
-            .clip_radius = radius,
-            .tint = optional_paint ? optional_paint->color : 0xFFFFFFFFu,
-        },
+        .image =
+            {
+                .image = image,
+                .clip_rect = clip,
+                .clip_radius = radius,
+                .tint = optional_paint ? optional_paint->color : 0xFFFFFFFFu,
+            },
     };
     flux_canvas_draw_geometry(c, &g, &b);
 }
 
 static inline void flux_canvas_draw_image_sub(flux_canvas *c, flux_image *image, flux_rect dst,
-                                             flux_rect src) {
+                                              flux_rect src) {
     flux_geometry g = flux_geom_rect(dst);
     flux_brush b = {
         .kind = FLUX_BRUSH_IMAGE_PATTERN,
@@ -239,8 +238,8 @@ static inline void flux_canvas_draw_image_sub(flux_canvas *c, flux_image *image,
     flux_canvas_draw_geometry(c, &g, &b);
 }
 
-static inline void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image *image, flux_rect dst,
-                                                    flux_rect src) {
+static inline void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image *image,
+                                                     flux_rect dst, flux_rect src) {
     flux_geometry g = flux_geom_rect(dst);
     flux_brush b = {
         .kind = FLUX_BRUSH_IMAGE_PATTERN,
@@ -252,18 +251,19 @@ static inline void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image 
 }
 
 static inline void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *image,
-                                                 flux_sampler *sampler, flux_rect dst,
-                                                 const flux_paint *optional_paint) {
+                                                  flux_sampler *sampler, flux_rect dst,
+                                                  const flux_paint *optional_paint) {
     flux_geometry g = flux_geom_rect(dst);
     flux_brush b = {
         .kind = FLUX_BRUSH_IMAGE_PATTERN,
         .blend = optional_paint ? optional_paint->blend : FLUX_BLEND_SRC_OVER,
         .opacity = 1.0f,
-        .image = {
-            .image = image,
-            .sampler = sampler,
-            .tint = optional_paint ? optional_paint->color : 0xFFFFFFFFu,
-        },
+        .image =
+            {
+                .image = image,
+                .sampler = sampler,
+                .tint = optional_paint ? optional_paint->color : 0xFFFFFFFFu,
+            },
     };
     flux_canvas_draw_geometry(c, &g, &b);
 }

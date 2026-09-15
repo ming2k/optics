@@ -25,7 +25,7 @@ void lensi_free(lens *ui, void *p) {
 void lensi_set_overflow(lens *ui) {
     ui->overflow = true;
 }
-void lensi_node_drop_record(lens *ui, lens_node *n) {
+void lensi_node_release_cache(lens *ui, lens_node *n) {
     (void)ui;
     (void)n;
 }

@@ -45,7 +45,7 @@ int main(void) {
     lens_id dst_id = lens_current_id(ui, "Target");
     lens_button(ui, &(lens_button_opts){.label = "Target", .box.width = 100, .box.height = 40});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* Frame 2: Mouse press down on source button (x=20, y=20) */
     in.cursor = (flux_point){20, 20};
@@ -72,7 +72,7 @@ int main(void) {
     CHECK(!dinfo.is_hovered);
 
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* Frame 3: Pointer moves past drag threshold (x=20, y=40 -> dy = 20 > 4) */
     in.cursor = (flux_point){20, 40};
@@ -89,7 +89,7 @@ int main(void) {
 
     lens_button(ui, &(lens_button_opts){.label = "Target", .box.width = 100, .box.height = 40});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* Frame 4: Platform delivers drop payload onto destination target */
     lens_node *tnode = lens_find(ui, dst_id);
@@ -121,7 +121,7 @@ int main(void) {
     CHECK(strcmp(buf, "Dropped Payload") == 0);
 
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_release(ui);
     return TEST_REPORT();

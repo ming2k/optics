@@ -101,14 +101,14 @@ typedef struct cp_accum {
     bool down[LENS_MOUSE_COUNT];    /* held state (persists)                */
     bool pressed[LENS_MOUSE_COUNT]; /* edges this frame                     */
     bool released[LENS_MOUSE_COUNT];
-    double scroll_x, scroll_y;      /* wheel steps this frame               */
+    double scroll_x, scroll_y;       /* wheel steps this frame               */
     double scroll_px_x, scroll_px_y; /* precise (trackpad) points this frame */
-    uint32_t mods;                  /* level state (persists)               */
-    char text[256];                 /* committed text this frame; must match
-                                      lens_input.text_utf8 (static_assert below) */
-    char preedit[LENS_PREEDIT_MAX]; /* IME preedit string (level state)     */
-    uint32_t preedit_cursor;        /* caret byte offset in preedit         */
-    uint32_t preedit_sel_lo;        /* selection byte range in preedit      */
+    uint32_t mods;                   /* level state (persists)               */
+    char text[256];                  /* committed text this frame; must match
+                                       lens_input.text_utf8 (static_assert below) */
+    char preedit[LENS_PREEDIT_MAX];  /* IME preedit string (level state)     */
+    uint32_t preedit_cursor;         /* caret byte offset in preedit         */
+    uint32_t preedit_sel_lo;         /* selection byte range in preedit      */
     uint32_t preedit_sel_hi;
     lens_key_event keys[LENS_INPUT_MAX_KEYS];
     uint32_t key_count;
@@ -140,15 +140,15 @@ static_assert(sizeof((cp_accum *)0)->preedit == sizeof((lens_input *)0)->preedit
 
     lens *ui; /* set after lens_create; IME/theme callbacks check it */
 
-    int width, height; /* window content size in *logical* pixels      */
-    float scale;       /* current backing scale (device px per point)  */
+    int width, height;   /* window content size in *logical* pixels      */
+    float scale;         /* current backing scale (device px per point)  */
     float pending_scale; /* last reported backingScaleFactor, 0 = none */
 
     int min_w, min_h; /* size hints last sent to the window            */
     int max_w, max_h; /* 0 = no limit                                   */
 
     bool running;
-    bool resized;                 /* size or scale changed -> resize swap  */
+    bool resized;                   /* size or scale changed -> resize swap  */
     bool animation_frame_requested; /* host asked for active-rate follow-up */
     bool paint_static;              /* host declared this frame's canvas static */
     bool frame_skip_render;         /* host asked to skip rendering but keep the active cadence */
@@ -374,8 +374,8 @@ IRIS_API void iris_window_set_max_size(int32_t width, int32_t height) {
     pl->max_w = width;
     pl->max_h = height;
     /* AppKit has no "no maximum" sentinel; FLT_MAX is the de-facto one. */
-    [pl->window setContentMaxSize:NSMakeSize(width > 0 ? width : FLT_MAX,
-                                             height > 0 ? height : FLT_MAX)];
+    [pl->window
+        setContentMaxSize:NSMakeSize(width > 0 ? width : FLT_MAX, height > 0 ? height : FLT_MAX)];
 }
 
 IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) {
@@ -415,7 +415,7 @@ IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
     if (!event)
         return -1;
 
-    [pl->view beginDraggingSessionWithItems:@[dragItem] event:event source:pl->view];
+    [pl->view beginDraggingSessionWithItems:@[ dragItem ] event:event source:pl->view];
     return 0;
 }
 
@@ -487,7 +487,7 @@ static void mouse_button(IrisPlatform *pl, NSEvent *event, bool down) {
 enum {
     kVK_Return = 0x24,
     kVK_Tab = 0x30,
-    kVK_Delete = 0x33,        /* backspace */
+    kVK_Delete = 0x33, /* backspace */
     kVK_Escape = 0x35,
     kVK_ForwardDelete = 0x75,
     kVK_Home = 0x73,
@@ -545,8 +545,8 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
     /* Owned by iris_app_run_cocoa for the whole view lifetime; the view is
      * torn down first, so a weak back-pointer is safe. */
     __unsafe_unretained IrisPlatform *_platform;
-    NSString *_marked_text; /* live IME composition, nil when none          */
-    NSRange _selected_in_marked; /* caret/selection inside _marked_text     */
+    NSString *_marked_text;         /* live IME composition, nil when none          */
+    NSRange _selected_in_marked;    /* caret/selection inside _marked_text     */
     bool _ime_delivered_this_event; /* insertText/setMarkedText fired during
                                      * the current keyDown: dispatch         */
 }
@@ -563,7 +563,7 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
         _selected_in_marked = NSMakeRange(NSNotFound, 0);
         /* Layer-backed by CAMetalLayer (makeBackingLayer below). */
         [self setWantsLayer:YES];
-        [self registerForDraggedTypes:@[NSPasteboardTypeString, NSPasteboardTypeFileURL]];
+        [self registerForDraggedTypes:@[ NSPasteboardTypeString, NSPasteboardTypeFileURL ]];
         NSTrackingAreaOptions opts = NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
                                      NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect |
                                      NSTrackingCursorUpdate;
@@ -623,19 +623,23 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
     return NO;
 }
 
-- (NSDragOperation)draggingSession:(NSDraggingSession *)session sourceOperationMaskForDraggingContext:(NSDraggingContext)context {
+- (NSDragOperation)draggingSession:(NSDraggingSession *)session
+    sourceOperationMaskForDraggingContext:(NSDraggingContext)context {
     (void)session;
     (void)context;
     return NSDragOperationCopy | NSDragOperationMove;
 }
 
-- (void)draggingSession:(NSDraggingSession *)session endedAtPoint:(NSPoint)screenPoint operation:(NSDragOperation)operation {
+- (void)draggingSession:(NSDraggingSession *)session
+           endedAtPoint:(NSPoint)screenPoint
+              operation:(NSDragOperation)operation {
     (void)session;
     (void)screenPoint;
     if (_platform) {
         _platform->drag_active = false;
         if (_platform->drag_source.callbacks.finished && operation != NSDragOperationNone) {
-            _platform->drag_source.callbacks.finished(IRIS_DND_ACTION_COPY, _platform->drag_source.callbacks.user);
+            _platform->drag_source.callbacks.finished(IRIS_DND_ACTION_COPY,
+                                                      _platform->drag_source.callbacks.user);
         } else if (_platform->drag_source.callbacks.cancelled && operation == NSDragOperationNone) {
             _platform->drag_source.callbacks.cancelled(_platform->drag_source.callbacks.user);
         }
@@ -915,8 +919,8 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 }
 
 - (void)setMarkedText:(id)string
-          selectedRange:(NSRange)selectedRange
-       replacementRange:(NSRange)replacementRange {
+        selectedRange:(NSRange)selectedRange
+     replacementRange:(NSRange)replacementRange {
     (void)replacementRange;
     IrisPlatform *pl = _platform;
     if (!pl)
@@ -1100,7 +1104,8 @@ static void clip_set_text(const char *utf8, size_t len, void *user) {
             return;
         NSPasteboard *pb = [NSPasteboard generalPasteboard];
         [pb clearContents];
-        NSString *s = [[NSString alloc] initWithBytes:utf8 length:len
+        NSString *s = [[NSString alloc] initWithBytes:utf8
+                                               length:len
                                              encoding:NSUTF8StringEncoding];
         if (s)
             [pb setString:s forType:NSPasteboardTypeString];
@@ -1207,8 +1212,8 @@ static void log_raw(const lens_input *in) {
     if (in->scroll_x != 0.0f || in->scroll_y != 0.0f)
         fprintf(stderr, "[raw] scroll dx=%.2f dy=%.2f\n", in->scroll_x, in->scroll_y);
     for (uint32_t k = 0; k < in->key_count; k++)
-        fprintf(stderr, "[raw] key %d %s%s\n", in->keys[k].key, in->keys[k].pressed ? "down" : "up  ",
-                in->keys[k].repeat ? " (repeat)" : "");
+        fprintf(stderr, "[raw] key %d %s%s\n", in->keys[k].key,
+                in->keys[k].pressed ? "down" : "up  ", in->keys[k].repeat ? " (repeat)" : "");
 }
 
 /* Monotonic nanoseconds, for frame pacing. */
@@ -1393,8 +1398,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         [window setTitle:cfg->title ? [NSString stringWithUTF8String:cfg->title] : @"iris"];
         /* cfg->app_id is unused on macOS — the bundle owns the identity. */
 
-        view = [[IrisView alloc] initWithFrame:NSMakeRect(0, 0, pl->width, pl->height)
-                                      platform:pl];
+        view = [[IrisView alloc] initWithFrame:NSMakeRect(0, 0, pl->width, pl->height) platform:pl];
         if (!view) {
             fprintf(stderr, "IrisView creation failed\n");
             goto fail;
@@ -1469,34 +1473,33 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         }
 
         if (flux_canvas_create(
-                &(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC, .surface = surface},
-                &canvas) != FLUX_OK) {
+                &(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC, .surface = surface}, &canvas) !=
+            FLUX_OK) {
             fprintf(stderr, "flux_canvas_create failed\n");
             goto fail;
         }
 
-static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t actions, void *user) {
-    (void)user;
-    iris_dnd_source src = {
-        .actions = actions,
-        .static_text = text,
-        .static_text_len = len,
-    };
-    return iris_dnd_start(&src);
-}
+        static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t actions,
+                                              void *user) {
+            (void)user;
+            iris_dnd_source src = {
+                .actions = actions,
+                .static_text = text,
+                .static_text_len = len,
+            };
+            return iris_dnd_start(&src);
+        }
 
         if (lens_create(&(lens_desc){.device = device,
-                                     .theme = cfg->dark
-                                                  ? lens_theme_dark()
-                                                  : (iris_system_prefers_dark()
-                                                         ? lens_theme_dark()
-                                                         : lens_theme_default()),
+                                     .theme = cfg->dark ? lens_theme_dark()
+                                                        : (iris_system_prefers_dark()
+                                                               ? lens_theme_dark()
+                                                               : lens_theme_default()),
                                      .scale = pl->scale,
                                      .clipboard = {.set_text = clip_set_text,
                                                    .request_text = clip_request_text,
                                                    .user = pl},
-                                     .dnd = {.start_drag = lens_host_start_drag_cocoa,
-                                             .user = pl}},
+                                     .dnd = {.start_drag = lens_host_start_drag_cocoa, .user = pl}},
                         &ui) != FLUX_OK) {
             fprintf(stderr, "lens_create failed\n");
             goto fail;
@@ -1663,8 +1666,8 @@ static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t act
 
                 struct timespec now;
                 clock_gettime(CLOCK_MONOTONIC, &now);
-                float dt = (float)(now.tv_sec - prev.tv_sec) +
-                           (float)(now.tv_nsec - prev.tv_nsec) * 1e-9f;
+                float dt =
+                    (float)(now.tv_sec - prev.tv_sec) + (float)(now.tv_nsec - prev.tv_nsec) * 1e-9f;
                 if (dt <= 0.0f)
                     dt = 1.0f / 60.0f;
                 prev = now;
@@ -1710,18 +1713,16 @@ static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t act
                  * force a real paint below. */
                 bool chrome_damaged = lens_frame_needs_repaint(ui);
                 bool surface_forced = resized_this_frame || surface_needs_paint;
-                bool host_skip_render =
-                    cfg->paint != NULL && pl->frame_skip_render && !surface_forced &&
-                    !chrome_damaged;
+                bool host_skip_render = cfg->paint != NULL && pl->frame_skip_render &&
+                                        !surface_forced && !chrome_damaged;
                 pl->frame_skip_render = false;
                 bool host_canvas_static = cfg->paint != NULL && pl->paint_static &&
                                           !host_animating && !resized_this_frame &&
                                           !surface_needs_paint && !chrome_damaged;
                 pl->paint_static = false;
-                bool must_paint =
-                    !host_canvas_static && !host_skip_render &&
-                    (cfg->paint != NULL || chrome_damaged || host_animating ||
-                     resized_this_frame || surface_needs_paint);
+                bool must_paint = !host_canvas_static && !host_skip_render &&
+                                  (cfg->paint != NULL || chrome_damaged || host_animating ||
+                                   resized_this_frame || surface_needs_paint);
                 if (must_paint) {
                     surface_needs_paint = true;
                     flux_frame *frame = NULL;
@@ -1746,29 +1747,47 @@ static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t act
 
                     /* Clear to the current theme's body background; the
                      * paint callback draws *under* lens's chrome (iris calls
-                     * it before lens_render). */
+                     * it before snapshot publication). */
                     lens_theme th = lens_get_theme(ui);
                     flux_color clear = th.color_bg;
                     bool drew = false;
+                    lens_scene_snapshot *snapshot = nullptr;
                     if (flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK) {
                         if (cfg->paint)
                             cfg->paint(canvas, device, pl->scale, cfg->user);
-                        drew = lens_render(ui, canvas) == FLUX_OK;
-                        flux_canvas_end_frame(canvas);
+                        if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
+                            drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK;
+                        }
+                        if (flux_canvas_end(canvas) != FLUX_OK)
+                            drew = false;
                     }
 
-                    if (flux_frame_submit(frame) != FLUX_OK)
-                        break;
+                    if (!drew) {
+                        lens_snapshot_release(snapshot);
+                        goto fail;
+                    }
+                    if (flux_frame_submit(frame) != FLUX_OK) {
+                        lens_snapshot_release(snapshot);
+                        goto fail;
+                    }
                     r = flux_frame_present(frame);
                     if (r == FLUX_ERROR_SURFACE_LOST) {
                         view_physical_size(pl, &phys_w, &phys_h);
                         (void)flux_surface_resize(surface, phys_w, phys_h);
                     } else if (r != FLUX_OK) {
-                        break;
+                        lens_snapshot_release(snapshot);
+                        goto fail;
                     } else if (drew) {
-                        lens_notify_presented(ui, lens_generation(ui));
+                        flux_result activated = lens_snapshot_activate(ui, snapshot);
+                        if (activated != FLUX_OK) {
+                            lens_snapshot_release(snapshot);
+                            goto fail;
+                        }
+                        iris_a11y_update(ui);
                         surface_needs_paint = false;
                     }
+
+                    lens_snapshot_release(snapshot);
 
                     if (++frame_no == 1)
                         fprintf(stderr,

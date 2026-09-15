@@ -66,7 +66,7 @@ static void test_caret_rect_default_zero(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
     lens_begin(ui, &in);
-    lens_end(ui);
+    test_end(ui);
     flux_rect c = lens_caret_rect(ui);
     CHECK(c.x == 0 && c.y == 0 && c.w == 0 && c.h == 0);
     lens_release(ui);
@@ -85,7 +85,7 @@ static void test_input_size_guard(void) {
     lens_input legacy = {.display_size = {100, 100}, .dt_seconds = 0.016f};
     legacy.size = 0;
     lens_begin(ui, &legacy);
-    lens_end(ui);
+    test_end(ui);
 
     /* Forward-compat: size set to sizeof(lens_input). */
     lens_input modern = {.display_size = {100, 100}, .dt_seconds = 0.016f};
@@ -93,7 +93,7 @@ static void test_input_size_guard(void) {
     memcpy(modern.preedit_utf8, "abc", 3);
     modern.preedit_cursor = 2;
     lens_begin(ui, &modern);
-    lens_end(ui);
+    test_end(ui);
     /* nothing crashes; preedit copied through */
     CHECK(lens_caret_rect(ui).w == 0); /* still no text widget */
 
@@ -102,7 +102,7 @@ static void test_input_size_guard(void) {
      * what wasn't supplied. */
     lens_input small = {.size = 8}; /* far less than sizeof(lens_input) */
     lens_begin(ui, &small);
-    lens_end(ui);
+    test_end(ui);
 
     lens_release(ui);
 }
@@ -114,7 +114,7 @@ static void test_text_context_default_null(void) {
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
     lens_begin(ui, &in);
-    lens_end(ui);
+    test_end(ui);
     lens_text_context tc = lens_text_context_get(ui);
     CHECK(tc.utf8 == NULL);
     CHECK(tc.len == 0 && tc.cursor == 0 && tc.multiline == false);
@@ -133,11 +133,11 @@ static void test_text_context_textfield(void) {
     /* frame 1: enter; frame 2: focus explicitly */
     lens_begin(ui, &in);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
-    lens_end(ui);
+    test_end(ui);
     lens_begin(ui, &in);
     lens_set_focus(ui, lens_current_id(ui, "tf"));
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 3: caret to end (EOL = 5) */
     lens_input end = in;
@@ -145,7 +145,7 @@ static void test_text_context_textfield(void) {
     end.keys[0] = (lens_key_event){.key = LENS_KEY_END, .pressed = true};
     lens_begin(ui, &end);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
-    lens_end(ui);
+    test_end(ui);
 
     lens_text_context tc = lens_text_context_get(ui);
     CHECK(tc.utf8 == buf);
@@ -155,7 +155,7 @@ static void test_text_context_textfield(void) {
 
     /* frame 4: no text widget built — the context is cleared again */
     lens_begin(ui, &in);
-    lens_end(ui);
+    test_end(ui);
     tc = lens_text_context_get(ui);
     CHECK(tc.utf8 == NULL);
     CHECK(tc.len == 0 && tc.cursor == 0 && tc.multiline == false);
@@ -176,14 +176,14 @@ static void test_text_context_textarea(void) {
                                             .buf = buf,
                                             .cap = sizeof buf,
                                             .multiline = true});
-    lens_end(ui);
+    test_end(ui);
     lens_begin(ui, &in);
     lens_set_focus(ui, lens_current_id(ui, "ta"));
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "ta", .min_height = 80.0f},
                                             .buf = buf,
                                             .cap = sizeof buf,
                                             .multiline = true});
-    lens_end(ui);
+    test_end(ui);
 
     lens_text_context tc = lens_text_context_get(ui);
     CHECK(tc.utf8 == buf);
@@ -193,7 +193,7 @@ static void test_text_context_textarea(void) {
 
     /* no text widget built — cleared again */
     lens_begin(ui, &in);
-    lens_end(ui);
+    test_end(ui);
     tc = lens_text_context_get(ui);
     CHECK(tc.utf8 == NULL);
 

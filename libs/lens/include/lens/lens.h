@@ -15,7 +15,7 @@
  *       lens_begin(ui, &input) ->
  *       build (lens_row / lens_button / ...) ->
  *       lens_end(ui)            (reconcile, layout, interaction) ->
- *       flux_canvas_begin_frame(...) -> lens_render(ui, canvas) -> flux_canvas_end_frame(...)
+ *       lens_snapshot_create(...) -> lens_snapshot_submit(...) -> lens_snapshot_activate(...)
  */
 
 #ifndef LENS_H
@@ -316,11 +316,11 @@ typedef struct lens_a11y_desc {
 
 LENS_API void lens_a11y(lens *ui, const lens_a11y_desc *desc);
 
-/* Read-only walk of the retained tree, valid between lens_end and the
- * next lens_begin. Visits every node carrying non-decorative semantics
- * in pre-order with its solved bounds and its nearest semantic ancestor.
- * The platform AT-SPI bridge (or a test) consumes it; lens calls no
- * assistive API itself (same host separation as input, ADR-0029). */
+/* Read-only walk of the activated snapshot. Failed or skipped presentation
+ * leaves its geometry and semantic content unchanged. Visits every node carrying non-decorative
+ * semantics in pre-order with its solved bounds and its nearest semantic ancestor. The platform
+ * AT-SPI bridge (or a test) consumes it; lens calls no assistive API itself (same host separation
+ * as input, ADR-0029). */
 typedef void (*lens_a11y_visit_fn)(const lens_semantics *s, flux_rect bounds, lens_id id,
                                    lens_id parent, void *user);
 LENS_API void lens_accessibility_walk(const lens *ui, lens_a11y_visit_fn visit, void *user);
@@ -790,9 +790,9 @@ LENS_API lens_theme lens_get_theme(const lens *ui);
 
 /* Frame-scoped opacity switch (0..1; default 1.0): the single fade knob
  * for enter/exit motion. Every node built while an opacity is in effect
- * carries it as a build-time stamp, and emission bakes it into each draw
- * command's colour alpha — rects, borders, text, icons, host images and
- * scrollbars fade together, with no per-colour work by the caller. Like
+ * carries it as a build-time stamp. Its own visual commands form one
+ * isolated opacity group; children independently capture the current setting.
+ * Rects, borders, text, icons, images and scrollbars fade together. Like
  * the style scope stack, the switch resets to 1.0 at every lens_begin, so
  * a forgotten restore cannot dim the next frame; within a frame, set it
  * back after building the faded subtree. Mechanism, not animation: the
@@ -816,7 +816,7 @@ LENS_API void lens_set_ghost(lens *ui, lens_id subtree_root, float alpha);
 
 /* Device-pixel scale (HiDPI). The application reports the compositor /
  * window-system scale here; layout, input, and `lens_input.display_size`
- * stay in *logical* pixels, and `lens_render` scales the canvas
+ * stay in *logical* pixels, and snapshot publication captures the scale
  * transform by this factor so 1 logical pixel maps to `scale` device
  * pixels. Default 1.0. */
 LENS_API void lens_set_scale(lens *ui, float scale);
@@ -842,28 +842,12 @@ LENS_API float lens_text_scale(const lens *ui);
 
 LENS_API void lens_begin(lens *ui, const lens_input *input);
 LENS_API void lens_end(lens *ui);
-FLUX_NODISCARD LENS_API flux_result lens_render(lens *ui, flux_canvas *canvas);
-
-/* ================================================================== */
-/*  Decoupled DrawList Pipeline (ADR-0088 Clean-Break)                */
-/* ================================================================== */
-
-typedef struct lens_draw_list {
-    flux_display_list *display_list;
-    bool has_damage;
-    uint64_t generation;
-} lens_draw_list;
-
-/* ================================================================== */
-/*  Scene Snapshots & Presentation Generations (ADR-0094)             */
-/* ================================================================== */
-
 typedef struct lens_scene_snapshot lens_scene_snapshot;
 
 /* Create an immutable snapshot of the resolved layout tree and compiled visuals.
  * The published snapshot is GPU-independent, owned, and survives destruction of
  * the mutable lens context. */
-FLUX_NODISCARD LENS_API flux_result lens_snapshot_create(lens *ui, flux_arena *arena,
+FLUX_NODISCARD LENS_API flux_result lens_snapshot_create(lens *ui,
                                                          lens_scene_snapshot **out_snapshot);
 LENS_API lens_scene_snapshot *lens_snapshot_retain(lens_scene_snapshot *snapshot);
 LENS_API void lens_snapshot_release(lens_scene_snapshot *snapshot);
@@ -873,20 +857,17 @@ FLUX_NODISCARD LENS_API flux_result lens_snapshot_submit(const lens_scene_snapsh
 
 /* Generation progression & presentation handshake (ADR-0094).
  * A new generation is published at each lens_end. The presentation engine
- * calls lens_notify_presented upon successful frame presentation. */
+ * activates the corresponding snapshot upon successful frame presentation. */
 LENS_API uint64_t lens_generation(const lens *ui);
-LENS_API void lens_notify_presented(lens *ui, uint64_t presented_generation);
+/* Activate exactly the successfully presented snapshot, or explicitly select
+ * one in a headless host. Foreign and older generations are rejected. */
+FLUX_NODISCARD LENS_API flux_result lens_snapshot_activate(lens *ui, lens_scene_snapshot *snapshot);
+LENS_API void lens_snapshot_accessibility_walk(const lens_scene_snapshot *snapshot,
+                                               lens_a11y_visit_fn visit, void *user);
 LENS_API uint64_t lens_last_presented_generation(const lens *ui);
 
-/* Pure CPU compile phase: transforms the resolved layout tree into an
- * immutable, GPU-independent draw list allocated on `arena`. Can run on worker
- * threads or headless environments without an active Canvas or GPU device. */
-FLUX_NODISCARD LENS_API flux_result lens_compile_draw_list(lens *ui, flux_arena *arena,
-                                                           lens_draw_list *out_list);
-
-/* Submit a compiled draw list to a canvas for rasterization. */
-FLUX_NODISCARD LENS_API flux_result lens_draw_list_submit(const lens_draw_list *list,
-                                                          flux_canvas *canvas);
+/* Borrowed immutable list, valid while the snapshot is retained. */
+LENS_API const flux_display_list *lens_snapshot_display_list(const lens_scene_snapshot *snapshot);
 
 /* True if the per-frame arena overflowed during the frame just built. */
 LENS_API bool lens_overflowed(const lens *ui);

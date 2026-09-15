@@ -21,7 +21,7 @@ static void test_right_and_middle_click(void) {
     /* frame 1: button enters */
     lens_begin(ui, &IN0);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 2: right press inside */
     lens_input in = IN0;
@@ -30,7 +30,7 @@ static void test_right_and_middle_click(void) {
     in.mouse_down[LENS_MOUSE_RIGHT] = true;
     lens_begin(ui, &in);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 3: right release inside → right_clicked, not left clicked */
     lens_input in2 = IN0;
@@ -38,7 +38,7 @@ static void test_right_and_middle_click(void) {
     in2.mouse_released[LENS_MOUSE_RIGHT] = true;
     lens_begin(ui, &in2);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     lens_response r = lens_get_response(ui);
     CHECK(r.right_clicked == true);
     CHECK(r.clicked == false);
@@ -50,7 +50,7 @@ static void test_right_and_middle_click(void) {
     in3.mouse_down[LENS_MOUSE_MIDDLE] = true;
     lens_begin(ui, &in3);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 5: middle release inside → middle_clicked */
     lens_input in4 = IN0;
@@ -58,7 +58,7 @@ static void test_right_and_middle_click(void) {
     in4.mouse_released[LENS_MOUSE_MIDDLE] = true;
     lens_begin(ui, &in4);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     lens_response rm = lens_get_response(ui);
     CHECK(rm.middle_clicked == true);
     CHECK(rm.clicked == false);
@@ -69,7 +69,7 @@ static void test_right_and_middle_click(void) {
     in5.mouse_released[LENS_MOUSE_RIGHT] = true;
     lens_begin(ui, &in5);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     lens_response ro = lens_get_response(ui);
     CHECK(ro.right_clicked == false);
 
@@ -86,7 +86,7 @@ static void test_multi_button_left_wins(void) {
     /* frame 1: enter */
     lens_begin(ui, &IN0);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 2: both left and right pressed inside */
     lens_input in = IN0;
@@ -97,7 +97,7 @@ static void test_multi_button_left_wins(void) {
     in.mouse_down[LENS_MOUSE_RIGHT] = true;
     lens_begin(ui, &in);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_active(ui) != 0); /* someone is active */
 
     /* frame 3: release right only — left stays pressed, right click fires */
@@ -107,7 +107,7 @@ static void test_multi_button_left_wins(void) {
     in2.mouse_released[LENS_MOUSE_RIGHT] = true;
     lens_begin(ui, &in2);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     lens_response r = lens_get_response(ui);
     CHECK(r.pressed == true); /* left still held */
     CHECK(r.right_clicked == true);
@@ -118,7 +118,7 @@ static void test_multi_button_left_wins(void) {
     in3.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in3);
     bool clicked = lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(clicked == true);
 
     lens_release(ui);
@@ -134,7 +134,7 @@ static void test_drag_back_inside_yields_click(void) {
     /* frame 1: enter */
     lens_begin(ui, &IN0);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 2: press inside */
     lens_input in2 = IN0;
@@ -143,7 +143,7 @@ static void test_drag_back_inside_yields_click(void) {
     in2.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in2);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_active(ui) != 0);
 
     /* frame 3: drag outside */
@@ -152,7 +152,7 @@ static void test_drag_back_inside_yields_click(void) {
     in3.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in3);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 4: drag back inside and release → click */
     lens_input in4 = IN0;
@@ -160,7 +160,7 @@ static void test_drag_back_inside_yields_click(void) {
     in4.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in4);
     bool clicked = lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(clicked == true);
 
     lens_release(ui);
@@ -184,7 +184,7 @@ static void test_wheel_scrolls_content(void) {
         lens_pop_id(ui);
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *first0 = lens_node_first_child(lens_node_first_child(lens_root(ui)));
     float y0 = lens_node_bounds(first0).y;
@@ -201,7 +201,7 @@ static void test_wheel_scrolls_content(void) {
         lens_pop_id(ui);
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *first1 = lens_node_first_child(lens_node_first_child(lens_root(ui)));
     float y1 = lens_node_bounds(first1).y;
@@ -224,7 +224,7 @@ static void test_shift_tab_reverse_focus(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     (void)lens_button(ui, &(lens_button_opts){.label = "B"}).clicked;
     (void)lens_button(ui, &(lens_button_opts){.label = "C"}).clicked;
-    lens_end(ui);
+    test_end(ui);
 
     /* frame 2: Tab moves to A */
     lens_input in2 = in;
@@ -237,7 +237,7 @@ static void test_shift_tab_reverse_focus(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     (void)lens_button(ui, &(lens_button_opts){.label = "B"}).clicked;
     (void)lens_button(ui, &(lens_button_opts){.label = "C"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_focused(ui, aid) == true);
 
     /* frame 3: Tab moves to B */
@@ -245,7 +245,7 @@ static void test_shift_tab_reverse_focus(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     (void)lens_button(ui, &(lens_button_opts){.label = "B"}).clicked;
     (void)lens_button(ui, &(lens_button_opts){.label = "C"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_focused(ui, bid) == true);
 
     /* frame 4: Shift+Tab moves back to A */
@@ -257,7 +257,7 @@ static void test_shift_tab_reverse_focus(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     (void)lens_button(ui, &(lens_button_opts){.label = "B"}).clicked;
     (void)lens_button(ui, &(lens_button_opts){.label = "C"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_focused(ui, aid) == true);
 
     /* frame 5: Shift+Tab from A wraps to C */
@@ -265,7 +265,7 @@ static void test_shift_tab_reverse_focus(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "A"}).clicked;
     (void)lens_button(ui, &(lens_button_opts){.label = "B"}).clicked;
     (void)lens_button(ui, &(lens_button_opts){.label = "C"}).clicked;
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_focused(ui, cid) == true);
 
     lens_release(ui);

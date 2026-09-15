@@ -62,7 +62,7 @@ static void test_fallback_layout_and_render_no_crash(void) {
     lens_label(ui,
                &(lens_label_opts){
                    .text = "English and \xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e \xf0\x9f\x91\x8d"});
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *root = lens_root(ui);
     lens_node *lbl = lens_node_first_child(root);

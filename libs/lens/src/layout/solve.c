@@ -264,8 +264,6 @@ static float flex_adjustment(const lens_node *n, lens_axis axis, float level, bo
 
 static void arrange(lens_node *n, flux_rect rect) {
     n->final_rect = rect;
-    n->prev_rect = rect; /* becomes next frame's hit-test rect */
-    n->has_prev = true;
 
     if (!n->is_container || !n->first_child)
         return;

@@ -13,11 +13,11 @@ int main(void) {
     /* identity is stable across frames for the same label + scope */
     lens_begin(ui, &in);
     lens_id a1 = lens_current_id(ui, "X");
-    lens_end(ui);
+    test_end(ui);
 
     lens_begin(ui, &in);
     lens_id a2 = lens_current_id(ui, "X");
-    lens_end(ui);
+    test_end(ui);
     CHECK(a1 == a2);
     CHECK(a1 != 0);
 
@@ -28,7 +28,7 @@ int main(void) {
     lens_id scoped = lens_current_id(ui, "X");
     lens_pop_id(ui);
     lens_id back = lens_current_id(ui, "X");
-    lens_end(ui);
+    test_end(ui);
     CHECK(base != scoped);
     CHECK(base == back);
 
@@ -40,7 +40,7 @@ int main(void) {
     lens_push_id_int(ui, 1);
     lens_id row1 = lens_current_id(ui, "row");
     lens_pop_id(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(row0 != row1);
 
     /* Repeated visible labels under one parent are a caller error and must be
@@ -48,7 +48,7 @@ int main(void) {
     lens_begin(ui, &in);
     lens_label(ui, &(lens_label_opts){.text = "duplicate"});
     lens_label(ui, &(lens_label_opts){.text = "duplicate"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_has_duplicate_ids(ui));
 
     /* Stable data scopes make identical labels distinct. The diagnostic is
@@ -60,14 +60,14 @@ int main(void) {
     lens_push_id_int(ui, 42);
     lens_label(ui, &(lens_label_opts){.text = "duplicate"});
     lens_pop_id(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(!lens_has_duplicate_ids(ui));
 
     /* "##" splits the visible label from the id seed */
     lens_begin(ui, &in);
     lens_id ok_save = lens_current_id(ui, "OK##save");
     lens_id ok_discard = lens_current_id(ui, "OK##discard");
-    lens_end(ui);
+    test_end(ui);
     CHECK(ok_save != ok_discard);
 
     lens_release(ui);

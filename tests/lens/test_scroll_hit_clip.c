@@ -33,7 +33,7 @@ static void test_scroll_clips_hit_testing(void) {
             clicked = true;
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(!clicked);
 
     /* Frame 2: press+release at y=200 — inside a folded button's rect,
@@ -52,7 +52,7 @@ static void test_scroll_clips_hit_testing(void) {
             hovered = lens_get_response(ui).hovered;
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(!clicked);
     in = IN0;
     in.cursor = (flux_point){30.0f, 200.0f};
@@ -65,7 +65,7 @@ static void test_scroll_clips_hit_testing(void) {
             clicked = true;
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(!clicked);
     (void)hovered;
 
@@ -80,7 +80,7 @@ static void test_scroll_clips_hit_testing(void) {
         for (int i = 0; i < 20; ++i)
             (void)lens_button(ui, &(lens_button_opts){.label = ROW_LABELS[i]});
         lens_scroll_end(ui);
-        lens_end(ui);
+        test_end(ui);
     }
     in = IN0;
     in.cursor = (flux_point){30.0f, 30.0f};
@@ -91,7 +91,7 @@ static void test_scroll_clips_hit_testing(void) {
     for (int i = 0; i < 20; ++i)
         (void)lens_button(ui, &(lens_button_opts){.label = ROW_LABELS[i]});
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
     in = IN0;
     in.cursor = (flux_point){30.0f, 30.0f};
     in.mouse_released[LENS_MOUSE_LEFT] = true;
@@ -103,7 +103,7 @@ static void test_scroll_clips_hit_testing(void) {
             clicked = true;
     }
     lens_scroll_end(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(clicked);
 
     lens_release(ui);

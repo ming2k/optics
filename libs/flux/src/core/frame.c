@@ -200,8 +200,8 @@ static bool foreign_images_grow(flux_surface *s, flux_per_frame *pf) {
 bool flux_frame_track_foreign_image(flux_frame *f, VkImage image, void *resource,
                                     flux_frame_resource_retain_fn retain,
                                     flux_frame_resource_release_fn release, bool *foreign_owned) {
-    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING || !image || !resource ||
-        !retain || !release)
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING || !resource || !retain ||
+        !release || (foreign_owned && !image))
         return false;
 
     flux_surface *s = f->surface;
@@ -228,6 +228,13 @@ bool flux_frame_track_foreign_image(flux_frame *f, VkImage image, void *resource
 
     ++pf->foreign_image_count;
     return true;
+}
+
+bool flux_frame_track_resource(flux_frame *frame, void *resource,
+                               flux_frame_resource_retain_fn retain,
+                               flux_frame_resource_release_fn release) {
+    return flux_frame_track_foreign_image(frame, VK_NULL_HANDLE, resource, retain, release,
+                                          nullptr);
 }
 
 bool flux_frame_set_foreign_image_acquire(flux_frame *f, void *resource, VkSemaphore semaphore) {
@@ -1121,39 +1128,62 @@ VkBuffer flux_frame_vk_transient_buffer(const flux_frame *f) {
 
 static VkPipelineStageFlags2 stage_to_vk(flux_pipeline_stage stage) {
     VkPipelineStageFlags2 flags = 0;
-    if (stage & FLUX_STAGE_TOP_OF_PIPE) flags |= VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-    if (stage & FLUX_STAGE_DRAW_INDIRECT) flags |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-    if (stage & FLUX_STAGE_VERTEX_INPUT) flags |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
-    if (stage & FLUX_STAGE_VERTEX_SHADER) flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
-    if (stage & FLUX_STAGE_FRAGMENT_SHADER) flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-    if (stage & FLUX_STAGE_EARLY_FRAGMENT_TESTS) flags |= VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
-    if (stage & FLUX_STAGE_LATE_FRAGMENT_TESTS) flags |= VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-    if (stage & FLUX_STAGE_COLOR_ATTACHMENT_OUTPUT) flags |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    if (stage & FLUX_STAGE_COMPUTE_SHADER) flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-    if (stage & FLUX_STAGE_TRANSFER) flags |= VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-    if (stage & FLUX_STAGE_BOTTOM_OF_PIPE) flags |= VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+    if (stage & FLUX_STAGE_TOP_OF_PIPE)
+        flags |= VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+    if (stage & FLUX_STAGE_DRAW_INDIRECT)
+        flags |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+    if (stage & FLUX_STAGE_VERTEX_INPUT)
+        flags |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+    if (stage & FLUX_STAGE_VERTEX_SHADER)
+        flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    if (stage & FLUX_STAGE_FRAGMENT_SHADER)
+        flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    if (stage & FLUX_STAGE_EARLY_FRAGMENT_TESTS)
+        flags |= VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+    if (stage & FLUX_STAGE_LATE_FRAGMENT_TESTS)
+        flags |= VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    if (stage & FLUX_STAGE_COLOR_ATTACHMENT_OUTPUT)
+        flags |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    if (stage & FLUX_STAGE_COMPUTE_SHADER)
+        flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    if (stage & FLUX_STAGE_TRANSFER)
+        flags |= VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    if (stage & FLUX_STAGE_BOTTOM_OF_PIPE)
+        flags |= VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
     return flags;
 }
 
 static VkAccessFlags2 access_to_vk(flux_access_flags access) {
     VkAccessFlags2 flags = 0;
-    if (access & FLUX_ACCESS_INDIRECT_COMMAND_READ) flags |= VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
-    if (access & FLUX_ACCESS_INDEX_READ) flags |= VK_ACCESS_2_INDEX_READ_BIT;
-    if (access & FLUX_ACCESS_VERTEX_ATTRIBUTE_READ) flags |= VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
-    if (access & FLUX_ACCESS_UNIFORM_READ) flags |= VK_ACCESS_2_UNIFORM_READ_BIT;
-    if (access & FLUX_ACCESS_SHADER_READ) flags |= VK_ACCESS_2_SHADER_READ_BIT;
-    if (access & FLUX_ACCESS_SHADER_WRITE) flags |= VK_ACCESS_2_SHADER_WRITE_BIT;
-    if (access & FLUX_ACCESS_COLOR_ATTACHMENT_READ) flags |= VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT;
-    if (access & FLUX_ACCESS_COLOR_ATTACHMENT_WRITE) flags |= VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    if (access & FLUX_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ) flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-    if (access & FLUX_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE) flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    if (access & FLUX_ACCESS_TRANSFER_READ) flags |= VK_ACCESS_2_TRANSFER_READ_BIT;
-    if (access & FLUX_ACCESS_TRANSFER_WRITE) flags |= VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    if (access & FLUX_ACCESS_INDIRECT_COMMAND_READ)
+        flags |= VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+    if (access & FLUX_ACCESS_INDEX_READ)
+        flags |= VK_ACCESS_2_INDEX_READ_BIT;
+    if (access & FLUX_ACCESS_VERTEX_ATTRIBUTE_READ)
+        flags |= VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
+    if (access & FLUX_ACCESS_UNIFORM_READ)
+        flags |= VK_ACCESS_2_UNIFORM_READ_BIT;
+    if (access & FLUX_ACCESS_SHADER_READ)
+        flags |= VK_ACCESS_2_SHADER_READ_BIT;
+    if (access & FLUX_ACCESS_SHADER_WRITE)
+        flags |= VK_ACCESS_2_SHADER_WRITE_BIT;
+    if (access & FLUX_ACCESS_COLOR_ATTACHMENT_READ)
+        flags |= VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT;
+    if (access & FLUX_ACCESS_COLOR_ATTACHMENT_WRITE)
+        flags |= VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    if (access & FLUX_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ)
+        flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+    if (access & FLUX_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE)
+        flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    if (access & FLUX_ACCESS_TRANSFER_READ)
+        flags |= VK_ACCESS_2_TRANSFER_READ_BIT;
+    if (access & FLUX_ACCESS_TRANSFER_WRITE)
+        flags |= VK_ACCESS_2_TRANSFER_WRITE_BIT;
     return flags;
 }
 
 void flux_frame_pipeline_barrier(flux_frame *f, const flux_image_barrier *image_barriers,
-                                  uint32_t count) {
+                                 uint32_t count) {
     if (!f || !image_barriers || count == 0)
         return;
     VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
@@ -1161,7 +1191,8 @@ void flux_frame_pipeline_barrier(flux_frame *f, const flux_image_barrier *image_
         return;
 
     VkImageMemoryBarrier2 stack_barriers[16];
-    VkImageMemoryBarrier2 *vk_barriers = (count <= 16) ? stack_barriers : malloc(count * sizeof(*vk_barriers));
+    VkImageMemoryBarrier2 *vk_barriers =
+        (count <= 16) ? stack_barriers : malloc(count * sizeof(*vk_barriers));
     if (!vk_barriers)
         return;
 
@@ -1174,8 +1205,12 @@ void flux_frame_pipeline_barrier(flux_frame *f, const flux_image_barrier *image_
         if (!img)
             continue;
 
-        uint32_t src_qf = (b->src_queue_family == FLUX_QUEUE_FAMILY_IGNORED) ? VK_QUEUE_FAMILY_IGNORED : b->src_queue_family;
-        uint32_t dst_qf = (b->dst_queue_family == FLUX_QUEUE_FAMILY_IGNORED) ? VK_QUEUE_FAMILY_IGNORED : b->dst_queue_family;
+        uint32_t src_qf = (b->src_queue_family == FLUX_QUEUE_FAMILY_IGNORED)
+                              ? VK_QUEUE_FAMILY_IGNORED
+                              : b->src_queue_family;
+        uint32_t dst_qf = (b->dst_queue_family == FLUX_QUEUE_FAMILY_IGNORED)
+                              ? VK_QUEUE_FAMILY_IGNORED
+                              : b->dst_queue_family;
 
         vk_barriers[valid_count++] = (VkImageMemoryBarrier2){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -1188,11 +1223,12 @@ void flux_frame_pipeline_barrier(flux_frame *f, const flux_image_barrier *image_
             .srcQueueFamilyIndex = src_qf,
             .dstQueueFamilyIndex = dst_qf,
             .image = img,
-            .subresourceRange = {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
+            .subresourceRange =
+                {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .levelCount = 1,
+                    .layerCount = 1,
+                },
         };
     }
 

@@ -2067,25 +2067,43 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             lens_theme th = lens_get_theme(ui);
             flux_color clear = th.color_bg;
             bool drew = false;
+            lens_scene_snapshot *snapshot = nullptr;
             if (flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK) {
                 if (cfg->paint)
                     cfg->paint(canvas, device, pl.scale, cfg->user);
-                drew = lens_render(ui, canvas) == FLUX_OK;
-                flux_canvas_end_frame(canvas);
+                if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
+                    drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK;
+                }
+                if (flux_canvas_end(canvas) != FLUX_OK)
+                    drew = false;
             }
 
-            if (flux_frame_submit(frame) != FLUX_OK)
-                break;
+            if (!drew) {
+                lens_snapshot_release(snapshot);
+                goto fail;
+            }
+            if (flux_frame_submit(frame) != FLUX_OK) {
+                lens_snapshot_release(snapshot);
+                goto fail;
+            }
             r = flux_frame_present(frame);
             if (r == FLUX_ERROR_SURFACE_LOST)
                 (void)flux_surface_resize(surface, (uint32_t)lroundf((float)pl.width * pl.scale),
                                           (uint32_t)lroundf((float)pl.height * pl.scale));
-            else if (r != FLUX_OK)
-                break;
-            else if (drew) {
-                lens_notify_presented(ui, lens_generation(ui));
+            else if (r != FLUX_OK) {
+                lens_snapshot_release(snapshot);
+                goto fail;
+            } else if (drew) {
+                flux_result activated = lens_snapshot_activate(ui, snapshot);
+                if (activated != FLUX_OK) {
+                    lens_snapshot_release(snapshot);
+                    goto fail;
+                }
+                iris_a11y_update(ui);
                 surface_needs_paint = false;
             }
+
+            lens_snapshot_release(snapshot);
 
             if (++frame_no == 1)
                 fprintf(stderr, "first frame presented: %dx%d logical, %ux%u device (scale=%.2f)\n",

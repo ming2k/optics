@@ -16,14 +16,14 @@ static void test_hover_and_press_bits(void) {
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){20, 20};
     lens_begin(ui, &in);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
     uint32_t hover_state = lens_get_response(ui).state;
-    lens_end(ui);
+    test_end(ui);
     CHECK(hover_state & LENS_STATE_HOVERED);
     CHECK(!(hover_state & LENS_STATE_PRESSED));
     CHECK(!(hover_state & LENS_STATE_DISABLED));
@@ -35,7 +35,7 @@ static void test_hover_and_press_bits(void) {
     lens_begin(ui, &in);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
     uint32_t press_state = lens_get_response(ui).state;
-    lens_end(ui);
+    test_end(ui);
     CHECK((press_state & LENS_STATE_PRESSED) && (press_state & LENS_STATE_HOVERED));
 
     lens_release(ui);
@@ -47,7 +47,7 @@ static void test_disabled_bit_excludes_hover_and_press(void) {
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){20, 20};
@@ -56,7 +56,7 @@ static void test_disabled_bit_excludes_hover_and_press(void) {
     lens_begin(ui, &in);
     lens_button(ui, &(lens_button_opts){.label = "OK", .box = {.disabled = true}});
     uint32_t state = lens_get_response(ui).state;
-    lens_end(ui);
+    test_end(ui);
     CHECK(state & LENS_STATE_DISABLED);
     CHECK(!(state & (LENS_STATE_HOVERED | LENS_STATE_PRESSED | LENS_STATE_FOCUSED)));
 
@@ -71,7 +71,7 @@ static void test_focus_visible_is_keyboard_only(void) {
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_button(ui, &(lens_button_opts){.label = "B"});
-    lens_end(ui);
+    test_end(ui);
 
     /* Frame 2: Tab moves focus to A during lens_end. */
     lens_input in = IN0;
@@ -80,14 +80,14 @@ static void test_focus_visible_is_keyboard_only(void) {
     lens_begin(ui, &in);
     lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_button(ui, &(lens_button_opts){.label = "B"});
-    lens_end(ui);
+    test_end(ui);
 
     /* Frame 3: A reports FOCUSED|FOCUS_VISIBLE (keyboard modality). */
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "A"});
     uint32_t a_state = lens_get_response(ui).state;
     lens_button(ui, &(lens_button_opts){.label = "B"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(a_state & LENS_STATE_FOCUSED);
     CHECK(a_state & LENS_STATE_FOCUS_VISIBLE);
 
@@ -100,7 +100,7 @@ static void test_focus_visible_is_keyboard_only(void) {
     lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_button(ui, &(lens_button_opts){.label = "B"});
     uint32_t b_state = lens_get_response(ui).state;
-    lens_end(ui);
+    test_end(ui);
     CHECK(b_state & LENS_STATE_FOCUSED);
     CHECK(!(b_state & LENS_STATE_FOCUS_VISIBLE));
     CHECK(b_state & LENS_STATE_PRESSED);
@@ -120,7 +120,7 @@ static void test_widget_owned_bits(void) {
     uint32_t unsel = lens_get_response(ui).state;
     lens_checkbox(ui, &(lens_checkbox_opts){.label = "On", .value = &on});
     uint32_t toggle = lens_get_response(ui).state;
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(sel & LENS_STATE_SELECTED);
     CHECK(!(unsel & LENS_STATE_SELECTED));

@@ -30,14 +30,14 @@ static void test_complete_row_is_one_hit_target(void) {
 
     lens_begin(ui, &IN0);
     CHECK(!build_pressable(ui).hovered);
-    lens_end(ui);
+    test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){220.0f, 60.0f}; /* trailing whitespace, past both children */
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     lens_response pressed = build_pressable(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(pressed.hovered);
     CHECK(pressed.pressed);
     CHECK(lens_get_cursor_hint(ui) == LENS_CURSOR_POINTER);
@@ -47,7 +47,7 @@ static void test_complete_row_is_one_hit_target(void) {
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     lens_response released = build_pressable(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(released.clicked);
 
     lens_release(ui);

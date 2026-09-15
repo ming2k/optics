@@ -8,8 +8,8 @@
  * flux_mesh. This is the replacement for the raw Vulkan
  * image/memory/view plumbing every depth-using example used to carry.
  */
-#include "internal.h"
 #include "image_internal.h"
+#include "internal.h"
 #include <flux/vulkan.h>
 
 #include <stdatomic.h>

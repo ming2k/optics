@@ -115,3 +115,6 @@ test('lens_contracts', contract_test)
 store_fault_test = executable('test_store_fault', 'test_store_fault.c',
   '../../libs/lens/src/store/store.c', dependencies : [lens_dep, m_dep])
 test('lens_store_fault', store_fault_test)
+
+snapshot_test = executable('test_snapshot', 'test_snapshot.c', dependencies : [lens_dep, m_dep])
+test('lens_snapshot', snapshot_test)

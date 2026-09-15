@@ -95,7 +95,7 @@ static void test_widget_intrinsic_height_scales(void) {
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
     lens_id id = lens_current_id(ui, "OK");
-    lens_end(ui);
+    test_end(ui);
     lens_node *n1 = lens_find(ui, id);
     CHECK(n1 != NULL);
     h1 = lens_node_bounds(n1).h;
@@ -103,7 +103,7 @@ static void test_widget_intrinsic_height_scales(void) {
     lens_set_text_scale(ui, 2.0f);
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    lens_end(ui);
+    test_end(ui);
     n1 = lens_find(ui, id);
     CHECK(n1 != NULL);
     float h2 = lens_node_bounds(n1).h;
@@ -122,7 +122,7 @@ static void test_text_command_size_scales(void) {
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
     lens_id id = lens_current_id(ui, "OK");
-    lens_end(ui);
+    test_end(ui);
 
     const lens_node *n = lens_find(ui, id);
     CHECK(n != NULL);
@@ -145,7 +145,7 @@ static void test_explicit_label_size_scales(void) {
     lens_id pt_id = lens_current_id(ui, "Point");
     lens_id cp_id = lens_current_id(ui, "Compact");
     lens_id wr_id = lens_current_id(ui, "Wrapped text");
-    lens_end(ui);
+    test_end(ui);
 
     const lens_node *pt = lens_find(ui, pt_id);
     const lens_node *cp = lens_find(ui, cp_id);
@@ -173,7 +173,7 @@ static void test_heading_size_scales(void) {
     lens_id title_id = lens_current_id(ui, "T");
     lens_label(ui, &(lens_label_opts){.text = "H", .size = 22.0f});
     lens_id h1_id = lens_current_id(ui, "H");
-    lens_end(ui);
+    test_end(ui);
 
     const lens_node *title = lens_find(ui, title_id);
     CHECK(title != NULL);

@@ -49,20 +49,20 @@ int main(void) {
     lens_set_skin_userdata(ui, MY_DIAL_KIND, dial_skin, (void *)0xC0FFEE);
     lens_begin(ui, NULL);
     my_dial(ui, "dial");
-    lens_end(ui);
+    test_end(ui);
     CHECK(dial_emissions == 1);
     CHECK(last_user == (void *)0xC0FFEE);
     CHECK(last_kind == MY_DIAL_KIND);
 
     lens_begin(ui, NULL);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(dial_emissions == 1);
 
     lens_set_skin_userdata(ui, MY_DIAL_KIND, NULL, NULL);
     lens_begin(ui, NULL);
     my_dial(ui, "dial");
-    lens_end(ui);
+    test_end(ui);
     CHECK(dial_emissions == 1);
 
     lens_skin_emit_user(ui, lens_root(ui), LENS_WIDGET_BUTTON, (lens_widget_record){0});

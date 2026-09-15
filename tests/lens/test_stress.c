@@ -23,7 +23,7 @@ static void test_many_nodes(void) {
         lens_label(ui, &(lens_label_opts){.text = lbl});
     }
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *root = lens_root(ui);
     CHECK(root != NULL);
@@ -44,7 +44,7 @@ static void test_many_nodes(void) {
         lens_label(ui, &(lens_label_opts){.text = lbl});
     }
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(lens_overflowed(ui) == false);
 
@@ -66,7 +66,7 @@ static void test_deep_nesting(void) {
     lens_label(ui, &(lens_label_opts){.text = "deep"});
     for (int i = 0; i < 50; i++)
         lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *root = lens_root(ui);
     lens_node *n = lens_node_first_child(root);
@@ -84,7 +84,7 @@ static void test_deep_nesting(void) {
     lens_label(ui, &(lens_label_opts){.text = "too deep"});
     for (int i = 0; i < 70; i++)
         lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(lens_overflowed(ui) == true);
 
@@ -117,7 +117,7 @@ static void test_arena_pressure(void) {
         }
     }
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* With a 4 KiB arena and 200 buttons, overflow is certain: each
      * button arena-copies its label plus at least one draw command, far
@@ -130,7 +130,7 @@ static void test_arena_pressure(void) {
     lens_column_begin(ui, NULL);
     (void)lens_button(ui, &(lens_button_opts){.label = "one"});
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_overflowed(ui) == false); /* flag is per frame */
 
     lens_release(ui);
@@ -153,7 +153,7 @@ static void test_rapid_churn(void) {
         }
     }
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* Frame 2: only even ids remain */
     lens_begin(ui, &IN0);
@@ -165,7 +165,7 @@ static void test_rapid_churn(void) {
         }
     }
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* Frame 3: restore all 100 */
     lens_begin(ui, &IN0);
@@ -177,7 +177,7 @@ static void test_rapid_churn(void) {
         }
     }
     lens_close(ui);
-    lens_end(ui);
+    test_end(ui);
 
     CHECK(lens_overflowed(ui) == false);
 
@@ -195,7 +195,7 @@ static void test_id_collision_reuses_node(void) {
     lens_button(ui, &(lens_button_opts){.label = "Dup"});
     lens_button(ui,
                 &(lens_button_opts){.label = "Dup"}); /* same id — should resolve to same node */
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *root = lens_root(ui);
     lens_node *first = lens_node_first_child(root);

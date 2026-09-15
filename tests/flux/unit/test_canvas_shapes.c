@@ -16,14 +16,16 @@ int main(void) {
         .kind = FLUX_BRUSH_LINEAR_GRADIENT,
         .blend = FLUX_BLEND_SRC_OVER,
         .opacity = 1.0f,
-        .gradient = {
-            .start = {0, 0},
-            .end = {64, 0},
-            .stops = {
-                .stops = {{0.0f, 0xffff0000}, {1.0f, 0xff0000ff}},
-                .count = 2,
+        .gradient =
+            {
+                .start = {0, 0},
+                .end = {64, 0},
+                .stops =
+                    {
+                        .stops = {{0.0f, 0xffff0000}, {1.0f, 0xff0000ff}},
+                        .count = 2,
+                    },
             },
-        },
     };
     flux_geometry geoms[] = {
         flux_geom_rect((flux_rect){4, 4, 56, 56}),
@@ -64,7 +66,8 @@ int main(void) {
     flux_canvas_draw_geometry(c, &(flux_geometry){.kind = FLUX_GEOM_PATH}, &white);
     EXPECT(flux_canvas_end_frame_checked(c) == FLUX_ERROR_INVALID_ARGUMENT);
     EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
-    flux_canvas_draw_geometry(c, &(flux_geometry){.kind = FLUX_GEOM_LINE, .stroke_width = 0}, &white);
+    flux_canvas_draw_geometry(c, &(flux_geometry){.kind = FLUX_GEOM_LINE, .stroke_width = 0},
+                              &white);
     EXPECT(flux_canvas_end_frame_checked(c) == FLUX_ERROR_INVALID_ARGUMENT);
     EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
     flux_canvas_draw_geometry(c, &geoms[1], &white);

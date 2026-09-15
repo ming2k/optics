@@ -46,7 +46,7 @@ static void test_reduced_motion_hover_stays_settled(void) {
     lens_begin(ui, &IN0);
     lens_slider(ui,
                 &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
-    lens_end(ui);
+    test_end(ui);
     CHECK(!lens_anim_pending(ui));
 
     /* The same hover that animates the knob in test_slider must not. */
@@ -55,7 +55,7 @@ static void test_reduced_motion_hover_stays_settled(void) {
     lens_begin(ui, &hover);
     lens_slider(ui,
                 &(lens_slider_opts){.label = "Volume", .value = &value, .min = 0.0f, .max = 1.0f});
-    lens_end(ui);
+    test_end(ui);
     CHECK(!lens_anim_pending(ui));
 
     lens_release(ui);

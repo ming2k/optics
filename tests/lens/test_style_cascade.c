@@ -74,7 +74,7 @@ static void test_scope_reaches_terse_widgets(void) {
     lens_label(ui, &(lens_label_opts){.text = "scoped"});
     lens_pop_style(ui);
     lens_label(ui, &(lens_label_opts){.text = "after"});
-    lens_end(ui);
+    test_end(ui);
 
     flux_color themed = lens_get_theme(ui).color_fg;
     CHECK(first_text_color(find_widget(ui, "before")) == themed);
@@ -102,7 +102,7 @@ static void test_nested_scopes_merge_and_nearest_wins(void) {
     lens_pop_style(ui);
     lens_label(ui, &(lens_label_opts){.text = "back-to-outer"});
     lens_pop_style(ui);
-    lens_end(ui);
+    test_end(ui);
 
     /* The inner scope overrides fg but inherits the outer font size. */
     lens_node *in_node = find_widget(ui, "inner");
@@ -124,12 +124,12 @@ static void test_forgotten_pop_cannot_leak_across_frames(void) {
     lens_push_style(ui, fg_only(red));
     lens_label(ui, &(lens_label_opts){.text = "scoped"});
     /* no pop — the frame ends with the stack non-empty */
-    lens_end(ui);
+    test_end(ui);
     CHECK(first_text_color(find_widget(ui, "scoped")) == red);
 
     lens_begin(ui, &IN0);
     lens_label(ui, &(lens_label_opts){.text = "next-frame"});
-    lens_end(ui);
+    test_end(ui);
     CHECK(first_text_color(find_widget(ui, "next-frame")) == lens_get_theme(ui).color_fg);
     lens_release(ui);
 }
@@ -166,7 +166,7 @@ static void test_box_style_beats_scope_beats_theme(void) {
     lens_button(ui, &(lens_button_opts){.label = "scoped"});
     lens_button(ui, &(lens_button_opts){.label = "per-call", .box = {.style = bg_only(blue)}});
     lens_pop_style(ui);
-    lens_end(ui);
+    test_end(ui);
 
     flux_color themed = lens_get_theme(ui).color_bg;
     CHECK(first_rect_color(find_widget(ui, "themed")) == themed);
@@ -192,7 +192,7 @@ static void test_outline_atoms_reach_draw_commands(void) {
     lens_push_style(ui, s);
     lens_label(ui, &(lens_label_opts){.text = "12:34", .size = 14.0f});
     lens_pop_style(ui);
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *plain = find_widget(ui, "plain");
     lens_node *outlined = find_widget(ui, "12:34");
@@ -216,7 +216,7 @@ static void test_skin_scratch_lifecycle(void) {
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "Host"});
-    lens_end(ui);
+    test_end(ui);
 
     lens_node *n = find_widget(ui, "Host");
     CHECK(n != NULL);
@@ -231,7 +231,7 @@ static void test_skin_scratch_lifecycle(void) {
     scratch[3] = -4.25f;
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "Host"});
-    lens_end(ui);
+    test_end(ui);
     n = find_widget(ui, "Host");
     CHECK(n != NULL);
     scratch = lens_skin_scratch(ui, n);
@@ -245,7 +245,7 @@ static void test_skin_scratch_lifecycle(void) {
     for (int f = 0; f < 12; f++) {
         lens_begin(ui, &IN0);
         lens_label(ui, &(lens_label_opts){.text = "unrelated"});
-        lens_end(ui);
+        test_end(ui);
     }
     CHECK(find_widget(ui, "Host") == NULL);
     CHECK(lens_skin_scratch(ui, NULL) == NULL); /* NULL-safety */

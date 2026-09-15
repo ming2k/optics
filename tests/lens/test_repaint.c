@@ -13,13 +13,13 @@ static void build_frame(lens *ui, float value) {
     lens_begin(ui, &IN0);
     lens_label(ui, &(lens_label_opts){.text = "status"});
     lens_label(ui, &(lens_label_opts){.text = val_str, .box = {.id = "val_node"}});
-    lens_end(ui);
+    test_end(ui);
 }
 
 static void render_frame(lens *ui, flux_canvas *canvas) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
     CHECK(flux_canvas_cpu_begin(canvas, &clear) == FLUX_OK);
-    CHECK(lens_render(ui, canvas) == FLUX_OK);
+    CHECK(test_snapshot_render(ui, canvas) == FLUX_OK);
     flux_canvas_cpu_end(canvas);
 }
 
@@ -96,7 +96,7 @@ static void test_place_open_close_repaints(void) {
         lens_label(ui, &(lens_label_opts){.text = "item"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_frame_needs_repaint(ui));
     render_frame(ui, canvas);
 
@@ -109,7 +109,7 @@ static void test_place_open_close_repaints(void) {
             lens_label(ui, &(lens_label_opts){.text = "item"});
             lens_place_end(ui);
         }
-        lens_end(ui);
+        test_end(ui);
         render_frame(ui, canvas);
     }
     CHECK(!lens_frame_needs_repaint(ui));
@@ -123,7 +123,7 @@ static void test_place_open_close_repaints(void) {
         lens_label(ui, &(lens_label_opts){.text = "item"});
         lens_place_end(ui);
     }
-    lens_end(ui);
+    test_end(ui);
     CHECK(lens_frame_needs_repaint(ui));
 
     flux_canvas_release(canvas);
