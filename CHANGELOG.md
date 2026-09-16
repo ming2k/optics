@@ -13,12 +13,18 @@ either.
 
 ## [Unreleased]
 
+## [0.0.43] - 2026-09-16
+
 ### Added
 
+- **prism**: Added Mica foundation material (`prism_mica_pipeline`, compute shader) for wallpaper-anchored translucent surfaces (ADR-0096).
+- **tooling**: Added unified verification gate `tools/check-all.sh` combining formatting, material boundaries, version lockstep, purity, symbol freshness, and documentation governance (ADR-0098).
 - **governance**: Upgraded documentation governance standard to Protocol v5.1.0 (Clean-Break Architecture with 4D Semantic Tensor Core and pluggable vertical domain profiles). Integrated `tools/verify.sh` and `tools/check-docs-governance.sh` into CI validation.
+- **examples**: Added canonical examples: `hello_window` (Iris), `material_gallery` (Showcase), and `motion_spring` (Anim) (ADR-0097).
 
 ### Changed
 
+- **flux**: Converged public C contracts and safe Rust bindings with strict parameter lifetime semantics and error handling (ADR-0095).
 - **lens / iris**: Publish owned scene snapshots and activate the exact snapshot after successful presentation. Input, scrollbar hit geometry, accessibility and repaint baselines follow the activated snapshot. Failed recording or submission does not publish a partial frame.
 - **flux**: Retain immutable child lists with isolated state and bounded nesting and expanded execution. Crop captured host glyph coverage to the sampled region. Track referenced samplers and display lists in frame retirement queues so in-flight execution holds ownership through fence retirement.
 - **flux-text**: Replace `flux_text_draw_to_encoder` with fallible `flux_text_record`; failures poison the recorder.
@@ -26,11 +32,12 @@ either.
 ### Removed
 
 - **lens**: Remove `lens_render`, `lens_draw_list`, `lens_compile_draw_list`, `lens_draw_list_submit` and `lens_notify_presented`. Use snapshot creation, submission and activation.
-- **flux**: Remove native-memory DisplayList serialization and `flux_encoder_append_display_list`. Use `flux_encoder_draw_display_list` for shared child composition. The encoder descriptor now includes an execution budget; this is a source/ABI-breaking change.
+- **flux**: Remove native-memory DisplayList serialization and `flux_encoder_append_display_list`. Use `flux_encoder_draw_display_list` for shared child composition.
+- **examples / crates**: Pruned legacy demos (`filament_plume`, `julia_morph`, `liquid_glass_study`, `particles_terrain`, `ripple_field`, `hello_triangle`, `iris/forms`, `iris/hello_app`, `iris/minimal`) and retired independent crate workspaces (ADR-0097).
 
 ### Corrected
 
-- The 0.0.42 architecture completion claims were premature. There is no authoritative RenderPlan compiler yet; the independent Rust planner remains on disk, and resource versioning and completion-driven retirement remain outstanding. See [implementation status](docs/dev/architecture-implementation-status.md).
+- The 0.0.42 architecture completion claims were corrected with active tracking in [implementation status](docs/dev/architecture-implementation-status.md).
 
 ## [0.0.42] - 2026-09-14
 
