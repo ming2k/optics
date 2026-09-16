@@ -201,8 +201,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_image_bindless_storage_handle` | The storage bindless handle of the image, valid only for images created with flux_image_create_compute_writable (FLUX_BINDLESS_INVALID otherwise). |
 | `flux_graphics_pipeline_create` |  |
 | `flux_graphics_pipeline_retain` |  |
-| `flux_graphics_pipeline_release` | DESTROY-INLINE SEMANTICS — see the fuller note on flux_compute_pipeline_release in <flux/compute.h>. |
-| `flux_graphics_pipeline_release_deferred` | Deferred-release counterpart for graphics pipelines: parks on the device retire queue, destroyed once in-flight batches complete. |
+| `flux_graphics_pipeline_release` | Drop one owned reference. |
 | `flux_graphics_pipeline_vk_pipeline` |  |
 | `flux_graphics_pipeline_vk_layout` |  |
 | `flux_graphics_pipeline_bind` | Bind the pipeline and push `push_bytes` of `push_constants` (may be NULL/0). |
@@ -220,11 +219,6 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
-| `flux_paint_default` |  |
-| `flux_paint_solid` | Convenience constructors. |
-| `flux_paint_linear_gradient` |  |
-| `flux_paint_radial_gradient` |  |
-| `flux_path_init` |  |
 | `flux_path_reset` |  |
 | `flux_path_create` |  |
 | `flux_path_move_to` |  |
@@ -241,16 +235,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_canvas_release` |  |
 | `flux_canvas_set_scale` | Content scale (device-pixel ratio). |
 | `flux_canvas_get_scale` |  |
-| `flux_canvas_begin` | Unified target-driven pass bracket (RFC-0094 / ADR-0087). |
+| `flux_canvas_begin` | The only pass bracket. |
 | `flux_canvas_end` |  |
-| `flux_canvas_begin_frame` | Begin / end a recording session. |
-| `flux_canvas_end_frame` |  |
-| `flux_canvas_end_frame_checked` | Checked counterpart: always closes a valid frame pass and returns its first sticky draw-time error (notably a stencil-dependent draw attempted inside a no-stencil pass). |
-| `flux_canvas_begin_pass` | Descriptor form of flux_canvas_begin_frame. |
-| `flux_canvas_begin_target` | Render the draws between begin_target/end_target into `target` (a flux_image from flux_image_create_render_target) instead of the frame's swapchain image. |
-| `flux_canvas_begin_target_pass` |  |
-| `flux_canvas_end_target` |  |
-| `flux_canvas_end_target_checked` | Checked target-pass counterpart; see flux_canvas_end_frame_checked. |
 | `flux_canvas_save` | State stack. |
 | `flux_canvas_restore` |  |
 | `flux_canvas_save_layer` | Save a compositing layer (ADR-0088 / Opacity Group). |
@@ -285,12 +271,12 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_canvas_dropped_draws` | Cumulative count of draw calls dropped due to transient ring exhaustion since canvas creation. |
 | `flux_canvas_submit_calls` | Vulkan batching diagnostics, cumulative since canvas creation. |
 | `flux_canvas_recorded_draws` |  |
-| `flux_canvas_begin_record` | Start capturing every draw submitted between here and the matching flux_canvas_end_record into a new segment. |
-| `flux_canvas_end_record` | Close the innermost recording and return its handle (null on budget overflow or allocation failure — the live draws still happened, only the recording is lost). |
-| `flux_canvas_replay` | Re-submit a recorded segment. |
-| `flux_canvas_record_release` | Release a segment early (e.g. |
-| `flux_canvas_records_created` | Diagnostics: cumulative successful end_record / replay counts since canvas creation. |
-| `flux_canvas_records_replayed` |  |
+| `flux_canvas_cache_begin` | Start capturing every draw submitted between here and the matching flux_canvas_cache_end into a new segment. |
+| `flux_canvas_cache_end` | Close the innermost recording and return its handle (null on budget overflow or allocation failure — the live draws still happened, only the recording is lost). |
+| `flux_canvas_cache_replay` | Re-submit a recorded segment. |
+| `flux_canvas_cache_release` | Release a segment early (e.g. |
+| `flux_canvas_cache_entries_created` | Diagnostics: cumulative successful end_record / replay counts since canvas creation. |
+| `flux_canvas_cache_entries_replayed` |  |
 
 ### `flux/canvas_cpu.h`
 
@@ -298,8 +284,6 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 |--------|-------------|
 | `flux_canvas_create_cpu` | Create a headless CPU canvas with a `width`x`height` (physical pixels) framebuffer. |
 | `flux_canvas_create_cpu_aa` | flux_canvas_create_cpu with an explicit antialiasing request. |
-| `flux_canvas_cpu_begin` | Begin a recording pass, clearing to `clear` (premultiplied; NULL = fully transparent). |
-| `flux_canvas_cpu_end` | End the recording pass. |
 
 ### `flux/dmabuf.h`
 
@@ -320,8 +304,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_mesh_create` |  |
 | `flux_mesh_release` | Destruction is deferred: a released mesh's vertex/index buffers may still be bound by in-flight frames, so they are destroyed by the device retire queue only after the GPU provably passed every batch that could reference them. |
 | `flux_material_create` |  |
-| `flux_material_release` | Release destroys the material's pipelines inline — they do NOT go through the device retire queue (the retained texture/sampler do). |
-| `flux_material_release_deferred` | Deferred flavour: parks the underlying Vulkan pipelines on the device's retire queue so they are safely destroyed after all in-flight GPU batches have finished executing. |
+| `flux_material_release` | Drop one owned reference. |
 | `flux_material_get_alpha_mode` |  |
 | `flux_scene_draw_mesh` | Records a single mesh+material draw into the frame's currently active pass. |
 | `flux_scene_draw_mesh_lit` | Same as flux_scene_draw_mesh with an explicit light. |
@@ -334,8 +317,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 |--------|-------------|
 | `flux_compute_pipeline_create` |  |
 | `flux_compute_pipeline_retain` |  |
-| `flux_compute_pipeline_release` | DESTROY-INLINE SEMANTICS — different from every retire-queued resource (image/buffer/mesh/sampler/target), where *_release is safe at any time. |
-| `flux_pipeline_release_deferred` | Deferred-release counterpart: parks the pipeline on the device retire queue and destroys it once every submitted batch has completed. |
+| `flux_compute_pipeline_release` | Drop one owned reference. |
 | `flux_compute_pipeline_vk_pipeline` |  |
 | `flux_compute_pipeline_vk_layout` |  |
 | `flux_compute_dispatch` | Record a compute dispatch into `cmd`. |
@@ -657,6 +639,14 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `prism_acrylic_filter_retain` |  |
 | `prism_acrylic_filter_release` |  |
 | `prism_acrylic_filter_apply` |  |
+
+### `prism/mica.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `prism_mica_filter_create` |  |
+| `prism_mica_filter_release` |  |
+| `prism_mica_filter_apply` |  |
 
 ### `prism/backdrop_layer.h`
 

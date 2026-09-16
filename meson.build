@@ -70,6 +70,9 @@ if get_option('examples')
   if get_option('scene-graph')
     subdir('examples/flux-scene-graph')
   endif
+  if get_option('anim')
+    subdir('examples/anim')
+  endif
   subdir('examples/lens')
   subdir('examples/iris')
 endif

@@ -597,25 +597,6 @@ void flux_material_release(flux_material *m) {
     if (atomic_fetch_sub_explicit(&m->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
     flux_device *d = m->device;
-    if (m->pipeline)
-        vkDestroyPipeline(d->device, m->pipeline, nullptr);
-    if (m->skinned_pipeline)
-        vkDestroyPipeline(d->device, m->skinned_pipeline, nullptr);
-    if (m->layout)
-        vkDestroyPipelineLayout(d->device, m->layout, nullptr);
-    flux_sampler_release(m->base_color_sampler);
-    flux_image_release(m->base_color_image);
-    flux_internal_free(d, m);
-    flux_device_release(d);
-}
-
-void flux_material_release_deferred(flux_device *d, flux_material *m) {
-    if (!m)
-        return;
-    if (atomic_fetch_sub_explicit(&m->ref_count, 1u, memory_order_acq_rel) != 1u)
-        return;
-    if (!d)
-        d = m->device;
     if (m->pipeline) {
         flux_vk_retire_pipeline(d, m->pipeline);
         m->pipeline = VK_NULL_HANDLE;

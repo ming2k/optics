@@ -8,57 +8,37 @@ meson setup build -Dexamples=true
 meson compile -C build
 ```
 
-The windowed examples (`hello_triangle`, `canvas_hello`, `image_animation`,
-`scene_cube`) need a Vulkan-capable desktop and [GLFW][glfw]. The headless
-compute example (`compute_fill`) has no such dependency and builds
-unconditionally.
+The windowed examples (`canvas_hello`, `image_animation`, `scene_cube`) run on
+native Iris (`iris_app_run`) with native Wayland cursor-shape and fractional HiDPI.
+The headless compute example (`compute_fill`) runs without a window and builds unconditionally.
 
 Effect showcases — demos where a visual or mathematical effect is the point
 rather than the API — live in [`../showcase`](../showcase/).
-
-[glfw]: https://www.glfw.org/
 
 ## What's here
 
 | Example | Builds | Teaches |
 |---------|--------|---------|
 | [`compute_fill`](#compute_fill) | always | a compute pipeline: dispatch, SSBO readback |
-| [`hello_triangle`](#hello_triangle) | GLFW | the smallest render loop; public graphics pipeline |
-| [`canvas_hello`](#canvas_hello) | GLFW | the 2D canvas: paths, paint, images |
-| [`image_animation`](#image_animation) | GLFW | canvas image draws + app-owned animation |
-| [`scene_cube`](#scene_cube) | GLFW | 3D mesh + material, camera, a depth attachment |
+| [`canvas_hello`](#canvas_hello) | Iris | the 2D canvas: paths, paint, images |
+| [`image_animation`](#image_animation) | Iris | canvas image draws + app-owned animation |
+| [`scene_cube`](#scene_cube) | Iris | 3D mesh + material, camera, a depth attachment |
 
 ### Shared bootstrap
 
-`hello_triangle`, `canvas_hello`, `image_animation`, and `scene_cube` share
-an identical device + surface + frame-loop bootstrap (GLFW window,
-`VkSurfaceKHR`, `flux_device`, `flux_surface`, the `begin_frame` /
-`submit` / `present` loop, and resize handling). `hello_triangle`
-introduces it and the header comment in each example marks where the
-shared part ends and the example-specific part begins. `pipeline_cache.h`
-is a file-backed pipeline-cache helper copied verbatim by all of them —
-and by the windowed showcases in `../showcase/`.
+`canvas_hello`, `image_animation`, and `scene_cube` share Iris's native application
+bootstrap (`iris_app_run`, `iris_app_opts`, device/canvas lifecycle, and automatic
+Wayland/XDG resize and HiDPI scaling).
 
 ---
 
 ## compute_fill
 
-The only **headless** example — no window, no GLFW. A compute shader fills
+The only **headless** example — no window. A compute shader fills
 a storage buffer; the host reads it back and checks the result.
 
 The first stop for anyone who wants to see a `flux_compute_pipeline` end
 to end: descriptor binding, dispatch, and GPU→CPU readback.
-
-## hello_triangle
-
-A single hardcoded triangle via the public `flux_graphics_pipeline` API.
-Shaders are compiled to SPIR-V by meson + glslangValidator at build time
-and embedded with C23 `#embed`; the pipeline is described by a plain
-descriptor struct (`flux_graphics_pipeline_desc`) — no raw Vulkan
-pipeline-state boilerplate in user code.
-
-This is the canonical entry point to flux: device, surface, one pipeline,
-present loop, swapchain resize, and per-frame GPU timestamps.
 
 ## canvas_hello
 

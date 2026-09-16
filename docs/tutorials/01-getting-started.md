@@ -90,5 +90,6 @@ event loop for a complete UI application.
 |------|------|
 | Build a 2D app | [Your first 2D canvas application](02-first-2d-app.md) |
 | Build a 3D app | [Your first 3D scene application](03-first-3d-app.md) |
+| Explore visual effects & materials | [Interactive examples showcase](../how-to/run-and-explore-examples.md) |
 | Understand the stack | [Application architecture](../explanation/application-architecture.md) |
 | Look up contracts | [API reference](../reference/api.md), [thread safety](../reference/thread-safety.md), and [glossary](../reference/glossary.md) |

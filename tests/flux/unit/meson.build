@@ -180,3 +180,7 @@ test_display_list = executable('test_display_list', 'test_display_list.c',
   dependencies : [test_helpers_dep],
 )
 test('display_list', test_display_list, suite : 'unit')
+
+test_public_contracts = executable('test_public_contracts',
+  'test_public_contracts.c', dependencies : [test_helpers_dep])
+test('public_contracts', test_public_contracts, suite : 'unit')

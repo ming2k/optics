@@ -73,7 +73,8 @@ static void delayed_presentation_and_owned_metadata(void) {
     flux_canvas *canvas = nullptr;
     CHECK(flux_canvas_create_cpu(400, 240, 1, &canvas) == FLUX_OK);
     flux_color clear = 0;
-    CHECK(flux_canvas_begin(canvas, nullptr, &clear) == FLUX_OK);
+    CHECK(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &clear}) == FLUX_OK);
     CHECK(lens_snapshot_submit(a, canvas) == FLUX_OK);
     CHECK(flux_canvas_end(canvas) == FLUX_OK);
     uint32_t stride = 0;
@@ -86,7 +87,8 @@ static void delayed_presentation_and_owned_metadata(void) {
     old.buttons = 0;
     lens_snapshot_accessibility_walk(a, visit, &old);
     CHECK(old.buttons == 1);
-    CHECK(flux_canvas_begin(canvas, nullptr, &clear) == FLUX_OK);
+    CHECK(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &clear}) == FLUX_OK);
     CHECK(lens_snapshot_submit(a, canvas) == FLUX_OK);
     CHECK(flux_canvas_end(canvas) == FLUX_OK);
     pixels = flux_canvas_read_pixels(canvas, nullptr, nullptr, &stride);

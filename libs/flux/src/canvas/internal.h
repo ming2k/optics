@@ -8,6 +8,55 @@
 #include <flux/canvas.h>
 #include <flux/vulkan.h>
 
+void canvas_fail(flux_canvas *c, flux_result result, const char *message);
+bool canvas_finite_rect(flux_rect r);
+bool canvas_valid_geometry(const flux_geometry *g);
+bool canvas_valid_brush(const flux_brush *b);
+
+/* Paint kind selects how the surface colour is computed.
+ *   SOLID  - flat colour from `color`
+ *   LINEAR - colour interpolated between stops along
+ *            line (linear.from -> linear.to), positions in pixel space
+ *   RADIAL - colour interpolated between stops by distance from
+ *            radial.center, normalized by radial.radius (pixel space) */
+typedef enum canvas_paint_kind {
+    CANVAS_PAINT_SOLID = 0,
+    CANVAS_PAINT_LINEAR_GRADIENT = 1,
+    CANVAS_PAINT_RADIAL_GRADIENT = 2,
+} canvas_paint_kind;
+
+typedef struct canvas_paint {
+    canvas_paint_kind kind;
+    flux_color color; /* SOLID: fill colour; gradient kinds: ignored */
+
+    /* Extension chain head; FLUX_TYPE-tagged (flux_struct_type). NULL for
+     * every paint produced by the constructors below and by zero-init. */
+
+    /* Stroke parameters — apply to every stroke_path regardless of kind. */
+    float stroke_width;
+    float miter_limit;
+    flux_line_cap cap;
+    flux_line_join join;
+    flux_fill_rule fill_rule;
+    flux_blend_mode blend;
+
+    /* Gradient parameters (pixel space, pre-transform). */
+    union {
+        struct {
+            flux_point from;
+            flux_point to;
+            flux_gradient_stops stops;
+        } linear;
+        struct {
+            flux_point center;
+            float radius;
+            flux_gradient_stops stops;
+        } radial;
+    } gradient;
+} canvas_paint;
+
+canvas_paint canvas_paint_default(void);
+
 #define FLUX_CANVAS_MAX_STATES 32
 #define FLUX_CANVAS_PATH_SCRATCH_CAP 2048
 #define FLUX_CANVAS_MAX_CONTOURS 64
@@ -73,7 +122,7 @@ typedef struct flux_path_segment {
 /*                                                                    */
 /*  A segment captures every backend submit (pipeline id, push        */
 /*  constants, scissor, blend, vertex bytes) emitted between          */
-/*  flux_canvas_begin_record / flux_canvas_end_record so an unchanged */
+/*  flux_canvas_cache_begin / flux_canvas_cache_end so an unchanged */
 /*  subtree can be re-submitted later without re-running the emitter  */
 /*  (text shaping, tessellation, measure). Recording is passive: the  */
 /*  draws are submitted live as usual while being captured.           */
@@ -269,7 +318,7 @@ struct flux_canvas {
 
     /* Newest content generation seen per host atlas buffer (see
      * flux_glyph_run_host_atlas_desc). draw_glyph_run refreshes an entry,
-     * flux_canvas_replay refuses a segment whose recorded generation is
+     * flux_canvas_cache_replay refuses a segment whose recorded generation is
      * older. Fixed-size, round-robin: one entry per live producer. */
     flux_host_atlas_gen host_atlas_gens[FLUX_CANVAS_HOST_ATLAS_GEN_CAP];
     uint32_t host_atlas_gen_next; /* round-robin insert slot */
@@ -282,7 +331,7 @@ struct flux_canvas {
     flux_blend_mode pending_blend;
 
     /* Display-list segments (see "Display-list segments" above). The
-     * slot pool is allocated lazily on the first flux_canvas_begin_record
+     * slot pool is allocated lazily on the first flux_canvas_cache_begin
      * and freed at destroy; the stack tracks nested recordings. */
     flux_canvas_record_slot *record_slots;
     flux_canvas_record_slot *record_stack[FLUX_CANVAS_RECORD_DEPTH_CAP];
@@ -512,7 +561,7 @@ typedef enum canvas_pipe_id {
 #define FLUX_CANVAS_PUSH_HAS_COLOR_PARAMS 0x200u
 
 flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format,
-                                VkSampleCountFlagBits samples, flux_paint_kind kind,
+                                VkSampleCountFlagBits samples, canvas_paint_kind kind,
                                 flux_blend_mode blend, bool with_stencil,
                                 VkPipelineLayout *out_layout, VkPipeline *out_pipeline);
 flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
@@ -536,12 +585,12 @@ bool flux_canvas_alloc_scratch(flux_canvas *c);
 void flux_canvas_free_scratch(flux_canvas *c);
 
 void push_vertex(flux_canvas_vertex *v, flux_point p, flux_mat3x2 tx, flux_color c);
-void build_push(flux_canvas *c, const flux_paint *paint, flux_canvas_push *out);
-bool ensure_pipeline_bound(flux_canvas *c, flux_paint_kind kind);
+void build_push(flux_canvas *c, const canvas_paint *paint, flux_canvas_push *out);
+bool ensure_pipeline_bound(flux_canvas *c, canvas_paint_kind kind);
 bool ensure_pipeline_bound_id(flux_canvas *c, canvas_pipe_id id);
-void submit_triangles(flux_canvas *c, const flux_paint *paint, const flux_canvas_vertex *verts,
+void submit_triangles(flux_canvas *c, const canvas_paint *paint, const flux_canvas_vertex *verts,
                       uint32_t vertex_count);
-void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id id,
+void submit_triangles_id(flux_canvas *c, const canvas_paint *paint, canvas_pipe_id id,
                          const flux_canvas_vertex *verts, uint32_t vertex_count);
 void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, uint32_t image_handle,
                                     flux_sampler *sampler, flux_bindless_handle sh, flux_rect dst,
@@ -628,7 +677,7 @@ bool ear_clip_contour(flux_canvas_vertex *verts, uint32_t *v_count, uint32_t ver
  * On a miss (miss counter bumped) the caller must tessellate with an
  * IDENTITY transform so the output is cacheable path-space geometry,
  * then call tess_cache_store_and_transform before submit. */
-bool tess_cache_lookup_submit(flux_canvas *c, const flux_path *p, const flux_paint *paint,
+bool tess_cache_lookup_submit(flux_canvas *c, const flux_path *p, const canvas_paint *paint,
                               bool is_stroke, float pixel_scale, float stroke_width,
                               float miter_limit, flux_mat3x2 tx);
 
@@ -637,7 +686,7 @@ bool tess_cache_lookup_submit(flux_canvas *c, const flux_path *p, const flux_pai
  * cacheable (!stalled, counts within the inline caps), then transform
  * every vertex in place by `tx` so the caller's submit produces
  * exactly what a transform-during-emit run would have produced. */
-void tess_cache_store_and_transform(flux_canvas *c, const flux_path *p, const flux_paint *paint,
+void tess_cache_store_and_transform(flux_canvas *c, const flux_path *p, const canvas_paint *paint,
                                     bool is_stroke, float pixel_scale, float stroke_width,
                                     float miter_limit, bool stalled, flux_canvas_vertex *verts,
                                     uint32_t v_count, flux_mat3x2 tx);
@@ -687,8 +736,8 @@ void emit_tri(flux_canvas_vertex *verts, uint32_t *count, uint32_t cap, flux_mat
 /*  Internal rasterization primitives (RFC-0094)                      */
 /* ------------------------------------------------------------------ */
 
-void canvas_fill_rect_internal(flux_canvas *c, flux_rect r, const flux_paint *paint);
-void canvas_fill_path_internal(flux_canvas *c, const flux_path *p, const flux_paint *paint);
-void canvas_stroke_path_internal(flux_canvas *c, const flux_path *p, const flux_paint *paint);
+void canvas_fill_rect_internal(flux_canvas *c, flux_rect r, const canvas_paint *paint);
+void canvas_fill_path_internal(flux_canvas *c, const flux_path *p, const canvas_paint *paint);
+void canvas_stroke_path_internal(flux_canvas *c, const flux_path *p, const canvas_paint *paint);
 
 #endif /* FLUX_CANVAS_INTERNAL_H */

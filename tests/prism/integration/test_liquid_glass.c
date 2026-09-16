@@ -37,8 +37,13 @@ static uint32_t render_liquid_glass_frame(flux_surface *surface, flux_canvas *ca
     uint32_t slot = flux_frame_index(frame);
 
     flux_color source = flux_color_rgba(96, 144, 208, 255);
-    EXPECT(flux_canvas_begin_target(canvas, frame, target, &source) == FLUX_OK);
-    flux_canvas_end_target(canvas);
+    EXPECT(flux_canvas_begin(
+               canvas, &(flux_canvas_pass_desc){
+                           .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                           .frame = frame,
+                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
+                           .clear_color = &source}) == FLUX_OK);
+    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     flux_effect_blur_desc blur_desc = FLUX_EFFECT_BLUR_DESC_INIT;
     blur_desc.input = target;
@@ -56,9 +61,11 @@ static uint32_t render_liquid_glass_frame(flux_surface *surface, flux_canvas *ca
     EXPECT(prism_liquid_glass_filter_apply(glass_filter, frame, &glass_desc, &glass) == FLUX_OK);
 
     flux_color black = flux_color_rgba(0, 0, 0, 255);
-    EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
+    EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                              .frame = frame,
+                                                              .clear_color = &black}) == FLUX_OK);
     flux_canvas_draw_image(canvas, glass, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-    flux_canvas_end_frame(canvas);
+    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
     EXPECT(flux_frame_submit(frame) == FLUX_OK);
     EXPECT(flux_frame_present(frame) == FLUX_OK);
     memset(pixels, 0xCD, BYTES);
@@ -103,11 +110,16 @@ int main(void) {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_target(canvas, frame, target, &black) == FLUX_OK);
+        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                             .frame = frame,
+                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                            .image = target},
+                                             .clear_color = &black}) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas,
                                     (flux_rect){(float)(W / 2), 0.0f, (float)(W / 2), (float)H},
                                     flux_color_rgba_premul(255, 255, 255, 255));
-        flux_canvas_end_target(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
@@ -131,10 +143,13 @@ int main(void) {
         EXPECT(prism_liquid_glass_filter_apply(glass_filter, frame, &gd, &glass) == FLUX_OK);
         EXPECT(glass != nullptr);
 
-        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &black}) == FLUX_OK);
         flux_canvas_draw_image(canvas, target, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
         flux_canvas_draw_image(canvas, glass, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0, BYTES);

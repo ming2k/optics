@@ -52,18 +52,6 @@ typedef enum flux_blend_mode {
     FLUX_BLEND_MULTIPLY = 3
 } flux_blend_mode;
 
-/* Paint kind selects how the surface colour is computed.
- *   SOLID  - flat colour from `color`
- *   LINEAR - colour interpolated between stops along
- *            line (linear.from -> linear.to), positions in pixel space
- *   RADIAL - colour interpolated between stops by distance from
- *            radial.center, normalized by radial.radius (pixel space) */
-typedef enum flux_paint_kind {
-    FLUX_PAINT_SOLID = 0,
-    FLUX_PAINT_LINEAR_GRADIENT = 1,
-    FLUX_PAINT_RADIAL_GRADIENT = 2,
-} flux_paint_kind;
-
 #define FLUX_GRADIENT_MAX_STOPS 8
 
 typedef struct flux_gradient_stop {
@@ -76,73 +64,12 @@ typedef struct flux_gradient_stops {
     flux_gradient_stop stops[FLUX_GRADIENT_MAX_STOPS];
 } flux_gradient_stops;
 
-/* Discriminated by `kind`. The `gradient` union is meaningful only
- * for LINEAR/RADIAL — read it via flux_paint_linear_gradient /
- * flux_paint_radial_gradient (defined below) or directly.
- *
- * Extension chain (the same sType/pNext pattern every flux descriptor
- * uses — see flux_struct_type in <flux/core.h>). `next` is a linked list
- * of typed extension structs; unrecognized tags are ignored by every
- * backend, so a host can chain a new paint extension without waiting
- * for canvas support and older binaries keep working against newer
- * libraries. This is the designated growth path for paint kinds:
- * instead of widening this struct (a restructure = ABI break per
- * docs/reference/api.md) or adding union arms, add
- *   typedef struct flux_paint_<thing>_desc { flux_struct_type type;
- *   const void *next; ... } with a new FLUX_TYPE_PAINT_<THING>_DESC tag.
- * `next` must remain NULL while zero-initialized (compound literals
- * with FLUX_PAINT_INIT / the constructors below guarantee this).
- * Callers never read `next` back; the canvas consumes it during draw. */
-typedef struct flux_paint {
-    flux_paint_kind kind;
-    flux_color color; /* SOLID: fill colour; gradient kinds: ignored */
-
-    /* Extension chain head; FLUX_TYPE-tagged (flux_struct_type). NULL for
-     * every paint produced by the constructors below and by zero-init. */
-    const void *next;
-
-    /* Stroke parameters — apply to every stroke_path regardless of kind. */
-    float stroke_width;
-    float miter_limit;
-    flux_line_cap cap;
-    flux_line_join join;
-    flux_fill_rule fill_rule;
-    flux_blend_mode blend;
-
-    /* Gradient parameters (pixel space, pre-transform). */
-    union {
-        struct {
-            flux_point from;
-            flux_point to;
-            flux_gradient_stops stops;
-        } linear;
-        struct {
-            flux_point center;
-            float radius;
-            flux_gradient_stops stops;
-        } radial;
-    } gradient;
-} flux_paint;
-
-FLUX_API flux_paint flux_paint_default(void);
-
-/* Convenience constructors. All return a paint with sensible stroke
- * defaults (miter limit 4, cap butt, join miter, src-over). */
-FLUX_API flux_paint flux_paint_solid(flux_color color);
-FLUX_API flux_paint flux_paint_linear_gradient(flux_point from, flux_point to,
-                                               const flux_gradient_stop *stops,
-                                               uint32_t stop_count);
-FLUX_API flux_paint flux_paint_radial_gradient(flux_point center, float radius,
-                                               const flux_gradient_stop *stops,
-                                               uint32_t stop_count);
-
 /* ------------------------------------------------------------------ */
 /*  Path (arena-owned)                                                */
 /* ------------------------------------------------------------------ */
 
 typedef struct flux_path flux_path; /* opaque-in-this-header; see implementation */
 
-FLUX_NODISCARD FLUX_API flux_result flux_path_init(flux_path *p, flux_arena *arena);
 FLUX_API void flux_path_reset(flux_path *p);
 FLUX_NODISCARD FLUX_API flux_result flux_path_create(flux_path **out, flux_arena *arena);
 FLUX_API void flux_path_move_to(flux_path *p, float x, float y);
@@ -203,10 +130,30 @@ typedef enum flux_canvas_antialias {
     FLUX_CANVAS_ANTIALIAS_MSAA_4X = 2,
 } flux_canvas_antialias;
 
+/* Destination selection is independent of recording context and pass policy.
+ * DEFAULT selects the frame attachment on GPU, or the Canvas framebuffer on
+ * CPU. IMAGE selects a sampleable GPU render image. TARGET selects an owned
+ * CPU target or an image-backed target. GPU destinations always require frame. */
+typedef enum flux_canvas_attachment_kind : uint32_t {
+    FLUX_CANVAS_ATTACHMENT_DEFAULT = 0,
+    FLUX_CANVAS_ATTACHMENT_IMAGE = 1,
+    FLUX_CANVAS_ATTACHMENT_TARGET = 2,
+} flux_canvas_attachment_kind;
+
+typedef struct flux_canvas_attachment {
+    flux_canvas_attachment_kind kind;
+    union {
+        flux_image *image;
+        flux_target *target;
+    };
+} flux_canvas_attachment;
+
 typedef struct flux_canvas_pass_desc {
     flux_struct_type type; /* FLUX_TYPE_CANVAS_PASS_DESC */
     const void *next;
-    const flux_color *clear_color; /* non-NULL: clear; NULL: load */
+    flux_frame *frame; /* GPU recording context; nullptr on CPU. Borrowed until end. */
+    flux_canvas_attachment attachment; /* resources retained until end */
+    const flux_color *clear_color;     /* non-NULL: clear; NULL: load */
     flux_canvas_antialias antialias;
     /* Dirty rectangle for a partial-frame pass, in framebuffer pixels.
      * `render_width/height == 0` selects the full surface extent (legacy
@@ -279,64 +226,20 @@ FLUX_API void flux_canvas_release(flux_canvas *c);
 FLUX_API void flux_canvas_set_scale(flux_canvas *c, float scale);
 FLUX_API float flux_canvas_get_scale(const flux_canvas *c);
 
-/* Unified target-driven pass bracket (RFC-0094 / ADR-0087).
- * Drives both CPU and GPU canvases polymorphically through a unified target. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin(flux_canvas *c, flux_target *target,
-                                                      const flux_color *clear_color);
+/* The only pass bracket. A null descriptor selects defaults (CPU only).
+ * GPU execution requires an open frame belonging to the Canvas surface.
+ * The destination determines extent. CPU TARGET loads its own pixels, never
+ * another destination's contents. Unsupported attachments fail before recording.
+ * All draw-time failures are sticky; end closes the pass and returns the first
+ * failure. Neither end nor release submits GPU work. Always check end. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin(flux_canvas *c,
+                                                      const flux_canvas_pass_desc *desc);
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_end(flux_canvas *c);
 
-/* Begin / end a recording session. `f` is the open frame for a GPU canvas
- * (from flux_surface_begin_frame); for a CPU canvas pass NULL. This is the
- * unified, backend-agnostic pass bracket — the same drawing code runs on
- * either backend between begin_frame and end_frame.
- * clear_color: if non-NULL, the target is cleared to it; else loaded. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_frame(flux_canvas *c, flux_frame *f,
-                                                            const flux_color *clear_color);
-FLUX_API void flux_canvas_end_frame(flux_canvas *c);
-/* Checked counterpart: always closes a valid frame pass and returns its first
- * sticky draw-time error (notably a stencil-dependent draw attempted inside a
- * no-stencil pass). The error belongs only to this pass; begin resets it and
- * successful termination returns FLUX_OK. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_frame_checked(flux_canvas *c);
-
-/* Descriptor form of flux_canvas_begin_frame. This makes attachment load
- * semantics and antialiasing independent: compositor/image-heavy passes can
- * clear a one-sample target without allocating and resolving a 4x attachment,
- * while vector UI keeps the AUTO default. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_pass(flux_canvas *c, flux_frame *f,
-                                                           const flux_canvas_pass_desc *desc);
-
-/* Snapshot the canvas' pixels as premultiplied RGBA8 (row-major; *stride is
- * bytes/row). Backend-polymorphic: implemented by the CPU backend (returns its
- * framebuffer); returns NULL on the GPU backend (use flux_canvas_begin_target
- * to render into a readable flux_image instead). width/height/stride are
- * optional out-params. The buffer is owned by the canvas. */
+/* CPU default framebuffer readback, valid only outside a pass. Borrowed until
+ * the next Canvas operation. Returns nullptr for GPU canvases. */
 FLUX_API const uint8_t *flux_canvas_read_pixels(flux_canvas *c, uint32_t *width, uint32_t *height,
                                                 uint32_t *stride);
-
-/* Render the draws between begin_target/end_target into `target`
- * (a flux_image from flux_image_create_render_target) instead of the
- * frame's swapchain image. This is the capture seam (ADR-0017): the
- * captured image is a regular sampleable flux_image, so it can feed
- * flux_effect_blur and be drawn back via flux_canvas_draw_image.
- *
- * `target` must match the canvas's colour format. Its extent selects the
- * offscreen pass extent and may be smaller than the surface for effects such
- * as downsampled backdrop blur. The canvas transitions target to
- * COLOR_ATTACHMENT_OPTIMAL on begin and back to SHADER_READ_ONLY_OPTIMAL on
- * end, so the following effect or draw needs no caller-side synchronisation.
- * Requires an open frame (flux_surface_begin_frame) but NOT an open
- * canvas_begin session
- * — a capture typically runs before the frame pass. A target pass may
- * not be nested inside the frame's own canvas_begin/canvas_end. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_target(flux_canvas *c, flux_frame *f,
-                                                             flux_image *target,
-                                                             const flux_color *clear_color);
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_begin_target_pass(
-    flux_canvas *c, flux_frame *f, flux_image *target, const flux_canvas_pass_desc *desc);
-FLUX_API void flux_canvas_end_target(flux_canvas *c);
-/* Checked target-pass counterpart; see flux_canvas_end_frame_checked. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_end_target_checked(flux_canvas *c);
 
 /* State stack. All draws and state mutators between flux_canvas_begin_frame
  * and flux_canvas_end_frame record into the bound frame; calls outside that
@@ -399,10 +302,19 @@ typedef struct flux_geom_path_data {
     flux_fill_rule fill_rule;
 } flux_geom_path_data;
 
+/* Stroke topology is independent of the brush. Zero width means fill;
+ * zero miter_limit selects 4. Other fields use their zero-valued defaults. */
+typedef struct flux_stroke_style {
+    float width;
+    float miter_limit;
+    flux_line_cap cap;
+    flux_line_join join;
+} flux_stroke_style;
+
 typedef struct flux_geometry {
     flux_geom_kind kind;
     uint8_t _pad[3];
-    float stroke_width; /* 0 = fill, > 0 = stroke width */
+    flux_stroke_style stroke;
     union {
         flux_geom_rect_data rect;
         flux_geom_rrect_data rrect;
@@ -579,7 +491,7 @@ typedef struct flux_glyph_run_desc {
 /* Optional flux_glyph_run_desc.next payload: the producer's content
  * generation for a host coverage buffer. The canvas records the pair
  * (host_coverage pointer, generation) with each captured glyph batch and
- * remembers the newest generation it has seen per buffer; flux_canvas_replay
+ * remembers the newest generation it has seen per buffer; flux_canvas_cache_replay
  * then refuses a segment whose recorded generation is stale (the buffer's
  * texels were rearranged since, so the baked UVs would sample the wrong
  * cells), letting the caller re-emit and re-record. Producers that never
@@ -628,29 +540,29 @@ FLUX_API uint64_t flux_canvas_recorded_draws(const flux_canvas *c);
  * stale handle — released, LRU-evicted, or from another canvas — fails
  * validation instead of replaying the wrong draws. Zero-initialise for
  * the null record. */
-typedef struct flux_canvas_record {
+typedef struct flux_canvas_cache_entry {
     void *slot;
     uint64_t generation;
-} flux_canvas_record;
+} flux_canvas_cache_entry;
 
-#define FLUX_CANVAS_RECORD_INIT {.slot = NULL, .generation = 0}
+#define FLUX_CANVAS_CACHE_ENTRY_INIT {.slot = NULL, .generation = 0}
 
 /* Start capturing every draw submitted between here and the matching
- * flux_canvas_end_record into a new segment. Recording is passive: draws
+ * flux_canvas_cache_end into a new segment. Recording is passive: draws
  * are still submitted live, so a recorded frame renders exactly as an
  * unrecorded one. Recordings nest (e.g. a re-recording parent subtree
  * around a recording child); every active recording captures every draw.
  * Returns false (and records nothing) when called outside
  * begin_frame/end_frame or when the nesting-depth cap is hit — the caller
  * then simply draws without recording and must not call end_record. */
-FLUX_API bool flux_canvas_begin_record(flux_canvas *c);
+FLUX_API bool flux_canvas_cache_begin(flux_canvas *c);
 
 /* Close the innermost recording and return its handle (null on budget
  * overflow or allocation failure — the live draws still happened, only
  * the recording is lost). The segment stays valid until
- * flux_canvas_record_release, LRU eviction under the canvas-wide byte
+ * flux_canvas_cache_release, LRU eviction under the canvas-wide byte
  * budget, or canvas destruction. */
-FLUX_API flux_canvas_record flux_canvas_end_record(flux_canvas *c);
+FLUX_API flux_canvas_cache_entry flux_canvas_cache_end(flux_canvas *c);
 
 /* Re-submit a recorded segment. Replays only when the canvas state still
  * matches the recording exactly — same framebuffer extent, same absolute
@@ -665,18 +577,18 @@ FLUX_API flux_canvas_record flux_canvas_end_record(flux_canvas *c);
  * batch additionally refuses to replay once its producer reports a newer
  * atlas generation (flux_glyph_run_host_atlas_desc): the baked UVs would
  * sample rearranged texels. */
-FLUX_API bool flux_canvas_replay(flux_canvas *c, flux_canvas_record rec);
+FLUX_API bool flux_canvas_cache_replay(flux_canvas *c, flux_canvas_cache_entry rec);
 
 /* Release a segment early (e.g. its subtree changed or died). Safe on a
  * null or stale handle. Unreleased segments are reclaimed by the canvas's
  * LRU byte budget and at canvas destruction. */
-FLUX_API void flux_canvas_record_release(flux_canvas *c, flux_canvas_record rec);
+FLUX_API void flux_canvas_cache_release(flux_canvas *c, flux_canvas_cache_entry rec);
 
 /* Diagnostics: cumulative successful end_record / replay counts since
  * canvas creation. Tests diff these across a frame to assert that a
  * static frame replays and a changed frame re-records. */
-FLUX_API uint64_t flux_canvas_records_created(const flux_canvas *c);
-FLUX_API uint64_t flux_canvas_records_replayed(const flux_canvas *c);
+FLUX_API uint64_t flux_canvas_cache_entries_created(const flux_canvas *c);
+FLUX_API uint64_t flux_canvas_cache_entries_replayed(const flux_canvas *c);
 
 #ifdef __cplusplus
 }

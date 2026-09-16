@@ -183,7 +183,7 @@ fn main() {
         .blocklist_type("lens_.*")
         .blocklist_function("lens_.*")
         .blocklist_var("LENS_.*")
-        .raw_line("pub use flux_sys::{flux_canvas, flux_device, flux_point};")
+        .raw_line("pub use flux_sys::{flux_canvas, flux_device, flux_frame, flux_point};")
         .raw_line("pub use lens_sys::{lens, lens_input};")
         .default_enum_style(bindgen::EnumVariation::Rust {
             non_exhaustive: false,

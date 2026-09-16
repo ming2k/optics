@@ -270,13 +270,8 @@ typedef enum flux_struct_type {
     FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC = 31,
     FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC = 32,
     FLUX_TYPE_CANVAS_ANTIALIAS_DESC = 33,
-    FLUX_TYPE_PAINT_EXT_BASE = 34, /* reserved block: FLUX_TYPE_PAINT_*_DESC
-                                    * extension tags for flux_paint.next
-                                    * chains start at 35; none defined yet.
-                                    * Append only. Never repurpose. */
-    /* ADR-0074's first operator lands after the reserved paint block;
-     * 35–39 stay reserved for paint extensions. */
     FLUX_TYPE_EFFECT_SHADOW_DESC = 40,
+    FLUX_TYPE_CPU_TARGET_DESC = 46,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -289,7 +284,6 @@ typedef enum flux_struct_type {
 static_assert(FLUX_TYPE_DEVICE_DESC == 1, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_CANVAS_ANTIALIAS_DESC == 33,
               "flux_struct_type: append only — never renumber");
-static_assert(FLUX_TYPE_PAINT_EXT_BASE == 34, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_EFFECT_SHADOW_DESC == 40, "flux_struct_type: append only — never renumber");
 
 /* ================================================================== */
@@ -313,8 +307,7 @@ static_assert(FLUX_TYPE_EFFECT_SHADOW_DESC == 40, "flux_struct_type: append only
 #define FLUX_TYPE_graphics_pipeline_desc FLUX_TYPE_GRAPHICS_PIPELINE_DESC
 #define FLUX_TYPE_effect_blur_desc FLUX_TYPE_EFFECT_BLUR_DESC
 #define FLUX_TYPE_target_desc FLUX_TYPE_TARGET_DESC
-#define FLUX_TYPE_cpu_target_desc FLUX_TYPE_TARGET_DESC
-#define FLUX_TYPE_CPU_TARGET_DESC FLUX_TYPE_TARGET_DESC
+#define FLUX_TYPE_cpu_target_desc FLUX_TYPE_CPU_TARGET_DESC
 #define FLUX_TYPE_canvas_pass_desc FLUX_TYPE_CANVAS_PASS_DESC
 #define FLUX_TYPE_glyph_run_desc FLUX_TYPE_GLYPH_RUN_DESC
 
@@ -847,16 +840,17 @@ typedef struct flux_target_desc {
 #define FLUX_TARGET_DESC_INIT {.type = FLUX_TYPE_TARGET_DESC}
 
 typedef struct flux_cpu_target_desc {
-    flux_struct_type type; /* FLUX_TYPE_TARGET_DESC */
+    flux_struct_type type; /* FLUX_TYPE_CPU_TARGET_DESC */
     const void *next;
     uint32_t width;
     uint32_t height;
-    flux_format format;  /* FLUX_FORMAT_RGBA8_UNORM, FLUX_FORMAT_BGRA8_UNORM */
+    flux_format format;  /* RGBA8_UNORM only; UNDEFINED selects RGBA8_UNORM. */
     void *user_buffer;   /* optional external host memory; if NULL, target allocates */
+    size_t buffer_bytes; /* required capacity when user_buffer is supplied */
     size_t stride_bytes; /* optional row pitch (0 = tightly packed) */
 } flux_cpu_target_desc;
 
-#define FLUX_CPU_TARGET_DESC_INIT {.type = FLUX_TYPE_TARGET_DESC}
+#define FLUX_CPU_TARGET_DESC_INIT {.type = FLUX_TYPE_CPU_TARGET_DESC}
 
 FLUX_NODISCARD FLUX_API flux_result flux_target_create(flux_device *d, const flux_target_desc *desc,
                                                        flux_target **out);
@@ -864,10 +858,6 @@ FLUX_NODISCARD FLUX_API flux_result flux_target_create_cpu(const flux_cpu_target
                                                            flux_target **out);
 FLUX_NODISCARD FLUX_API flux_result flux_target_create_from_image(flux_device *d, flux_image *image,
                                                                   flux_target **out);
-
-/* Borrowed target bound to the current swapchain/framebuffer of `f`.
- * Lifetime is managed by `f`. Callers MUST NOT call flux_target_release on it. */
-FLUX_NODISCARD FLUX_API flux_target *flux_frame_target(flux_frame *f);
 
 FLUX_NODISCARD FLUX_API flux_target *flux_target_retain(flux_target *t);
 /* Destruction is deferred: a released target may still be an attachment

@@ -1418,6 +1418,8 @@ void flux_vk_retire_pipeline(flux_device *d, VkPipeline pipeline) {
     }
     memset(z, 0, sizeof *z);
     z->pipeline = pipeline;
+    z->bindless = FLUX_BINDLESS_INVALID;
+    z->bindless_storage = FLUX_BINDLESS_INVALID;
     zombie_park(d, z);
 }
 

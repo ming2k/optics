@@ -34,7 +34,7 @@ static void test_flux_init_macro(void) {
     /* CPU target desc */
     flux_cpu_target_desc ct1 =
         FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
-    EXPECT(ct1.type == FLUX_TYPE_TARGET_DESC);
+    EXPECT(ct1.type == FLUX_TYPE_CPU_TARGET_DESC);
     EXPECT(ct1.next == nullptr);
     EXPECT(ct1.width == 64);
 }
@@ -98,7 +98,11 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
 
     /* 3. Polymorphic Target-Driven pass bracket */
     flux_color clear = flux_color_rgba_premul(10, 20, 30, 255);
-    r = flux_canvas_begin(canvas, target, &clear);
+    r = flux_canvas_begin(
+        canvas, &(flux_canvas_pass_desc){
+                    .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                    .clear_color = &clear,
+                    .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET, .target = target}});
     EXPECT(r == FLUX_OK);
 
     /* 4. Use inline canvas helpers from <flux/canvas_helpers.h> */
@@ -202,7 +206,11 @@ static void test_adr0088_clean_break(void) {
     EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(c, target, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(
+               c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                           .clear_color = &clear,
+                                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                          .target = target}}) == FLUX_OK);
     EXPECT(flux_canvas_submit_display_list(c, dl) == FLUX_OK);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
 
@@ -258,7 +266,11 @@ static void test_adr0090_display_list_immutable_capture(void) {
     EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(c, target, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(
+               c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                           .clear_color = &clear,
+                                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                          .target = target}}) == FLUX_OK);
     EXPECT(flux_canvas_submit_display_list(c, dl) == FLUX_OK);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
 
@@ -286,7 +298,11 @@ static void test_adr0091_save_layer_opacity_group(void) {
     EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(c, target, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(
+               c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                           .clear_color = &clear,
+                                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                          .target = target}}) == FLUX_OK);
 
     /* Opacity Group with 0.5 opacity:
      * Draw two overlapping fully-opaque red rectangles.
@@ -338,14 +354,22 @@ static void test_adr0091_squircle_distinct_geometry(void) {
     flux_rect box = {4.0f, 4.0f, 56.0f, 56.0f};
 
     /* Draw squircle */
-    EXPECT(flux_canvas_begin(c, t_sq, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(
+               c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                           .clear_color = &clear,
+                                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                          .target = t_sq}}) == FLUX_OK);
     flux_geometry g_sq = flux_geom_squircle(box, 16.0f, 1.0f);
     flux_brush b = flux_brush_solid(white);
     flux_canvas_draw_geometry(c, &g_sq, &b);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* Draw rrect */
-    EXPECT(flux_canvas_begin(c, t_rr, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(
+               c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                           .clear_color = &clear,
+                                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                          .target = t_rr}}) == FLUX_OK);
     flux_geometry g_rr = flux_geom_rrect(box, 16.0f);
     flux_canvas_draw_geometry(c, &g_rr, &b);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
@@ -401,10 +425,19 @@ static void test_adr0093_target_exclusive_borrow_and_readback(void) {
 
     /* 1. Begin on target with c1 */
     flux_color red = flux_color_rgba_premul(255, 0, 0, 255);
-    EXPECT(flux_canvas_begin(c1, target, &red) == FLUX_OK);
+    EXPECT(flux_canvas_begin(
+               c1, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                            .clear_color = &red,
+                                            .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                           .target = target}}) == FLUX_OK);
 
     /* 2. Overlapping begin on the same target with c2 MUST fail with INVALID_STATE (ADR-0093) */
-    EXPECT(flux_canvas_begin(c2, target, &red) == FLUX_ERROR_INVALID_STATE);
+    EXPECT(flux_canvas_begin(
+               c2, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                            .clear_color = &red,
+                                            .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                           .target = target}}) ==
+           FLUX_ERROR_INVALID_STATE);
 
     /* 3. Readback of target pixels during active session MUST return nullptr */
     uint32_t w = 0, h = 0, stride = 0;
@@ -423,7 +456,11 @@ static void test_adr0093_target_exclusive_borrow_and_readback(void) {
 
     /* 7. Target can now be bound to c2 */
     flux_color blue = flux_color_rgba_premul(0, 0, 255, 255);
-    EXPECT(flux_canvas_begin(c2, target, &blue) == FLUX_OK);
+    EXPECT(flux_canvas_begin(
+               c2, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                            .clear_color = &blue,
+                                            .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                           .target = target}}) == FLUX_OK);
     EXPECT(flux_canvas_end(c2) == FLUX_OK);
     px = flux_target_cpu_pixels(target, &w, &h, &stride);
     EXPECT(px != nullptr);

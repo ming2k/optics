@@ -32,7 +32,7 @@ Specific intake criteria and technical invariants are governed per domain:
 | **Image Effects** | [`effects.md`](effects.md) | `libs/flux/effect`, `prism` | GPU pixel operators, bandwidth bounds, zero choreography |
 | **Surface Materials** | [`materials.md`](materials.md) | `libs/prism`, `flux` | Physical BRDF models, shader register bounds, offscreen graphs |
 | **Platform Backends** | [`backends.md`](backends.md) | `libs/iris` | Native OS windowing, non-invasive event pump, zero core glue |
-| **Documentation** | [`documentation/index.md`](documentation/index.md) | `docs/` | 4-Gate routing cascade, Diátaxis, style guide, ADRs |
+| **Documentation** | [`documentation/core/index.md`](documentation/core/index.md) | `docs/` | 4D coordinate tensor, system invariants, workflow & profiles |
 
 ---
 
@@ -65,6 +65,7 @@ Every PR proposing a new API, primitive, or component must pass through the 5-Ga
 - [ ] Passed the 5-Gate Review Filter.
 - [ ] Conforms to [`api-design-guidelines.md`](api-design-guidelines.md).
 - [ ] Accompanied by an ADR in `docs/adr/` (if architectural).
+- [ ] Documentation governance zero-drift verified (`./tools/verify.sh .`).
 - [ ] 100% test pass rate with ASan / UBSan enabled (`meson test -C build`).
 - [ ] Updated Rust safe wrapper in `bindings/` (tested with `cargo test`).
 - [ ] Regenerated symbol index (`python3 tools/gen_symbols.py`).

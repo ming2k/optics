@@ -25,15 +25,16 @@
 
 /* Render one black-cleared frame drawing `path` (fill or stroke) and
  * snapshot the framebuffer into `out` (W*H*4 bytes). */
-static void render(flux_canvas *c, const flux_path *path, const flux_paint *paint, bool stroke,
-                   uint8_t *out) {
+static void render(flux_canvas *c, const flux_path *path, const flux_brush *paint,
+                   const flux_stroke_style *stroke, flux_fill_rule rule, uint8_t *out) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    EXPECT(flux_canvas_cpu_begin(c, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
     if (stroke)
-        flux_canvas_stroke_path(c, path, paint);
+        flux_canvas_stroke_path(c, path, stroke, paint);
     else
-        flux_canvas_fill_path(c, path, paint);
-    flux_canvas_cpu_end(c);
+        flux_canvas_fill_path(c, path, rule, paint);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
@@ -108,82 +109,82 @@ int main(void) {
 
     /* ---- Fill: second identical render hits and matches exactly ---- */
     flux_path *icon = build_icon_path(&arena);
-    flux_paint fill = flux_paint_solid(white);
+    flux_brush fill = flux_brush_solid(white);
     EXPECT(c->tess_cache_hits == 0 && c->tess_cache_misses == 0 && c->tess_cache_stores == 0);
-    render(c, icon, &fill, false, first);
+    render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, first);
     EXPECT(c->tess_cache_misses == 1);
     EXPECT(c->tess_cache_stores == 1);
     EXPECT(c->tess_cache_hits == 0);
-    render(c, icon, &fill, false, second);
+    render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, second);
     EXPECT(c->tess_cache_hits == 1);
     EXPECT(c->tess_cache_misses == 1); /* no second miss */
     EXPECT(frames_equal(first, second));
 
     /* ---- pixel_scale change must miss (flatten tolerance input) ---- */
     flux_canvas_set_scale(c, 2.0f);
-    render(c, icon, &fill, false, second);
+    render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, second);
     EXPECT(c->tess_cache_hits == 1);   /* unchanged: no hit */
     EXPECT(c->tess_cache_misses == 2); /* scale is part of the key */
     EXPECT(c->tess_cache_stores == 2);
     EXPECT(!frames_equal(first, second)); /* scaled output really differs */
-    render(c, icon, &fill, false, first);
+    render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, first);
     EXPECT(c->tess_cache_hits == 2); /* the scale-2 entry now hits */
     EXPECT(frames_equal(first, second));
     flux_canvas_set_scale(c, 1.0f);
 
     /* ---- Stroke: cached too; stroke_width is part of the key ---- */
-    flux_paint stroke = flux_paint_solid(white);
-    stroke.stroke_width = 3.0f;
+    flux_brush stroke = flux_brush_solid(white);
+    flux_stroke_style stroke_stroke = {.width = 3.0f};
     uint64_t stores_before = c->tess_cache_stores;
-    render(c, icon, &stroke, true, first);
+    render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, first);
     EXPECT(c->tess_cache_stores == stores_before + 1);
-    render(c, icon, &stroke, true, second);
+    render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, second);
     EXPECT(frames_equal(first, second));
 
-    stroke.stroke_width = 6.0f;
+    stroke_stroke.width = 6.0f;
     uint64_t hits_before = c->tess_cache_hits;
-    render(c, icon, &stroke, true, second);
+    render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, second);
     EXPECT(c->tess_cache_hits == hits_before); /* width change missed */
     EXPECT(!frames_equal(first, second));      /* and the wider stroke shows */
-    render(c, icon, &stroke, true, first);
+    render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, first);
     EXPECT(c->tess_cache_hits == hits_before + 1);
     EXPECT(frames_equal(first, second));
 
     /* ---- Stalled fill (self-intersecting): never cached, no pollution ---- */
     flux_path *star = build_stalled_star(&arena);
     uint64_t misses_b = c->tess_cache_misses, stores_b = c->tess_cache_stores;
-    render(c, star, &fill, false, first);
-    render(c, star, &fill, false, second);
+    render(c, star, &fill, nullptr, FLUX_FILL_NON_ZERO, first);
+    render(c, star, &fill, nullptr, FLUX_FILL_NON_ZERO, second);
     EXPECT(c->tess_cache_misses == misses_b + 2); /* looked up both times… */
     EXPECT(c->tess_cache_stores == stores_b);     /* …but never stored     */
     EXPECT(frames_equal(first, second));          /* deterministic output  */
 
     /* The icon entry survived the stalled fills and still hits. */
     hits_before = c->tess_cache_hits;
-    render(c, icon, &fill, false, second);
+    render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, second);
     EXPECT(c->tess_cache_hits == hits_before + 1);
-    stroke.stroke_width = 3.0f;
-    render(c, icon, &stroke, true, first);
-    render(c, icon, &stroke, true, second);
+    stroke_stroke.width = 3.0f;
+    render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, first);
+    render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, second);
     EXPECT(frames_equal(first, second));
 
     /* ---- EVEN_ODD: bypasses the cache entirely ---- */
     flux_path *overlap = build_overlap(&arena);
-    flux_paint eo = flux_paint_solid(white);
-    eo.fill_rule = FLUX_FILL_EVEN_ODD;
+    flux_brush eo = flux_brush_solid(white);
+    flux_fill_rule eo_rule = FLUX_FILL_EVEN_ODD;
     misses_b = c->tess_cache_misses;
     stores_b = c->tess_cache_stores;
     hits_before = c->tess_cache_hits;
-    render(c, overlap, &eo, false, first);
-    render(c, overlap, &eo, false, second);
+    render(c, overlap, &eo, nullptr, eo_rule, first);
+    render(c, overlap, &eo, nullptr, eo_rule, second);
     EXPECT(c->tess_cache_misses == misses_b); /* not even looked up */
     EXPECT(c->tess_cache_stores == stores_b);
     EXPECT(c->tess_cache_hits == hits_before);
     EXPECT(frames_equal(first, second)); /* deterministic fallback output */
 
     /* …and the cached entries render exactly as before afterwards. */
-    render(c, icon, &fill, false, second);
-    render(c, icon, &fill, false, first);
+    render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, second);
+    render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, first);
     EXPECT(frames_equal(first, second));
     EXPECT(c->tess_cache_hits == hits_before + 2);
 

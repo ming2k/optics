@@ -3307,15 +3307,16 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * chrome damage, resize, and not-yet-presented surfaces still
          * force a real paint below because they change what is on screen,
          * which the declaration cannot know about. */
+        bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
         bool surface_forced = resized_this_frame || surface_needs_paint;
         bool host_skip_render =
-            cfg->paint != NULL && pl.frame_skip_render && !surface_forced && !chrome_damaged;
+            has_custom_paint && pl.frame_skip_render && !surface_forced && !chrome_damaged;
         pl.frame_skip_render = false;
-        bool host_canvas_static = cfg->paint != NULL && pl.paint_static && !host_animating &&
+        bool host_canvas_static = has_custom_paint && pl.paint_static && !host_animating &&
                                   !resized_this_frame && !surface_needs_paint && !chrome_damaged;
         pl.paint_static = false;
         bool must_paint = !host_canvas_static && !host_skip_render &&
-                          (cfg->paint != NULL || chrome_damaged || host_animating ||
+                          (has_custom_paint || chrome_damaged || host_animating ||
                            resized_this_frame || surface_needs_paint);
         if (must_paint) {
             surface_needs_paint = true;
@@ -3339,6 +3340,9 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             flux_surface_info info;
             flux_surface_get_info(surface, &info);
 
+            if (cfg->prepare)
+                cfg->prepare(frame, canvas, device, (float)pl.buffer_scale, cfg->user);
+
             /* Clear to the current theme's body background so empty areas
              * (e.g. short content in a tall window) don't show a hard-coded
              * dark color in light mode. The paint callback (if any) draws
@@ -3347,9 +3351,13 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
              * composites on top. */
             lens_theme th = lens_get_theme(ui);
             flux_color clear = th.color_bg;
+            flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
             bool drew = false;
             lens_scene_snapshot *snapshot = nullptr;
-            if (flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK) {
+            if (flux_canvas_begin(canvas,
+                                  &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                           .frame = frame,
+                                                           .clear_color = pass_clear}) == FLUX_OK) {
                 if (cfg->paint)
                     cfg->paint(canvas, device, (float)pl.buffer_scale, cfg->user);
                 if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
@@ -3406,11 +3414,11 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * the cadence: hosts stream media-cadence content (e.g. 30 fps
          * visualizers) by declaring skip on in-between frames while a fresh
          * request keeps the active deadline armed. */
-        if (cfg->paint && !host_canvas_static) {
+        if (has_custom_paint && !host_canvas_static) {
             if (pl.animation_frame_requested)
                 next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
             frame_scheduled = true;
-        } else if (cfg->paint) {
+        } else if (has_custom_paint) {
             /* Static-declaring host: keep the low idle tick so build/paint
              * keep running (~4 Hz) and the host can observe state changes
              * and resume animating on their own; only the GPU work skips.

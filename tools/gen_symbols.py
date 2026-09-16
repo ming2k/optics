@@ -81,6 +81,7 @@ LIBRARIES = [
             "libs/prism/include/prism/liquid_glass.h",
             "libs/prism/include/prism/frosted.h",
             "libs/prism/include/prism/acrylic.h",
+            "libs/prism/include/prism/mica.h",
             "libs/prism/include/prism/backdrop_layer.h",
         ],
         r"PRISM_API",

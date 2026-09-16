@@ -70,7 +70,7 @@ flatten_multi flatten_path_to_contours(const flux_path *p, float pixel_scale, fl
     return (flatten_multi){.point_count = g_polygon_n, .contour_count = 1};
 }
 
-void submit_triangles(flux_canvas *c, const flux_paint *paint, const flux_canvas_vertex *verts,
+void submit_triangles(flux_canvas *c, const canvas_paint *paint, const flux_canvas_vertex *verts,
                       uint32_t vertex_count) {
     (void)c;
     (void)paint;
@@ -83,7 +83,7 @@ void submit_triangles(flux_canvas *c, const flux_paint *paint, const flux_canvas
 /* The stencil fallback's submit seam. The fake canvas carries no
  * stencil attachment, so fill_path never reaches it here; the stub
  * only satisfies the link. */
-void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id id,
+void submit_triangles_id(flux_canvas *c, const canvas_paint *paint, canvas_pipe_id id,
                          const flux_canvas_vertex *verts, uint32_t vertex_count) {
     (void)id;
     submit_triangles(c, paint, verts, vertex_count);
@@ -190,7 +190,7 @@ static void run_fill(flux_point *poly, uint32_t n) {
     flux_path dummy = {0}; /* opaque to our scripted flatten */
     dummy.count = 1;       /* defeat the empty-path early-return */
     dummy.segments = &g_dummy_seg;
-    flux_paint paint = flux_paint_default();
+    canvas_paint paint = (canvas_paint){.color = 0xFF000000u};
     canvas_fill_path_internal(&c, &dummy, &paint);
 }
 
@@ -200,7 +200,7 @@ static void run_fill_scripted(void) {
     flux_path dummy = {0};
     dummy.count = 1;
     dummy.segments = &g_dummy_seg;
-    flux_paint paint = flux_paint_default();
+    canvas_paint paint = (canvas_paint){.color = 0xFF000000u};
     canvas_fill_path_internal(&c, &dummy, &paint);
 }
 

@@ -126,6 +126,19 @@ typedef void (*iris_build_fn)(lens *ui, const lens_input *in, void *user);
  * captures it in the same closure context. */
 typedef void (*iris_paint_fn)(flux_canvas *canvas, flux_device *device, float scale, void *user);
 
+/* Per-frame prepare callback (optional).
+ *
+ * Runs after iris acquires the frame and before iris begins the primary
+ * canvas pass on the swapchain image. `frame` is live in
+ * FLUX_FRAME_STATE_RECORDING with no active render pass.
+ *
+ * This hook enables multi-pass workloads: offscreen render targets,
+ * compute dispatch (e.g. blur filters, prism optical materials), or
+ * scene graph passes that produce images consumed downstream by
+ * `iris_paint_fn`. */
+typedef void (*iris_prepare_fn)(flux_frame *frame, flux_canvas *canvas, flux_device *device,
+                                float scale, void *user);
+
 /* Application-resource lifecycle.
  *
  * `start` runs after iris has created its flux device, canvas, and lens
@@ -137,17 +150,19 @@ typedef bool (*iris_start_fn)(lens *ui, flux_device *device, void *user);
 typedef void (*iris_stop_fn)(lens *ui, flux_device *device, void *user);
 
 typedef struct iris_app_opts {
-    const char *title;   /* window title (UTF-8, optional)       */
-    const char *app_id;  /* Wayland desktop app ID (optional)    */
-    int32_t width;       /* initial logical width (0 = default)  */
-    int32_t height;      /* initial logical height (0 = default) */
-    bool dark;           /* force dark; false = follow system    */
-    bool log_raw;        /* debug raw input events to stderr     */
-    iris_start_fn start; /* resource setup before first frame (optional) */
-    iris_stop_fn stop;   /* resource teardown before iris GPU teardown (optional) */
-    iris_build_fn build; /* per-frame build callback (may be nullptr) */
-    iris_paint_fn paint; /* per-frame canvas paint (may be nullptr)   */
-    void *user;          /* opaque pointer passed to callbacks */
+    const char *title;       /* window title (UTF-8, optional)       */
+    const char *app_id;      /* Wayland desktop app ID (optional)    */
+    int32_t width;           /* initial logical width (0 = default)  */
+    int32_t height;          /* initial logical height (0 = default) */
+    bool dark;               /* force dark; false = follow system    */
+    bool log_raw;            /* debug raw input events to stderr     */
+    bool no_clear;           /* skip canvas clear; preserves content rendered in prepare */
+    iris_start_fn start;     /* resource setup before first frame (optional) */
+    iris_stop_fn stop;       /* resource teardown before iris GPU teardown (optional) */
+    iris_build_fn build;     /* per-frame build callback (may be nullptr) */
+    iris_prepare_fn prepare; /* pre-canvas frame compute/render pass (optional) */
+    iris_paint_fn paint;     /* per-frame canvas paint (may be nullptr)   */
+    void *user;              /* opaque pointer passed to callbacks */
 } iris_app_opts;
 
 typedef iris_app_opts iris_app_config;

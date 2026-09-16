@@ -113,7 +113,7 @@ void emit_arc(flux_canvas_vertex *verts, uint32_t *count, uint32_t cap, flux_mat
  * several subpaths (a move_to starts a new one — e.g. the divider line in a
  * sidebar glyph, or a gear's hub circle plus its body) strokes every subpath,
  * not just the first. */
-static void stroke_one_contour(flux_canvas *c, const flux_paint *paint, flux_mat3x2 tx,
+static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_mat3x2 tx,
                                flux_color color, float half, float miter_limit, flux_point *pts,
                                uint32_t count, bool contour_closed, float first_x, float first_y,
                                flux_canvas_vertex *verts, uint32_t *v_count_io,
@@ -270,7 +270,7 @@ static void stroke_one_contour(flux_canvas *c, const flux_paint *paint, flux_mat
     *v_count_io = v_count;
 }
 
-void canvas_stroke_path_internal(flux_canvas *c, const flux_path *p, const flux_paint *paint) {
+void canvas_stroke_path_internal(flux_canvas *c, const flux_path *p, const canvas_paint *paint) {
     if (!c || !c->recording || !p || !paint)
         return;
     if (p->count == 0)

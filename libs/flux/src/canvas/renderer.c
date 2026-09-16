@@ -338,13 +338,13 @@ flux_result get_canvas_pipeline_id(flux_device *device, VkFormat color_format,
  * 0xff code selects the image pipeline (images are dispatched via
  * flux_canvas_draw_image, not paint.kind). */
 flux_result get_canvas_pipeline(flux_device *device, VkFormat color_format,
-                                VkSampleCountFlagBits samples, flux_paint_kind kind,
+                                VkSampleCountFlagBits samples, canvas_paint_kind kind,
                                 flux_blend_mode blend, bool with_stencil,
                                 VkPipelineLayout *out_layout, VkPipeline *out_pipeline) {
     canvas_pipe_id id = CANVAS_PIPE_SOLID;
     if ((uint32_t)kind == 0xffu)
         id = CANVAS_PIPE_IMAGE;
-    else if (kind == FLUX_PAINT_LINEAR_GRADIENT || kind == FLUX_PAINT_RADIAL_GRADIENT)
+    else if (kind == CANVAS_PAINT_LINEAR_GRADIENT || kind == CANVAS_PAINT_RADIAL_GRADIENT)
         id = CANVAS_PIPE_GRADIENT;
     return get_canvas_pipeline_id(device, color_format, samples, id, blend, with_stencil,
                                   out_layout, out_pipeline);
@@ -593,10 +593,10 @@ void push_vertex(flux_canvas_vertex *v, flux_point p, flux_mat3x2 tx, flux_color
  * into framebuffer pixel space with the current transform — the
  * shaders evaluate gradients per fragment in pixel space, matching
  * the SDF path's draw_sdf_rrect handling. */
-void build_push(flux_canvas *c, const flux_paint *paint, flux_canvas_push *out) {
+void build_push(flux_canvas *c, const canvas_paint *paint, flux_canvas_push *out) {
     *out = (flux_canvas_push){
         .inv_window_size = {2.0f / (float)c->fb_width, 2.0f / (float)c->fb_height},
-        .kind = (uint32_t)(paint ? paint->kind : FLUX_PAINT_SOLID),
+        .kind = (uint32_t)(paint ? paint->kind : CANVAS_PAINT_SOLID),
     };
     if (!paint)
         return;
@@ -608,14 +608,14 @@ void build_push(flux_canvas *c, const flux_paint *paint, flux_canvas_push *out) 
     const flux_mat3x2 tx = c->states[c->state_top].transform;
     const float pixel_scale = flux_canvas_mat3x2_pixel_scale(tx);
     switch (paint->kind) {
-    case FLUX_PAINT_SOLID:
+    case CANVAS_PAINT_SOLID:
         return;
-    case FLUX_PAINT_LINEAR_GRADIENT:
+    case CANVAS_PAINT_LINEAR_GRADIENT:
         from = flux_mat3x2_transform_point(tx, paint->gradient.linear.from);
         to = flux_mat3x2_transform_point(tx, paint->gradient.linear.to);
         stops = &paint->gradient.linear.stops;
         break;
-    case FLUX_PAINT_RADIAL_GRADIENT:
+    case CANVAS_PAINT_RADIAL_GRADIENT:
         from = flux_mat3x2_transform_point(tx, paint->gradient.radial.center);
         radius = paint->gradient.radial.radius * pixel_scale;
         stops = &paint->gradient.radial.stops;
@@ -647,11 +647,11 @@ bool ensure_pipeline_bound_id(flux_canvas *c, canvas_pipe_id id) {
     return c->backend->bind_program(c->backend, c, id);
 }
 
-bool ensure_pipeline_bound(flux_canvas *c, flux_paint_kind kind) {
+bool ensure_pipeline_bound(flux_canvas *c, canvas_paint_kind kind) {
     canvas_pipe_id id = CANVAS_PIPE_SOLID;
     if ((uint32_t)kind == 0xffu)
         id = CANVAS_PIPE_IMAGE;
-    else if (kind == FLUX_PAINT_LINEAR_GRADIENT || kind == FLUX_PAINT_RADIAL_GRADIENT)
+    else if (kind == CANVAS_PAINT_LINEAR_GRADIENT || kind == CANVAS_PAINT_RADIAL_GRADIENT)
         id = CANVAS_PIPE_GRADIENT;
     return ensure_pipeline_bound_id(c, id);
 }
@@ -662,7 +662,7 @@ bool ensure_pipeline_bound(flux_canvas *c, flux_paint_kind kind) {
  * c->pending_blend so the GPU backend can key into the per-blend pipeline
  * cache; paint == nullptr keeps the current blend (used by the stencil write
  * pass, which ignores blend entirely). */
-void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id id,
+void submit_triangles_id(flux_canvas *c, const canvas_paint *paint, canvas_pipe_id id,
                          const flux_canvas_vertex *verts, uint32_t vertex_count) {
     if (!c->recording || vertex_count == 0)
         return;
@@ -673,11 +673,11 @@ void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id
     canvas_emit(c, id, &pc, verts, vertex_count);
 }
 
-void submit_triangles(flux_canvas *c, const flux_paint *paint, const flux_canvas_vertex *verts,
+void submit_triangles(flux_canvas *c, const canvas_paint *paint, const flux_canvas_vertex *verts,
                       uint32_t vertex_count) {
-    flux_paint_kind kind = paint ? paint->kind : FLUX_PAINT_SOLID;
+    canvas_paint_kind kind = paint ? paint->kind : CANVAS_PAINT_SOLID;
     canvas_pipe_id id = CANVAS_PIPE_SOLID;
-    if (kind == FLUX_PAINT_LINEAR_GRADIENT || kind == FLUX_PAINT_RADIAL_GRADIENT)
+    if (kind == CANVAS_PAINT_LINEAR_GRADIENT || kind == CANVAS_PAINT_RADIAL_GRADIENT)
         id = CANVAS_PIPE_GRADIENT;
     submit_triangles_id(c, paint, id, verts, vertex_count);
 }

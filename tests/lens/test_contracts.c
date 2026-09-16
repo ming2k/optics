@@ -88,7 +88,8 @@ int main(void) {
     flux_canvas *c = nullptr;
     CHECK(flux_canvas_create(&cd, &c) == FLUX_OK);
     flux_color clear = 0;
-    CHECK(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    CHECK(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                        .clear_color = &clear}) == FLUX_OK);
     CHECK(lens_snapshot_submit(first_snapshot, c) == FLUX_OK);
     CHECK(flux_canvas_end(c) == FLUX_OK);
 
@@ -117,7 +118,8 @@ int main(void) {
 
     /* Replay published snapshot on a fresh canvas — must succeed even after UI is destroyed */
     CHECK(flux_canvas_create(&cd, &c) == FLUX_OK);
-    CHECK(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    CHECK(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                        .clear_color = &clear}) == FLUX_OK);
     CHECK(lens_snapshot_submit(snapshot, c) == FLUX_OK);
     CHECK(flux_canvas_end(c) == FLUX_OK);
     px = flux_canvas_read_pixels(c, &pw, &ph, &pstride);

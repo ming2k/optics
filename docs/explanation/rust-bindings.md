@@ -12,7 +12,7 @@ need a Rust toolchain.
 | Workspace | Crates | Role |
 |-----------|--------|------|
 | `bindings/flux-rs/` | `flux-sys`, `flux` | Raw FFI and safe rendering API. |
-| | `flux-text-sys`, `flux-text`, `flux-text-layout` | Text FFI, shaping, and line layout. |
+| | `flux-text-sys`, `flux-text` | Text FFI and shaping surface. |
 | | `flux-scene-graph-sys`, `flux-scene-graph` | glTF scene-graph FFI and safe wrapper. |
 | `bindings/lens-rs/` | `lens-sys`, `lens` | Raw FFI and safe UI wrapper. |
 | `bindings/iris-rs/` | `iris-sys`, `iris` | Raw FFI and safe application-host wrapper. |

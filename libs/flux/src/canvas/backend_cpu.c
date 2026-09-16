@@ -56,6 +56,8 @@ typedef struct flux_cpu_layer {
 } flux_cpu_layer;
 
 typedef struct flux_cpu_canvas {
+    struct flux_cpu_canvas *owner;
+    struct flux_cpu_canvas *target_scratch;
     uint32_t width, height; /* logical (output) size */
     uint32_t sw, sh;        /* sample-buffer size = width*ss, height*ss */
     /* Supersampling factor in effect for this canvas: 2 (4 samples/px,
@@ -612,6 +614,11 @@ static void cpu_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) 
     flux_cpu_canvas *v = cpu(c);
     if (!v)
         return;
+    if (v->target_scratch) {
+        c->backend_data = v->target_scratch;
+        cpu_canvas_destroy(self, c);
+        c->backend_data = v;
+    }
     for (uint32_t i = 0; i < v->layer_top; ++i) {
         free(v->layers[i].fb);
     }
@@ -682,6 +689,29 @@ static void cpu_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
     v->fb = parent_fb;
 }
 
+static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canvas *c,
+                                      uint32_t *width, uint32_t *height, uint32_t *stride);
+
+/* RGBA8 targets are the authoritative storage between passes. Load every
+ * sample from that target, preserving untouched pixels across dirty passes. */
+static void cpu_load_target(flux_cpu_canvas *v, const flux_target *target) {
+    for (uint32_t y = 0; y < v->height; ++y) {
+        for (uint32_t x = 0; x < v->width; ++x) {
+            const uint8_t *px = target->cpu_buffer + y * target->cpu_stride + x * 4;
+            vec4f color = unpack_premul(((uint32_t)px[3] << 24) | ((uint32_t)px[0] << 16) |
+                                        ((uint32_t)px[1] << 8) | px[2]);
+            for (uint32_t sy = 0; sy < v->ss; ++sy)
+                for (uint32_t sx = 0; sx < v->ss; ++sx) {
+                    float *dst = v->fb + ((size_t)(y * v->ss + sy) * v->sw + x * v->ss + sx) * 4;
+                    dst[0] = color.r;
+                    dst[1] = color.g;
+                    dst[2] = color.b;
+                    dst[3] = color.a;
+                }
+        }
+    }
+}
+
 static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *c, flux_frame *f,
                                   flux_image *target, const canvas_pass_config *config) {
     (void)self;
@@ -691,13 +721,52 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "CPU canvas has no offscreen target (v1)");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
-    flux_cpu_canvas *v = cpu(c);
+    flux_cpu_canvas *root = cpu(c);
+    flux_cpu_canvas *v = root;
+    flux_target *host = c->bound_cpu_target;
+    uint32_t width = host ? host->width : root->width;
+    uint32_t height = host ? host->height : root->height;
     flux_recti area;
-    if (!canvas_pass_render_area(config, v->width, v->height, &area)) {
+    if (!canvas_pass_render_area(config, width, height, &area)) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "Canvas render area is invalid or out of bounds");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
 
+    if (host) {
+        uint32_t ss = config->antialias == FLUX_CANVAS_ANTIALIAS_NONE ? 1u : root->ss;
+        v = root->target_scratch;
+        if (v && (v->width != width || v->height != height || v->ss != ss)) {
+            c->backend_data = v;
+            cpu_canvas_destroy(self, c);
+            c->backend_data = root;
+            root->target_scratch = nullptr;
+            v = nullptr;
+        }
+        if (!v) {
+            c->fb_width = width;
+            c->fb_height = height;
+            flux_canvas_antialias saved = c->create_antialias;
+            c->create_antialias =
+                ss == 1 ? FLUX_CANVAS_ANTIALIAS_NONE : FLUX_CANVAS_ANTIALIAS_MSAA_4X;
+            flux_result result = cpu_canvas_init(self, c);
+            c->create_antialias = saved;
+            if (result != FLUX_OK) {
+                c->backend_data = root;
+                return result;
+            }
+            v = cpu(c);
+            v->rgba8 = malloc((size_t)width * height * 4);
+            if (!v->rgba8) {
+                cpu_canvas_destroy(self, c);
+                c->backend_data = root;
+                return FLUX_ERROR_OUT_OF_MEMORY;
+            }
+            v->owner = root;
+            root->target_scratch = v;
+        }
+        c->backend_data = v;
+        cpu_load_target(v, host);
+    }
     if (config->clear_color) {
         vec4f cc = unpack_premul(*config->clear_color);
         uint32_t x0 = (uint32_t)area.x * v->ss;
@@ -735,7 +804,16 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
 
 static void cpu_end_pass(const flux_canvas_backend *self, flux_canvas *c) {
     (void)self;
-    c->pass_active = false; /* pixels are already resolved in the framebuffer */
+    flux_cpu_canvas *v = cpu(c);
+    if (c->bound_cpu_target) {
+        const uint8_t *pixels = cpu_read_pixels(self, c, nullptr, nullptr, nullptr);
+        flux_target *target = c->bound_cpu_target;
+        for (uint32_t y = 0; y < v->height; ++y)
+            memcpy(target->cpu_buffer + y * target->cpu_stride, pixels + (size_t)y * v->width * 4,
+                   (size_t)v->width * 4);
+        c->backend_data = v->owner;
+    }
+    c->pass_active = false;
 }
 
 static void cpu_set_scissor(const flux_canvas_backend *self, flux_canvas *c, flux_recti clip) {
@@ -923,21 +1001,6 @@ flux_result flux_canvas_create_cpu_aa(uint32_t width, uint32_t height, float sca
     }
     *out = c;
     return FLUX_OK;
-}
-
-/* CPU-spelled convenience wrappers over the unified pass/readback API. */
-flux_result flux_canvas_cpu_begin(flux_canvas *c, const flux_color *clear) {
-    if (!c || c->backend != flux_canvas_backend_cpu())
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    /* Keep the CPU convenience API's historical NULL => transparent-clear
-     * contract. The unified descriptor API uses NULL => LOAD consistently
-     * across backends. */
-    flux_color transparent = 0;
-    return flux_canvas_begin_frame(c, nullptr, clear ? clear : &transparent);
-}
-
-void flux_canvas_cpu_end(flux_canvas *c) {
-    flux_canvas_end_frame(c);
 }
 
 const uint8_t *flux_canvas_cpu_pixels(const flux_canvas *c, uint32_t *width, uint32_t *height,

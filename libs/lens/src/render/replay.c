@@ -165,7 +165,7 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
             float bw = c->width > 0 ? c->width : 1.0f;
             flux_geometry g =
                 (c->radius > 0.5f) ? flux_geom_rrect(r, c->radius) : flux_geom_rect(r);
-            g.stroke_width = bw;
+            g.stroke.width = bw;
             flux_brush b = flux_brush_solid(c->color);
             flux_encoder_draw_geometry(enc, &g, &b);
             break;
@@ -299,7 +299,7 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                     flux_color color = rc == 0 ? c->color : flux_color_rgba_premul(rr, rg, rb, ra);
                     flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
                     if (!ri->fill) {
-                        g.stroke_width = c->width > 0 ? c->width : 2.0f * s;
+                        g.stroke.width = c->width > 0 ? c->width : 2.0f * s;
                     }
                     flux_brush b = flux_brush_solid(color);
                     flux_encoder_draw_geometry(enc, &g, &b);
@@ -346,11 +346,11 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
 
             flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
             if (lensi_icon_mode(c->icon_id) != LENSI_ICON_RENDER_FILL) {
-                g.stroke_width = c->width > 0 ? c->width : 2.0f * s;
+                g.stroke.width = c->width > 0 ? c->width : 2.0f * s;
             }
             if (c->outline_width > 0.0f && c->outline_color != 0) {
                 flux_geometry outline = g;
-                outline.stroke_width = g.stroke_width + c->outline_width * 2.0f;
+                outline.stroke.width = g.stroke.width + c->outline_width * 2.0f;
                 flux_brush outline_brush = flux_brush_solid(c->outline_color);
                 flux_encoder_draw_geometry(enc, &outline, &outline_brush);
             }
@@ -563,7 +563,7 @@ static flux_result compile_visuals(lens *ui, flux_display_list **out_list) {
         flux_encoder_draw_geometry(enc, &g_bg, &b_bg);
 
         flux_geometry g_border = flux_geom_rect(bg);
-        g_border.stroke_width = 1.0f;
+        g_border.stroke.width = 1.0f;
         flux_brush b_border =
             flux_brush_solid(lensi_opacity_color(t->color_border, ui->tooltip.opacity));
         flux_encoder_draw_geometry(enc, &g_border, &b_border);

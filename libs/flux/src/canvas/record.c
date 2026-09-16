@@ -246,18 +246,18 @@ void canvas_emit(flux_canvas *c, canvas_pipe_id id, const flux_canvas_push *push
 /*  Public API                                                        */
 /* ------------------------------------------------------------------ */
 
-bool flux_canvas_begin_record(flux_canvas *c) {
+bool flux_canvas_cache_begin(flux_canvas *c) {
     if (!c || !c->recording) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "flux_canvas_begin_record outside begin/end frame");
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "flux_canvas_cache_begin outside begin/end frame");
         return false;
     }
     if (c->record_depth >= FLUX_CANVAS_RECORD_DEPTH_CAP) {
-        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "flux_canvas_begin_record nesting too deep");
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "flux_canvas_cache_begin nesting too deep");
         return false;
     }
     flux_canvas_record_slot *s = slot_alloc(c);
     if (!s) {
-        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "flux_canvas_begin_record: no slot");
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "flux_canvas_cache_begin: no slot");
         return false;
     }
     s->owner = c;
@@ -272,10 +272,10 @@ bool flux_canvas_begin_record(flux_canvas *c) {
     return true;
 }
 
-flux_canvas_record flux_canvas_end_record(flux_canvas *c) {
-    flux_canvas_record null_rec = FLUX_CANVAS_RECORD_INIT;
+flux_canvas_cache_entry flux_canvas_cache_end(flux_canvas *c) {
+    flux_canvas_cache_entry null_rec = FLUX_CANVAS_CACHE_ENTRY_INIT;
     if (!c || c->record_depth == 0) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "flux_canvas_end_record without begin_record");
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "flux_canvas_cache_end without begin_record");
         return null_rec;
     }
     flux_canvas_record_slot *s = c->record_stack[--c->record_depth];
@@ -306,10 +306,10 @@ flux_canvas_record flux_canvas_end_record(flux_canvas *c) {
             break;
         slot_evict(c, lru);
     }
-    return (flux_canvas_record){.slot = s, .generation = s->generation};
+    return (flux_canvas_cache_entry){.slot = s, .generation = s->generation};
 }
 
-bool flux_canvas_replay(flux_canvas *c, flux_canvas_record rec) {
+bool flux_canvas_cache_replay(flux_canvas *c, flux_canvas_cache_entry rec) {
     if (!c || !rec.slot || !c->recording)
         return false;
     flux_canvas_record_slot *s = rec.slot;
@@ -380,7 +380,7 @@ bool flux_canvas_replay(flux_canvas *c, flux_canvas_record rec) {
     return true;
 }
 
-void flux_canvas_record_release(flux_canvas *c, flux_canvas_record rec) {
+void flux_canvas_cache_release(flux_canvas *c, flux_canvas_cache_entry rec) {
     if (!c || !rec.slot)
         return;
     flux_canvas_record_slot *s = rec.slot;
@@ -389,10 +389,10 @@ void flux_canvas_record_release(flux_canvas *c, flux_canvas_record rec) {
     slot_evict(c, s);
 }
 
-uint64_t flux_canvas_records_created(const flux_canvas *c) {
+uint64_t flux_canvas_cache_entries_created(const flux_canvas *c) {
     return c ? c->records_created : 0;
 }
 
-uint64_t flux_canvas_records_replayed(const flux_canvas *c) {
+uint64_t flux_canvas_cache_entries_replayed(const flux_canvas *c) {
     return c ? c->records_replayed : 0;
 }

@@ -260,17 +260,10 @@ FLUX_NODISCARD FLUX_API flux_result flux_graphics_pipeline_create(
 
 FLUX_NODISCARD FLUX_API flux_graphics_pipeline *
 flux_graphics_pipeline_retain(flux_graphics_pipeline *p);
-/* DESTROY-INLINE SEMANTICS — see the fuller note on
- * flux_compute_pipeline_release in <flux/compute.h>. release destroys the
- * VkPipeline inline and requires the caller to prove GPU quiescence; the
- * safe-any-time spelling is flux_pipeline_release_deferred(). */
+/* Drop one owned reference. GPU objects retire after submitted use completes.
+ * Keep resources alive through submission; raw command buffers follow the
+ * same rule. No caller-side device-idle wait is required after submission. */
 FLUX_API void flux_graphics_pipeline_release(flux_graphics_pipeline *p);
-
-/* Deferred-release counterpart for graphics pipelines: parks on the
- * device retire queue, destroyed once in-flight batches complete. Safe
- * at any time. (Declared in <flux/compute.h> for the compute flavour;
- * one implementation serves both.) */
-FLUX_API void flux_graphics_pipeline_release_deferred(flux_device *d, flux_graphics_pipeline *p);
 
 FLUX_API VkPipeline flux_graphics_pipeline_vk_pipeline(const flux_graphics_pipeline *p);
 FLUX_API VkPipelineLayout flux_graphics_pipeline_vk_layout(const flux_graphics_pipeline *p);

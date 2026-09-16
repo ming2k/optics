@@ -44,7 +44,7 @@ void emit_tri(flux_canvas_vertex *verts, uint32_t *count, uint32_t cap, flux_mat
     g_emit_tri_count += 3;
 }
 
-void submit_triangles(flux_canvas *c, const flux_paint *paint, const flux_canvas_vertex *verts,
+void submit_triangles(flux_canvas *c, const canvas_paint *paint, const flux_canvas_vertex *verts,
                       uint32_t vertex_count) {
     (void)c;
     (void)paint;
@@ -52,7 +52,7 @@ void submit_triangles(flux_canvas *c, const flux_paint *paint, const flux_canvas
     (void)vertex_count;
 }
 
-void submit_triangles_id(flux_canvas *c, const flux_paint *paint, canvas_pipe_id id,
+void submit_triangles_id(flux_canvas *c, const canvas_paint *paint, canvas_pipe_id id,
                          const flux_canvas_vertex *verts, uint32_t vertex_count) {
     (void)c;
     (void)paint;

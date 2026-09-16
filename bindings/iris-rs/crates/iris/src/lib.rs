@@ -82,12 +82,12 @@ impl PaintHost {
     /// which types it `flux_canvas*`; `iris-sys` re-exports the one
     /// `flux_canvas` definition from `flux-sys`, so the cast to the
     /// `flux` crate's view is a no-op reinterpretation of an opaque
-    /// handle (see [`flux::Canvas::borrow_raw`]'s contract for
+    /// handle (see [`flux::CanvasCommands::borrow_raw`]'s contract for
     /// sibling-binding pointers).
-    pub fn flux_canvas(&self) -> flux::Canvas {
+    pub fn flux_canvas(&self) -> flux::CanvasCommands<'_> {
         // SAFETY: iris handed us a live `flux_canvas*` for the duration of
         // the paint callback. The returned handle does not destroy on drop.
-        unsafe { flux::Canvas::borrow_raw(self.canvas) }
+        unsafe { flux::CanvasCommands::borrow_raw(self.canvas) }
     }
 
     /// The single flux device iris owns, as a borrowed (non-owning)
@@ -503,9 +503,11 @@ impl Application {
             height: config.height,
             dark: config.dark,
             log_raw: config.log_raw,
+            no_clear: false,
             start: start_fn,
             stop: stop_fn,
             build: Some(build_trampoline::<B, P, S, T>),
+            prepare: None,
             paint: paint_fn,
             user: user_ptr,
         };

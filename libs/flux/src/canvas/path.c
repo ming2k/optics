@@ -46,16 +46,6 @@ uint32_t flux_path_dropped_count(const flux_path *p) {
     return p ? p->dropped : 0;
 }
 
-flux_result flux_path_init(flux_path *p, flux_arena *arena) {
-    if (!p || !arena) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "flux_path_init requires non-NULL path and arena");
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    }
-    memset(p, 0, sizeof(*p));
-    p->arena = arena;
-    return FLUX_OK;
-}
-
 void flux_path_reset(flux_path *p) {
     if (!p)
         return;

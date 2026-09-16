@@ -27,53 +27,18 @@ executable('compute_fill',
   c_args       : examples_embed_dir_arg,
 )
 
-# Windowed examples — need GLFW. (Effect showcases live in examples/showcase/.)
-if not glfw_dep.found()
-  warning('GLFW not found; skipping windowed flux examples.')
-  subdir_done()
-endif
-
-triangle_vert_spv = custom_target('triangle.vert.spv',
-  input   : 'shaders/triangle.vert',
-  output  : 'triangle.vert.spv',
-  command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
-)
-triangle_frag_spv = custom_target('triangle.frag.spv',
-  input   : 'shaders/triangle.frag',
-  output  : 'triangle.frag.spv',
-  command : [glslang, '-V', '@INPUT@', '-o', '@OUTPUT@'],
-)
-triangle_vert_h = custom_target('triangle_vert_spv.h',
-  input   : triangle_vert_spv,
-  output  : 'triangle_vert_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'triangle_vert_spv'],
-)
-triangle_frag_h = custom_target('triangle_frag_spv.h',
-  input   : triangle_frag_spv,
-  output  : 'triangle_frag_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'triangle_frag_spv'],
-)
-executable('hello_triangle',
-  'hello_triangle.c',
-  triangle_vert_spv,
-  triangle_frag_spv,
-  triangle_vert_h,
-  triangle_frag_h,
-  dependencies : [flux_dep, glfw_dep, m_dep],
-  c_args       : examples_embed_dir_arg,
-)
-
+# Windowed examples — all native Iris applications (ADR-0097).
 executable('canvas_hello',
   'canvas_hello.c',
-  dependencies : [flux_dep, glfw_dep, m_dep],
+  dependencies : [flux_dep, iris_dep, m_dep],
 )
 
 executable('image_animation',
   'image_animation.c',
-  dependencies : [flux_dep, glfw_dep, m_dep],
+  dependencies : [flux_dep, iris_dep, m_dep],
 )
 
 executable('scene_cube',
   'scene_cube.c',
-  dependencies : [flux_dep, glfw_dep, m_dep],
+  dependencies : [flux_dep, iris_dep, m_dep],
 )

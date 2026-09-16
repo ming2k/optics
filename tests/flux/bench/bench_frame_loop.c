@@ -73,10 +73,11 @@ int main(void) {
         flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
         pd.clear_color = &clear;
-        (void)flux_canvas_begin_pass(canvas, f, &pd);
+        pd.frame = f;
+        (void)flux_canvas_begin(canvas, &pd);
         flux_canvas_fill_rect_color(canvas, (flux_rect){0, 0, (float)W, (float)H},
                                     flux_color_rgba(64, 64, 77, 255));
-        flux_canvas_end_frame(canvas);
+        flux_canvas_end(canvas);
         (void)flux_frame_submit(f);
         (void)flux_frame_present(f);
     }
@@ -93,25 +94,29 @@ int main(void) {
             flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
             flux_color clear = flux_color_rgba(0, 0, 0, 0);
             pd.clear_color = &clear;
-            (void)flux_canvas_begin_target_pass(canvas, f, targets[t], &pd);
+            pd.frame = f;
+            pd.attachment =
+                (flux_canvas_attachment){.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = targets[t]};
+            (void)flux_canvas_begin(canvas, &pd);
             flux_canvas_fill_rect_color(canvas,
                                         (flux_rect){0, 0, (float)W / 3 * reveal, (float)H / 3},
                                         flux_color_rgba(204, 153, 102, 230));
-            flux_canvas_end_target(canvas);
+            flux_canvas_end(canvas);
         }
 
         /* Main composite pass. */
         flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
         pd.clear_color = &clear;
-        (void)flux_canvas_begin_pass(canvas, f, &pd);
+        pd.frame = f;
+        (void)flux_canvas_begin(canvas, &pd);
         flux_canvas_fill_rect_color(canvas, (flux_rect){0, 0, (float)W, (float)H},
                                     flux_color_rgba(64, 64, 77, 255));
         for (uint32_t t = 0; t < TARGETS; ++t)
             flux_canvas_draw_image(canvas, targets[t],
                                    (flux_rect){(float)(t * 40), 120.0f, (float)W / 3, (float)H / 3},
                                    nullptr);
-        flux_canvas_end_frame(canvas);
+        flux_canvas_end(canvas);
 
         (void)flux_frame_submit(f);
         (void)flux_frame_present(f);

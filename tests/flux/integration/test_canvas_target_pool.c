@@ -48,10 +48,13 @@ static void run_sweep(flux_device *d, flux_surface *s, flux_canvas *canvas,
             flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
             flux_color clear = flux_color_rgba(26, 51, 77, 255);
             pd.clear_color = &clear;
-            EXPECT(flux_canvas_begin_target_pass(canvas, frame, target, &pd) == FLUX_OK);
+            pd.frame = frame;
+            pd.attachment =
+                (flux_canvas_attachment){.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target};
+            EXPECT(flux_canvas_begin(canvas, &pd) == FLUX_OK);
             flux_canvas_fill_rect_color(canvas, (flux_rect){0, 0, (float)sweep[i], 384.0f},
                                         flux_color_rgba(230, 128, 51, 255));
-            flux_canvas_end_target(canvas);
+            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
             EXPECT(flux_frame_submit(frame) == FLUX_OK);
             EXPECT(flux_frame_present(frame) == FLUX_OK);
         }

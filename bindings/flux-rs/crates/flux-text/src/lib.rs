@@ -9,8 +9,8 @@
 //!
 //! This crate mirrors only the engine's Layer-0 surface (single-run
 //! shaping), matching the "API layers" note in `<flux-text/text.h>`. Line
-//! wrapping / paragraph composition is Layer-1 and lives in the separate
-//! `flux-text-layout` crate.
+//! wrapping / paragraph composition is Layer-1 (reserved in `<flux-text/text.h>`
+//! as `flux_text_layout`).
 //!
 //! flux core handles (`Device`, `Canvas`, `Arena`) come from the `flux`
 //! crate; their raw pointers are ABI-identical to the opaque types
@@ -21,7 +21,7 @@
 
 #![deny(rust_2018_idioms)]
 
-use flux::{Arena, Canvas, Device};
+use flux::{Arena, CanvasCommands, Device};
 
 /// A flux result code surfaced as a Rust error. This is the SAME type as
 /// [`flux::Error`] (the whole stack speaks one `flux_result`); re-exported
@@ -191,7 +191,7 @@ impl Text {
     /// Shape `text` and paint it as one batched glyph run with its top-left at
     /// `(x, y)` (logical pixels). `arena` supplies per-frame scratch for the
     /// glyph quads. No-op on a measure-only context.
-    pub fn draw(&self, canvas: &Canvas, arena: &Arena, x: f32, y: f32, text: &str, style: &Style) {
+    pub fn draw(&self, canvas: &CanvasCommands<'_>, arena: &Arena, x: f32, y: f32, text: &str, style: &Style) {
         let s = style.to_sys();
         unsafe {
             flux_text_sys::flux_text_draw(

@@ -185,83 +185,12 @@ void flux_encoder_destroy(flux_encoder *enc) {
     free(enc);
 }
 
-static bool finite_rect(flux_rect r) {
-    return isfinite(r.x) && isfinite(r.y) && isfinite(r.w) && isfinite(r.h) && r.w >= 0 &&
-           r.h >= 0 && isfinite(r.x + r.w) && isfinite(r.y + r.h);
-}
-
-static bool valid_geometry(const flux_geometry *g) {
-    if (!g || !isfinite(g->stroke_width) || g->stroke_width < 0)
-        return false;
-    switch (g->kind) {
-    case FLUX_GEOM_RECT:
-        return finite_rect(g->rect.rect);
-    case FLUX_GEOM_RRECT:
-        return finite_rect(g->rrect.rect) && isfinite(g->rrect.radius) && g->rrect.radius >= 0;
-    case FLUX_GEOM_SQUIRCLE:
-        return finite_rect(g->squircle.rect) && isfinite(g->squircle.radius) &&
-               g->squircle.radius >= 0 && isfinite(g->squircle.curvature) &&
-               g->squircle.curvature >= 0 && g->squircle.curvature <= 1;
-    case FLUX_GEOM_CIRCLE:
-        return isfinite(g->circle.cx) && isfinite(g->circle.cy) && isfinite(g->circle.radius) &&
-               g->circle.radius >= 0;
-    case FLUX_GEOM_LINE:
-        return isfinite(g->line.x0) && isfinite(g->line.y0) && isfinite(g->line.x1) &&
-               isfinite(g->line.y1);
-    case FLUX_GEOM_PATH: {
-        const flux_path *p = g->path.path;
-        if (!p || p->dropped || (p->count && !p->segments))
-            return false;
-        for (uint32_t i = 0; i < p->count; i++) {
-            const flux_path_segment *seg = &p->segments[i];
-            if (seg->op > FLUX_PATH_CLOSE)
-                return false;
-            unsigned n = seg->op == FLUX_PATH_CLOSE   ? 0
-                         : seg->op == FLUX_PATH_CUBIC ? 6
-                         : seg->op == FLUX_PATH_QUAD  ? 4
-                                                      : 2;
-            for (unsigned j = 0; j < n; j++)
-                if (!isfinite(seg->pts[j]))
-                    return false;
-        }
-        return true;
-    }
-    default:
-        return false;
-    }
-}
-
-static bool valid_brush(const flux_brush *b) {
-    if (!isfinite(b->opacity) || b->opacity < 0 || b->opacity > 1 ||
-        b->blend < FLUX_BLEND_SRC_OVER || b->blend > FLUX_BLEND_MULTIPLY)
-        return false;
-    if (b->kind == FLUX_BRUSH_SOLID)
-        return true;
-    if (b->kind == FLUX_BRUSH_IMAGE_PATTERN)
-        return b->image.image && finite_rect(b->image.src_rect);
-    if (b->kind != FLUX_BRUSH_LINEAR_GRADIENT && b->kind != FLUX_BRUSH_RADIAL_GRADIENT)
-        return false;
-    const flux_brush_gradient_data *g = &b->gradient;
-    if (!isfinite(g->start.x) || !isfinite(g->start.y) || !isfinite(g->end.x) ||
-        !isfinite(g->end.y) || !isfinite(g->radius) || g->radius < 0 || !g->stops.count ||
-        g->stops.count > FLUX_GRADIENT_MAX_STOPS)
-        return false;
-    float prev = 0;
-    for (uint32_t i = 0; i < g->stops.count; i++) {
-        float t = g->stops.stops[i].t;
-        if (!isfinite(t) || t < prev || t > 1)
-            return false;
-        prev = t;
-    }
-    return true;
-}
-
 void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
                                 const flux_brush *brush) {
     if (!encoder_ready(enc))
         return;
     flux_brush b = brush ? *brush : flux_brush_solid(0xff000000u);
-    if (!valid_geometry(geom) || !valid_brush(&b)) {
+    if (!canvas_valid_geometry(geom) || !canvas_valid_brush(&b)) {
         flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
         return;
     }
@@ -312,7 +241,7 @@ void flux_encoder_draw_glyph_run(flux_encoder *enc, const flux_glyph_run_desc *d
     }
     for (uint32_t i = 0; i < desc->quad_count; i++) {
         const flux_glyph_quad *q = &desc->quads[i];
-        if (!finite_rect((flux_rect){q->sx, q->sy, q->sw, q->sh}) || !q->aw || !q->ah) {
+        if (!canvas_finite_rect((flux_rect){q->sx, q->sy, q->sw, q->sh}) || !q->aw || !q->ah) {
             flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
             return;
         }
@@ -394,7 +323,7 @@ void flux_encoder_restore(flux_encoder *enc) {
 }
 
 void flux_encoder_clip_rect(flux_encoder *enc, flux_rect r) {
-    if (!finite_rect(r)) {
+    if (!canvas_finite_rect(r)) {
         flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
         return;
     }
@@ -406,7 +335,8 @@ void flux_encoder_clip_rect(flux_encoder *enc, flux_rect r) {
 void flux_encoder_save_layer(flux_encoder *enc, const flux_rect *bounds, float opacity) {
     if (!encoder_ready(enc))
         return;
-    if (!isfinite(opacity) || opacity < 0 || opacity > 1 || (bounds && !finite_rect(*bounds))) {
+    if (!isfinite(opacity) || opacity < 0 || opacity > 1 ||
+        (bounds && !canvas_finite_rect(*bounds))) {
         flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
         return;
     }

@@ -349,9 +349,10 @@ static uint8_t sample(flux_canvas *canvas, uint32_t x, uint32_t y) {
 
 static void render(lens *ui, flux_canvas *canvas) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    CHECK(flux_canvas_cpu_begin(canvas, &clear) == FLUX_OK);
+    CHECK(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &clear}) == FLUX_OK);
     CHECK(test_snapshot_render(ui, canvas) == FLUX_OK);
-    flux_canvas_cpu_end(canvas);
+    CHECK(flux_canvas_end(canvas) == FLUX_OK);
 }
 
 /* Emission order: BACKDROP under the base tree under CHROME under POPUP

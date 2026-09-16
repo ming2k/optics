@@ -273,7 +273,7 @@ bool ear_clip_contour(flux_canvas_vertex *verts, uint32_t *v_count, uint32_t ver
  * When `even_odd` is set, pass 1 uses CANVAS_PIPE_STENCIL_WRITE_EO
  * (INVERT on both faces) so the stencil is 1 in odd-overlap regions
  * and 0 in even-overlap regions; pass 2 is unchanged (NOT_EQUAL 0). */
-static void fill_path_stencil_cover(flux_canvas *c, const flux_paint *paint, flux_mat3x2 tx,
+static void fill_path_stencil_cover(flux_canvas *c, const canvas_paint *paint, flux_mat3x2 tx,
                                     const flux_point *pts, const struct contour_info *infos,
                                     uint32_t contour_count, bool even_odd) {
     flux_canvas_vertex *verts = c->scratch_verts;
@@ -322,8 +322,8 @@ static void fill_path_stencil_cover(flux_canvas *c, const flux_paint *paint, flu
     emit_tri(verts, &v_count, verts_cap, tx, color, bl, tr, tl);
 
     canvas_pipe_id cover = CANVAS_PIPE_COVER_SOLID;
-    if (paint &&
-        (paint->kind == FLUX_PAINT_LINEAR_GRADIENT || paint->kind == FLUX_PAINT_RADIAL_GRADIENT))
+    if (paint && (paint->kind == CANVAS_PAINT_LINEAR_GRADIENT ||
+                  paint->kind == CANVAS_PAINT_RADIAL_GRADIENT))
         cover = CANVAS_PIPE_COVER_GRADIENT;
     submit_triangles_id(c, paint, cover, verts, v_count);
 }
@@ -345,7 +345,7 @@ static uint64_t tess_fnv1a(const void *data, size_t n, uint64_t h) {
  * push_segment, so the bytes are deterministic) plus every parameter
  * the tessellation output depends on. Irrelevant stroke/fill fields
  * are zeroed so a paint that differs only in them still hits. */
-static uint64_t tess_cache_hash(const flux_path *p, const flux_paint *paint, bool is_stroke,
+static uint64_t tess_cache_hash(const flux_path *p, const canvas_paint *paint, bool is_stroke,
                                 float pixel_scale, float stroke_width, float miter_limit) {
     uint64_t h = 14695981039346656037ULL;
     h = tess_fnv1a(p->segments, p->count * sizeof(*p->segments), h);
@@ -362,7 +362,7 @@ static uint64_t tess_cache_hash(const flux_path *p, const flux_paint *paint, boo
 }
 
 static bool tess_entry_matches(const flux_tess_cache_entry *e, const flux_path *p,
-                               const flux_paint *paint, bool is_stroke, float pixel_scale,
+                               const canvas_paint *paint, bool is_stroke, float pixel_scale,
                                float stroke_width, float miter_limit, uint64_t hash) {
     if (e->last_used == 0 || e->hash != hash || e->seg_count != p->count ||
         e->is_stroke != (is_stroke ? 1u : 0u) || e->pixel_scale != pixel_scale ||
@@ -375,7 +375,7 @@ static bool tess_entry_matches(const flux_tess_cache_entry *e, const flux_path *
     return memcmp(e->segs, p->segments, p->count * sizeof(*p->segments)) == 0;
 }
 
-bool tess_cache_lookup_submit(flux_canvas *c, const flux_path *p, const flux_paint *paint,
+bool tess_cache_lookup_submit(flux_canvas *c, const flux_path *p, const canvas_paint *paint,
                               bool is_stroke, float pixel_scale, float stroke_width,
                               float miter_limit, flux_mat3x2 tx) {
     if (p->count > FLUX_TESS_CACHE_MAX_SEGS)
@@ -398,7 +398,7 @@ bool tess_cache_lookup_submit(flux_canvas *c, const flux_path *p, const flux_pai
     return false;
 }
 
-void tess_cache_store_and_transform(flux_canvas *c, const flux_path *p, const flux_paint *paint,
+void tess_cache_store_and_transform(flux_canvas *c, const flux_path *p, const canvas_paint *paint,
                                     bool is_stroke, float pixel_scale, float stroke_width,
                                     float miter_limit, bool stalled, flux_canvas_vertex *verts,
                                     uint32_t v_count, flux_mat3x2 tx) {
@@ -442,7 +442,7 @@ void tess_cache_store_and_transform(flux_canvas *c, const flux_path *p, const fl
     }
 }
 
-void canvas_fill_path_internal(flux_canvas *c, const flux_path *p, const flux_paint *paint) {
+void canvas_fill_path_internal(flux_canvas *c, const flux_path *p, const canvas_paint *paint) {
     if (!c || !c->recording || !p || !paint)
         return;
     if (p->count == 0)

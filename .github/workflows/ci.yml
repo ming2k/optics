@@ -80,6 +80,10 @@ jobs:
       - name: symbols.md freshness
         run: python3 tools/gen_symbols.py --check
 
+      # Documentation governance integrity & zero-drift (Protocol v5.1.0)
+      - name: Documentation governance check
+        run: tools/verify.sh .
+
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq

@@ -45,9 +45,8 @@ cross-fade, and sprite-sheet playback):
 ./build/examples/flux/image_animation
 ```
 
-Effect showcases — demos where a visual or mathematical effect is the point
-(liquid glass, particle fields, a GPU-computed Julia set) — live in
-`examples/showcase/`:
+Prism material showcase — interactive visual gallery demonstrating all modern
+UI materials (Liquid Glass, Frosted, Acrylic, Mica) side-by-side:
 ```bash
-./build/examples/showcase/liquid_glass
+./build/examples/showcase/material_gallery
 ```

@@ -320,6 +320,9 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
     if (flux_frame_get_state(frame) != FLUX_FRAME_STATE_RECORDING ||
         flux_frame_has_active_pass(frame))
         return FLUX_ERROR_INVALID_STATE;
+    if (flux_image_bindless_handle(desc->input) == FLUX_BINDLESS_INVALID ||
+        flux_image_bindless_handle(desc->blurred_input) == FLUX_BINDLESS_INVALID)
+        return FLUX_ERROR_UNSUPPORTED;
 
     uint32_t slot_index = flux_frame_index(frame);
     flux_result r = frosted_ensure_slot(filter, slot_index, desc->input);
@@ -328,8 +331,7 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
     frosted_filter_slot *slot = &filter->slots[slot_index];
 
     bool is16f = slot->format == FLUX_FORMAT_RGBA16_SFLOAT;
-    r = frosted_ensure_pipelines(filter, is16f, slot->initialized || desc->group_count > 0,
-                                 desc->group_count > 0);
+    r = frosted_ensure_pipelines(filter, is16f, true, desc->group_count > 0);
     if (r != FLUX_OK)
         return r;
 
@@ -349,8 +351,24 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
         }
     }
 
-    // Clear previous footprints
-    if (slot->initialized && filter->clear_pipelines[cls]) {
+    // Clear previous footprints or initialize full output on first use
+    if (!slot->initialized) {
+        if (filter->clear_pipelines[cls]) {
+            storage_clear_push pc = {
+                .output_handle = flux_image_bindless_storage_handle(slot->output),
+                .width = slot->width,
+                .height = slot->height,
+                .origin_x = 0,
+                .origin_y = 0,
+                .region_width = slot->width,
+                .region_height = slot->height,
+            };
+            uint32_t gx = (slot->width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (slot->height + PRISM_WG - 1u) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            barrier_compute_write_to_read_write(cmd, out_vk);
+        }
+    } else if (filter->clear_pipelines[cls]) {
         for (uint32_t i = 0; i < slot->previous_count; ++i) {
             storage_clear_push pc = {
                 .output_handle = flux_image_bindless_storage_handle(slot->output),
@@ -361,11 +379,25 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
                 .region_width = slot->previous[i].width,
                 .region_height = slot->previous[i].height,
             };
-            uint32_t gx = (pc.region_width + PRISM_WG - 1) / PRISM_WG;
-            uint32_t gy = (pc.region_height + PRISM_WG - 1) / PRISM_WG;
+            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
             flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
         }
-        if (slot->previous_count > 0 && desc->group_count > 0)
+        for (uint32_t i = 0; i < current_count; ++i) {
+            storage_clear_push pc = {
+                .output_handle = flux_image_bindless_storage_handle(slot->output),
+                .width = slot->width,
+                .height = slot->height,
+                .origin_x = current_regions[i].x,
+                .origin_y = current_regions[i].y,
+                .region_width = current_regions[i].width,
+                .region_height = current_regions[i].height,
+            };
+            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+        }
+        if ((slot->previous_count > 0 || current_count > 0) && desc->group_count > 0)
             barrier_compute_write_to_read_write(cmd, out_vk);
     }
 
@@ -378,8 +410,8 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
                 continue;
 
             frosted_push pc = {
-                .input_handle = flux_image_bindless_storage_handle(desc->input),
-                .blurred_handle = flux_image_bindless_storage_handle(desc->blurred_input),
+                .input_handle = flux_image_bindless_handle(desc->input),
+                .blurred_handle = flux_image_bindless_handle(desc->blurred_input),
                 .sampler_handle = flux_device_default_sampler_handle(filter->device),
                 .output_handle = flux_image_bindless_storage_handle(slot->output),
                 .width = slot->width,

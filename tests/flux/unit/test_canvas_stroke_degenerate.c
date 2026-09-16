@@ -51,13 +51,14 @@ int main(void) {
     flux_path_cubic_to(p, 76.0f, 76.0f, 70.0f, 70.0f, 64.0f, 64.0f);
 
     flux_color white = flux_color_rgba_premul(255, 255, 255, 255);
-    flux_paint stroke = flux_paint_solid(white);
-    stroke.stroke_width = 3.0f;
+    flux_brush stroke = flux_brush_solid(white);
+    flux_stroke_style stroke_stroke = {.width = 3.0f};
 
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    EXPECT(flux_canvas_cpu_begin(c, &clear) == FLUX_OK);
-    flux_canvas_stroke_path(c, p, &stroke);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
+    flux_canvas_stroke_path(c, p, &stroke_stroke, &stroke);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);

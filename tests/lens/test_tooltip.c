@@ -62,9 +62,10 @@ static void test_tooltip_render_path(void) {
     flux_canvas *canvas = NULL;
     CHECK(flux_canvas_create_cpu(200, 100, 1.0f, &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
-    CHECK(flux_canvas_cpu_begin(canvas, &black) == FLUX_OK);
+    CHECK(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &black}) == FLUX_OK);
     CHECK(test_snapshot_render(ui, canvas) == FLUX_OK);
-    flux_canvas_cpu_end(canvas);
+    CHECK(flux_canvas_end(canvas) == FLUX_OK);
 
     uint32_t width = 0, height = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(canvas, &width, &height, &stride);

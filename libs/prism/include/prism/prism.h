@@ -30,6 +30,7 @@
 #include <prism/backdrop_layer.h>
 #include <prism/frosted.h>
 #include <prism/liquid_glass.h>
+#include <prism/mica.h>
 #include <prism/types.h>
 
 #endif /* PRISM_H */

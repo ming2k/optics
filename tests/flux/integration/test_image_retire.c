@@ -70,9 +70,12 @@ int main(void) {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &clear}) == FLUX_OK);
         draw_cover(canvas, image);
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         if (previous) {

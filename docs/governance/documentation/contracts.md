@@ -1,46 +1,48 @@
 # Repository Contracts
 
-Reference data about the documentation surfaces this repository uses. Read
-this when a rule depends on an optional file or directory and you need to
-know whether this repository has it.
+Reference data, profile declarations, and path bindings for documentation surfaces adopted by this repository.
 
-For the one-time process of installing this governance in a new repository,
-see [Adoption](adoption.md).
+For adoption procedures, see [Workflow: Adoption](core/workflow.md#part-4-repository-adoption-workflow).
 
-## Required layout
+---
 
-This guide routes documentation through three gates plus a root-file
-exception (see [Routing](routing.md)). Each gate maps to a location:
+## 1. Activated Profiles
 
-| Gate | Path | Required | Purpose |
-|------|------|----------|---------|
-| Time | `docs/adr/` | Optional | Architecture Decision Records (immutable) |
-| Audience | `docs/dev/` | Yes | Contributor-only documentation (the firewall) |
-| Audience | `docs/dev/documentation/` | Yes | Documentation governance (this directory) |
-| Cognitive mode | `docs/tutorials/` | Optional | Learning-oriented walkthroughs |
-| Cognitive mode | `docs/how-to/` | Recommended | Task-oriented user guides |
-| Cognitive mode | `docs/reference/` | Recommended | API, CLI, configuration, and schema lookup |
-| Cognitive mode | `docs/explanation/` | Recommended | Conceptual background and design explanation |
-| Root | `README.md` | Yes | Project pitch and shortest successful start path |
-| Root | `docs/index.md` | Yes | Documentation entry point |
+Declare the domain capability profiles active in this repository. `tools/sync.sh` and `tools/verify.sh` use this declaration to assemble and verify documentation surfaces.
 
-If the target repository does not use this layout, either adapt
-[Routing](routing.md) first or keep this directory out of the repository.
+- [x] `core` (Mandatory: 4D spatial taxonomy, system invariants, operational workflow, style)
+- [x] `architecture` (Architecture records, living blueprints, pre-decision RFCs)
+- [x] `validation` (Product validation: user journeys, acceptance matrices, testing guides)
+- [ ] `operations` (Operational knowledge: postmortems, triage runbooks)
 
-## Repository contracts
+---
 
-Some rules refer to common files that not every repository has. Treat them
-as contracts:
+## 2. Directory Layout Bindings
 
-| Contract | If present | If absent |
-|----------|------------|-----------|
-| `CHANGELOG.md` | User-visible changes update it in the same commit | Omit changelog checks from review |
-| `CONTRIBUTING.md` | Contributor workflow links to `docs/dev/` | Add one before expecting outside contributions |
-| `docs/adr/index.md` | ADRs are registered there | Create the index before writing ADRs, or disable ADR workflow |
-| `docs/adr/template.md` | New ADRs start from the template | Create a template before requiring ADRs |
-| `docs/reference/glossary.md` | New canonical terms update it | Keep terminology local to the relevant doc |
-| `docs/reference/api.md` | Public API changes update it | Use the project's equivalent reference surface |
-| `docs/tutorials/01-getting-started.md` | Setup changes update it with the README | Update the closest getting-started tutorial instead |
+| Surface | Path | Required | Temperature | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| **Core Governance** | `docs/governance/documentation/` | Yes | **HOT** | Mirrored governance standard (`core/` + active profiles) |
+| **Project Governance** | `docs/governance/` | Yes | **HOT** | Repository charters, API standards, and guidelines |
+| **Contributor Firewall**| `docs/dev/` | Yes | **HOT** | Developer bootstrap, testing, and procedures |
+| **Active ADRs** | `docs/adr/` | If `architecture` | **WARM** | Immutable Architectural Decision Records |
+| **Living Blueprints** | `docs/architecture/` | If `architecture` | **HOT** | Living subsystem blueprints and compacted invariants |
+| **Archived ADRs** | `docs/adr/archive/` | If `architecture` | **COLD** | Compacted, superseded, and deprecated records |
+| **In-Flight RFCs** | `docs/rfc/` | Optional (`architecture`) | **WARM** | Active pre-decision proposals under deliberation |
+| **Archived RFCs** | `docs/rfc/archive/` | Optional (`architecture`) | **COLD** | Concluded and withdrawn RFC deliberations |
+| **Incident Reviews** | `docs/dev/postmortems/` | If `operations` | **COLD** | Archived blameless post-incident reviews |
+| **Root Entry** | `README.md` | Yes | **HOT** | Project value pitch and shortest setup |
+| **Docs Portal** | `docs/index.md` | Yes | **HOT** | Primary documentation navigation portal |
 
-Do not silently assume an optional contract exists. Either add it, link to
-the repository's equivalent, or mark that rule as not used by the project.
+---
+
+## 3. Optional Document Contracts
+
+| Contract Surface | Active Profile | If Present | If Absent |
+| :--- | :--- | :--- | :--- |
+| `CHANGELOG.md` | Universal | User-visible changes must update it in the same PR | Omit changelog checks from PR review |
+| `CONTRIBUTING.md` | Universal | Contributor entry point; links into `docs/dev/` | Add before accepting outside contributions |
+| `docs/dev/acceptance.md` | Profile `validation` | User journey or acceptance changes update it | Rely on internal testing guides |
+| `docs/dev/testing.md` | Profile `validation` | Test runner, command, or suite changes update it | Document testing in dev setup guide |
+| `docs/adr/index.md` | Profile `architecture` | Active and archived ADRs registered in table | Create index before authoring ADRs |
+| `docs/rfc/` | Profile `architecture` | In-flight debates in `docs/rfc/`; closed RFCs to `archive/` | Omit RFCs; record decisions directly in ADRs |
+| `docs/reference/glossary.md` | Universal | Canonical project terms defined and cross-linked | Keep term definitions local to documents |

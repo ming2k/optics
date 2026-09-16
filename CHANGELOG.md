@@ -13,6 +13,10 @@ either.
 
 ## [Unreleased]
 
+### Added
+
+- **governance**: Upgraded documentation governance standard to Protocol v5.1.0 (Clean-Break Architecture with 4D Semantic Tensor Core and pluggable vertical domain profiles). Integrated `tools/verify.sh` and `tools/check-docs-governance.sh` into CI validation.
+
 ### Changed
 
 - **lens / iris**: Publish owned scene snapshots and activate the exact snapshot after successful presentation. Input, scrollbar hit geometry, accessibility and repaint baselines follow the activated snapshot. Failed recording or submission does not publish a partial frame.

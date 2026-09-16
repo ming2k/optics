@@ -110,3 +110,7 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0092 | [Resource planning, synchronization, and retirement](0092-resource-planning-and-retirement.md) | Accepted |
 | 0093 | [C state contracts and Rust execution sessions](0093-c-state-contracts-and-rust-sessions.md) | Accepted |
 | 0094 | [Lens scene snapshots and explicit invalidation](0094-lens-scene-snapshots-and-invalidation.md) | Accepted |
+| 0095 | [Flux public contract convergence](0095-flux-public-contract-convergence.md) | Accepted (supersedes ADR-0087; refines ADR-0091, ADR-0093) |
+| 0096 | [Prism Mica foundation material — screen-anchored wallpaper composite](0096-prism-mica-foundation-material.md) | Accepted |
+| 0097 | [Canonical example taxonomy, legacy pruning, and lifecycle governance](0097-canonical-example-taxonomy-and-governance.md) | Accepted |
+| 0098 | [Developer tooling taxonomy, architecture guardrails, and unified verification](0098-developer-tooling-and-architecture-guardrails.md) | Accepted |

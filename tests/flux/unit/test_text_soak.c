@@ -92,9 +92,10 @@ int main(void) {
     /* --- Phase 1: oversize working set (forces evictions, maybe pages). */
     for (uint32_t round = 0; round < 3; round++) {
         flux_color bg = flux_color_rgba_premul(0, 0, 0, 255);
-        EXPECT(flux_canvas_cpu_begin(c, &bg) == FLUX_OK);
+        EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &bg}) == FLUX_OK);
         draw_window(t, c, 0, DISTINCT_GLYPHS, 16.0f);
-        flux_canvas_cpu_end(c);
+        EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
     flux_text_stats s1;
     flux_text_get_stats(t, &s1);
@@ -110,9 +111,10 @@ int main(void) {
      *     storm would add 256 misses per frame (64 x 256 = 16384). */
     for (int frame = 0; frame < 64; frame++) {
         flux_color bg = flux_color_rgba_premul(0, 0, 0, 255);
-        EXPECT(flux_canvas_cpu_begin(c, &bg) == FLUX_OK);
+        EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &bg}) == FLUX_OK);
         draw_window(t, c, 100, 256, 16.0f);
-        flux_canvas_cpu_end(c);
+        EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
     flux_text_stats s2;
     flux_text_get_stats(t, &s2);
@@ -125,16 +127,18 @@ int main(void) {
     flux_text_stats wa, wb;
     for (int frame = 0; frame < 8; frame++) {
         flux_color bg = flux_color_rgba_premul(0, 0, 0, 255);
-        EXPECT(flux_canvas_cpu_begin(c, &bg) == FLUX_OK);
+        EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &bg}) == FLUX_OK);
         draw_window(t, c, 0, 1024, 16.0f);
-        flux_canvas_cpu_end(c);
+        EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
     flux_text_get_stats(t, &wa);
     for (int frame = 0; frame < 8; frame++) {
         flux_color bg = flux_color_rgba_premul(0, 0, 0, 255);
-        EXPECT(flux_canvas_cpu_begin(c, &bg) == FLUX_OK);
+        EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &bg}) == FLUX_OK);
         draw_window(t, c, 0, 1024, 16.0f);
-        flux_canvas_cpu_end(c);
+        EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
     flux_text_get_stats(t, &wb);
     EXPECT(wb.glyph_count == wa.glyph_count); /* no creep */

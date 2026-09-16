@@ -53,7 +53,8 @@ static void relocated_capture(void) {
 
     flux_canvas *c = canvas();
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
     EXPECT(flux_canvas_submit_display_list(c, shared) == FLUX_OK);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
     EXPECT(alpha(c, 4, 4) == 255);
@@ -87,7 +88,8 @@ static void captured_glyphs(void) {
     flux_encoder_destroy(enc);
     flux_canvas *c = canvas();
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
     EXPECT(flux_canvas_submit_display_list(c, list) == FLUX_OK);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
     EXPECT(alpha(c, 5, 5) == 255);
@@ -108,7 +110,8 @@ static void isolated_state(void) {
     flux_canvas *c = canvas();
     EXPECT(flux_canvas_submit_display_list(c, list) == FLUX_ERROR_INVALID_STATE);
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
     flux_canvas_translate(c, 20, 0);
     flux_canvas_clip_rect(c, (flux_rect){0, 0, 12, 12});
     EXPECT(flux_canvas_submit_display_list(c, list) == FLUX_OK);
@@ -158,7 +161,8 @@ static void terminal_and_failure(void) {
 static void layer_bounds_are_hints(void) {
     flux_canvas *c = canvas();
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
     flux_rect hint = {0, 0, 1, 1};
     flux_canvas_save_layer(c, &hint, 0.5f);
     flux_geometry g = flux_geom_rect((flux_rect){2, 2, 8, 8});
@@ -195,7 +199,8 @@ static void append_and_splice(void) {
 
     flux_canvas *c = canvas();
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
     EXPECT(flux_canvas_submit_display_list(c, dl2) == FLUX_OK);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
     EXPECT(alpha(c, 4, 4) == 255);
@@ -240,7 +245,8 @@ static void child_ownership_and_state(void) {
 
     flux_canvas *c = canvas();
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
     EXPECT(flux_canvas_submit_display_list(c, parent) == FLUX_OK);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
     EXPECT(alpha(c, 1, 1) == 255);
@@ -310,7 +316,8 @@ static void cropped_glyph_capture_and_execution_budget(void) {
     flux_encoder_destroy(enc);
     flux_canvas *c = canvas();
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(c, nullptr, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
     EXPECT(flux_canvas_submit_display_list(c, child) == FLUX_OK);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
     EXPECT(alpha(c, 4, 4) == 255);

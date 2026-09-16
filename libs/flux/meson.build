@@ -422,8 +422,6 @@ pkg.generate(
   extra_cflags : flux_public_defines,
 )
 
-glfw_dep = dependency('glfw3', required : false)
-
 # Sibling content libraries (ADR-0016): they link libflux and feed its
 # draw primitives. Each is a separate shared library with its own .pc.
 if get_option('text')

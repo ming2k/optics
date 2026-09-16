@@ -63,13 +63,6 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_create_cpu_aa(uint32_t width, ui
                                                               flux_canvas_antialias antialias,
                                                               flux_canvas **out);
 
-/* Begin a recording pass, clearing to `clear` (premultiplied; NULL = fully
- * transparent). The CPU analogue of flux_canvas_begin_frame — no frame needed. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_cpu_begin(flux_canvas *c, const flux_color *clear);
-
-/* End the recording pass. Pixels are already resolved in the framebuffer. */
-FLUX_API void flux_canvas_cpu_end(flux_canvas *c);
-
 /* Return the premultiplied-RGBA8 framebuffer (row-major, tightly packed:
  * *stride == width*4). The buffer is refreshed from the internal float
  * framebuffer on each call and remains owned by the canvas. Returns NULL if `c`

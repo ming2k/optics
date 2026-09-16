@@ -1,163 +1,116 @@
 /*
- * text_hello — shape and draw a UTF-8 run through flux-text.
+ * text_hello — shape and draw a UTF-8 run through flux-text on Iris.
  *
- * Demonstrates the ADR-0016 boundary: the app owns the window, device,
- * surface, canvas, and arena; flux-text owns shaping (HarfBuzz) and feeds
+ * Demonstrates the ADR-0016 boundary: the host (iris) owns window lifecycle,
+ * device, surface, and canvas; flux-text owns shaping (HarfBuzz) and feeds
  * the flux_canvas_draw_glyph_run primitive. BiDi and CJK work because
- * FriBidi + HarfBuzz live in the sibling, not in libflux.
+ * FriBidi + HarfBuzz live in flux-text. Native Wayland cursor and HiDPI
+ * scaling work out of the box via Iris.
  */
+
 #include <flux-text/text.h>
 #include <flux/canvas.h>
 #include <flux/flux.h>
-#include <flux/vulkan.h>
-
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
+#include <iris/app.h>
+#include <iris/iris.h>
+#include <iris/window.h>
+#include <lens/lens.h>
 
 #include <stdio.h>
 #include <string.h>
 
-static void on_resize(GLFWwindow *win, int w, int h) {
-    flux_surface *surface = glfwGetWindowUserPointer(win);
-    if (surface && w > 0 && h > 0)
-        (void)flux_surface_resize(surface, (uint32_t)w, (uint32_t)h);
+typedef struct text_hello_app {
+    flux_text *text;
+    flux_arena arena;
+} text_hello_app;
+
+static bool on_start(lens *ui, flux_device *device, void *user) {
+    (void)ui;
+    text_hello_app *app = user;
+
+    flux_text_desc tdesc = {.device = device, .scale = 1.0f};
+    if (flux_text_create(&tdesc, &app->text) != FLUX_OK) {
+        fprintf(stderr, "flux_text_create failed (is fontconfig available?)\n");
+        return false;
+    }
+
+    if (flux_arena_init(&app->arena, 1u << 20, nullptr) != FLUX_OK) {
+        flux_text_release(app->text);
+        return false;
+    }
+
+    return true;
+}
+
+static void on_stop(lens *ui, flux_device *device, void *user) {
+    (void)ui;
+    (void)device;
+    text_hello_app *app = user;
+    if (app->text) {
+        flux_text_release(app->text);
+        app->text = nullptr;
+    }
+    flux_arena_deinit(&app->arena);
+}
+
+static void on_build(lens *ui, const lens_input *in, void *user) {
+    (void)ui;
+    (void)user;
+    for (uint32_t k = 0; k < in->key_count; k++) {
+        if (in->keys[k].pressed && (in->keys[k].key == LENS_KEY_ESCAPE || in->keys[k].key == 'q' ||
+                                    in->keys[k].key == 'Q')) {
+            iris_window_close();
+            return;
+        }
+    }
+}
+
+static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void *user) {
+    (void)device;
+    text_hello_app *app = user;
+    if (!app->text)
+        return;
+
+    flux_text_set_scale(app->text, scale);
+
+    flux_canvas_save(canvas);
+    flux_canvas_scale(canvas, scale, scale);
+
+    const char *s = "hello, flux-text \xe4\xbd\xa0\xe5\xa5\xbd"; /* + "你好" */
+    flux_text_style style = {
+        .size_px = 40.0f,
+        .weight = 0.0f,
+        .color = flux_color_rgba(0xe8, 0xe8, 0xe8, 0xff),
+        .family = FLUX_TEXT_FAMILY_SANS,
+    };
+    flux_text_draw(app->text, canvas, &app->arena, 40.0f, 80.0f, s, strlen(s), &style);
+
+    const char *sub = "Native Optics Wayland stack (zero GLFW, HiDPI aware, Esc to quit)";
+    flux_text_style sub_style = {
+        .size_px = 16.0f,
+        .weight = 0.0f,
+        .color = flux_color_rgba(0x9a, 0xa0, 0xb4, 0xff),
+        .family = FLUX_TEXT_FAMILY_SANS,
+    };
+    flux_text_draw(app->text, canvas, &app->arena, 40.0f, 130.0f, sub, strlen(sub), &sub_style);
+
+    flux_canvas_restore(canvas);
+    flux_arena_reset(&app->arena);
 }
 
 int main(void) {
-    if (!glfwInit() || !glfwVulkanSupported())
-        return 1;
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    GLFWwindow *win = glfwCreateWindow(800, 480, "flux text", nullptr, nullptr);
-    if (!win) {
-        glfwTerminate();
-        return 1;
-    }
-
-    uint32_t ext_count = 0;
-    const char **req_exts = glfwGetRequiredInstanceExtensions(&ext_count);
-    const char *device_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-    flux_device_desc ddesc = {
-        .type = FLUX_TYPE_DEVICE_DESC,
-        .log = flux_console_logger,
-        .validation = FLUX_VALIDATION_AUTO,
-        .required_instance_extensions = req_exts,
-        .required_instance_extension_count = ext_count,
-        .required_device_extensions = device_exts,
-        .required_device_extension_count = sizeof(device_exts) / sizeof(*device_exts),
-        .frames_in_flight = 2,
-    };
-    flux_device *device = nullptr;
-    if (flux_device_create(&ddesc, &device) != FLUX_OK) {
-        glfwDestroyWindow(win);
-        glfwTerminate();
-        return 1;
-    }
-
-    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
-    if (glfwCreateWindowSurface(flux_device_vk_instance(device), win, nullptr, &vk_surface) !=
-        VK_SUCCESS) {
-        flux_device_release(device);
-        glfwDestroyWindow(win);
-        glfwTerminate();
-        return 1;
-    }
-    int fbw = 0, fbh = 0;
-    glfwGetFramebufferSize(win, &fbw, &fbh);
-    flux_surface_desc sdesc = {
-        .type = FLUX_TYPE_SURFACE_DESC,
-        .vk_surface_khr = vk_surface,
-        .width = (uint32_t)fbw,
-        .height = (uint32_t)fbh,
-        .vsync = true,
-    };
-    flux_surface *surface = nullptr;
-    if (flux_surface_create(device, &sdesc, &surface) != FLUX_OK) {
-        vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
-        flux_device_release(device);
-        glfwDestroyWindow(win);
-        glfwTerminate();
-        return 1;
-    }
-    glfwSetWindowUserPointer(win, surface);
-    glfwSetFramebufferSizeCallback(win, on_resize);
-
-    flux_canvas_desc cdesc = {
-        .type = FLUX_TYPE_CANVAS_DESC,
-        .surface = surface,
-        .scale = 1.0f,
-    };
-    flux_canvas *canvas = nullptr;
-    if (flux_canvas_create(&cdesc, &canvas) != FLUX_OK)
-        goto teardown;
-
-    flux_text_desc tdesc = {.device = device, .scale = 1.0f};
-    flux_text *text = nullptr;
-    if (flux_text_create(&tdesc, &text) != FLUX_OK) {
-        fprintf(stderr, "flux_text_create failed (is fontconfig available?)\n");
-        goto teardown;
-    }
-
-    flux_arena arena_store;
-    if (flux_arena_init(&arena_store, 1u << 20, nullptr) != FLUX_OK) {
-        flux_text_release(text);
-        goto teardown;
-    }
-
-    printf("text_hello ready\n");
-    while (!glfwWindowShouldClose(win)) {
-        glfwPollEvents();
-        flux_frame *frame = nullptr;
-        flux_result r = flux_surface_begin_frame(surface, nullptr, &frame);
-        if (r == FLUX_ERROR_SURFACE_LOST) {
-            int w, h;
-            glfwGetFramebufferSize(win, &w, &h);
-            if (w > 0 && h > 0)
-                (void)flux_surface_resize(surface, (uint32_t)w, (uint32_t)h);
-            continue;
-        }
-        if (r == FLUX_ERROR_INVALID_STATE)
-            continue;
-        if (r != FLUX_OK)
-            break;
-
-        flux_color clear = flux_color_rgba(0x12, 0x14, 0x1a, 0xff);
-        if (flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK) {
-            const char *s = "hello, flux-text \xe4\xbd\xa0\xe5\xa5\xbd"; /* + "你好" */
-            flux_text_style style = {
-                .size_px = 40.0f,
-                .weight = 0.0f,
-                .color = flux_color_rgba(0xe8, 0xe8, 0xe8, 0xff),
-                .family = FLUX_TEXT_FAMILY_SANS,
-            };
-            flux_text_draw(text, canvas, &arena_store, 40.0f, 80.0f, s, strlen(s), &style);
-            flux_canvas_end_frame(canvas);
-        }
-
-        r = flux_frame_submit(frame);
-        if (r != FLUX_OK)
-            break;
-        r = flux_frame_present(frame);
-        if (r == FLUX_ERROR_SURFACE_LOST) {
-            int w, h;
-            glfwGetFramebufferSize(win, &w, &h);
-            if (w > 0 && h > 0)
-                (void)flux_surface_resize(surface, (uint32_t)w, (uint32_t)h);
-        } else if (r != FLUX_OK)
-            break;
-        flux_arena_reset(&arena_store);
-    }
-
-    flux_device_wait_idle(device);
-    flux_arena_deinit(&arena_store);
-    flux_text_release(text);
-teardown:
-    if (canvas)
-        flux_canvas_release(canvas);
-    flux_surface_release(surface);
-    vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
-    flux_device_release(device);
-    glfwDestroyWindow(win);
-    glfwTerminate();
-    return 0;
+    text_hello_app app = {0};
+    printf("flux-text hello — native Iris window (Esc to quit)\n");
+    return iris_app_run(&(iris_app_opts){
+        .title = "flux text — hello",
+        .app_id = "org.optics.flux-text.hello",
+        .width = 800,
+        .height = 480,
+        .dark = true,
+        .start = on_start,
+        .stop = on_stop,
+        .build = on_build,
+        .paint = on_paint,
+        .user = &app,
+    });
 }

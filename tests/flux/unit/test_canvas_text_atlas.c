@@ -43,7 +43,8 @@ static uint8_t *snapshot(flux_canvas *c) {
 
 static void begin_clear(flux_canvas *c) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    EXPECT(flux_canvas_cpu_begin(c, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
 }
 
 int main(void) {
@@ -70,17 +71,17 @@ int main(void) {
 
     /* Frame 1: record two glyphs. */
     begin_clear(c);
-    EXPECT(flux_canvas_begin_record(c));
+    EXPECT(flux_canvas_cache_begin(c));
     flux_text_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
-    flux_canvas_record rec = flux_canvas_end_record(c);
+    flux_canvas_cache_entry rec = flux_canvas_cache_end(c);
     EXPECT(rec.slot != nullptr);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint8_t *live = snapshot(c);
 
     /* Frame 2: replay is faithful while the atlas is untouched. */
     begin_clear(c);
-    EXPECT(flux_canvas_replay(c, rec));
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_cache_replay(c, rec));
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint8_t *replayed = snapshot(c);
     EXPECT(memcmp(live, replayed, (size_t)W * H * 4) == 0);
     free(replayed);
@@ -99,7 +100,7 @@ int main(void) {
             break;
         flux_text_draw(t, c, nullptr, 0.13f * (float)k, 4.0f, filler, 94, &style);
     }
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     flux_text_get_stats(t, &st_after);
     /* atlas_clears keeps its counting semantics (consumers poll it as a
      * generation signal). */
@@ -110,13 +111,13 @@ int main(void) {
      * generation even when the final filler draw triggered the clear. */
     begin_clear(c);
     flux_text_draw(t, c, nullptr, 4.0f, 4.0f, "x", 1, &style);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* Frame 3: the pre-clear segment must be REFUSED — its baked UVs name
      * rearranged texels. Nothing is drawn. */
     begin_clear(c);
-    EXPECT(!flux_canvas_replay(c, rec));
-    flux_canvas_cpu_end(c);
+    EXPECT(!flux_canvas_cache_replay(c, rec));
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint8_t *blank = snapshot(c);
     uint8_t all_black[W * 4];
     for (uint32_t x = 0; x < W; ++x) {
@@ -133,7 +134,7 @@ int main(void) {
      * and reproduces the recorded pixels exactly. */
     begin_clear(c);
     flux_text_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint8_t *redrawn = snapshot(c);
     EXPECT(memcmp(live, redrawn, (size_t)W * H * 4) == 0);
     free(redrawn);
@@ -141,17 +142,17 @@ int main(void) {
 
     /* A segment recorded after the clear replays normally. */
     begin_clear(c);
-    EXPECT(flux_canvas_begin_record(c));
+    EXPECT(flux_canvas_cache_begin(c));
     flux_text_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
-    flux_canvas_record rec2 = flux_canvas_end_record(c);
+    flux_canvas_cache_entry rec2 = flux_canvas_cache_end(c);
     EXPECT(rec2.slot != nullptr);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     begin_clear(c);
-    EXPECT(flux_canvas_replay(c, rec2));
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_cache_replay(c, rec2));
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
 
-    flux_canvas_record_release(c, rec);
-    flux_canvas_record_release(c, rec2);
+    flux_canvas_cache_release(c, rec);
+    flux_canvas_cache_release(c, rec2);
     flux_canvas_release(c);
     flux_text_release(t);
     TEST_SUMMARY();

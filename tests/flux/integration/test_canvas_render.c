@@ -36,11 +36,13 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas, draw_fn dr
         return r;
 
     flux_color clear = flux_color_rgba(0, 0, 0, 255);
-    r = flux_canvas_begin_frame(canvas, frame, &clear);
+    r = flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                           .frame = frame,
+                                                           .clear_color = &clear});
     if (r != FLUX_OK)
         return r;
     draw(canvas, user);
-    r = flux_canvas_end_frame_checked(canvas);
+    r = flux_canvas_end(canvas);
     if (r != FLUX_OK)
         return r;
 
@@ -71,11 +73,12 @@ static flux_result render_frame_no_stencil(flux_surface *s, flux_canvas *canvas,
         const void *next;
     } future_extension = {FLUX_TYPE_UNKNOWN, &no_stencil};
     pass.next = &future_extension;
-    r = flux_canvas_begin_pass(canvas, frame, &pass);
+    pass.frame = frame;
+    r = flux_canvas_begin(canvas, &pass);
     if (r != FLUX_OK)
         return r;
     draw(canvas, user);
-    flux_result pass_result = flux_canvas_end_frame_checked(canvas);
+    flux_result pass_result = flux_canvas_end(canvas);
 
     r = flux_frame_submit(frame);
     if (r != FLUX_OK)
@@ -92,29 +95,29 @@ static void draw_linear_gradient(flux_canvas *canvas, void *user) {
         {0.0f, flux_color_rgba(255, 0, 0, 255)},
         {1.0f, flux_color_rgba(0, 0, 255, 255)},
     };
-    flux_paint g =
-        flux_paint_linear_gradient((flux_point){0, 0}, (flux_point){(float)W, 0}, stops, 2);
+    flux_brush g =
+        flux_brush_linear_gradient((flux_point){0, 0}, (flux_point){(float)W, 0}, stops, 2);
     flux_canvas_fill_rect(canvas, (flux_rect){0, 0, (float)W, (float)H}, &g);
 }
 
 static void draw_stroke(flux_canvas *canvas, void *user) {
     flux_path *p = user;
-    flux_paint paint = flux_paint_solid(flux_color_rgba(255, 255, 255, 255));
-    paint.stroke_width = 8.0f;
-    flux_canvas_stroke_path(canvas, p, &paint);
+    flux_brush paint = flux_brush_solid(flux_color_rgba(255, 255, 255, 255));
+    flux_stroke_style paint_stroke = {.width = 8.0f};
+    flux_canvas_stroke_path(canvas, p, &paint_stroke, &paint);
 }
 
 static void draw_donut(flux_canvas *canvas, void *user) {
     flux_path *p = user;
-    flux_paint paint = flux_paint_solid(flux_color_rgba(255, 255, 255, 255));
-    flux_canvas_fill_path(canvas, p, &paint);
+    flux_brush paint = flux_brush_solid(flux_color_rgba(255, 255, 255, 255));
+    flux_canvas_fill_path(canvas, p, FLUX_FILL_NON_ZERO, &paint);
 }
 
 static void draw_even_odd_path(flux_canvas *canvas, void *user) {
     flux_path *p = user;
-    flux_paint paint = flux_paint_solid(flux_color_rgba(255, 255, 255, 255));
-    paint.fill_rule = FLUX_FILL_EVEN_ODD;
-    flux_canvas_fill_path(canvas, p, &paint);
+    flux_brush paint = flux_brush_solid(flux_color_rgba(255, 255, 255, 255));
+    flux_fill_rule paint_rule = FLUX_FILL_EVEN_ODD;
+    flux_canvas_fill_path(canvas, p, paint_rule, &paint);
 }
 
 static void draw_glyph_run(flux_canvas *canvas, void *user) {
@@ -151,12 +154,12 @@ static void draw_point_field(flux_canvas *canvas, void *user) {
 typedef struct image_transform_case {
     flux_image *image;
     flux_sampler *sampler;
-    flux_paint paint;
+    flux_image_style paint;
 } image_transform_case;
 
 typedef struct image_record_case {
     image_transform_case image;
-    flux_canvas_record record;
+    flux_canvas_cache_entry record;
 } image_record_case;
 
 static void draw_rotated_image(flux_canvas *canvas, void *user) {
@@ -219,14 +222,14 @@ static void draw_opaque_image(flux_canvas *canvas, void *user) {
 
 static void record_rotated_image(flux_canvas *canvas, void *user) {
     image_record_case *tc = user;
-    EXPECT(flux_canvas_begin_record(canvas));
+    EXPECT(flux_canvas_cache_begin(canvas));
     draw_rotated_image(canvas, &tc->image);
-    tc->record = flux_canvas_end_record(canvas);
+    tc->record = flux_canvas_cache_end(canvas);
     EXPECT(tc->record.slot != nullptr);
 }
 
 static void replay_record(flux_canvas *canvas, void *user) {
-    EXPECT(flux_canvas_replay(canvas, *(flux_canvas_record *)user));
+    EXPECT(flux_canvas_cache_replay(canvas, *(flux_canvas_cache_entry *)user));
 }
 
 #if defined(FLUX_TEXT_HAVE_FTHB)
@@ -526,9 +529,9 @@ int main(void) {
                 {
                     .image = image,
                     .sampler = nearest,
-                    .paint = flux_paint_solid(flux_color_rgba_premul(255, 255, 255, 128)),
+                    .paint = {.tint = flux_color_rgba_premul(255, 255, 255, 128), .opacity = 1.0f},
                 },
-            .record = FLUX_CANVAS_RECORD_INIT,
+            .record = FLUX_CANVAS_CACHE_ENTRY_INIT,
         };
         EXPECT(render_frame(s, canvas, draw_combined_image, &tc.image) == FLUX_OK);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
@@ -583,7 +586,7 @@ int main(void) {
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         EXPECT(memcmp(live, px, sizeof live) == 0);
-        flux_canvas_record_release(canvas, tc.record);
+        flux_canvas_cache_release(canvas, tc.record);
     }
 
     /* --- alpha-free image import ignores the undefined X channel --- */

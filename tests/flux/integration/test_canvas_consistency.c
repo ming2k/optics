@@ -41,12 +41,12 @@ static void draw_scene(flux_canvas *canvas, flux_arena *arena) {
         {0.5f, flux_color_rgba(30, 200, 90, 255)},
         {1.0f, flux_color_rgba(40, 60, 220, 255)},
     };
-    flux_paint grad =
-        flux_paint_linear_gradient((flux_point){0, 0}, (flux_point){(float)W, 0}, stops, 3);
+    flux_brush grad =
+        flux_brush_linear_gradient((flux_point){0, 0}, (flux_point){(float)W, 0}, stops, 3);
     flux_canvas_fill_rect(canvas, (flux_rect){0, 0, (float)W, (float)H / 2}, &grad);
 
     /* Radial gradient disc bottom-left. */
-    flux_paint radial = flux_paint_radial_gradient((flux_point){32, 96}, 24.0f, stops, 2);
+    flux_brush radial = flux_brush_radial_gradient((flux_point){32, 96}, 24.0f, stops, 2);
     flux_canvas_fill_rect(canvas, (flux_rect){8, 72, 48, 48}, &radial);
 
     /* Solid rounded rect (SDF path) bottom-right. */
@@ -69,9 +69,9 @@ static void draw_scene(flux_canvas *canvas, flux_arena *arena) {
     if (flux_path_create(&p, arena) == FLUX_OK) {
         flux_path_add_circle(p, 104, 24, 14.0f);
         flux_path_add_circle(p, 104, 24, 6.0f);
-        flux_paint paint = flux_paint_solid(flux_color_rgba(120, 220, 255, 255));
-        paint.fill_rule = FLUX_FILL_EVEN_ODD;
-        flux_canvas_fill_path(canvas, p, &paint);
+        flux_brush paint = flux_brush_solid(flux_color_rgba(120, 220, 255, 255));
+        flux_fill_rule paint_rule = FLUX_FILL_EVEN_ODD;
+        flux_canvas_fill_path(canvas, p, paint_rule, &paint);
     }
 }
 
@@ -95,9 +95,10 @@ int main(void) {
     EXPECT(flux_arena_init(&arena, 64 * 1024, nullptr) == FLUX_OK);
 
     flux_color clear = flux_color_rgba(12, 12, 16, 255);
-    EXPECT(flux_canvas_cpu_begin(cpu, &clear) == FLUX_OK);
+    EXPECT(flux_canvas_begin(cpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                           .clear_color = &clear}) == FLUX_OK);
     draw_scene(cpu, &arena);
-    flux_canvas_cpu_end(cpu);
+    EXPECT(flux_canvas_end(cpu) == FLUX_OK);
 
     uint32_t cpu_w = 0, cpu_h = 0, cpu_stride = 0;
     const uint8_t *cpu_px = flux_canvas_cpu_pixels(cpu, &cpu_w, &cpu_h, &cpu_stride);
@@ -128,9 +129,11 @@ int main(void) {
     {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
-        EXPECT(flux_canvas_begin_frame(gpu, frame, &clear) == FLUX_OK);
+        EXPECT(flux_canvas_begin(gpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &clear}) == FLUX_OK);
         draw_scene(gpu, &arena);
-        flux_canvas_end_frame(gpu);
+        EXPECT(flux_canvas_end(gpu) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         EXPECT(flux_surface_read_pixels(s, gpu_px, BYTES) == FLUX_OK);

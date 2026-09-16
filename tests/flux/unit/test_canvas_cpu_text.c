@@ -45,13 +45,14 @@ static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
         return false;
     }
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
-    if (flux_canvas_cpu_begin(canvas, &black) != FLUX_OK) {
+    if (flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                           .clear_color = &black}) != FLUX_OK) {
         flux_canvas_release(canvas);
         flux_text_release(text);
         return false;
     }
     flux_text_draw(text, canvas, nullptr, 4.0f, 4.0f, "sf", 2, &small);
-    flux_canvas_cpu_end(canvas);
+    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *pixels = flux_canvas_cpu_pixels(canvas, &w, &h, &stride);
@@ -80,7 +81,8 @@ int main(void) {
 
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     flux_color white = flux_color_rgba_premul(255, 255, 255, 255);
-    EXPECT(flux_canvas_cpu_begin(c, &black) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &black}) == FLUX_OK);
 
     flux_text_style style = {0};
     style.size_px = 24.0f;
@@ -89,7 +91,7 @@ int main(void) {
     flux_text_draw_outlined(t, c, nullptr, 72.0f, 8.0f, "Aa", 2, &style,
                             flux_color_rgba_premul(255, 0, 0, 255), 2.0f);
 
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);

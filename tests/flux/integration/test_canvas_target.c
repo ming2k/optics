@@ -68,14 +68,19 @@ int main(void) {
         flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
         pd.clear_color = &teal;
         pd.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
-        EXPECT(flux_canvas_begin_target_pass(canvas, frame, target, &pd) == FLUX_OK);
-        flux_canvas_end_target(canvas);
+        pd.frame = frame;
+        pd.attachment =
+            (flux_canvas_attachment){.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target};
+        EXPECT(flux_canvas_begin(canvas, &pd) == FLUX_OK);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
+        pd.attachment = (flux_canvas_attachment){0};
         pd.clear_color = &black;
-        EXPECT(flux_canvas_begin_pass(canvas, frame, &pd) == FLUX_OK);
+        pd.frame = frame;
+        EXPECT(flux_canvas_begin(canvas, &pd) == FLUX_OK);
         flux_canvas_draw_image(canvas, target, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -91,11 +96,16 @@ int main(void) {
 
         /* Capture: black clear + white right half. */
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_target(canvas, frame, target, &black) == FLUX_OK);
+        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                             .frame = frame,
+                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                            .image = target},
+                                             .clear_color = &black}) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas,
                                     (flux_rect){(float)(W / 2), 0.0f, (float)(W / 2), (float)H},
                                     flux_color_rgba_premul(255, 255, 255, 255));
-        flux_canvas_end_target(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         /* Blur the captured target (compute, no active pass). */
         flux_image *blurred = nullptr;
@@ -107,9 +117,12 @@ int main(void) {
 
         /* Composite the blurred capture onto the frame. */
         flux_color fc = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_frame(canvas, frame, &fc) == FLUX_OK);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &fc}) == FLUX_OK);
         flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -165,10 +178,13 @@ int main(void) {
         EXPECT(blurred != nullptr);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &black}) == FLUX_OK);
         flux_canvas_draw_image_sub(canvas, blurred, (flux_rect){20, 20, 24, 24},
                                    (flux_rect){20.0f / W, 20.0f / H, 24.0f / W, 24.0f / H});
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0, BYTES);
@@ -191,15 +207,23 @@ int main(void) {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
-        EXPECT(flux_canvas_begin_target(canvas, frame, target, nullptr) == FLUX_OK);
+        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                             .frame = frame,
+                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                            .image = target},
+                                             .clear_color = nullptr}) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas, (flux_rect){2, 2, 8, 8},
                                     flux_color_rgba_premul(0, 255, 0, 255));
-        flux_canvas_end_target(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &black}) == FLUX_OK);
         flux_canvas_draw_image(canvas, target, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -219,8 +243,13 @@ int main(void) {
 
         uint8_t red = (uint8_t)(40u + iteration * 30u);
         flux_color fill = flux_color_rgba(red, 20, 40, 255);
-        EXPECT(flux_canvas_begin_target(canvas, frame, target, &fill) == FLUX_OK);
-        flux_canvas_end_target(canvas);
+        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                             .frame = frame,
+                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                            .image = target},
+                                             .clear_color = &fill}) == FLUX_OK);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
@@ -230,9 +259,12 @@ int main(void) {
         EXPECT(blurred != nullptr);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &black}) == FLUX_OK);
         flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0, BYTES);
@@ -252,11 +284,17 @@ int main(void) {
 
             /* Capture an opaque white square on transparent: the mask. */
             flux_color transparent = flux_color_rgba(0, 0, 0, 0);
-            EXPECT(flux_canvas_begin_target(canvas, frame, target, &transparent) == FLUX_OK);
+            EXPECT(flux_canvas_begin(
+                       canvas,
+                       &(flux_canvas_pass_desc){
+                           .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                           .frame = frame,
+                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
+                           .clear_color = &transparent}) == FLUX_OK);
             flux_canvas_fill_rect_color(
                 canvas, (flux_rect){(float)(W / 4), (float)(H / 4), (float)(W / 2), (float)(H / 2)},
                 flux_color_rgba_premul(255, 255, 255, 255));
-            flux_canvas_end_target(canvas);
+            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
             flux_effect_shadow_desc sd = FLUX_EFFECT_SHADOW_DESC_INIT;
             sd.input = target;
@@ -274,9 +312,12 @@ int main(void) {
              * inside the offset square the coverage is near-opaque (colour
              * collapses toward black); the far corner keeps near-white. */
             flux_color white = flux_color_rgba(255, 255, 255, 255);
-            EXPECT(flux_canvas_begin_frame(canvas, frame, &white) == FLUX_OK);
+            EXPECT(flux_canvas_begin(canvas,
+                                     &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                              .frame = frame,
+                                                              .clear_color = &white}) == FLUX_OK);
             flux_canvas_draw_image(canvas, shadow, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-            flux_canvas_end_frame(canvas);
+            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
             EXPECT(flux_frame_submit(frame) == FLUX_OK);
             EXPECT(flux_frame_present(frame) == FLUX_OK);
 
@@ -301,9 +342,17 @@ int main(void) {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
-        EXPECT(flux_canvas_begin_target(canvas, frame, target, &black) == FLUX_ERROR_INVALID_STATE);
-        flux_canvas_end_frame(canvas);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &black}) == FLUX_OK);
+        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                             .frame = frame,
+                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                            .image = target},
+                                             .clear_color = &black}) == FLUX_ERROR_INVALID_STATE);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         flux_effect_reset(d);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -317,12 +366,20 @@ int main(void) {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color red = flux_color_rgba(255, 0, 0, 255);
-        EXPECT(flux_canvas_begin_target(canvas, frame, downsampled, &red) == FLUX_OK);
-        flux_canvas_end_target(canvas);
+        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                             .frame = frame,
+                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                            .image = downsampled},
+                                             .clear_color = &red}) == FLUX_OK);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &black}) == FLUX_OK);
         flux_canvas_draw_image(canvas, downsampled, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0, BYTES);
@@ -339,8 +396,13 @@ int main(void) {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color source = flux_color_rgba(35, 70, 105, 255);
-        EXPECT(flux_canvas_begin_target(canvas, frame, backdrop, &source) == FLUX_OK);
-        flux_canvas_end_target(canvas);
+        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                             .frame = frame,
+                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                            .image = backdrop},
+                                             .clear_color = &source}) == FLUX_OK);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = backdrop;
@@ -349,9 +411,12 @@ int main(void) {
         EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &black}) == FLUX_OK);
         flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
 
@@ -374,8 +439,13 @@ int main(void) {
         flux_frame *frame = nullptr;
         EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color source = flux_color_rgba(11, 22, 33, 255);
-        EXPECT(flux_canvas_begin_target(canvas, frame, cross_target, &source) == FLUX_OK);
-        flux_canvas_end_target(canvas);
+        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                             .frame = frame,
+                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                            .image = cross_target},
+                                             .clear_color = &source}) == FLUX_OK);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = cross_target;
@@ -385,9 +455,12 @@ int main(void) {
         EXPECT(flux_image_format(blurred) == FLUX_FORMAT_RGBA8_UNORM);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin_frame(canvas, frame, &black) == FLUX_OK);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &black}) == FLUX_OK);
         flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
 

@@ -51,6 +51,19 @@ acrylic_16f_comp_spv = custom_target('acrylic_16f.comp.spv',
              '@INPUT@', '-o', '@OUTPUT@'],
 )
 
+# Mica SPIR-V
+mica_comp_spv = custom_target('mica.comp.spv',
+  input   : 'src/shaders/mica.comp',
+  output  : 'mica.comp.spv',
+  command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+)
+mica_16f_comp_spv = custom_target('mica_16f.comp.spv',
+  input   : 'src/shaders/mica.comp',
+  output  : 'mica_16f.comp.spv',
+  command : [glslang, '-V', '--target-env', 'vulkan1.3', '-DPRISM_STORAGE_RGBA16F',
+             '@INPUT@', '-o', '@OUTPUT@'],
+)
+
 # Common utility SPIR-V
 storage_clear_comp_spv = custom_target('storage_clear.comp.spv',
   input   : 'src/shaders/storage_clear.comp',
@@ -109,6 +122,17 @@ acrylic_16f_spv_h = custom_target('acrylic_16f_spv.h',
   command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'acrylic_16f_spv'],
 )
 
+mica_spv_h = custom_target('mica_spv.h',
+  input   : mica_comp_spv,
+  output  : 'mica_spv.h',
+  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'mica_spv'],
+)
+mica_16f_spv_h = custom_target('mica_16f_spv.h',
+  input   : mica_16f_comp_spv,
+  output  : 'mica_16f_spv.h',
+  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'mica_16f_spv'],
+)
+
 backdrop_frost_comp_spv = custom_target('backdrop_frost.comp.spv',
   input   : 'src/shaders/backdrop_frost.comp',
   output  : 'backdrop_frost.comp.spv',
@@ -151,16 +175,19 @@ prism_lib = library('prism',
   'src/liquid_glass.c',
   'src/frosted.c',
   'src/acrylic.c',
+  'src/mica.c',
   'src/backdrop_layer.c',
   'src/version.c',
   liquid_glass_comp_spv, liquid_glass_16f_comp_spv,
   frosted_comp_spv, frosted_16f_comp_spv,
   acrylic_comp_spv, acrylic_16f_comp_spv,
+  mica_comp_spv, mica_16f_comp_spv,
   backdrop_frost_comp_spv, backdrop_frost_16f_comp_spv,
   storage_clear_comp_spv, storage_clear_16f_comp_spv, backdrop_stats_comp_spv,
   liquid_glass_spv_h, liquid_glass_16f_spv_h,
   frosted_spv_h, frosted_16f_spv_h,
   acrylic_spv_h, acrylic_16f_spv_h,
+  mica_spv_h, mica_16f_spv_h,
   backdrop_frost_spv_h, backdrop_frost_16f_spv_h,
   storage_clear_spv_h, storage_clear_16f_spv_h, backdrop_stats_spv_h,
   include_directories   : prism_inc,
@@ -178,6 +205,7 @@ install_headers(
   'include/prism/liquid_glass.h',
   'include/prism/frosted.h',
   'include/prism/acrylic.h',
+  'include/prism/mica.h',
   'include/prism/backdrop_layer.h',
   subdir : 'prism',
 )
@@ -192,7 +220,7 @@ pkg.generate(
   libraries   : prism_lib,
   name        : 'prism',
   filebase    : 'prism',
-  description : 'Optics material library (liquid glass, frosted, acrylic, layered backdrop), built on the flux effect runtime',
+  description : 'Optics material library (liquid glass, frosted, acrylic, mica, layered backdrop), built on the flux effect runtime',
   version     : meson.project_version(),
   requires    : ['flux >= ' + meson.project_version()],
 )

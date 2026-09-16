@@ -33,9 +33,11 @@ int main(void) {
         flux_geom_circle(32, 32, 28),
     };
     for (unsigned i = 0; i < 3; i++) {
-        EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
+        EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &(flux_color){0}}) ==
+               FLUX_OK);
         flux_canvas_draw_geometry(c, &geoms[i], &gradient);
-        EXPECT(flux_canvas_end_frame_checked(c) == FLUX_OK);
+        EXPECT(flux_canvas_end(c) == FLUX_OK);
         const uint8_t *left = pixel(c, 16, 32);
         EXPECT(left[0] > left[2] && left[3] > 250);
         const uint8_t *right = pixel(c, 48, 32);
@@ -46,32 +48,42 @@ int main(void) {
     /* Stroke width belongs to geometry. */
     flux_brush white = flux_brush_solid(0xffffffff);
     flux_geometry stroked_rect = flux_geom_rect((flux_rect){16, 16, 32, 32});
-    stroked_rect.stroke_width = 8;
-    EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
+    stroked_rect.stroke.width = 8;
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &(flux_color){0}}) ==
+           FLUX_OK);
     flux_canvas_draw_geometry(c, &stroked_rect, &white);
-    EXPECT(flux_canvas_end_frame_checked(c) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     EXPECT(pixel(c, 32, 32)[3] == 0);
     EXPECT(pixel(c, 18, 32)[3] > 250);
 
     flux_geometry line = flux_geom_line(8, 32, 56, 32);
-    line.stroke_width = 10;
-    EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
+    line.stroke.width = 10;
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &(flux_color){0}}) ==
+           FLUX_OK);
     flux_canvas_draw_geometry(c, &line, &gradient);
-    EXPECT(flux_canvas_end_frame_checked(c) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     EXPECT(pixel(c, 32, 35)[3] > 250);
     EXPECT(pixel(c, 32, 40)[3] == 0);
 
     /* Unsupported / invalid combinations poison the pass; the next pass recovers. */
-    EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &(flux_color){0}}) ==
+           FLUX_OK);
     flux_canvas_draw_geometry(c, &(flux_geometry){.kind = FLUX_GEOM_PATH}, &white);
-    EXPECT(flux_canvas_end_frame_checked(c) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
-    flux_canvas_draw_geometry(c, &(flux_geometry){.kind = FLUX_GEOM_LINE, .stroke_width = 0},
+    EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &(flux_color){0}}) ==
+           FLUX_OK);
+    flux_canvas_draw_geometry(c, &(flux_geometry){.kind = FLUX_GEOM_LINE, .stroke.width = 0},
                               &white);
-    EXPECT(flux_canvas_end_frame_checked(c) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &(flux_color){0}}) ==
+           FLUX_OK);
     flux_canvas_draw_geometry(c, &geoms[1], &white);
-    EXPECT(flux_canvas_end_frame_checked(c) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     EXPECT(pixel(c, 32, 32)[3] > 250);
     flux_canvas_release(c);
     TEST_SUMMARY();

@@ -118,15 +118,32 @@ fail:
 }
 
 flux_result flux_target_create_cpu(const flux_cpu_target_desc *desc, flux_target **out) {
+    if (out)
+        *out = nullptr;
     if (!desc || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    if (desc->type != FLUX_TYPE_TARGET_DESC) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_TARGET_DESC");
+    if (desc->type != FLUX_TYPE_CPU_TARGET_DESC) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_CPU_TARGET_DESC");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->width == 0 || desc->height == 0) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "target width/height is 0");
         return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->format != FLUX_FORMAT_UNDEFINED && desc->format != FLUX_FORMAT_RGBA8_UNORM) {
+        FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "CPU targets require RGBA8_UNORM");
+        return FLUX_ERROR_UNSUPPORTED;
+    }
+    size_t stride = desc->stride_bytes ? desc->stride_bytes : (size_t)desc->width * 4;
+    if (desc->width > UINT32_MAX / 4 || stride < (size_t)desc->width * 4 || stride > UINT32_MAX ||
+        desc->height > SIZE_MAX / stride) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "CPU target stride or extent overflow");
+        return FLUX_ERROR_OUT_OF_RANGE;
+    }
+    if (desc->user_buffer &&
+        desc->buffer_bytes < (size_t)(desc->height - 1) * stride + (size_t)desc->width * 4) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "CPU target external buffer is too small");
+        return FLUX_ERROR_OUT_OF_RANGE;
     }
     *out = nullptr;
 
@@ -156,7 +173,9 @@ flux_result flux_target_create_cpu(const flux_cpu_target_desc *desc, flux_target
 }
 
 flux_result flux_target_create_from_image(flux_device *d, flux_image *image, flux_target **out) {
-    if (!d || !image || !out)
+    if (out)
+        *out = nullptr;
+    if (!d || !image || !out || image->device != d)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;
 
@@ -175,22 +194,6 @@ flux_result flux_target_create_from_image(flux_device *d, flux_image *image, flu
     return FLUX_OK;
 }
 
-flux_target *flux_frame_target(flux_frame *f) {
-    if (!f)
-        return nullptr;
-    if (!f->frame_target_valid) {
-        atomic_init(&f->frame_target.ref_count, 1u);
-        f->frame_target.device = f->surface ? f->surface->device : nullptr;
-        f->frame_target.usage = FLUX_TARGET_COLOR;
-        f->frame_target.width = f->surface ? f->surface->extent.width : 0;
-        f->frame_target.height = f->surface ? f->surface->extent.height : 0;
-        f->frame_target.is_borrowed = true;
-        f->frame_target.bound_frame = f;
-        f->frame_target_valid = true;
-    }
-    return &f->frame_target;
-}
-
 const uint8_t *flux_target_cpu_pixels(const flux_target *t, uint32_t *out_width,
                                       uint32_t *out_height, uint32_t *out_stride) {
     if (!t || !t->is_cpu || t->in_use)
@@ -205,7 +208,7 @@ const uint8_t *flux_target_cpu_pixels(const flux_target *t, uint32_t *out_width,
 }
 
 flux_target *flux_target_retain(flux_target *t) {
-    if (t && !t->is_borrowed)
+    if (t)
         atomic_fetch_add_explicit(&t->ref_count, 1u, memory_order_relaxed);
     return t;
 }
@@ -213,8 +216,6 @@ flux_target *flux_target_retain(flux_target *t) {
 void flux_target_release(flux_target *t) {
     if (!t)
         return;
-    if (t->is_borrowed)
-        return; /* borrowed target lifetime bound to owner frame */
     if (atomic_fetch_sub_explicit(&t->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
 

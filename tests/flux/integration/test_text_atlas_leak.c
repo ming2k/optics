@@ -68,9 +68,11 @@ static bool settle_frame_slots(flux_device *d, flux_surface *s, flux_canvas *can
         if (flux_surface_begin_frame(s, nullptr, &frame) != FLUX_OK)
             return false;
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
-        if (flux_canvas_begin_frame(canvas, frame, &clear) != FLUX_OK)
+        if (flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &clear}) != FLUX_OK)
             return false;
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         if (flux_frame_submit(frame) != FLUX_OK || flux_frame_present(frame) != FLUX_OK)
             return false;
     }
@@ -127,13 +129,15 @@ int main(void) {
         if (flux_surface_begin_frame(s, nullptr, &frame) != FLUX_OK)
             break;
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
-        if (flux_canvas_begin_frame(canvas, frame, &clear) != FLUX_OK) {
+        if (flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &clear}) != FLUX_OK) {
             flux_frame_submit(frame);
             flux_frame_present(frame);
             break;
         }
         draw_filler(canvas, &dc);
-        flux_canvas_end_frame(canvas);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         flux_frame_submit(frame);
         flux_frame_present(frame);
 

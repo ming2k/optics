@@ -12,7 +12,7 @@ field is [ADR-0050](../adr/0050-single-body-liquid-glass-focus-field.md).
 
 Requires flux built with `-Dcompute=true`. Headers: `<prism/prism.h>`
 (umbrella), `<prism/liquid_glass.h>`, `<prism/frosted.h>`,
-`<prism/acrylic.h>`, and `<prism/backdrop_layer.h>`.
+`<prism/acrylic.h>`, `<prism/mica.h>`, and `<prism/backdrop_layer.h>`.
 
 ## Build flag
 
@@ -248,6 +248,45 @@ See
 [ADR-0079](../adr/0079-layered-backdrop-material.md) for the layer-relation
 rationale.
 
+## Mica foundation material
+
+`prism_mica_filter` composites screen-anchored desktop wallpaper samples,
+soft Gaussian/Dual-Kawase blur, luminosity plate balancing (Pearl for light
+mode, Smoke for dark mode), theme color tinting, procedural dithering, and
+inactive fallback states ([ADR-0096](../adr/0096-prism-mica-foundation-material.md)):
+
+```c
+#include <prism/mica.h>
+
+prism_mica_filter *filter = NULL;
+prism_mica_filter_create(device, &filter);
+
+prism_mica_group group = PRISM_MICA_GROUP_INIT;
+group.shape = (prism_mica_shape){
+    .bounds = {0.0f, 0.0f, 800.0f, 600.0f},
+    .corner_radius = 12.0f,
+};
+
+prism_mica_desc mica = PRISM_MICA_DESC_INIT;
+mica.wallpaper = desktop_wallpaper;
+mica.blurred_wallpaper = blurred_wallpaper; /* optional, falls back to wallpaper */
+mica.groups = &group;
+mica.group_count = 1;
+mica.kind = PRISM_MICA_BASE; /* or PRISM_MICA_ALT for commanding bars */
+mica.screen_origin_x = window_x;
+mica.screen_origin_y = window_y;
+mica.screen_width = display_width;
+mica.screen_height = display_height;
+
+flux_image *output = NULL; /* borrowed; do not release */
+prism_mica_filter_apply(filter, frame, &mica, &output);
+```
+
+When `screen_width` and `screen_height` are nonzero, wallpaper UV coordinates
+are anchored to absolute desktop screen coordinates so moving the window
+dynamically reveals the portion of the wallpaper behind it. When zero, UV coordinates
+default to the local surface.
+
 ## See also
 
 - [Effect module reference](effect.md) — the flux runtime prism builds on: blur, capture, transient outputs.
@@ -256,3 +295,4 @@ rationale.
 - [ADR-0046 — Liquid glass as a convex-lens material](../adr/0046-liquid-glass-convex-lens-model.md) — the material model.
 - [ADR-0050 — Single-body liquid-glass focus field](../adr/0050-single-body-liquid-glass-focus-field.md) — the focus field.
 - [ADR-0079 — Layered backdrop material](../adr/0079-layered-backdrop-material.md) — frost beneath glass in one dispatch.
+- [ADR-0096 — Prism Mica foundation material](../adr/0096-prism-mica-foundation-material.md) — screen-anchored wallpaper composite.

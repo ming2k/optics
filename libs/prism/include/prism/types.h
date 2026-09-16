@@ -86,6 +86,7 @@ typedef enum prism_struct_type {
     PRISM_TYPE_FROSTED_DESC = 2,
     PRISM_TYPE_ACRYLIC_DESC = 3,
     PRISM_TYPE_BACKDROP_LAYER_DESC = 4,
+    PRISM_TYPE_MICA_DESC = 5,
     /* Append only. Never repurpose. */
 } prism_struct_type;
 /* Quality and accessibility degradation hint. */

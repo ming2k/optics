@@ -1711,17 +1711,18 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                  * The prior-frame request does NOT veto it on Wayland, and
                  * likewise does not here; chrome damage and resizes still
                  * force a real paint below. */
+                bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
                 bool chrome_damaged = lens_frame_needs_repaint(ui);
                 bool surface_forced = resized_this_frame || surface_needs_paint;
-                bool host_skip_render = cfg->paint != NULL && pl->frame_skip_render &&
+                bool host_skip_render = has_custom_paint && pl->frame_skip_render &&
                                         !surface_forced && !chrome_damaged;
                 pl->frame_skip_render = false;
-                bool host_canvas_static = cfg->paint != NULL && pl->paint_static &&
+                bool host_canvas_static = has_custom_paint && pl->paint_static &&
                                           !host_animating && !resized_this_frame &&
                                           !surface_needs_paint && !chrome_damaged;
                 pl->paint_static = false;
                 bool must_paint = !host_canvas_static && !host_skip_render &&
-                                  (cfg->paint != NULL || chrome_damaged || host_animating ||
+                                  (has_custom_paint || chrome_damaged || host_animating ||
                                    resized_this_frame || surface_needs_paint);
                 if (must_paint) {
                     surface_needs_paint = true;
@@ -1745,14 +1746,18 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     flux_surface_info info;
                     flux_surface_get_info(surface, &info);
 
+                    if (cfg->prepare)
+                        cfg->prepare(frame, canvas, device, pl->scale, cfg->user);
+
                     /* Clear to the current theme's body background; the
                      * paint callback draws *under* lens's chrome (iris calls
                      * it before snapshot publication). */
                     lens_theme th = lens_get_theme(ui);
                     flux_color clear = th.color_bg;
+                    flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
                     bool drew = false;
                     lens_scene_snapshot *snapshot = nullptr;
-                    if (flux_canvas_begin_frame(canvas, frame, &clear) == FLUX_OK) {
+                    if (flux_canvas_begin_frame(canvas, frame, pass_clear) == FLUX_OK) {
                         if (cfg->paint)
                             cfg->paint(canvas, device, pl->scale, cfg->user);
                         if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
@@ -1801,11 +1806,11 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                  * scheduling frames entirely and block on the next event.
                  * A host paint callback keeps the always-render pacing
                  * unless it declared this frame static. */
-                if (cfg->paint && !host_canvas_static) {
+                if (has_custom_paint && !host_canvas_static) {
                     if (pl->animation_frame_requested)
                         next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
                     frame_scheduled = true;
-                } else if (cfg->paint) {
+                } else if (has_custom_paint) {
                     /* Static-declaring host: keep the low idle tick so
                      * build/paint keep running and the host can resume
                      * animating on its own; only the GPU work skips. */

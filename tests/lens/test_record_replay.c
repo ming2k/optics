@@ -28,9 +28,10 @@ static void fixture_close(fixture *f) {
 
 static void render_frame(fixture *f) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    CHECK(flux_canvas_cpu_begin(f->canvas, &clear) == FLUX_OK);
+    CHECK(flux_canvas_begin(f->canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                .clear_color = &clear}) == FLUX_OK);
     CHECK(test_snapshot_render(f->ui, f->canvas) == FLUX_OK);
-    flux_canvas_cpu_end(f->canvas);
+    CHECK(flux_canvas_end(f->canvas) == FLUX_OK);
 }
 
 static void snapshot(fixture *f, uint8_t *out) {
@@ -183,9 +184,10 @@ static void test_hidpi_scroll_clip_alignment(void) {
     test_end(f.ui);
 
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    CHECK(flux_canvas_cpu_begin(f.canvas, &clear) == FLUX_OK);
+    CHECK(flux_canvas_begin(f.canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .clear_color = &clear}) == FLUX_OK);
     CHECK(test_snapshot_render(f.ui, f.canvas) == FLUX_OK);
-    flux_canvas_cpu_end(f.canvas);
+    CHECK(flux_canvas_end(f.canvas) == FLUX_OK);
 
     uint32_t pw = 0, ph = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(f.canvas, &pw, &ph, &stride);

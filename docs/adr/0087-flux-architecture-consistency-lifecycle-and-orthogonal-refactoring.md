@@ -1,6 +1,6 @@
 # ADR-0087: Flux Architecture Consistency, Lifecycle Contracts, and Orthogonal Refactoring
 
-- Status: Accepted
+- Status: Superseded by ADR-0095
 - Date: 2026-08-27
 - Scope: `flux` (core, canvas, canvas_cpu, vulkan), `flux-text`, `flux-scene-graph`, downstream UI/compositor consumers (`lens`, `iris`). Extends ADR-0010, ADR-0019, ADR-0083. RFC Reference: RFC-0094.
 

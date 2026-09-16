@@ -158,6 +158,8 @@ void flux_canvas_release(flux_canvas *c) {
     if (atomic_fetch_sub_explicit(&c->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
 
+    if (c->recording)
+        (void)flux_canvas_end(c);
     /* Recorded segments retain images; release them before the backend
      * (and its image teardown) goes away. */
     canvas_record_pool_destroy(c);
@@ -268,118 +270,93 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
     return FLUX_OK;
 }
 
-flux_result flux_canvas_begin_pass(flux_canvas *c, flux_frame *f,
-                                   const flux_canvas_pass_desc *desc) {
-    return canvas_begin_pass_impl(c, f, nullptr, desc);
-}
-
-flux_result flux_canvas_begin_frame(flux_canvas *c, flux_frame *f, const flux_color *clear) {
-    flux_canvas_pass_desc desc = FLUX_CANVAS_PASS_DESC_INIT;
-    desc.clear_color = clear;
-    return flux_canvas_begin_pass(c, f, &desc);
-}
-
-flux_result flux_canvas_begin(flux_canvas *c, flux_target *target, const flux_color *clear_color) {
-    if (!c)
+flux_result flux_canvas_begin(flux_canvas *c, const flux_canvas_pass_desc *desc) {
+    const flux_canvas_pass_desc defaults = FLUX_CANVAS_PASS_DESC_INIT;
+    if (!desc)
+        desc = &defaults;
+    if (!c || desc->type != FLUX_TYPE_CANVAS_PASS_DESC) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid Canvas/pass descriptor");
         return FLUX_ERROR_INVALID_ARGUMENT;
-    if (c->recording)
+    }
+    if (c->recording) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas already recording");
         return FLUX_ERROR_INVALID_STATE;
-
-    if (target) {
-        if (target->in_use)
+    }
+    flux_image *image = nullptr;
+    flux_target *target = nullptr;
+    switch (desc->attachment.kind) {
+    case FLUX_CANVAS_ATTACHMENT_DEFAULT:
+        break;
+    case FLUX_CANVAS_ATTACHMENT_IMAGE:
+        image = desc->attachment.image;
+        if (!image || !c->device)
+            goto invalid;
+        break;
+    case FLUX_CANVAS_ATTACHMENT_TARGET:
+        target = desc->attachment.target;
+        if (!target || target->is_cpu != (c->device == nullptr))
+            goto invalid;
+        if (target->in_use) {
+            FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "target already in use");
             return FLUX_ERROR_INVALID_STATE;
+        }
+        if (!target->is_cpu) {
+            image = target->from_image;
+            if (!image) {
+                FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "Canvas requires a sampleable color target");
+                return FLUX_ERROR_UNSUPPORTED;
+            }
+        }
+        break;
+    default:
+        goto invalid;
+    }
+    if (!c->device && desc->frame)
+        goto invalid;
+    c->bound_cpu_target = target && target->is_cpu ? target : nullptr;
+    flux_result result = canvas_begin_pass_impl(c, desc->frame, image, desc);
+    if (result != FLUX_OK) {
+        c->bound_cpu_target = nullptr;
+        return result;
+    }
+    c->bound_target = flux_target_retain(target);
+    if (target)
         target->in_use = true;
-        c->bound_target = target;
-    }
-
-    if (!c->device) {
-        /* Headless CPU software canvas */
-        if (target && !target->is_cpu) {
-            if (c->bound_target) {
-                c->bound_target->in_use = false;
-                c->bound_target = nullptr;
-            }
-            return FLUX_ERROR_INVALID_ARGUMENT;
-        }
-        c->bound_cpu_target = target;
-        flux_result result = flux_canvas_begin_frame(c, nullptr, clear_color);
-        if (result != FLUX_OK) {
-            c->bound_cpu_target = nullptr;
-            if (c->bound_target) {
-                c->bound_target->in_use = false;
-                c->bound_target = nullptr;
-            }
-        }
-        return result;
-    }
-
-    /* GPU hardware-accelerated canvas */
-    if (target && target->bound_frame) {
-        flux_result result = flux_canvas_begin_frame(c, target->bound_frame, clear_color);
-        if (result != FLUX_OK && c->bound_target) {
-            c->bound_target->in_use = false;
-            c->bound_target = nullptr;
-        }
-        return result;
-    }
-
-    if (target && target->from_image) {
-        flux_result result = flux_canvas_begin_target(c, c->frame, target->from_image, clear_color);
-        if (result != FLUX_OK && c->bound_target) {
-            c->bound_target->in_use = false;
-            c->bound_target = nullptr;
-        }
-        return result;
-    }
-
-    flux_result result = flux_canvas_begin_frame(c, c->frame, clear_color);
-    if (result != FLUX_OK && c->bound_target) {
-        c->bound_target->in_use = false;
-        c->bound_target = nullptr;
-    }
-    return result;
+    if (image)
+        (void)flux_image_retain(image);
+    return FLUX_OK;
+invalid:
+    FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "attachment/context does not match Canvas backend");
+    return FLUX_ERROR_INVALID_ARGUMENT;
 }
 
 flux_result flux_canvas_end(flux_canvas *c) {
-    if (!c)
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    if (!c->recording)
-        return FLUX_ERROR_INVALID_STATE;
-    if (c->target_pass)
-        return flux_canvas_end_target_checked(c);
-    return flux_canvas_end_frame_checked(c);
-}
-
-static flux_result canvas_finish_pass_checked(flux_canvas *c, bool expect_target) {
-    if (!c || !c->recording || c->target_pass != expect_target) {
+    if (!c || !c->recording) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas pass termination does not match active pass");
         return FLUX_ERROR_INVALID_STATE;
+    }
+    if (c->state_top || c->record_depth) {
+        if (c->pass_error == FLUX_OK)
+            c->pass_error = FLUX_ERROR_INVALID_STATE;
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "unbalanced Canvas state/cache stack at end");
+        while (c->record_depth) {
+            flux_canvas_cache_entry entry = flux_canvas_cache_end(c);
+            flux_canvas_cache_release(c, entry);
+        }
+        while (c->state_top)
+            flux_canvas_restore(c);
     }
     flux_result result = c->pass_error;
     c->backend->end_pass(c->backend, c);
 
-    if (c->bound_cpu_target && c->bound_cpu_target->is_cpu && c->bound_cpu_target->cpu_buffer) {
-        uint32_t w = 0, h = 0, stride = 0;
-        const uint8_t *px = c->backend->read_pixels
-                                ? c->backend->read_pixels(c->backend, c, &w, &h, &stride)
-                                : nullptr;
-        if (px) {
-            uint32_t copy_h = c->bound_cpu_target->height < h ? c->bound_cpu_target->height : h;
-            size_t dst_stride = c->bound_cpu_target->cpu_stride;
-            size_t copy_w_bytes =
-                (c->bound_cpu_target->width < w ? c->bound_cpu_target->width : w) * 4;
-            for (uint32_t y = 0; y < copy_h; ++y) {
-                memcpy(c->bound_cpu_target->cpu_buffer + y * dst_stride, px + y * stride,
-                       copy_w_bytes);
-            }
-        }
-    }
     c->bound_cpu_target = nullptr;
     if (c->bound_target) {
         c->bound_target->in_use = false;
+        flux_target_release(c->bound_target);
         c->bound_target = nullptr;
     }
 
+    flux_image_release(c->target);
     c->target = nullptr;
     c->target_pass = false;
     c->frame = nullptr;
@@ -390,16 +367,6 @@ static flux_result canvas_finish_pass_checked(flux_canvas *c, bool expect_target
     return result;
 }
 
-flux_result flux_canvas_end_frame_checked(flux_canvas *c) {
-    return canvas_finish_pass_checked(c, false);
-}
-
-void flux_canvas_end_frame(flux_canvas *c) {
-    if (!c || !c->recording || c->target_pass)
-        return;
-    (void)flux_canvas_end_frame_checked(c);
-}
-
 const uint8_t *flux_canvas_read_pixels(flux_canvas *c, uint32_t *width, uint32_t *height,
                                        uint32_t *stride) {
     if (!c || c->recording || !c->backend->read_pixels)
@@ -408,40 +375,15 @@ const uint8_t *flux_canvas_read_pixels(flux_canvas *c, uint32_t *width, uint32_t
 }
 
 /* ------------------------------------------------------------------ */
-/*  Render-target capture (ADR-0017)                                  */
-/* ------------------------------------------------------------------ */
-
-flux_result flux_canvas_begin_target(flux_canvas *c, flux_frame *f, flux_image *target,
-                                     const flux_color *clear) {
-    flux_canvas_pass_desc desc = FLUX_CANVAS_PASS_DESC_INIT;
-    desc.clear_color = clear;
-    return flux_canvas_begin_target_pass(c, f, target, &desc);
-}
-
-flux_result flux_canvas_begin_target_pass(flux_canvas *c, flux_frame *f, flux_image *target,
-                                          const flux_canvas_pass_desc *desc) {
-    if (!c || !f || !target)
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    return canvas_begin_pass_impl(c, f, target, desc);
-}
-
-void flux_canvas_end_target(flux_canvas *c) {
-    if (!c || !c->recording || !c->target_pass)
-        return;
-    (void)flux_canvas_end_target_checked(c);
-}
-
-flux_result flux_canvas_end_target_checked(flux_canvas *c) {
-    /* end_pass emits the trailing COLOR_ATTACHMENT -> SHADER_READ transition
-     * so a following effect or draw needs no caller synchronisation. */
-    return canvas_finish_pass_checked(c, true);
-}
-
-/* ------------------------------------------------------------------ */
 /*  State stack                                                       */
 /* ------------------------------------------------------------------ */
 
 void flux_canvas_save(flux_canvas *c) {
+    if (!c || !c->recording) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
+        return;
+    }
+
     if (!c)
         return;
     if (c->state_top + 1 >= FLUX_CANVAS_MAX_STATES) {
@@ -458,7 +400,7 @@ void flux_canvas_save(flux_canvas *c) {
                      FLUX_CANVAS_MAX_STATES);
             c->device->log(FLUX_LOG_ERROR, "flux_canvas_save", 0, "%s", buf, c->device->log_user);
         }
-        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "flux_canvas_save: state stack overflow");
+        canvas_fail(c, FLUX_ERROR_OUT_OF_RANGE, "Canvas state stack overflow");
         return;
     }
     c->states[c->state_top + 1] = c->states[c->state_top];
@@ -468,6 +410,11 @@ void flux_canvas_save(flux_canvas *c) {
 }
 
 void flux_canvas_save_layer(flux_canvas *c, const flux_rect *bounds, float opacity) {
+    if (!c || !c->recording) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
+        return;
+    }
+
     if (!c)
         return;
     if (!c->recording || c->pass_error != FLUX_OK)
@@ -514,8 +461,15 @@ void flux_canvas_save_layer(flux_canvas *c, const flux_rect *bounds, float opaci
 }
 
 void flux_canvas_restore(flux_canvas *c) {
-    if (!c || c->state_top == 0)
+    if (!c || !c->recording) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
         return;
+    }
+
+    if (c->state_top == 0) {
+        canvas_fail(c, FLUX_ERROR_INVALID_STATE, "Canvas restore without save");
+        return;
+    }
     bool was_layer = c->states[c->state_top].is_layer;
     c->state_top--;
     c->backend->set_scissor(c->backend, c, c->states[c->state_top].scissor);
@@ -525,22 +479,49 @@ void flux_canvas_restore(flux_canvas *c) {
 }
 
 void flux_canvas_translate(flux_canvas *c, float x, float y) {
+    if (!c || !c->recording) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
+        return;
+    }
+
     if (!c)
         return;
+    if (!(isfinite(x) && isfinite(y))) {
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "non-finite Canvas transform/clip");
+        return;
+    }
     flux_canvas_state *s = &c->states[c->state_top];
     s->transform = flux_mat3x2_multiply(s->transform, flux_mat3x2_translate(x, y));
 }
 
 void flux_canvas_scale(flux_canvas *c, float sx, float sy) {
+    if (!c || !c->recording) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
+        return;
+    }
+
     if (!c)
         return;
+    if (!(isfinite(sx) && isfinite(sy))) {
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "non-finite Canvas transform/clip");
+        return;
+    }
     flux_canvas_state *s = &c->states[c->state_top];
     s->transform = flux_mat3x2_multiply(s->transform, flux_mat3x2_scale(sx, sy));
 }
 
 void flux_canvas_rotate(flux_canvas *c, float radians) {
+    if (!c || !c->recording) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
+        return;
+    }
+
     if (!c)
         return;
+    if (!(isfinite(radians))) {
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "non-finite Canvas transform/clip");
+        return;
+    }
     flux_canvas_state *s = &c->states[c->state_top];
     s->transform = flux_mat3x2_multiply(s->transform, flux_mat3x2_rotate(radians));
 }
@@ -565,16 +546,35 @@ float flux_canvas_get_scale(const flux_canvas *c) {
 }
 
 void flux_canvas_transform(flux_canvas *c, flux_mat3x2 m) {
+    if (!c || !c->recording) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
+        return;
+    }
+
     if (!c)
         return;
+    if (!(isfinite(m.m[0]) && isfinite(m.m[1]) && isfinite(m.m[2]) && isfinite(m.m[3]) &&
+          isfinite(m.m[4]) && isfinite(m.m[5]))) {
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "non-finite Canvas transform/clip");
+        return;
+    }
     flux_canvas_state *s = &c->states[c->state_top];
     s->transform = flux_mat3x2_multiply(s->transform, m);
 }
 
 void flux_canvas_clip_rect(flux_canvas *c, flux_rect r) {
+    if (!c || !c->recording) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
+        return;
+    }
+
     if (!c)
         return;
 
+    if (!(canvas_finite_rect(r))) {
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "non-finite Canvas transform/clip");
+        return;
+    }
     flux_canvas_state *state = &c->states[c->state_top];
     flux_rect transformed = flux_mat3x2_transform_rect(state->transform, r);
     flux_recti current = state->scissor;
@@ -620,7 +620,7 @@ void flux_canvas_clip_rect(flux_canvas *c, flux_rect r) {
 /*  Public draws                                                      */
 /* ------------------------------------------------------------------ */
 
-void canvas_fill_rect_internal(flux_canvas *c, flux_rect r, const flux_paint *paint) {
+void canvas_fill_rect_internal(flux_canvas *c, flux_rect r, const canvas_paint *paint) {
     if (!c || !c->recording)
         return;
     flux_mat3x2 tx = c->states[c->state_top].transform;
@@ -1036,7 +1036,7 @@ uint64_t flux_canvas_recorded_draws(const flux_canvas *c) {
     return c ? c->recorded_draws : 0;
 }
 
-static void canvas_shape_error(flux_canvas *c, flux_result result, const char *message) {
+void canvas_fail(flux_canvas *c, flux_result result, const char *message) {
     if (c->pass_error == FLUX_OK) {
         c->pass_error = result;
         FLUX_FAIL(result, message);
@@ -1052,33 +1052,39 @@ static bool canvas_axis_uniform(const flux_canvas *c) {
 }
 
 void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const flux_brush *brush) {
-    if (!c || !c->recording)
-        return;
-    if (!geom) {
-        canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "draw requires geometry");
+    if (!c || !c->recording) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "draw requires an active Canvas pass");
         return;
     }
-    if (!isfinite(geom->stroke_width) || geom->stroke_width < 0.0f) {
-        canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "invalid stroke width");
+    if (!geom) {
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "draw requires geometry");
+        return;
+    }
+    if (!isfinite(geom->stroke.width) || geom->stroke.width < 0.0f) {
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "invalid stroke width");
         return;
     }
 
     flux_brush b = brush ? *brush : flux_brush_solid(0xFF000000u);
-    float alpha_scale = (b.opacity >= 0.0f && b.opacity <= 1.0f) ? b.opacity : 1.0f;
+    if (!canvas_valid_geometry(geom) || !canvas_valid_brush(&b)) {
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "invalid geometry or brush");
+        return;
+    }
+    float alpha_scale = b.opacity;
 
     /* Handle Image Brush pattern */
     if (b.kind == FLUX_BRUSH_IMAGE_PATTERN) {
         if (!b.image.image) {
-            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "image brush requires an image");
+            canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "image brush requires an image");
             return;
         }
-        if (!c->device || geom->stroke_width > 0.0f) {
-            canvas_shape_error(c, FLUX_ERROR_UNSUPPORTED, "image draws require GPU and no stroke");
+        if (!c->device || geom->stroke.width > 0.0f) {
+            canvas_fail(c, FLUX_ERROR_UNSUPPORTED, "image draws require GPU and no stroke");
             return;
         }
         if (b.image.image->device != c->device ||
             (b.image.sampler && flux_sampler_owner(b.image.sampler) != c->device)) {
-            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "image/sampler device mismatch");
+            canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "image/sampler device mismatch");
             return;
         }
 
@@ -1096,11 +1102,6 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
                 radius = geom->rrect.radius;
                 rounded = radius > 0.0f;
                 break;
-            case FLUX_GEOM_SQUIRCLE:
-                dst = geom->squircle.rect;
-                radius = geom->squircle.radius;
-                rounded = radius > 0.0f;
-                break;
             case FLUX_GEOM_CIRCLE:
                 dst = (flux_rect){geom->circle.cx - geom->circle.radius,
                                   geom->circle.cy - geom->circle.radius, geom->circle.radius * 2.0f,
@@ -1108,25 +1109,25 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
                 radius = geom->circle.radius;
                 rounded = true;
                 break;
-            case FLUX_GEOM_LINE:
-                dst = (flux_rect){
-                    fminf(geom->line.x0, geom->line.x1), fminf(geom->line.y0, geom->line.y1),
-                    fabsf(geom->line.x1 - geom->line.x0), fabsf(geom->line.y1 - geom->line.y0)};
-                break;
             default:
-                dst = (flux_rect){0, 0, 100, 100};
-                break;
+                canvas_fail(c, FLUX_ERROR_UNSUPPORTED,
+                            "image brush supports filled rect, rrect, and circle only");
+                return;
             }
         } else {
+            if (geom->kind != FLUX_GEOM_RECT && geom->kind != FLUX_GEOM_RRECT) {
+                canvas_fail(c, FLUX_ERROR_UNSUPPORTED,
+                            "independent image clip requires rect or rrect geometry");
+                return;
+            }
             dst = geom->kind == FLUX_GEOM_RRECT ? geom->rrect.rect : geom->rect.rect;
             rounded = true;
             radius = b.image.clip_radius;
         }
 
         if (rounded && !canvas_axis_uniform(c)) {
-            canvas_shape_error(
-                c, FLUX_ERROR_UNSUPPORTED,
-                "rounded image clips require positive uniform scale and translation");
+            canvas_fail(c, FLUX_ERROR_UNSUPPORTED,
+                        "rounded image clips require positive uniform scale and translation");
             return;
         }
 
@@ -1134,7 +1135,7 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
         if (src.w == 0.0f && src.h == 0.0f)
             src = FLUX_SRC_WHOLE;
         if (src.w <= 0.0f || src.h <= 0.0f) {
-            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "invalid image source rectangle");
+            canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "invalid image source rectangle");
             return;
         }
 
@@ -1142,7 +1143,7 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
                                                   : flux_device_default_sampler_handle(c->device);
         const flux_rect *clip = rounded ? (clipped ? &b.image.clip_rect : &dst) : nullptr;
         uint32_t kind = b.image.opaque_only ? (rounded ? 7u : 6u) : (rounded ? 5u : 3u);
-        uint32_t tint_color = b.image.tint ? b.image.tint : 0xFFFFFFFFu;
+        uint32_t tint_color = b.image.tint;
         if (alpha_scale < 1.0f) {
             uint32_t a = (uint32_t)(((tint_color >> 24) & 0xFF) * alpha_scale + 0.5f);
             uint32_t r = (uint32_t)(((tint_color >> 16) & 0xFF) * alpha_scale + 0.5f);
@@ -1158,12 +1159,15 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
     }
 
     /* Solid / Gradient brushes */
-    flux_paint p = flux_paint_default();
+    canvas_paint p = canvas_paint_default();
     p.blend = b.blend;
-    p.stroke_width = geom->stroke_width;
+    p.stroke_width = geom->stroke.width;
+    p.miter_limit = geom->stroke.miter_limit;
+    p.cap = geom->stroke.cap;
+    p.join = geom->stroke.join;
 
     if (b.kind == FLUX_BRUSH_SOLID) {
-        p.kind = FLUX_PAINT_SOLID;
+        p.kind = CANVAS_PAINT_SOLID;
         uint32_t color = b.solid.color;
         if (alpha_scale < 1.0f) {
             uint32_t a = (uint32_t)(((color >> 24) & 0xFF) * alpha_scale + 0.5f);
@@ -1175,7 +1179,7 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
             p.color = color;
         }
     } else if (b.kind == FLUX_BRUSH_LINEAR_GRADIENT) {
-        p.kind = FLUX_PAINT_LINEAR_GRADIENT;
+        p.kind = CANVAS_PAINT_LINEAR_GRADIENT;
         p.gradient.linear.from = b.gradient.start;
         p.gradient.linear.to = b.gradient.end;
         p.gradient.linear.stops = b.gradient.stops;
@@ -1190,7 +1194,7 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
             }
         }
     } else if (b.kind == FLUX_BRUSH_RADIAL_GRADIENT) {
-        p.kind = FLUX_PAINT_RADIAL_GRADIENT;
+        p.kind = CANVAS_PAINT_RADIAL_GRADIENT;
         p.gradient.radial.center = b.gradient.start;
         p.gradient.radial.radius = b.gradient.radius;
         p.gradient.radial.stops = b.gradient.stops;
@@ -1208,7 +1212,7 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
 
     switch (geom->kind) {
     case FLUX_GEOM_RECT:
-        if (geom->stroke_width <= 0.0f) {
+        if (geom->stroke.width <= 0.0f) {
             canvas_fill_rect_internal(c, geom->rect.rect, &p);
         } else {
             flux_path_segment segs[5];
@@ -1220,15 +1224,15 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
     case FLUX_GEOM_RRECT: {
         flux_rect r = geom->rrect.rect;
         float radius = geom->rrect.radius;
-        if (p.kind == FLUX_PAINT_SOLID && p.blend == FLUX_BLEND_SRC_OVER &&
+        if (p.kind == CANVAS_PAINT_SOLID && p.blend == FLUX_BLEND_SRC_OVER &&
             canvas_axis_uniform(c)) {
-            draw_sdf_rrect(c, r, radius, p.color, geom->stroke_width * 0.5f);
+            draw_sdf_rrect(c, r, radius, p.color, geom->stroke.width * 0.5f);
             return;
         }
         flux_path_segment segs[16];
         flux_path path = {.segments = segs, .capacity = 16};
         flux_path_add_round_rect(&path, r, radius);
-        if (geom->stroke_width <= 0.0f) {
+        if (geom->stroke.width <= 0.0f) {
             canvas_fill_path_internal(c, &path, &p);
         } else {
             canvas_stroke_path_internal(c, &path, &p);
@@ -1240,7 +1244,7 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
         flux_path path = {.segments = segs, .capacity = 32};
         flux_path_add_squircle(&path, geom->squircle.rect, geom->squircle.radius,
                                geom->squircle.curvature);
-        if (geom->stroke_width <= 0.0f) {
+        if (geom->stroke.width <= 0.0f) {
             canvas_fill_path_internal(c, &path, &p);
         } else {
             canvas_stroke_path_internal(c, &path, &p);
@@ -1252,15 +1256,15 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
         float cy = geom->circle.cy;
         float rad = geom->circle.radius;
         flux_rect r = {cx - rad, cy - rad, rad * 2.0f, rad * 2.0f};
-        if (p.kind == FLUX_PAINT_SOLID && p.blend == FLUX_BLEND_SRC_OVER &&
+        if (p.kind == CANVAS_PAINT_SOLID && p.blend == FLUX_BLEND_SRC_OVER &&
             canvas_axis_uniform(c)) {
-            draw_sdf_rrect(c, r, rad, p.color, geom->stroke_width * 0.5f);
+            draw_sdf_rrect(c, r, rad, p.color, geom->stroke.width * 0.5f);
             return;
         }
         flux_path_segment segs[16];
         flux_path path = {.segments = segs, .capacity = 16};
         flux_path_add_circle(&path, cx, cy, rad);
-        if (geom->stroke_width <= 0.0f) {
+        if (geom->stroke.width <= 0.0f) {
             canvas_fill_path_internal(c, &path, &p);
         } else {
             canvas_stroke_path_internal(c, &path, &p);
@@ -1268,33 +1272,32 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
         break;
     }
     case FLUX_GEOM_LINE: {
-        if (geom->stroke_width <= 0.0f) {
-            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT,
-                               "line requires positive stroke width");
+        if (geom->stroke.width <= 0.0f) {
+            canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "line requires positive stroke width");
             return;
         }
         flux_path_segment segs[3];
         flux_path path = {.segments = segs, .capacity = 3};
         flux_path_move_to(&path, geom->line.x0, geom->line.y0);
         flux_path_line_to(&path, geom->line.x1, geom->line.y1);
-        p.stroke_width = geom->stroke_width;
+        p.stroke_width = geom->stroke.width;
         canvas_stroke_path_internal(c, &path, &p);
         break;
     }
     case FLUX_GEOM_PATH:
         if (!geom->path.path) {
-            canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "path geometry requires a path");
+            canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "path geometry requires a path");
             return;
         }
         p.fill_rule = geom->path.fill_rule;
-        if (geom->stroke_width <= 0.0f) {
+        if (geom->stroke.width <= 0.0f) {
             canvas_fill_path_internal(c, geom->path.path, &p);
         } else {
             canvas_stroke_path_internal(c, geom->path.path, &p);
         }
         break;
     default:
-        canvas_shape_error(c, FLUX_ERROR_INVALID_ARGUMENT, "unknown geometry kind");
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "unknown geometry kind");
         break;
     }
 }

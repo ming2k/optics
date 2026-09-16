@@ -8,6 +8,8 @@ Choose a section based on what you are trying to do:
 
 - [Tutorials](tutorials/01-getting-started.md) — build the stack and learn the
   2D and 3D APIs.
+- [Interactive Examples Showcase](how-to/run-and-explore-examples.md) — run and
+  explore the material gallery, visual effects, and UI widget demos.
 - [How-to guides](how-to/record-and-present-a-frame.md) — complete a focused
   rendering task.
 - [Explanation](explanation/application-architecture.md) — understand the
@@ -19,8 +21,8 @@ Choose a section based on what you are trying to do:
   technical decisions.
 - [Developer documentation](dev/index.md) — set up a checkout, run tests,
   navigate the tree, and prepare a release.
-- [Contributing](contributing/index.md) — follow the monorepo change workflow
-  and documentation rules.
+- [Architecture & Governance](governance/index.md) — review the governance
+  charter, 5-gate review filter, and documentation standard.
 
 The current source tree and root `meson.build` are authoritative when a
 historical ADR describes an older layout.

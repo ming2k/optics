@@ -110,7 +110,7 @@ int main(void) {
         EXPECT(flux_frame_present(frame) == FLUX_OK);
 
         /* Deferred release while batch is in flight. */
-        flux_material_release_deferred(d, material);
+        flux_material_release(material);
     }
 
     /* Test null device parameter (uses m->device). */
@@ -124,7 +124,7 @@ int main(void) {
             .depth_format = FLUX_FORMAT_D32_SFLOAT,
         };
         EXPECT(flux_material_create(d, &mdesc, &material) == FLUX_OK);
-        flux_material_release_deferred(nullptr, material);
+        flux_material_release(material);
     }
 
     flux_mesh_release(mesh);

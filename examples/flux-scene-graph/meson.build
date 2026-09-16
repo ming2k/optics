@@ -1,16 +1,10 @@
-# flux-scene-graph examples. Windowed (GLFW); skip cleanly when GLFW
-# is absent, matching the flux/examples convention.
-if not glfw_dep.found()
-  warning('GLFW not found; skipping flux-scene-graph examples.')
-  subdir_done()
-endif
+# flux-scene-graph examples — 3D glTF visualizer (ADR-0097).
+# Native Iris application.
 
-# Bake the source-tree path to the bundled asset into gltf_viewer so the
-# binary finds Duck.glb for --orbit regardless of the cwd it is launched from.
 duck_asset_path = meson.current_source_dir() / 'assets' / 'Duck.glb'
 
 executable('gltf_viewer',
   'gltf_viewer.c',
-  dependencies : [flux_sg_dep, glfw_dep, m_dep],
+  dependencies : [flux_sg_dep, iris_dep, m_dep],
   c_args       : ['-DFLUX_DUCK_ASSET="@0@"'.format(duck_asset_path)],
 )

@@ -309,11 +309,11 @@ pub struct LiquidGlassImage<'filter> {
     _filter: PhantomData<&'filter mut LiquidGlassFilter>,
 }
 
-fn draw_image_rect(canvas: &flux::Canvas, image: *mut flux_sys::flux_image, dst: sys::flux_rect) {
+fn draw_image_rect(canvas: &flux::CanvasCommands<'_>, image: *mut flux_sys::flux_image, dst: sys::flux_rect) {
     let geom = flux_sys::flux_geometry {
         kind: flux_sys::flux_geom_kind::FLUX_GEOM_RECT,
         _pad: [0; 3],
-        stroke_width: 0.0,
+        stroke: Default::default(),
         __bindgen_anon_1: flux_sys::flux_geometry__bindgen_ty_1 {
             rect: flux_sys::flux_geom_rect_data { rect: dst },
         },
@@ -348,7 +348,7 @@ fn draw_image_rect(canvas: &flux::Canvas, image: *mut flux_sys::flux_image, dst:
 }
 
 impl LiquidGlassImage<'_> {
-    pub fn draw(&self, canvas: &flux::Canvas, x: f32, y: f32, width: f32, height: f32) {
+    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>, x: f32, y: f32, width: f32, height: f32) {
         let destination = sys::flux_rect {
             x,
             y,
@@ -552,7 +552,7 @@ pub struct BackdropLayerImage<'filter> {
 impl BackdropLayerImage<'_> {
     /// Draw the leased output into `canvas` at `(x, y)`, `width`x`height`
     /// logical px (the canvas transform applies).
-    pub fn draw(&self, canvas: &flux::Canvas, x: f32, y: f32, width: f32, height: f32) {
+    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>, x: f32, y: f32, width: f32, height: f32) {
         let destination = sys::flux_rect {
             x,
             y,
@@ -701,7 +701,7 @@ pub struct FrostedImage<'filter> {
 impl FrostedImage<'_> {
     /// Draw the leased output into `canvas` at `(x, y)`, `width`x`height`
     /// logical px (the canvas transform applies).
-    pub fn draw(&self, canvas: &flux::Canvas, x: f32, y: f32, width: f32, height: f32) {
+    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>, x: f32, y: f32, width: f32, height: f32) {
         let destination = sys::flux_rect {
             x,
             y,
@@ -859,7 +859,7 @@ pub struct AcrylicImage<'filter> {
 impl AcrylicImage<'_> {
     /// Draw the leased output into `canvas` at `(x, y)`, `width`x`height`
     /// logical px (the canvas transform applies).
-    pub fn draw(&self, canvas: &flux::Canvas, x: f32, y: f32, width: f32, height: f32) {
+    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>, x: f32, y: f32, width: f32, height: f32) {
         let destination = sys::flux_rect {
             x,
             y,

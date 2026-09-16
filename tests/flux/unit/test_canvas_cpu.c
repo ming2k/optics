@@ -9,36 +9,6 @@
 #include <flux/math.h>
 #include <stddef.h>
 
-/* The no-stencil option is a pNext extension specifically so an application
- * compiled with the pre-extension descriptor remains ABI-compatible with a
- * newer libflux. Keep this executable assertion alongside the API tests. */
-typedef struct legacy_flux_canvas_pass_desc {
-    flux_struct_type type;
-    const void *next;
-    const flux_color *clear_color;
-    flux_canvas_antialias antialias;
-    int32_t render_offset_x;
-    int32_t render_offset_y;
-    uint32_t render_width;
-    uint32_t render_height;
-} legacy_flux_canvas_pass_desc;
-
-_Static_assert(sizeof(flux_canvas_pass_desc) == sizeof(legacy_flux_canvas_pass_desc),
-               "flux_canvas_pass_desc ABI changed");
-#define ASSERT_PASS_DESC_FIELD(field)                                                              \
-    _Static_assert(offsetof(flux_canvas_pass_desc, field) ==                                       \
-                       offsetof(legacy_flux_canvas_pass_desc, field),                              \
-                   "flux_canvas_pass_desc field layout changed: " #field)
-ASSERT_PASS_DESC_FIELD(type);
-ASSERT_PASS_DESC_FIELD(next);
-ASSERT_PASS_DESC_FIELD(clear_color);
-ASSERT_PASS_DESC_FIELD(antialias);
-ASSERT_PASS_DESC_FIELD(render_offset_x);
-ASSERT_PASS_DESC_FIELD(render_offset_y);
-ASSERT_PASS_DESC_FIELD(render_width);
-ASSERT_PASS_DESC_FIELD(render_height);
-#undef ASSERT_PASS_DESC_FIELD
-
 /* Fetch an RGBA8 pixel from a premultiplied framebuffer. */
 static void px(const uint8_t *fb, uint32_t stride, uint32_t x, uint32_t y, uint8_t out[4]) {
     const uint8_t *p = fb + (size_t)y * stride + (size_t)x * 4;
@@ -58,9 +28,10 @@ int main(void) {
 
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     flux_color red = flux_color_rgba_premul(255, 0, 0, 255);
-    EXPECT(flux_canvas_cpu_begin(c, &black) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &black}) == FLUX_OK);
     flux_canvas_fill_rect_color(c, (flux_rect){16, 16, 32, 32}, red);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
@@ -76,10 +47,12 @@ int main(void) {
     EXPECT(p[0] > 250 && p[3] > 250);
 
     /* ---- SDF rounded rect on a transparent clear: corners are cut ---- */
-    EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &(flux_color){0}}) ==
+           FLUX_OK);
     flux_color white = flux_color_rgba_premul(255, 255, 255, 255);
     flux_canvas_fill_rrect(c, (flux_rect){0, 0, 64, 64}, 20.0f, white);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 32, 32, p); /* centre → opaque white */
     EXPECT(p[0] > 250 && p[1] > 250 && p[2] > 250 && p[3] > 250);
@@ -87,10 +60,11 @@ int main(void) {
     EXPECT(p[3] < 20);
 
     /* ---- Clip rect confines a fill ---- */
-    EXPECT(flux_canvas_cpu_begin(c, &black) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &black}) == FLUX_OK);
     flux_canvas_clip_rect(c, (flux_rect){0, 0, 32, 64});
     flux_canvas_fill_rect_color(c, (flux_rect){0, 0, 64, 64}, red);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 10, 32, p); /* inside clip → red */
     EXPECT(p[0] > 250 && p[3] > 250);
@@ -98,10 +72,12 @@ int main(void) {
     EXPECT(p[0] < 5 && p[3] > 250);
 
     /* ---- Shared triangle edge is covered once, not blended twice ---- */
-    EXPECT(flux_canvas_cpu_begin(c, nullptr) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &(flux_color){0}}) ==
+           FLUX_OK);
     flux_color half_red = flux_color_rgba_premul(255, 0, 0, 128);
     flux_canvas_fill_rect_color(c, (flux_rect){16, 16, 32, 32}, half_red);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 32, 32, p); /* exactly on the quad's shared diagonal */
     EXPECT(p[0] >= 126 && p[0] <= 130);
@@ -111,13 +87,14 @@ int main(void) {
     EXPECT(p[3] >= 126 && p[3] <= 130);
 
     /* ---- Fixed SRC_OVER SDF does not inherit a preceding SRC paint ---- */
-    EXPECT(flux_canvas_cpu_begin(c, &black) == FLUX_OK);
-    flux_paint replace_red = flux_paint_solid(red);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &black}) == FLUX_OK);
+    flux_brush replace_red = flux_brush_solid(red);
     replace_red.blend = FLUX_BLEND_SRC;
     flux_canvas_fill_rect(c, (flux_rect){0, 0, W, H}, &replace_red);
     flux_color half_black = flux_color_rgba_premul(0, 0, 0, 128);
     flux_canvas_stroke_rrect(c, (flux_rect){16, 16, 32, 32}, 0.0f, half_black, 2.0f);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 16, 32, p); /* antialiased point on the left stroke */
     EXPECT(p[0] > 100 && p[0] < 200);
@@ -127,12 +104,13 @@ int main(void) {
 
     /* ---- Clip follows the current HiDPI transform and cannot expand ---- */
     EXPECT(flux_canvas_create_cpu(W, H, 2.0f, &c) == FLUX_OK);
-    EXPECT(flux_canvas_cpu_begin(c, &black) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &black}) == FLUX_OK);
     flux_canvas_clip_rect(c, (flux_rect){0, 0, 16, 32});
     /* A later, larger clip intersects the first instead of replacing it. */
     flux_canvas_clip_rect(c, (flux_rect){0, 0, 32, 32});
     flux_canvas_fill_rect_color(c, (flux_rect){0, 0, 32, 32}, red);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 24, 32, p); /* logical x=12: inside transformed clip */
     EXPECT(p[0] > 250 && p[3] > 250);
@@ -146,11 +124,12 @@ int main(void) {
         {0.0f, flux_color_rgba_premul(255, 0, 0, 255)},
         {1.0f, flux_color_rgba_premul(0, 0, 255, 255)},
     };
-    flux_paint g =
-        flux_paint_linear_gradient((flux_point){0, 0}, (flux_point){(float)W, 0}, stops, 2);
-    EXPECT(flux_canvas_cpu_begin(c, &black) == FLUX_OK);
+    flux_brush g =
+        flux_brush_linear_gradient((flux_point){0, 0}, (flux_point){(float)W, 0}, stops, 2);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &black}) == FLUX_OK);
     flux_canvas_fill_rect(c, (flux_rect){0, 0, (float)W, (float)H}, &g);
-    flux_canvas_cpu_end(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 2, 32, p); /* left → red end */
     EXPECT(p[0] > 200 && p[2] < 60);
@@ -171,9 +150,11 @@ int main(void) {
     d.height = H;
     d.scale = 1.0f;
     EXPECT(flux_canvas_create(&d, &c) == FLUX_OK);
-    EXPECT(flux_canvas_begin_frame(c, nullptr, &black) == FLUX_OK);
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .frame = nullptr,
+                                                         .clear_color = &black}) == FLUX_OK);
     flux_canvas_fill_rect_color(c, (flux_rect){0, 0, (float)W, (float)H}, red);
-    flux_canvas_end_frame(c);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     EXPECT(fb != nullptr && w == W && h == H);
     px(fb, stride, 32, 32, p);
@@ -183,16 +164,18 @@ int main(void) {
      * permits a clear without asking the backend for multisampling. */
     flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
     pd.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
-    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_OK);
-    flux_canvas_end_frame(c);
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 32, 32, p);
     EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
 
     flux_color blue = flux_color_rgba_premul(0, 0, 255, 255);
     pd.clear_color = &blue;
-    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_OK);
-    flux_canvas_end_frame(c);
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 32, 32, p);
     EXPECT(p[0] < 5 && p[1] < 5 && p[2] > 250 && p[3] > 250);
@@ -203,10 +186,11 @@ int main(void) {
     no_stencil.enabled = true;
     pd.next = &no_stencil;
     pd.clear_color = &black;
-    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_OK);
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
     flux_canvas_fill_rect_color(c, (flux_rect){8, 8, 16, 16}, red);
-    EXPECT(flux_canvas_end_frame_checked(c) == FLUX_OK);
-    EXPECT(flux_canvas_end_frame_checked(c) == FLUX_ERROR_INVALID_STATE);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_STATE);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 12, 12, p);
     EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
@@ -219,25 +203,28 @@ int main(void) {
     flux_path *eo_path = nullptr;
     EXPECT(flux_path_create(&eo_path, &arena) == FLUX_OK);
     flux_path_add_rect(eo_path, (flux_rect){8, 8, 16, 16});
-    flux_paint eo = flux_paint_solid(white);
-    eo.fill_rule = FLUX_FILL_EVEN_ODD;
+    flux_brush eo = flux_brush_solid(white);
+    flux_fill_rule eo_rule = FLUX_FILL_EVEN_ODD;
     pd.clear_color = &black;
-    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_OK);
-    flux_canvas_fill_path(c, eo_path, &eo);
-    EXPECT(flux_canvas_end_frame_checked(c) == FLUX_ERROR_INVALID_STATE);
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    flux_canvas_fill_path(c, eo_path, eo_rule, &eo);
+    EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_STATE);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 12, 12, p);
     EXPECT(p[0] < 5 && p[1] < 5 && p[2] < 5 && p[3] > 250);
     /* The sticky error was consumed by end; the next pass starts clean. */
-    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_OK);
-    EXPECT(flux_canvas_end_frame_checked(c) == FLUX_OK);
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     flux_arena_deinit(&arena);
     pd.next = nullptr;
 
     /* Restore the blue baseline used by the partial-clear preservation check. */
     pd.clear_color = &blue;
-    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_OK);
-    flux_canvas_end_frame(c);
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* A dirty render area constrains both the attachment clear and the
      * initial draw scissor. Pixels outside it retain the previous blue pass. */
@@ -246,8 +233,9 @@ int main(void) {
     pd.render_offset_y = 20;
     pd.render_width = 24;
     pd.render_height = 12;
-    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_OK);
-    flux_canvas_end_frame(c);
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 20, 24, p);
     EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
@@ -256,7 +244,8 @@ int main(void) {
 
     pd.render_offset_x = 63;
     pd.render_width = 2;
-    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
 
     pd.clear_color = nullptr;
     pd.antialias = FLUX_CANVAS_ANTIALIAS_MSAA_4X;
@@ -264,7 +253,8 @@ int main(void) {
     pd.render_offset_y = 0;
     pd.render_width = 0;
     pd.render_height = 0;
-    EXPECT(flux_canvas_begin_pass(c, nullptr, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
 
     /* ---- Antialias create-time policy (flux_canvas_antialias_desc) -----
      *
@@ -279,14 +269,16 @@ int main(void) {
                FLUX_OK);
 
         flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
-        EXPECT(flux_canvas_cpu_begin(ss2, &black) == FLUX_OK);
+        EXPECT(flux_canvas_begin(ss2, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .clear_color = &black}) == FLUX_OK);
         flux_canvas_fill_rect_color(ss2, (flux_rect){16, 16, 32, 32},
                                     flux_color_rgba_premul(255, 0, 0, 255));
-        flux_canvas_cpu_end(ss2);
-        EXPECT(flux_canvas_cpu_begin(ss1, &black) == FLUX_OK);
+        EXPECT(flux_canvas_end(ss2) == FLUX_OK);
+        EXPECT(flux_canvas_begin(ss1, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .clear_color = &black}) == FLUX_OK);
         flux_canvas_fill_rect_color(ss1, (flux_rect){16, 16, 32, 32},
                                     flux_color_rgba_premul(255, 0, 0, 255));
-        flux_canvas_cpu_end(ss1);
+        EXPECT(flux_canvas_end(ss1) == FLUX_OK);
 
         uint32_t w2, h2, st2, w1, h1, st1;
         const uint8_t *p2 = flux_canvas_cpu_pixels(ss2, &w2, &h2, &st2);
