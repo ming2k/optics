@@ -271,11 +271,31 @@ static void test_shift_tab_reverse_focus(void) {
     lens_release(ui);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Function keys F1 through F12 (ADR-0099)                           */
+/* ------------------------------------------------------------------ */
+static void test_function_keys_f1_to_f12(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    for (int k = LENS_KEY_F1; k <= LENS_KEY_F12; k++) {
+        lens_input in = IN0;
+        in.key_count = 1;
+        in.keys[0] = (lens_key_event){.key = k, .pressed = true, .repeat = false};
+        lens_begin(ui, &in);
+        (void)lens_button(ui, &(lens_button_opts){.label = "FKey"}).clicked;
+        test_end(ui);
+    }
+
+    lens_release(ui);
+}
+
 int main(void) {
     test_right_and_middle_click();
     test_multi_button_left_wins();
     test_drag_back_inside_yields_click();
     test_wheel_scrolls_content();
     test_shift_tab_reverse_focus();
+    test_function_keys_f1_to_f12();
     return TEST_REPORT();
 }

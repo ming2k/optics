@@ -39,6 +39,7 @@
 
 #include "cursor-shape-v1-client-protocol.h"
 #include "fractional-scale-v1-client-protocol.h"
+#include "xdg-activation-v1-client-protocol.h"
 #include <linux/input-event-codes.h> /* BTN_LEFT / BTN_RIGHT / BTN_MIDDLE — Linux-only, this file only */
 
 #include <ctype.h>
@@ -114,9 +115,10 @@ typedef struct wp_output {
  * ever compared, never dereferenced through this struct. */
 struct wp_offer_mimes {
     struct wl_data_offer *offer;
-    bool uri_list;   /* text/uri-list              */
-    bool text_utf8;  /* text/plain;charset=utf-8   */
-    bool text_plain; /* text/plain                 */
+    bool uri_list;           /* text/uri-list                */
+    bool text_utf8;          /* text/plain;charset=utf-8     */
+    bool text_plain;         /* text/plain                   */
+    bool gnome_copied_files; /* x-special/gnome-copied-files */
 };
 
 typedef struct wp_platform {
@@ -124,6 +126,8 @@ typedef struct wp_platform {
     struct wl_registry *registry;
     struct wl_compositor *compositor;
     struct xdg_wm_base *wm_base;
+    struct xdg_activation_v1 *activation;
+    uint32_t activation_name;
     struct wl_seat *seat;
     uint32_t seat_name; /* registry global name (for global_remove) */
     struct zxdg_decoration_manager_v1 *deco_mgr;
@@ -756,6 +760,90 @@ IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) 
     return true;
 }
 
+struct iris_token_capture {
+    char token[512];
+    bool done;
+};
+
+static void xdg_activation_token_done(void *data, struct xdg_activation_token_v1 *token,
+                                      const char *token_str) {
+    struct iris_token_capture *cap = data;
+    if (token_str && token_str[0]) {
+        strncpy(cap->token, token_str, sizeof(cap->token) - 1);
+        cap->token[sizeof(cap->token) - 1] = '\0';
+    }
+    cap->done = true;
+    (void)token;
+}
+
+static const struct xdg_activation_token_v1_listener activation_token_listener = {
+    .done = xdg_activation_token_done,
+};
+
+IRIS_API int iris_window_create_activation_token(const char *app_id, char *out_buf,
+                                                 size_t out_cap) {
+    wp_platform *pl = g_active_pl;
+    if (!pl || !pl->activation || !pl->surface || !out_buf || out_cap == 0)
+        return -1;
+
+    struct wl_event_queue *queue = wl_display_create_queue(pl->display);
+    if (!queue)
+        return -1;
+
+    struct xdg_activation_token_v1 *token = xdg_activation_v1_get_activation_token(pl->activation);
+    if (!token) {
+        wl_event_queue_destroy(queue);
+        return -1;
+    }
+
+    wl_proxy_set_queue((struct wl_proxy *)token, queue);
+
+    struct iris_token_capture cap = {0};
+    xdg_activation_token_v1_add_listener(token, &activation_token_listener, &cap);
+
+    if (pl->seat && pl->last_serial)
+        xdg_activation_token_v1_set_serial(token, pl->last_serial, pl->seat);
+    xdg_activation_token_v1_set_surface(token, pl->surface);
+    if (app_id && *app_id)
+        xdg_activation_token_v1_set_app_id(token, app_id);
+    xdg_activation_token_v1_commit(token);
+    wl_display_flush(pl->display);
+
+    /* Dedicated event queue dispatch with bounded polling to prevent deadlock
+     * while completely isolating the token receipt from the main UI event queue. */
+    int display_fd = wl_display_get_fd(pl->display);
+    struct pollfd pfd = {.fd = display_fd, .events = POLLIN};
+    int retries = 50; /* ~1 second maximum */
+    while (!cap.done && retries-- > 0) {
+        if (wl_display_dispatch_queue_pending(pl->display, queue) > 0) {
+            if (cap.done)
+                break;
+            continue;
+        }
+        wl_display_flush(pl->display);
+        int pr = poll(&pfd, 1, 20);
+        if (pr <= 0)
+            continue;
+        if (wl_display_dispatch_queue(pl->display, queue) == -1)
+            break;
+    }
+
+    xdg_activation_token_v1_destroy(token);
+    wl_event_queue_destroy(queue);
+
+    if (cap.done && cap.token[0]) {
+        strncpy(out_buf, cap.token, out_cap - 1);
+        out_buf[out_cap - 1] = '\0';
+        return 0;
+    }
+    return -1;
+}
+
+IRIS_API int iris_wayland_create_activation_token(const char *app_id, char *out_buf,
+                                                  size_t out_cap) {
+    return iris_window_create_activation_token(app_id, out_buf, out_cap);
+}
+
 static const struct wl_pointer_listener pointer_listener = {
     .enter = ptr_enter,
     .leave = ptr_leave,
@@ -1208,6 +1296,8 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
             fk = LENS_KEY_HOME;
         else if (sym == XKB_KEY_End)
             fk = LENS_KEY_END;
+        else if (sym >= XKB_KEY_F1 && sym <= XKB_KEY_F12)
+            fk = LENS_KEY_F1 + (int)(sym - XKB_KEY_F1);
         /* ASCII letters (and digits) so widgets see Ctrl+C/V/X/A etc.
          * xkb keysyms for these equal their ASCII codepoints; the level-0
          * keysym is the unshifted one ('a', never 'A'). */
@@ -1345,6 +1435,8 @@ static void doffer_offer(void *data, struct wl_data_offer *off, const char *mime
         return;
     if (strcmp(mime, "text/uri-list") == 0)
         slot->uri_list = true;
+    else if (strcmp(mime, "x-special/gnome-copied-files") == 0)
+        slot->gnome_copied_files = true;
     else if (strcmp(mime, "text/plain;charset=utf-8") == 0)
         slot->text_utf8 = true;
     else if (strcmp(mime, "text/plain") == 0)
@@ -1374,8 +1466,11 @@ static void ddev_data_offer(void *data, struct wl_data_device *dev, struct wl_da
      * enter referenced it) is ours to destroy, or it leaks. */
     if (pl->pending_offer_mimes.offer && pl->pending_offer_mimes.offer != offer)
         wl_data_offer_destroy(pl->pending_offer_mimes.offer);
-    pl->pending_offer_mimes = (struct wp_offer_mimes){
-        .offer = offer, .uri_list = false, .text_utf8 = false, .text_plain = false};
+    pl->pending_offer_mimes = (struct wp_offer_mimes){.offer = offer,
+                                                      .uri_list = false,
+                                                      .text_utf8 = false,
+                                                      .text_plain = false,
+                                                      .gnome_copied_files = false};
     wl_data_offer_add_listener(offer, &data_offer_listener, pl);
 }
 static void ddev_selection(void *data, struct wl_data_device *dev, struct wl_data_offer *offer) {
@@ -1395,6 +1490,8 @@ static void ddev_selection(void *data, struct wl_data_device *dev, struct wl_dat
  * text we can use (image-only drags, …). uri-list is preferred for file
  * drags; utf-8 text beats legacy text/plain. */
 static const char *offer_pick_mime(const struct wp_offer_mimes *m) {
+    if (m->gnome_copied_files)
+        return "x-special/gnome-copied-files";
     if (m->uri_list)
         return "text/uri-list";
     if (m->text_utf8)
@@ -1665,9 +1762,19 @@ static const struct wl_data_device_listener data_device_listener = {
 static void dsource_send(void *data, struct wl_data_source *src, const char *mime, int32_t fd) {
     wp_platform *pl = data;
     (void)src;
-    (void)mime;
     const char *p = pl->copy_buf;
     size_t left = pl->copy_len;
+
+    if (p && mime && strcmp(mime, "text/uri-list") == 0) {
+        if (left >= 5 && strncmp(p, "copy\n", 5) == 0) {
+            p += 5;
+            left -= 5;
+        } else if (left >= 4 && strncmp(p, "cut\n", 4) == 0) {
+            p += 4;
+            left -= 4;
+        }
+    }
+
     while (left) {
         ssize_t w = write(fd, p, left);
         if (w <= 0)
@@ -1720,6 +1827,16 @@ static void drag_source_send(void *data, struct wl_data_source *src, const char 
     } else if (pl->drag_text_buf && pl->drag_text_len) {
         const char *p = pl->drag_text_buf;
         size_t left = pl->drag_text_len;
+        if (p && mime && strcmp(mime, "text/uri-list") == 0 && p[0] == '/') {
+            char uri[4096];
+            int n = snprintf(uri, sizeof(uri), "file://%s\r\n", p);
+            if (n > 0 && (size_t)n < sizeof(uri)) {
+                ssize_t w = write(fd, uri, (size_t)n);
+                (void)w;
+                close(fd);
+                return;
+            }
+        }
         while (left) {
             ssize_t w = write(fd, p, left);
             if (w <= 0)
@@ -1809,6 +1926,11 @@ IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
                 wl_data_source_offer(pl->drag_source, source->mime_types[i]);
         }
     } else {
+        const char *t = source->static_text;
+        size_t tlen = source->static_text_len;
+        if (t && tlen > 0 && t[0] == '/') {
+            wl_data_source_offer(pl->drag_source, "text/uri-list");
+        }
         wl_data_source_offer(pl->drag_source, "text/plain;charset=utf-8");
         wl_data_source_offer(pl->drag_source, "text/plain");
         wl_data_source_offer(pl->drag_source, "UTF8_STRING");
@@ -1989,6 +2111,18 @@ static void clip_set_text(const char *utf8, size_t len, void *user) {
 
     pl->copy_source = wl_data_device_manager_create_data_source(pl->data_device_mgr);
     wl_data_source_add_listener(pl->copy_source, &data_source_listener, pl);
+
+    bool is_gnome_files = (len >= 5 && strncmp(copy, "copy\n", 5) == 0) ||
+                          (len >= 4 && strncmp(copy, "cut\n", 4) == 0);
+    bool is_uri_list =
+        (len >= 7 && (strncmp(copy, "file://", 7) == 0 || strncmp(copy, "http://", 7) == 0)) ||
+        (len >= 8 && strncmp(copy, "https://", 8) == 0);
+    if (is_gnome_files) {
+        wl_data_source_offer(pl->copy_source, "x-special/gnome-copied-files");
+        wl_data_source_offer(pl->copy_source, "text/uri-list");
+    } else if (is_uri_list) {
+        wl_data_source_offer(pl->copy_source, "text/uri-list");
+    }
     wl_data_source_offer(pl->copy_source, "text/plain;charset=utf-8");
     wl_data_source_offer(pl->copy_source, "text/plain");
     wl_data_source_offer(pl->copy_source, "UTF8_STRING");
@@ -2024,9 +2158,9 @@ static void clip_request_text(void *user) {
      * UTF-8 type when the offer predates our MIME tracking (harmless: the
      * source simply refuses a type it does not have). */
     const struct wp_offer_mimes *m = &pl->selection_offer_mimes;
-    const char *mime = (m->offer == pl->selection_offer && m->text_plain && !m->text_utf8)
-                           ? "text/plain"
-                           : "text/plain;charset=utf-8";
+    const char *mime = offer_pick_mime(m);
+    if (!mime)
+        mime = "text/plain;charset=utf-8";
     wl_data_offer_receive(pl->selection_offer, mime, fds[1]);
     close(fds[1]);
     wl_display_flush(pl->display);
@@ -2462,6 +2596,9 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
         /* xdg-foreign-unstable-v2: exports a window handle for portal
          * dialogs (file_dialog_portal.c passes it as parent_window). */
         pl->foreign_exporter = wl_registry_bind(reg, name, &zxdg_exporter_v2_interface, 1);
+    } else if (strcmp(iface, xdg_activation_v1_interface.name) == 0) {
+        pl->activation = wl_registry_bind(reg, name, &xdg_activation_v1_interface, 1);
+        pl->activation_name = name;
     }
 }
 
@@ -2484,6 +2621,10 @@ static void reg_remove(void *d, struct wl_registry *r, uint32_t name) {
     }
     if (pl->seat && name == pl->seat_name)
         seat_teardown(pl);
+    if (pl->activation && name == pl->activation_name) {
+        xdg_activation_v1_destroy(pl->activation);
+        pl->activation = NULL;
+    }
 }
 static const struct wl_registry_listener registry_listener = {
     .global = reg_global,
@@ -3555,6 +3696,8 @@ fail:
         zxdg_exported_v2_destroy(pl.foreign_exported);
     if (pl.foreign_exporter)
         zxdg_exporter_v2_destroy(pl.foreign_exporter);
+    if (pl.activation)
+        xdg_activation_v1_destroy(pl.activation);
 
     if (pl.deco)
         zxdg_toplevel_decoration_v1_destroy(pl.deco);

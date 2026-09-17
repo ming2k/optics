@@ -553,6 +553,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `iris_window_set_min_size` | Configure the minimum and maximum logical window size the compositor should respect. |
 | `iris_window_set_max_size` |  |
 | `iris_window_get_geometry` | Snapshot of the active window's logical geometry. |
+| `iris_window_create_activation_token` | Request a window activation token (xdg-activation-v1 on Wayland) to pass to an external or child process for seamless focus handoff. |
+| `iris_wayland_create_activation_token` | Compatibility alias for iris_window_create_activation_token. |
 
 ### `iris/cursor.h`
 

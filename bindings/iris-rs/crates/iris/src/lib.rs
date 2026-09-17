@@ -877,6 +877,34 @@ pub fn window_get_geometry() -> Option<WindowSize> {
     }
 }
 
+/// Request a window activation token (xdg-activation-v1 on Wayland) to pass
+/// to an external or child process for smooth focus handoff. Returns None if
+/// unsupported, inactive, or token creation fails.
+pub fn window_create_activation_token(app_id: Option<&str>) -> Option<String> {
+    let mut buf = [0u8; 512];
+    let app_id_c = app_id.and_then(|s| std::ffi::CString::new(s).ok());
+    let ptr = app_id_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    let rc = unsafe {
+        sys::iris_window_create_activation_token(
+            ptr,
+            buf.as_mut_ptr() as *mut std::os::raw::c_char,
+            buf.len(),
+        )
+    };
+    if rc == 0 {
+        let cstr = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr() as *const std::os::raw::c_char) };
+        cstr.to_str().ok().map(|s| s.to_string())
+    } else {
+        None
+    }
+}
+
+/// Request an XDG activation token (xdg-activation-v1) on Wayland to pass
+/// to an external process. Compatibility alias for [`window_create_activation_token`].
+pub fn wayland_activation_token(app_id: Option<&str>) -> Option<String> {
+    window_create_activation_token(app_id)
+}
+
 // =====================================================================
 //  Cross-thread wakeup (app.h — the ONLY thread-safe iris entry point)
 // =====================================================================
@@ -1329,6 +1357,7 @@ pub enum Capability {
     Decorations,
     FractionalScale,
     DragSource,
+    ActivationToken,
 }
 
 impl Capability {
@@ -1346,6 +1375,7 @@ impl Capability {
             Self::Decorations => C::IRIS_CAP_DECORATIONS,
             Self::FractionalScale => C::IRIS_CAP_FRACTIONAL_SCALE,
             Self::DragSource => C::IRIS_CAP_DRAG_SOURCE,
+            Self::ActivationToken => C::IRIS_CAP_ACTIVATION_TOKEN,
         }
     }
 }
@@ -1471,6 +1501,7 @@ mod tests {
                 assert!(supports(Capability::WindowControl));
                 assert!(supports(Capability::DropTarget));
                 assert!(supports(Capability::DragSource));
+                assert!(supports(Capability::ActivationToken));
             }
             "win32" => {
                 assert!(!supports(Capability::PrimarySelection));
@@ -1479,6 +1510,7 @@ mod tests {
                 assert!(!supports(Capability::A11y)); // stub, ADR-0056 D5
                 assert!(supports(Capability::DropTarget));
                 assert!(supports(Capability::DragSource));
+                assert!(!supports(Capability::ActivationToken));
             }
             "cocoa" => {
                 assert!(!supports(Capability::PrimarySelection));
@@ -1486,12 +1518,14 @@ mod tests {
                 assert!(supports(Capability::Decorations));
                 assert!(supports(Capability::DropTarget));
                 assert!(supports(Capability::DragSource));
+                assert!(!supports(Capability::ActivationToken));
             }
             _ => {
                 assert!(!supports(Capability::WindowControl));
                 assert!(!supports(Capability::FileDialog));
                 assert!(!supports(Capability::DropTarget));
                 assert!(!supports(Capability::DragSource));
+                assert!(!supports(Capability::ActivationToken));
             }
         }
     }
@@ -1526,6 +1560,8 @@ mod tests {
         window_set_min_size(200, 100);
         window_set_max_size(4096, 4096);
         assert_eq!(window_get_geometry(), None);
+        assert_eq!(window_create_activation_token(None), None);
+        assert_eq!(wayland_activation_token(Some("org.example.App")), None);
     }
 
     #[test]

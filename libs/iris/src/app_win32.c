@@ -380,6 +380,30 @@ static int vk_to_lens_key(WPARAM vk) {
         return LENS_KEY_HOME;
     case VK_END:
         return LENS_KEY_END;
+    case VK_F1:
+        return LENS_KEY_F1;
+    case VK_F2:
+        return LENS_KEY_F2;
+    case VK_F3:
+        return LENS_KEY_F3;
+    case VK_F4:
+        return LENS_KEY_F4;
+    case VK_F5:
+        return LENS_KEY_F5;
+    case VK_F6:
+        return LENS_KEY_F6;
+    case VK_F7:
+        return LENS_KEY_F7;
+    case VK_F8:
+        return LENS_KEY_F8;
+    case VK_F9:
+        return LENS_KEY_F9;
+    case VK_F10:
+        return LENS_KEY_F10;
+    case VK_F11:
+        return LENS_KEY_F11;
+    case VK_F12:
+        return LENS_KEY_F12;
     case VK_SHIFT:
     case VK_LSHIFT:
     case VK_RSHIFT:
@@ -834,6 +858,19 @@ IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) 
     if (out_height)
         *out_height = pl->height;
     return true;
+}
+
+IRIS_API int iris_window_create_activation_token(const char *app_id, char *out_buf,
+                                                 size_t out_cap) {
+    (void)app_id;
+    (void)out_buf;
+    (void)out_cap;
+    return -1;
+}
+
+IRIS_API int iris_wayland_create_activation_token(const char *app_id, char *out_buf,
+                                                  size_t out_cap) {
+    return iris_window_create_activation_token(app_id, out_buf, out_cap);
 }
 
 /* ================================================================== */

@@ -37,6 +37,7 @@ int main(void) {
     CHECK(iris_supports(IRIS_CAP_PRIMARY_SELECTION) == is_wayland);
     CHECK(iris_supports(IRIS_CAP_TABLET) == is_wayland);
     CHECK(iris_supports(IRIS_CAP_FRACTIONAL_SCALE) == is_win32);
+    CHECK(iris_supports(IRIS_CAP_ACTIVATION_TOKEN) == is_wayland);
 
     /* The window/file-dialog/DnD capability is backend-level, not OS-level:
      * only the linkable shell (no backend) lacks them. */

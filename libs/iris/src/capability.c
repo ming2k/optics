@@ -52,6 +52,7 @@ static const int irisi_caps_wayland[] = {
         * A runtime-refined variant can flip this when the globals land. */
     0, /* IRIS_CAP_FRACTIONAL_SCALE */
     1, /* IRIS_CAP_DRAG_SOURCE     */
+    1, /* IRIS_CAP_ACTIVATION_TOKEN */
 };
 
 #if defined(IRIS_BACKEND_WIN32)
@@ -67,6 +68,7 @@ static const int irisi_caps_win32[] = {
     1, /* DECORATIONS — native */
     1, /* FRACTIONAL_SCALE — per-monitor DPI v2 */
     1, /* DRAG_SOURCE — OLE DoDragDrop (ADR-0086) */
+    0, /* ACTIVATION_TOKEN */
 };
 #endif
 
@@ -83,6 +85,7 @@ static const int irisi_caps_cocoa[] = {
     1, /* DECORATIONS — native */
     0, /* FRACTIONAL_SCALE — integer backingScaleFactor */
     1, /* DRAG_SOURCE — NSDraggingSource (ADR-0086) */
+    0, /* ACTIVATION_TOKEN */
 };
 #endif
 

@@ -86,6 +86,16 @@ IRIS_API void iris_window_set_max_size(int32_t width, int32_t height);
  * optional (pass NULL to skip). Returns false when no app is active. */
 IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height);
 
+/* Request a window activation token (xdg-activation-v1 on Wayland) to pass
+ * to an external or child process for seamless focus handoff.
+ * Returns 0 on success with NUL-terminated token written into out_buf,
+ * or -1 if unsupported, inactive, or creation fails. */
+IRIS_API int iris_window_create_activation_token(const char *app_id, char *out_buf, size_t out_cap);
+
+/* Compatibility alias for iris_window_create_activation_token. */
+IRIS_API int iris_wayland_create_activation_token(const char *app_id, char *out_buf,
+                                                  size_t out_cap);
+
 #ifdef __cplusplus
 }
 #endif

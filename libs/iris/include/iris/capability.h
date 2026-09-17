@@ -90,6 +90,11 @@ typedef enum iris_capability {
      * Degradation: drag initiation returns -1. */
     IRIS_CAP_DRAG_SOURCE = 10,
 
+    /* Window activation token creation (window.h, ADR-0099). Used on Wayland to
+     * hand off focus to a spawned child or external process (xdg-activation-v1).
+     * Degradation: returns -1 and external process launches without a token. */
+    IRIS_CAP_ACTIVATION_TOKEN = 11,
+
     /* Append only. Never repurpose. Unknown values return false from
      * iris_supports() (forward compatibility with a newer libiris). */
 } iris_capability;

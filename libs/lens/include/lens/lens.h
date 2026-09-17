@@ -126,6 +126,18 @@ typedef enum lens_node_phase {
 #define LENS_KEY_END 265
 #define LENS_KEY_UP 266
 #define LENS_KEY_DOWN 267
+#define LENS_KEY_F1 280
+#define LENS_KEY_F2 281
+#define LENS_KEY_F3 282
+#define LENS_KEY_F4 283
+#define LENS_KEY_F5 284
+#define LENS_KEY_F6 285
+#define LENS_KEY_F7 286
+#define LENS_KEY_F8 287
+#define LENS_KEY_F9 288
+#define LENS_KEY_F10 289
+#define LENS_KEY_F11 290
+#define LENS_KEY_F12 291
 
 /* Modifier masks for lens_input.mods. */
 #define LENS_MOD_SHIFT (1u << 0)

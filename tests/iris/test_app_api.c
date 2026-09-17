@@ -68,5 +68,13 @@ int main(void) {
     CHECK(iris_pick_files(NULL, buf, 0, NULL) != 0);
     CHECK(iris_pick_files(NULL, NULL, sizeof buf, NULL) != 0);
 
+    /* Activation token creation outside a running app returns -1 (ADR-0099) */
+    char tok_buf[64];
+    CHECK(iris_window_create_activation_token(NULL, NULL, 0) != 0);
+    CHECK(iris_window_create_activation_token(NULL, tok_buf, 0) != 0);
+    CHECK(iris_window_create_activation_token(NULL, NULL, sizeof tok_buf) != 0);
+    CHECK(iris_window_create_activation_token("org.example.App", tok_buf, sizeof tok_buf) != 0);
+    CHECK(iris_wayland_create_activation_token("org.example.App", tok_buf, sizeof tok_buf) != 0);
+
     return TEST_REPORT();
 }

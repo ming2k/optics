@@ -209,4 +209,16 @@ pub mod key {
     pub const END: i32 = super::sys::LENS_KEY_END as i32;
     pub const UP: i32 = super::sys::LENS_KEY_UP as i32;
     pub const DOWN: i32 = super::sys::LENS_KEY_DOWN as i32;
+    pub const F1: i32 = super::sys::LENS_KEY_F1 as i32;
+    pub const F2: i32 = super::sys::LENS_KEY_F2 as i32;
+    pub const F3: i32 = super::sys::LENS_KEY_F3 as i32;
+    pub const F4: i32 = super::sys::LENS_KEY_F4 as i32;
+    pub const F5: i32 = super::sys::LENS_KEY_F5 as i32;
+    pub const F6: i32 = super::sys::LENS_KEY_F6 as i32;
+    pub const F7: i32 = super::sys::LENS_KEY_F7 as i32;
+    pub const F8: i32 = super::sys::LENS_KEY_F8 as i32;
+    pub const F9: i32 = super::sys::LENS_KEY_F9 as i32;
+    pub const F10: i32 = super::sys::LENS_KEY_F10 as i32;
+    pub const F11: i32 = super::sys::LENS_KEY_F11 as i32;
+    pub const F12: i32 = super::sys::LENS_KEY_F12 as i32;
 }

@@ -114,3 +114,4 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0096 | [Prism Mica foundation material — screen-anchored wallpaper composite](0096-prism-mica-foundation-material.md) | Accepted |
 | 0097 | [Canonical example taxonomy, legacy pruning, and lifecycle governance](0097-canonical-example-taxonomy-and-governance.md) | Accepted |
 | 0098 | [Developer tooling taxonomy, architecture guardrails, and unified verification](0098-developer-tooling-and-architecture-guardrails.md) | Accepted |
+| 0099 | [Desktop platform integration — extended function keys, focus activation, and MIME clipboard interop](0099-desktop-integration-fkeys-activation-and-clipboard.md) | Accepted |

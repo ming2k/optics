@@ -100,6 +100,7 @@ if host_system == 'linux'
       wl.find_protocol('text-input', state : 'unstable', version : 3),
       wl.find_protocol('fractional-scale', state : 'staging', version : 1),
       wl.find_protocol('primary-selection', state : 'unstable', version : 1),
+      wl.find_protocol('xdg-activation', state : 'staging', version : 1),
       # Pen/tablet input (tablet_wayland.c): pressure, eraser end, barrel
       # buttons. Compositors without tablets simply don't advertise the
       # global; the bridge stays inert.
