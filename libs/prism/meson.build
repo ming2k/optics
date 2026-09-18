@@ -82,7 +82,7 @@ backdrop_stats_comp_spv = custom_target('backdrop_stats.comp.spv',
   command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
 )
 
-prism_c_args = ['-DPRISM_BUILDING=1']
+prism_c_args = ['-DPRISM_BUILDING=1', '-DPRISM_SHADER_NO_EMBED=1']
 prism_c_args += cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
 
 spv2h_py = import('python').find_installation('python3')

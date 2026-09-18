@@ -32,6 +32,7 @@
 #include <flux/math.h>
 #include <lens/export.h> /* LENS_API — single source of truth */
 #include <lens/icon.h>
+#include <lens/material.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -417,6 +418,11 @@ typedef struct lens_theme {
     flux_color color_slider_track;
     flux_color color_slider_fill;
     flux_color color_slider_knob;
+
+    /* Semantic surface material recipes (Mica, Acrylic, Frosted, Liquid Glass).
+     * Populated with dual-plate polarity defaults: Pearl (1.0) on light themes,
+     * Smoke (0.0) on dark themes, with matching tints and border highlights. */
+    lens_theme_materials materials;
 } lens_theme;
 
 LENS_API lens_theme lens_theme_default(void);
@@ -456,6 +462,7 @@ typedef enum lens_style_field : uint32_t {
     LENS_STYLE_FONT_SIZE = 1u << 10,
     LENS_STYLE_OUTLINE_COLOR = 1u << 12, /* foreground contour colour  */
     LENS_STYLE_OUTLINE_WIDTH = 1u << 13, /* contour radius, logical px */
+    LENS_STYLE_MATERIAL = 1u << 14,      /* semantic material kind     */
 } lens_style_field;
 
 typedef struct lens_style {
@@ -477,6 +484,7 @@ typedef struct lens_style {
      * no theme token exists — unset means none. */
     flux_color outline_color;
     float outline_width;
+    lens_material_kind material;
 } lens_style;
 
 /* Empty style: nothing set, everything resolves to the theme. */
@@ -509,6 +517,8 @@ typedef struct lens_style_resolved {
     float font_size;
     flux_color outline_color;
     float outline_width;
+    lens_material_kind material;
+    lens_material_recipe material_recipe;
 } lens_style_resolved;
 
 /* Scoped style stack (ADR-0061 item 4): every widget declared between

@@ -75,6 +75,7 @@ install_headers(
   'include/lens/lens.h',
   'include/lens/patterns.h',
   'include/lens/icon.h',
+  'include/lens/material.h',
   'include/lens/export.h',
   subdir : 'lens',
 )

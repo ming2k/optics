@@ -115,3 +115,4 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0097 | [Canonical example taxonomy, legacy pruning, and lifecycle governance](0097-canonical-example-taxonomy-and-governance.md) | Accepted |
 | 0098 | [Developer tooling taxonomy, architecture guardrails, and unified verification](0098-developer-tooling-and-architecture-guardrails.md) | Accepted |
 | 0099 | [Desktop platform integration — extended function keys, focus activation, and MIME clipboard interop](0099-desktop-integration-fkeys-activation-and-clipboard.md) | Accepted |
+| 0100 | [Liquid Glass dual-rim TIR and screen-space environmental optics](0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md) | Accepted |

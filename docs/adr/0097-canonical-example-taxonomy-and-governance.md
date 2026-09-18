@@ -39,7 +39,8 @@ Over time, `examples/` accumulated 20+ programs with several architectural probl
      - `examples/flux-text/text_hello.c` (Flux-Text: HarfBuzz shaping and measurement)
      - `examples/lens/headless_demo.c` (Lens: headless tree layout, zero-GPU Flexbox)
      - `examples/anim/motion_spring.c` (Anim: closed-form spring, adaptive smoother, hysteresis)
-   - **Tier 2: Subsystem Seams (专项能力与架构接缝):** Dedicated, focused programs proving complex subsystems:
+   - **Tier 2: Subsystem Seams & Capability Scenarios (专项能力与多文件场景):** Dedicated, focused programs proving complex subsystems and idiomatic application architectures:
+     - `examples/scenarios/overlays/` (Multi-file scenario: modals, popups, dropdown menus, backdrop scrims)
      - `examples/iris/dnd_demo.c` (Drag-and-Drop cross-window exchange per ADR-0086)
      - `examples/iris/paint_static_demo.c` (Static damage tracking & zero-damage frame verification per ADR-0030)
      - `examples/iris/overlay_demo.c` (Modals, popups, and floating overlays)
@@ -52,7 +53,7 @@ Over time, `examples/` accumulated 20+ programs with several architectural probl
      - `examples/lens/state_demo.c` (Retained node state and store GC)
    - **Tier 3: Flagship Integration Galleries (全栈大画廊):** Comprehensive visual and interactive acceptance:
      - `examples/iris/widgets.c` (Unified UI catalog: buttons, inputs, sliders, checks, tabs, form controls)
-     - `examples/showcase/material_gallery.c` (Comparative showcase of all 4 Prism materials: Liquid Glass, Frosted, Acrylic, Mica)
+     - `examples/showcase/material_gallery/` (Comparative showcase of all 4 Prism materials: Liquid Glass, Frosted, Acrylic, Mica)
 
 2. **Prune redundant and obsolete targets:**
    - Remove `examples/flux/hello_triangle.c` (and its shaders).

@@ -40,6 +40,8 @@ static void test_theme_older_caller_prefix_only(void) {
     CHECK(got.size == sizeof(lens_theme));
     /* Normalization ran: title size derives from font_size, never 0. */
     CHECK(got.font_size_title > 0.0f);
+    /* Material normalization ran: default recipes populated. */
+    CHECK(got.materials.foundation.plate_opacity > 0.0f);
 
     lens_release(ui);
 }

@@ -75,6 +75,7 @@ if get_option('examples')
   endif
   subdir('examples/lens')
   subdir('examples/iris')
+  subdir('examples/scenarios')
 endif
 
 # LeakSanitizer suppressions (fontconfig's process-lifetime pattern cache

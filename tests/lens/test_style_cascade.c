@@ -253,6 +253,50 @@ static void test_skin_scratch_lifecycle(void) {
     lens_release(ui);
 }
 
+static void test_material_theme_and_cascade_resolution(void) {
+    lens_theme light = lens_theme_default();
+    lens_theme dark = lens_theme_dark();
+
+    /* 1. Theme recipe defaults: dual-polarity contrast */
+    CHECK_NEAR(light.materials.foundation.plate_polarity, 1.0f, 0.0f); /* Pearl */
+    CHECK_NEAR(dark.materials.foundation.plate_polarity, 0.0f, 0.0f);  /* Smoke */
+    CHECK_NEAR(light.materials.command.plate_polarity, 1.0f, 0.0f);
+    CHECK_NEAR(dark.materials.command.plate_polarity, 0.0f, 0.0f);
+    CHECK_NEAR(light.materials.floating.plate_polarity, 1.0f, 0.0f);
+    CHECK_NEAR(dark.materials.floating.plate_polarity, 0.0f, 0.0f);
+    CHECK_NEAR(light.materials.lens_body.plate_polarity, 1.0f, 0.0f);
+    CHECK_NEAR(dark.materials.lens_body.plate_polarity, 0.0f, 0.0f);
+
+    /* Dark mode requires higher border highlight for silhouette contrast */
+    CHECK(dark.materials.foundation.border_highlight > light.materials.foundation.border_highlight);
+
+    /* 2. Cascade style resolution: material kind -> mapped recipe */
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    lens_style s_acrylic = lens_style_init();
+    s_acrylic.fields = LENS_STYLE_MATERIAL;
+    s_acrylic.material = LENS_MATERIAL_ACRYLIC;
+
+    lens_style_resolved r_light = lensi_style_resolve(ui, &s_acrylic, &light, 0);
+    CHECK(r_light.material == LENS_MATERIAL_ACRYLIC);
+    CHECK_NEAR(r_light.material_recipe.plate_polarity, 1.0f, 0.0f);
+    CHECK_NEAR(r_light.material_recipe.plate_opacity, light.materials.floating.plate_opacity, 0.0f);
+
+    lens_style_resolved r_dark = lensi_style_resolve(ui, &s_acrylic, &dark, 0);
+    CHECK(r_dark.material == LENS_MATERIAL_ACRYLIC);
+    CHECK_NEAR(r_dark.material_recipe.plate_polarity, 0.0f, 0.0f);
+    CHECK_NEAR(r_dark.material_recipe.plate_opacity, dark.materials.floating.plate_opacity, 0.0f);
+
+    /* Unset material resolves to LENS_MATERIAL_NONE and zeroed recipe */
+    lens_style s_empty = lens_style_init();
+    lens_style_resolved r_none = lensi_style_resolve(ui, &s_empty, &light, 0);
+    CHECK(r_none.material == LENS_MATERIAL_NONE);
+    CHECK_NEAR(r_none.material_recipe.plate_opacity, 0.0f, 0.0f);
+
+    lens_release(ui);
+}
+
 int main(void) {
     test_merge_is_per_field();
     test_scope_reaches_terse_widgets();
@@ -261,5 +305,6 @@ int main(void) {
     test_box_style_beats_scope_beats_theme();
     test_outline_atoms_reach_draw_commands();
     test_skin_scratch_lifecycle();
+    test_material_theme_and_cascade_resolution();
     return TEST_REPORT();
 }

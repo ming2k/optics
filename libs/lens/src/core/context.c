@@ -193,6 +193,18 @@ static void lensi_theme_normalize(lens_theme *t) {
         t->slider_track_thickness = 6.0f;
     if (t->slider_knob_size <= 0.0f)
         t->slider_knob_size = 14.0f;
+
+    /* Normalize material recipes if uninitialized (e.g. from zero-initialized or older callers) */
+    if (t->materials.foundation.plate_opacity <= 0.0f && !t->materials.foundation.fallback) {
+        uint8_t r = 0, g = 0, b = 0, a = 0;
+        if (t->color_bg)
+            flux_color_unpack(t->color_bg, &r, &g, &b, &a);
+        bool dark = ((int)r + g + b) < 384;
+        t->materials.foundation = lens_material_recipe_default(LENS_MATERIAL_MICA, dark);
+        t->materials.command = lens_material_recipe_default(LENS_MATERIAL_MICA_ALT, dark);
+        t->materials.floating = lens_material_recipe_default(LENS_MATERIAL_ACRYLIC, dark);
+        t->materials.lens_body = lens_material_recipe_default(LENS_MATERIAL_LIQUID_GLASS, dark);
+    }
 }
 
 void lens_set_text_family(lens *ui, lens_text_family family) {

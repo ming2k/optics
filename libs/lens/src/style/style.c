@@ -85,6 +85,8 @@ lens_style lensi_style_merge(const lens_style *base, const lens_style *over) {
         out.outline_color = over->outline_color;
     if (f & LENS_STYLE_OUTLINE_WIDTH)
         out.outline_width = over->outline_width;
+    if (f & LENS_STYLE_MATERIAL)
+        out.material = over->material;
     out.fields = base->fields | over->fields;
     return out;
 }
@@ -130,6 +132,28 @@ lens_style_resolved lensi_style_resolve(lens *ui, const lens_style *eff, const l
     /* No theme tokens exist for the outline atoms: unset means none. */
     r.outline_color = (f & LENS_STYLE_OUTLINE_COLOR) ? eff->outline_color : 0;
     r.outline_width = (f & LENS_STYLE_OUTLINE_WIDTH) ? eff->outline_width : 0.0f;
+
+    /* Semantic surface material and recipe resolution */
+    r.material = (f & LENS_STYLE_MATERIAL) ? eff->material : LENS_MATERIAL_NONE;
+    switch (r.material) {
+    case LENS_MATERIAL_MICA:
+        r.material_recipe = theme->materials.foundation;
+        break;
+    case LENS_MATERIAL_MICA_ALT:
+        r.material_recipe = theme->materials.command;
+        break;
+    case LENS_MATERIAL_ACRYLIC:
+    case LENS_MATERIAL_FROSTED:
+        r.material_recipe = theme->materials.floating;
+        break;
+    case LENS_MATERIAL_LIQUID_GLASS:
+        r.material_recipe = theme->materials.lens_body;
+        break;
+    case LENS_MATERIAL_NONE:
+    default:
+        memset(&r.material_recipe, 0, sizeof(r.material_recipe));
+        break;
+    }
 
     /* Slots the cascade is responsible for — set directly, or derived
      * below — tracked so the disabled dim (step 3) touches only those. */

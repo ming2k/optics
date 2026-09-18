@@ -332,39 +332,34 @@ void main()
         colour *= 1.0 + 0.018 * focus * (0.40 + 0.60 * focus_key);
     }
 
-    /* Light. key_dir points from the shape toward the key light. The
-     * parameter is the light's position direction (default up-left;
-     * y runs downward), so light-facing edges have n·key > 0. */
+    /* Pure physical water droplet / dielectric convex lens model:
+     * Screen content passes through the droplet with single-pass optical refraction.
+     * Ambient light reflects off the curved meniscus surface as clean specular rims
+     * with zero ghosting or duplicate offset imagery. */
+
     vec2 key_dir = normalize(light_direction() + vec2(1e-6));
     float facing = max(dot(rim_normal, key_dir), 0.0);
     float away = max(dot(rim_normal, -key_dir), 0.0);
 
-    /* 1) Key line: a ~2 px gaussian hugging the silhouette on the
-     * light-facing side. This — not a broad rim wash — is the highlight. */
-    float line = exp(-(d + 0.75) * (d + 0.75) / 2.88);
-    colour += vec3(1.0) * (pc.rim_light * 1.05 * pow(facing, 1.6) * line);
+    /* 1) Key line: primary specular highlight on the light-facing side
+     * (top-left grazing Fresnel reflection on the outer convex meniscus). */
+    float line = exp(-(d + 0.65) * (d + 0.65) / 2.50);
+    colour += vec3(1.0) * (pc.rim_light * 1.25 * pow(facing, 1.5) * line);
 
-    /* 2) Soft sheen across the rim band, keyed to the light. */
-    colour += vec3(1.0) * (pc.rim_light * 0.10 * facing * facing * u * u);
+    /* 2) Secondary Internal Total Reflection (TIR) / Back-face Caustic Rim:
+     * Light entering the droplet refracts through the medium and undergoes
+     * total internal reflection against the opposite (bottom-right) curved boundary,
+     * focusing into a clean secondary caustic rim. */
+    float tir_line = exp(-(d + 0.75) * (d + 0.75) / 2.50);
+    colour += vec3(1.0) * (pc.rim_light * 1.15 * pow(away, 1.4) * tir_line);
 
-    /* 3) Fresnel env sheen: direction-modulated, so it brightens the top
-     * and dies at the bottom instead of ringing the whole silhouette. */
-    float fresnel = u * u * u * u;
-    colour += vec3(1.0) * (pc.rim_light * 0.12 * fresnel * (0.15 + 0.85 * facing * facing));
+    /* 3) Subtle meniscus perimeter sheen. */
+    float perimeter_glint = exp(-(d + 0.50) * (d + 0.50) / 2.00);
+    colour += vec3(1.0) * (pc.rim_light * 0.15 * perimeter_glint);
 
-    /* 4) Shadow side: a thin dark line opposite the key light. */
-    colour *= 1.0 - 0.22 * pc.rim_light * pow(away, 1.8) * line;
-
-    /* 4b) Edge absorption: grazing light dies at the silhouette in every
-     * direction. Stronger over bright content, where the body would
-     * otherwise merge with a white backdrop. */
-    float absorb = (0.05 + 0.09 * (1.0 - dark_backdrop)) * exp(-(d + 0.5) * (d + 0.5) / 1.62);
+    /* 4) Edge absorption: microscopic contact line where the droplet meets the surface. */
+    float absorb = (0.06 + 0.12 * (1.0 - dark_backdrop)) * exp(-d * d / 1.50);
     colour *= 1.0 - absorb;
-
-    /* 5) Transmitted-light trough: faint concentration just inside the
-     * bottom rim, where light through the lens pools. */
-    float trough = away * away * smoothstep(0.25, 0.75, u) * (1.0 - smoothstep(0.85, 1.0, u));
-    colour += vec3(1.0) * (0.05 * pc.rim_light * trough);
 
     /* Sub-LSB dither: smooth studio gradients band visibly in rgba8.
      * 16F outputs keep full float precision instead. */

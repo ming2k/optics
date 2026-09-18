@@ -2,6 +2,114 @@
 
 #include "../internal.h"
 
+lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool dark) {
+    lens_material_recipe r = {0};
+    if (dark) {
+        switch (kind) {
+        case LENS_MATERIAL_MICA:
+            r.plate_polarity = 0.0f; /* Smoke */
+            r.plate_opacity = 0.65f;
+            r.tint = flux_color_rgba(0x1e, 0x2b, 0x3e, 0xff);
+            r.tint_opacity = 0.25f;
+            r.border_highlight = 0.20f;
+            r.shadow_alpha = 0.30f;
+            r.shadow_blur = 16.0f;
+            r.noise_intensity = 0.02f;
+            r.fallback = flux_color_rgba(0x20, 0x20, 0x20, 0xff);
+            break;
+        case LENS_MATERIAL_MICA_ALT:
+            r.plate_polarity = 0.0f;
+            r.plate_opacity = 0.80f;
+            r.tint = flux_color_rgba(0x18, 0x22, 0x32, 0xff);
+            r.tint_opacity = 0.40f;
+            r.border_highlight = 0.24f;
+            r.shadow_alpha = 0.35f;
+            r.shadow_blur = 12.0f;
+            r.noise_intensity = 0.02f;
+            r.fallback = flux_color_rgba(0x18, 0x18, 0x18, 0xff);
+            break;
+        case LENS_MATERIAL_ACRYLIC:
+        case LENS_MATERIAL_FROSTED:
+            r.plate_polarity = 0.0f;
+            r.plate_opacity = 0.85f;
+            r.tint = flux_color_rgba(0x22, 0x30, 0x48, 0xff);
+            r.tint_opacity = 0.30f;
+            r.border_highlight = 0.22f;
+            r.shadow_alpha = 0.40f;
+            r.shadow_blur = 24.0f;
+            r.noise_intensity = 0.03f;
+            r.fallback = flux_color_rgba(0x1a, 0x1a, 0x20, 0xff);
+            break;
+        case LENS_MATERIAL_LIQUID_GLASS:
+            r.plate_polarity = 0.0f;
+            r.plate_opacity = 1.0f;
+            r.tint = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
+            r.tint_opacity = 0.15f;
+            r.border_highlight = 0.60f;
+            r.shadow_alpha = 0.35f;
+            r.shadow_blur = 16.0f;
+            r.noise_intensity = 0.0f;
+            r.fallback = flux_color_rgba(0x0e, 0x0e, 0x11, 0xff);
+            break;
+        case LENS_MATERIAL_NONE:
+        default:
+            break;
+        }
+    } else {
+        switch (kind) {
+        case LENS_MATERIAL_MICA:
+            r.plate_polarity = 1.0f; /* Pearl */
+            r.plate_opacity = 0.65f;
+            r.tint = flux_color_rgba(0xef, 0xf3, 0xf8, 0xff);
+            r.tint_opacity = 0.20f;
+            r.border_highlight = 0.10f;
+            r.shadow_alpha = 0.15f;
+            r.shadow_blur = 16.0f;
+            r.noise_intensity = 0.02f;
+            r.fallback = flux_color_rgba(0xf3, 0xf3, 0xf3, 0xff);
+            break;
+        case LENS_MATERIAL_MICA_ALT:
+            r.plate_polarity = 1.0f;
+            r.plate_opacity = 0.78f;
+            r.tint = flux_color_rgba(0xe2, 0xe8, 0xf0, 0xff);
+            r.tint_opacity = 0.35f;
+            r.border_highlight = 0.12f;
+            r.shadow_alpha = 0.18f;
+            r.shadow_blur = 12.0f;
+            r.noise_intensity = 0.02f;
+            r.fallback = flux_color_rgba(0xeb, 0xeb, 0xeb, 0xff);
+            break;
+        case LENS_MATERIAL_ACRYLIC:
+        case LENS_MATERIAL_FROSTED:
+            r.plate_polarity = 1.0f;
+            r.plate_opacity = 0.85f;
+            r.tint = flux_color_rgba(0xf0, 0xf4, 0xf8, 0xff);
+            r.tint_opacity = 0.25f;
+            r.border_highlight = 0.14f;
+            r.shadow_alpha = 0.25f;
+            r.shadow_blur = 20.0f;
+            r.noise_intensity = 0.03f;
+            r.fallback = flux_color_rgba(0xf3, 0xf4, 0xf6, 0xff);
+            break;
+        case LENS_MATERIAL_LIQUID_GLASS:
+            r.plate_polarity = 1.0f;
+            r.plate_opacity = 1.0f;
+            r.tint = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
+            r.tint_opacity = 0.15f;
+            r.border_highlight = 0.50f;
+            r.shadow_alpha = 0.25f;
+            r.shadow_blur = 16.0f;
+            r.noise_intensity = 0.0f;
+            r.fallback = flux_color_rgba(0xfa, 0xfa, 0xfb, 0xff);
+            break;
+        case LENS_MATERIAL_NONE:
+        default:
+            break;
+        }
+    }
+    return r;
+}
+
 lens_theme lens_theme_dark(void) {
     lens_theme t = {0};
     t.size = sizeof(lens_theme);
@@ -44,6 +152,13 @@ lens_theme lens_theme_dark(void) {
     t.color_slider_knob = t.color_fg;
     t.slider_track_thickness = 6.0f;
     t.slider_knob_size = 14.0f;
+
+    /* Surface materials (Smoke plate polarity, subtle specular edge highlight) */
+    t.materials.foundation = lens_material_recipe_default(LENS_MATERIAL_MICA, true);
+    t.materials.command = lens_material_recipe_default(LENS_MATERIAL_MICA_ALT, true);
+    t.materials.floating = lens_material_recipe_default(LENS_MATERIAL_ACRYLIC, true);
+    t.materials.lens_body = lens_material_recipe_default(LENS_MATERIAL_LIQUID_GLASS, true);
+
     return t;
 }
 
@@ -88,5 +203,12 @@ lens_theme lens_theme_default(void) {
     t.color_slider_knob = t.color_fg;
     t.slider_track_thickness = 6.0f;
     t.slider_knob_size = 14.0f;
+
+    /* Surface materials (Pearl plate polarity, soft diffuse elevation shadow) */
+    t.materials.foundation = lens_material_recipe_default(LENS_MATERIAL_MICA, false);
+    t.materials.command = lens_material_recipe_default(LENS_MATERIAL_MICA_ALT, false);
+    t.materials.floating = lens_material_recipe_default(LENS_MATERIAL_ACRYLIC, false);
+    t.materials.lens_body = lens_material_recipe_default(LENS_MATERIAL_LIQUID_GLASS, false);
+
     return t;
 }

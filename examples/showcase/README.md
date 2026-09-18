@@ -34,10 +34,11 @@ stripes, geometric rings) and overlays all four modern UI materials side-by-side
 ### Interactive Hotkeys
 
 - `1`: 4-Up Grid comparison view (all 4 materials side-by-side)
-- `2`: Liquid Glass fullscreen focus
+- `2`: Liquid Glass comprehensive suite (Hero G2 Squircle + Focus lens, Fluid Metaball fusion, Amber tint, micro-dock pill)
 - `3`: Frosted Glass fullscreen focus
 - `4`: Acrylic fullscreen focus
 - `5`: Mica & Mica Alt fullscreen focus
+- `B`: Cycle backdrop style (Dynamic Waves, Pure Black, Pure White)
 - `D`: Toggle Dark / Light mode theme plate polarity (Smoke vs. Pearl)
 - `F`: Toggle Inactive state fallback on Mica
 - `Space`: Pause / Resume backdrop animation
