@@ -125,6 +125,7 @@ application can use to build a custom renderer on top of `flux-core`. See
 
 ## See Also
 
+- [Value-Semantic Rendering](rendering-model.md) — the rendering architecture, display lists, and GPU hardware mapping.
 - [Vulkan backend](vulkan-backend.md) — the per-frame lifecycle in detail.
 - [ADR-0001 — project foundations](../adr/0001-project-foundations.md)
 - [ADR-0002 — per-module device state](../adr/0002-per-module-device-state.md)

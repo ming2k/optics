@@ -13,7 +13,8 @@ Choose a section based on what you are trying to do:
 - [How-to guides](how-to/record-and-present-a-frame.md) — complete a focused
   rendering task.
 - [Explanation](explanation/application-architecture.md) — understand the
-  stack boundaries, Vulkan backend, and Rust bindings.
+  stack boundaries, [Value-Semantic Rendering](explanation/rendering-model.md),
+  Vulkan backend, and Rust bindings.
 - [Reference](reference/api.md) — look up API contracts, symbols, effects,
   the [composition graph](reference/composition-graph.md), threading rules,
   and terminology.
