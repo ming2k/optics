@@ -13,6 +13,13 @@ either.
 
 ## [Unreleased]
 
+## [0.0.44] - 2026-09-18
+
+### Added
+
+- **iris / lens**: Desktop platform integration — extended function keys (F1–F24), programmatic focus activation (`iris_window_request_focus`), and MIME-typed clipboard interop across Cocoa, Wayland, and Win32 platforms (ADR-0099).
+- **docs**: Added Value-Semantic Rendering (VSR) architectural explanation and data-flow model (`docs/explanation/rendering-model.md`).
+
 ## [0.0.43] - 2026-09-16
 
 ### Added
