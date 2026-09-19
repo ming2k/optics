@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.45] - 2026-09-19
+
 ### Added
 
 - **flux / prism**: Formalized physical sampling governor and bounded material dispatch architecture (ADR-0101). Codified physical Shannon-Nyquist bandwidth governor, sampling tap budgets, and bounded footprints.
@@ -22,7 +24,7 @@ either.
 
 - **prism(shaders)**: 3D Meniscus dual-rim lighting and G2 metric gradient normalization for Liquid Glass (ADR-0100). Restored unbroken specular highlights across all 4 corners and closed capsule arcs ($1.30:1$ sweet-spot ratio); eliminated ghost focus field artifacts on hero glass plates.
 - **prism(shaders)**: Fixed hollow-shell shadow discontinuity across Mica, Acrylic, and Frosted compute shaders, curing misaligned ghost card outlines.
-- **showcase**: Fixed `material_gallery` 4-up grid view symmetry with unified monolithic Mica tile and aligned 16px corner radius.
+- **showcase**: Optimized `material_gallery` with circular theme toggle, left control sidebar, material-styled tab buttons, 4-up grid symmetry with unified monolithic Mica tile, and dynamic background switcher.
 
 ## [0.0.44] - 2026-09-18
 
