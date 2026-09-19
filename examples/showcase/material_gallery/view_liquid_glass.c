@@ -1,29 +1,23 @@
 /*
- * view_liquid_glass.c — dedicated Liquid Glass showcase exhibiting the full physical
- * feature suite: G2 squircle continuous curvature, internal focus lens field,
- * fluid metaball smooth union, tinted optical absorption, and micro-scale dock pill.
+ * view_liquid_glass.c — dedicated Liquid Glass showcase exhibiting the pure physical
+ * feature suite: G2 squircle continuous curvature, fluid metaball smooth union,
+ * tinted optical absorption, and micro-scale dock pill.
  */
 
 #include "gallery.h"
 
 void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image *blurred,
                                 const gallery_layout *l) {
+    (void)app;
     float gap = 20.0f * l->scale;
     float hero_w = l->avail_w * 0.50f - gap * 0.5f;
     float hero_h = l->avail_h;
     float hero_x = l->margin_x;
     float hero_y = l->header_h;
 
-    /* Exhibit 1: Hero Surface (G2 Squircle + Focus Field) */
+    /* Exhibit 1: Hero Surface (Continuous G2 Superellipse Squircle) */
     prism_liquid_glass_shape hero_shapes[1] = {
         {.bounds = {hero_x, hero_y, hero_w, hero_h}, .corner_radius = 26.0f * l->scale},
-    };
-    float focus_pad = 28.0f * l->scale;
-    float focus_w = hero_w - focus_pad * 2.0f;
-    float focus_h = 100.0f * l->scale;
-    prism_liquid_glass_shape focus_shape = {
-        .bounds = {hero_x + focus_pad, hero_y + 36.0f * l->scale, focus_w, focus_h},
-        .corner_radius = 18.0f * l->scale,
     };
 
     prism_liquid_glass_group hero_group = PRISM_LIQUID_GLASS_GROUP_INIT;
@@ -34,8 +28,6 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     hero_group.shadow_blur = 24.0f * l->scale;
     hero_group.shadow_offset_y = 8.0f * l->scale;
     hero_group.curvature = 1.0f; /* Continuous G2 superellipse squircle */
-    hero_group.focus = focus_shape;
-    hero_group.focus_strength = 1.0f; /* Optical focus clarity and light amplification */
 
     /* Exhibit 2: Fluid Metaball Organic Smooth-Union */
     float right_x = hero_x + hero_w + gap;
@@ -80,8 +72,9 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     tint_group.shapes = tint_shapes;
     tint_group.shape_count = 1;
     tint_group.plate_polarity = l->polarity;
-    tint_group.tint_color = app->dark_mode ? 0xF5BA42u : 0xD97706u; /* Amber gold */
-    tint_group.tint_strength = 1.35f;
+    tint_group.tint_color = app->glass_amber ? (app->dark_mode ? 0xF5BA42u : 0xD97706u)
+                                             : (app->dark_mode ? 0x38BDF8u : 0x0284C7u);
+    tint_group.tint_strength = app->glass_amber ? 1.35f : 0.40f;
     tint_group.shadow_alpha = 0.26f;
     tint_group.shadow_blur = 18.0f * l->scale;
     tint_group.shadow_offset_y = 6.0f * l->scale;

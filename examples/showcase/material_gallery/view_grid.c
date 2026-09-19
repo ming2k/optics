@@ -40,14 +40,16 @@ void gallery_view_grid_prepare(gallery_app *app, flux_frame *frame, flux_image *
 
     /* 2. Frosted Glass (Top-Right) */
     {
+        lens_material_recipe frost_r =
+            lens_material_recipe_default(LENS_MATERIAL_FROSTED, app->dark_mode);
         prism_frosted_group group = PRISM_FROSTED_GROUP_INIT;
         group.shape = (prism_frosted_shape){
             .bounds = {x1, y0, pad_w, pad_h},
             .corner_radius = 16.0f * l->scale,
         };
-        group.tint_color = app->dark_mode ? 0x1A2540 : 0xEAF2FF;
-        group.shadow_alpha = 0.25f;
-        group.shadow_blur = 16.0f * l->scale;
+        group.tint_color = frost_r.tint & 0x00FFFFFFu;
+        group.shadow_alpha = frost_r.shadow_alpha;
+        group.shadow_blur = frost_r.shadow_blur * l->scale;
         group.shadow_offset_y = 6.0f * l->scale;
 
         prism_frosted_desc desc = PRISM_FROSTED_DESC_INIT;
@@ -56,20 +58,22 @@ void gallery_view_grid_prepare(gallery_app *app, flux_frame *frame, flux_image *
         desc.groups = &group;
         desc.group_count = 1;
         desc.saturation = 1.35f;
-        desc.tint_strength = 0.15f;
+        desc.tint_strength = frost_r.tint_opacity;
         (void)prism_frosted_filter_apply(app->frosted_filter, frame, &desc, &app->frost_out);
     }
 
     /* 3. Acrylic (Bottom-Left) */
     {
+        lens_material_recipe acrylic_r =
+            lens_material_recipe_default(LENS_MATERIAL_ACRYLIC, app->dark_mode);
         prism_acrylic_group group = PRISM_ACRYLIC_GROUP_INIT;
         group.shape = (prism_acrylic_shape){
             .bounds = {x0, y1, pad_w, pad_h},
             .corner_radius = 16.0f * l->scale,
         };
-        group.tint_color = app->dark_mode ? 0x223048 : 0xF0F4F8;
-        group.shadow_alpha = 0.25f;
-        group.shadow_blur = 16.0f * l->scale;
+        group.tint_color = acrylic_r.tint & 0x00FFFFFFu;
+        group.shadow_alpha = acrylic_r.shadow_alpha;
+        group.shadow_blur = acrylic_r.shadow_blur * l->scale;
         group.shadow_offset_y = 6.0f * l->scale;
 
         prism_acrylic_desc desc = PRISM_ACRYLIC_DESC_INIT;
@@ -78,52 +82,39 @@ void gallery_view_grid_prepare(gallery_app *app, flux_frame *frame, flux_image *
         desc.groups = &group;
         desc.group_count = 1;
         desc.luminance_plate = l->polarity;
-        desc.tint_strength = 0.25f;
-        desc.noise_intensity = 0.03f;
+        desc.tint_strength = acrylic_r.tint_opacity;
+        desc.noise_intensity = acrylic_r.noise_intensity;
         desc.border_width = 1.0f * l->scale;
-        desc.border_alpha = 0.18f;
+        desc.border_alpha = acrylic_r.border_highlight;
         (void)prism_acrylic_filter_apply(app->acrylic_filter, frame, &desc, &app->acrylic_out);
     }
 
-    /* 4. Mica & Mica Alt (Bottom-Right: split into two side-by-side tiles) */
+    /* 4. Mica Foundation (Bottom-Right: monolithic tile matching 2x2 grid) */
     {
-        float sub_gap = 12.0f * l->scale;
-        float sub_w = (pad_w - sub_gap) * 0.5f;
-
-        prism_mica_group groups[2] = {
-            {
-                .shape =
-                    {
-                        .bounds = {x1, y1, sub_w, pad_h},
-                        .corner_radius = 16.0f * l->scale,
-                    },
-                .shadow_alpha = 0.25f,
-                .shadow_blur = 16.0f * l->scale,
-                .shadow_offset_y = 6.0f * l->scale,
-            },
-            {
-                .shape =
-                    {
-                        .bounds = {x1 + sub_w + sub_gap, y1, sub_w, pad_h},
-                        .corner_radius = 16.0f * l->scale,
-                    },
-                .shadow_alpha = 0.25f,
-                .shadow_blur = 16.0f * l->scale,
-                .shadow_offset_y = 6.0f * l->scale,
-            },
+        lens_material_recipe mica_r =
+            lens_material_recipe_default(LENS_MATERIAL_MICA, app->dark_mode);
+        prism_mica_group group = {
+            .shape =
+                {
+                    .bounds = {x1, y1, pad_w, pad_h},
+                    .corner_radius = 16.0f * l->scale,
+                },
+            .shadow_alpha = mica_r.shadow_alpha,
+            .shadow_blur = mica_r.shadow_blur * l->scale,
+            .shadow_offset_y = 6.0f * l->scale,
         };
 
         prism_mica_desc desc = PRISM_MICA_DESC_INIT;
         desc.wallpaper = app->capture;
         desc.blurred_wallpaper = blurred;
-        desc.groups = groups;
-        desc.group_count = 2;
+        desc.groups = &group;
+        desc.group_count = 1;
         desc.kind = PRISM_MICA_BASE;
         desc.screen_width = 0.0f;
         desc.screen_height = 0.0f;
         desc.luminosity_plate = l->polarity;
-        desc.tint_color = app->dark_mode ? 0x1E2B3E : 0xEFF3F8;
-        desc.fallback_color = app->dark_mode ? 0x202020 : 0xF3F3F3;
+        desc.tint_color = mica_r.tint & 0x00FFFFFFu;
+        desc.fallback_color = mica_r.fallback & 0x00FFFFFFu;
         desc.fallback_weight = app->inactive_fallback ? 1.0f : 0.0f;
         (void)prism_mica_filter_apply(app->mica_filter, frame, &desc, &app->mica_out);
     }

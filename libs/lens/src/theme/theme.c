@@ -212,3 +212,26 @@ lens_theme lens_theme_default(void) {
 
     return t;
 }
+
+lens_theme lens_theme_for_material(lens_material_kind kind, bool dark) {
+    lens_theme t = dark ? lens_theme_dark() : lens_theme_default();
+    lens_material_recipe r = lens_material_recipe_default(kind, dark);
+
+    if (dark) {
+        /* Clear solid container fill so the refractive/frosted medium shines through */
+        t.color_bg = flux_color_rgba(0x00, 0x00, 0x00, 0x00);
+        t.color_fg = flux_color_rgba(0xfa, 0xfa, 0xfc, 0xff);
+        t.color_border = flux_color_rgba(0xff, 0xff, 0xff, (uint8_t)(r.border_highlight * 255.0f));
+        t.color_hover = flux_color_rgba(0xff, 0xff, 0xff, 0x14);
+        t.color_active = flux_color_rgba(0xff, 0xff, 0xff, 0x24);
+    } else {
+        t.color_bg = flux_color_rgba(0xff, 0xff, 0xff, 0x00);
+        t.color_fg = flux_color_rgba(0x0a, 0x0f, 0x1d, 0xff);
+        t.color_border =
+            flux_color_rgba(0x00, 0x00, 0x00, (uint8_t)(r.border_highlight * 255.0f * 0.7f));
+        t.color_hover = flux_color_rgba(0x00, 0x00, 0x00, 0x0c);
+        t.color_active = flux_color_rgba(0x00, 0x00, 0x00, 0x18);
+    }
+
+    return t;
+}

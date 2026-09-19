@@ -1,35 +1,34 @@
 /*
  * ui.c — top floating control dock, material-specific view selectors,
- * boolean toggle buttons, and backdrop dropdown menu.
+ * standalone circular dark/light mode toggle, frosted subtitle pill,
+ * and left-hand material interaction column.
  */
 
 #include "gallery.h"
 
-void gallery_apply_theme(lens *ui, bool dark) {
-    if (!ui)
+void gallery_apply_theme(gallery_app *app, lens *ui) {
+    if (!ui || !app)
         return;
-    lens_theme t = dark ? lens_theme_dark() : lens_theme_default();
-    if (dark) {
-        /* Harmonious, refined dark mode:
-         * Replaces harsh oversaturated electric blue (#3B82F6) with a balanced,
-         * elegant sapphire tone (#3875D7), plus translucent glass surfaces. */
-        t.color_accent = flux_color_rgba(56, 117, 215, 255); /* #3875D7 */
-        t.color_bg = flux_color_rgba(18, 20, 28, 210);       /* dark glass capsule */
-        t.color_hover = flux_color_rgba(255, 255, 255, 24);  /* luminous hover glow */
-        t.color_active = flux_color_rgba(255, 255, 255, 42); /* soft press */
-        t.color_border = flux_color_rgba(255, 255, 255, 28); /* hairline translucent border */
-        t.color_fg = flux_color_rgba(242, 244, 250, 255);    /* soft off-white text */
-        t.corner_radius = 7.0f;
-    } else {
-        /* Harmonious, luminous light mode */
-        t.color_accent = flux_color_rgba(37, 99, 235, 255); /* royal blue #2563EB */
-        t.color_bg = flux_color_rgba(255, 255, 255, 210);   /* pearl glass capsule */
-        t.color_hover = flux_color_rgba(0, 0, 0, 18);       /* soft hover */
-        t.color_active = flux_color_rgba(0, 0, 0, 32);
-        t.color_border = flux_color_rgba(0, 0, 0, 25);
-        t.color_fg = flux_color_rgba(15, 23, 42, 255);
-        t.corner_radius = 7.0f;
+    lens_theme t;
+    switch (app->view) {
+    case VIEW_GLASS:
+        t = lens_theme_for_material(LENS_MATERIAL_LIQUID_GLASS, app->dark_mode);
+        break;
+    case VIEW_FROST:
+        t = lens_theme_for_material(LENS_MATERIAL_FROSTED, app->dark_mode);
+        break;
+    case VIEW_ACRYLIC:
+        t = lens_theme_for_material(LENS_MATERIAL_ACRYLIC, app->dark_mode);
+        break;
+    case VIEW_MICA:
+        t = lens_theme_for_material(LENS_MATERIAL_MICA, app->dark_mode);
+        break;
+    case VIEW_GRID:
+    default:
+        t = app->dark_mode ? lens_theme_dark() : lens_theme_default();
+        break;
     }
+    t.corner_radius = 8.0f;
     lens_set_theme(ui, t);
 }
 
@@ -44,21 +43,26 @@ void gallery_ui_build(gallery_app *app, lens *ui, const lens_input *in) {
             return;
         } else if (key == '1') {
             app->view = VIEW_GRID;
+            gallery_apply_theme(app, ui);
         } else if (key == '2') {
             app->view = VIEW_GLASS;
+            gallery_apply_theme(app, ui);
         } else if (key == '3') {
             app->view = VIEW_FROST;
+            gallery_apply_theme(app, ui);
         } else if (key == '4') {
             app->view = VIEW_ACRYLIC;
+            gallery_apply_theme(app, ui);
         } else if (key == '5') {
             app->view = VIEW_MICA;
+            gallery_apply_theme(app, ui);
         } else if (key == ' ' || key == 'p' || key == 'P') {
             app->animating = !app->animating;
         } else if (key == 'b' || key == 'B') {
             app->backdrop = (backdrop_kind)((app->backdrop + 1) % BACKDROP_COUNT);
         } else if (key == 'd' || key == 'D') {
             app->dark_mode = !app->dark_mode;
-            gallery_apply_theme(ui, app->dark_mode);
+            gallery_apply_theme(app, ui);
         } else if (key == 'f' || key == 'F') {
             app->inactive_fallback = !app->inactive_fallback;
         }
@@ -67,14 +71,18 @@ void gallery_ui_build(gallery_app *app, lens *ui, const lens_input *in) {
     if (app->animating)
         iris_request_animation_frame();
 
-    /* Floating control bar at the top with native Lens widgets */
-    lens_column_begin(ui, &(lens_layout_opts){.pad = 12, .gap = 6, .cross = LENS_STRETCH});
-    lens_row_begin(ui, &(lens_layout_opts){.gap = 8, .cross = LENS_CENTER});
+    /* Main UI container */
+    lens_column_begin(ui, &(lens_layout_opts){.pad = 12.0f, .gap = 8.0f, .cross = LENS_STRETCH});
 
-    /* 1. View selector segmented capsule with material-specific identities */
+    /* ================================================================== */
+    /*  Row 1: Top Navigation Bar                                         */
+    /* ================================================================== */
+    lens_row_begin(ui, &(lens_layout_opts){.gap = 8.0f, .cross = LENS_CENTER});
+
+    /* 1. View selector segmented capsule */
     lens_row_begin(ui, &(lens_layout_opts){
-                           .pad = 3,
-                           .gap = 2,
+                           .pad = 3.0f,
+                           .gap = 2.0f,
                            .cross = LENS_CENTER,
                            .radius = 8.0f,
                            .border_width = 1.0f,
@@ -85,120 +93,132 @@ void gallery_ui_build(gallery_app *app, lens *ui, const lens_input *in) {
                        });
 
     /* 4-Up Grid */
+    bool is_grid = (app->view == VIEW_GRID);
     if (lens_button(
             ui,
             &(lens_button_opts){
                 .box =
                     {
                         .id = "btn_grid",
-                        .style =
-                            {
-                                .fields = LENS_STYLE_ACCENT,
-                                .accent = app->dark_mode ? flux_color_rgba(71, 85, 105, 255)
-                                                         : flux_color_rgba(100, 116, 139, 255),
-                            },
+                        .style = is_grid ? (lens_style){
+                            .fields = LENS_STYLE_BG | LENS_STYLE_BORDER | LENS_STYLE_BORDER_WIDTH | LENS_STYLE_FG,
+                            .bg = app->dark_mode ? flux_color_rgba(50, 60, 80, 210) : flux_color_rgba(220, 225, 235, 240),
+                            .border = app->dark_mode ? flux_color_rgba(255, 255, 255, 40) : flux_color_rgba(0, 0, 0, 30),
+                            .border_width = 1.0f,
+                            .fg = app->dark_mode ? flux_color_rgba(250, 250, 252, 255) : flux_color_rgba(15, 23, 42, 255),
+                        } : (lens_style)LENS_STYLE_INIT,
                     },
                 .label = "4-Up Grid",
-                .icon = LENS_ICON_GRID,
-                .variant = (app->view == VIEW_GRID) ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
+                .variant = is_grid ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
             })
             .clicked) {
         app->view = VIEW_GRID;
+        gallery_apply_theme(app, ui);
     }
 
-    /* Liquid Glass (Cyan/Sapphire Refractive Lens) */
+    /* Liquid Glass */
+    bool is_glass = (app->view == VIEW_GLASS);
     if (lens_button(
             ui,
             &(lens_button_opts){
                 .box =
                     {
                         .id = "btn_glass",
-                        .style =
-                            {
-                                .fields = LENS_STYLE_ACCENT,
-                                .accent = app->dark_mode ? flux_color_rgba(2, 132, 199, 255)
-                                                         : flux_color_rgba(3, 105, 161, 255),
-                            },
+                        .style = is_glass ? (lens_style){
+                            .fields = LENS_STYLE_BG | LENS_STYLE_BORDER | LENS_STYLE_BORDER_WIDTH | LENS_STYLE_FG,
+                            /* Liquid glass signature: translucent glossy core + bright specular rim */
+                            .bg = app->dark_mode ? flux_color_rgba(255, 255, 255, 45) : flux_color_rgba(255, 255, 255, 185),
+                            .border = app->dark_mode ? flux_color_rgba(255, 255, 255, 160) : flux_color_rgba(255, 255, 255, 240),
+                            .border_width = 1.5f,
+                            .fg = app->dark_mode ? flux_color_rgba(255, 255, 255, 255) : flux_color_rgba(15, 23, 42, 255),
+                        } : (lens_style)LENS_STYLE_INIT,
                     },
                 .label = "Liquid Glass",
-                .icon = LENS_ICON_DROPLET,
-                .variant = (app->view == VIEW_GLASS) ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
+                .variant = is_glass ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
             })
             .clicked) {
         app->view = VIEW_GLASS;
+        gallery_apply_theme(app, ui);
     }
 
-    /* Frosted Glass (Vibrancy Lilac/Indigo Blur) */
+    /* Frosted Glass */
+    bool is_frost = (app->view == VIEW_FROST);
     if (lens_button(
             ui,
             &(lens_button_opts){
                 .box =
                     {
                         .id = "btn_frost",
-                        .style =
-                            {
-                                .fields = LENS_STYLE_ACCENT,
-                                .accent = app->dark_mode ? flux_color_rgba(99, 102, 241, 255)
-                                                         : flux_color_rgba(79, 70, 229, 255),
-                            },
+                        .style = is_frost ? (lens_style){
+                            .fields = LENS_STYLE_BG | LENS_STYLE_BORDER | LENS_STYLE_BORDER_WIDTH | LENS_STYLE_FG,
+                            .bg = app->dark_mode ? flux_color_rgba(14, 165, 233, 45) : flux_color_rgba(255, 255, 255, 200),
+                            .border = flux_color_rgba(14, 165, 233, 140),
+                            .border_width = 1.0f,
+                            .fg = app->dark_mode ? flux_color_rgba(255, 255, 255, 255) : flux_color_rgba(15, 23, 42, 255),
+                        } : (lens_style)LENS_STYLE_INIT,
                     },
-                .label = "Frosted Glass",
-                .icon = LENS_ICON_WIND,
-                .variant = (app->view == VIEW_FROST) ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
+                .label = "Frosted",
+                .variant = is_frost ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
             })
             .clicked) {
         app->view = VIEW_FROST;
+        gallery_apply_theme(app, ui);
     }
 
-    /* Acrylic (Fluent Teal/Cyan Material) */
+    /* Acrylic */
+    bool is_acrylic = (app->view == VIEW_ACRYLIC);
     if (lens_button(
             ui,
             &(lens_button_opts){
                 .box =
                     {
                         .id = "btn_acrylic",
-                        .style =
-                            {
-                                .fields = LENS_STYLE_ACCENT,
-                                .accent = app->dark_mode ? flux_color_rgba(13, 148, 136, 255)
-                                                         : flux_color_rgba(15, 118, 110, 255),
-                            },
+                        .style = is_acrylic ? (lens_style){
+                            .fields = LENS_STYLE_BG | LENS_STYLE_BORDER | LENS_STYLE_BORDER_WIDTH | LENS_STYLE_FG,
+                            .bg = app->dark_mode ? flux_color_rgba(99, 102, 241, 45) : flux_color_rgba(240, 244, 248, 210),
+                            .border = flux_color_rgba(99, 102, 241, 140),
+                            .border_width = 1.0f,
+                            .fg = app->dark_mode ? flux_color_rgba(255, 255, 255, 255) : flux_color_rgba(15, 23, 42, 255),
+                        } : (lens_style)LENS_STYLE_INIT,
                     },
                 .label = "Acrylic",
-                .icon = LENS_ICON_LAYERS,
-                .variant = (app->view == VIEW_ACRYLIC) ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
+                .variant = is_acrylic ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
             })
             .clicked) {
         app->view = VIEW_ACRYLIC;
+        gallery_apply_theme(app, ui);
     }
 
-    /* Mica (Wallpaper Mineral Slate-Blue) */
+    /* Mica */
+    bool is_mica = (app->view == VIEW_MICA);
     if (lens_button(
             ui,
             &(lens_button_opts){
                 .box =
                     {
                         .id = "btn_mica",
-                        .style =
-                            {
-                                .fields = LENS_STYLE_ACCENT,
-                                .accent = app->dark_mode ? flux_color_rgba(59, 104, 152, 255)
-                                                         : flux_color_rgba(37, 99, 235, 255),
-                            },
+                        .style = is_mica ? (lens_style){
+                            .fields = LENS_STYLE_BG | LENS_STYLE_BORDER | LENS_STYLE_BORDER_WIDTH | LENS_STYLE_FG,
+                            .bg = app->dark_mode ? flux_color_rgba(30, 43, 62, 190) : flux_color_rgba(239, 243, 248, 230),
+                            .border = flux_color_rgba(59, 104, 152, 140),
+                            .border_width = 1.0f,
+                            .fg = app->dark_mode ? flux_color_rgba(255, 255, 255, 255) : flux_color_rgba(15, 23, 42, 255),
+                        } : (lens_style)LENS_STYLE_INIT,
                     },
-                .label = "Mica & Mica Alt",
-                .icon = LENS_ICON_MONITOR,
-                .variant = (app->view == VIEW_MICA) ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
+                .label = "Mica",
+                .variant = is_mica ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
             })
             .clicked) {
         app->view = VIEW_MICA;
+        gallery_apply_theme(app, ui);
     }
+
     lens_close(ui); /* view selector capsule */
 
-    /* 2. Controls icon segmented capsule (Boolean Toggles) */
+    /* 2. Backdrop Dropdown capsule */
     lens_row_begin(ui, &(lens_layout_opts){
-                           .pad = 3,
-                           .gap = 2,
+                           .pad = 3.0f,
+                           .gap = 2.0f,
                            .cross = LENS_CENTER,
                            .radius = 8.0f,
                            .border_width = 1.0f,
@@ -208,82 +228,9 @@ void gallery_ui_build(gallery_app *app, lens *ui, const lens_input *in) {
                                                     : flux_color_rgba(0, 0, 0, 25),
                        });
 
-    /* Dark/Light boolean icon toggle (Moon / Sun) */
-    if (lens_button(
-            ui,
-            &(lens_button_opts){
-                .box =
-                    {
-                        .id = "toggle_theme",
-                        .width = 34.0f,
-                        .height = 30.0f,
-                        .style =
-                            {
-                                .fields = LENS_STYLE_ACCENT,
-                                .accent = app->dark_mode ? flux_color_rgba(245, 158, 11, 255)
-                                                         : flux_color_rgba(99, 102, 241, 255),
-                            },
-                    },
-                .icon = app->dark_mode ? LENS_ICON_MOON : LENS_ICON_SUN,
-                .variant = LENS_BUTTON_SUBTLE,
-            })
-            .clicked) {
-        app->dark_mode = !app->dark_mode;
-        gallery_apply_theme(ui, app->dark_mode);
-    }
-
-    /* Pause/Resume boolean animation icon toggle (Pause / Play) */
-    if (lens_button(ui,
-                    &(lens_button_opts){
-                        .box =
-                            {
-                                .id = "toggle_anim",
-                                .width = 34.0f,
-                                .height = 30.0f,
-                                .style =
-                                    {
-                                        .fields = LENS_STYLE_ACCENT,
-                                        .accent = flux_color_rgba(234, 88, 12, 255),
-                                    },
-                            },
-                        .icon = app->animating ? LENS_ICON_PAUSE : LENS_ICON_PLAY,
-                        .variant = app->animating ? LENS_BUTTON_SUBTLE : LENS_BUTTON_PRIMARY,
-                    })
-            .clicked) {
-        app->animating = !app->animating;
-    }
-
-    /* Mica Inactive Fallback boolean icon toggle (Eye / Eye-Off) */
-    if (app->view == VIEW_MICA) {
-        if (lens_button(
-                ui,
-                &(lens_button_opts){
-                    .box =
-                        {
-                            .id = "toggle_fallback",
-                            .width = 34.0f,
-                            .height = 30.0f,
-                            .style =
-                                {
-                                    .fields = LENS_STYLE_ACCENT,
-                                    .accent = flux_color_rgba(59, 104, 152, 255),
-                                },
-                        },
-                    .icon = app->inactive_fallback ? LENS_ICON_EYE_OFF : LENS_ICON_EYE,
-                    .variant = app->inactive_fallback ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
-                })
-                .clicked) {
-            app->inactive_fallback = !app->inactive_fallback;
-        }
-    }
-
-    /* Backdrop dropdown trigger */
     lens_response bd_resp =
         lens_button(ui, &(lens_button_opts){
-                            .box =
-                                {
-                                    .id = "btn_backdrop_dropdown",
-                                },
+                            .box = {.id = "btn_backdrop_dropdown"},
                             .icon = g_backdrops[app->backdrop].icon,
                             .label = g_backdrops[app->backdrop].label,
                             .variant = lens_place_is_open(ui, "backdrop_menu") ? LENS_BUTTON_PRIMARY
@@ -294,11 +241,48 @@ void gallery_ui_build(gallery_app *app, lens *ui, const lens_input *in) {
     }
     app->backdrop_btn_rect = bd_resp.rect;
 
-    lens_close(ui); /* controls capsule */
+    lens_close(ui); /* backdrop capsule */
 
-    lens_close(ui); /* row */
+    /* 3. Spacer pushing the theme toggle to the far right */
+    lens_row_begin(ui, &(lens_layout_opts){.box = {.flex = 1.0f}});
+    lens_close(ui);
 
-    /* 3. Backdrop Dropdown Popup Menu */
+    /* 4. Standalone Circular Dark/Light Mode Button on the far right (with visible decoration) */
+    lens_row_begin(ui, &(lens_layout_opts){
+                           .pad = 0.0f,
+                           .cross = LENS_CENTER,
+                           .radius = 18.0f,
+                           .border_width = 1.0f,
+                           .bg = app->dark_mode ? flux_color_rgba(20, 24, 38, 220)
+                                                : flux_color_rgba(255, 255, 255, 220),
+                           .border = app->dark_mode ? flux_color_rgba(255, 255, 255, 35)
+                                                    : flux_color_rgba(0, 0, 0, 30),
+                       });
+    if (lens_button(ui,
+                    &(lens_button_opts){
+                        .box =
+                            {
+                                .id = "toggle_theme",
+                                .width = 36.0f,
+                                .height = 36.0f,
+                                .style =
+                                    {
+                                        .fields = LENS_STYLE_CORNER_RADIUS,
+                                        .corner_radius = 18.0f,
+                                    },
+                            },
+                        .icon = app->dark_mode ? LENS_ICON_MOON : LENS_ICON_SUN,
+                        .variant = LENS_BUTTON_SUBTLE,
+                    })
+            .clicked) {
+        app->dark_mode = !app->dark_mode;
+        gallery_apply_theme(app, ui);
+    }
+    lens_close(ui);
+
+    lens_close(ui); /* top row */
+
+    /* Backdrop Dropdown Menu */
     if (lens_place_is_open(ui, "backdrop_menu")) {
         if (lens_place_begin(
                 ui, &(lens_place_opts){
@@ -340,14 +324,16 @@ void gallery_ui_build(gallery_app *app, lens *ui, const lens_input *in) {
         }
     }
 
-    /* Title / Material caption */
+    /* ================================================================== */
+    /*  Row 2: Subtitle Caption enclosed in a frosted translucent pill   */
+    /* ================================================================== */
     const char *title_text = "";
     switch (app->view) {
     case VIEW_GRID:
         title_text = "Prism Materials: Liquid Glass (TL), Frosted (TR), Acrylic (BL), Mica (BR)";
         break;
     case VIEW_GLASS:
-        title_text = "Liquid Glass Suite: [Hero] G2 Squircle & Focus Lens  |  [Top-R] Fluid "
+        title_text = "Liquid Glass Suite: [Hero] G2 Squircle Physical Glass  |  [Top-R] Fluid "
                      "Metaball Fusion  |  [Bot-R] Amber Tint & Micro-Pill";
         break;
     case VIEW_FROST:
@@ -357,10 +343,143 @@ void gallery_ui_build(gallery_app *app, lens *ui, const lens_input *in) {
         title_text = "Acrylic: Dual-Kawase Blur, Luminance Plate Balancing & Procedural Grain";
         break;
     case VIEW_MICA:
-        title_text = "Mica & Mica Alt: Wallpaper Sampling, Mineral Dither & Fallback State";
+        title_text = "Mica Foundation: Windows 11 Fluent Desktop Material (Base & Alt Surfaces)";
         break;
     }
-    lens_label(ui, &(lens_label_opts){.text = title_text, .size = 13.0f});
 
-    lens_close(ui); /* column */
+    lens_row_begin(ui, &(lens_layout_opts){.cross = LENS_CENTER});
+    lens_row_begin(ui, &(lens_layout_opts){
+                           .pad = 5.0f,
+                           .radius = 14.0f,
+                           .border_width = 1.0f,
+                           .bg = app->dark_mode ? flux_color_rgba(16, 20, 30, 210)
+                                                : flux_color_rgba(255, 255, 255, 210),
+                           .border = app->dark_mode ? flux_color_rgba(255, 255, 255, 28)
+                                                    : flux_color_rgba(0, 0, 0, 25),
+                       });
+    lens_label(ui, &(lens_label_opts){
+                       .box =
+                           {
+                               .style =
+                                   {
+                                       .fields = LENS_STYLE_FG,
+                                       .fg = app->dark_mode ? flux_color_rgba(226, 232, 240, 255)
+                                                            : flux_color_rgba(30, 41, 59, 255),
+                                   },
+                           },
+                       .text = title_text,
+                       .size = 12.0f,
+                   });
+    lens_close(ui); /* caption pill */
+    lens_close(ui); /* caption row */
+
+    /* ================================================================== */
+    /*  Row 3: Left-hand Material-Specific Interactive Control Column    */
+    /* ================================================================== */
+    if (app->view != VIEW_GRID) {
+        lens_row_begin(ui, &(lens_layout_opts){.cross = LENS_START});
+
+        lens_column_begin(ui, &(lens_layout_opts){
+                                  .pad = 6.0f,
+                                  .gap = 6.0f,
+                                  .radius = 10.0f,
+                                  .border_width = 1.0f,
+                                  .box = {.width = 124.0f},
+                                  .bg = app->dark_mode ? flux_color_rgba(16, 20, 30, 210)
+                                                       : flux_color_rgba(255, 255, 255, 210),
+                                  .border = app->dark_mode ? flux_color_rgba(255, 255, 255, 28)
+                                                           : flux_color_rgba(0, 0, 0, 25),
+                              });
+
+        lens_label(ui,
+                   &(lens_label_opts){
+                       .box =
+                           {
+                               .style =
+                                   {
+                                       .fields = LENS_STYLE_FG,
+                                       .fg = app->dark_mode ? flux_color_rgba(148, 163, 184, 255)
+                                                            : flux_color_rgba(100, 116, 139, 255),
+                                   },
+                           },
+                       .text = "PROPERTIES",
+                       .size = 10.0f,
+                   });
+
+        switch (app->view) {
+        case VIEW_GLASS:
+            if (lens_button(
+                    ui,
+                    &(lens_button_opts){
+                        .box = {.id = "ctrl_amber", .width = 112.0f, .height = 30.0f},
+                        .icon = LENS_ICON_SUN,
+                        .label = app->glass_amber ? "Amber Tint" : "Clear Glass",
+                        .variant = app->glass_amber ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
+                    })
+                    .clicked) {
+                app->glass_amber = !app->glass_amber;
+            }
+            break;
+
+        case VIEW_FROST:
+            if (lens_button(
+                    ui,
+                    &(lens_button_opts){
+                        .box = {.id = "ctrl_vibrancy", .width = 112.0f, .height = 30.0f},
+                        .icon = LENS_ICON_SLIDERS,
+                        .label = app->frost_vibrancy ? "High Vibrancy" : "Neutral Sat",
+                        .variant = app->frost_vibrancy ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
+                    })
+                    .clicked) {
+                app->frost_vibrancy = !app->frost_vibrancy;
+            }
+            break;
+
+        case VIEW_ACRYLIC:
+            if (lens_button(
+                    ui,
+                    &(lens_button_opts){
+                        .box = {.id = "ctrl_grain", .width = 112.0f, .height = 30.0f},
+                        .icon = LENS_ICON_GRID,
+                        .label = app->acrylic_grain ? "Grain On" : "Grain Off",
+                        .variant = app->acrylic_grain ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
+                    })
+                    .clicked) {
+                app->acrylic_grain = !app->acrylic_grain;
+            }
+            break;
+
+        case VIEW_MICA:
+            if (lens_button(ui,
+                            &(lens_button_opts){
+                                .box = {.id = "ctrl_fallback", .width = 112.0f, .height = 30.0f},
+                                .icon = app->inactive_fallback ? LENS_ICON_EYE_OFF : LENS_ICON_EYE,
+                                .label = app->inactive_fallback ? "Inactive" : "Active Win",
+                                .variant = app->inactive_fallback ? LENS_BUTTON_PRIMARY
+                                                                  : LENS_BUTTON_SUBTLE,
+                            })
+                    .clicked) {
+                app->inactive_fallback = !app->inactive_fallback;
+            }
+            if (lens_button(ui,
+                            &(lens_button_opts){
+                                .box = {.id = "ctrl_alt", .width = 112.0f, .height = 30.0f},
+                                .icon = LENS_ICON_LAYERS,
+                                .label = app->mica_alt ? "Mica Alt" : "Mica Base",
+                                .variant = app->mica_alt ? LENS_BUTTON_PRIMARY : LENS_BUTTON_SUBTLE,
+                            })
+                    .clicked) {
+                app->mica_alt = !app->mica_alt;
+            }
+            break;
+
+        default:
+            break;
+        }
+
+        lens_close(ui); /* sidebar column */
+        lens_close(ui); /* sidebar row */
+    }
+
+    lens_close(ui); /* main container */
 }

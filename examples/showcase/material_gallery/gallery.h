@@ -31,8 +31,10 @@ typedef enum view_mode {
 
 typedef enum backdrop_kind {
     BACKDROP_DYNAMIC = 0,
-    BACKDROP_BLACK = 1,
-    BACKDROP_WHITE = 2,
+    BACKDROP_AURORA = 1,
+    BACKDROP_SPATIAL_GRID = 2,
+    BACKDROP_BLACK = 3,
+    BACKDROP_WHITE = 4,
     BACKDROP_COUNT,
 } backdrop_kind;
 
@@ -61,6 +63,10 @@ typedef struct gallery_app {
     bool animating;
     bool dark_mode;
     bool inactive_fallback;
+    bool glass_amber;
+    bool frost_vibrancy;
+    bool acrylic_grain;
+    bool mica_alt;
     float time;
 
     /* GPU resources */
@@ -86,7 +92,7 @@ typedef struct gallery_app {
 } gallery_app;
 
 /* UI and theme */
-void gallery_apply_theme(lens *ui, bool dark);
+void gallery_apply_theme(gallery_app *app, lens *ui);
 void gallery_ui_build(gallery_app *app, lens *ui, const lens_input *in);
 
 /* Backdrop provider */

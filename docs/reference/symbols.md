@@ -408,6 +408,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_a11y_activate` | Request activation of a widget by id (ADR-0062) — the write direction of the a11y seam. |
 | `lens_theme_default` |  |
 | `lens_theme_dark` |  |
+| `lens_theme_for_material` | Material-paired theme generator: returns a full design token set tailored for UI components resting on top of the given physical material surface (ADR-0032, ADR-0101). |
 | `lens_push_style` | Scoped style stack (ADR-0061 item 4): every widget declared between lens_push_style and lens_pop_style resolves its unset style atoms against the merged scope — the primitive from which callers build their own design-system scopes ("danger", "sidebar"). |
 | `lens_pop_style` |  |
 | `lens_set_text_family` |  |

@@ -428,6 +428,12 @@ typedef struct lens_theme {
 LENS_API lens_theme lens_theme_default(void);
 LENS_API lens_theme lens_theme_dark(void);
 
+/* Material-paired theme generator: returns a full design token set tailored for UI
+ * components resting on top of the given physical material surface (ADR-0032, ADR-0101).
+ * Clears opaque background fills to let the medium shine through, sets high-contrast
+ * text polarity against the material plate, and tunes border and hover states. */
+LENS_API lens_theme lens_theme_for_material(lens_material_kind kind, bool dark);
+
 /* ================================================================== */
 /*  Style cascade (ADR-0058, amended by ADR-0061)                     */
 /*                                                                    */

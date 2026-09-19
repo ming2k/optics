@@ -6,7 +6,7 @@
 
 static bool on_start(lens *ui, flux_device *device, void *user) {
     gallery_app *app = user;
-    gallery_apply_theme(ui, app->dark_mode);
+    gallery_apply_theme(app, ui);
     if (flux_arena_init(&app->arena, 1024 * 1024, nullptr) != FLUX_OK)
         return false;
 
@@ -117,12 +117,13 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
     app->acrylic_out = nullptr;
     app->mica_out = nullptr;
 
+    float sidebar_w = (app->view == VIEW_GRID) ? 0.0f : 140.0f * scale;
     gallery_layout layout = {
-        .margin_x = 24.0f * scale,
-        .header_h = 88.0f * scale,
+        .margin_x = 24.0f * scale + sidebar_w,
+        .header_h = 92.0f * scale,
         .margin_bottom = 20.0f * scale,
-        .avail_w = (float)W - 48.0f * scale,
-        .avail_h = (float)H - 88.0f * scale - 20.0f * scale,
+        .avail_w = (float)W - 48.0f * scale - sidebar_w,
+        .avail_h = (float)H - 92.0f * scale - 20.0f * scale,
         .polarity = app->dark_mode ? 0.0f : 1.0f,
         .scale = scale,
     };
@@ -178,6 +179,10 @@ int main(int argc, char **argv) {
         .animating = true,
         .dark_mode = true,
         .inactive_fallback = false,
+        .glass_amber = true,
+        .frost_vibrancy = true,
+        .acrylic_grain = true,
+        .mica_alt = false,
         .time = 0.0f,
         .smoke_mode = false,
         .smoke_frames = 0,

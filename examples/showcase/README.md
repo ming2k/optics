@@ -21,7 +21,7 @@ Renders an animated dynamic backdrop (radial color orbs, moving high-contrast
 stripes, geometric rings) and overlays all four modern UI materials side-by-side:
 
 1. **Liquid Glass** (`<prism/liquid_glass.h>`): physical IOR refraction,
-   chromatic dispersion (RGB split), Fresnel specular rim lighting, and focus field.
+   chromatic dispersion (RGB split), continuous G2 squircle curvature, and 360° dual-rim optics.
 2. **Frosted Glass** (`<prism/frosted.h>`): high-purity dual-Kawase blur with
    macOS-style vibrancy color saturation boost.
 3. **Acrylic** (`<prism/acrylic.h>`): Windows Fluent-style dual-Kawase blur,
@@ -34,7 +34,7 @@ stripes, geometric rings) and overlays all four modern UI materials side-by-side
 ### Interactive Hotkeys
 
 - `1`: 4-Up Grid comparison view (all 4 materials side-by-side)
-- `2`: Liquid Glass comprehensive suite (Hero G2 Squircle + Focus lens, Fluid Metaball fusion, Amber tint, micro-dock pill)
+- `2`: Liquid Glass comprehensive suite (Hero G2 Squircle physical glass, Fluid Metaball fusion, Amber tint, micro-dock pill)
 - `3`: Frosted Glass fullscreen focus
 - `4`: Acrylic fullscreen focus
 - `5`: Mica & Mica Alt fullscreen focus

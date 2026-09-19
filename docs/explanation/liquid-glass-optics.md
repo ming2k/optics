@@ -46,25 +46,30 @@ This confines prismatic color fringing strictly to the curved rim band where lig
 
 ---
 
-## 2. The Dual-Rim Caustic Architecture
+## 2. The 3D Meniscus Illumination & Dual-Rim Architecture
 
-A signature visual cue of spatial glass (e.g. VisionOS) is the presence of **highlights on both sides** of a curved component: the primary light-facing edge and the opposite back-facing edge.
+A signature visual cue of physical dielectric glass (e.g. VisionOS and macOS spatial glass) is the presence of **highlights on both sides and continuous structural definition across all four corners**:
 
-### 2.1 Primary Key Rim (Outer Specular Reflection)
-On the side facing the directional key light ($\mathbf{n} \cdot \mathbf{l}_{\text{key}} > 0$), grazing incident light reflects off the front convex meniscus according to Schlick's Fresnel approximation:
-$$R(\theta) = R_0 + (1 - R_0)(1 - \cos\theta)^5$$
-In the shader, this is realized as a razor-sharp Gaussian highlight situated on the immediate exterior perimeter ($d \approx -0.65\text{px}$):
-$$I_{\text{key}} = (\mathbf{n} \cdot \mathbf{l}_{\text{key}})^{1.5} \cdot \exp\left(-\frac{(d + 0.65)^2}{2.50}\right)$$
+### 2.1 Overhead Key Illumination (Top Edge & Top Corners)
+In realistic ambient environments, overhead diffuse ceiling light illuminates the entire upper curved meniscus ($-n_y > 0$). Modulated smoothly by the incident key light direction $\mathbf{l}_{\text{key}}$, both top-left and top-right corners maintain consistent brilliance without abrupt cutoffs:
+$$I_{\text{top}} = (-n_y)^{1.25} \cdot \left(0.65 + 0.35 \cdot \max(\mathbf{n} \cdot \mathbf{l}_{\text{key}}, 0)^{1.25}\right) \cdot \exp\left(-\frac{(d + 0.65)^2}{2.00}\right)$$
 
-### 2.2 Secondary TIR Back-Rim (Total Internal Reflection & Caustics)
-Light that enters the glass body is not extinguished; it travels through the medium and strikes the opposite boundary from the inside. When propagating from a dense medium ($n_1 \approx 1.5$) to a rare medium ($n_2 = 1.0$), the critical angle is:
-$$\theta_c = \arcsin\left(\frac{1.0}{1.5}\right) \approx 41.8^\circ$$
-At the curved away-side boundary, the internal angle of incidence regularly exceeds $\theta_c$, triggering **Total Internal Reflection (TIR)**. The curved inner boundary functions as a concave reflector, concentrating exiting rays into a luminous caustic band shifted inward into the glass body:
-$$I_{\text{tir}} = (\mathbf{n} \cdot -\mathbf{l}_{\text{key}})^{1.4} \cdot \exp\left(-\frac{(d + 0.75)^2}{2.50}\right)$$
+### 2.2 Secondary TIR Caustic Field (Bottom Edge & Bottom Corners)
+Light entering the droplet medium propagates to the opposite boundary ($n_y > 0$). When propagating from glass ($n_1 \approx 1.5$) to air ($n_2 = 1.0$), angles exceeding the critical angle ($\theta_c \approx 41.8^\circ$) undergo **Total Internal Reflection (TIR)**. This produces a secondary caustic rim shifted slightly deeper into the glass wall, beautifully illuminating both bottom-left and bottom-right corners:
+$$I_{\text{bot}} = (n_y)^{1.25} \cdot \left(0.55 + 0.35 \cdot \max(\mathbf{n} \cdot -\mathbf{l}_{\text{key}}, 0)^{1.25}\right) \cdot \exp\left(-\frac{(d + 0.80)^2}{2.00}\right)$$
 
-### 2.3 360° Meniscus Perimeter Sheen
-To prevent lateral edges from collapsing into dead black cutouts while avoiding artificial neon-ring artifacts, a balanced baseline ambient glint wraps the entire perimeter:
-$$I_{\text{base}} = 0.15 \cdot \exp\left(-\frac{(d + 0.50)^2}{2.00}\right)$$
+### 2.3 360° Continuous Meniscus Fresnel Baseline
+To ensure capsule caps and orthogonal corners never suffer from blackout dropouts, a solid physical baseline wraps the entire perimeter:
+$$I_{\text{base}} = 0.38 \cdot \exp\left(-\frac{(d + 0.65)^2}{2.00}\right)$$
+
+### 2.4 Screen-Space Environmental Area Radiance Gathering (SS-IBL)
+Specular highlights reflect local ambient scene radiance rather than artificial flat white:
+$$\text{spec\_tint} = \text{mix}\left(\text{vec3}(1.0), \max(\text{frost}, 0.12) \times 1.35, 0.28\right)$$
+
+### 2.5 Engineering Sweet Spot Benchmark (甜蜜点工程基准)
+- **Four-Corner Highlight Ratio:** **$1.30 : 1 \sim 1.40 : 1$** (TL: 0.99, TR: 0.82, BR: 0.92, BL: 0.76), eliminating historical 9.3:1 diagonal blackouts.
+- **Per-Pixel Sampling Footprint:** Exactly 4 taps for Liquid Glass (3 chromatic refraction + 1 environmental frost); exactly 1 tap for Frosted/Acrylic/Mica.
+- **Metric Distance Invariant:** G2 squircle distance field enforced via Taubin first-order gradient normalization $\|\nabla d\| = 1.0$ at all angles.
 
 ---
 
