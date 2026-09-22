@@ -53,7 +53,7 @@ extern "C" {
 
 #define FLUX_SG_VERSION_MAJOR 0
 #define FLUX_SG_VERSION_MINOR 0
-#define FLUX_SG_VERSION_PATCH 45
+#define FLUX_SG_VERSION_PATCH 46
 
 /* Packed integer version, monotonic — identical layout to
  * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).

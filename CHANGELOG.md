@@ -13,6 +13,12 @@ either.
 
 ## [Unreleased]
 
+## [0.0.46] - 2026-09-19
+
+### Added
+
+- **lens**: Tab strip drag-to-reorder (ADR-0086 parity): 14px drag threshold, hover-predicted insertion slot, and `LENS_TAB_ACTION_MOVE` emitted in post-removal coordinates; `pressed_on_tab` flag lets CSD hosts suppress window dragging on tab press. Headless `test_tab_strip` C test (42 checks).
+
 ## [0.0.45] - 2026-09-19
 
 ### Added
