@@ -38,6 +38,15 @@ pub enum TabAction {
     Select(usize),
     Close(usize),
     NewTab,
+    /// Move the tab at `.0` (pre-move index) to the slot `.1`, expressed in
+    /// post-removal coordinates: remove the source first, then insert at
+    /// `to`. Delivered on the release frame of a drag that crossed the
+    /// 14 px threshold.
+    Move(usize, usize),
+    /// A pointer press landed on an interactive strip element (tab, close
+    /// or new button) this frame. CSD hosts must suppress the window-move
+    /// grab for this frame so tab drags are not swallowed by it.
+    PressedOnTab,
 }
 
 /// Builder for tab strip presentation.
@@ -146,6 +155,12 @@ impl TabStrip {
                 TabAction::Close(raw_action.index as usize)
             }
             lens_sys::lens_tab_action_kind::LENS_TAB_ACTION_NEW => TabAction::NewTab,
+            lens_sys::lens_tab_action_kind::LENS_TAB_ACTION_MOVE => {
+                TabAction::Move(raw_action.index as usize, raw_action.to as usize)
+            }
+            // The press flag only ever fires on the press frame, where the
+            // action kind is still NONE (clicks resolve on release).
+            _ if raw_action.pressed_on_tab => TabAction::PressedOnTab,
             _ => TabAction::None,
         }
     }

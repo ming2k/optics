@@ -77,11 +77,18 @@ typedef enum lens_tab_action_kind {
     LENS_TAB_ACTION_SELECT,
     LENS_TAB_ACTION_CLOSE,
     LENS_TAB_ACTION_NEW,
+    LENS_TAB_ACTION_MOVE,
 } lens_tab_action_kind;
 
 typedef struct lens_tab_action {
     lens_tab_action_kind kind;
-    uint32_t index; /* relevant for SELECT and CLOSE */
+    uint32_t index; /* relevant for SELECT, CLOSE and MOVE (source) */
+    uint32_t to;    /* relevant for MOVE: insertion slot AFTER removal of
+                       `index` (post-removal coordinates), < previous count */
+    bool pressed_on_tab; /* a pointer press landed on an interactive strip
+                            element (tab, close or new button) this frame;
+                            CSD hosts use it to suppress window dragging so
+                            tab drags are not swallowed by the move grab */
 } lens_tab_action;
 
 typedef struct lens_tab_strip_opts {
