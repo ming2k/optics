@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.47] - 2026-09-23
+
 ### Fixed
 
 - **flux-scene-graph**: `sg_update_worlds` propagated world matrices by iterating the whole node array `node_count` times to converge a glTF node tree that is not topologically sorted — O(n²) matrix multiplies on every animated frame (skin-palette and camera updates included). A skinned VRM avatar (117 nodes) cost ~0.11 ms per pose and grew quadratically with rig size (600 nodes: ~5.4 ms). Nodes are now walked in one parents-before-children order, computed once from the immutable parent links (roots derived from the links, so the animation retargeter's root-less scratch scene works too) and reused every frame; the pathological all-reversed order folds in one pass. A missing/out-of-range/self parent folds as a root and an allocation failure falls back to the previous convergence loop, so malformed input stays correct and in-bounds. 117-node pose update ≈20× faster; the gain scales with node count (≈65× at 600 nodes).
