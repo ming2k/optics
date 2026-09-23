@@ -306,6 +306,7 @@ FLUX_SG_API void flux_sg_scene_release(flux_sg_scene *scene) {
     free(scene->nodes);
     free(scene->skins);
     free(scene->roots);
+    free(scene->world_order);
     free(scene);
 }
 
@@ -367,23 +368,121 @@ static flux_mat4 node_local(const flux_sg_node *node) {
     return flux_mat4_multiply(t, flux_mat4_multiply(r, s));
 }
 
+/* Build the node index order in which every node appears after its parent.
+ *
+ * glTF node arrays are not required to be topologically sorted, and a node's
+ * parent link never changes after parse/build (`sg_read_node`/glb.c set it;
+ * nothing mutates it afterwards). The previous implementation iterated the
+ * whole node array `node_count` times to converge such a tree — O(n^2) matrix
+ * multiplies per animated frame, which dominated the frame budget for a
+ * skinned VRM avatar. Instead, compute a parents-before-children order once
+ * (a depth-first walk from every root; roots are derived from the parent
+ * links, not `scene->roots`, because the animation retargeter's scratch scene
+ * has parent links but no root list) and fold each node's world from its
+ * parent's in one linear pass.
+ *
+ * The walk is iterative so a pathological deep chain cannot overflow the C
+ * stack, and a malformed parent cycle is broken rather than followed (a node
+ * whose parent is not yet placed is treated as a root, and any node the walk
+ * never reaches is appended so the linear pass still visits it). Returns NULL
+ * on allocation failure or an empty scene. */
+static uint32_t *sg_build_world_order(const flux_sg_scene *scene) {
+    uint32_t n = scene->node_count;
+    if (n == 0)
+        return NULL;
+    uint32_t *order = malloc((size_t)n * sizeof(*order));
+    bool *placed = calloc(n, sizeof(*placed));
+    /* head[i] is the first child of i; next[i] the following sibling; both
+     * UINT32_MAX-terminated, so the walk needs no per-node child array. */
+    uint32_t *head = malloc((size_t)n * sizeof(*head));
+    uint32_t *next = malloc((size_t)n * sizeof(*next));
+    uint32_t *stack = malloc((size_t)n * sizeof(*stack));
+    if (!order || !placed || !head || !next || !stack) {
+        free(order);
+        free(placed);
+        free(head);
+        free(next);
+        free(stack);
+        return NULL;
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        head[i] = UINT32_MAX;
+        next[i] = UINT32_MAX;
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        int parent = scene->nodes[i].parent;
+        /* Skip self/out-of-range parents: such a node folds as a root below,
+         * so it must not enter a sibling list that a cycle could trap. */
+        if (parent >= 0 && (uint32_t)parent < n && (uint32_t)parent != i) {
+            next[i] = head[parent];
+            head[parent] = i;
+        }
+    }
+
+    uint32_t count = 0;
+    for (uint32_t root = 0; root < n; ++root) {
+        int parent = scene->nodes[root].parent;
+        bool is_root = parent < 0 || (uint32_t)parent >= n || (uint32_t)parent == root;
+        if (!is_root || placed[root])
+            continue;
+        uint32_t top = 0;
+        stack[top++] = root;
+        while (top > 0) {
+            uint32_t node = stack[--top];
+            if (placed[node])
+                continue;
+            placed[node] = true;
+            order[count++] = node;
+            for (uint32_t c = head[node]; c != UINT32_MAX; c = next[c])
+                if (!placed[c])
+                    stack[top++] = c;
+        }
+    }
+    /* A node in an unrooted cycle keeps index order so it is still visited. */
+    for (uint32_t i = 0; i < n; ++i)
+        if (!placed[i])
+            order[count++] = i;
+
+    free(placed);
+    free(head);
+    free(next);
+    free(stack);
+    return order;
+}
+
 void sg_update_worlds(flux_sg_scene *scene) {
     if (!scene)
         return;
-    for (uint32_t i = 0; i < scene->node_count; ++i) {
-        flux_sg_node *node = &scene->nodes[i];
-        node->local = node_local(node);
-        node->world = node->parent < 0 ? node->local : flux_mat4_identity();
-    }
-    /* glTF node arrays are not required to be topologically sorted. Repeated
-     * propagation converges within max tree depth without recursion or a
-     * temporary allocation. */
-    for (uint32_t pass = 0; pass < scene->node_count; ++pass)
+    if (scene->node_count > 0 && !scene->world_order)
+        scene->world_order = sg_build_world_order(scene);
+    if (!scene->world_order) {
+        /* Allocation failure (or an empty scene): fall back to the array-order
+         * convergence loop so world matrices stay correct, just slower. */
         for (uint32_t i = 0; i < scene->node_count; ++i) {
             flux_sg_node *node = &scene->nodes[i];
-            if (node->parent >= 0 && (uint32_t)node->parent < scene->node_count)
-                node->world = flux_mat4_multiply(scene->nodes[node->parent].world, node->local);
+            node->world = node->parent < 0 ? node_local(node) : flux_mat4_identity();
         }
+        for (uint32_t pass = 0; pass < scene->node_count; ++pass)
+            for (uint32_t i = 0; i < scene->node_count; ++i) {
+                flux_sg_node *node = &scene->nodes[i];
+                if (node->parent >= 0 && (uint32_t)node->parent < scene->node_count)
+                    node->world =
+                        flux_mat4_multiply(scene->nodes[node->parent].world, node_local(node));
+            }
+        return;
+    }
+    for (uint32_t k = 0; k < scene->node_count; ++k) {
+        flux_sg_node *node = &scene->nodes[scene->world_order[k]];
+        flux_mat4 local = node_local(node);
+        int parent = node->parent;
+        /* A missing/out-of-range/self parent folds as a root (matches the
+         * order builder and keeps a malformed file from indexing out of
+         * bounds). */
+        node->world = (parent < 0 || (uint32_t)parent >= scene->node_count ||
+                       (uint32_t)parent == scene->world_order[k])
+                          ? local
+                          : flux_mat4_multiply(scene->nodes[parent].world, local);
+    }
 }
 
 void sg_update_rest_world_rotations(flux_sg_scene *scene) {

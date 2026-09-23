@@ -7,6 +7,20 @@
 #include <stdlib.h>
 #include <time.h>
 
+/* A headless flux device, or NULL when no Vulkan device is available (dev
+ * sandboxes without a driver, sanitizer runs, CI). Benchmarks that need a
+ * device skip cleanly on NULL rather than aborting the suite. */
+static inline flux_device *bench_headless_device(void) {
+    flux_device_desc desc = {
+        .type = FLUX_TYPE_DEVICE_DESC,
+        .frames_in_flight = 1,
+    };
+    flux_device *device = NULL;
+    if (flux_device_create(&desc, &device) != FLUX_OK)
+        return NULL;
+    return device;
+}
+
 #define BENCH_WARMUP 3
 #define BENCH_ITERATIONS 100
 

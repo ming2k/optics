@@ -533,10 +533,6 @@ void sg_read_node(const jv *node, flux_sg_node *n) {
     n->translation = n->rest_translation;
     n->rotation = n->rest_rotation;
     n->scale = n->rest_scale;
-    flux_mat4 t = flux_mat4_translate(n->translation.x, n->translation.y, n->translation.z);
-    flux_mat4 r = flux_mat4_rotation_quat(n->rotation);
-    flux_mat4 s = flux_mat4_scale(n->scale.x, n->scale.y, n->scale.z);
-    n->local = flux_mat4_multiply(t, flux_mat4_multiply(r, s));
     n->world = flux_mat4_identity();
     n->rest_world_rotation = flux_quat_identity();
     const jv *name = jv_obj_get(node, "name");

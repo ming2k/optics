@@ -252,6 +252,10 @@ flux_result sg_parse_animation_glb(const flux_sg_scene *target, const void *byte
     flux_sg_node *source_nodes = NULL;
     uint32_t source_node_count = 0;
     flux_sg_animation *animation = NULL;
+    /* The retarget source scratch scene. Declared here so early `goto fail`
+     * exits (before it is populated) can still release its cached world
+     * order; zero-init leaves `world_order` NULL, which `free` accepts. */
+    flux_sg_scene source_scene = {0};
 
     size_t error_offset = 0;
     root = jv_parse((const char *)glb.json, glb.json_len, &error_offset);
@@ -284,10 +288,9 @@ flux_result sg_parse_animation_glb(const flux_sg_scene *target, const void *byte
                 source_nodes[child].parent = (int)i;
         }
     }
-    flux_sg_scene source_scene = {.nodes = source_nodes, .node_count = source_node_count};
+    source_scene = (flux_sg_scene){.nodes = source_nodes, .node_count = source_node_count};
     sg_update_worlds(&source_scene);
     sg_update_rest_world_rotations(&source_scene);
-
     int source_bones[SG_HUMAN_BONE_COUNT];
     for (int i = 0; i < SG_HUMAN_BONE_COUNT; ++i)
         source_bones[i] = -1;
@@ -434,6 +437,7 @@ flux_result sg_parse_animation_glb(const flux_sg_scene *target, const void *byte
     }
     /* Success: the source-scene scratch and the JSON tree are no longer
      * needed; ownership of the animation passes to the caller. */
+    free(source_scene.world_order);
     free_nodes(source_nodes, source_node_count);
     jv_free(root);
     *out = animation;
@@ -441,6 +445,7 @@ flux_result sg_parse_animation_glb(const flux_sg_scene *target, const void *byte
 
 fail:
     free_animation(animation);
+    free(source_scene.world_order);
     free_nodes(source_nodes, source_node_count);
     jv_free(root);
     return r;

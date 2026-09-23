@@ -81,6 +81,31 @@ static test_glb make_target(void) {
     return make_glb(json, positions, sizeof(positions));
 }
 
+/* A parent and its child listed in reverse order, with the child preceding
+ * the parent in the node array (glTF does not require topological order).
+ * Two such pairs: chain A (0 -> 1) and chain B (2 -> 3), each with a pure
+ * translation so the composed world translation is exact. */
+static test_glb make_reversed_chain(void) {
+    static const char json[] =
+        "{"
+        "\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"byteLength\":36}],"
+        "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36}],"
+        "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+        "\"type\":\"VEC3\"}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+        "\"nodes\":["
+        "{\"name\":\"childA\",\"translation\":[0,2,0],\"mesh\":0},"
+        "{\"name\":\"parentA\",\"translation\":[0,1,0],\"children\":[0]},"
+        "{\"name\":\"childB\",\"translation\":[0,0,3],\"mesh\":0},"
+        "{\"name\":\"parentB\",\"translation\":[4,0,0],\"children\":[2]}],"
+        "\"scenes\":[{\"nodes\":[1,3]}],\"scene\":0}";
+    static const float positions[9] = {
+        -0.1f, -0.1f, 0.0f, 0.1f, -0.1f, 0.0f, 0.0f, 0.1f, 0.0f,
+    };
+    return make_glb(json, positions, sizeof(positions));
+}
+
 static test_glb make_animation(void) {
     static const char json[] =
         "{"
@@ -195,6 +220,40 @@ int main(void) {
         flux_sg_animation_release(animation);
         animation = retained;
         EXPECT(flux_sg_scene_apply_animation(scene, animation, -1.0f, false) == FLUX_OK);
+    }
+
+    /* A node array where children precede their parents must still fold the
+     * parent world matrix into each child. The previous world-matrix update
+     * relied on array-order convergence; this locks the correct composed
+     * transforms regardless of ordering. */
+    test_glb reversed_glb = make_reversed_chain();
+    EXPECT(reversed_glb.bytes != NULL);
+    if (reversed_glb.bytes) {
+        flux_sg_scene *reversed = NULL;
+        flux_result reversed_result =
+            flux_sg_load_glb(device, reversed_glb.bytes, reversed_glb.size, &reversed);
+        EXPECT(reversed_result == FLUX_OK);
+        if (reversed) {
+            /* Two children each carry the mesh. Their translated AABBs
+             * (positions plus the child's world translation) must fold in
+             * both parents, proving the parent world matrix reached each
+             * child even though the children precede the parents in the
+             * node array. */
+            flux_vec3 bounds_min = {0};
+            flux_vec3 bounds_max = {0};
+            EXPECT(flux_sg_scene_bounds(reversed, &bounds_min, &bounds_max));
+            /* Positions span x in [-0.1, 0.1], y in [-0.1, 0.1], z = 0.
+             * childA's world is (0, 3, 0); childB's is (4, 0, 3). */
+            EXPECT_NEAR(bounds_min.x, -0.1f, 1e-4);
+            EXPECT_NEAR(bounds_min.y, -0.1f, 1e-4);
+            EXPECT_NEAR(bounds_min.z, 0.0f, 1e-4);
+            EXPECT_NEAR(bounds_max.x, 4.1f, 1e-4);
+            EXPECT_NEAR(bounds_max.y, 3.1f, 1e-4);
+            EXPECT_NEAR(bounds_max.z, 3.0f, 1e-4);
+        }
+        flux_device_wait_idle(device);
+        flux_sg_scene_release(reversed);
+        free(reversed_glb.bytes);
     }
 
     flux_sg_animation_release(animation);

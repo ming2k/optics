@@ -94,7 +94,6 @@ typedef struct flux_sg_node {
     flux_quat rotation;
     flux_vec3 scale;
     flux_quat rest_world_rotation;
-    flux_mat4 local;
     flux_mat4 world; /* cached; recomputed each draw */
     int mesh_first;  /* -1 if this node has no mesh */
     int mesh_prim_count;
@@ -146,6 +145,10 @@ struct flux_sg_scene {
     int *roots; /* node indices */
     uint32_t root_count;
     int human_bones[SG_HUMAN_BONE_COUNT];
+    /* Node indices ordered parents-before-children, so one linear pass
+     * propagates world matrices. Computed once from the (immutable) parent
+     * links and reused every animated frame; NULL until first needed. */
+    uint32_t *world_order;
 };
 
 /* ------------------------------------------------------------------ */

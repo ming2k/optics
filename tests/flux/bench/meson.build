@@ -54,3 +54,15 @@ if opt_canvas
   )
   test('frame_loop', bench_frame_loop, suite : 'bench', is_parallel : false)
 endif
+
+# World-matrix propagation for a skinned avatar: drives the full animated
+# pose path (reset + compose + skin palettes) over a deliberately reversed
+# topological order, where the pre-fix convergence loop did O(n^2) work.
+if get_option('scene-graph')
+  bench_sg_worlds = executable('bench_sg_worlds',
+    'bench_sg_worlds.c',
+    include_directories : bench_helpers_inc,
+    dependencies : [test_helpers_dep, flux_sg_dep],
+  )
+  test('sg_worlds', bench_sg_worlds, suite : 'bench', is_parallel : false)
+endif
