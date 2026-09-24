@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.48] - 2026-09-23
+
 ### Added
 
 - **prism**: Uncompromised dielectric optics and sub-pixel Contact Ambient Occlusion (CAO) (ADR-0102). Liquid glass is modeled as pure dielectric optical medium ($\text{IOR} \approx 1.52$), replacing monolithic smoke plate darkening with volumetric absorption along optical thickness. Added `contact_ao` (sub-pixel contact boundary crease) and `ambient_fresnel` (360-degree isotropic environmental Fresnel sheen).
