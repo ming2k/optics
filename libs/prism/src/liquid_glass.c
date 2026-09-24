@@ -567,6 +567,8 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
         .tint_strength = desc->tint_strength,
         .frost_strength = desc->frost_strength,
         .curvature = desc->curvature,
+        .contact_ao = desc->contact_ao,
+        .ambient_fresnel = desc->ambient_fresnel,
     };
     for (uint32_t i = 0; i < current_count; ++i) {
         const prism_liquid_glass_group *group = &desc->groups[current_group_indices[i]];

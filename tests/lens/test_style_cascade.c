@@ -264,8 +264,11 @@ static void test_material_theme_and_cascade_resolution(void) {
     CHECK_NEAR(dark.materials.command.plate_polarity, 0.0f, 0.0f);
     CHECK_NEAR(light.materials.floating.plate_polarity, 1.0f, 0.0f);
     CHECK_NEAR(dark.materials.floating.plate_polarity, 0.0f, 0.0f);
-    CHECK_NEAR(light.materials.lens_body.plate_polarity, 1.0f, 0.0f);
-    CHECK_NEAR(dark.materials.lens_body.plate_polarity, 0.0f, 0.0f);
+    /* Lens body is a pure dielectric medium: zero opaque plate, governed by Contact AO */
+    CHECK_NEAR(light.materials.lens_body.plate_opacity, 0.0f, 0.0f);
+    CHECK_NEAR(dark.materials.lens_body.plate_opacity, 0.0f, 0.0f);
+    CHECK(light.materials.lens_body.contact_ao > 0.0f);
+    CHECK(dark.materials.lens_body.ambient_fresnel > 0.0f);
 
     /* Dark mode requires higher border highlight for silhouette contrast */
     CHECK(dark.materials.foundation.border_highlight > light.materials.foundation.border_highlight);

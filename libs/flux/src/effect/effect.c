@@ -215,6 +215,7 @@ typedef struct blur_filter_slot {
     flux_image *half;
     flux_image *quarter;
     flux_image *output;
+    bool valid;
 } blur_filter_slot;
 
 struct flux_blur_filter {
@@ -1136,6 +1137,27 @@ flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
     blur_filter_slot *slot = &filter->slots[index];
     record_backdrop_filter(st, filter->device, flux_frame_vk_command_buffer(frame), input, slot,
                            desc->sigma, regions, region_count, is16f);
+    slot->valid = true;
+    *out = slot->output;
+    return FLUX_OK;
+}
+
+flux_result flux_blur_filter_current(flux_blur_filter *filter, flux_frame *frame,
+                                     flux_image **out) {
+    if (!filter || !frame || !out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = nullptr;
+    if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING || frame->pass_active) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "reusable blur query requires a recording frame pass boundary");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    uint32_t index = flux_frame_index(frame);
+    if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
+        return FLUX_ERROR_OUT_OF_RANGE;
+    blur_filter_slot *slot = &filter->slots[index];
+    if (!slot->valid || !slot->output)
+        return FLUX_ERROR_INVALID_STATE;
     *out = slot->output;
     return FLUX_OK;
 }

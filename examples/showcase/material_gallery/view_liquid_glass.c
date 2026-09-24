@@ -23,7 +23,8 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     prism_liquid_glass_group hero_group = PRISM_LIQUID_GLASS_GROUP_INIT;
     hero_group.shapes = hero_shapes;
     hero_group.shape_count = 1;
-    hero_group.plate_polarity = l->polarity;
+    hero_group.contact_ao = app->dark_mode ? 0.35f : 0.45f;
+    hero_group.ambient_fresnel = app->dark_mode ? 0.60f : 0.50f;
     hero_group.shadow_alpha = 0.30f;
     hero_group.shadow_blur = 24.0f * l->scale;
     hero_group.shadow_offset_y = 8.0f * l->scale;
@@ -53,7 +54,8 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     fusion_group.shapes = fusion_shapes;
     fusion_group.shape_count = 2;
     fusion_group.blend_radius = 34.0f * l->scale; /* Smooth-union blend radius */
-    fusion_group.plate_polarity = l->polarity;
+    fusion_group.contact_ao = app->dark_mode ? 0.35f : 0.45f;
+    fusion_group.ambient_fresnel = app->dark_mode ? 0.55f : 0.45f;
     fusion_group.shadow_alpha = 0.28f;
     fusion_group.shadow_blur = 22.0f * l->scale;
     fusion_group.shadow_offset_y = 7.0f * l->scale;
@@ -71,7 +73,8 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     prism_liquid_glass_group tint_group = PRISM_LIQUID_GLASS_GROUP_INIT;
     tint_group.shapes = tint_shapes;
     tint_group.shape_count = 1;
-    tint_group.plate_polarity = l->polarity;
+    tint_group.contact_ao = app->dark_mode ? 0.30f : 0.40f;
+    tint_group.ambient_fresnel = 0.50f;
     tint_group.tint_color = app->glass_amber ? (app->dark_mode ? 0xF5BA42u : 0xD97706u)
                                              : (app->dark_mode ? 0x38BDF8u : 0x0284C7u);
     tint_group.tint_strength = app->glass_amber ? 1.35f : 0.40f;
@@ -95,7 +98,8 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     prism_liquid_glass_group pill_group = PRISM_LIQUID_GLASS_GROUP_INIT;
     pill_group.shapes = pill_shapes;
     pill_group.shape_count = 1;
-    pill_group.plate_polarity = l->polarity;
+    pill_group.contact_ao = app->dark_mode ? 0.35f : 0.45f;
+    pill_group.ambient_fresnel = 0.50f;
     pill_group.shadow_alpha = 0.30f;
     pill_group.shadow_blur = 12.0f * l->scale;
     pill_group.shadow_offset_y = 4.0f * l->scale;

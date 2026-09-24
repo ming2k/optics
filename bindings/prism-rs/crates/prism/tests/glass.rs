@@ -50,9 +50,9 @@ fn shape_focus_group_are_plain_copy_data() {
         frost_strength: None,
         tint_strength: None,
         saturation: None,
-        plate_polarity: None,
-        backdrop_energy: None,
         curvature: None,
+        contact_ao: None,
+        ambient_fresnel: None,
     };
     let copied = group; // Copy
     assert_eq!(group, copied);
@@ -82,17 +82,17 @@ fn group_overrides_map_none_to_inherit_sentinel() {
         frost_strength: Some(0.75),
         tint_strength: None,
         saturation: Some(1.2),
-        plate_polarity: Some(0.4),
-        backdrop_energy: None,
         curvature: None,
+        contact_ao: Some(0.35),
+        ambient_fresnel: None,
     };
     let raw = group.as_raw();
     // None → the C header's <0 inherit/disabled sentinel; Some → verbatim.
     assert_eq!(raw.frost_strength, 0.75);
     assert_eq!(raw.tint_strength, -1.0);
     assert_eq!(raw.saturation, 1.2);
-    assert_eq!(raw.plate_polarity, 0.4);
-    assert_eq!(raw.backdrop_energy, -1.0);
+    assert_eq!(raw.contact_ao, 0.35);
+    assert_eq!(raw.ambient_fresnel, -1.0);
     assert_eq!(raw.tint_color, 0xC8E0FF);
     assert_eq!(raw.shape_count, 1);
 }

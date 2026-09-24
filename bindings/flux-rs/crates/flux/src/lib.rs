@@ -3685,6 +3685,24 @@ impl BlurFilter {
             _filter: PhantomData,
         })
     }
+
+    /// Borrow the slot's current valid blurred output without re-recording
+    /// Dual-Kawase pyramid passes into this frame's command buffer.
+    ///
+    /// Returns [`Error`] if the frame slot has no recorded blur yet or if its
+    /// targets were invalidated. Used by material-only updates (such as backdrop
+    /// cover fade) where the source scene capture and blur sigma are unchanged.
+    pub fn current<'filter>(
+        &'filter mut self,
+        frame: &Frame<'_>,
+    ) -> Result<BlurredImage<'filter>, Error> {
+        let mut raw = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_blur_filter_current(self.raw, frame.raw, &mut raw) })?;
+        Ok(BlurredImage {
+            raw,
+            _filter: PhantomData,
+        })
+    }
 }
 
 impl Drop for BlurFilter {

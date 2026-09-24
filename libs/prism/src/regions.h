@@ -40,20 +40,19 @@ static inline bool liquid_glass_rect_contains(flux_rect outer, flux_rect inner) 
 
 /* Validate one body's geometry and optical policy. A positive focus is an
  * interior field of a single body, never a second body or a smooth-union
- * participant, so its bounds must remain inside the primary shape. The five
- * override/adaptive fields must be finite; plate_polarity and
- * backdrop_energy are sentinel-driven (<0 disables), so only values above
- * their [0,1] range are rejected. */
+ * participant, so its bounds must remain inside the primary shape. Override
+ * fields must be finite; contact_ao, ambient_fresnel, and curvature are sentinel-driven
+ * (<0 disables/inherits), so only values above their [0,1] range are rejected. */
 static inline bool liquid_glass_group_is_valid(const prism_liquid_glass_group *group) {
     if (!group || group->shape_count < 1u || group->shape_count > LIQUID_GLASS_MAX_SHAPES ||
         !group->shapes || !isfinite(group->blend_radius) || !isfinite(group->opacity) ||
         !isfinite(group->shadow_alpha) || !isfinite(group->shadow_blur) ||
         !isfinite(group->shadow_offset_y) || !isfinite(group->focus_strength) ||
         !isfinite(group->frost_strength) || !isfinite(group->tint_strength) ||
-        !isfinite(group->saturation) || !isfinite(group->plate_polarity) ||
-        !isfinite(group->backdrop_energy) || !isfinite(group->curvature))
+        !isfinite(group->saturation) || !isfinite(group->curvature) ||
+        !isfinite(group->contact_ao) || !isfinite(group->ambient_fresnel))
         return false;
-    if (group->plate_polarity > 1.0f || group->backdrop_energy > 1.0f || group->curvature > 1.0f)
+    if (group->curvature > 1.0f || group->contact_ao > 1.0f || group->ambient_fresnel > 1.0f)
         return false;
     for (uint32_t j = 0; j < group->shape_count; ++j) {
         if (!liquid_glass_finite_rect(group->shapes[j].bounds) ||

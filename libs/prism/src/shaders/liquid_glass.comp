@@ -66,7 +66,7 @@ layout(push_constant) uniform PC {
     uint size_params;
     uint strength_params;
     uint focus_curvature;
-    uint tone_params;
+    uint optics_params;
 } pc;
 
 layout(local_size_x = 16, local_size_y = 16) in;
@@ -113,9 +113,9 @@ vec2 focus_curvature()
     return unpackHalf2x16(pc.focus_curvature);
 }
 
-vec2 tone_params()
+vec2 optics_params()
 {
-    return unpackHalf2x16(pc.tone_params);
+    return unpackHalf2x16(pc.optics_params);
 }
 
 vec4 sample_image(uint handle, vec2 uv)
@@ -290,36 +290,31 @@ void main()
     vec3 colour = mix(refracted, frost, frost_amount);
     colour = adjust_saturation(colour, max(pc.saturation, 0.0));
 
-    /* Adaptive body tint, opposing the backdrop: pearl over dark content,
-     * smoke over bright. Weakest inside the rim band, where lensing and
-     * light already provide separation. The smoke side is strong enough
-     * to hold the body apart from uniform white content. A non-negative
-     * plate_polarity pins the caller-chosen polarity for the whole body
-     * (uniform plate tone); negative keeps the legacy per-pixel polarity
-     * from the local blurred sample. */
-    vec2 tone = tone_params();
-    float plate_polarity = tone.x;
-    float backdrop_energy = tone.y;
-    float backdrop_luminance = dot(frost, vec3(0.2126, 0.7152, 0.0722));
-    float dark_backdrop = plate_polarity >= 0.0
-                              ? plate_polarity
-                              : 1.0 - smoothstep(0.20, 0.62, backdrop_luminance);
+    /* Physical dielectric optics:
+     * 1) Ambient reflectance floor: over dark content, the dielectric surface
+     *    reflects an ambient baseline (~10% pearl wash), ensuring floating glass
+     *    remains visible over pitch black without disappearing.
+     * 2) Volumetric transmission: light passing through the glass experiences
+     *    natural optical attenuation (~15-18%) and tint absorption along its optical
+     *    thickness, without artificial dirty smoke plate darkening. */
+    vec2 optics = optics_params();
+    float contact_ao = optics.x;
+    float ambient_fresnel = optics.y;
+
+    float backdrop_luma = dot(frost, vec3(0.2126, 0.7152, 0.0722));
+    float dark_ratio = 1.0 - smoothstep(0.15, 0.65, backdrop_luma);
+    float tint_profile = (0.65 + 0.35 * (1.0 - u)) * tint_strength * (1.0 - 0.25 * focus);
+
     vec3 tint_rgb = vec3((tint_color() >> 16) & 0xFFu, (tint_color() >> 8) & 0xFFu,
                          tint_color() & 0xFFu) / 255.0;
-    vec3 tint_colour = mix(vec3(0.045, 0.05, 0.065), vec3(1.0), dark_backdrop) * tint_rgb;
-    float tint_amount = mix(0.24, 0.10, dark_backdrop) * (0.65 + 0.35 * (1.0 - u)) *
-                        tint_strength;
-    tint_amount *= 1.0 - 0.25 * focus;
-    /* Prevent smoke plate from crushing dark backdrops into pitch-black mud */
-    if (plate_polarity >= 0.0 && plate_polarity < 0.5) {
-        float low_luma_suppression = smoothstep(0.05, 0.30, backdrop_luminance);
-        tint_amount *= mix(0.35, 1.0, low_luma_suppression);
-    }
-    /* Busy backdrops get a stronger tint: the energy boost lifts the body
-     * off high-frequency content without changing the quiet-content look. */
-    if (backdrop_energy >= 0.0)
-        tint_amount *= min(1.0 + 1.5 * backdrop_energy, 2.0);
-    colour = mix(colour, tint_colour, tint_amount);
+
+    // Ambient reflection floor on dark backgrounds (~10% pearl):
+    vec3 refl_floor = vec3(1.0) * tint_rgb * (0.10 * dark_ratio * tint_profile);
+
+    // Volumetric transmission through medium (pure glass transmission loss + chromatic tint):
+    float trans_atten = mix(0.24, 0.08, dark_ratio) * tint_profile;
+    vec3 trans_color = colour * mix(vec3(0.65), tint_rgb, 0.35);
+    colour = mix(colour, trans_color, trans_atten) + refl_floor;
     colour *= max(pc.brightness, 0.0);
 
     /* Selected content is a focus field inside this body, never another
@@ -343,29 +338,24 @@ void main()
 
     /* Physical 3D Meniscus Illumination Architecture:
      * 1) Overhead Ambient Key Illumination (Top Edge & Both Top Corners):
-     *    Every point along the upper curved meniscus (-rim_normal.y > 0) catches
-     *    overhead illumination, modulated smoothly by the incident key direction.
-     *    Both top-left AND top-right corners maintain consistent, unbroken brilliance. */
+     *    Every point along the upper curved meniscus catches overhead illumination. */
     float top_facing = max(-rim_normal.y, 0.0);
     float key_align = max(dot(rim_normal, key_dir), 0.0);
     float top_rim = pow(top_facing, 1.25) * (0.65 + 0.35 * pow(key_align, 1.25));
 
     /* 2) Bottom TIR Caustic Field (Bottom Edge & Both Bottom Corners):
-     *    Light refracted into the medium reflects internally at the opposite lower wall
-     *    (rim_normal.y > 0), focusing into a caustic rim shifted slightly deeper into the glass wall.
-     *    Both bottom-left AND bottom-right corners receive caustic illumination. */
+     *    Light refracted into the medium reflects internally at the opposite lower wall. */
     float bot_facing = max(rim_normal.y, 0.0);
     float away_align = max(dot(rim_normal, -key_dir), 0.0);
     float bot_rim = pow(bot_facing, 1.25) * (0.55 + 0.35 * pow(away_align, 1.25));
 
     /* 3) Continuous 360° Meniscus Fresnel Baseline:
-     *    In real dielectric glass, overhead ambient room light reflects off the
-     *    curved 3D meniscus around the entire perimeter. An unbroken baseline
-     *    guarantees that all four corners and rounded caps maintain structural
-     *    definition with zero dead-zone dropouts. */
+     *    In real dielectric glass, ambient room light reflects off the curved 3D
+     *    meniscus around the entire perimeter. The ambient_fresnel parameter scales
+     *    the isotropic environmental radiance ring. */
     float line = exp(-(d + 0.65) * (d + 0.65) / 2.00);
     float tir_line = exp(-(d + 0.80) * (d + 0.80) / 2.00);
-    float ambient_rim = 0.38 * line;
+    float ambient_rim = (0.28 + 0.32 * max(ambient_fresnel, 0.0)) * line;
 
     float total_spec = ambient_rim + top_rim * line + bot_rim * tir_line;
 
@@ -376,9 +366,14 @@ void main()
     vec3 spec_tint = mix(vec3(1.0), max(frost, vec3(0.12)) * 1.35, 0.28);
     colour += spec_tint * (pc.rim_light * total_spec);
 
-    /* 5) Edge absorption: microscopic contact line where the droplet meets the surface. */
-    float absorb = (0.06 + 0.12 * (1.0 - dark_backdrop)) * exp(-d * d / 1.50);
-    colour *= 1.0 - absorb;
+    /* 5) Contact Ambient Occlusion (CAO):
+     * Microscopic sub-pixel contact boundary where the dielectric lens meets the
+     * underlying surface. Produces a razor-sharp 1.5px contact crease that grounds
+     * the transparent glass even over pure white (1.0) backdrops without muddying
+     * the interior body. */
+    float contact_alpha = clamp(contact_ao, 0.0, 1.0);
+    float contact_absorb = contact_alpha * 0.45 * exp(-d * d / 1.20);
+    colour *= 1.0 - contact_absorb;
 
     /* Sub-LSB dither: smooth studio gradients band visibly in rgba8.
      * 16F outputs keep full float precision instead. */

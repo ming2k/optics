@@ -16,6 +16,8 @@ lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool 
             r.shadow_blur = 16.0f;
             r.noise_intensity = 0.02f;
             r.fallback = flux_color_rgba(0x20, 0x20, 0x20, 0xff);
+            r.contact_ao = 0.25f;
+            r.ambient_fresnel = 0.30f;
             break;
         case LENS_MATERIAL_MICA_ALT:
             r.plate_polarity = 0.0f;
@@ -27,6 +29,8 @@ lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool 
             r.shadow_blur = 12.0f;
             r.noise_intensity = 0.02f;
             r.fallback = flux_color_rgba(0x18, 0x18, 0x18, 0xff);
+            r.contact_ao = 0.25f;
+            r.ambient_fresnel = 0.30f;
             break;
         case LENS_MATERIAL_ACRYLIC:
         case LENS_MATERIAL_FROSTED:
@@ -39,10 +43,11 @@ lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool 
             r.shadow_blur = 24.0f;
             r.noise_intensity = 0.03f;
             r.fallback = flux_color_rgba(0x1a, 0x1a, 0x20, 0xff);
+            r.contact_ao = 0.30f;
+            r.ambient_fresnel = 0.35f;
             break;
         case LENS_MATERIAL_LIQUID_GLASS:
-            r.plate_polarity = 0.0f;
-            r.plate_opacity = 1.0f;
+            r.plate_opacity = 0.0f; /* Pure dielectric medium: zero opaque plate */
             r.tint = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
             r.tint_opacity = 0.15f;
             r.border_highlight = 0.60f;
@@ -50,6 +55,8 @@ lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool 
             r.shadow_blur = 16.0f;
             r.noise_intensity = 0.0f;
             r.fallback = flux_color_rgba(0x0e, 0x0e, 0x11, 0xff);
+            r.contact_ao = 0.35f;
+            r.ambient_fresnel = 0.60f;
             break;
         case LENS_MATERIAL_NONE:
         default:
@@ -67,6 +74,8 @@ lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool 
             r.shadow_blur = 16.0f;
             r.noise_intensity = 0.02f;
             r.fallback = flux_color_rgba(0xf3, 0xf3, 0xf3, 0xff);
+            r.contact_ao = 0.35f;
+            r.ambient_fresnel = 0.25f;
             break;
         case LENS_MATERIAL_MICA_ALT:
             r.plate_polarity = 1.0f;
@@ -78,6 +87,8 @@ lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool 
             r.shadow_blur = 12.0f;
             r.noise_intensity = 0.02f;
             r.fallback = flux_color_rgba(0xeb, 0xeb, 0xeb, 0xff);
+            r.contact_ao = 0.35f;
+            r.ambient_fresnel = 0.25f;
             break;
         case LENS_MATERIAL_ACRYLIC:
         case LENS_MATERIAL_FROSTED:
@@ -90,10 +101,11 @@ lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool 
             r.shadow_blur = 20.0f;
             r.noise_intensity = 0.03f;
             r.fallback = flux_color_rgba(0xf3, 0xf4, 0xf6, 0xff);
+            r.contact_ao = 0.40f;
+            r.ambient_fresnel = 0.30f;
             break;
         case LENS_MATERIAL_LIQUID_GLASS:
-            r.plate_polarity = 1.0f;
-            r.plate_opacity = 1.0f;
+            r.plate_opacity = 0.0f; /* Pure dielectric medium: zero opaque plate */
             r.tint = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
             r.tint_opacity = 0.15f;
             r.border_highlight = 0.50f;
@@ -101,6 +113,8 @@ lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool 
             r.shadow_blur = 16.0f;
             r.noise_intensity = 0.0f;
             r.fallback = flux_color_rgba(0xfa, 0xfa, 0xfb, 0xff);
+            r.contact_ao = 0.45f;
+            r.ambient_fresnel = 0.50f;
             break;
         case LENS_MATERIAL_NONE:
         default:
@@ -228,7 +242,7 @@ lens_theme lens_theme_for_material(lens_material_kind kind, bool dark) {
         t.color_bg = flux_color_rgba(0xff, 0xff, 0xff, 0x00);
         t.color_fg = flux_color_rgba(0x0a, 0x0f, 0x1d, 0xff);
         t.color_border =
-            flux_color_rgba(0x00, 0x00, 0x00, (uint8_t)(r.border_highlight * 255.0f * 0.7f));
+            flux_color_rgba(0x18, 0x1f, 0x2e, (uint8_t)(r.border_highlight * 255.0f * 0.75f));
         t.color_hover = flux_color_rgba(0x00, 0x00, 0x00, 0x0c);
         t.color_active = flux_color_rgba(0x00, 0x00, 0x00, 0x18);
     }

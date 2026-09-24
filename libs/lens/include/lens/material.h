@@ -49,6 +49,8 @@ typedef struct lens_material_recipe {
     float shadow_blur;      /* Spatial elevation drop-shadow blur radius in px */
     float noise_intensity;  /* Procedural grain / dithering intensity (eliminates banding) */
     flux_color fallback;    /* Solid fallback color for inactive / low-power state */
+    float contact_ao;       /* Sub-pixel contact ambient occlusion [0, 1] (CAO) */
+    float ambient_fresnel;  /* 360-degree isotropic environmental Fresnel sheen [0, 1] */
 } lens_material_recipe;
 
 /* Design token group for materials attached to lens_theme. */

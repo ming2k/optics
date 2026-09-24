@@ -60,7 +60,7 @@ typedef struct liquid_glass_push {
     uint32_t size_params;
     uint32_t strength_params;
     uint32_t focus_curvature;
-    uint32_t tone_params;
+    uint32_t optics_params;
 } liquid_glass_push;
 
 static_assert(sizeof(liquid_glass_push) == 160,
@@ -130,6 +130,8 @@ typedef struct prism_glass_policy {
     float tint_strength;
     float frost_strength;
     float curvature;
+    float contact_ao;
+    float ambient_fresnel;
 } prism_glass_policy;
 
 /* Record one glass-group dispatch. `input`/`blurred` are what the lens
@@ -154,6 +156,15 @@ static inline void prism_glass_record_group(VkCommandBuffer command,
     float focus_strength = fminf(fmaxf(group->focus_strength, 0.0f), 1.0f);
     float curvature = liquid_glass_group_or_desc(group->curvature, policy->curvature);
     curvature = fminf(fmaxf(curvature, 0.0f), 1.0f);
+    float contact_ao = liquid_glass_group_or_desc(group->contact_ao, policy->contact_ao);
+    if (contact_ao < 0.0f)
+        contact_ao = 0.35f;
+    contact_ao = fminf(fmaxf(contact_ao, 0.0f), 1.0f);
+    float ambient_fresnel =
+        liquid_glass_group_or_desc(group->ambient_fresnel, policy->ambient_fresnel);
+    if (ambient_fresnel < 0.0f)
+        ambient_fresnel = 0.50f;
+    ambient_fresnel = fminf(fmaxf(ambient_fresnel, 0.0f), 1.0f);
 
     liquid_glass_push push = {
         .input_handle = flux_image_bindless_handle(input),
@@ -188,8 +199,8 @@ static inline void prism_glass_record_group(VkCommandBuffer command,
                            ((uint32_t)prism_glass_f32_to_f16(fmaxf(frost_strength, 0.0f)) << 16u),
         .focus_curvature = (uint32_t)prism_glass_f32_to_f16(focus_strength) |
                            ((uint32_t)prism_glass_f32_to_f16(curvature) << 16u),
-        .tone_params = (uint32_t)prism_glass_f32_to_f16(group->plate_polarity) |
-                       ((uint32_t)prism_glass_f32_to_f16(group->backdrop_energy) << 16u),
+        .optics_params = (uint32_t)prism_glass_f32_to_f16(contact_ao) |
+                         ((uint32_t)prism_glass_f32_to_f16(ambient_fresnel) << 16u),
     };
     prism_glass_copy_shape(push.shape0, group->shapes[0]);
     if (group->shape_count == 2u)

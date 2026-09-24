@@ -57,20 +57,15 @@ typedef struct prism_liquid_glass_shape {
  *   inside the first shape. Focus and smooth union are mutually exclusive
  *   because both reuse the secondary-shape shader slot.
  *
- * The five trailing fields override dispatch-wide desc policy per body and
- * carry adaptive-plate inputs; each is armed by a non-negative value and
+ * The trailing fields override dispatch-wide desc policy per body and
+ * carry physical contact and optical profile parameters; each is armed by a non-negative value and
  * disabled/inherited by a negative one:
  * - frost_strength / tint_strength / saturation: per-body override of the
  *   same desc knob (<0 inherits the desc value; >=0 is used verbatim and
  *   clamped like the desc value);
- * - plate_polarity: [0,1] caller-chosen adaptive-tint polarity for the whole
- *   body — 0 pins the smoke plate, 1 the pearl plate — uniform instead of the
- *   legacy per-pixel polarity (<0 keeps the per-pixel behaviour). Text-bearing
- *   surfaces pin the polarity that opposes their text tone; callers that want
- *   backdrop-derived polarity can source it from
- *   prism_liquid_glass_filter_stats;
- * - backdrop_energy: [0,1] region high-frequency energy, boosting the body
- *   tint over busy backdrops (<0 disables the boost).
+ * - curvature: [0, 1] continuous curvature blend factor: 0 = rounded rect, 1 = G2 superellipse (p=4);
+ * - contact_ao: [0, 1] sub-pixel contact ambient occlusion (CAO) at silhouette boundary;
+ * - ambient_fresnel: [0, 1] 360-degree isotropic environmental Fresnel sheen.
  *
  * Build groups from PRISM_LIQUID_GLASS_GROUP_INIT: zero-init is NOT inherit
  * — a zeroed group pins frost/tint/saturation to explicit zeros instead of
@@ -96,13 +91,12 @@ typedef struct prism_liquid_glass_group {
     float frost_strength;  /* <0 = inherit desc value */
     float tint_strength;   /* <0 = inherit desc value */
     float saturation;      /* <0 = inherit desc value */
-    float plate_polarity;  /* [0,1] caller-chosen plate polarity: 0 = smoke,
-                              1 = pearl, uniform for the whole body; <0 = legacy
-                              per-pixel adaptive behaviour */
-    float backdrop_energy; /* [0,1] region high-frequency energy; boosts body tint;
-                              <0 = disabled */
     float curvature;       /* [0, 1] continuous curvature (squircle) blend factor:
                               0 = Euclidean rounded rect, 1 = G2 superellipse (p=4);
+                              <0 = inherit desc value */
+    float contact_ao;      /* [0, 1] sub-pixel contact ambient occlusion (CAO) at
+                              silhouette boundary; <0 = inherit desc value */
+    float ambient_fresnel; /* [0, 1] 360-degree isotropic environmental Fresnel sheen;
                               <0 = inherit desc value */
 } prism_liquid_glass_group;
 
@@ -118,9 +112,9 @@ typedef struct prism_liquid_glass_group {
      .frost_strength = -1.0f,                                                                      \
      .tint_strength = -1.0f,                                                                       \
      .saturation = -1.0f,                                                                          \
-     .plate_polarity = -1.0f,                                                                      \
-     .backdrop_energy = -1.0f,                                                                     \
-     .curvature = -1.0f}
+     .curvature = -1.0f,                                                                           \
+     .contact_ao = -1.0f,                                                                          \
+     .ambient_fresnel = -1.0f}
 
 /* Number of shapes this build supports per glass body (the dispatch
  * pushes one SDF per shape; the shader fuses them pairwise). Callers
@@ -168,6 +162,8 @@ typedef struct prism_liquid_glass_desc {
     float frost_strength;
     float curvature; /* [0, 1] continuous curvature (squircle) blend factor: 0 = rounded rect, 1 =
                         G2 superellipse */
+    float contact_ao;      /* [0, 1] Contact ambient occlusion default (default: 0.35) */
+    float ambient_fresnel; /* [0, 1] Isotropic environmental Fresnel sheen default (default: 0.50) */
 } prism_liquid_glass_desc;
 
 #define PRISM_LIQUID_GLASS_DESC_INIT                                                               \
@@ -184,7 +180,9 @@ typedef struct prism_liquid_glass_desc {
      .size_scale_min = 0.15f,                                                                      \
      .tint_strength = 1.0f,                                                                        \
      .frost_strength = 1.0f,                                                                       \
-     .curvature = 0.0f}
+     .curvature = 0.0f,                                                                            \
+     .contact_ao = 0.35f,                                                                          \
+     .ambient_fresnel = 0.50f}
 
 typedef struct prism_liquid_glass_filter prism_liquid_glass_filter;
 

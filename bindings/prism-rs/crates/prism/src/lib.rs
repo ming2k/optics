@@ -78,9 +78,9 @@ pub struct LiquidGlassGroup {
     pub frost_strength: Option<f32>,
     pub tint_strength: Option<f32>,
     pub saturation: Option<f32>,
-    pub plate_polarity: Option<f32>,
-    pub backdrop_energy: Option<f32>,
     pub curvature: Option<f32>,
+    pub contact_ao: Option<f32>,
+    pub ambient_fresnel: Option<f32>,
 }
 
 impl LiquidGlassGroup {
@@ -124,9 +124,9 @@ impl LiquidGlassGroup {
             frost_strength: sentinel(self.frost_strength),
             tint_strength: sentinel(self.tint_strength),
             saturation: sentinel(self.saturation),
-            plate_polarity: sentinel(self.plate_polarity),
-            backdrop_energy: sentinel(self.backdrop_energy),
             curvature: sentinel(self.curvature),
+            contact_ao: sentinel(self.contact_ao),
+            ambient_fresnel: sentinel(self.ambient_fresnel),
         };
         RawGroup {
             group,
@@ -177,6 +177,8 @@ pub struct LiquidGlassParams {
     pub tint_strength: f32,
     pub frost_strength: f32,
     pub curvature: f32,
+    pub contact_ao: f32,
+    pub ambient_fresnel: f32,
 }
 
 impl Default for LiquidGlassParams {
@@ -195,6 +197,8 @@ impl Default for LiquidGlassParams {
             tint_strength: 1.0,
             frost_strength: 1.0,
             curvature: 0.0,
+            contact_ao: 0.35,
+            ambient_fresnel: 0.50,
         }
     }
 }
@@ -267,6 +271,8 @@ impl LiquidGlassFilter {
             tint_strength: params.tint_strength,
             frost_strength: params.frost_strength,
             curvature: params.curvature,
+            contact_ao: params.contact_ao,
+            ambient_fresnel: params.ambient_fresnel,
             ..Default::default()
         };
         let mut raw = std::ptr::null_mut();

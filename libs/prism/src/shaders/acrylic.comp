@@ -133,11 +133,12 @@ void main()
     vec3 tint = unpack_rgb(pc.tint_color);
     vec3 tinted = mix(base_mix, tint, clamp(pc.tint_strength, 0.0, 1.0));
 
-    // 1px subtle SDF border highlight
+    // 1px subtle SDF border highlight / contact rim
     if (pc.border_alpha > 0.001 && pc.border_width > 0.0) {
         float edge_dist = abs(d);
         float border_intensity = clamp(1.0 - edge_dist / max(pc.border_width, 0.5), 0.0, 1.0);
-        tinted = mix(tinted, vec3(1.0), border_intensity * pc.border_alpha);
+        vec3 rim_col = mix(vec3(1.0), vec3(0.12, 0.15, 0.20), clamp(pc.luminance_plate, 0.0, 1.0));
+        tinted = mix(tinted, rim_col, border_intensity * pc.border_alpha);
     }
 
     // Procedural noise dither

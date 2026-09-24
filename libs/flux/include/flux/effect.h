@@ -137,6 +137,18 @@ FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_apply(flux_blur_filter *fil
                                                            const flux_effect_blur_desc *desc,
                                                            flux_image **out);
 
+/* Borrow the slot's current valid blurred output without re-recording the
+ * Dual-Kawase pyramid dispatch into `frame`'s command buffer.
+ *
+ * Errors:
+ *   FLUX_ERROR_INVALID_ARGUMENT — null filter/frame/out.
+ *   FLUX_ERROR_INVALID_STATE    — frame not recording, or slot has no
+ *     valid recorded blur output.
+ *   FLUX_ERROR_OUT_OF_RANGE     — frame slot index >= FLUX_MAX_FRAMES_IN_FLIGHT. */
+FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_current(flux_blur_filter *filter,
+                                                             flux_frame *frame,
+                                                             flux_image **out);
+
 /* ------------------------------------------------------------------ */
 /*  Drop shadow                                                       */
 /* ------------------------------------------------------------------ */

@@ -168,11 +168,11 @@ void main()
         tinted = mix(tinted, fallback_rgb, clamp(pc.fallback_weight, 0.0, 1.0));
     }
 
-    // 1px subtle SDF border highlight rim
+    // 1px subtle SDF border highlight rim / contact crease
     if (pc.border_alpha > 0.001 && pc.border_width > 0.0) {
         float edge_dist = abs(d);
         float border_intensity = clamp(1.0 - edge_dist / max(pc.border_width, 0.5), 0.0, 1.0);
-        vec3 rim_col = mix(vec3(1.0), vec3(0.9), clamp(pc.luminosity_plate, 0.0, 1.0));
+        vec3 rim_col = mix(vec3(1.0), vec3(0.12, 0.15, 0.20), clamp(pc.luminosity_plate, 0.0, 1.0));
         tinted = mix(tinted, rim_col, border_intensity * pc.border_alpha);
     }
 

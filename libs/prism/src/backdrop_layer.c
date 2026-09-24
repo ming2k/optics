@@ -810,6 +810,9 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         .size_scale_min = desc->size_scale_min,
         .tint_strength = desc->tint_strength,
         .frost_strength = desc->frost_strength,
+        .curvature = 0.0f,
+        .contact_ao = 0.35f,
+        .ambient_fresnel = 0.50f,
     };
     bool glass_dispatched = false;
     for (uint32_t i = 0; i < current_group_count; ++i) {

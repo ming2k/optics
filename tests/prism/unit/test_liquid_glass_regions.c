@@ -78,14 +78,14 @@ int main(void) {
     overrides.shapes = override_shapes;
     overrides.shape_count = 1u;
     EXPECT(overrides.frost_strength < 0.0f && overrides.tint_strength < 0.0f &&
-           overrides.saturation < 0.0f && overrides.plate_polarity < 0.0f &&
-           overrides.backdrop_energy < 0.0f);
+           overrides.saturation < 0.0f && overrides.contact_ao < 0.0f &&
+           overrides.ambient_fresnel < 0.0f);
     EXPECT(liquid_glass_group_is_valid(&overrides));
 
-    /* NaN is rejected in each of the five fields; any other sentinel or
+    /* NaN is rejected in each of the fields; any other sentinel or
      * in-range value is accepted. */
     float *fields[5] = {&overrides.frost_strength, &overrides.tint_strength, &overrides.saturation,
-                        &overrides.plate_polarity, &overrides.backdrop_energy};
+                        &overrides.contact_ao, &overrides.ambient_fresnel};
     for (uint32_t i = 0; i < 5u; ++i) {
         float keep = *fields[i];
         *fields[i] = NAN;
@@ -93,18 +93,18 @@ int main(void) {
         *fields[i] = keep;
         EXPECT(liquid_glass_group_is_valid(&overrides));
     }
-    /* plate_polarity / backdrop_energy accept <0 (disabled) or [0,1];
+    /* contact_ao / ambient_fresnel accept <0 (disabled) or [0,1];
      * anything above the range is rejected. */
-    overrides.plate_polarity = 0.0f;
-    overrides.backdrop_energy = 1.0f;
+    overrides.contact_ao = 0.5f;
+    overrides.ambient_fresnel = 0.7f;
     EXPECT(liquid_glass_group_is_valid(&overrides));
-    overrides.plate_polarity = 1.0f + 1e-6f;
+    overrides.contact_ao = 1.0f + 1e-6f;
     EXPECT(!liquid_glass_group_is_valid(&overrides));
-    overrides.plate_polarity = -2.0f;
+    overrides.contact_ao = -1.0f;
     EXPECT(liquid_glass_group_is_valid(&overrides));
-    overrides.backdrop_energy = 1.5f;
+    overrides.ambient_fresnel = 1.5f;
     EXPECT(!liquid_glass_group_is_valid(&overrides));
-    overrides.backdrop_energy = -1.0f;
+    overrides.ambient_fresnel = -1.0f;
     EXPECT(liquid_glass_group_is_valid(&overrides));
     /* The strength overrides accept any finite value: <0 inherits. */
     overrides.frost_strength = 0.0f;

@@ -7,13 +7,19 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Per-group material overrides and adaptive-plate inputs.**
-  `LiquidGlassGroup` gains `frost_strength`, `tint_strength`, `saturation`,
-  `plate_polarity`, and `backdrop_energy` as `Option<f32>`; `None` maps to
+- **Uncompromised physical dielectric optics and Contact AO (ADR-0102).**
+  `LiquidGlassGroup` and `LiquidGlassParams` gain `contact_ao` (sub-pixel contact
+  ambient occlusion at silhouette boundaries) and `ambient_fresnel` (360-degree
+  isotropic environmental Fresnel sheen) as `Option<f32>`; `None` maps to
   the C header's `< 0` inherit/disabled sentinel, `Some` is used verbatim.
-  `plate_polarity` pins the caller-chosen tint polarity (0 = smoke, 1 =
-  pearl) uniformly for the whole body. The group-to-raw mapping is now
-  public as `LiquidGlassGroup::as_raw`.
+- **Continuous $G^2$ curvature.** `LiquidGlassGroup` gains `curvature` for
+  superellipse ($p=4$ squircle) silhouette blending.
+
+### Removed
+
+- **Legacy adaptive-plate polarity.** Removed `plate_polarity` and `backdrop_energy`
+  from `LiquidGlassGroup` and `LiquidGlassParams`. Pure dielectric volumetric absorption
+  and sub-pixel Contact AO supersede monolithic smoke plate tinting.
 - **Backdrop statistics.** `BackdropStats` and
   `LiquidGlassFilter::stats(frame, out)` read the per-group GPU reduction
   (mean blurred-backdrop luminance and high-frequency energy) the frame

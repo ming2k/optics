@@ -22,7 +22,8 @@ void gallery_view_grid_prepare(gallery_app *app, flux_frame *frame, flux_image *
         prism_liquid_glass_group group = PRISM_LIQUID_GLASS_GROUP_INIT;
         group.shapes = shapes;
         group.shape_count = 1;
-        group.plate_polarity = l->polarity;
+        group.contact_ao = app->dark_mode ? 0.35f : 0.45f;
+        group.ambient_fresnel = app->dark_mode ? 0.60f : 0.50f;
         group.shadow_alpha = 0.25f;
         group.shadow_blur = 16.0f * l->scale;
         group.shadow_offset_y = 6.0f * l->scale;

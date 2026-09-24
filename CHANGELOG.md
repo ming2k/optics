@@ -13,6 +13,17 @@ either.
 
 ## [Unreleased]
 
+### Added
+
+- **prism**: Uncompromised dielectric optics and sub-pixel Contact Ambient Occlusion (CAO) (ADR-0102). Liquid glass is modeled as pure dielectric optical medium ($\text{IOR} \approx 1.52$), replacing monolithic smoke plate darkening with volumetric absorption along optical thickness. Added `contact_ao` (sub-pixel contact boundary crease) and `ambient_fresnel` (360-degree isotropic environmental Fresnel sheen).
+- **prism**: Theme-adaptive contact rims in `acrylic.comp` and `mica.comp` that transition smoothly between specular white highlights in Dark mode and dark slate contact strokes (`0x181F2E`) in Light mode.
+- **lens**: Added `contact_ao` and `ambient_fresnel` to `lens_material_recipe`. `lens_theme_for_material` now equips Light theme surfaces with subtle dark slate contact borders.
+
+### Removed
+
+- **prism**: Completely eliminated `plate_polarity` and `backdrop_energy` from `prism_liquid_glass_group` and `prism_liquid_glass_desc`. Liquid Glass does not pretend to have an opaque plate.
+- **prism-rs**: Removed `plate_polarity` and `backdrop_energy` from Rust bindings `LiquidGlassGroup` and `LiquidGlassParams`.
+
 ## [0.0.47] - 2026-09-23
 
 ### Fixed
