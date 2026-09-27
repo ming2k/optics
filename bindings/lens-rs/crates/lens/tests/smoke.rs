@@ -2,9 +2,7 @@
 //! bindings, the linker resolved liblens + libflux, and a real headless
 //! frame drives the widget set through the safe wrapper. No GPU required.
 
-use lens::{
-    Input, TextBuf, Ui,
-};
+use lens::{Input, TextBuf, Ui};
 
 #[test]
 fn register_svg_icon_accepts_valid_and_rejects_garbage() {
@@ -87,6 +85,46 @@ fn headless_frame_drives_containers() {
                     for i in 0..10 {
                         f.label(&format!("item-{i}"));
                     }
+                });
+            });
+        });
+    });
+}
+
+#[test]
+fn headless_frame_drives_grid_and_nested_flex() {
+    let mut ui = Ui::headless().expect("create headless ui");
+    let input = Input::new((800.0, 600.0), 1.0 / 60.0);
+
+    ui.frame(&input, |f| {
+        // Outer 1D Column
+        f.column().gap(16.0).show_flat(|f| {
+            f.label("Dashboard");
+
+            // 2D Grid with 3 columns, Bento layout
+            f.grid(3).col_gap(10.0).row_gap(10.0).pad(12.0).show(|f| {
+                // Card 1: 2 cols x 1 row with nested 1D Row
+                f.column().col_span(2).row_span(1).show_flat(|f| {
+                    f.label("Hero Card (2x1)");
+                    f.row().show_flat(|f| {
+                        f.button("Action A");
+                        f.button("Action B");
+                    });
+                });
+
+                // Card 2: 1 col x 2 rows
+                f.column().col_span(1).row_span(2).show_flat(|f| {
+                    f.label("Tall Card (1x2)");
+                });
+
+                // Card 3: 1 col x 1 row
+                f.column().col_span(1).row_span(1).show_flat(|f| {
+                    f.label("Tile 1");
+                });
+
+                // Card 4: 1 col x 1 row
+                f.column().col_span(1).row_span(1).show_flat(|f| {
+                    f.label("Tile 2");
                 });
             });
         });

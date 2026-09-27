@@ -43,6 +43,19 @@ void lensi_link_child(lens *ui, lens_node *n) {
         n->fixed_h = ui->next_h;
         ui->have_next_size = false;
     }
+    if (ui->have_next_col_span) {
+        n->col_span = ui->next_col_span;
+        ui->have_next_col_span = false;
+    }
+    if (ui->have_next_row_span) {
+        n->row_span = ui->next_row_span;
+        ui->have_next_row_span = false;
+    }
+    if (ui->have_next_grid_pos) {
+        n->grid_col = ui->next_grid_col;
+        n->grid_row = ui->next_grid_row;
+        ui->have_next_grid_pos = false;
+    }
 }
 
 void lensi_open_container_push(lens *ui, lens_node *n) {
@@ -87,24 +100,6 @@ static lens_node *open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
     n->gap = opts.gap;
     n->pad = opts.pad;
     n->cross = opts.cross;
-    /* container's own main-axis grow. A descriptor flex wins; otherwise keep
-     * any pending lens_flex(...) link_child already applied, so the documented
-     * "lens_flex applies to the next node (widget OR container)" holds for the
-     * terse lens_row/lens_column too. */
-    if (opts.box.flex != 0)
-        n->flex_grow = opts.box.flex;
-    if (opts.box.width > 0)
-        n->fixed_w = opts.box.width;
-    if (opts.box.height > 0)
-        n->fixed_h = opts.box.height;
-    if (opts.box.min_width > 0)
-        n->min_w = opts.box.min_width;
-    if (opts.box.max_width > 0)
-        n->max_w = opts.box.max_width;
-    if (opts.box.min_height > 0)
-        n->min_h = opts.box.min_height;
-    if (opts.box.max_height > 0)
-        n->max_h = opts.box.max_height;
 
     /* Optional panel background — painted at replay against final_rect,
      * so it fills the container after layout has solved its size.
@@ -147,22 +142,52 @@ void lens_column_end(lens *ui) {
     lensi_open_container_pop(ui);
 }
 
+static lens_node *open_grid(lens *ui, lens_grid_opts opts) {
+    lens_id id = (opts.box.id && opts.box.id[0]) ? lensi_gen_widget_id(ui, opts.box.id)
+                                                 : lensi_gen_container_id(ui, "grid");
+    lens_node *n = lensi_store_touch(ui, id);
+    if (!n)
+        return NULL;
+    lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts.box);
+    n->is_container = true;
+    n->is_grid = true;
+    n->grid_columns = opts.columns > 0 ? (uint32_t)opts.columns : 1;
+    n->gap = opts.col_gap >= 0.0f ? opts.col_gap : 0.0f;
+    n->grid_row_gap = opts.row_gap >= 0.0f ? opts.row_gap : 0.0f;
+    n->grid_row_height = opts.row_height >= 0.0f ? opts.row_height : 0.0f;
+    n->pad = opts.pad >= 0.0f ? opts.pad : 0.0f;
+    n->align = opts.align;
+    n->cross = opts.cross != 0 ? opts.cross : LENS_STRETCH;
+
+    if ((opts.bg >> 24) != 0) {
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                            .rel = {0, 0, 0, 0},
+                                            .color = opts.bg,
+                                            .radius = opts.radius});
+    }
+    if ((opts.border >> 24) != 0 && opts.border_width > 0.0f) {
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
+                                            .rel = {0, 0, 0, 0},
+                                            .color = opts.border,
+                                            .radius = opts.radius,
+                                            .width = opts.border_width});
+    }
+
+    lensi_open_container_push(ui, n);
+    return n;
+}
+
 void lens_grid_begin(lens *ui, const lens_grid_opts *opts) {
     lens_grid_opts default_opts = {
-        .columns = 1, .col_gap = ui ? ui->theme.gap : 0, .row_gap = ui ? ui->theme.gap : 0};
-    if (!opts)
-        opts = &default_opts;
-    lens_layout_opts lopts = {
-        .box = opts->box,
-        .gap = opts->col_gap,
-        .pad = opts->pad,
+        .columns = 1,
+        .col_gap = ui ? ui->theme.gap : 0,
+        .row_gap = ui ? ui->theme.gap : 0,
         .cross = LENS_STRETCH,
     };
-    lens_node *n = open_flex(ui, LENS_ROW, lopts);
-    if (n) {
-        n->grid_columns = opts->columns > 0 ? (uint32_t)opts->columns : 1;
-        n->grid_row_gap = opts->row_gap;
-    }
+    open_grid(ui, opts ? *opts : default_opts);
 }
 void lens_grid_end(lens *ui) {
     lensi_open_container_pop(ui);
@@ -251,6 +276,10 @@ lens_box lensi_merge_box(lens_box base, lens_box override) {
     OVERRIDE(max_width);
     OVERRIDE(min_height);
     OVERRIDE(max_height);
+    OVERRIDE(col_span);
+    OVERRIDE(row_span);
+    OVERRIDE(grid_col);
+    OVERRIDE(grid_row);
     OVERRIDE(disabled);
     OVERRIDE(error);
     OVERRIDE(tooltip);
@@ -265,6 +294,14 @@ void lensi_node_box(lens *ui, lens_node *n, const lens_box *box) {
     n->max_w = box->max_width;
     n->min_h = box->min_height;
     n->max_h = box->max_height;
+    if (box->col_span > 0)
+        n->col_span = (uint32_t)box->col_span;
+    if (box->row_span > 0)
+        n->row_span = (uint32_t)box->row_span;
+    if (box->grid_col > 0)
+        n->grid_col = box->grid_col;
+    if (box->grid_row > 0)
+        n->grid_row = box->grid_row;
     n->box_disabled = box->disabled;
     if (box->flex != 0)
         n->flex_grow = box->flex;
@@ -311,6 +348,25 @@ void lens_size(lens *ui, float w, float h) {
     ui->next_h = h;
     ui->have_next_size = true;
 }
+void lens_col_span(lens *ui, uint32_t span) {
+    if (!ui)
+        return;
+    ui->next_col_span = span > 0 ? span : 1;
+    ui->have_next_col_span = true;
+}
+void lens_row_span(lens *ui, uint32_t span) {
+    if (!ui)
+        return;
+    ui->next_row_span = span > 0 ? span : 1;
+    ui->have_next_row_span = true;
+}
+void lens_grid_at(lens *ui, int32_t col, int32_t row) {
+    if (!ui)
+        return;
+    ui->next_grid_col = col;
+    ui->next_grid_row = row;
+    ui->have_next_grid_pos = true;
+}
 
 void lensi_apply_box(lens *ui, lens_box box) {
     if (box.flex != 0) {
@@ -321,6 +377,19 @@ void lensi_apply_box(lens *ui, lens_box box) {
         ui->next_w = box.width;
         ui->next_h = box.height;
         ui->have_next_size = true;
+    }
+    if (box.col_span > 0) {
+        ui->next_col_span = (uint32_t)box.col_span;
+        ui->have_next_col_span = true;
+    }
+    if (box.row_span > 0) {
+        ui->next_row_span = (uint32_t)box.row_span;
+        ui->have_next_row_span = true;
+    }
+    if (box.grid_col > 0 || box.grid_row > 0) {
+        ui->next_grid_col = box.grid_col;
+        ui->next_grid_row = box.grid_row;
+        ui->have_next_grid_pos = true;
     }
     if (box.disabled)
         ui->next_disabled = true;

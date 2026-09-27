@@ -572,6 +572,30 @@ impl<'frame> Frame<'frame> {
         self.col().with_opts(opts).show(body)
     }
 
+    /// Start a 2D grid container with a fluent builder (ADR-0104).
+    #[inline]
+    pub fn grid(&mut self, columns: u32) -> GridBuilder<'_, 'frame> {
+        GridBuilder::new(self, columns)
+    }
+
+    /// Set the number of columns spanned by the next widget or container.
+    #[inline]
+    pub fn col_span(&mut self, span: u32) {
+        unsafe { sys::lens_col_span(self.ui, span) };
+    }
+
+    /// Set the number of rows spanned by the next widget or container.
+    #[inline]
+    pub fn row_span(&mut self, span: u32) {
+        unsafe { sys::lens_row_span(self.ui, span) };
+    }
+
+    /// Set explicit 1-based grid position (col, row) for the next widget or container.
+    #[inline]
+    pub fn grid_at(&mut self, col: i32, row: i32) {
+        unsafe { sys::lens_grid_at(self.ui, col, row) };
+    }
+
     /// Center `body` on both axes inside a `width` × `height` box.
     ///
     /// Lens containers align only on the cross axis ([`LayoutOpts::cross`]);
@@ -1713,6 +1737,28 @@ impl<'a, 'frame> FlexBuilder<'a, 'frame> {
         self.max_height(h)
     }
 
+    /// Set columns spanned in an enclosing 2D grid.
+    #[inline]
+    pub fn col_span(mut self, span: i32) -> Self {
+        self.opts.col_span = span;
+        self
+    }
+
+    /// Set rows spanned in an enclosing 2D grid.
+    #[inline]
+    pub fn row_span(mut self, span: i32) -> Self {
+        self.opts.row_span = span;
+        self
+    }
+
+    /// Set explicit 1-based grid position (col, row).
+    #[inline]
+    pub fn grid_at(mut self, col: i32, row: i32) -> Self {
+        self.opts.grid_col = col;
+        self.opts.grid_row = row;
+        self
+    }
+
     /// Apply all options from a [`LayoutOpts`] descriptor.
     #[inline]
     pub fn with_opts(mut self, opts: &LayoutOpts) -> Self {
@@ -1751,6 +1797,156 @@ impl<'a, 'frame> FlexBuilder<'a, 'frame> {
     #[inline]
     pub fn empty(self) -> Response {
         self.show(|_| ()).0
+    }
+}
+
+/// Fluent builder for 2D grid containers (ADR-0104).
+pub struct GridBuilder<'a, 'frame> {
+    frame: &'a mut Frame<'frame>,
+    opts: sys::lens_grid_opts,
+}
+
+impl<'a, 'frame> GridBuilder<'a, 'frame> {
+    pub(crate) fn new(frame: &'a mut Frame<'frame>, columns: u32) -> Self {
+        let mut opts: sys::lens_grid_opts = unsafe { std::mem::zeroed() };
+        opts.columns = columns.max(1) as std::os::raw::c_int;
+        opts.cross = sys::lens_align::LENS_STRETCH;
+        Self { frame, opts }
+    }
+
+    /// Set horizontal gap between columns in logical px.
+    #[inline]
+    pub fn col_gap(mut self, px: f32) -> Self {
+        self.opts.col_gap = px;
+        self
+    }
+
+    /// Set vertical gap between rows in logical px.
+    #[inline]
+    pub fn row_gap(mut self, px: f32) -> Self {
+        self.opts.row_gap = px;
+        self
+    }
+
+    /// Set both column and row gaps to the same value.
+    #[inline]
+    pub fn gap(mut self, px: f32) -> Self {
+        self.opts.col_gap = px;
+        self.opts.row_gap = px;
+        self
+    }
+
+    /// Set uniform container padding in logical px.
+    #[inline]
+    pub fn pad(mut self, px: f32) -> Self {
+        self.opts.pad = px;
+        self
+    }
+
+    /// Set uniform row height (0 = content-measured).
+    #[inline]
+    pub fn row_height(mut self, px: f32) -> Self {
+        self.opts.row_height = px;
+        self
+    }
+
+    /// Set cross-axis alignment.
+    #[inline]
+    pub fn cross(mut self, align: Align) -> Self {
+        self.opts.cross = align.raw();
+        self
+    }
+
+    /// Set cell horizontal alignment.
+    #[inline]
+    pub fn align(mut self, align: Align) -> Self {
+        self.opts.align = align.raw();
+        self
+    }
+
+    /// Set columns spanned in an enclosing grid.
+    #[inline]
+    pub fn col_span(mut self, span: i32) -> Self {
+        self.opts.box_.col_span = span;
+        self
+    }
+
+    /// Set rows spanned in an enclosing grid.
+    #[inline]
+    pub fn row_span(mut self, span: i32) -> Self {
+        self.opts.box_.row_span = span;
+        self
+    }
+
+    /// Set explicit 1-based grid position (col, row).
+    #[inline]
+    pub fn grid_at(mut self, col: i32, row: i32) -> Self {
+        self.opts.box_.grid_col = col;
+        self.opts.box_.grid_row = row;
+        self
+    }
+
+    /// Set explicit width in logical px.
+    #[inline]
+    pub fn width(mut self, w: f32) -> Self {
+        self.opts.box_.width = w;
+        self
+    }
+
+    /// Set explicit height in logical px.
+    #[inline]
+    pub fn height(mut self, h: f32) -> Self {
+        self.opts.box_.height = h;
+        self
+    }
+
+    /// Set flex grow factor.
+    #[inline]
+    pub fn flex(mut self, factor: f32) -> Self {
+        self.opts.box_.flex = factor;
+        self
+    }
+
+    /// Set background fill color.
+    #[inline]
+    pub fn bg(mut self, color: Color) -> Self {
+        self.opts.bg = color.raw();
+        self
+    }
+
+    /// Set corner radius in logical px.
+    #[inline]
+    pub fn radius(mut self, r: f32) -> Self {
+        self.opts.radius = r;
+        self
+    }
+
+    /// Set corner radius in logical px (alias for [`Self::radius`]).
+    #[inline]
+    pub fn rounded(self, r: f32) -> Self {
+        self.radius(r)
+    }
+
+    /// Set border stroke color.
+    #[inline]
+    pub fn border(mut self, color: Color) -> Self {
+        self.opts.border = color.raw();
+        self
+    }
+
+    /// Set border stroke width in logical px.
+    #[inline]
+    pub fn border_width(mut self, width: f32) -> Self {
+        self.opts.border_width = width;
+        self
+    }
+
+    /// Execute the body within the grid container.
+    pub fn show<R>(self, body: impl FnOnce(&mut Frame) -> R) -> R {
+        unsafe { sys::lens_grid_begin(self.frame.ui, &self.opts) };
+        let r = body(self.frame);
+        unsafe { sys::lens_grid_end(self.frame.ui) };
+        r
     }
 }
 

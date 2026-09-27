@@ -416,8 +416,11 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->id_top = 0;
     ui->cont_top = 0;
     ui->have_next_flex = ui->have_next_size = false;
+    ui->have_next_col_span = ui->have_next_row_span = ui->have_next_grid_pos = false;
     ui->next_flex = 0;
     ui->next_w = ui->next_h = 0;
+    ui->next_col_span = ui->next_row_span = 0;
+    ui->next_grid_col = ui->next_grid_row = 0;
     ui->next_disabled = false;
     ui->next_error = false;
     ui->next_placeholder = NULL;

@@ -127,6 +127,7 @@ struct lens_node {
     /* layout inputs (per frame) */
     bool is_container;
     bool is_scroll;
+    bool is_grid;
     /* placement metadata (ADR-0060). FLOW nodes are ordinary flex items and
      * live in LENS_BAND_BASE. An ABS node keeps its parent chain and sibling
      * sequence position but consumes no flow space: it is measured, then
@@ -151,6 +152,15 @@ struct lens_node {
     bool box_disabled;
     uint32_t grid_columns;
     float grid_row_gap;
+    float grid_row_height;
+    uint32_t col_span;
+    uint32_t row_span;
+    int32_t grid_col;
+    int32_t grid_row;
+    uint32_t resolved_col;
+    uint32_t resolved_row;
+    uint32_t resolved_col_span;
+    uint32_t resolved_row_span;
     float flex_grow;
     float fixed_w, fixed_h; /* 0 = intrinsic */
     float min_w, max_w;     /* 0 = unconstrained */
@@ -335,7 +345,12 @@ struct lens {
     /* pending modifiers for the next widget */
     float next_flex;
     float next_w, next_h;
+    uint32_t next_col_span;
+    uint32_t next_row_span;
+    int32_t next_grid_col;
+    int32_t next_grid_row;
     bool have_next_flex, have_next_size;
+    bool have_next_col_span, have_next_row_span, have_next_grid_pos;
     bool next_disabled;
     bool next_error;
     const char *next_placeholder;
@@ -657,9 +672,37 @@ void lensi_apply_box(lens *ui, lens_box box); /* stage flex/size/disabled/error 
 void lensi_set_placeholder(lens *ui, const char *text);
 void lensi_tooltip(lens *ui, const char *text); /* anchored to last widget */
 
-/* layout (solve.c) */
+/* Spatial arithmetic & constraint resolution (solve.c, grid.c) */
+static inline float lensi_constrain_extent(float value, float min_value, float max_value) {
+    if (max_value > 0.0f)
+        value = fminf(value, max_value);
+    if (min_value > 0.0f)
+        value = fmaxf(value, min_value);
+    return value;
+}
+
+static inline float lensi_align_offset(lens_align a, float free) {
+    switch (a) {
+    case LENS_CENTER:
+        return free * 0.5f;
+    case LENS_END:
+        return free;
+    case LENS_START:
+    case LENS_STRETCH:
+    default:
+        return 0.0f;
+    }
+}
+
+/* layout strategies: 1D flex (flex.c) and 2D grid (grid.c) */
 void lensi_layout_solve(lens *ui);
 void lensi_scroll_clamp(lens *ui);
+void lensi_arrange_node(lens_node *n, flux_rect rect);
+flux_rect lensi_resolve_abs_rect(const lens *ui, const lens_node *n);
+flux_point lensi_flex_measure(lens_node *n);
+void lensi_flex_arrange(lens_node *n, flux_rect inner);
+flux_point lensi_grid_measure(lens_node *n);
+void lensi_grid_arrange(lens_node *n, flux_rect inner);
 
 /* input / interaction (input.c, focus.c) */
 lens_response lensi_interact(lens *ui, lens_node *n, bool focusable, bool disabled);

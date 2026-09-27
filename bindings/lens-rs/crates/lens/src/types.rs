@@ -135,10 +135,10 @@ impl CursorHint {
         }
     }
 }
+pub use sys::lens_skin_fn as SkinFn;
 pub use sys::lens_style_resolved as StyleResolved;
 pub use sys::lens_widget_record as WidgetRecord;
 pub use sys::lens_widget_state as WidgetState;
-pub use sys::lens_skin_fn as SkinFn;
 
 /// Named vector glyphs bundled with the lens runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -423,7 +423,8 @@ impl Response {
             clicked: r.clicked,
             right_clicked: r.right_clicked,
             focused: r.focused,
-            focus_visible: (r.state & (sys::lens_widget_state::LENS_STATE_FOCUS_VISIBLE as u32)) != 0,
+            focus_visible: (r.state & (sys::lens_widget_state::LENS_STATE_FOCUS_VISIBLE as u32))
+                != 0,
             changed: r.changed,
             id: r.id,
             state: r.state,
@@ -864,6 +865,10 @@ pub struct LayoutOpts {
     pub max_width: f32,
     pub min_height: f32,
     pub max_height: f32,
+    pub col_span: i32,
+    pub row_span: i32,
+    pub grid_col: i32,
+    pub grid_row: i32,
 }
 
 impl LayoutOpts {
@@ -880,6 +885,10 @@ impl LayoutOpts {
         b.max_width = self.max_width;
         b.min_height = self.min_height;
         b.max_height = self.max_height;
+        b.col_span = self.col_span;
+        b.row_span = self.row_span;
+        b.grid_col = self.grid_col;
+        b.grid_row = self.grid_row;
         sys::lens_layout_opts {
             box_: b,
             gap: self.gap,

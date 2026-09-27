@@ -956,6 +956,10 @@ typedef struct lens_box {
     float min_height;    /* minimum height constraint; 0 = unconstrained */
     float max_width;     /* maximum width constraint; 0 = unconstrained  */
     float max_height;    /* maximum height constraint; 0 = unconstrained */
+    int32_t col_span;    /* grid: columns spanned (0 or 1 = 1 column)    */
+    int32_t row_span;    /* grid: rows spanned (0 or 1 = 1 row)          */
+    int32_t grid_col;    /* grid: 1-based col position (0 = auto-place)  */
+    int32_t grid_row;    /* grid: 1-based row position (0 = auto-place)  */
     bool disabled;       /* non-interactive + dimmed                     */
     bool error;          /* validation-error styling                     */
     const char *tooltip; /* shown while this widget is hovered           */
@@ -963,7 +967,7 @@ typedef struct lens_box {
 } lens_box;
 
 /* ================================================================== */
-/*  Containers / layout (ADR-0028)                                    */
+/*  Containers / layout (ADR-0028, ADR-0104)                          */
 /* ================================================================== */
 
 typedef struct lens_layout_opts {
@@ -990,6 +994,13 @@ typedef struct lens_grid_opts {
     float col_gap;
     float row_gap;
     float pad;
+    float row_height;   /* fixed uniform row height; 0 = content height */
+    lens_align align;   /* cell horizontal alignment (default LENS_START) */
+    lens_align cross;   /* cell vertical alignment (default LENS_STRETCH) */
+    flux_color bg;      /* background fill; alpha 0 = transparent       */
+    float radius;       /* corner radius                                */
+    flux_color border;  /* border stroke                                */
+    float border_width; /* border width                                 */
 } lens_grid_opts;
 
 LENS_API void lens_grid_begin(lens *ui, const lens_grid_opts *opts);
@@ -1021,6 +1032,9 @@ LENS_API void lens_spacer(lens *ui, float size);
 LENS_API void lens_space_between(lens *ui);
 LENS_API void lens_fit(lens *ui);
 LENS_API void lens_size(lens *ui, float width, float height);
+LENS_API void lens_col_span(lens *ui, uint32_t span);
+LENS_API void lens_row_span(lens *ui, uint32_t span);
+LENS_API void lens_grid_at(lens *ui, int32_t col, int32_t row);
 
 /* ================================================================== */
 /*  Absolute placement & overlays (ADR-0060)                          */

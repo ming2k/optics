@@ -13,6 +13,15 @@ either.
 
 ## [Unreleased]
 
+### Added
+- **lens**: Unified orthogonal 2D grid and 1D flex layout subsystem (ADR-0104).
+  - Added multi-column and multi-row spans (`col_span`, `row_span`) and explicit grid coordinates (`grid_col`, `grid_row`) to the base `lens_box` model.
+  - Added immediate-mode procedural layout modifiers: `lens_col_span`, `lens_row_span`, and `lens_grid_at`.
+  - Upgraded `lens_grid_opts` with uniform `row_height` specification, cross-axis cell alignment, and panel container styling (`bg`, `radius`, `border`, `border_width`).
+  - Implemented 2D grid placement algorithm in `solve.c` supporting automatic packing (Bento Grids), explicit cell placement, and multi-span deficit distribution with zero dynamic heap allocations.
+  - Added full composability and arbitrary depth nesting between 1D Flex (Row/Column) and 2D Grid containers.
+- **lens-rs**: Added `GridBuilder` and `f.grid(columns)` with `.col_span()`, `.row_span()`, `.grid_at()`, and complete fluent container chaining.
+
 ## [0.0.49] - 2026-09-27
 
 ### Changed

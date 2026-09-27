@@ -15,6 +15,7 @@ void lensi_node_reset_frame(lens_node *n) {
 
     n->is_container = false;
     n->is_scroll = false;
+    n->is_grid = false;
     n->place = LENS_PLACE_FLOW;
     n->band = LENS_BAND_BASE;
     n->mode = LENS_PLACE_EXACT;
@@ -29,7 +30,16 @@ void lensi_node_reset_frame(lens_node *n) {
     n->align = LENS_START;
     n->space_between = n->fit = n->box_disabled = false;
     n->grid_columns = 0;
-    n->grid_row_gap = 0;
+    n->grid_row_gap = 0.0f;
+    n->grid_row_height = 0.0f;
+    n->col_span = 1;
+    n->row_span = 1;
+    n->grid_col = 0;
+    n->grid_row = 0;
+    n->resolved_col = 0;
+    n->resolved_row = 0;
+    n->resolved_col_span = 1;
+    n->resolved_row_span = 1;
     n->flex_grow = 0.0f;
     n->fixed_w = n->fixed_h = 0.0f;
     n->min_w = n->max_w = 0.0f;

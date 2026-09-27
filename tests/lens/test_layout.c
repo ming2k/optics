@@ -261,6 +261,244 @@ static void test_flex_respects_min_width_while_shrinking(void) {
     lens_release(ui);
 }
 
+static void test_grid_uniform_tracks(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_grid_begin(
+        ui, &(lens_grid_opts){.columns = 3, .col_gap = 0, .row_gap = 0, .row_height = 40.0f});
+    lens_response b0 = lens_button(ui, &(lens_button_opts){.label = "0"});
+    lens_response b1 = lens_button(ui, &(lens_button_opts){.label = "1"});
+    lens_response b2 = lens_button(ui, &(lens_button_opts){.label = "2"});
+    lens_grid_end(ui);
+    test_end(ui);
+
+    flux_rect r0 = lens_node_bounds(lens_find(ui, b0.id));
+    flux_rect r1 = lens_node_bounds(lens_find(ui, b1.id));
+    flux_rect r2 = lens_node_bounds(lens_find(ui, b2.id));
+
+    CHECK_NEAR(r0.x, 0.0f, 0.5f);
+    CHECK_NEAR(r0.w, 100.0f, 0.5f);
+    CHECK_NEAR(r1.x, 100.0f, 0.5f);
+    CHECK_NEAR(r1.w, 100.0f, 0.5f);
+    CHECK_NEAR(r2.x, 200.0f, 0.5f);
+    CHECK_NEAR(r2.w, 100.0f, 0.5f);
+
+    lens_release(ui);
+}
+
+static void test_grid_column_span(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {320, 200}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_grid_begin(ui, &(lens_grid_opts){
+                            .columns = 3, .col_gap = 10.0f, .row_gap = 10.0f, .row_height = 40.0f});
+    lens_response ba = lens_button(ui, &(lens_button_opts){.box = {.col_span = 2}, .label = "A"});
+    lens_response bb = lens_button(ui, &(lens_button_opts){.box = {.col_span = 1}, .label = "B"});
+    lens_grid_end(ui);
+    test_end(ui);
+
+    flux_rect ra = lens_node_bounds(lens_find(ui, ba.id));
+    flux_rect rb = lens_node_bounds(lens_find(ui, bb.id));
+
+    CHECK_NEAR(ra.x, 0.0f, 0.5f);
+    CHECK_NEAR(ra.w, 210.0f, 0.5f);
+    CHECK_NEAR(rb.x, 220.0f, 0.5f);
+    CHECK_NEAR(rb.w, 100.0f, 0.5f);
+
+    lens_release(ui);
+}
+
+static void test_grid_row_span_and_bento_packing(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {300, 300}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_grid_begin(
+        ui, &(lens_grid_opts){.columns = 3, .col_gap = 0.0f, .row_gap = 0.0f, .row_height = 50.0f});
+    lens_response ba =
+        lens_button(ui, &(lens_button_opts){.box = {.col_span = 2, .row_span = 1}, .label = "A"});
+    lens_response bb =
+        lens_button(ui, &(lens_button_opts){.box = {.col_span = 1, .row_span = 2}, .label = "B"});
+    lens_response bc =
+        lens_button(ui, &(lens_button_opts){.box = {.col_span = 1, .row_span = 1}, .label = "C"});
+    lens_response bd =
+        lens_button(ui, &(lens_button_opts){.box = {.col_span = 1, .row_span = 1}, .label = "D"});
+    lens_grid_end(ui);
+    test_end(ui);
+
+    flux_rect ra = lens_node_bounds(lens_find(ui, ba.id));
+    flux_rect rb = lens_node_bounds(lens_find(ui, bb.id));
+    flux_rect rc = lens_node_bounds(lens_find(ui, bc.id));
+    flux_rect rd = lens_node_bounds(lens_find(ui, bd.id));
+
+    CHECK_NEAR(ra.x, 0.0f, 0.5f);
+    CHECK_NEAR(ra.y, 0.0f, 0.5f);
+    CHECK_NEAR(ra.w, 200.0f, 0.5f);
+    CHECK_NEAR(ra.h, 50.0f, 0.5f);
+
+    CHECK_NEAR(rb.x, 200.0f, 0.5f);
+    CHECK_NEAR(rb.y, 0.0f, 0.5f);
+    CHECK_NEAR(rb.w, 100.0f, 0.5f);
+    CHECK_NEAR(rb.h, 100.0f, 0.5f);
+
+    CHECK_NEAR(rc.x, 0.0f, 0.5f);
+    CHECK_NEAR(rc.y, 50.0f, 0.5f);
+    CHECK_NEAR(rc.w, 100.0f, 0.5f);
+    CHECK_NEAR(rc.h, 50.0f, 0.5f);
+
+    CHECK_NEAR(rd.x, 100.0f, 0.5f);
+    CHECK_NEAR(rd.y, 50.0f, 0.5f);
+    CHECK_NEAR(rd.w, 100.0f, 0.5f);
+    CHECK_NEAR(rd.h, 50.0f, 0.5f);
+
+    lens_release(ui);
+}
+
+static void test_grid_explicit_coordinates(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_grid_begin(
+        ui, &(lens_grid_opts){.columns = 3, .col_gap = 0.0f, .row_gap = 0.0f, .row_height = 40.0f});
+    lens_response ba =
+        lens_button(ui, &(lens_button_opts){.box = {.grid_col = 3, .grid_row = 1}, .label = "A"});
+    lens_response bb = lens_button(ui, &(lens_button_opts){.label = "B"});
+    lens_response bc = lens_button(ui, &(lens_button_opts){.label = "C"});
+    lens_grid_end(ui);
+    test_end(ui);
+
+    flux_rect ra = lens_node_bounds(lens_find(ui, ba.id));
+    flux_rect rb = lens_node_bounds(lens_find(ui, bb.id));
+    flux_rect rc = lens_node_bounds(lens_find(ui, bc.id));
+
+    CHECK_NEAR(ra.x, 200.0f, 0.5f);
+    CHECK_NEAR(rb.x, 0.0f, 0.5f);
+    CHECK_NEAR(rc.x, 100.0f, 0.5f);
+
+    lens_release(ui);
+}
+
+static void test_nested_1d_flex_inside_2d_grid(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_grid_begin(
+        ui, &(lens_grid_opts){.columns = 2, .col_gap = 0.0f, .row_gap = 0.0f, .row_height = 80.0f});
+    lens_column_begin(ui, &(lens_layout_opts){.gap = 10.0f, .cross = LENS_STRETCH});
+    lens_response b0 =
+        lens_button(ui, &(lens_button_opts){.box = {.height = 30.0f}, .label = "Top"});
+    lens_response b1 =
+        lens_button(ui, &(lens_button_opts){.box = {.height = 30.0f}, .label = "Btm"});
+    lens_column_end(ui);
+
+    lens_response b2 = lens_button(ui, &(lens_button_opts){.label = "Right"});
+    lens_grid_end(ui);
+    test_end(ui);
+
+    flux_rect r0 = lens_node_bounds(lens_find(ui, b0.id));
+    flux_rect r1 = lens_node_bounds(lens_find(ui, b1.id));
+    flux_rect r2 = lens_node_bounds(lens_find(ui, b2.id));
+
+    CHECK_NEAR(r0.x, 0.0f, 0.5f);
+    CHECK_NEAR(r0.y, 0.0f, 0.5f);
+    CHECK_NEAR(r0.w, 150.0f, 0.5f);
+    CHECK_NEAR(r0.h, 30.0f, 0.5f);
+
+    CHECK_NEAR(r1.x, 0.0f, 0.5f);
+    CHECK_NEAR(r1.y, 40.0f, 0.5f);
+    CHECK_NEAR(r1.w, 150.0f, 0.5f);
+    CHECK_NEAR(r1.h, 30.0f, 0.5f);
+
+    CHECK_NEAR(r2.x, 150.0f, 0.5f);
+    CHECK_NEAR(r2.w, 150.0f, 0.5f);
+
+    lens_release(ui);
+}
+
+static void test_nested_2d_grid_inside_1d_column(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {200, 300}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_response h =
+        lens_button(ui, &(lens_button_opts){.box = {.height = 40.0f}, .label = "Header"});
+    lens_grid_begin(
+        ui, &(lens_grid_opts){.columns = 2, .col_gap = 0.0f, .row_gap = 0.0f, .row_height = 30.0f});
+    lens_response g0 = lens_button(ui, &(lens_button_opts){.label = "G0"});
+    lens_response g1 = lens_button(ui, &(lens_button_opts){.label = "G1"});
+    lens_response g2 = lens_button(ui, &(lens_button_opts){.box = {.col_span = 2}, .label = "G2"});
+    lens_grid_end(ui);
+    lens_response f =
+        lens_button(ui, &(lens_button_opts){.box = {.height = 40.0f}, .label = "Footer"});
+    test_end(ui);
+
+    flux_rect rh = lens_node_bounds(lens_find(ui, h.id));
+    flux_rect rg0 = lens_node_bounds(lens_find(ui, g0.id));
+    flux_rect rg1 = lens_node_bounds(lens_find(ui, g1.id));
+    flux_rect rg2 = lens_node_bounds(lens_find(ui, g2.id));
+    flux_rect rf = lens_node_bounds(lens_find(ui, f.id));
+
+    CHECK_NEAR(rh.y, 0.0f, 0.5f);
+    CHECK_NEAR(rh.h, 40.0f, 0.5f);
+
+    float theme_gap = lens_get_theme(ui).gap;
+    float grid_top = 40.0f + theme_gap;
+    CHECK_NEAR(rg0.y, grid_top, 0.5f);
+    CHECK_NEAR(rg0.x, 0.0f, 0.5f);
+    CHECK_NEAR(rg0.w, 100.0f, 0.5f);
+
+    CHECK_NEAR(rg1.y, grid_top, 0.5f);
+    CHECK_NEAR(rg1.x, 100.0f, 0.5f);
+    CHECK_NEAR(rg1.w, 100.0f, 0.5f);
+
+    CHECK_NEAR(rg2.y, grid_top + 30.0f, 0.5f);
+    CHECK_NEAR(rg2.x, 0.0f, 0.5f);
+    CHECK_NEAR(rg2.w, 200.0f, 0.5f);
+
+    CHECK_NEAR(rf.y, grid_top + 60.0f + theme_gap, 0.5f);
+
+    lens_release(ui);
+}
+
+static void test_grid_positional_hints(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
+
+    lens_begin(ui, &in);
+    lens_grid_begin(
+        ui, &(lens_grid_opts){.columns = 3, .col_gap = 0.0f, .row_gap = 0.0f, .row_height = 40.0f});
+
+    lens_col_span(ui, 2);
+    lens_response b0 = lens_button(ui, &(lens_button_opts){.label = "HintSpan2"});
+
+    lens_response b1 = lens_button(ui, &(lens_button_opts){.label = "Col3"});
+
+    lens_grid_end(ui);
+    test_end(ui);
+
+    flux_rect r0 = lens_node_bounds(lens_find(ui, b0.id));
+    flux_rect r1 = lens_node_bounds(lens_find(ui, b1.id));
+
+    CHECK_NEAR(r0.x, 0.0f, 0.5f);
+    CHECK_NEAR(r0.w, 200.0f, 0.5f);
+    CHECK_NEAR(r1.x, 200.0f, 0.5f);
+    CHECK_NEAR(r1.w, 100.0f, 0.5f);
+
+    lens_release(ui);
+}
+
 int main(void) {
     test_row_packs_children();
     test_flex_distributes_slack();
@@ -270,5 +508,12 @@ int main(void) {
     test_container_width_constraints_bound_intrinsic_size();
     test_flex_redistributes_space_after_max_width();
     test_flex_respects_min_width_while_shrinking();
+    test_grid_uniform_tracks();
+    test_grid_column_span();
+    test_grid_row_span_and_bento_packing();
+    test_grid_explicit_coordinates();
+    test_nested_1d_flex_inside_2d_grid();
+    test_nested_2d_grid_inside_1d_column();
+    test_grid_positional_hints();
     return TEST_REPORT();
 }

@@ -13,6 +13,8 @@ lens_sources = files(
   'src/store/node.c',
   'src/layout/tree.c',
   'src/layout/solve.c',
+  'src/layout/flex.c',
+  'src/layout/grid.c',
   'src/input/input.c',
   'src/input/focus.c',
   'src/input/clipboard.c',

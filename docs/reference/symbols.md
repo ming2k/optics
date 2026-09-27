@@ -458,24 +458,27 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_push_id_int` |  |
 | `lens_pop_id` |  |
 | `lens_current_id` |  |
-| `lens_row_begin` |  |
-| `lens_row_end` |  |
-| `lens_column_begin` |  |
-| `lens_column_end` |  |
-| `lens_close` |  |
-| `lens_grid_begin` |  |
-| `lens_grid_end` |  |
+| `lens_row_begin` | Begin horizontal 1D flex container (ADR-0028, ADR-0081) |
+| `lens_row_end` | Close horizontal 1D flex container |
+| `lens_column_begin` | Begin vertical 1D flex container (ADR-0028, ADR-0081) |
+| `lens_column_end` | Close vertical 1D flex container |
+| `lens_close` | Close innermost open layout container |
+| `lens_grid_begin` | Begin 2D grid container with track partitioning (ADR-0104) |
+| `lens_grid_end` | Close 2D grid container |
 | `lens_scroll_begin` |  |
 | `lens_scroll_end` |  |
 | `lens_scroll_offset` |  |
 | `lens_scroll_to` |  |
 | `lens_pressable_begin` |  |
 | `lens_pressable_end` |  |
-| `lens_flex` | Layout modifiers |
+| `lens_flex` | Layout modifiers: set main-axis flex grow factor for next node |
 | `lens_spacer` |  |
 | `lens_space_between` |  |
 | `lens_fit` |  |
-| `lens_size` |  |
+| `lens_size` | Set explicit fixed width and height for next node |
+| `lens_col_span` | Set columns spanned in an enclosing grid (ADR-0104) |
+| `lens_row_span` | Set rows spanned in an enclosing grid (ADR-0104) |
+| `lens_grid_at` | Set explicit 1-based grid coordinates (col, row) (ADR-0104) |
 | `lens_place_begin` |  |
 | `lens_place_end` |  |
 | `lens_place_open` |  |

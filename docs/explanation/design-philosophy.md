@@ -60,8 +60,10 @@ The GUI stack is separated into four strictly isolated layers:
 
 ### Layer 3: Layout Flow (`lens_row`, `lens_column`, `lens_grid`)
 - **Single Responsibility**: Solve 2D box positioning $(x, y, w, h)$ for child nodes.
-- **Physics**: Flexbox main-axis and cross-axis alignment (`gap`, `pad`, `flex`, `cross`, `radius`, `border`, `bg`).
-- **Invariance**: Layout containers do not perform GPU viewport clipping and do not escape parent coordinates.
+- **Physics**:
+  - **1D Flexbox Flow (`lens_row`, `lens_column`)**: Main-axis slack distribution (`flex`), cross-axis alignment (`cross`), inter-child spacing (`gap`, `pad`), panel styling (`bg`, `border`, `radius`).
+  - **2D Planar Grid (`lens_grid`)**: Column and row track partitioning (`columns`, `row_height`), multi-cell spans (`col_span`, `row_span`), explicit planar positioning (`grid_col`, `grid_row`), and dense Bento auto-packing (ADR-0104).
+- **Invariance**: Layout containers do not perform GPU viewport clipping and do not escape parent coordinates. 1D Flex and 2D Grid are completely orthogonal and freely nestable to arbitrary depths.
 
 ### Layer 4: Data & Interaction Atoms
 The 9 canonical orthogonal widget primitives:
