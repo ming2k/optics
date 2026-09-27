@@ -13,6 +13,16 @@ either.
 
 ## [Unreleased]
 
+## [0.0.49] - 2026-09-27
+
+### Changed
+- **iris**: Platform-agnostic accessibility bridge, asynchronous transport, and lazy activation (ADR-0103).
+  - Eliminated synchronous blocking D-Bus calls on window startup, avoiding main-thread freezes.
+  - Gated accessibility connection on desktop session state (`ScreenReaderEnabled` / `IsEnabled`) with inert zero-cost degradation when inactive.
+  - Replaced subshell `popen` in `a11y_prefs_linux.c` with direct in-memory Portal Settings D-Bus queries.
+  - Removed duplicate per-frame `iris_a11y_update` across Wayland, Win32, and Cocoa backends.
+  - Purged platform-specific AT-SPI/D-Bus details from public `<iris/a11y.h>` contract.
+
 ## [0.0.48] - 2026-09-23
 
 ### Added
