@@ -142,4 +142,33 @@ fn theme_minimalist_defaults_and_classic() {
     assert_eq!(dark.border_width(), 0.0);
     assert_eq!(classic_light.border_width(), 1.0);
     assert_eq!(classic_dark.border_width(), 1.0);
+
+    // Semantic surface tokens
+    assert_ne!(def.surface().raw(), 0);
+    assert_ne!(def.surface_sunken().raw(), 0);
+    assert_ne!(def.surface_elevated().raw(), 0);
+    assert_ne!(dark.surface().raw(), 0);
+    assert_ne!(dark.surface_sunken().raw(), 0);
+    assert_ne!(dark.surface_elevated().raw(), 0);
+}
+
+#[test]
+fn headless_frame_drives_wrap_and_stack_containers() {
+    let mut ui = Ui::headless().expect("create headless ui");
+    let input = Input::new((800.0, 600.0), 1.0 / 60.0);
+
+    ui.frame(&input, |f| {
+        // Flow wrap layout
+        f.wrap().gap(8.0).row_gap(10.0).show_flat(|f| {
+            f.button("Tag 1");
+            f.button("Tag 2");
+            f.button("Tag 3");
+        });
+
+        // Layering stack layout
+        f.stack().pad(4.0).show_flat(|f| {
+            f.label("Base Background");
+            f.button("Overlay Action");
+        });
+    });
 }

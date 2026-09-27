@@ -100,6 +100,8 @@ static lens_node *open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
     n->gap = opts.gap;
     n->pad = opts.pad;
     n->cross = opts.cross;
+    n->wrap = opts.wrap;
+    n->row_gap = opts.row_gap > 0.0f ? opts.row_gap : opts.gap;
 
     /* Optional panel background — painted at replay against final_rect,
      * so it fills the container after layout has solved its size.
@@ -139,6 +141,59 @@ void lens_column_begin(lens *ui, const lens_layout_opts *opts) {
     open_flex(ui, LENS_COLUMN, opts ? *opts : default_opts);
 }
 void lens_column_end(lens *ui) {
+    lensi_open_container_pop(ui);
+}
+
+void lens_wrap_begin(lens *ui, const lens_layout_opts *opts) {
+    lens_layout_opts default_opts = {
+        .gap = ui ? ui->theme.gap : 0, .pad = 0, .cross = LENS_START, .wrap = true};
+    lens_layout_opts o = opts ? *opts : default_opts;
+    o.wrap = true;
+    open_flex(ui, LENS_ROW, o);
+}
+void lens_wrap_end(lens *ui) {
+    lensi_open_container_pop(ui);
+}
+
+static lens_node *open_stack(lens *ui, lens_layout_opts opts) {
+    lens_id id = (opts.box.id && opts.box.id[0]) ? lensi_gen_widget_id(ui, opts.box.id)
+                                                 : lensi_gen_container_id(ui, "stack");
+    lens_node *n = lensi_store_touch(ui, id);
+    if (!n)
+        return NULL;
+    lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts.box);
+    n->is_container = true;
+    n->is_stack = true;
+    n->align = opts.align;
+    n->cross = opts.cross;
+    n->pad = opts.pad;
+
+    if ((opts.bg >> 24) != 0) {
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                            .rel = {0, 0, 0, 0},
+                                            .color = opts.bg,
+                                            .radius = opts.radius});
+    }
+    if ((opts.border >> 24) != 0 && opts.border_width > 0.0f) {
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
+                                            .rel = {0, 0, 0, 0},
+                                            .color = opts.border,
+                                            .radius = opts.radius,
+                                            .width = opts.border_width});
+    }
+
+    lensi_open_container_push(ui, n);
+    return n;
+}
+
+void lens_stack_begin(lens *ui, const lens_layout_opts *opts) {
+    lens_layout_opts default_opts = {.pad = 0, .cross = LENS_STRETCH};
+    open_stack(ui, opts ? *opts : default_opts);
+}
+void lens_stack_end(lens *ui) {
     lensi_open_container_pop(ui);
 }
 
@@ -281,6 +336,8 @@ lens_box lensi_merge_box(lens_box base, lens_box override) {
     OVERRIDE(row_span);
     OVERRIDE(grid_col);
     OVERRIDE(grid_row);
+    OVERRIDE(align);
+    OVERRIDE(cross);
     OVERRIDE(disabled);
     OVERRIDE(error);
     OVERRIDE(tooltip);
@@ -303,6 +360,10 @@ void lensi_node_box(lens *ui, lens_node *n, const lens_box *box) {
         n->grid_col = box->grid_col;
     if (box->grid_row > 0)
         n->grid_row = box->grid_row;
+    if (box->align != 0)
+        n->align = box->align;
+    if (box->cross != 0)
+        n->cross = box->cross;
     n->box_disabled = box->disabled;
     if (box->flex != 0)
         n->flex_grow = box->flex;

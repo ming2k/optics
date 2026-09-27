@@ -561,7 +561,8 @@ static flux_result compile_visuals(lens *ui, flux_display_list **out_list) {
         float y = ui->tooltip.anchor.y + ui->tooltip.anchor.h + 4.0f;
         flux_rect bg = {x, y, w, h};
         flux_geometry g_bg = flux_geom_rect(bg);
-        flux_brush b_bg = flux_brush_solid(lensi_opacity_color(t->color_bg, ui->tooltip.opacity));
+        flux_color tt_bg = t->color_surface_elevated ? t->color_surface_elevated : t->color_bg;
+        flux_brush b_bg = flux_brush_solid(lensi_opacity_color(tt_bg, ui->tooltip.opacity));
         flux_encoder_draw_geometry(enc, &g_bg, &b_bg);
 
         if (t->border_width > 0.0f && (t->color_border & 0xFF000000u) != 0) {

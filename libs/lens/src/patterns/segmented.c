@@ -19,7 +19,7 @@ bool lens_segmented_control(lens *ui, const char *id_str, const lens_segmented_i
     float border_w = ui->theme.border_width;
 
     /* Base theme colors */
-    flux_color bg = (border_w > 0.0f) ? ui->theme.color_bg : ui->theme.color_hover;
+    flux_color bg = (border_w > 0.0f) ? ui->theme.color_bg : ui->theme.color_surface_sunken;
     flux_color border_color = ui->theme.color_border;
 
     /* Outer container */

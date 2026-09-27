@@ -491,6 +491,21 @@ impl Theme {
         self
     }
 
+    pub fn with_surface(mut self, color: Color) -> Theme {
+        self.0.color_surface = color.raw();
+        self
+    }
+
+    pub fn with_surface_sunken(mut self, color: Color) -> Theme {
+        self.0.color_surface_sunken = color.raw();
+        self
+    }
+
+    pub fn with_surface_elevated(mut self, color: Color) -> Theme {
+        self.0.color_surface_elevated = color.raw();
+        self
+    }
+
     pub fn with_disabled(mut self, color: Color) -> Theme {
         self.0.color_disabled = color.raw();
         self
@@ -647,6 +662,18 @@ impl Theme {
 
     pub fn error(&self) -> Color {
         Color::from_raw(self.0.color_error)
+    }
+
+    pub fn surface(&self) -> Color {
+        Color::from_raw(self.0.color_surface)
+    }
+
+    pub fn surface_sunken(&self) -> Color {
+        Color::from_raw(self.0.color_surface_sunken)
+    }
+
+    pub fn surface_elevated(&self) -> Color {
+        Color::from_raw(self.0.color_surface_elevated)
     }
 
     pub fn font_size(&self) -> f32 {
@@ -873,6 +900,8 @@ pub struct LayoutOpts {
     pub row_span: i32,
     pub grid_col: i32,
     pub grid_row: i32,
+    pub wrap: bool,
+    pub row_gap: f32,
 }
 
 impl LayoutOpts {
@@ -903,6 +932,8 @@ impl LayoutOpts {
             radius: self.radius,
             border: self.border.raw(),
             border_width: self.border_width,
+            wrap: self.wrap,
+            row_gap: self.row_gap,
         }
     }
 }

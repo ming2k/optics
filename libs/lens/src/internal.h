@@ -128,6 +128,9 @@ struct lens_node {
     bool is_container;
     bool is_scroll;
     bool is_grid;
+    bool is_stack;
+    bool wrap;
+    float row_gap;
     /* placement metadata (ADR-0060). FLOW nodes are ordinary flex items and
      * live in LENS_BAND_BASE. An ABS node keeps its parent chain and sibling
      * sequence position but consumes no flow space: it is measured, then
@@ -703,6 +706,8 @@ flux_point lensi_flex_measure(lens_node *n);
 void lensi_flex_arrange(lens_node *n, flux_rect inner);
 flux_point lensi_grid_measure(lens_node *n);
 void lensi_grid_arrange(lens_node *n, flux_rect inner);
+flux_point lensi_stack_measure(lens_node *n);
+void lensi_stack_arrange(lens_node *n, flux_rect inner);
 
 /* input / interaction (input.c, focus.c) */
 lens_response lensi_interact(lens *ui, lens_node *n, bool focusable, bool disabled);

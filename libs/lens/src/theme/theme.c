@@ -139,6 +139,10 @@ lens_theme lens_theme_dark(void) {
     t.color_disabled = flux_color_rgba(0x52, 0x52, 0x5b, 0xff); /* zinc 600 */
     t.color_error = flux_color_rgba(0xef, 0x44, 0x44, 0xff);    /* modern red */
 
+    t.color_surface = flux_color_rgba(0x15, 0x15, 0x1a, 0xff);
+    t.color_surface_sunken = flux_color_rgba(0x12, 0x12, 0x16, 0xff);
+    t.color_surface_elevated = flux_color_rgba(0x1c, 0x1c, 0x24, 0xff);
+
     t.padding = 12.0f;
     t.gap = 8.0f;
     t.corner_radius = 6.0f;
@@ -190,6 +194,10 @@ lens_theme lens_theme_default(void) {
 
     t.color_disabled = flux_color_rgba(0x94, 0xa3, 0xb8, 0xff);
     t.color_error = flux_color_rgba(0xdc, 0x26, 0x26, 0xff);
+
+    t.color_surface = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
+    t.color_surface_sunken = flux_color_rgba(0xf1, 0xf3, 0xf5, 0xff);
+    t.color_surface_elevated = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
 
     t.padding = 12.0f;
     t.gap = 8.0f;

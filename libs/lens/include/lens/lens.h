@@ -372,6 +372,11 @@ typedef struct lens_theme {
     flux_color color_disabled;
     flux_color color_error;
 
+    /* Semantic surface tokens (ADR-0105) */
+    flux_color color_surface;          /* card / container resting surface */
+    flux_color color_surface_sunken;   /* input field / segmented track sunken surface */
+    flux_color color_surface_elevated; /* popup / tooltip / menu elevated surface */
+
     float padding;
     float gap;
     float corner_radius;
@@ -964,6 +969,8 @@ typedef struct lens_box {
     int32_t row_span;    /* grid: rows spanned (0 or 1 = 1 row)          */
     int32_t grid_col;    /* grid: 1-based col position (0 = auto-place)  */
     int32_t grid_row;    /* grid: 1-based row position (0 = auto-place)  */
+    lens_align align;    /* horizontal/main item alignment override      */
+    lens_align cross;    /* vertical/cross item alignment override       */
     bool disabled;       /* non-interactive + dimmed                     */
     bool error;          /* validation-error styling                     */
     const char *tooltip; /* shown while this widget is hovered           */
@@ -984,12 +991,18 @@ typedef struct lens_layout_opts {
     float radius;       /* corner radius                                */
     flux_color border;  /* border stroke                                */
     float border_width; /* border width                                 */
+    bool wrap;          /* multi-line wrapping (ADR-0105)               */
+    float row_gap;      /* vertical gap between wrapped lines (0 = gap) */
 } lens_layout_opts;
 
 LENS_API void lens_row_begin(lens *ui, const lens_layout_opts *opts);
 LENS_API void lens_row_end(lens *ui);
 LENS_API void lens_column_begin(lens *ui, const lens_layout_opts *opts);
 LENS_API void lens_column_end(lens *ui);
+LENS_API void lens_wrap_begin(lens *ui, const lens_layout_opts *opts);
+LENS_API void lens_wrap_end(lens *ui);
+LENS_API void lens_stack_begin(lens *ui, const lens_layout_opts *opts);
+LENS_API void lens_stack_end(lens *ui);
 LENS_API void lens_close(lens *ui); /* closes the innermost open container */
 
 typedef struct lens_grid_opts {

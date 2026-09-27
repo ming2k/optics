@@ -194,6 +194,14 @@ static void lensi_theme_normalize(lens_theme *t) {
     if (t->slider_knob_size <= 0.0f)
         t->slider_knob_size = 14.0f;
 
+    /* Normalize semantic surface tokens (ADR-0105) */
+    if (!t->color_surface)
+        t->color_surface = t->color_bg;
+    if (!t->color_surface_sunken)
+        t->color_surface_sunken = t->color_hover ? t->color_hover : t->color_bg;
+    if (!t->color_surface_elevated)
+        t->color_surface_elevated = t->color_active ? t->color_active : t->color_bg;
+
     /* Normalize material recipes if uninitialized (e.g. from zero-initialized or older callers) */
     if (t->materials.foundation.plate_opacity <= 0.0f && !t->materials.foundation.fallback) {
         uint8_t r = 0, g = 0, b = 0, a = 0;

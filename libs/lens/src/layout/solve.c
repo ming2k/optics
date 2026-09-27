@@ -25,7 +25,13 @@ static flux_point measure(lens_node *n) {
     }
 
     /* Container measure delegated to layout strategy */
-    flux_point m = n->is_grid ? lensi_grid_measure(n) : lensi_flex_measure(n);
+    flux_point m;
+    if (n->is_grid)
+        m = lensi_grid_measure(n);
+    else if (n->is_stack)
+        m = lensi_stack_measure(n);
+    else
+        m = lensi_flex_measure(n);
     if (n->fixed_w > 0)
         m.x = n->fixed_w;
     if (n->fixed_h > 0)
@@ -123,6 +129,8 @@ void lensi_arrange_node(lens_node *n, flux_rect rect) {
     /* Container arrange delegated to layout strategy */
     if (n->is_grid) {
         lensi_grid_arrange(n, inner);
+    } else if (n->is_stack) {
+        lensi_stack_arrange(n, inner);
     } else {
         lensi_flex_arrange(n, inner);
     }

@@ -239,6 +239,14 @@ static void test_minimalist_theme_defaults_and_borders(void) {
     CHECK_NEAR(classic_dark.border_width, 1.0f, 0.0f);
     CHECK_NEAR(mat.border_width, 1.0f, 0.0f);
 
+    /* Semantic surface tokens (ADR-0105) */
+    CHECK(def.color_surface != 0);
+    CHECK(def.color_surface_sunken != 0);
+    CHECK(def.color_surface_elevated != 0);
+    CHECK(dark.color_surface != 0);
+    CHECK(dark.color_surface_sunken != 0);
+    CHECK(dark.color_surface_elevated != 0);
+
     lens *ui = NULL;
     CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 

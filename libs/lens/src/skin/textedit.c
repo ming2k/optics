@@ -10,7 +10,7 @@ void lensi_skin_textedit(lens *ui, lens_node *n, const lens_widget_record *rec) 
     bool focused = (rec->state & LENS_STATE_FOCUSED) != 0;
     bool hovered = (rec->state & LENS_STATE_HOVERED) != 0;
 
-    flux_color resting_bg = (rs->border_width > 0.0f) ? rs->bg : rs->bg_hover;
+    flux_color resting_bg = (rs->border_width > 0.0f) ? rs->bg : ui->theme.color_surface_sunken;
     flux_color bg = (hovered && !disabled && c->multiline) ? rs->bg_hover : resting_bg;
     lensi_drawlist_push(
         ui, n,

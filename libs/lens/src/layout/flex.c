@@ -100,10 +100,187 @@ static float flex_adjustment(const lens_node *n, lens_axis axis, float level, bo
 }
 
 /* ================================================================== */
+/*  Wrap (Flow) and Stack Layout Strategies (ADR-0105)                */
+/* ================================================================== */
+
+static void lensi_wrap_arrange(lens_node *n, flux_rect inner) {
+    float avail_w = inner.w;
+    float row_gap = n->row_gap > 0.0f ? n->row_gap : n->gap;
+
+    uint32_t total_items = 0;
+    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place != LENS_PLACE_ABS)
+            total_items++;
+    }
+    if (total_items == 0)
+        return;
+
+    float cur_y = inner.y;
+    lens_node *line_start = n->first_child;
+
+    while (line_start) {
+        while (line_start && line_start->place == LENS_PLACE_ABS)
+            line_start = line_start->next_sibling;
+        if (!line_start)
+            break;
+
+        float line_w = 0.0f;
+        float line_h = 0.0f;
+        uint32_t line_count = 0;
+        lens_node *line_end = line_start;
+        lens_node *next_line_start = NULL;
+
+        for (lens_node *c = line_start; c; c = c->next_sibling) {
+            if (c->place == LENS_PLACE_ABS)
+                continue;
+            float cw = (c->fixed_w > 0.0f) ? c->fixed_w : c->measured.x;
+            cw = lensi_constrain_extent(cw, c->min_w, c->max_w);
+            float ch = (c->fixed_h > 0.0f) ? c->fixed_h : c->measured.y;
+            ch = lensi_constrain_extent(ch, c->min_h, c->max_h);
+
+            float next_w = (line_count > 0) ? (line_w + n->gap + cw) : cw;
+            if (line_count > 0 && avail_w > 0.0f && next_w > avail_w) {
+                next_line_start = c;
+                break;
+            }
+
+            line_w = next_w;
+            if (ch > line_h)
+                line_h = ch;
+            line_end = c;
+            line_count++;
+        }
+
+        float free_x = fmaxf(0.0f, avail_w - line_w);
+        float line_x = inner.x + lensi_align_offset(n->align, free_x);
+
+        for (lens_node *c = line_start;; c = c->next_sibling) {
+            if (c->place != LENS_PLACE_ABS) {
+                float cw = (c->fixed_w > 0.0f) ? c->fixed_w : c->measured.x;
+                cw = lensi_constrain_extent(cw, c->min_w, c->max_w);
+                float ch = (c->fixed_h > 0.0f) ? c->fixed_h : c->measured.y;
+                ch = lensi_constrain_extent(ch, c->min_h, c->max_h);
+
+                float cy = cur_y;
+                if (n->cross == LENS_CENTER) {
+                    cy = cur_y + (line_h - ch) * 0.5f;
+                } else if (n->cross == LENS_END) {
+                    cy = cur_y + line_h - ch;
+                } else if (n->cross == LENS_STRETCH && c->fixed_h <= 0.0f) {
+                    ch = line_h;
+                }
+
+                lensi_arrange_node(c, (flux_rect){line_x, cy, cw, ch});
+                line_x += cw + n->gap;
+            }
+
+            if (c == line_end)
+                break;
+        }
+
+        cur_y += line_h + row_gap;
+        line_start = next_line_start;
+    }
+
+    if (n->fixed_h <= 0.0f) {
+        float total_h =
+            (cur_y > inner.y) ? (cur_y - inner.y - row_gap + 2.0f * n->pad) : 2.0f * n->pad;
+        n->final_rect.h = fmaxf(n->final_rect.h, total_h);
+    }
+
+    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place != LENS_PLACE_ABS)
+            continue;
+        lensi_arrange_node(c, lensi_resolve_abs_rect(n->ui, c));
+    }
+}
+
+flux_point lensi_stack_measure(lens_node *n) {
+    float max_w = 0.0f;
+    float max_h = 0.0f;
+    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place == LENS_PLACE_ABS)
+            continue;
+        if (c->measured.x > max_w)
+            max_w = c->measured.x;
+        if (c->measured.y > max_h)
+            max_h = c->measured.y;
+    }
+    return (flux_point){max_w + 2.0f * n->pad, max_h + 2.0f * n->pad};
+}
+
+void lensi_stack_arrange(lens_node *n, flux_rect inner) {
+    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place == LENS_PLACE_ABS)
+            continue;
+        float cw = (c->fixed_w > 0.0f) ? c->fixed_w : c->measured.x;
+        float ch = (c->fixed_h > 0.0f) ? c->fixed_h : c->measured.y;
+
+        if (n->cross == LENS_STRETCH && c->fixed_w <= 0.0f && !c->fit)
+            cw = inner.w;
+        if (n->cross == LENS_STRETCH && c->fixed_h <= 0.0f && !c->fit)
+            ch = inner.h;
+
+        cw = lensi_constrain_extent(cw, c->min_w, c->max_w);
+        ch = lensi_constrain_extent(ch, c->min_h, c->max_h);
+
+        lens_align h_align = (c->align != 0) ? c->align : n->align;
+        lens_align v_align = (c->cross != 0) ? c->cross : n->cross;
+
+        float cx = inner.x + lensi_align_offset(h_align, inner.w - cw);
+        float cy = inner.y + lensi_align_offset(v_align, inner.h - ch);
+
+        lensi_arrange_node(c, (flux_rect){cx, cy, cw, ch});
+    }
+
+    for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->place != LENS_PLACE_ABS)
+            continue;
+        lensi_arrange_node(c, lensi_resolve_abs_rect(n->ui, c));
+    }
+}
+
+/* ================================================================== */
 /*  Public 1D Flex Strategy Entries                                   */
 /* ================================================================== */
 
 flux_point lensi_flex_measure(lens_node *n) {
+    if (n->wrap && n->axis == LENS_ROW && n->fixed_w > 0.0f) {
+        float avail = n->fixed_w - 2.0f * n->pad;
+        float row_gap = n->row_gap > 0.0f ? n->row_gap : n->gap;
+        float line_w = 0.0f, line_h = 0.0f, total_h = 0.0f, max_line_w = 0.0f;
+        uint32_t cnt = 0;
+        for (lens_node *c = n->first_child; c; c = c->next_sibling) {
+            if (c->place == LENS_PLACE_ABS)
+                continue;
+            float cw = (c->fixed_w > 0.0f) ? c->fixed_w : c->measured.x;
+            cw = lensi_constrain_extent(cw, c->min_w, c->max_w);
+            float ch = (c->fixed_h > 0.0f) ? c->fixed_h : c->measured.y;
+            ch = lensi_constrain_extent(ch, c->min_h, c->max_h);
+
+            float next_w = (cnt > 0) ? (line_w + n->gap + cw) : cw;
+            if (cnt > 0 && avail > 0.0f && next_w > avail) {
+                total_h += line_h + row_gap;
+                if (line_w > max_line_w)
+                    max_line_w = line_w;
+                line_w = cw;
+                line_h = ch;
+                cnt = 1;
+            } else {
+                line_w = next_w;
+                if (ch > line_h)
+                    line_h = ch;
+                cnt++;
+            }
+        }
+        if (cnt > 0) {
+            total_h += line_h;
+            if (line_w > max_line_w)
+                max_line_w = line_w;
+        }
+        return (flux_point){max_line_w + 2.0f * n->pad, total_h + 2.0f * n->pad};
+    }
+
     float main = 0, cross = 0;
     uint32_t n_children = 0;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
@@ -124,6 +301,11 @@ flux_point lensi_flex_measure(lens_node *n) {
 }
 
 void lensi_flex_arrange(lens_node *n, flux_rect inner) {
+    if (n->wrap && n->axis == LENS_ROW) {
+        lensi_wrap_arrange(n, inner);
+        return;
+    }
+
     lens_axis ax = n->axis;
     float inner_main = (ax == LENS_ROW) ? inner.w : inner.h;
     float inner_cross = (ax == LENS_ROW) ? inner.h : inner.w;

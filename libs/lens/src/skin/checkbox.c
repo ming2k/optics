@@ -83,7 +83,7 @@ void lensi_skin_checkbox(lens *ui, lens_node *n, const lens_widget_record *rec) 
         float text_y = fmaxf((rec->bounds.h - rs->font_size) * 0.5f - 1.0f, 0.0f);
 
         flux_color ring = disabled ? rs->border : (on ? rs->accent : rs->fg);
-        flux_color radio_bg = (rs->border_width > 0.0f) ? rs->bg : rs->bg_hover;
+        flux_color radio_bg = (rs->border_width > 0.0f) ? rs->bg : ui->theme.color_surface_sunken;
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){
                                 .kind = LENS_DRAW_RECT,
@@ -137,7 +137,7 @@ void lensi_skin_checkbox(lens *ui, lens_node *n, const lens_widget_record *rec) 
     float text_y = fmaxf((rec->bounds.h - rs->font_size) * 0.5f - 1.0f, 0.0f);
     float radius = rs->corner_radius > 0.0f ? fminf(rs->corner_radius, 4.0f) : 3.0f;
 
-    flux_color off_bg = (rs->border_width > 0.0f) ? rs->bg : rs->bg_hover;
+    flux_color off_bg = (rs->border_width > 0.0f) ? rs->bg : ui->theme.color_surface_sunken;
     flux_color box_bg = on ? (disabled ? rs->disabled : rs->accent) : off_bg;
 
     lensi_drawlist_push(ui, n,

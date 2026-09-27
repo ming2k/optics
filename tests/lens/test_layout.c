@@ -499,6 +499,104 @@ static void test_grid_positional_hints(void) {
     lens_release(ui);
 }
 
+static void test_flow_wrap_layout(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {400, 300}, .dt_seconds = 0.016f};
+
+    /* Wrap container: fixed width 200, pad 0, gap 10, row_gap 12.
+     * Buttons: fixed width 80, height 30.
+     * Item 0: x=0, y=0.
+     * Item 1: x=90, y=0. (80 + 10 = 90. Next item would be 90 + 80 + 10 = 180 + 80 > 200, breaks!)
+     * Item 2: x=0, y=42 (30 + 12 = 42).
+     */
+    lens_begin(ui, &in);
+    lens_wrap_begin(ui, &(lens_layout_opts){
+                            .box = {.id = "wrap_box", .width = 200.0f},
+                            .gap = 10.0f,
+                            .row_gap = 12.0f,
+                            .pad = 0.0f,
+                        });
+    lens_button(ui, &(lens_button_opts){.box = {.id = "b0", .width = 80.0f, .height = 30.0f},
+                                        .label = "0"});
+    lens_button(ui, &(lens_button_opts){.box = {.id = "b1", .width = 80.0f, .height = 30.0f},
+                                        .label = "1"});
+    lens_button(ui, &(lens_button_opts){.box = {.id = "b2", .width = 80.0f, .height = 30.0f},
+                                        .label = "2"});
+    lens_wrap_end(ui);
+    test_end(ui);
+
+    lens_node *root = lens_root(ui);
+    lens_node *wrap_node = lens_node_first_child(root);
+    CHECK(wrap_node != NULL);
+    lens_node *n0 = lens_node_first_child(wrap_node);
+    lens_node *n1 = n0 ? lens_node_next_sibling(n0) : NULL;
+    lens_node *n2 = n1 ? lens_node_next_sibling(n1) : NULL;
+
+    CHECK(n0 != NULL);
+    CHECK(n1 != NULL);
+    CHECK(n2 != NULL);
+
+    flux_rect r0 = lens_node_bounds(n0);
+    flux_rect r1 = lens_node_bounds(n1);
+    flux_rect r2 = lens_node_bounds(n2);
+
+    CHECK_NEAR(r0.x, 0.0f, 0.5f);
+    CHECK_NEAR(r0.y, 0.0f, 0.5f);
+    CHECK_NEAR(r1.x, 90.0f, 0.5f);
+    CHECK_NEAR(r1.y, 0.0f, 0.5f);
+    CHECK_NEAR(r2.x, 0.0f, 0.5f);
+    CHECK_NEAR(r2.y, 42.0f, 0.5f);
+
+    lens_release(ui);
+}
+
+static void test_stack_layering_layout(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {400, 300}, .dt_seconds = 0.016f};
+
+    /* Stack container: width 100, height 100.
+     * Base card: 100 x 100.
+     * Top-right badge: 24 x 24 with align = LENS_END, cross = LENS_START.
+     * Expected badge x = 76, y = 0.
+     */
+    lens_begin(ui, &in);
+    lens_stack_begin(ui, &(lens_layout_opts){
+                             .box = {.id = "stack_box", .width = 100.0f, .height = 100.0f},
+                             .pad = 0.0f,
+                         });
+    lens_button(ui, &(lens_button_opts){.box = {.id = "base", .width = 100.0f, .height = 100.0f},
+                                        .label = "base"});
+    lens_button(ui, &(lens_button_opts){.box = {.id = "badge",
+                                                .width = 24.0f,
+                                                .height = 24.0f,
+                                                .align = LENS_END,
+                                                .cross = LENS_START},
+                                        .label = "1"});
+    lens_stack_end(ui);
+    test_end(ui);
+
+    lens_node *root = lens_root(ui);
+    lens_node *stack_node = lens_node_first_child(root);
+    CHECK(stack_node != NULL);
+    lens_node *n_base = lens_node_first_child(stack_node);
+    lens_node *n_badge = n_base ? lens_node_next_sibling(n_base) : NULL;
+
+    CHECK(n_base != NULL);
+    CHECK(n_badge != NULL);
+
+    flux_rect r_base = lens_node_bounds(n_base);
+    flux_rect r_badge = lens_node_bounds(n_badge);
+
+    CHECK_NEAR(r_base.x, 0.0f, 0.5f);
+    CHECK_NEAR(r_base.y, 0.0f, 0.5f);
+    CHECK_NEAR(r_badge.x, 76.0f, 0.5f);
+    CHECK_NEAR(r_badge.y, 0.0f, 0.5f);
+
+    lens_release(ui);
+}
+
 int main(void) {
     test_row_packs_children();
     test_flex_distributes_slack();
@@ -515,5 +613,7 @@ int main(void) {
     test_nested_1d_flex_inside_2d_grid();
     test_nested_2d_grid_inside_1d_column();
     test_grid_positional_hints();
+    test_flow_wrap_layout();
+    test_stack_layering_layout();
     return TEST_REPORT();
 }

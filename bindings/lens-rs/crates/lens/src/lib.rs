@@ -578,6 +578,20 @@ impl<'frame> Frame<'frame> {
         GridBuilder::new(self, columns)
     }
 
+    /// Start a multi-line wrapping flex container (flow/wrap) with a fluent builder (ADR-0105).
+    #[inline]
+    pub fn wrap(&mut self) -> FlexBuilder<'_, 'frame> {
+        let mut b = FlexBuilder::new(self, false);
+        b.opts.wrap = true;
+        b
+    }
+
+    /// Start an in-tree stack (layering) container with a fluent builder (ADR-0105).
+    #[inline]
+    pub fn stack(&mut self) -> StackBuilder<'_, 'frame> {
+        StackBuilder::new(self)
+    }
+
     /// Set the number of columns spanned by the next widget or container.
     #[inline]
     pub fn col_span(&mut self, span: u32) {
@@ -1781,6 +1795,20 @@ impl<'a, 'frame> FlexBuilder<'a, 'frame> {
         self
     }
 
+    /// Enable or disable multi-line wrapping (ADR-0105).
+    #[inline]
+    pub fn wrapping(mut self, enabled: bool) -> Self {
+        self.opts.wrap = enabled;
+        self
+    }
+
+    /// Set vertical gap between wrapped lines in logical px (ADR-0105).
+    #[inline]
+    pub fn row_gap(mut self, gap: f32) -> Self {
+        self.opts.row_gap = gap;
+        self
+    }
+
     /// Open the container scope, execute `body` with the child frame, and
     /// return a tuple of `(Response, R)`.
     pub fn show<R>(self, body: impl FnOnce(&mut Frame) -> R) -> (Response, R) {
@@ -1797,6 +1825,83 @@ impl<'a, 'frame> FlexBuilder<'a, 'frame> {
     #[inline]
     pub fn empty(self) -> Response {
         self.show(|_| ()).0
+    }
+}
+
+/// Fluent builder for in-tree layering stack containers (ADR-0105).
+pub struct StackBuilder<'a, 'frame> {
+    frame: &'a mut Frame<'frame>,
+    opts: LayoutOpts,
+}
+
+impl<'a, 'frame> StackBuilder<'a, 'frame> {
+    #[inline]
+    pub fn new(frame: &'a mut Frame<'frame>) -> Self {
+        Self {
+            frame,
+            opts: LayoutOpts::default(),
+        }
+    }
+
+    #[inline]
+    pub fn pad(mut self, p: f32) -> Self {
+        self.opts.pad = p;
+        self
+    }
+
+    #[inline]
+    pub fn bg(mut self, color: Color) -> Self {
+        self.opts.bg = color;
+        self
+    }
+
+    #[inline]
+    pub fn radius(mut self, r: f32) -> Self {
+        self.opts.radius = r;
+        self
+    }
+
+    #[inline]
+    pub fn border(mut self, color: Color) -> Self {
+        self.opts.border = color;
+        self
+    }
+
+    #[inline]
+    pub fn border_width(mut self, w: f32) -> Self {
+        self.opts.border_width = w;
+        self
+    }
+
+    #[inline]
+    pub fn width(mut self, w: f32) -> Self {
+        self.opts.width = w;
+        self
+    }
+
+    #[inline]
+    pub fn height(mut self, h: f32) -> Self {
+        self.opts.height = h;
+        self
+    }
+
+    #[inline]
+    pub fn with_opts(mut self, opts: &LayoutOpts) -> Self {
+        self.opts = *opts;
+        self
+    }
+
+    pub fn show<R>(self, body: impl FnOnce(&mut Frame) -> R) -> R {
+        let raw = self.opts.to_raw();
+        unsafe { sys::lens_stack_begin(self.frame.ui, &raw) };
+        let r = body(self.frame);
+        unsafe { sys::lens_stack_end(self.frame.ui) };
+        r
+    }
+
+    #[inline]
+    pub fn show_flat<R>(self, body: impl FnOnce(&mut Frame) -> R) -> R {
+        self.show(body)
     }
 }
 
