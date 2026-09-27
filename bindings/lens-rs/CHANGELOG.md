@@ -5,6 +5,13 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.51] - 2026-09-27
+
+### Added
+- **Flow wrap and stack layout support (ADR-0105)**: `f.wrap()`, `f.stack()`, `StackBuilder`, `LayoutOpts.wrap`, `LayoutOpts.row_gap`.
+- **Semantic surface tokens**: `Theme::surface()`, `Theme::surface_sunken()`, `Theme::surface_elevated()`.
+- **Classic theme preset**: `Theme::classic(dark)`.
+
 ## [0.0.50] - 2026-09-27
 
 ### Added

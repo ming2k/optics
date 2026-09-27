@@ -13,6 +13,22 @@ either.
 
 ## [Unreleased]
 
+## [0.0.51] - 2026-09-27
+
+### Added
+- **lens**: Flow wrap and in-tree stack layout subsystems and semantic surface tokens (ADR-0105).
+  - Added multi-line flow wrapping container: `lens_wrap_begin` / `lens_wrap_end` and `lens_layout_opts.wrap` with configurable `row_gap`.
+  - Added in-tree stack layering container: `lens_stack_begin` / `lens_stack_end` for composite cards, badges, and overlays.
+  - Added orthogonal `align` (horizontal) and `cross` (vertical) alignment hints to base `lens_box`.
+  - Established first-class semantic surface design tokens: `color_surface`, `color_surface_sunken`, `color_surface_elevated` in `lens_theme` with automatic normalization.
+  - Added `lens_theme_classic(bool dark)` preset for 1px wireframe desktop style fallback.
+- **lens-rs**: Added `f.wrap()` and `f.stack()` fluent container builders, `StackBuilder`, `LayoutOpts.wrap`/`row_gap`, `Theme::surface()`, `Theme::surface_sunken()`, `Theme::surface_elevated()`, and `Theme::classic(dark)`.
+
+### Changed
+- **lens**: Established minimalist borderless baseline by default (`border_width = 0.0f` across default light/dark themes).
+- **lens**: Replaced legacy wireframe hacks in `TextEdit`, `Checkbox`, `Segmented`, and `Slider` tracks with direct bindings to `color_surface_sunken`.
+- **lens**: Fixed replay engine bug where `border_width <= 0.0f` fell back to `1.0f`.
+
 ## [0.0.50] - 2026-09-27
 
 ### Added

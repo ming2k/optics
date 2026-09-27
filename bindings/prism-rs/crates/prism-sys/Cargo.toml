@@ -16,7 +16,7 @@ rust-version.workspace = true
 # prism's C API speaks flux types (flux_image, flux_result, ...); they are
 # re-exported from flux-sys instead of being bindgen-duplicated, so the two
 # sys crates share one definition of each flux type.
-flux-sys = { path = "../../../flux-rs/crates/flux-sys", version = "0.0.50" }
+flux-sys = { path = "../../../flux-rs/crates/flux-sys", version = "0.0.51" }
 
 [build-dependencies]
 bindgen = "0.72"

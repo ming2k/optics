@@ -130,14 +130,14 @@ dependencies = [
 
 [[package]]
 name = "flux"
-version = "0.0.50"
+version = "0.0.51"
 dependencies = [
  "flux-sys",
 ]
 
 [[package]]
 name = "flux-scene-graph"
-version = "0.0.50"
+version = "0.0.51"
 dependencies = [
  "flux",
  "flux-scene-graph-sys",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "flux-scene-graph-sys"
-version = "0.0.50"
+version = "0.0.51"
 dependencies = [
  "bindgen",
  "flux-sys",
@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "flux-sys"
-version = "0.0.50"
+version = "0.0.51"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "flux-text"
-version = "0.0.50"
+version = "0.0.51"
 dependencies = [
  "flux",
  "flux-text-sys",
@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "flux-text-sys"
-version = "0.0.50"
+version = "0.0.51"
 dependencies = [
  "bindgen",
  "flux-sys",

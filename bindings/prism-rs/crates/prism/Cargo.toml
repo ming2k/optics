@@ -8,14 +8,14 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-prism-sys = { path = "../prism-sys", version = "0.0.50" }
+prism-sys = { path = "../prism-sys", version = "0.0.51" }
 # flux (Rust bindings) is published from a separate repo (../flux-rs).
 # The path works when both repos are siblings under a common parent
 # directory; for other layouts set up a Cargo [patch.crates-io] in your
 # workspace, or replace this with a git URL / registry version once
 # `flux` is published.
-flux = { path = "../../../flux-rs/crates/flux", version = "0.0.50" }
+flux = { path = "../../../flux-rs/crates/flux", version = "0.0.51" }
 # Direct dependency so this crate's build.rs receives DEP_FLUX_RPATHS
 # (links metadata reaches direct dependents only) and so the raw calls it
 # makes itself (flux_canvas_draw_image) name the same types `flux` uses.
-flux-sys = { path = "../../../flux-rs/crates/flux-sys", version = "0.0.50" }
+flux-sys = { path = "../../../flux-rs/crates/flux-sys", version = "0.0.51" }
