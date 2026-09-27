@@ -834,55 +834,136 @@ static const sd_bus_vtable g_application_vtable[] = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Init / shutdown                                                    */
+/*  Init / shutdown / active state (ADR-0103)                         */
 /* ------------------------------------------------------------------ */
+
+static bool g_a11y_active = false;
+static void visit_fn(const lens_semantics *s, flux_rect bounds, lens_id id, lens_id parent,
+                     void *user);
+
+IRIS_API bool iris_a11y_is_active(void) {
+    return g_a11y_bus != NULL && g_a11y_active;
+}
+
+static int on_bus_message_filter(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
+    (void)userdata;
+    (void)ret_error;
+    uint8_t type = 0;
+    if (sd_bus_message_get_type(m, &type) >= 0 && type == SD_BUS_MESSAGE_METHOD_CALL) {
+        if (!g_a11y_active) {
+            g_a11y_active = true;
+            if (g_state.n == 0 && g_lens_ui)
+                lens_accessibility_walk(g_lens_ui, visit_fn, NULL);
+        }
+    }
+    return 0; /* Pass through to vtables */
+}
 
 IRIS_API int iris_a11y_init(void) {
     if (g_a11y_bus)
         return 0;
 
-    /* 1. Query the session bus for the AT-SPI bus address. */
-    sd_bus *session = NULL;
-    int rc = sd_bus_open_user(&session);
-    if (rc < 0)
+    /* 0. Explicit opt-out via standard NO_AT_BRIDGE environment variable. */
+    const char *no_at_bridge = getenv("NO_AT_BRIDGE");
+    if (no_at_bridge && strcmp(no_at_bridge, "1") == 0)
         return -1;
 
     char addr_buf[1024] = {0};
-    char *addr_owned = NULL;
-    sd_bus_error err = SD_BUS_ERROR_NULL;
-    rc = sd_bus_get_property_string(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
-                                    "BusAddress", &err, &addr_owned);
-    if (rc >= 0 && addr_owned && addr_owned[0] != '\0' && strlen(addr_owned) < sizeof addr_buf) {
-        memcpy(addr_buf, addr_owned, strlen(addr_owned) + 1);
+
+    /* Explicit opt-in overrides (standard GTK_A11Y, AT_SPI_BUS_ADDRESS, IRIS_A11Y_FORCE). */
+    bool explicitly_requested = false;
+    const char *env_force = getenv("IRIS_A11Y_FORCE");
+    if (!env_force)
+        env_force = getenv("A11Y_FORCE");
+    if (!env_force)
+        env_force = getenv("GTK_A11Y");
+    if (env_force && strcmp(env_force, "0") != 0 && strcmp(env_force, "none") != 0)
+        explicitly_requested = true;
+
+    /* 1. Fast path: standard AT_SPI_BUS_ADDRESS environment variable
+     * (used by Flatpak, containers, and modern freedesktop sessions).
+     * Bypasses the session-bus IPC roundtrip entirely. */
+    const char *env_addr = getenv("AT_SPI_BUS_ADDRESS");
+    if (env_addr && env_addr[0] != '\0' && strlen(env_addr) < sizeof addr_buf) {
+        memcpy(addr_buf, env_addr, strlen(env_addr) + 1);
+        explicitly_requested = true;
     } else {
-        /* Some setups expose it via GetAddress method instead. */
+        /* Discover the bus address via the user session bus org.a11y.Bus.
+         * Enforce a tight fail-fast timeout (50ms): if the session bus or
+         * a11y broker is absent/unresponsive, fail soft immediately without
+         * degrading application startup or blocking the main thread. */
+        sd_bus *session = NULL;
+        int rc = sd_bus_open_user(&session);
+        if (rc < 0)
+            return -1;
+        (void)sd_bus_set_method_call_timeout(session, 50000); /* 50ms fail-fast */
+
+        /* Check desktop accessibility state (ScreenReaderEnabled / IsEnabled).
+         * If accessibility is NOT enabled in the desktop session and no
+         * explicit opt-in was given, keep the bridge completely inert:
+         * 0 sockets, 0 D-Bus traffic, 0 poll fds. (ADR-0103) */
+        sd_bus_error err = SD_BUS_ERROR_NULL;
+        int val = 0;
+        bool system_enabled = false;
+        if (sd_bus_get_property_trivial(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Status",
+                                        "ScreenReaderEnabled", &err, 'b', &val) >= 0 && val) {
+            system_enabled = true;
+            g_a11y_active = true;
+        } else if (sd_bus_get_property_trivial(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Status",
+                                               "IsEnabled", &err, 'b', &val) >= 0 && val) {
+            system_enabled = true;
+        }
+
+        if (!explicitly_requested && !system_enabled) {
+            /* Accessibility is not enabled in this desktop session.
+             * Clean inert degradation with zero runtime footprint. */
+            sd_bus_error_free(&err);
+            sd_bus_unref(session);
+            return 0;
+        }
+
+        char *addr_owned = NULL;
+        rc = sd_bus_get_property_string(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
+                                        "BusAddress", &err, &addr_owned);
+        if (rc >= 0 && addr_owned && addr_owned[0] != '\0' && strlen(addr_owned) < sizeof addr_buf) {
+            memcpy(addr_buf, addr_owned, strlen(addr_owned) + 1);
+        } else {
+            /* Fallback: GetAddress method call (used by legacy broker setups). */
+            free(addr_owned);
+            addr_owned = NULL;
+            sd_bus_error_free(&err);
+            sd_bus_message *reply = NULL;
+            rc = sd_bus_call_method(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
+                                    "GetAddress", &err, &reply, "");
+            if (rc < 0) {
+                sd_bus_error_free(&err);
+                sd_bus_unref(session);
+                return -1;
+            }
+            const char *reply_addr = NULL;
+            rc = sd_bus_message_read(reply, "s", &reply_addr);
+            bool valid =
+                rc >= 0 && reply_addr && reply_addr[0] != '\0' && strlen(reply_addr) < sizeof addr_buf;
+            if (valid)
+                memcpy(addr_buf, reply_addr, strlen(reply_addr) + 1);
+            sd_bus_message_unref(reply);
+            if (!valid) {
+                sd_bus_error_free(&err);
+                sd_bus_unref(session);
+                return -1;
+            }
+        }
+
         free(addr_owned);
-        addr_owned = NULL;
         sd_bus_error_free(&err);
-        sd_bus_message *reply = NULL;
-        rc = sd_bus_call_method(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
-                                "GetAddress", &err, &reply, "");
-        if (rc < 0) {
-            sd_bus_error_free(&err);
-            sd_bus_unref(session);
-            return -1;
-        }
-        const char *reply_addr = NULL;
-        rc = sd_bus_message_read(reply, "s", &reply_addr);
-        bool valid =
-            rc >= 0 && reply_addr && reply_addr[0] != '\0' && strlen(reply_addr) < sizeof addr_buf;
-        if (valid)
-            memcpy(addr_buf, reply_addr, strlen(reply_addr) + 1);
-        sd_bus_message_unref(reply);
-        if (!valid) {
-            sd_bus_error_free(&err);
-            sd_bus_unref(session);
-            return -1;
-        }
+        sd_bus_unref(session);
     }
-    free(addr_owned);
-    sd_bus_error_free(&err);
-    sd_bus_unref(session);
+
+    if (explicitly_requested)
+        g_a11y_active = true;
+
+    if (addr_buf[0] == '\0')
+        return -1;
 
     /* 2. Open a fresh connection directly to the AT-SPI bus: set the
      *    discovered address on a private connection and start it. This
@@ -891,11 +972,13 @@ IRIS_API int iris_a11y_init(void) {
      *    sd_bus_set_bus_client(true) is required: without it the
      *    connection is a raw (non-bus) one and sd_bus_start never sends
      *    the Hello that assigns our unique name. */
-    rc = sd_bus_new(&g_a11y_bus);
+    int rc = sd_bus_new(&g_a11y_bus);
     if (rc >= 0)
         rc = sd_bus_set_address(g_a11y_bus, addr_buf);
     if (rc >= 0)
         rc = sd_bus_set_bus_client(g_a11y_bus, true);
+    if (rc >= 0)
+        (void)sd_bus_set_method_call_timeout(g_a11y_bus, 500000); /* 500ms fail-fast on a11y bus */
     if (rc >= 0)
         rc = sd_bus_start(g_a11y_bus);
     if (rc < 0) {
@@ -946,14 +1029,22 @@ IRIS_API int iris_a11y_init(void) {
 
     /* 8. Register with the AT-SPI registry (links our root into the
      *    desktop-wide accessibility tree). Ignore failures — at-spi2-core
-     *    may not be running and we still want object exposure. */
-    (void)sd_bus_call_method(g_a11y_bus, "org.a11y.atspi.Registry",
-                             "/org/a11y/atspi/accessible/root", "org.a11y.atspi.Socket", "Embed",
-                             NULL, NULL, "o", "/org/a11y/atspi/accessible/root");
+     *    may not be running and we still want object exposure.
+     *    Must be asynchronous so we never stall application startup if the
+     *    registry service is absent or unresponsive (a synchronous call
+     *    with default timeout blocks the main thread for 25s waiting for
+     *    bus activation). */
+    (void)sd_bus_call_method_async(g_a11y_bus, NULL, "org.a11y.atspi.Registry",
+                                   "/org/a11y/atspi/accessible/root", "org.a11y.atspi.Socket",
+                                   "Embed", NULL, NULL, "o", "/org/a11y/atspi/accessible/root");
 
-    /* 9. Some sd_bus builds filter incoming method_calls unless we add an
-     *    explicit match. Match every message to us; the vtable dispatch
-     *    is the actual filter. */
+    /* 9. Install message filter to detect incoming AT-SPI client activity
+     *    and lazy-activate detailed signal emissions (ADR-0103). */
+    (void)sd_bus_add_filter(g_a11y_bus, NULL, on_bus_message_filter, NULL);
+
+    /* 10. Some sd_bus builds filter incoming method_calls unless we add an
+     *     explicit match. Match every message to us; the vtable dispatch
+     *     is the actual filter. */
     (void)sd_bus_match_signal_async(g_a11y_bus, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
     return 0;
@@ -991,6 +1082,7 @@ IRIS_API void iris_a11y_shutdown(void) {
         return;
     sd_bus_unref(g_a11y_bus);
     g_a11y_bus = NULL;
+    g_a11y_active = false;
     g_unique[0] = '\0';
     g_state.n = 0;
     g_state.n_prev = 0;
@@ -1135,6 +1227,12 @@ IRIS_API int iris_a11y_update(lens *ui) {
     if (!ui)
         return -1;
     g_lens_ui = ui; /* for Action.DoAction → lens_a11y_activate (ADR-0062) */
+
+    /* Zero-Cost Inactive Invariant (ADR-0103):
+     * If no screen reader or assistive technology client is actively
+     * consuming the tree, skip per-frame walk, diffing, and signal emissions. */
+    if (!g_a11y_active)
+        return 0;
 
     /* Retire the current frame into `prev`, then walk the new one. */
     g_state.n_prev = g_state.n;

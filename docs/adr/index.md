@@ -118,3 +118,4 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0100 | [Liquid Glass dual-rim TIR and screen-space environmental optics](0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md) | Accepted |
 | 0101 | [Physical Sampling Governor and Bounded Material Dispatch](0101-physical-sampling-governor-and-bounded-material-dispatch.md) | Accepted |
 | 0102 | [Decoupled Dielectric Optics, Contact Ambient Occlusion, and Uncompromised Material Contrast](0102-uncompromised-dielectric-optics-and-contact-ao.md) | Accepted |
+| 0103 | [Platform-Agnostic Accessibility Bridge, Asynchronous Transport, and Lazy Screen-Reader Activation](0103-platform-agnostic-accessibility-bridge-and-lazy-activation.md) | Accepted |

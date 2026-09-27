@@ -1837,7 +1837,6 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                             lens_snapshot_release(snapshot);
                             goto fail;
                         }
-                        iris_a11y_update(ui);
                         surface_needs_paint = false;
                     }
 

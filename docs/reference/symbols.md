@@ -592,9 +592,10 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 
 | Symbol | Description |
 |--------|-------------|
-| `iris_a11y_init` | Initialise the accessibility bridge: connect to the AT-SPI bus, register the application, expose the root accessible object. |
-| `iris_a11y_update` | Reconcile the AT-SPI object tree with lens's live semantic tree. |
-| `iris_a11y_shutdown` | Shutdown the bridge and release D-Bus resources. |
+| `iris_a11y_init` | Initialise the accessibility bridge: connect to the platform accessibility subsystem asynchronously. |
+| `iris_a11y_is_active` | Query whether assistive technology clients (e.g. screen readers) are actively monitoring the application. |
+| `iris_a11y_update` | Reconcile the platform accessibility hierarchy with lens's live semantic tree. |
+| `iris_a11y_shutdown` | Shutdown the accessibility bridge and release platform resources. |
 
 ### `iris/a11y_prefs.h`
 

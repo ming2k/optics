@@ -58,6 +58,13 @@ int main(void) {
     char buf[16];
     CHECK(iris_pick_file(NULL, buf, 0) != 0);
     CHECK(iris_pick_file(NULL, NULL, sizeof buf) != 0);
+
+    /* Accessibility headless safety and lazy active query (ADR-0103) */
+    CHECK(iris_a11y_update(NULL) != 0);
+    bool active_before = iris_a11y_is_active();
+    (void)active_before;
+    iris_a11y_shutdown();
+    CHECK(!iris_a11y_is_active());
     CHECK(iris_pick_folder(NULL, NULL, 0) != 0);
     CHECK(iris_pick_folder(NULL, buf, 0) != 0);
     CHECK(iris_pick_folder(NULL, NULL, sizeof buf) != 0);

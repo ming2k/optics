@@ -271,9 +271,10 @@ typedef struct wp_platform {
     bool frame_skip_render;         /* host asked to skip rendering but keep the active cadence */
     lens *ui;                       /* so output/scale callbacks can update  */
 
-    /* Live colour-scheme watching + AT-SPI bridge: optional, fail-soft. */
+    /* Live colour-scheme watching + accessibility bridge: optional, fail-soft. */
     bool theme_watching;
     bool a11y_prefs_watching;
+    bool a11y_running;
     int a11y_fd;
 
     /* Cross-thread wakeup seam (platform_wakeup.h): an eventfd in the
@@ -3011,6 +3012,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         .pending_scale = 1,
         .host_cursor = IRIS_CURSOR_DEFAULT,
         .effective_cursor = IRIS_CURSOR_DEFAULT,
+        .a11y_running = false,
         .a11y_fd = -1, /* so the cleanup guards are correct even if
                         * we fail before the bridge is started */
         .wakeup_fd = -1,
@@ -3282,13 +3284,12 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     }
     pl.a11y_prefs_watching = (iris_a11y_prefs__watch_backend(wp_on_a11y_prefs, &pl) == 0);
 
-    /* AT-SPI bridge: register the app on the a11y session bus so screen
-     * readers (orca, etc.) can read the widget tree. Fail-soft: if the
-     * bridge is unavailable we silently skip — the app still runs. Its
-     * bus fd joins the pump_events poll set (internal integration point,
-     * src/a11y_internal.h), so AT-SPI method calls are answered on this
-     * thread. */
-    if (iris_a11y_init() == 0)
+    /* Accessibility bridge: connect to the host a11y subsystem. Fail-soft:
+     * if the bridge is unavailable we silently skip — the app still runs.
+     * The bus fd (Linux) joins the pump_events poll set (internal integration
+     * point, src/a11y_internal.h), so method calls are answered on this thread. */
+    pl.a11y_running = (iris_a11y_init() == 0);
+    if (pl.a11y_running)
         pl.a11y_fd = iris_a11y__fd();
 
     while (pl.running) {
@@ -3394,10 +3395,10 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             cfg->build(ui, &in, cfg->user);
         lens_end(ui);
 
-        /* Push the live semantic tree to the AT-SPI bridge so screen
+        /* Push the live semantic tree to the accessibility bridge so screen
          * readers see the current widget names / roles / focus. No-op
-         * when the bridge isn't running. */
-        if (pl.a11y_fd >= 0)
+         * when the bridge isn't running or when inactive (ADR-0103). */
+        if (pl.a11y_running)
             iris_a11y_update(ui);
 
         /* Cursor: an explicit host iris_set_cursor pins the cursor; while
@@ -3529,7 +3530,6 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                     lens_snapshot_release(snapshot);
                     goto fail;
                 }
-                iris_a11y_update(ui);
                 surface_needs_paint = false;
                 last_render_ns = render_anchor_ns;
             }
@@ -3618,8 +3618,11 @@ fail:
         iris_theme__unwatch_backend();
     if (pl.a11y_prefs_watching)
         iris_a11y_prefs__unwatch_backend();
-    if (pl.a11y_fd >= 0)
+    if (pl.a11y_running) {
         iris_a11y_shutdown();
+        pl.a11y_running = false;
+        pl.a11y_fd = -1;
+    }
     /* Wakeup seam teardown: unregister the kick FIRST so a detached
      * subsystem thread (async paste, theme watcher) posting late fails
      * cleanly instead of queueing a job nothing would drain; then drain
