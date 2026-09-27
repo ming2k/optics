@@ -162,7 +162,9 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
             break;
         }
         case LENS_DRAW_BORDER: {
-            float bw = c->width > 0 ? c->width : 1.0f;
+            if (c->width <= 0.0f || (c->color >> 24) == 0)
+                break;
+            float bw = c->width;
             flux_geometry g =
                 (c->radius > 0.5f) ? flux_geom_rrect(r, c->radius) : flux_geom_rect(r);
             g.stroke.width = bw;
@@ -562,11 +564,13 @@ static flux_result compile_visuals(lens *ui, flux_display_list **out_list) {
         flux_brush b_bg = flux_brush_solid(lensi_opacity_color(t->color_bg, ui->tooltip.opacity));
         flux_encoder_draw_geometry(enc, &g_bg, &b_bg);
 
-        flux_geometry g_border = flux_geom_rect(bg);
-        g_border.stroke.width = 1.0f;
-        flux_brush b_border =
-            flux_brush_solid(lensi_opacity_color(t->color_border, ui->tooltip.opacity));
-        flux_encoder_draw_geometry(enc, &g_border, &b_border);
+        if (t->border_width > 0.0f && (t->color_border & 0xFF000000u) != 0) {
+            flux_geometry g_border = flux_geom_rect(bg);
+            g_border.stroke.width = t->border_width;
+            flux_brush b_border =
+                flux_brush_solid(lensi_opacity_color(t->color_border, ui->tooltip.opacity));
+            flux_encoder_draw_geometry(enc, &g_border, &b_border);
+        }
 
         if (ui->text) {
             flux_text_style ts = {.size_px = size,

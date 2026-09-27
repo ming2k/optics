@@ -142,7 +142,7 @@ lens_theme lens_theme_dark(void) {
     t.padding = 12.0f;
     t.gap = 8.0f;
     t.corner_radius = 6.0f;
-    t.border_width = 1.0f;
+    t.border_width = 0.0f;
 
     t.font = NULL;
     t.font_size = 14.0f;
@@ -194,7 +194,7 @@ lens_theme lens_theme_default(void) {
     t.padding = 12.0f;
     t.gap = 8.0f;
     t.corner_radius = 6.0f;
-    t.border_width = 1.0f;
+    t.border_width = 0.0f;
 
     t.font = NULL;
     t.font_size = 14.0f;
@@ -230,6 +230,7 @@ lens_theme lens_theme_default(void) {
 lens_theme lens_theme_for_material(lens_material_kind kind, bool dark) {
     lens_theme t = dark ? lens_theme_dark() : lens_theme_default();
     lens_material_recipe r = lens_material_recipe_default(kind, dark);
+    t.border_width = 1.0f; /* 1px specular rim highlight */
 
     if (dark) {
         /* Clear solid container fill so the refractive/frosted medium shines through */
@@ -247,5 +248,11 @@ lens_theme lens_theme_for_material(lens_material_kind kind, bool dark) {
         t.color_active = flux_color_rgba(0x00, 0x00, 0x00, 0x18);
     }
 
+    return t;
+}
+
+lens_theme lens_theme_classic(bool dark) {
+    lens_theme t = dark ? lens_theme_dark() : lens_theme_default();
+    t.border_width = 1.0f;
     return t;
 }

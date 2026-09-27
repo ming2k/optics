@@ -13,12 +13,14 @@
  * frame is rebuilt from the caller's tab array, so nothing here owns tab
  * identity — only the in-flight drag is remembered. */
 typedef struct tab_strip_drag {
-    bool active;      /* pointer captured and past the drag threshold */
-    bool armed;       /* a press is held and may still cross the threshold */
-    uint32_t from;    /* index of the tab being dragged */
-    uint32_t hover;   /* current predicted insertion slot (0..tab_count-1) */
-    uint32_t count;   /* tab_count captured at press, to detect model drift */
-    flux_point press; /* pointer position at press */
+    bool active;           /* pointer captured and past the drag threshold */
+    bool armed;            /* a press is held and may still cross the threshold */
+    uint32_t from;         /* index of the tab being dragged */
+    uint32_t hover;        /* current predicted insertion slot (0..tab_count-1) */
+    uint32_t count;        /* tab_count captured at press, to detect model drift */
+    flux_point press;      /* pointer position at press */
+    bool close_pressed;    /* press captured on a tab's close button */
+    uint32_t close_index;  /* index of the tab whose close button is pressed */
 } tab_strip_drag;
 
 lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item *tabs,
@@ -43,7 +45,7 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
         .gap = 4.0f,
         .pad = 3.0f,
         .cross = LENS_CENTER,
-        .bg = ui->theme.color_bg,
+        .bg = (flux_color){0},
     };
 
     lens_row_begin(ui, &strip_opts);
@@ -84,7 +86,47 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
         };
 
         lens_response resp = lens_selectable(ui, &sel);
-        if (resp.clicked && !is_active) {
+
+        /* Close button geometry relative to tab rect (progressive disclosure) */
+        float close_size = 16.0f;
+        float pad_right = 6.0f;
+        flux_rect r = resp.rect;
+        flux_rect close_rect = {
+            .x = r.x + r.w - close_size - pad_right,
+            .y = r.y + (r.h - close_size) * 0.5f,
+            .w = close_size,
+            .h = close_size,
+        };
+
+        bool close_hovered = tab->closable && (r.w > 0.0f) &&
+                             lensi_point_in(ui->input.cursor, close_rect);
+        bool tab_hovered = resp.hovered;
+
+        /* Press / click on the close button */
+        bool close_clicked = false;
+        if (tab->closable) {
+            if (ui->input.mouse_pressed[0] && close_hovered) {
+                if (drag) {
+                    drag->close_pressed = true;
+                    drag->close_index = i;
+                    drag->armed = false;
+                }
+                action.pressed_on_tab = true;
+            }
+
+            if (drag && drag->close_pressed && drag->close_index == i) {
+                if (ui->input.mouse_released[0]) {
+                    if (close_hovered) {
+                        close_clicked = true;
+                        action.kind = LENS_TAB_ACTION_CLOSE;
+                        action.index = i;
+                    }
+                    drag->close_pressed = false;
+                }
+            }
+        }
+
+        if (resp.clicked && !is_active && !close_clicked && !close_hovered) {
             action.kind = LENS_TAB_ACTION_SELECT;
             action.index = i;
         }
@@ -98,7 +140,8 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
              * The candidate belongs to the gesture that pressed it and dies
              * with the button release — so a later gesture can never inherit
              * a stale `from` and cross the threshold from the old press. */
-            if (ui->input.mouse_pressed[0] && resp.pressed) {
+            if (ui->input.mouse_pressed[0] && resp.pressed && !close_hovered &&
+                !(drag->close_pressed && drag->close_index == i)) {
                 drag->armed = true;
                 drag->active = false;
                 drag->from = i;
@@ -123,7 +166,6 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
                  * is reported in post-removal coordinates (remove(from)
                  * first, then insert(to)), so the host applies the move
                  * without index gymnastics. */
-                flux_rect r = resp.rect;
                 float mid = r.x + r.w * 0.5f;
                 if (ui->input.cursor.x < mid) {
                     slot_decided = true;
@@ -135,30 +177,63 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
                 ui->cursor_hint = LENS_CURSOR_POINTER;
         }
 
-        /* Optional close button */
-        if (tab->closable) {
-            char close_id[32];
-            snprintf(close_id, sizeof(close_id), "close_%u", i);
-            lens_button_opts close_btn = {
-                .box =
-                    {
-                        .id = close_id,
-                        .width = 18.0f,
-                        .height = 18.0f,
-                    },
-                .icon = (opts && opts->close_icon != LENS_ICON_INVALID) ? opts->close_icon
-                                                                        : LENS_ICON_INVALID,
-                .label = (opts && opts->close_icon != LENS_ICON_INVALID) ? NULL : "×",
-                .variant = LENS_BUTTON_SUBTLE,
-            };
+        /* Draw close button inside tab pill (progressive disclosure: visible on hover) */
+        bool show_close =
+            tab->closable && (tab_hovered || (drag && drag->close_pressed && drag->close_index == i));
+        if (show_close) {
+            lens_node *n = lensi_store_touch(ui, resp.id);
+            if (n) {
+                flux_rect rel_close = {
+                    .x = -pad_right,
+                    .y = (tab_h - close_size) * 0.5f,
+                    .w = close_size,
+                    .h = close_size,
+                };
 
-            lens_response close_resp = lens_button(ui, &close_btn);
-            if (close_resp.clicked) {
-                action.kind = LENS_TAB_ACTION_CLOSE;
-                action.index = i;
+                if (close_hovered) {
+                    ui->cursor_hint = LENS_CURSOR_POINTER;
+                    flux_color hover_bg = ui->theme.color_hover;
+                    lensi_drawlist_push(ui, n,
+                                        (lens_draw_cmd){
+                                            .kind = LENS_DRAW_RECT,
+                                            .rel = rel_close,
+                                            .color = hover_bg,
+                                            .radius = close_size * 0.5f,
+                                        });
+                }
+
+                flux_color close_fg =
+                    close_hovered ? ui->theme.color_fg : lensi_opacity_color(ui->theme.color_fg, 0.65f);
+                if (opts && opts->close_icon != LENS_ICON_INVALID) {
+                    lensi_drawlist_push(ui, n,
+                                        (lens_draw_cmd){
+                                            .kind = LENS_DRAW_ICON,
+                                            .rel = {
+                                                .x = -pad_right - 2.0f,
+                                                .y = (tab_h - (close_size - 4.0f)) * 0.5f,
+                                                .w = close_size - 4.0f,
+                                                .h = close_size - 4.0f,
+                                            },
+                                            .color = close_fg,
+                                            .icon_id = opts->close_icon,
+                                            .width = 1.5f,
+                                        });
+                } else {
+                    lensi_drawlist_push(ui, n,
+                                        (lens_draw_cmd){
+                                            .kind = LENS_DRAW_TEXT,
+                                            .rel = {
+                                                .x = -pad_right - 4.0f,
+                                                .y = (tab_h - 12.0f) * 0.5f - 1.0f,
+                                                .w = 0,
+                                                .h = 0,
+                                            },
+                                            .color = close_fg,
+                                            .text = "×",
+                                            .text_size = 12.0f,
+                                        });
+                }
             }
-            if (close_resp.pressed && ui->input.mouse_pressed[0])
-                action.pressed_on_tab = true;
         }
     }
 
@@ -182,6 +257,7 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
     if (drag && ui->input.mouse_released[0]) {
         drag->armed = false;
         drag->active = false;
+        drag->close_pressed = false;
     }
 
     /* Trailing New Tab Button */

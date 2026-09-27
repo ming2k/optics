@@ -245,12 +245,13 @@ lens_response lens_pressable_begin(lens *ui, const lens_pressable_opts *opts) {
                             .radius = lopts.radius});
     }
     if (r.focused) {
+        float bw = ui->theme.border_width > 0.0f ? ui->theme.border_width : 1.5f;
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
                                             .rel = {0, 0, 0, 0},
                                             .color = ui->theme.color_accent,
                                             .radius = lopts.radius,
-                                            .width = ui->theme.border_width});
+                                            .width = bw});
     }
 
     ui->last_response = r;

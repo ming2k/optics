@@ -16,10 +16,10 @@ bool lens_segmented_control(lens *ui, const char *id_str, const lens_segmented_i
     float h =
         (opts && opts->height > 0.0f) ? opts->height : ((opts && opts->compact) ? 30.0f : 34.0f);
     float radius = (opts && opts->compact) ? 6.0f : 8.0f;
-    float border_w = 1.0f;
+    float border_w = ui->theme.border_width;
 
     /* Base theme colors */
-    flux_color bg = ui->theme.color_bg;
+    flux_color bg = (border_w > 0.0f) ? ui->theme.color_bg : ui->theme.color_hover;
     flux_color border_color = ui->theme.color_border;
 
     /* Outer container */
@@ -34,7 +34,7 @@ bool lens_segmented_control(lens *ui, const char *id_str, const lens_segmented_i
         .radius = radius,
         .border_width = border_w,
         .bg = bg,
-        .border = border_color,
+        .border = (border_w > 0.0f) ? border_color : 0,
     };
 
     lens_row_begin(ui, &row_opts);

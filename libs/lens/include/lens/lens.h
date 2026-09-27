@@ -46,7 +46,7 @@ extern "C" {
 
 #define LENS_VERSION_MAJOR 0
 #define LENS_VERSION_MINOR 0
-#define LENS_VERSION_PATCH 47
+#define LENS_VERSION_PATCH 50
 
 /* Stringify helpers used by lens_version_string(); LENS_STRINGIFY_ adds the
  * indirection level required for macro-expansion of literal tokens. */
@@ -427,6 +427,10 @@ typedef struct lens_theme {
 
 LENS_API lens_theme lens_theme_default(void);
 LENS_API lens_theme lens_theme_dark(void);
+
+/* Classic theme generator: provides a 1px wireframe border baseline (border_width = 1.0f)
+ * for applications desiring traditional desktop control outlines. */
+LENS_API lens_theme lens_theme_classic(bool dark);
 
 /* Material-paired theme generator: returns a full design token set tailored for UI
  * components resting on top of the given physical material surface (ADR-0032, ADR-0101).

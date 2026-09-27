@@ -449,6 +449,10 @@ impl Theme {
         Theme(unsafe { sys::lens_theme_dark() })
     }
 
+    pub fn classic(dark: bool) -> Theme {
+        Theme(unsafe { sys::lens_theme_classic(dark) })
+    }
+
     pub fn from_raw(raw: sys::lens_theme) -> Theme {
         Theme(raw)
     }

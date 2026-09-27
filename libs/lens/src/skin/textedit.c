@@ -10,7 +10,8 @@ void lensi_skin_textedit(lens *ui, lens_node *n, const lens_widget_record *rec) 
     bool focused = (rec->state & LENS_STATE_FOCUSED) != 0;
     bool hovered = (rec->state & LENS_STATE_HOVERED) != 0;
 
-    flux_color bg = (hovered && !disabled && c->multiline) ? rs->bg_hover : rs->bg;
+    flux_color resting_bg = (rs->border_width > 0.0f) ? rs->bg : rs->bg_hover;
+    flux_color bg = (hovered && !disabled && c->multiline) ? rs->bg_hover : resting_bg;
     lensi_drawlist_push(
         ui, n,
         (lens_draw_cmd){
@@ -34,12 +35,24 @@ void lensi_skin_textedit(lens *ui, lens_node *n, const lens_widget_record *rec) 
     else if (focused)
         border_color = rs->accent;
 
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
-                                        .rel = {0, 0, 0, 0},
-                                        .color = border_color,
-                                        .width = rs->border_width,
-                                        .radius = rs->corner_radius});
+    if (rs->border_width > 0.0f && (border_color & 0xFF000000u) != 0) {
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
+                                            .rel = {0, 0, 0, 0},
+                                            .color = border_color,
+                                            .width = rs->border_width,
+                                            .radius = rs->corner_radius});
+    } else if (focused || c->error) {
+        /* When default border is 0 (minimalist), focused or error state still provides
+         * a crisp, accessible focus outline so typing affordance is unmistakable. */
+        flux_color ring_col = c->error ? ui->theme.color_error : rs->accent;
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
+                                            .rel = {0, 0, 0, 0},
+                                            .color = ring_col,
+                                            .width = 1.5f,
+                                            .radius = rs->corner_radius});
+    }
 
     /* Text rendering */
     flux_color text_color = c->show_placeholder ? rs->disabled : rs->fg;

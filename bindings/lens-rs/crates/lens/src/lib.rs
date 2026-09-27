@@ -922,7 +922,7 @@ impl<'frame> Frame<'frame> {
             layout: LayoutOpts {
                 bg: theme.bg(),
                 border: theme.border(),
-                border_width: 1.0,
+                border_width: theme.border_width(),
                 pad: 4.0,
                 gap: 2.0,
                 ..Default::default()

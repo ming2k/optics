@@ -5,7 +5,7 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.1.1] - 2026-09-27
+## [0.0.50] - 2026-09-27
 
 ### Added
 - **2D Grid layout support (ADR-0104)**: `GridBuilder`, `f.grid(columns)`, `.col_span()`, `.row_span()`, `.grid_at()`, `.align()`, `.cross()`.

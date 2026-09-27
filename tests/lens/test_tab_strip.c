@@ -119,10 +119,10 @@ int main(void) {
     test_end(ui);
 
     /* Frame 7-8: press on the last tab, drag left to the first, release →
-     * MOVE(2 -> 0). Third tab sits right of the second; press (250, 18),
+     * MOVE(2 -> 0). Third tab sits right of the second; press (210, 18),
      * release over the first tab at (10, 18). */
     in.mouse_released[LENS_MOUSE_LEFT] = false;
-    in.cursor = (flux_point){250, 18};
+    in.cursor = (flux_point){210, 18};
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
@@ -189,6 +189,36 @@ int main(void) {
         a = lens_tab_strip(ui, "##main-tabs", tabs, 4, 0, &opts);
     }
     CHECK(a.kind == LENS_TAB_ACTION_NONE);
+    test_end(ui);
+
+    /* Close button on hover: hover over tab 0's close button (x ≈ 70, y ≈ 18).
+     * Press and release triggers LENS_TAB_ACTION_CLOSE. */
+    in.mouse_released[LENS_MOUSE_LEFT] = false;
+    in.cursor = (flux_point){70, 18};
+    in.mouse_down[LENS_MOUSE_LEFT] = true;
+    in.mouse_pressed[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &in);
+    {
+        lens_tab_item tabs[3] = {{.title = "Alpha", .closable = true},
+                                 {.title = "Beta", .closable = true},
+                                 {.title = "Gamma", .closable = true}};
+        lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
+        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+    }
+    CHECK(a.pressed_on_tab);
+    test_end(ui);
+    in.mouse_down[LENS_MOUSE_LEFT] = false;
+    in.mouse_released[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &in);
+    {
+        lens_tab_item tabs[3] = {{.title = "Alpha", .closable = true},
+                                 {.title = "Beta", .closable = true},
+                                 {.title = "Gamma", .closable = true}};
+        lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
+        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+    }
+    CHECK(a.kind == LENS_TAB_ACTION_CLOSE);
+    CHECK(a.index == 0);
     test_end(ui);
 
     lens_release(ui);

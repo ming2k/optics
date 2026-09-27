@@ -83,21 +83,24 @@ void lensi_skin_checkbox(lens *ui, lens_node *n, const lens_widget_record *rec) 
         float text_y = fmaxf((rec->bounds.h - rs->font_size) * 0.5f - 1.0f, 0.0f);
 
         flux_color ring = disabled ? rs->border : (on ? rs->accent : rs->fg);
+        flux_color radio_bg = (rs->border_width > 0.0f) ? rs->bg : rs->bg_hover;
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){
                                 .kind = LENS_DRAW_RECT,
                                 .rel = {rs->padding, circle_y, circle, circle},
-                                .color = rs->bg,
+                                .color = radio_bg,
                                 .radius = circle * 0.5f,
                             });
-        lensi_drawlist_push(ui, n,
-                            (lens_draw_cmd){
-                                .kind = LENS_DRAW_BORDER,
-                                .rel = {rs->padding, circle_y, circle, circle},
-                                .color = ring,
-                                .width = 1.5f,
-                                .radius = circle * 0.5f,
-                            });
+        if (rs->border_width > 0.0f && (ring & 0xFF000000u) != 0) {
+            lensi_drawlist_push(ui, n,
+                                (lens_draw_cmd){
+                                    .kind = LENS_DRAW_BORDER,
+                                    .rel = {rs->padding, circle_y, circle, circle},
+                                    .color = ring,
+                                    .width = rs->border_width,
+                                    .radius = circle * 0.5f,
+                                });
+        }
 
         if (on) {
             float dot = roundf(circle * 0.5f);
@@ -132,24 +135,30 @@ void lensi_skin_checkbox(lens *ui, lens_node *n, const lens_widget_record *rec) 
     float box_y = roundf((rec->bounds.h - box) * 0.5f);
     float label_x = rs->padding + box + 8.0f;
     float text_y = fmaxf((rec->bounds.h - rs->font_size) * 0.5f - 1.0f, 0.0f);
+    float radius = rs->corner_radius > 0.0f ? fminf(rs->corner_radius, 4.0f) : 3.0f;
+
+    flux_color off_bg = (rs->border_width > 0.0f) ? rs->bg : rs->bg_hover;
+    flux_color box_bg = on ? (disabled ? rs->disabled : rs->accent) : off_bg;
 
     lensi_drawlist_push(ui, n,
                         (lens_draw_cmd){
                             .kind = LENS_DRAW_RECT,
                             .rel = {rs->padding, box_y, box, box},
-                            .color = on ? (disabled ? rs->disabled : rs->accent) : rs->bg,
-                            .radius = 3.0f,
+                            .color = box_bg,
+                            .radius = radius,
                         });
 
     flux_color border_col = disabled ? rs->border : rs->fg;
-    lensi_drawlist_push(ui, n,
-                        (lens_draw_cmd){
-                            .kind = LENS_DRAW_BORDER,
-                            .rel = {rs->padding, box_y, box, box},
-                            .color = border_col,
-                            .width = 1.0f,
-                            .radius = 3.0f,
-                        });
+    if (rs->border_width > 0.0f && (border_col & 0xFF000000u) != 0 && !on) {
+        lensi_drawlist_push(ui, n,
+                            (lens_draw_cmd){
+                                .kind = LENS_DRAW_BORDER,
+                                .rel = {rs->padding, box_y, box, box},
+                                .color = border_col,
+                                .width = rs->border_width,
+                                .radius = radius,
+                            });
+    }
 
     if (on) {
         float mark = roundf(box * 0.5f);

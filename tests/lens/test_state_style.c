@@ -216,6 +216,86 @@ static void test_resolver_disabled_dims_last(void) {
     lens_release(ui);
 }
 
+static bool has_border_cmd(const lens_node *n) {
+    if (!n)
+        return false;
+    for (uint32_t i = 0; i < n->cmd_count; i++) {
+        if (n->cmds[i].kind == LENS_DRAW_BORDER)
+            return true;
+    }
+    return false;
+}
+
+static void test_minimalist_theme_defaults_and_borders(void) {
+    lens_theme def = lens_theme_default();
+    lens_theme dark = lens_theme_dark();
+    lens_theme classic_light = lens_theme_classic(false);
+    lens_theme classic_dark = lens_theme_classic(true);
+    lens_theme mat = lens_theme_for_material(LENS_MATERIAL_LIQUID_GLASS, true);
+
+    CHECK_NEAR(def.border_width, 0.0f, 0.0f);
+    CHECK_NEAR(dark.border_width, 0.0f, 0.0f);
+    CHECK_NEAR(classic_light.border_width, 1.0f, 0.0f);
+    CHECK_NEAR(classic_dark.border_width, 1.0f, 0.0f);
+    CHECK_NEAR(mat.border_width, 1.0f, 0.0f);
+
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    lens_input in = {.display_size = {800, 600}, .dt_seconds = 0.016f};
+
+    /* Frame 1: default theme (minimalist, border_width = 0) */
+    lens_begin(ui, &in);
+    lens_button(ui, &(lens_button_opts){.label = "btn1"});
+    bool chk = false;
+    lens_checkbox(ui, &(lens_checkbox_opts){.label = "chk1", .value = &chk});
+    char text_buf[32] = "hello";
+    lens_textedit(
+        ui, &(lens_textedit_opts){.box = {.id = "tf1"}, .buf = text_buf, .cap = sizeof text_buf});
+    test_end(ui);
+
+    lens_node *n_btn = lens_find(ui, lens_current_id(ui, "btn1"));
+    lens_node *n_chk = lens_find(ui, lens_current_id(ui, "chk1"));
+    lens_node *n_tf = lens_find(ui, lens_current_id(ui, "tf1"));
+
+    CHECK(n_btn != NULL);
+    CHECK(!has_border_cmd(n_btn));
+    CHECK(n_chk != NULL);
+    CHECK(!has_border_cmd(n_chk));
+    CHECK(n_tf != NULL);
+    CHECK(!has_border_cmd(n_tf));
+
+    /* Frame 2: classic theme (border_width = 1.0) */
+    lens_set_theme(ui, classic_dark);
+    lens_begin(ui, &in);
+    lens_button(ui, &(lens_button_opts){.label = "btn1"});
+    lens_checkbox(ui, &(lens_checkbox_opts){.label = "chk1", .value = &chk});
+    lens_textedit(
+        ui, &(lens_textedit_opts){.box = {.id = "tf1"}, .buf = text_buf, .cap = sizeof text_buf});
+    test_end(ui);
+
+    n_btn = lens_find(ui, lens_current_id(ui, "btn1"));
+    n_chk = lens_find(ui, lens_current_id(ui, "chk1"));
+    n_tf = lens_find(ui, lens_current_id(ui, "tf1"));
+
+    CHECK(n_btn != NULL && has_border_cmd(n_btn));
+    CHECK(n_chk != NULL && has_border_cmd(n_chk));
+    CHECK(n_tf != NULL && has_border_cmd(n_tf));
+
+    /* Frame 3: default theme with focused textedit -> emits focus outline */
+    lens_set_theme(ui, dark);
+    lens_set_focus(ui, lens_current_id(ui, "tf1"));
+    lens_begin(ui, &in);
+    lens_textedit(
+        ui, &(lens_textedit_opts){.box = {.id = "tf1"}, .buf = text_buf, .cap = sizeof text_buf});
+    test_end(ui);
+
+    n_tf = lens_find(ui, lens_current_id(ui, "tf1"));
+    CHECK(n_tf != NULL && has_border_cmd(n_tf));
+
+    lens_release(ui);
+}
+
 int main(void) {
     test_hover_and_press_bits();
     test_disabled_bit_excludes_hover_and_press();
@@ -224,5 +304,6 @@ int main(void) {
     test_resolver_null_instance_is_verbatim_theme();
     test_resolver_override_and_derivation();
     test_resolver_disabled_dims_last();
+    test_minimalist_theme_defaults_and_borders();
     return TEST_REPORT();
 }
