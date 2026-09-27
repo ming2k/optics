@@ -1,3 +1,10 @@
+---
+id: ADR-0103
+title: "Platform-Agnostic Accessibility Bridge, Asynchronous Transport, and Lazy Screen-Reader Activation"
+status: accepted
+date: 2026-09-27
+---
+
 # ADR-0103: Platform-Agnostic Accessibility Bridge, Asynchronous Transport, and Lazy Screen-Reader Activation
 
 - Status: Accepted

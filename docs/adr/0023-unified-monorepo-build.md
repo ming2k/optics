@@ -1,3 +1,10 @@
+---
+id: ADR-0023
+title: "Unified Monorepo Build"
+status: accepted
+date: 2026-07-18
+---
+
 # ADR-0023: Unified Monorepo Build
 
 - Status: Accepted

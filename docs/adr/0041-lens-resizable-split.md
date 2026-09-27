@@ -1,3 +1,10 @@
+---
+id: ADR-0041
+title: "Lens resizable split panel — persisted ratio, draggable divider"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0041: Lens resizable split panel — persisted ratio, draggable divider
 
 - Status: Accepted

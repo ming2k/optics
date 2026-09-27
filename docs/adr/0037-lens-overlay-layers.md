@@ -1,3 +1,11 @@
+---
+id: ADR-0037
+title: "Lens overlay layers — transient overlays + persistent floating panels"
+status: superseded
+date: 2026-07-21
+superseded_by: "ADR-0060](0060-lens-single-tree-placement-and-z-bands.md"
+---
+
 # ADR-0037: Lens overlay layers — transient overlays + persistent floating panels
 
 - Status: Superseded by [ADR-0060](0060-lens-single-tree-placement-and-z-bands.md)

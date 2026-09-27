@@ -1,3 +1,10 @@
+---
+id: ADR-0100
+title: "Liquid Glass dual-rim TIR and screen-space environmental optics"
+status: accepted
+date: 2026-09-18
+---
+
 # ADR-0100: Liquid Glass dual-rim TIR and screen-space environmental optics
 
 - Status: Accepted

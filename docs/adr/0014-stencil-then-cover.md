@@ -1,3 +1,10 @@
+---
+id: ADR-0014
+title: "Stencil-then-cover fallback for self-intersecting fills"
+status: accepted
+date: 2026-01-01
+---
+
 # ADR-0014: Stencil-then-cover fallback for self-intersecting fills
 
 - Status: Accepted

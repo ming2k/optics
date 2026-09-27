@@ -1,3 +1,10 @@
+---
+id: ADR-0073
+title: "Widget-kind extension range and the user-widget contract"
+status: accepted
+date: 2026-08-22
+---
+
 # ADR-0073: Widget-kind extension range and the user-widget contract
 
 - Status: Accepted

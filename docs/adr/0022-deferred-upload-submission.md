@@ -1,3 +1,10 @@
+---
+id: ADR-0022
+title: "Deferred upload submission (amends ADR-0021 item 1)"
+status: accepted
+date: 2026-07-18
+---
+
 # ADR-0022: Deferred upload submission (amends ADR-0021 item 1)
 
 - Status: Accepted

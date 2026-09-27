@@ -1,3 +1,10 @@
+---
+id: ADR-0091
+title: "Drawing, group composition, and explicit effects"
+status: accepted
+date: 2026-09-14
+---
+
 # ADR-0091: Drawing, group composition, and explicit effects
 
 - Status: Accepted

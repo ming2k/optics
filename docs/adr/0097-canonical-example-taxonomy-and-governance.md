@@ -1,3 +1,10 @@
+---
+id: ADR-0097
+title: "Canonical example taxonomy, legacy pruning, and lifecycle governance"
+status: accepted
+date: 2026-09-15
+---
+
 # ADR-0097: Canonical example taxonomy, legacy pruning, and lifecycle governance
 
 - Status: Accepted

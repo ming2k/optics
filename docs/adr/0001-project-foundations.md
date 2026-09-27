@@ -1,3 +1,10 @@
+---
+id: ADR-0001
+title: "Project foundations"
+status: accepted
+date: 2026-05-19
+---
+
 # ADR-0001: Project foundations
 
 - Status: Accepted

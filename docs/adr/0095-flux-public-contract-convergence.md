@@ -1,3 +1,10 @@
+---
+id: ADR-0095
+title: "Flux public contract convergence"
+status: accepted
+date: 2026-09-16
+---
+
 # ADR-0095: Flux public contract convergence
 
 - Status: Accepted

@@ -1,3 +1,10 @@
+---
+id: ADR-0068
+title: "Frame-scoped, node-stamped opacity for lens"
+status: accepted
+date: 2026-08-15
+---
+
 # ADR-0068: Frame-scoped, node-stamped opacity for lens
 
 - Status: Accepted

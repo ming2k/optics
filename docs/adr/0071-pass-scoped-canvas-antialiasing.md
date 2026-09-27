@@ -1,3 +1,10 @@
+---
+id: ADR-0071
+title: "Pass-scoped canvas antialiasing policy"
+status: accepted
+date: 2026-08-20
+---
+
 # ADR-0071: Pass-scoped canvas antialiasing policy
 
 - Status: Accepted

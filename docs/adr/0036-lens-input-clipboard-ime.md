@@ -1,3 +1,10 @@
+---
+id: ADR-0036
+title: "Lens input / clipboard / IME — host-supplied, size-guarded ABI"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0036: Lens input / clipboard / IME — host-supplied, size-guarded ABI
 
 - Status: Accepted

@@ -1,3 +1,10 @@
+---
+id: ADR-0098
+title: "Developer tooling taxonomy, architecture guardrails, and unified verification"
+status: accepted
+date: 2026-09-15
+---
+
 # ADR-0098: Developer tooling taxonomy, architecture guardrails, and unified verification
 
 - Status: Accepted

@@ -1,3 +1,10 @@
+---
+id: ADR-0006
+title: "No runtime RHI; build-time backend selection if ever needed"
+status: accepted
+date: 2026-05-19
+---
+
 # ADR-0006: No runtime RHI; build-time backend selection if ever needed
 
 - Status: Accepted

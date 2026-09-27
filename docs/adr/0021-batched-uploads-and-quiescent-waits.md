@@ -1,3 +1,10 @@
+---
+id: ADR-0021
+title: "Batched uploads, surface-scoped quiescent waits, prefers-dedicated floor"
+status: accepted
+date: 2026-07-17
+---
+
 # ADR-0021: Batched uploads, surface-scoped quiescent waits, prefers-dedicated floor
 
 - Status: Accepted

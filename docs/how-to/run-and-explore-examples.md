@@ -8,7 +8,7 @@ Use this guide to build, execute, and interact with the available examples acros
 
 ## 1. Prerequisites and Build Configuration
 
-All examples are configured through the root Meson build. Ensure you have installed the core dependencies (Vulkan SDK / loader, GLFW, FreeType, HarfBuzz) as described in [Setup](../dev/setup.md).
+All examples are configured through the root Meson build. Ensure you have installed the core dependencies (Vulkan SDK / loader, GLFW, FreeType, HarfBuzz) as described in [Getting Started](../tutorials/01-getting-started.md).
 
 Enable examples during setup or reconfigure your existing build tree:
 
@@ -169,4 +169,3 @@ These tools run in CI or headless environments without an active GPU or display 
 - [Getting Started Tutorial](../tutorials/01-getting-started.md) — First-time build and basic app bootstrap.
 - [Surface Materials Governance](../governance/materials.md) — Architectural invariants for Prism materials.
 - [UI Components Governance](../governance/components.md) — Invariants for Lens interaction atoms and layout.
-- [Developer Setup](../dev/setup.md) — Complete toolchain prerequisites and build flags.

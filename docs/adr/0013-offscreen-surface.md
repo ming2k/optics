@@ -1,3 +1,10 @@
+---
+id: ADR-0013
+title: "Offscreen rendering is a surface mode, not a new object"
+status: accepted
+date: 2026-01-01
+---
+
 # ADR-0013: Offscreen rendering is a surface mode, not a new object
 
 - Status: Accepted

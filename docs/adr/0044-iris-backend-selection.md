@@ -1,3 +1,10 @@
+---
+id: ADR-0044
+title: "Iris backend compile-time selection"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0044: Iris backend compile-time selection
 
 - Status: Accepted

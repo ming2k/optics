@@ -1,3 +1,10 @@
+---
+id: ADR-0053
+title: "Shader embedding — C23 #embed with generated-header fallback"
+status: accepted
+date: 2026-08-08
+---
+
 # ADR-0053: Shader embedding — C23 #embed with generated-header fallback
 
 - Status: Accepted

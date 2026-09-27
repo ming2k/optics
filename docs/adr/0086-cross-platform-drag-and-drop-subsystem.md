@@ -1,3 +1,10 @@
+---
+id: ADR-0086
+title: "Cross-Platform Drag-and-Drop Subsystem"
+status: accepted
+date: 2026-08-14
+---
+
 # ADR-0086: Cross-Platform Drag-and-Drop Subsystem
 
 - Status: Accepted

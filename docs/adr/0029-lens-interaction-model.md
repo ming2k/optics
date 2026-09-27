@@ -1,3 +1,10 @@
+---
+id: ADR-0029
+title: "Lens interaction model — prev-frame geometry, one-frame hit-test latency"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0029: Lens interaction model — prev-frame geometry, one-frame hit-test latency
 
 - Status: Accepted (amended 2026-08-10: keyboard activation — focused +

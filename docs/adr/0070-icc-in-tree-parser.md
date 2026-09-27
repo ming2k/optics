@@ -1,3 +1,10 @@
+---
+id: ADR-0070
+title: "ICC profile support — in-tree C parser over vendored skcms"
+status: accepted
+date: 2026-08-16
+---
+
 # ADR-0070: ICC profile support — in-tree C parser over vendored skcms
 
 - Status: Accepted

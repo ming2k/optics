@@ -1,3 +1,10 @@
+---
+id: ADR-0057
+title: "Paste drain and caret rect for app-owned editing surfaces"
+status: accepted
+date: 2026-08-09
+---
+
 # ADR-0057: Paste drain and caret rect for app-owned editing surfaces
 
 - Status: Accepted

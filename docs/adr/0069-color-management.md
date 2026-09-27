@@ -1,3 +1,10 @@
+---
+id: ADR-0069
+title: "Color management — parametric color spaces, scRGB working space, explicit output transform"
+status: accepted
+date: 2026-08-15
+---
+
 # ADR-0069: Color management — parametric color spaces, scRGB working space, explicit output transform
 
 - Status: Accepted

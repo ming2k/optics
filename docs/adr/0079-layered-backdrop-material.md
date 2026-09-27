@@ -1,3 +1,10 @@
+---
+id: ADR-0079
+title: "Layered backdrop material — frost beneath glass in one dispatch"
+status: accepted
+date: 2026-08-25
+---
+
 # ADR-0079: Layered backdrop material — frost beneath glass in one dispatch
 
 - Status: Accepted

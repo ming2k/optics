@@ -1,3 +1,10 @@
+---
+id: ADR-0074
+title: "Effect intake path — new visual operators and where choreography never enters"
+status: accepted
+date: 2026-08-22
+---
+
 # ADR-0074: Effect intake path — new visual operators and where choreography never enters
 
 - Status: Accepted (with `flux_effect_shadow`, the first operator taken

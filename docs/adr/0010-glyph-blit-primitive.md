@@ -1,3 +1,10 @@
+---
+id: ADR-0010
+title: "Glyph-blit primitive — text rendering at the canvas seam, shaping stays out"
+status: accepted
+date: 2026-05-24
+---
+
 # ADR-0010: Glyph-blit primitive — text rendering at the canvas seam, shaping stays out
 
 - Status: Accepted — glyph-blit primitive implemented (see Implementation notes). The "shaping stays out" boundary is superseded by [ADR-0015](0015-text-layering.md): Layer-0 shaping now ships in libflux as the `text` module, which draws through this primitive.

@@ -1,3 +1,10 @@
+---
+id: ADR-0092
+title: "Resource planning, synchronization, and retirement"
+status: accepted
+date: 2026-09-14
+---
+
 # ADR-0092: Resource planning, synchronization, and retirement
 
 - Status: Accepted

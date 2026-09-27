@@ -1,3 +1,11 @@
+---
+id: ADR-0087
+title: "Flux Architecture Consistency, Lifecycle Contracts, and Orthogonal Refactoring"
+status: superseded
+date: 2026-08-27
+superseded_by: "ADR-0095"
+---
+
 # ADR-0087: Flux Architecture Consistency, Lifecycle Contracts, and Orthogonal Refactoring
 
 - Status: Superseded by ADR-0095

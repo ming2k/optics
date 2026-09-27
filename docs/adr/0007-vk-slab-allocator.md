@@ -1,3 +1,10 @@
+---
+id: ADR-0007
+title: "Hand-rolled Vulkan slab allocator (no VMA)"
+status: accepted
+date: 2026-05-19
+---
+
 # ADR-0007: Hand-rolled Vulkan slab allocator (no VMA)
 
 - Status: Accepted — amended by [ADR-0020](0020-gpu-memory-production-hardening.md)

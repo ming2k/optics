@@ -1,3 +1,10 @@
+---
+id: ADR-0011
+title: "Hole-bridging ear-clipping tessellator"
+status: accepted
+date: 2026-01-01
+---
+
 # ADR-0011: Hole-bridging ear-clipping tessellator
 
 - Status: Accepted

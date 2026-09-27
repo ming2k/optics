@@ -1,3 +1,10 @@
+---
+id: ADR-0101
+title: "Physical Sampling Governor and Bounded Material Dispatch"
+status: accepted
+date: 2026-09-18
+---
+
 # ADR-0101: Physical Sampling Governor and Bounded Material Dispatch
 
 - Status: Accepted

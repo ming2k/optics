@@ -1,3 +1,10 @@
+---
+id: ADR-0043
+title: "Iris project foundations — L3 application toolkit"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0043: Iris project foundations — L3 application toolkit
 
 - Status: Accepted

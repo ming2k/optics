@@ -1,3 +1,10 @@
+---
+id: ADR-0034
+title: "Lens text measurement — host port + monospace fallback"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0034: Lens text measurement — host port + monospace fallback
 
 - Status: Accepted

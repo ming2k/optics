@@ -1,3 +1,10 @@
+---
+id: ADR-0040
+title: "Lens menus — menubar, context menu, submenu, items (hover-dwell)"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0040: Lens menus — menubar, context menu, submenu, items (hover-dwell)
 
 - Status: Accepted

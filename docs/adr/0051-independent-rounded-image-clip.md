@@ -1,3 +1,10 @@
+---
+id: ADR-0051
+title: "Independent rounded image clip for composed previews"
+status: accepted
+date: 2026-08-03
+---
+
 # ADR-0051: Independent rounded image clip for composed previews
 
 - Status: Accepted

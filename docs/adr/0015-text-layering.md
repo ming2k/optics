@@ -1,3 +1,11 @@
+---
+id: ADR-0015
+title: "Text layering — Layer-0 shaping in libflux, Layer-1 layout in flux-text-layout"
+status: superseded
+date: 2026-06-22
+superseded_by: "ADR-0016](0016-pure-rhi-and-draw-primitives.md"
+---
+
 # ADR-0015: Text layering — Layer-0 shaping in libflux, Layer-1 layout in flux-text-layout
 
 - Status: Superseded by [ADR-0016](0016-pure-rhi-and-draw-primitives.md)

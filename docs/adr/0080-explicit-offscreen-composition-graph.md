@@ -1,3 +1,10 @@
+---
+id: ADR-0080
+title: "Explicit offscreen composition graph above flux"
+status: accepted
+date: 2026-08-25
+---
+
 # ADR-0080: Explicit offscreen composition graph above flux
 
 - Status: Accepted

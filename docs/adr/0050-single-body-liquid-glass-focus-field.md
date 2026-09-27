@@ -1,3 +1,10 @@
+---
+id: ADR-0050
+title: "Single-body liquid-glass focus field"
+status: accepted
+date: 2026-08-03
+---
+
 # ADR-0050: Single-body liquid-glass focus field
 
 - Status: Accepted

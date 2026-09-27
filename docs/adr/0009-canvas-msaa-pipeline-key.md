@@ -1,3 +1,11 @@
+---
+id: ADR-0009
+title: "Canvas sample count joins the pipeline-cache key"
+status: superseded
+date: 2026-05-24
+superseded_by: "ADR-0071"
+---
+
 # ADR-0009: Canvas sample count joins the pipeline-cache key
 
 - Status: Superseded by ADR-0071

@@ -1,3 +1,10 @@
+---
+id: ADR-0085
+title: "Lens box model orthogonality, legacy layout cleanup, and C23 baseline"
+status: accepted
+date: 2026-08-26
+---
+
 # ADR-0085: Lens box model orthogonality, legacy layout cleanup, and C23 baseline
 
 - Status: Accepted

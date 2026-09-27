@@ -1,3 +1,10 @@
+---
+id: ADR-0065
+title: "Per-group material overrides and backdrop statistics"
+status: accepted
+date: 2026-08-12
+---
+
 # ADR-0065: Per-group material overrides and backdrop statistics
 
 - Status: Accepted

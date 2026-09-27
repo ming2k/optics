@@ -1,3 +1,10 @@
+---
+id: ADR-0028
+title: "Lens two-phase flexbox layout (measure / arrange)"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0028: Lens two-phase flexbox layout (measure / arrange)
 
 - Status: Accepted (amended by [ADR-0060](0060-lens-single-tree-placement-and-z-bands.md):

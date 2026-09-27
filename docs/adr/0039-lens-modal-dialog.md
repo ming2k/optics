@@ -1,3 +1,10 @@
+---
+id: ADR-0039
+title: "Lens modal dialog — centered overlay + backdrop + Tab focus trap"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0039: Lens modal dialog — centered overlay + backdrop + Tab focus trap
 
 - Status: Accepted (amended 2026-08-10: `lens_modal_opts.dismissable`

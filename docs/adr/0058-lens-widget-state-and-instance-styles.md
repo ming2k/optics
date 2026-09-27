@@ -1,3 +1,10 @@
+---
+id: ADR-0058
+title: "Lens widget state bitflags and per-instance styles"
+status: accepted
+date: 2026-08-10
+---
+
 # ADR-0058: Lens widget state bitflags and per-instance styles
 
 - Status: Accepted (amended by [ADR-0061](0061-lens-style-cascade-mechanism-neutral-flavor.md):

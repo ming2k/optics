@@ -1,3 +1,10 @@
+---
+id: ADR-0026
+title: "Lens widget identity — FNV-1a hashing over an id stack"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0026: Lens widget identity — FNV-1a hashing over an id stack
 
 - Status: Accepted

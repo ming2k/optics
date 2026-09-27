@@ -1,3 +1,10 @@
+---
+id: ADR-0059
+title: "Lens widget skins — emission as a replaceable function"
+status: accepted
+date: 2026-08-10
+---
+
 # ADR-0059: Lens widget skins — emission as a replaceable function
 
 - Status: Accepted (extended by [ADR-0061](0061-lens-style-cascade-mechanism-neutral-flavor.md):

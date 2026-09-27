@@ -1,3 +1,10 @@
+---
+id: ADR-0075
+title: "System accessibility preferences — lens executes, iris observes, the OS owns"
+status: accepted
+date: 2026-08-23
+---
+
 # ADR-0075: System accessibility preferences — lens executes, iris observes, the OS owns
 
 - Status: Accepted

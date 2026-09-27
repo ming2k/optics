@@ -1,3 +1,10 @@
+---
+id: ADR-0012
+title: "Phong lighting parameters ride a transient buffer-device-address block"
+status: accepted
+date: 2026-01-01
+---
+
 # ADR-0012: Phong lighting parameters ride a transient buffer-device-address block
 
 - Status: Accepted

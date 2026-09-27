@@ -1,3 +1,10 @@
+---
+id: ADR-0020
+title: "GPU memory production hardening (amends ADR-0007)"
+status: accepted
+date: 2026-07-17
+---
+
 # ADR-0020: GPU memory production hardening (amends ADR-0007)
 
 - Status: Accepted — item 5 amended by [ADR-0021](0021-batched-uploads-and-quiescent-waits.md)

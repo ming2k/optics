@@ -1,3 +1,10 @@
+---
+id: ADR-0016
+title: "Pure RHI and draw primitives — text and scene content move to sibling libraries"
+status: accepted
+date: 2026-06-23
+---
+
 # ADR-0016: Pure RHI and draw primitives — text and scene content move to sibling libraries
 
 - Status: Accepted

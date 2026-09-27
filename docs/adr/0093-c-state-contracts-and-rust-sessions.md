@@ -1,3 +1,10 @@
+---
+id: ADR-0093
+title: "C state contracts and Rust execution sessions"
+status: accepted
+date: 2026-09-14
+---
+
 # ADR-0093: C state contracts and Rust execution sessions
 
 - Status: Accepted

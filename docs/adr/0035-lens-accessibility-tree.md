@@ -1,3 +1,10 @@
+---
+id: ADR-0035
+title: "Lens accessibility semantic tree — per-node records and post-end walk"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0035: Lens accessibility semantic tree — per-node records and post-end walk
 
 - Status: Accepted (amended by [ADR-0060](0060-lens-single-tree-placement-and-z-bands.md):

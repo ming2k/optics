@@ -1,3 +1,10 @@
+---
+id: ADR-0064
+title: "Host-controlled caret and selection for lens_textfield"
+status: accepted
+date: 2026-08-12
+---
+
 # ADR-0064: Host-controlled caret and selection for lens_textfield
 
 - Status: Accepted

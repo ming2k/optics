@@ -1,3 +1,10 @@
+---
+id: ADR-0056
+title: "Win32 + Cocoa backends and the MoltenVK baseline"
+status: accepted
+date: 2026-08-08
+---
+
 # ADR-0056: Win32 + Cocoa backends and the MoltenVK baseline
 
 - Status: Accepted

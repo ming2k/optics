@@ -1,3 +1,10 @@
+---
+id: ADR-0076
+title: "Per-shape paint runs for runtime SVG icons"
+status: accepted
+date: 2026-08-23
+---
+
 # ADR-0076: Per-shape paint runs for runtime SVG icons
 
 - Status: Accepted

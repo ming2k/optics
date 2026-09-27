@@ -1,3 +1,10 @@
+---
+id: ADR-0096
+title: "Prism Mica foundation material — screen-anchored wallpaper composite"
+status: accepted
+date: 2026-09-15
+---
+
 # ADR-0096: Prism Mica foundation material — screen-anchored wallpaper composite
 
 - Status: Accepted

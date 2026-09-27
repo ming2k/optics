@@ -1,3 +1,10 @@
+---
+id: ADR-0083
+title: "Flux orthogonal shape-paint model and full C23 baseline"
+status: accepted
+date: 2026-08-26
+---
+
 # ADR-0083: Flux orthogonal shape-paint model and full C23 baseline
 
 - Status: Accepted

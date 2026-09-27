@@ -1,3 +1,10 @@
+---
+id: ADR-0017
+title: "Canvas render-target capture for real backdrop effects"
+status: accepted
+date: 2026-06-26
+---
+
 # ADR-0017: Canvas render-target capture for real backdrop effects
 
 - Status: Accepted

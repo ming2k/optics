@@ -1,3 +1,10 @@
+---
+id: ADR-0061
+title: "Lens style cascade and the mechanism / neutral-default / flavor rule"
+status: accepted
+date: 2026-08-10
+---
+
 # ADR-0061: Lens style cascade and the mechanism / neutral-default / flavor rule
 
 - Status: Accepted (enforcement follow-through, 2026-08-10: the

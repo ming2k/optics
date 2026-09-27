@@ -1,3 +1,11 @@
+---
+id: ADR-0088
+title: "Optics Clean-Break Architecture — Immutable Display Lists, Pure Algebraic Geometry-Brush Model, and Transient FrameGraph"
+status: superseded
+date: 2026-08-27
+superseded_by: "ADR-0089 through ADR-0094"
+---
+
 # ADR-0088: Optics Clean-Break Architecture — Immutable Display Lists, Pure Algebraic Geometry-Brush Model, and Transient FrameGraph
 
 - Status: Superseded by ADR-0089 through ADR-0094

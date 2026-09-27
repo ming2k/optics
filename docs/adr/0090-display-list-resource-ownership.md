@@ -1,3 +1,10 @@
+---
+id: ADR-0090
+title: "DisplayList snapshots and resource ownership"
+status: accepted
+date: 2026-09-14
+---
+
 # ADR-0090: DisplayList snapshots and resource ownership
 
 - Status: Accepted

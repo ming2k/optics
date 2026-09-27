@@ -1,3 +1,10 @@
+---
+id: ADR-0031
+title: "Lens symbol namespaces — public `lens_*`, internal `lensi_*`"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0031: Lens symbol namespaces — public `lens_*`, internal `lensi_*`
 
 - Status: Accepted

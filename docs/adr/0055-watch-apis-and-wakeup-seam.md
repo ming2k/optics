@@ -1,3 +1,10 @@
+---
+id: ADR-0055
+title: "Callback-driven watch APIs + the backend wakeup seam"
+status: accepted
+date: 2026-08-08
+---
+
 # ADR-0055: Callback-driven watch APIs + the backend wakeup seam
 
 - Status: Accepted

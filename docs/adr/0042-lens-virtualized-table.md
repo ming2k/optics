@@ -1,3 +1,10 @@
+---
+id: ADR-0042
+title: "Lens virtualized table / data grid"
+status: accepted
+date: 2026-07-21
+---
+
 # ADR-0042: Lens virtualized table / data grid
 
 - Status: Accepted

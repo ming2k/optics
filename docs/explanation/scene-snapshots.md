@@ -46,5 +46,5 @@ presentation. The raw Canvas submission method is unsafe because the caller
 must uphold Canvas state, target exclusivity and device requirements.
 
 There is no `lens_render` or borrowed `lens_draw_list` compatibility path.
-See the [implementation matrix](../dev/architecture-implementation-status.md)
-for the remaining resource-version, execution-plan and specialized-input work.
+Remaining resource-version, execution-plan and specialized-input milestones are
+tracked in internal developer implementation records.

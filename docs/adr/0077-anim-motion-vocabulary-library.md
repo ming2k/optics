@@ -1,3 +1,10 @@
+---
+id: ADR-0077
+title: "The `anim` motion vocabulary library — provable math, host-owned clocks"
+status: accepted
+date: 2026-08-23
+---
+
 # ADR-0077: The `anim` motion vocabulary library — provable math, host-owned clocks
 
 - Status: Accepted
