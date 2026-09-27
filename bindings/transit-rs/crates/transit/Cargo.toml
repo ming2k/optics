@@ -8,4 +8,4 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-transit-sys = { path = "../transit-sys", version = "0.0.51" }
+transit-sys = { path = "../transit-sys", version = "0.0.52" }

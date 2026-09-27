@@ -130,14 +130,14 @@ dependencies = [
 
 [[package]]
 name = "flux"
-version = "0.0.51"
+version = "0.0.52"
 dependencies = [
  "flux-sys",
 ]
 
 [[package]]
 name = "flux-sys"
-version = "0.0.51"
+version = "0.0.52"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -482,7 +482,7 @@ checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
 
 [[package]]
 name = "vista"
-version = "0.0.51"
+version = "0.0.52"
 dependencies = [
  "flux",
  "gltf",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "vista-sys"
-version = "0.0.51"
+version = "0.0.52"
 dependencies = [
  "bindgen",
  "flux-sys",
