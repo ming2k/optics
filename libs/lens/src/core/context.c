@@ -183,8 +183,16 @@ static void lensi_theme_normalize(lens_theme *t) {
         t->scrollbar_radius = t->scrollbar_width * 0.5f;
     if (t->scrollbar_min_thumb_h <= 0.0f)
         t->scrollbar_min_thumb_h = 28.0f;
+    /* Normalize semantic surface tokens (ADR-0105) */
+    if (!t->color_surface)
+        t->color_surface = t->color_bg;
+    if (!t->color_surface_sunken)
+        t->color_surface_sunken = t->color_hover ? t->color_hover : t->color_bg;
+    if (!t->color_surface_elevated)
+        t->color_surface_elevated = t->color_active ? t->color_active : t->color_bg;
+
     if (!t->color_slider_track)
-        t->color_slider_track = t->color_border;
+        t->color_slider_track = t->color_surface_sunken;
     if (!t->color_slider_fill)
         t->color_slider_fill = t->color_accent;
     if (!t->color_slider_knob)
@@ -193,14 +201,6 @@ static void lensi_theme_normalize(lens_theme *t) {
         t->slider_track_thickness = 6.0f;
     if (t->slider_knob_size <= 0.0f)
         t->slider_knob_size = 14.0f;
-
-    /* Normalize semantic surface tokens (ADR-0105) */
-    if (!t->color_surface)
-        t->color_surface = t->color_bg;
-    if (!t->color_surface_sunken)
-        t->color_surface_sunken = t->color_hover ? t->color_hover : t->color_bg;
-    if (!t->color_surface_elevated)
-        t->color_surface_elevated = t->color_active ? t->color_active : t->color_bg;
 
     /* Normalize material recipes if uninitialized (e.g. from zero-initialized or older callers) */
     if (t->materials.foundation.plate_opacity <= 0.0f && !t->materials.foundation.fallback) {
