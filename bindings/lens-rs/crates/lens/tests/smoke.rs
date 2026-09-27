@@ -130,3 +130,16 @@ fn headless_frame_drives_grid_and_nested_flex() {
         });
     });
 }
+
+#[test]
+fn theme_minimalist_defaults_and_classic() {
+    let def = lens::Theme::default();
+    let dark = lens::Theme::dark();
+    let classic_light = lens::Theme::classic(false);
+    let classic_dark = lens::Theme::classic(true);
+
+    assert_eq!(def.border_width(), 0.0);
+    assert_eq!(dark.border_width(), 0.0);
+    assert_eq!(classic_light.border_width(), 1.0);
+    assert_eq!(classic_dark.border_width(), 1.0);
+}
