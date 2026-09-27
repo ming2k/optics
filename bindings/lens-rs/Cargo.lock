@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "lens"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flux",
  "lens-sys",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "lens-sys"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bindgen",
  "flux-sys",

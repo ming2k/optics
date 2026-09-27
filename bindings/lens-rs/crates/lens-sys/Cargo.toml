@@ -15,4 +15,4 @@ pkg-config = "0.3"
 [dependencies]
 # flux-sys is re-exported so the flux types lens speaks (flux_canvas,
 # flux_color, ...) have ONE Rust definition across the stack.
-flux-sys = { path = "../../../flux-rs/crates/flux-sys" }
+flux-sys = { path = "../../../flux-rs/crates/flux-sys", version = "0.1.1" }
