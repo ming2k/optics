@@ -387,14 +387,14 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                 if (vlen) {
                     float x = r.x;
                     float y = r.y;
-                    const flux_text_style style = {
+                    const glyph_style style = {
                         .size_px = c->text_size,
                         .weight = c->text_weight,
                         .color = c->color,
-                        .family = (flux_text_family)c->text_family,
+                        .family = (glyph_family)c->text_family,
                     };
                     if (c->rel.w < 0.0f || c->rel.h < 0.0f) {
-                        flux_text_metrics tm = flux_text_measure(ui->text, c->text, vlen, &style);
+                        glyph_metrics tm = glyph_measure(ui->text, c->text, vlen, &style);
                         if (c->rel.w < 0.0f) {
                             x = r.x + (r.w - tm.width) * 0.5f;
                             if (x < r.x)
@@ -406,9 +406,9 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                                 y = r.y;
                         }
                     }
-                    flux_result result = flux_text_record(
+                    flux_result result = glyph_record(
                         ui->text, enc,
-                        &(flux_text_record_desc){.x = x,
+                        &(glyph_record_desc){.x = x,
                                                  .y = y,
                                                  .utf8 = c->text,
                                                  .len = vlen,
@@ -574,10 +574,10 @@ static flux_result compile_visuals(lens *ui, flux_display_list **out_list) {
         }
 
         if (ui->text) {
-            flux_text_style ts = {.size_px = size,
+            glyph_style ts = {.size_px = size,
                                   .color = lensi_opacity_color(t->color_fg, ui->tooltip.opacity)};
-            r = flux_text_record(ui->text, enc,
-                                 &(flux_text_record_desc){.x = x + pad,
+            r = glyph_record(ui->text, enc,
+                                 &(glyph_record_desc){.x = x + pad,
                                                           .y = y + pad,
                                                           .utf8 = ui->tooltip.text,
                                                           .len = strlen(ui->tooltip.text),

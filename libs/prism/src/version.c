@@ -2,7 +2,7 @@
  * prism/version.c — version accessors, all derived from the
  * PRISM_VERSION_* macros (single source of truth; no hardcoded
  * literals — a stale literal here is a bug that no test can catch,
- * which is exactly how flux-scene-graph shipped "0.0.29" for four
+ * which is exactly how vista shipped "0.0.29" for four
  * releases against 0.0.36 headers).
  */
 

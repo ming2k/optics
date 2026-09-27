@@ -131,11 +131,11 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
     if (r != FLUX_OK)
         goto fail_store;
 
-    /* Shared text engine (flux-text). Always usable: it degrades to
+    /* Shared text engine (glyph). Always usable: it degrades to
      * monospace metrics internally when no shaping backend or font is
      * available, so widgets never branch on backend presence. Only fails
      * on allocation, which is non-fatal here (text simply stays blank). */
-    if (flux_text_create(&(flux_text_desc){.device = ui->device, .scale = ui->scale}, &ui->text) !=
+    if (glyph_create(&(glyph_desc){.device = ui->device, .scale = ui->scale}, &ui->text) !=
         FLUX_OK)
         ui->text = NULL;
 
@@ -156,7 +156,7 @@ void lens_release(lens *ui) {
         return;
     lens_snapshot_release(ui->presented_snapshot);
     lensi_ghost_destroy(ui);
-    flux_text_release(ui->text); /* null-safe */
+    glyph_release(ui->text); /* null-safe */
     lensi_store_destroy(ui);
     flux_arena_deinit(&ui->arena);
     if (ui->device)
@@ -265,7 +265,7 @@ float lens_opacity(const lens *ui) {
 void lens_set_scale(lens *ui, float scale) {
     if (ui && scale > 0.0f) {
         ui->scale = scale;
-        flux_text_set_scale(ui->text, scale); /* null-safe */
+        glyph_set_scale(ui->text, scale); /* null-safe */
     }
 }
 

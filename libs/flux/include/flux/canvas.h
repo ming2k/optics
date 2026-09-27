@@ -108,7 +108,7 @@ typedef struct flux_canvas_desc {
     flux_surface *surface;            /* GPU: required (retained). CPU: ignored. */
     float scale;                      /* content scale (device-pixel ratio); 0 => 1.0.
                                          The canvas draws in logical units scaled onto
-                                         the physical surface by this factor; flux_text
+                                         the physical surface by this factor; glyph
                                          reads it to rasterise glyphs crisply at HiDPI.
                                          Change later with flux_canvas_set_scale. */
     flux_canvas_backend_kind backend; /* default AUTO */
@@ -220,7 +220,7 @@ FLUX_API void flux_canvas_release(flux_canvas *c);
  * flux_canvas_begin_frame start with this as the base transform, so all drawing is
  * in logical units mapped onto the physical surface. flux_canvas_get_scale
  * returns the *effective* scale of the active transform (the base content
- * scale composed with any flux_canvas_scale on the stack); flux_text reads it
+ * scale composed with any flux_canvas_scale on the stack); glyph reads it
  * to rasterise glyphs at the device resolution. Set the content scale once
  * when the surface scale changes. */
 FLUX_API void flux_canvas_set_scale(flux_canvas *c, float scale);
@@ -496,7 +496,7 @@ typedef struct flux_glyph_run_desc {
  * texels were rearranged since, so the baked UVs would sample the wrong
  * cells), letting the caller re-emit and re-record. Producers that never
  * rearrange in place may omit the extension; their segments replay
- * unchecked. flux_text attaches its atlas generation automatically. */
+ * unchecked. glyph attaches its atlas generation automatically. */
 typedef struct flux_glyph_run_host_atlas_desc {
     flux_struct_type type; /* FLUX_TYPE_GLYPH_RUN_HOST_ATLAS_DESC */
     const void *next;

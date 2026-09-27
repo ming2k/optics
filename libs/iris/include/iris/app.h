@@ -108,13 +108,13 @@ typedef void (*iris_build_fn)(lens *ui, const lens_input *in, void *user);
 /* Per-frame paint callback. `canvas` is live inside an open
  * flux_canvas_begin_frame/end pair, with the frame already cleared to the theme
  * background. `device` is the flux_device iris owns for this app —
- * hosts that need a device (e.g. to create a flux_text context) must
+ * hosts that need a device (e.g. to create a glyph context) must
  * borrow this one rather than opening their own, since two flux_devices
  * in one process is unsupported and crashes. `scale` is the current
  * device-pixel ratio (Wayland `wl_surface.preferred_buffer_scale`); hosts
  * painting canvas content directly should wrap their draw in
  * `flux_canvas_save / flux_canvas_scale(canvas, scale, scale) / ...
- * / flux_canvas_restore` and call `flux_text_set_scale(text, scale)` so
+ * / flux_canvas_restore` and call `glyph_set_scale(text, scale)` so
  * glyphs rasterise crisply at the device resolution. lens applies the
  * same scale to its own chrome internally; hosts do not need to also
  * scale the chrome portion.

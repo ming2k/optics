@@ -1,0 +1,12 @@
+[package]
+name = "glyph"
+description = "Safe Rust bindings for glyph — text shaping, metrics, and dynamic glyph atlas runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+glyph-sys = { path = "../glyph-sys", version = "0.0.51" }
+flux = { path = "../../../flux-rs/crates/flux", version = "0.0.51" }

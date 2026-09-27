@@ -8,7 +8,7 @@
  */
 
 #include "test_helpers.h"
-#include <flux-text/text.h>
+#include <glyph/glyph.h>
 #include <flux/canvas.h>
 #include <flux/canvas_helpers.h>
 #include <flux/core.h>
@@ -131,26 +131,26 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
 }
 
 static void test_text_lifecycle_and_atlas_sync(void) {
-    flux_text_desc desc = {
+    glyph_desc desc = {
         .device = nullptr,
         .scale = 1.0f,
     };
-    flux_text *text = nullptr;
-    flux_result r = flux_text_create(&desc, &text);
+    glyph_ctx *text = nullptr;
+    flux_result r = glyph_create(&desc, &text);
     if (r == FLUX_OK && text) {
         /* Retain / release */
-        flux_text *retained = flux_text_retain(text);
+        glyph_ctx *retained = glyph_retain(text);
         EXPECT(retained == text);
-        flux_text_release(retained);
+        glyph_release(retained);
 
         /* Query atlas sync */
-        bool pending = flux_text_has_pending_uploads(text);
+        bool pending = glyph_has_pending_uploads(text);
         EXPECT(!pending);
 
-        flux_result fr = flux_text_flush_atlas(text, nullptr);
+        flux_result fr = glyph_flush_atlas(text, nullptr);
         EXPECT(fr == FLUX_OK);
 
-        flux_text_release(text);
+        glyph_release(text);
     }
 }
 
@@ -398,16 +398,16 @@ static void test_adr0091_squircle_distinct_geometry(void) {
 }
 
 static void test_adr0092_text_atlas_epoch_tracking(void) {
-    flux_text_desc desc = {.scale = 1.0f};
-    flux_text *text = nullptr;
-    EXPECT(flux_text_create(&desc, &text) == FLUX_OK);
+    glyph_desc desc = {.scale = 1.0f};
+    glyph_ctx *text = nullptr;
+    EXPECT(glyph_create(&desc, &text) == FLUX_OK);
 
-    uint64_t epoch0 = flux_text_get_atlas_epoch(text, nullptr);
-    EXPECT(flux_text_flush_atlas(text, nullptr) == FLUX_OK);
-    uint64_t epoch1 = flux_text_get_atlas_epoch(text, nullptr);
+    uint64_t epoch0 = glyph_get_atlas_epoch(text, nullptr);
+    EXPECT(glyph_flush_atlas(text, nullptr) == FLUX_OK);
+    uint64_t epoch1 = glyph_get_atlas_epoch(text, nullptr);
     EXPECT(epoch1 > epoch0);
 
-    flux_text_release(text);
+    glyph_release(text);
 }
 
 static void test_adr0093_target_exclusive_borrow_and_readback(void) {

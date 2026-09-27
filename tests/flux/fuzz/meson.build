@@ -41,16 +41,16 @@ fuzz_harnesses += {
 }
 
   # GLB parser: feed arbitrary bytes through the deviceless parse seam
-  # (flux_sg_parse_glb, ADR-0016). Public API; libfuzzer-built via the
+  # (vista_parse_glb, ADR-0016). Public API; libfuzzer-built via the
   # ci-fuzz workflow (see .github/workflows/ci-fuzz.yml matrix).
   fuzz_harnesses += {
     'name': 'fuzz_glb_parse',
     'src': files('fuzz_glb_parse.c'),
-    'deps': [flux_sg_dep, m_dep],
+    'deps': [vista_dep, m_dep],
     'corpus': 'corpus/glb_parse',
   }
 
-if get_option('text')
+if get_option('glyph')
   # Text shaping: feed arbitrary / truncated UTF-8 through the measure-only
   # seam (no device needed): measure, caret mapping, bidi cursor moves, and
   # selection rects at every truncation boundary. Asserts finite metrics,
@@ -58,7 +58,7 @@ if get_option('text')
   fuzz_harnesses += {
     'name': 'fuzz_text_shape',
     'src': files('fuzz_text_shape.c'),
-    'deps': [flux_text_dep, flux_dep, m_dep],
+    'deps': [glyph_dep, flux_dep, m_dep],
     'corpus': 'corpus/text_shape',
   }
 endif

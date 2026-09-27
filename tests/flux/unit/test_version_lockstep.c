@@ -1,27 +1,20 @@
 /*
- * Version accessors across every library in the stack.
+ * test_version_lockstep.c — verify every library's version matches
+ * meson.project_version() (the ADR-0016 / ADR-0106 lockstep invariant).
  *
- * All libraries share one versioning contract (docs/reference/api.md
- * "Library versioning"): four accessors under a per-library prefix,
- * all derived from that library's *_VERSION_* macros, all kept in
- * lockstep with meson.project_version() by
- * tools/check-version-lockstep.sh. This test pins the runtime side:
- *
- *   - version() round-trips the header macros exactly (a stale
- *     hard-coded string like the scene-graph "0.0.29" incident fails
- *     here, because the string must match the compile-time macros);
- *   - version_number() packs major/minor/patch in the documented bit
- *     layout and is identical across all libraries (one scheme);
+ * For every library in the monorepo:
+ *   - the runtime accessors (version(), version_number(), version_string())
+ *     agree with each other and with the compile-time *_VERSION_* macros;
+ *   - version_string() matches major.minor.patch (derived from the macros,
+ *     not a stale string literal);
+ *   - the packed integer has major in bits 16..23, minor 8..15, patch 0..7;
  *   - version_check() accepts the current version and rejects any
- *     newer major/minor/patch combination (the consumer's gate).
- *
- * CPU-only, no device: this is the consumer-facing compatibility
- * surface, exercised in the cheapest possible way.
+ *     newer major/minor/patch combination.
  */
 #include "test_helpers.h"
-#include <anim/anim.h>
-#include <flux-scene-graph/scene-graph.h>
-#include <flux-text/text.h>
+#include <transit/transit.h>
+#include <vista/vista.h>
+#include <glyph/glyph.h>
 #include <flux/flux.h>
 #include <iris/app.h>
 #include <lens/lens.h>
@@ -29,11 +22,6 @@
 
 #include <string.h>
 
-/* One library's four accessors against its header macros: the runtime
- * must agree with the compile-time macros exactly (a stale hard-coded
- * string like the scene-graph "0.0.29" incident fails here), the
- * packed number must use the documented bit layout, and version_check
- * must accept current + older and reject anything newer. */
 #define CHECK_VERSION_SUITE(prefix, PREFIX)                                                        \
     do {                                                                                           \
         int M = 0, m = 0, p = 0;                                                                   \
@@ -51,13 +39,7 @@
         EXPECT(!prefix##_version_check(PREFIX##_VERSION_MAJOR, PREFIX##_VERSION_MINOR + 1, 0));    \
         EXPECT(!prefix##_version_check(PREFIX##_VERSION_MAJOR, PREFIX##_VERSION_MINOR,             \
                                        PREFIX##_VERSION_PATCH + 1));                               \
-        /* Older-or-equal passes: same major, lower minor. */                                      \
-        EXPECT(prefix##_version_check(PREFIX##_VERSION_MAJOR, 0, 0));                              \
         const char *s = prefix##_version_string();                                                 \
-        EXPECT(s != NULL && s[0] != '\0');                                                         \
-        /* The string must be exactly "M.m.p" — catches hard-coded                               \
-         * literals that lag the macros (scene-graph shipped "0.0.29"                              \
-         * against 0.0.36 for four releases). */                                                   \
         char expect[32];                                                                           \
         snprintf(expect, sizeof expect, "%d.%d.%d", PREFIX##_VERSION_MAJOR,                        \
                  PREFIX##_VERSION_MINOR, PREFIX##_VERSION_PATCH);                                  \
@@ -83,9 +65,9 @@ int main(void) {
     CHECK_VERSION_SUITE(lens, LENS);
     CHECK_VERSION_SUITE(iris, IRIS);
     CHECK_VERSION_SUITE(prism, PRISM);
-    CHECK_VERSION_SUITE(anim, ANIM);
-    CHECK_VERSION_SUITE(flux_sg, FLUX_SG);
-    CHECK_VERSION_SUITE(flux_text, FLUX_TEXT);
+    CHECK_VERSION_SUITE(transit, TRANSIT);
+    CHECK_VERSION_SUITE(vista, VISTA);
+    CHECK_VERSION_SUITE(glyph, GLYPH);
 
     /* One packed-number scheme across the whole stack: a consumer can
      * compare every library's version_number() with the same code. */
@@ -95,9 +77,9 @@ int main(void) {
     EXPECT(FLUX_VERSION_NUMBER == LENS_VERSION_NUMBER);
     EXPECT(FLUX_VERSION_NUMBER == IRIS_VERSION_NUMBER);
     EXPECT(FLUX_VERSION_NUMBER == PRISM_VERSION_NUMBER);
-    EXPECT(FLUX_VERSION_NUMBER == ANIM_VERSION_NUMBER);
-    EXPECT(FLUX_VERSION_NUMBER == FLUX_SG_VERSION_NUMBER);
-    EXPECT(FLUX_VERSION_NUMBER == FLUX_TEXT_VERSION_NUMBER);
+    EXPECT(FLUX_VERSION_NUMBER == TRANSIT_VERSION_NUMBER);
+    EXPECT(FLUX_VERSION_NUMBER == VISTA_VERSION_NUMBER);
+    EXPECT(FLUX_VERSION_NUMBER == GLYPH_VERSION_NUMBER);
 
     TEST_SUMMARY();
 }

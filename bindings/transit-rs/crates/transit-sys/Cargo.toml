@@ -1,0 +1,13 @@
+[package]
+name = "transit-sys"
+description = "Raw FFI bindings to transit (libtransit), generated from <transit/transit.h>"
+links = "transit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[build-dependencies]
+bindgen = "0.72"
+pkg-config = "0.3"

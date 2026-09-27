@@ -3,11 +3,11 @@
  * Builds a synthetic scene laid out like a skinned VRM avatar (a long
  * spine-to-fingertip chain with siblings), where every node array is in an
  * order that forces the convergence loop to do the full O(n^2) work. Times
- * many `flux_sg_scene_apply_animation` calls.
+ * many `vista_scene_apply_animation` calls.
  *
  * Usage: bench_sg_worlds [node_count] [iterations]
  */
-#include <flux-scene-graph/scene-graph.h>
+#include <vista/vista.h>
 
 #include "bench_helpers.h"
 
@@ -105,8 +105,8 @@ int main(int argc, char **argv) {
         return 0;
     }
     test_glb glb = make_chain(count);
-    flux_sg_scene *scene = NULL;
-    flux_result r = flux_sg_load_glb(device, glb.bytes, glb.size, &scene);
+    vista_scene *scene = NULL;
+    flux_result r = vista_load_glb(device, glb.bytes, glb.size, &scene);
     if (r != FLUX_OK) {
         fprintf(stderr, "load failed: %s\n", flux_result_string(r));
         flux_device_release(device);
@@ -116,12 +116,12 @@ int main(int argc, char **argv) {
     /* Drive the full animated path: reset pose + sample + worlds + skin. */
     double t0 = now_ms();
     for (int i = 0; i < iters; ++i)
-        flux_sg_scene_reset_pose(scene);
+        vista_scene_reset_pose(scene);
     double t1 = now_ms();
     printf("nodes=%u iters=%d  reset_pose_total=%.2fms  per_call=%.4fms\n", count, iters,
            t1 - t0, (t1 - t0) / iters);
     flux_device_wait_idle(device);
-    flux_sg_scene_release(scene);
+    vista_scene_release(scene);
     free(glb.bytes);
     flux_device_release(device);
     return 0;

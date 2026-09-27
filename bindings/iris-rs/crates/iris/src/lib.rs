@@ -57,13 +57,13 @@ pub use lens::{
 /// borrows are valid only inside the paint call.
 ///
 /// Hosts that need a `flux::Device`-shaped handle (e.g. to create a
-/// `flux::text::Text` context) **must** borrow `flux_device()` rather than
+/// `glyph::Text` context) **must** borrow `flux_device()` rather than
 /// opening their own — two `flux_device`s in one process is unsupported
 /// and crashes.
 ///
 /// Hosts drawing canvas content directly should wrap their draw in
 /// `canvas.save / canvas.scale(s, s) / ... / canvas.restore` and call
-/// `flux_text_set_scale(text, s)` so glyphs rasterise crisply on HiDPI.
+/// `glyph_set_scale(text, s)` so glyphs rasterise crisply on HiDPI.
 /// lens applies the same scale to its own chrome internally; the host
 /// only scales the document-surface portion.
 pub struct PaintHost {
@@ -92,7 +92,7 @@ impl PaintHost {
 
     /// The single flux device iris owns, as a borrowed (non-owning)
     /// `flux::Device`. Use it for any device-dependent context (samplers,
-    /// textures, a `flux_text::Text` shaper, …) instead of opening a
+    /// textures, a `glyph::Text` shaper, …) instead of opening a
     /// second device — two devices in one process is unsupported. The
     /// borrow is valid for the app's lifetime; iris releases the device at
     /// shutdown.
@@ -930,7 +930,9 @@ pub fn post_to_main_thread<F: FnOnce() + Send + 'static>(f: F) -> bool {
             return;
         }
         let boxed = unsafe { Box::from_raw(user as *mut Box<dyn FnOnce() + Send>) };
-        boxed();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            boxed();
+        }));
     }
     let boxed: Box<Box<dyn FnOnce() + Send>> = Box::new(Box::new(f));
     let raw = Box::into_raw(boxed) as *mut std::ffi::c_void;

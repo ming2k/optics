@@ -27,7 +27,7 @@
 #include <flux/canvas_cpu.h>
 
 /* one begin/end pair per frame */
-#include <flux-text/text.h>
+#include <glyph/glyph.h>
 #include <flux/math.h>
 
 #include <string.h>
@@ -40,7 +40,7 @@ static uint32_t g_codepoints[DISTINCT_GLYPHS];
 
 /* Draws N codepoints in windows of 16 (a label-sized chunk), like a
  * scrolling list would. Returns the number of draw calls made. */
-static uint64_t draw_window(flux_text *t, flux_canvas *c, uint32_t start, uint32_t count,
+static uint64_t draw_window(glyph_ctx *t, flux_canvas *c, uint32_t start, uint32_t count,
                             float size_px) {
     uint64_t draws = 0;
     for (uint32_t i = 0; i < count; i += 16) {
@@ -60,10 +60,10 @@ static uint64_t draw_window(flux_text *t, flux_canvas *c, uint32_t start, uint32
                 utf8[len++] = (char)(0x80 | (cp & 0x3F));
             }
         }
-        flux_text_style style = {0};
+        glyph_style style = {0};
         style.size_px = size_px;
         style.color = flux_color_rgba_premul(255, 255, 255, 255);
-        flux_text_draw(t, c, nullptr, 8.0f, 8.0f, utf8, len, &style);
+        glyph_draw(t, c, nullptr, 8.0f, 8.0f, utf8, len, &style);
         draws++;
     }
     return draws;
@@ -75,12 +75,12 @@ int main(void) {
     for (uint32_t i = 0; i < DISTINCT_GLYPHS; i++)
         g_codepoints[i] = 0x4E00u + i;
 
-    flux_text *t = nullptr;
-    EXPECT(flux_text_create(&(flux_text_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
+    glyph_ctx *t = nullptr;
+    EXPECT(glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
     EXPECT(t != nullptr);
 
     /* Skip when no shaping backend: measure-only draws no glyphs. */
-    flux_text_metrics probe = flux_text_measure(t, "A", 1, nullptr);
+    glyph_metrics probe = glyph_measure(t, "A", 1, nullptr);
     if (probe.width <= 0.0f) {
         fprintf(stderr, "text_soak: no shaping backend; skipping\n");
         TEST_SUMMARY();
@@ -97,8 +97,8 @@ int main(void) {
         draw_window(t, c, 0, DISTINCT_GLYPHS, 16.0f);
         EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
-    flux_text_stats s1;
-    flux_text_get_stats(t, &s1);
+    glyph_stats s1;
+    glyph_get_stats(t, &s1);
     EXPECT(s1.glyph_count <= s1.glyph_max_cap / 2); /* pinned at ceiling */
     EXPECT(s1.glyph_evictions > 0);                 /* oversize set evicted */
     EXPECT(s1.glyph_grows <= 7);                    /* 256→16384 = 6 doublings */
@@ -116,15 +116,15 @@ int main(void) {
         draw_window(t, c, 100, 256, 16.0f);
         EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
-    flux_text_stats s2;
-    flux_text_get_stats(t, &s2);
+    glyph_stats s2;
+    glyph_get_stats(t, &s2);
     EXPECT(s2.glyph_hits > s1.glyph_hits); /* replay hit the cache */
     uint64_t new_misses = s2.glyph_misses - s1.glyph_misses;
     EXPECT(new_misses < 512); /* one re-raster pass, no storm */
 
     /* --- Phase 3: two identical churn windows must land on identical
      *      counters (high-water steady state; no per-frame growth). */
-    flux_text_stats wa, wb;
+    glyph_stats wa, wb;
     for (int frame = 0; frame < 8; frame++) {
         flux_color bg = flux_color_rgba_premul(0, 0, 0, 255);
         EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -132,7 +132,7 @@ int main(void) {
         draw_window(t, c, 0, 1024, 16.0f);
         EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
-    flux_text_get_stats(t, &wa);
+    glyph_get_stats(t, &wa);
     for (int frame = 0; frame < 8; frame++) {
         flux_color bg = flux_color_rgba_premul(0, 0, 0, 255);
         EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -140,7 +140,7 @@ int main(void) {
         draw_window(t, c, 0, 1024, 16.0f);
         EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
-    flux_text_get_stats(t, &wb);
+    glyph_get_stats(t, &wb);
     EXPECT(wb.glyph_count == wa.glyph_count); /* no creep */
     EXPECT(wb.atlas_pages == wa.atlas_pages); /* no page growth per frame */
     /* A working set that fits the page budget must not storm-clear:
@@ -149,6 +149,6 @@ int main(void) {
     EXPECT(wb.atlas_clears <= wa.atlas_clears);
 
     flux_canvas_release(c);
-    flux_text_release(t);
+    glyph_release(t);
     TEST_SUMMARY();
 }

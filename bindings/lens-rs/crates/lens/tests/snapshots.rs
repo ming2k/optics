@@ -18,4 +18,10 @@ fn snapshots_outlive_ui_and_validate_presentation_identity() {
     let mut foreign = Ui::headless().unwrap();
     foreign.frame(&input, |frame| frame.label("foreign"));
     assert!(foreign.activate(&first).is_err());
+
+    // Verify Send and Sync contracts for Snapshot.
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+    assert_send::<lens::Snapshot>();
+    assert_sync::<lens::Snapshot>();
 }

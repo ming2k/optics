@@ -3,10 +3,6 @@ resolver = "3"
 members = [
   "crates/flux-sys",
   "crates/flux",
-  "crates/flux-text-sys",
-  "crates/flux-text",
-  "crates/flux-scene-graph-sys",
-  "crates/flux-scene-graph",
 ]
 
 [workspace.package]

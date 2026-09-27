@@ -18,8 +18,8 @@ lookup surfaces for this checkout.
 | `<flux/scene.h>`      | Iff `-Dscene=true`   | 3D primitives: camera, mesh, material, draw.                       |
 | `<flux/compute.h>`    | Iff `-Dcompute=true` | Compute pipeline + dispatch.                                       |
 | `<flux/effect.h>`     | Iff `-Deffect=true`  | Image-domain effects (blur, shadow). See [effect reference](effect.md). |
-| `<flux-text/text.h>`  | Iff `-Dtext=true`    | Sibling library: shaping, glyph atlas, text measure/draw. See [symbols](symbols.md#flux-texth-sibling-library). |
-| `<flux-scene-graph/scene-graph.h>` | Iff `-Dscene-graph=true` | Sibling library: glTF/GLB loading, animation, materials. |
+| `<glyph/glyph.h>`     | Iff `-Dglyph=true`   | Sibling library: shaping, glyph atlas, text measure/draw.          |
+| `<vista/vista.h>`     | Iff `-Dvista=true`   | Sibling library: glTF/GLB loading, animation, materials.           |
 
 `<flux/core.h>` and `<flux/math.h>` do **not** include `<vulkan/vulkan.h>`.
 Include `<flux/vulkan.h>` at the seam where you hand flux a `VkSurfaceKHR`
@@ -146,11 +146,11 @@ encoding with immutable publication (ADR-0089 through ADR-0094):
 | `flux_compute_dispatch` | Records `vkCmdBindPipeline` + bindless set + push constants + `vkCmdDispatch`. |
 | `flux_graphics_pipeline_bind` | Records `vkCmdBindPipeline` + bindless set + push constants. |
 
-## Scene-graph content layer
+## Scene-graph content layer (vista)
 
-`flux-scene-graph` preserves glTF primitive material indices. C hosts install
-an index-aligned material table with `flux_sg_scene_set_materials`; a NULL
-`flux_sg_draw_opts.material` selects that table, while a non-NULL value
+`vista` preserves glTF primitive material indices. C hosts install
+an index-aligned material table with `vista_scene_set_materials`; a NULL
+`vista_draw_opts.material` selects that table, while a non-NULL value
 overrides the complete scene.
 
 The safe Rust binding exposes
@@ -460,11 +460,11 @@ submit-and-end, nothing recorded is pending. Required reading for
 
 ## Library versioning
 
-Every library in the stack (`libflux`, `libflux-text`, `libflux-scene-graph`,
-`liblens`, `libiris`, `libprism`, `libanim`) releases as a unit and shares
+Every library in the stack (`libflux`, `libglyph`, `libvista`,
+`liblens`, `libiris`, `libprism`, `libtransit`) releases as a unit and shares
 one version: `meson.project_version()`. Each library exposes the same
 four accessors under its own prefix (`flux_*`, `lens_*`, `iris_*`,
-`prism_*`, `anim_*`, `flux_sg_*`) — one versioning scheme, learn once,
+`prism_*`, `transit_*`, `glyph_*`, `vista_*`) — one versioning scheme, learn once,
 apply to every library the consumer links.
 
 | Macro / accessor                | Returns                                                     |
@@ -478,8 +478,8 @@ apply to every library the consumer links.
 The lockstep is **machine-enforced**: `tools/check-version-lockstep.sh`
 (CI step) parses every library's macros and fails the build when any of
 them differs from `meson.project_version()`, and bans hard-coded version
-string literals (they always drift — flux-scene-graph shipped a
-hard-coded "0.0.29" against 0.0.36 headers; anim sat at 0.0.1 for seven
+string literals (they always drift — vista shipped a
+hard-coded "0.0.29" against 0.0.36 headers; transit sat at 0.0.1 for seven
 months). Bumping the release version therefore means touching every
 library's macros in one commit — the intended discipline.
 

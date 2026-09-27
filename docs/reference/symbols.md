@@ -337,62 +337,62 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_effect_promote` | Copy `transient` (an image returned by flux_effect_blur or any later effect operator) into a fresh caller-owned flux_image with the same width, height, and format. |
 | `flux_effect_reset` | End the current effect lease epoch and return its intermediate/output slots to the per-device pool. |
 
-## flux-text — text shaping (sibling of flux)
+## glyph — text shaping
 
-### `flux-text/text.h`
-
-| Symbol | Description |
-|--------|-------------|
-| `flux_text_version` |  |
-| `flux_text_version_number` |  |
-| `flux_text_version_check` |  |
-| `flux_text_create` | Create a text context. |
-| `flux_text_release` |  |
-| `flux_text_has_pending_uploads` | Atlas synchronization contract (RFC-0094 / ADR-0087 / ADR-0092). |
-| `flux_text_flush_atlas` |  |
-| `flux_text_get_atlas_epoch` |  |
-| `flux_text_set_scale` | Scale contract (single source of truth): - flux_text_draw rasterises at the *canvas's* effective scale (flux_canvas_get_scale — content scale composed with any stacked flux_canvas_scale), so drawn glyphs always match the target surface. |
-| `flux_text_scale` |  |
-| `flux_text_default_family` | Get/set the context's default typeface family — the family a style with FLUX_TEXT_FAMILY_DEFAULT resolves to. |
-| `flux_text_set_default_family` |  |
-| `flux_text_compact` | Release the per-context scratch high-water marks (the placed-glyph buffer, the run list, and the layout cache). |
-| `flux_text_get_stats` |  |
-| `flux_text_measure` | Shape `len` bytes of `utf8` in `style` and report the extent. |
-| `flux_text_draw` | Shape `len` bytes of `utf8` and paint them as a single batched glyph run with the top-left at (x, y) in logical pixels, using `style` (including its colour). |
-| `flux_text_record` | Capture text and its optional contour. |
-| `flux_text_draw_outlined` | Draw a run with a contour behind the foreground glyphs. |
-| `flux_text_x_for_byte` | Logical x of the glyph boundary before byte `byte`. |
-| `flux_text_byte_for_x` | Source byte offset of the glyph boundary nearest logical x `local_x`. |
-| `flux_text_selection_rects` | Fill `out` (capacity `max`) with the on-screen spans covering byte range [lo, hi). |
-| `flux_text_visual_move` | Move the caret one glyph in visual order (forward = rightward on screen) and return the resulting source byte offset. |
-
-## flux-scene-graph — glTF scene layer (sibling of flux)
-
-### `flux-scene-graph/scene-graph.h`
+### `glyph/glyph.h`
 
 | Symbol | Description |
 |--------|-------------|
-| `flux_sg_version` |  |
-| `flux_sg_version_number` |  |
-| `flux_sg_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
-| `flux_sg_load_glb` | Parse a .glb (binary glTF 2.0) and build GPU resources on `device`. |
-| `flux_sg_parse_glb` | Parse a .glb (binary glTF 2.0) into device-independent scene data. |
-| `flux_sg_scene_data_build` | Upload a parsed scene onto `device`: one flux_mesh per primitive. |
-| `flux_sg_scene_data_free` | Release a parsed scene (or one already consumed by build — safe, it is a no-op on NULL). |
-| `flux_sg_scene_data_primitive_count` | Number of mesh primitives in the parsed scene. |
-| `flux_sg_scene_data_bounds` | World-space axis-aligned bounding box of every parsed primitive (local AABBs; the node transforms are not applied — see flux_sg_scene_bounds for the built-scene form). |
-| `flux_sg_scene_release` |  |
-| `flux_sg_scene_set_materials` | Transactionally replace the scene-owned per-index material table and fallback material. |
-| `flux_sg_scene_primitive_count` | Number of mesh primitives in the scene (diagnostic). |
-| `flux_sg_scene_bounds` | World-space axis-aligned bounding box of every primitive the scene draws (each primitive's local AABB is transformed by its owning node's world matrix). |
-| `flux_sg_scene_humanoid_bone_position` | Current model-space position of a VRM humanoid bone (for example "head" or "hips"). |
-| `flux_sg_load_animation_glb` | Load the first animation from a binary glTF/VRMA file and bind its channels to `target`. |
-| `flux_sg_animation_release` |  |
-| `flux_sg_animation_duration` |  |
-| `flux_sg_animation_channel_count` |  |
-| `flux_sg_scene_apply_animation` | Reset to the model rest pose, then sample and apply the clip. |
-| `flux_sg_scene_reset_pose` |  |
-| `flux_sg_draw` | Record one flux_scene_draw_mesh(_lit) per primitive, composed with each node's world matrix. |
+| `glyph_version` |  |
+| `glyph_version_number` |  |
+| `glyph_version_check` |  |
+| `glyph_create` | Create a text context. |
+| `glyph_release` |  |
+| `glyph_has_pending_uploads` | Atlas synchronization contract (RFC-0094 / ADR-0087 / ADR-0092). |
+| `glyph_flush_atlas` |  |
+| `glyph_get_atlas_epoch` |  |
+| `glyph_set_scale` | Scale contract (single source of truth): - glyph_draw rasterises at the *canvas's* effective scale (flux_canvas_get_scale — content scale composed with any stacked flux_canvas_scale), so drawn glyphs always match the target surface. |
+| `glyph_scale` |  |
+| `glyph_default_family` | Get/set the context's default typeface family — the family a style with FLUX_TEXT_FAMILY_DEFAULT resolves to. |
+| `glyph_set_default_family` |  |
+| `glyph_compact` | Release the per-context scratch high-water marks (the placed-glyph buffer, the run list, and the layout cache). |
+| `glyph_get_stats` |  |
+| `glyph_measure` | Shape `len` bytes of `utf8` in `style` and report the extent. |
+| `glyph_draw` | Shape `len` bytes of `utf8` and paint them as a single batched glyph run with the top-left at (x, y) in logical pixels, using `style` (including its colour). |
+| `glyph_record` | Capture text and its optional contour. |
+| `glyph_draw_outlined` | Draw a run with a contour behind the foreground glyphs. |
+| `glyph_x_for_byte` | Logical x of the glyph boundary before byte `byte`. |
+| `glyph_byte_for_x` | Source byte offset of the glyph boundary nearest logical x `local_x`. |
+| `glyph_selection_rects` | Fill `out` (capacity `max`) with the on-screen spans covering byte range [lo, hi). |
+| `glyph_visual_move` | Move the caret one glyph in visual order (forward = rightward on screen) and return the resulting source byte offset. |
+
+## vista — 3D scene hierarchy and assets
+
+### `vista/vista.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `vista_version` |  |
+| `vista_version_number` |  |
+| `vista_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
+| `vista_load_glb` | Parse a .glb (binary glTF 2.0) and build GPU resources on `device`. |
+| `vista_parse_glb` | Parse a .glb (binary glTF 2.0) into device-independent scene data. |
+| `vista_scene_data_build` | Upload a parsed scene onto `device`: one flux_mesh per primitive. |
+| `vista_scene_data_free` | Release a parsed scene (or one already consumed by build — safe, it is a no-op on NULL). |
+| `vista_scene_data_primitive_count` | Number of mesh primitives in the parsed scene. |
+| `vista_scene_data_bounds` | World-space axis-aligned bounding box of every parsed primitive (local AABBs; the node transforms are not applied — see vista_scene_bounds for the built-scene form). |
+| `vista_scene_release` |  |
+| `vista_scene_set_materials` | Transactionally replace the scene-owned per-index material table and fallback material. |
+| `vista_scene_primitive_count` | Number of mesh primitives in the scene (diagnostic). |
+| `vista_scene_bounds` | World-space axis-aligned bounding box of every primitive the scene draws (each primitive's local AABB is transformed by its owning node's world matrix). |
+| `vista_scene_humanoid_bone_position` | Current model-space position of a VRM humanoid bone (for example "head" or "hips"). |
+| `vista_load_animation_glb` | Load the first animation from a binary glTF/VRMA file and bind its channels to `target`. |
+| `vista_animation_release` |  |
+| `vista_animation_duration` |  |
+| `vista_animation_channel_count` |  |
+| `vista_scene_apply_animation` | Reset to the model rest pose, then sample and apply the clip. |
+| `vista_scene_reset_pose` |  |
+| `vista_draw` | Record one flux_scene_draw_mesh(_lit) per primitive, composed with each node's world matrix. |
 
 ## lens — immediate-mode UI
 
@@ -415,7 +415,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_get_text_family` |  |
 | `lens_text_measure` | The only text entry point layout (ADR-0028 pass 1) may call. |
 | `lens_text_measure_ex` |  |
-| `lens_text_compact` | Release the text engine's high-water scratch and shaping cache (the shared engine's `flux_text_compact`). |
+| `lens_text_compact` | Release the text engine's high-water scratch and shaping cache (the shared engine's `glyph_compact`). |
 | `lens_set_skin` | Replace the skin for a widget kind context-wide; NULL restores the built-in default. |
 | `lens_set_skin_userdata` | Same, with a closure pointer delivered to the skin on every emission. |
 | `lens_default_skin` | The built-in default skin for a kind — for wrapping: call it from a custom skin to keep the stock chrome, then add your own. |
@@ -450,7 +450,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_last_presented_generation` |  |
 | `lens_overflowed` | True if the per-frame arena overflowed during the frame just built. |
 | `lens_has_duplicate_ids` | True if the same widget id was linked more than once under one parent in the frame just built. |
-| `lens_anim_pending` | True if an eased value (hover/active fade, …) was still in transit during the frame just built. |
+| `lens_transit_pending` | True if an eased value (hover/active fade, …) was still in transit during the frame just built. |
 | `lens_frame_needs_repaint` | True if the frame just built would paint anything different from what is already on screen: base-tree or placed-subtree damage (geometry, draw lists, lifecycle), an appearing/disappearing transient node or tooltip, an eased value still in transit, or a focused text caret that needs its blink clock. |
 | `lens_set_reduced_motion` | Accessibility reduced-motion switch. |
 | `lens_reduced_motion` |  |
@@ -665,32 +665,32 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `prism_backdrop_layer_filter_apply` | Requires a recording frame with no active pass. |
 | `prism_backdrop_layer_filter_stats` | Reads the glass statistics this frame slot last submitted (see prism_liquid_glass_filter_stats; group i of the stats aligns with group i of that submission's glass array). |
 
-## anim — motion vocabulary
+## transit — motion vocabulary and state transition
 
-### `anim/anim.h`
+### `transit/transit.h`
 
 | Symbol | Description |
 |--------|-------------|
-| `anim_version` | Version accessors. |
-| `anim_version_number` |  |
-| `anim_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
-| `anim_dt_clamp` | Clamp `dt` into the integrable range. |
-| `anim_spring_snappy` | Named presets (the vocabulary the consumers share; constants live in the .c so tuning is one place). |
-| `anim_spring_gentle` |  |
-| `anim_spring_bouncy` |  |
-| `anim_spring_at` |  |
-| `anim_spring_settled` | True when the spring rests on `target` within the given tolerances and can be dropped from the frame-cadence decision. |
-| `anim_spring_advance` | Advance toward `target` by clamped `dt_seconds`; returns the new value. |
-| `anim_spring_snap_to` | One-step resolve (reduced motion, or an animation that must end now). |
-| `anim_approach` | Move `current` toward `target` by rate per second: after t seconds the remaining distance is e^(−rate·t) of the original. |
-| `anim_decay` | Exponential decay toward zero (opacity tails, trailing values). |
-| `anim_ease_out_cubic` | ================================================================== |
-| `anim_ease_in_cubic` |  |
-| `anim_ease_in_out_cubic` |  |
-| `anim_ease_out_back` |  |
-| `anim_hysteresis_init` |  |
-| `anim_hysteresis_step` | Advance the latch. |
-| `anim_smoother_init` |  |
-| `anim_smoother_step` | Advance toward `target`. |
+| `transit_version` | Version accessors. |
+| `transit_version_number` |  |
+| `transit_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
+| `transit_dt_clamp` | Clamp `dt` into the integrable range. |
+| `transit_spring_snappy` | Named presets (the vocabulary the consumers share; constants live in the .c so tuning is one place). |
+| `transit_spring_gentle` |  |
+| `transit_spring_bouncy` |  |
+| `transit_spring_at` |  |
+| `transit_spring_settled` | True when the spring rests on `target` within the given tolerances and can be dropped from the frame-cadence decision. |
+| `transit_spring_advance` | Advance toward `target` by clamped `dt_seconds`; returns the new value. |
+| `transit_spring_snap_to` | One-step resolve (reduced motion, or an animation that must end now). |
+| `transit_approach` | Move `current` toward `target` by rate per second: after t seconds the remaining distance is e^(−rate·t) of the original. |
+| `transit_decay` | Exponential decay toward zero (opacity tails, trailing values). |
+| `transit_ease_out_cubic` | ================================================================== |
+| `transit_ease_in_cubic` |  |
+| `transit_ease_in_out_cubic` |  |
+| `transit_ease_out_back` |  |
+| `transit_hysteresis_init` |  |
+| `transit_hysteresis_step` | Advance the latch. |
+| `transit_smoother_init` |  |
+| `transit_smoother_step` | Advance toward `target`. |
 
 Every fallible function returns `flux_result`-style codes; see [API Reference](api.md#error-model). Functions returning `void` either cannot fail or report through the library's error channel as noted.

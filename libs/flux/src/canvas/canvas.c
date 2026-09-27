@@ -540,7 +540,7 @@ float flux_canvas_get_scale(const flux_canvas *c) {
     if (!c)
         return 1.0f;
     /* The *effective* scale: the active transform's pixel scale, so callers
-     * (e.g. flux_text) rasterise to match whether the scale comes from the
+     * (e.g. glyph) rasterise to match whether the scale comes from the
      * content-scale base transform or a manual flux_canvas_scale on top. */
     return flux_canvas_mat3x2_pixel_scale(c->states[c->state_top].transform);
 }

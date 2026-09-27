@@ -516,7 +516,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_update_region_premultiply(
  * `flux_device` as opaque (and consumers) use this instead of
  * dereferencing `flux_device_desc.log` directly; it forwards to the
  * same `flux_log_fn` the desc supplied. `category` is a short tag the
- * logger can filter on (e.g. "flux-text", "vulkan-validation"). */
+ * logger can filter on (e.g. "glyph", "vulkan-validation"). */
 FLUX_API void flux_device_log(flux_device *d, flux_log_level level, const char *category,
                               const char *fmt, ...)
 #if defined(__GNUC__) || defined(__clang__)

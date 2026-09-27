@@ -42,12 +42,25 @@ add_project_arguments(
 
 subdir('libs/flux')
 
-if get_option('anim')
-  subdir('libs/anim')
+opt_glyph = get_option('glyph')
+if opt_glyph
+  subdir('libs/glyph')
 else
-  # Always defined so tests/examples can reference it unconditionally; empty
-  # when the library is off.
-  anim_dep = declare_dependency()
+  glyph_dep = declare_dependency()
+endif
+
+opt_vista = get_option('vista')
+if opt_vista
+  subdir('libs/vista')
+else
+  vista_dep = declare_dependency()
+endif
+
+opt_transit = get_option('transit')
+if opt_transit
+  subdir('libs/transit')
+else
+  transit_dep = declare_dependency()
 endif
 
 if get_option('prism')
@@ -64,14 +77,14 @@ subdir('libs/iris')
 if get_option('examples')
   subdir('examples/flux')
   subdir('examples/showcase')
-  if get_option('text')
-    subdir('examples/flux-text')
+  if opt_glyph
+    subdir('examples/glyph')
   endif
-  if get_option('scene-graph')
-    subdir('examples/flux-scene-graph')
+  if opt_vista
+    subdir('examples/vista')
   endif
-  if get_option('anim')
-    subdir('examples/anim')
+  if opt_transit
+    subdir('examples/transit')
   endif
   subdir('examples/lens')
   subdir('examples/iris')
@@ -130,7 +143,7 @@ endif
 if get_option('tests')
   subdir('tests/flux')
   subdir('tests/prism')
-  subdir('tests/anim')
+  subdir('tests/transit')
   subdir('tests/lens')
   subdir('tests/iris')
 endif

@@ -7,12 +7,14 @@ Instructions for AI coding assistants working in the `optics` repository.
 ## 1. Repository Identity & Mission
 
 Optics is a unified C23 graphics and UI monorepo.
-The core stack consists of five closely integrated libraries in `libs/`:
-1. **`flux`**: Foundational Vulkan rendering engine (2D canvas, 3D scene-graph, compute pipelines, headless software CPU backend).
-2. **`lens`**: Immediate-mode UI engine (headless layout, retained reactive tree, widget state, draw-list emission).
-3. **`iris`**: Application L3 toolkit (OS integration, window management, cross-platform event loops for Wayland, Win32, Cocoa).
+The core stack consists of seven closely integrated libraries in `libs/`:
+1. **`flux`**: Foundational Vulkan rendering engine (2D canvas, 3D core, compute pipelines, headless software CPU backend).
+2. **`glyph`**: Text shaping and dynamic glyph atlas runtime (HarfBuzz, FreeType, Fontconfig/DirectWrite/CoreText).
+3. **`vista`**: 3D scene hierarchy and glTF 2.0 asset runtime (nodes, TRS transforms, VRM skeletal animation).
 4. **`prism`**: Physical material library (dielectric liquid glass, acrylic, mica atop flux runtime).
-5. **`anim`**: Motion vocabulary library (closed-form non-divergent analytic springs, easing curves, motion-adaptive smoothing).
+5. **`transit`**: Motion vocabulary library (closed-form non-divergent analytic springs, easing curves, motion-adaptive smoothing).
+6. **`lens`**: Immediate-mode UI engine (headless layout, retained reactive tree, widget state, draw-list emission).
+7. **`iris`**: Application L3 toolkit (OS integration, window management, cross-platform event loops for Wayland, Win32, Cocoa).
 
 ---
 

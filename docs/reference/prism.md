@@ -120,20 +120,20 @@ scene classification and high-frequency detection). In the decoupled physical
 model (ADR-0102), the liquid glass shader relies on sub-pixel Contact AO
 (`contact_ao`) and isotropic ambient Fresnel (`ambient_fresnel`) for silhouette
 separation without requiring callers to drive binary polarity latches. For
-applications that do monitor backdrop statistics across frames, `libanim`
-(`<anim/anim.h>`, ADR-0077) provides temporal de-jitter primitives (`anim_hysteresis_step`
-and `anim_smoother_step`):
+applications that do monitor backdrop statistics across frames, `libtransit`
+(`<transit/transit.h>`, ADR-0077, ADR-0106) provides temporal de-jitter primitives (`transit_hysteresis_step`
+and `transit_smoother_step`):
 
 ```c
 prism_backdrop_stat stats[8];
 uint32_t stat_count = 0;
 if (prism_liquid_glass_filter_stats(filter, frame, stats, 8, &stat_count) == FLUX_OK) {
-    static anim_smoother energy[8];    /* per-body filter state, host-owned */
+    static transit_smoother energy[8];    /* per-body filter state, host-owned */
     for (uint32_t i = 0; i < stat_count; ++i) {
         /* Continuous energy tracking: τ 60 ms at rest, ×8 (≈0.5 s) while the body
          * is crossing content — fast to settle, slow to flicker. */
         float smoothed_energy =
-            anim_smoother_step(&energy[i], stats[i].high_freq_energy,
+            transit_smoother_step(&energy[i], stats[i].high_freq_energy,
                                0.060f, 8.0f, 0.05f, lens_dt(ui));
         (void)smoothed_energy;
     }

@@ -8,7 +8,7 @@
  */
 #include "test_helpers.h"
 
-#include <flux-scene-graph/scene-graph.h>
+#include <vista/vista.h>
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -159,8 +159,8 @@ int main(void) {
         TEST_SUMMARY();
     }
 
-    flux_sg_scene *scene = NULL;
-    flux_result load_result = flux_sg_load_glb(device, target_glb.bytes, target_glb.size, &scene);
+    vista_scene *scene = NULL;
+    flux_result load_result = vista_load_glb(device, target_glb.bytes, target_glb.size, &scene);
     if (load_result != FLUX_OK)
         fprintf(stderr, "target GLB load failed: %s\n", flux_result_string(load_result));
     EXPECT(load_result == FLUX_OK);
@@ -174,52 +174,52 @@ int main(void) {
         flux_material *material = NULL;
         EXPECT(flux_material_create(device, &material_desc, &material) == FLUX_OK);
         flux_material *table[1] = {material};
-        EXPECT(flux_sg_scene_set_materials(scene, table, 1, material) == FLUX_OK);
+        EXPECT(vista_scene_set_materials(scene, table, 1, material) == FLUX_OK);
         /* The scene retains both table and fallback references. */
         flux_material_release(material);
-        EXPECT(flux_sg_scene_set_materials(scene, NULL, 0, NULL) == FLUX_OK);
-        EXPECT(flux_sg_scene_set_materials(NULL, NULL, 0, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(vista_scene_set_materials(scene, NULL, 0, NULL) == FLUX_OK);
+        EXPECT(vista_scene_set_materials(NULL, NULL, 0, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
     }
-    flux_sg_animation *animation = NULL;
+    vista_animation *animation = NULL;
     if (scene)
-        EXPECT(flux_sg_load_animation_glb(scene, animation_glb.bytes, animation_glb.size,
+        EXPECT(vista_load_animation_glb(scene, animation_glb.bytes, animation_glb.size,
                                           &animation) == FLUX_OK);
 
     if (scene && animation) {
-        EXPECT_NEAR(flux_sg_animation_duration(animation), 1.0f, 1e-6);
-        EXPECT(flux_sg_animation_channel_count(animation) == 2u);
+        EXPECT_NEAR(vista_animation_duration(animation), 1.0f, 1e-6);
+        EXPECT(vista_animation_channel_count(animation) == 2u);
 
         flux_vec3 eye = {0};
-        EXPECT(flux_sg_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
         EXPECT_NEAR(eye.x, 1.0f, 1e-5);
         EXPECT_NEAR(eye.y, 2.0f, 1e-5);
 
         /* Matrix-authored nodes must preserve their column-major rotation
          * during TRS decomposition: +X under +90-degree Z becomes +Y. */
         flux_vec3 jaw = {0};
-        EXPECT(flux_sg_scene_humanoid_bone_position(scene, "jaw", &jaw));
+        EXPECT(vista_scene_humanoid_bone_position(scene, "jaw", &jaw));
         EXPECT_NEAR(jaw.x, 0.0f, 1e-5);
         EXPECT_NEAR(jaw.y, 3.0f, 1e-5);
 
-        EXPECT(flux_sg_scene_apply_animation(scene, animation, 0.5f, false) == FLUX_OK);
-        EXPECT(flux_sg_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        EXPECT(vista_scene_apply_animation(scene, animation, 0.5f, false) == FLUX_OK);
+        EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
         EXPECT_NEAR(eye.x, 0.70710678f, 1e-4);
         EXPECT_NEAR(eye.y, 3.20710678f, 1e-4);
 
-        EXPECT(flux_sg_scene_apply_animation(scene, animation, 1.0f, false) == FLUX_OK);
-        EXPECT(flux_sg_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        EXPECT(vista_scene_apply_animation(scene, animation, 1.0f, false) == FLUX_OK);
+        EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
         EXPECT_NEAR(eye.x, 0.0f, 1e-4);
         EXPECT_NEAR(eye.y, 4.0f, 1e-4);
 
-        EXPECT(flux_sg_scene_apply_animation(scene, animation, 1.0f, true) == FLUX_OK);
-        EXPECT(flux_sg_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        EXPECT(vista_scene_apply_animation(scene, animation, 1.0f, true) == FLUX_OK);
+        EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
         EXPECT_NEAR(eye.x, 1.0f, 1e-5);
         EXPECT_NEAR(eye.y, 2.0f, 1e-5);
 
-        flux_sg_animation *retained = flux_sg_animation_retain(animation);
-        flux_sg_animation_release(animation);
+        vista_animation *retained = vista_animation_retain(animation);
+        vista_animation_release(animation);
         animation = retained;
-        EXPECT(flux_sg_scene_apply_animation(scene, animation, -1.0f, false) == FLUX_OK);
+        EXPECT(vista_scene_apply_animation(scene, animation, -1.0f, false) == FLUX_OK);
     }
 
     /* A node array where children precede their parents must still fold the
@@ -229,9 +229,9 @@ int main(void) {
     test_glb reversed_glb = make_reversed_chain();
     EXPECT(reversed_glb.bytes != NULL);
     if (reversed_glb.bytes) {
-        flux_sg_scene *reversed = NULL;
+        vista_scene *reversed = NULL;
         flux_result reversed_result =
-            flux_sg_load_glb(device, reversed_glb.bytes, reversed_glb.size, &reversed);
+            vista_load_glb(device, reversed_glb.bytes, reversed_glb.size, &reversed);
         EXPECT(reversed_result == FLUX_OK);
         if (reversed) {
             /* Two children each carry the mesh. Their translated AABBs
@@ -241,7 +241,7 @@ int main(void) {
              * node array. */
             flux_vec3 bounds_min = {0};
             flux_vec3 bounds_max = {0};
-            EXPECT(flux_sg_scene_bounds(reversed, &bounds_min, &bounds_max));
+            EXPECT(vista_scene_bounds(reversed, &bounds_min, &bounds_max));
             /* Positions span x in [-0.1, 0.1], y in [-0.1, 0.1], z = 0.
              * childA's world is (0, 3, 0); childB's is (4, 0, 3). */
             EXPECT_NEAR(bounds_min.x, -0.1f, 1e-4);
@@ -252,16 +252,16 @@ int main(void) {
             EXPECT_NEAR(bounds_max.z, 3.0f, 1e-4);
         }
         flux_device_wait_idle(device);
-        flux_sg_scene_release(reversed);
+        vista_scene_release(reversed);
         free(reversed_glb.bytes);
     }
 
-    flux_sg_animation_release(animation);
+    vista_animation_release(animation);
     /* Drain before releasing the scene: mesh buffers park on the device
      * retire queue and the release contract requires all referencing GPU
      * work to have completed. */
     flux_device_wait_idle(device);
-    flux_sg_scene_release(scene);
+    vista_scene_release(scene);
     free(target_glb.bytes);
     free(animation_glb.bytes);
     flux_device_release(device);

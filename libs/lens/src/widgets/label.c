@@ -31,11 +31,11 @@ static size_t utf8_prev_boundary(const char *text, size_t pos) {
     return pos;
 }
 
-static flux_text_metrics measure_slice(lens *ui, const char *text, size_t len, float size) {
-    return flux_text_measure(ui->text, text, len,
-                             &(flux_text_style){.size_px = size,
+static glyph_metrics measure_slice(lens *ui, const char *text, size_t len, float size) {
+    return glyph_measure(ui->text, text, len,
+                             &(glyph_style){.size_px = size,
                                                 .weight = 0.0f,
-                                                .family = (flux_text_family)ui->text_family});
+                                                .family = (glyph_family)ui->text_family});
 }
 
 static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t start, float size,
@@ -56,12 +56,12 @@ static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t st
 
     const char *segment = text + start;
     size_t segment_len = segment_end - start;
-    const flux_text_style style = {
-        .size_px = size, .weight = 0.0f, .family = (flux_text_family)ui->text_family};
-    size_t cut = flux_text_byte_for_x(ui->text, segment, segment_len, max_width, &style);
+    const glyph_style style = {
+        .size_px = size, .weight = 0.0f, .family = (glyph_family)ui->text_family};
+    size_t cut = glyph_byte_for_x(ui->text, segment, segment_len, max_width, &style);
     if (cut > segment_len)
         cut = segment_len;
-    while (cut > 0 && flux_text_x_for_byte(ui->text, segment, segment_len, cut, &style) > max_width)
+    while (cut > 0 && glyph_x_for_byte(ui->text, segment, segment_len, cut, &style) > max_width)
         cut = utf8_prev_boundary(segment, cut);
     if (cut == 0)
         cut = utf8_next_boundary(segment, segment_len, 0);
@@ -170,7 +170,7 @@ lens_response lens_label(lens *ui, const lens_label_opts *opts) {
         w = n->fixed_w > 0.0f ? n->fixed_w
                               : fminf(intrinsic.width + 2.0f * padding, requested_width);
         float content_width = fmaxf(w - 2.0f * padding, 1.0f);
-        flux_text_metrics line_metrics = measure_slice(ui, "Ag", 2, size);
+        glyph_metrics line_metrics = measure_slice(ui, "Ag", 2, size);
         float line_height = line_metrics.height > 0.0f ? line_metrics.height : size;
         float line_gap = fmaxf(size * 0.25f, 2.0f);
 
@@ -183,7 +183,7 @@ lens_response lens_label(lens *ui, const lens_label_opts *opts) {
             size_t end = wrapped_line_end(ui, text, len, start, size, content_width, &next);
             float line_x = padding;
             if (opts->align == LENS_CENTER || opts->align == LENS_END) {
-                flux_text_metrics lm = measure_slice(ui, text + start, end - start, size);
+                glyph_metrics lm = measure_slice(ui, text + start, end - start, size);
                 if (opts->align == LENS_CENTER)
                     line_x = padding + fmaxf((content_width - lm.width) * 0.5f, 0.0f);
                 else

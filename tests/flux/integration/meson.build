@@ -104,10 +104,10 @@ endif
 
 # A generated, tiny VRM + VRMA pair keeps humanoid retargeting and animation
 # sampling under CI without committing developer avatar assets.
-if get_option('scene-graph')
+if get_option('vista')
   test_scene_graph_animation = executable('test_scene_graph_animation',
     'test_scene_graph_animation.c',
-    dependencies : [test_helpers_dep, flux_sg_dep],
+    dependencies : [test_helpers_dep, vista_dep],
   )
   test('scene_graph_animation', test_scene_graph_animation, suite : 'integration')
 endif
@@ -182,7 +182,7 @@ if opt_canvas
   # hole-bridging fill (ADR-0011), asserted by read-back pixel.
   test_canvas_render = executable('test_canvas_render',
     'test_canvas_render.c',
-    dependencies : [test_helpers_dep, flux_text_dep],
+    dependencies : [test_helpers_dep, glyph_dep],
   )
   test('canvas_render', test_canvas_render, suite : 'integration')
 
@@ -219,7 +219,7 @@ if opt_canvas
   # return to baseline.
   test_text_atlas_leak = executable('test_text_atlas_leak',
     'test_text_atlas_leak.c',
-    dependencies : [test_helpers_dep, flux_text_dep],
+    dependencies : [test_helpers_dep, glyph_dep],
   )
   test('text_atlas_leak', test_text_atlas_leak,
     suite       : 'integration',

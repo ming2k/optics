@@ -1,9 +1,8 @@
 # Single first-party library: libflux. The C source tree sits at the repo
 # root (`src/`, `include/`, `tests/`, `examples/`). Content layers that feed
-# flux's draw primitives live in `libs/` as siblings (ADR-0016): `flux-text`
-# (HarfBuzz shaping, feeds flux_canvas_draw_glyph_run) and `flux-scene-graph`
-# (glTF, feeds flux_scene_draw_mesh). md is removed (out of scope). Rust
-# bindings live in the separate flux-rs repository.
+# flux's draw primitives live in `libs/` as siblings (ADR-0016, ADR-0106): `glyph`
+# (HarfBuzz shaping, feeds flux_canvas_draw_glyph_run) and `vista`
+# (glTF, feeds flux_scene_draw_mesh). Rust bindings live under `bindings/`.
 
 vulkan_dep  = dependency('vulkan',  version : '>=1.3', required : true)
 threads_dep = dependency('threads')
@@ -19,8 +18,8 @@ endif
 if opt_effect and not opt_compute
   error('effect module requires compute (flux_compute_pipeline) — pass -Dcompute=true with -Deffect=true')
 endif
-if get_option('text') and not opt_canvas
-  error('text sibling requires canvas (flux_canvas_draw_glyph_run) — pass -Dcanvas=true with -Dtext=true')
+if get_option('glyph') and not opt_canvas
+  error('glyph sibling requires canvas (flux_canvas_draw_glyph_run) — pass -Dcanvas=true with -Dglyph=true')
 endif
 
 flux_inc = include_directories('include')
@@ -336,9 +335,9 @@ if flux_shader_spvs.length() > 0
   )
 endif
 
-# Text shaping lives in the flux-text sibling (ADR-0016); libflux itself
+# Text shaping lives in the glyph sibling (ADR-0016, ADR-0106); libflux itself
 # depends on Vulkan + threads only. The glyph-blit primitive
-# flux_canvas_draw_glyph_run remains in the canvas module — flux-text feeds it.
+# flux_canvas_draw_glyph_run remains in the canvas module — glyph feeds it.
 
 # SO versioning (libtool semantics, per docs/reference/api.md):
 #   - `soversion` (the SONAME) encodes the *compatibility boundary*. The
@@ -385,7 +384,7 @@ endif
 if opt_effect
   install_headers('include/flux/effect.h', subdir : 'flux')
 endif
-# Text header lives in the flux-text sibling (ADR-0016); not installed here.
+# Text header lives in the glyph sibling (ADR-0016, ADR-0106); not installed here.
 
 # Public defines propagated to every consumer so the umbrella header
 # (<flux/flux.h>) knows which optional module headers to pull in.
@@ -421,17 +420,3 @@ pkg.generate(
   version      : meson.project_version(),
   extra_cflags : flux_public_defines,
 )
-
-# Sibling content libraries (ADR-0016): they link libflux and feed its
-# draw primitives. Each is a separate shared library with its own .pc.
-if get_option('text')
-  subdir('text')
-else
-  # Always defined so tests/examples can reference it unconditionally; empty
-  # when the sibling is off (and FLUX_TEXT_HAVE_FTHB is then absent, so the
-  # integration test's text path compiles out).
-  flux_text_dep = declare_dependency()
-endif
-if get_option('scene-graph')
-  subdir('scene_graph')
-endif

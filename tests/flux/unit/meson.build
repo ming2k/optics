@@ -15,8 +15,8 @@ test('smoke', test_smoke, suite : 'unit')
 # scene-graph "0.0.29" incident fails here). CPU-only.
 test_version_lockstep = executable('test_version_lockstep',
   'test_version_lockstep.c',
-  dependencies : [test_helpers_dep, anim_dep, prism_dep, iris_dep,
-                  flux_sg_dep, lens_dep, flux_text_dep],
+  dependencies : [test_helpers_dep, transit_dep, prism_dep, iris_dep,
+                  vista_dep, lens_dep, glyph_dep],
 )
 test('version_lockstep', test_version_lockstep, suite : 'unit')
 
@@ -26,7 +26,7 @@ test('version_lockstep', test_version_lockstep, suite : 'unit')
 # (The GPU build stage is covered by the scene_graph integration suite.)
 test_glb_parse = executable('test_glb_parse',
   'test_glb_parse.c',
-  dependencies : [test_helpers_dep, flux_sg_dep],
+  dependencies : [test_helpers_dep, vista_dep],
 )
 test('glb_parse', test_glb_parse, suite : 'unit')
 
@@ -69,10 +69,10 @@ test_canvas_cpu = executable('test_canvas_cpu',
 test('canvas_cpu', test_canvas_cpu, suite : 'unit')
 
 # Headless CPU-canvas GLYPH run test (ADR-0019): draws text on a device-less
-# canvas via the host R8 coverage atlas path. Links flux-text for shaping.
+# canvas via the host R8 coverage atlas path. Links glyph for shaping.
 test_canvas_cpu_text = executable('test_canvas_cpu_text',
   'test_canvas_cpu_text.c',
-  dependencies : [test_helpers_dep, flux_text_dep],
+  dependencies : [test_helpers_dep, glyph_dep],
 )
 test('canvas_cpu_text', test_canvas_cpu_text, suite : 'unit')
 
@@ -81,7 +81,7 @@ test('canvas_cpu_text', test_canvas_cpu_text, suite : 'unit')
 # hits vs misses, atlas pages/clears) stay in their documented steady states.
 test_text_soak = executable('test_text_soak',
   'test_text_soak.c',
-  dependencies : [test_helpers_dep, flux_text_dep],
+  dependencies : [test_helpers_dep, glyph_dep],
 )
 test('text_soak', test_text_soak, suite : 'unit', timeout : 120)
 
@@ -92,7 +92,7 @@ test('text_soak', test_text_soak, suite : 'unit', timeout : 120)
 # with oversized (512px) glyph cells.
 test_canvas_text_atlas = executable('test_canvas_text_atlas',
   'test_canvas_text_atlas.c',
-  dependencies : [test_helpers_dep, flux_text_dep],
+  dependencies : [test_helpers_dep, glyph_dep],
 )
 test('canvas_text_atlas', test_canvas_text_atlas, suite : 'unit')
 
@@ -172,7 +172,7 @@ test('canvas_shapes', shape_test, suite : 'unit')
 
 test_rfc0094 = executable('test_rfc0094_contracts',
   'test_rfc0094_contracts.c',
-  dependencies : [test_helpers_dep, flux_text_dep],
+  dependencies : [test_helpers_dep, glyph_dep],
 )
 test('rfc0094_contracts', test_rfc0094, suite : 'unit')
 

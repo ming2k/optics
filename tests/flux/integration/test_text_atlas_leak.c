@@ -16,7 +16,7 @@
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 #if defined(FLUX_TEXT_HAVE_FTHB)
-#include <flux-text/text.h>
+#include <glyph/glyph.h>
 #endif
 #include "test_helpers.h"
 
@@ -34,24 +34,24 @@ static const char *FILLER = "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQR
                             "abcdefghijklmnopqrstuvwxyz{|}~";
 
 typedef struct draw_case {
-    flux_text *text;
+    glyph_ctx *text;
     float x;
     float size_px;
 } draw_case;
 
 static void draw_filler(flux_canvas *canvas, void *user) {
     draw_case *dc = user;
-    flux_text_style style = {
+    glyph_style style = {
         .size_px = 64.0f,
         .weight = 400.0f,
         .color = flux_color_rgba(255, 255, 255, 255),
     };
     /* Same 512px-cell trick the CPU atlas-clear unit test uses: at scale 8
-     * (set below via flux_text_set_scale) each 64px glyph occupies a 512px
+     * (set below via glyph_set_scale) each 64px glyph occupies a 512px
      * atlas cell, so the 94-glyph working set spans four 4096px pages and
      * a subpixel phase shift forces new entries for every glyph. */
     style.size_px = dc->size_px;
-    flux_text_draw(dc->text, canvas, nullptr, dc->x, 4.0f, FILLER, strlen(FILLER), &style);
+    glyph_draw(dc->text, canvas, nullptr, dc->x, 4.0f, FILLER, strlen(FILLER), &style);
 }
 
 /* An idle device has finished GPU work, but sampled images stay retained by
@@ -106,9 +106,9 @@ int main(void) {
         EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
     }
 
-    flux_text *text = nullptr;
-    flux_text_desc td = {.device = d, .scale = 1.0f};
-    EXPECT(flux_text_create(&td, &text) == FLUX_OK);
+    glyph_ctx *text = nullptr;
+    glyph_desc td = {.device = d, .scale = 1.0f};
+    EXPECT(glyph_create(&td, &text) == FLUX_OK);
 
     flux_memory_stats mem_after, mem_first_clear_after;
     bool have_first_clear = false;
@@ -120,8 +120,8 @@ int main(void) {
          * fills a page every couple of steps and the page cap forces
          * atlas_clear quickly. */
         float size_px = 96.0f + 7.0f * (float)step;
-        flux_text_stats before;
-        flux_text_get_stats(text, &before);
+        glyph_stats before;
+        glyph_get_stats(text, &before);
 
         draw_case dc = {.text = text, .x = 0.13f * (float)(step % 8)};
         dc.size_px = size_px;
@@ -141,8 +141,8 @@ int main(void) {
         flux_frame_submit(frame);
         flux_frame_present(frame);
 
-        flux_text_stats after;
-        flux_text_get_stats(text, &after);
+        glyph_stats after;
+        glyph_get_stats(text, &after);
 
         if (after.atlas_clears > before.atlas_clears) {
             clears_seen++;
@@ -175,7 +175,7 @@ int main(void) {
 
     flux_canvas_release(canvas);
     flux_surface_release(s);
-    flux_text_release(text);
+    glyph_release(text);
     flux_device_release(d);
     TEST_SUMMARY();
 }

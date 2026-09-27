@@ -121,3 +121,4 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0103 | [Platform-Agnostic Accessibility Bridge, Asynchronous Transport, and Lazy Screen-Reader Activation](0103-platform-agnostic-accessibility-bridge-and-lazy-activation.md) | Accepted |
 | 0104 | [Lens unified orthogonal 2D grid and 1D flex layout subsystem](0104-lens-unified-orthogonal-2d-grid-and-1d-flex-layout.md) | Accepted |
 | 0105 | [Lens flow wrap and stack in-tree layout subsystems and semantic surface tokens](0105-lens-flow-wrap-and-stack-layout-and-surface-tokens.md) | Accepted |
+| 0106 | [Monorepo Identity Unification — glyph, vista, and transit](0106-monorepo-identity-unification-glyph-vista-transit.md) | Accepted |

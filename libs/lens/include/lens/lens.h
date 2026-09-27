@@ -553,7 +553,7 @@ LENS_API void lens_pop_style(lens *ui);
 /* ================================================================== */
 
 /* Typeface family for subsequently built widgets. Values mirror
- * flux_text_family so the seam can cast between them. LENS_TEXT_FAMILY_DEFAULT
+ * glyph_family so the seam can cast between them. LENS_TEXT_FAMILY_DEFAULT
  * keeps the engine's default (sans-serif). Like lens_set_theme, this is a
  * context switch read at widget-build time: set it, build the widgets that
  * need another voice (e.g. a serif display title), then set it back. */
@@ -574,14 +574,14 @@ typedef struct lens_text_metrics {
 } lens_text_metrics;
 
 /* The only text entry point layout (ADR-0028 pass 1) may call. Backed
- * by flux_text_measure via the text seam (ADR-0033). */
+ * by glyph_measure via the text seam (ADR-0033). */
 LENS_API lens_text_metrics lens_text_measure(lens *ui, lens_font *font, const char *utf8,
                                              float size_px);
 LENS_API lens_text_metrics lens_text_measure_ex(lens *ui, lens_font *font, const char *utf8,
                                                 float size_px, float weight);
 
 /* Release the text engine's high-water scratch and shaping cache (the
- * shared engine's `flux_text_compact`). The engine grows layout/run/
+ * shared engine's `glyph_compact`). The engine grows layout/run/
  * codepoint scratch to the largest text ever shaped and keeps it; for a
  * one-off megabyte paste that peak lingers for the session. Call this
  * from the host's idle path (iris does, on the low-power frame cadence)
@@ -750,7 +750,7 @@ LENS_API lens_skin_fn lens_default_skin(lens_widget_kind kind);
  * scale+opacity+rotation bundle? Graduate to lens_node_state(node, bytes):
  * arbitrary size, same zero-on-first-touch, same GC lifetime, no external
  * hashtable required. This is mechanism, not animation: the library stores
- * state; it never integrates anything. See libs/anim (ADR-0077) for the
+ * state; it never integrates anything. See libs/transit (ADR-0077, ADR-0106) for the
  * math to run on it. */
 #define LENS_SKIN_SCRATCH_FLOATS 4
 LENS_API float *lens_skin_scratch(lens *ui, lens_node *node);

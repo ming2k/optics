@@ -1,6 +1,6 @@
 # Optics Architecture Governance & Review Standards
 
-This directory contains the mandatory architectural rules, review gate filters, and lifecycle governance standards for all code, modules, and public APIs within the Optics monorepo (`flux`, `lens`, `iris`, `prism`, `anim`).
+This directory contains the mandatory architectural rules, review gate filters, and lifecycle governance standards for all code, modules, and public APIs within the Optics monorepo (`flux`, `glyph`, `vista`, `prism`, `transit`, `lens`, `iris`).
 
 ---
 

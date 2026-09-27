@@ -3,11 +3,10 @@ option('scene',    type : 'boolean', value : true,  description : 'Build the flu
 option('compute',  type : 'boolean', value : true,  description : 'Build the flux compute module')
 option('effect',   type : 'boolean', value : true,  description : 'Build the flux image effect module')
 
-option('text',        type : 'boolean', value : true, description : 'Build the flux-text sibling')
-option('scene-graph', type : 'boolean', value : true, description : 'Build the flux-scene-graph sibling')
-
-option('prism', type : 'boolean', value : true, description : 'Build the prism material library (liquid glass)')
-option('anim',   type : 'boolean', value : true, description : 'Build the anim motion vocabulary library (ADR-0077)')
+option('glyph',    type : 'boolean', value : true,  description : 'Build the glyph text shaping library (ADR-0106)')
+option('vista',    type : 'boolean', value : true,  description : 'Build the vista 3D scene-graph library (ADR-0106)')
+option('prism',    type : 'boolean', value : true,  description : 'Build the prism material library (liquid glass)')
+option('transit',  type : 'boolean', value : true,  description : 'Build the transit motion vocabulary library (ADR-0077, ADR-0106)')
 
 option('examples', type : 'boolean', value : false, description : 'Build all C examples across all modules')
 option('tests',    type : 'boolean', value : false, description : 'Build all C tests across all modules')

@@ -15,8 +15,8 @@
  *   <flux/compute.h>  iff built with -Dcompute=true
  *   <flux/effect.h>   iff built with -Deffect=true
  *
- * Text shaping is not in libflux: it lives in the flux-text sibling
- * (`<flux-text/text.h>`), which feeds flux_canvas_draw_glyph_run (ADR-0016).
+ * Text shaping is not in libflux: it lives in the glyph sibling
+ * (`<glyph/glyph.h>`), which feeds flux_canvas_draw_glyph_run (ADR-0016, ADR-0106).
  */
 
 #ifndef FLUX_H

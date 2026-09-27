@@ -12,13 +12,32 @@ need a Rust toolchain.
 | Workspace | Crates | Role |
 |-----------|--------|------|
 | `bindings/flux-rs/` | `flux-sys`, `flux` | Raw FFI and safe rendering API. |
-| | `flux-text-sys`, `flux-text` | Text FFI and shaping surface. |
-| | `flux-scene-graph-sys`, `flux-scene-graph` | glTF scene-graph FFI and safe wrapper. |
+| `bindings/glyph-rs/` | `glyph-sys`, `glyph` | Text shaping, metrics, and glyph atlas runtime. |
+| `bindings/vista-rs/` | `vista-sys`, `vista` | 3D scene hierarchy and glTF asset runtime. |
+| `bindings/prism-rs/` | `prism-sys`, `prism` | Raw FFI and physical material wrapper. |
+| `bindings/transit-rs/` | `transit-sys`, `transit` | Closed-form springs and motion vocabulary. |
 | `bindings/lens-rs/` | `lens-sys`, `lens` | Raw FFI and safe UI wrapper. |
 | `bindings/iris-rs/` | `iris-sys`, `iris` | Raw FFI and safe application-host wrapper. |
 
 The `*-sys` crates own native linking and bindgen output. Safe crates expose
 RAII handles and Rust error types without duplicating the C implementation.
+
+## Version Lockstep
+
+Rust bindings workspaces and their inter-crate internal dependencies share
+the monorepo's single version number (`meson.project_version()`).
+This lockstep discipline is machine-enforced by `tools/check-version-lockstep.sh`,
+which parses both the C header version macros and the Cargo manifests to ensure
+zero version drift between native binaries and language bindings.
+
+## Thread Safety and Invariants
+
+Safe wrapper crates uphold the thread-safety contracts documented in
+[`docs/reference/thread-safety.md`](../reference/thread-safety.md):
+
+- Thread-safe C handles (`flux_device`, `flux_sampler`, `flux_material`, `flux_icc_profile`, `lens_scene_snapshot`) implement `Send` and `Sync`.
+- Single-threaded recording contexts (`flux_canvas`, `flux_arena`, `lens_ui`) are strictly thread-confined and unmovable across threads.
+- Native trampolines wrapping Rust callbacks across the FFI boundary guard against unwinding using `std::panic::catch_unwind` to prevent undefined behavior across foreign C frames.
 
 ## Development Linking
 

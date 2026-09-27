@@ -46,8 +46,8 @@ The 2D immediate-mode canvas: path tessellation, gradients, images, and
 the save/translate/rotate state stack. Drawing is recorded into the same
 frame the other examples use; the canvas just feeds it.
 
-Text shaping is not part of flux proper — it lives in the flux-text
-sibling; see `examples/flux-text/text_hello`.
+Text shaping is not part of flux proper — it lives in the glyph
+sibling; see `examples/glyph/text_hello`.
 
 ## image_animation
 

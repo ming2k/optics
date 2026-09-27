@@ -57,9 +57,9 @@ for spec in \
     "libs/lens/include/lens/lens.h LENS lens" \
     "libs/iris/include/iris/app.h IRIS iris" \
     "libs/prism/include/prism/types.h PRISM prism" \
-    "libs/anim/include/anim/anim.h ANIM anim" \
-    "libs/flux/text/include/flux-text/text.h FLUX_TEXT flux-text" \
-    "libs/flux/scene_graph/include/flux-scene-graph/scene-graph.h FLUX_SG flux-scene-graph"
+    "libs/transit/include/transit/transit.h TRANSIT transit" \
+    "libs/glyph/include/glyph/glyph.h GLYPH glyph" \
+    "libs/vista/include/vista/vista.h VISTA vista"
 do
     set -- $spec
     header=$1 prefix=$2 name=$3
@@ -81,10 +81,32 @@ if grep -rn '_VERSION_STRING "[0-9]' libs/*/src libs/*/*/src 2>/dev/null | grep 
     fail=1
 fi
 
+# Rust bindings workspaces and inter-crate internal dependencies must
+# stay in lockstep with the C release version.
+for cargo_toml in bindings/*-rs/Cargo.toml; do
+    [ -f "$cargo_toml" ] || continue
+    ws_ver=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' "$cargo_toml" | head -1)
+    if [ "$ws_ver" != "${MAJOR}.${MINOR}.${PATCH}" ]; then
+        echo "FAIL $cargo_toml: workspace version '$ws_ver' != project ${MAJOR}.${MINOR}.${PATCH}"
+        fail=1
+    fi
+done
+
+for dep_toml in bindings/*-rs/crates/*/Cargo.toml; do
+    [ -f "$dep_toml" ] || continue
+    # Filter external non-optics crates (e.g. gltf, image)
+    bad_deps=$(grep -nE 'path = "[^"]+".*version = "[0-9]+' "$dep_toml" | grep -v "version = \"${MAJOR}.${MINOR}.${PATCH}\"" || true)
+    if [ -n "$bad_deps" ]; then
+        echo "FAIL $dep_toml: stale inter-crate version dependency:"
+        echo "$bad_deps"
+        fail=1
+    fi
+done
+
 if [ "$fail" -ne 0 ]; then
     echo ""
-    echo "Version lockstep broken. Bump every library's *_VERSION_* macros"
-    echo "to ${MAJOR}.${MINOR}.${PATCH} (one release, one version, all libraries)."
+    echo "Version lockstep broken. Bump every library's *_VERSION_* macros and"
+    echo "bindings Cargo.tomls to ${MAJOR}.${MINOR}.${PATCH} (one release, one version, all libraries & bindings)."
     exit 1
 fi
-echo "version lockstep OK (all libraries at ${MAJOR}.${MINOR}.${PATCH})"
+echo "version lockstep OK (all libraries and bindings at ${MAJOR}.${MINOR}.${PATCH})"

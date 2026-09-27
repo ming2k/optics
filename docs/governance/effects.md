@@ -13,7 +13,7 @@ An **Effect Operator** in Flux is a pure mathematical/GPU transformation over pi
   - Pure GPU compute/fragment shaders transforming input textures to output textures (e.g. separable Gaussian blur, dual-Kawase blur, drop shadow convolution, bloom thresholding, color matrix grading).
   - Explicit texture input/output descriptors and bounded scratch buffer allocations.
 - **Flux Effect FORBIDS**:
-  - **Choreography & Time**: An effect operator must NEVER take a `float time`, manage animation springs, or schedule keyframes. Time and motion choreography belong exclusively to the host application or the `anim` library.
+  - **Choreography & Time**: An effect operator must NEVER take a `float time`, manage animation springs, or schedule keyframes. Time and motion choreography belong exclusively to the host application or the `transit` library.
   - **Layout & Geometry**: An effect operator does not calculate UI layouts or position nodes.
 
 ---

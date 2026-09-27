@@ -8,7 +8,7 @@
 #ifndef LENSI_INTERNAL_H
 #define LENSI_INTERNAL_H
 
-#include <flux-text/text.h>
+#include <glyph/glyph.h>
 #include <lens/icon.h>
 #include <lens/lens.h>
 #include <math.h>
@@ -309,7 +309,7 @@ struct lens {
                        * frame-scoped: survives lens_begin (same contract as
                        * scale/reduced_motion). See lens_set_text_scale. */
     flux_arena arena; /* per-frame; reset each lens_begin */
-    flux_text *text;  /* shared text engine (flux-text); never NULL
+    glyph_ctx *text;  /* shared text engine (glyph); never NULL
                        * after create — degrades to mono internally */
     int text_family;  /* lens_text_family for subsequently built widgets;
                        * 0 (DEFAULT) keeps the engine's sans default */
@@ -815,14 +815,14 @@ bool lensi_mark_subtree_changed(lens_node *n);
 /* Release the immutable child-list cache owned by this node. */
 void lensi_node_release_cache(lens *ui, lens_node *n);
 
-/* text — lens's thin seam (seam.c) over the shared flux-text engine.
+/* text — lens's thin seam (seam.c) over the shared glyph engine.
  * These take lens (routing to ui->text) and apply lens label
- * conventions; the engine itself lives in <flux-text/text.h>. */
+ * conventions; the engine itself lives in <glyph/glyph.h>. */
 
 /* A visual x-span [x0, x1] in logical px, for selection rectangles.
- * Aliased to flux_text_xrange so seam.c forwards selection rects without
+ * Aliased to glyph_xrange so seam.c forwards selection rects without
  * a copy. */
-typedef flux_text_xrange lens_text_xrange;
+typedef glyph_xrange lens_text_xrange;
 
 /* Measure the *visible* portion of a label (everything before "##"). Use
  * this from widgets so the measured advance matches what is painted. */

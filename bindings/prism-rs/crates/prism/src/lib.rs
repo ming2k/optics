@@ -494,6 +494,8 @@ impl BackdropLayerFilter {
             tint_strength: params.tint_strength,
             frost_strength: params.frost_strength,
             curvature: params.curvature,
+            contact_ao: params.contact_ao,
+            ambient_fresnel: params.ambient_fresnel,
         };
         let mut raw = std::ptr::null_mut();
         check(unsafe {

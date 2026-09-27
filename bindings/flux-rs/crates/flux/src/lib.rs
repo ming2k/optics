@@ -639,6 +639,10 @@ impl Drop for IccProfile {
     }
 }
 
+// SAFETY: flux_icc_profile is immutable after creation and refcounted atomically.
+unsafe impl Send for IccProfile {}
+unsafe impl Sync for IccProfile {}
+
 impl fmt::Debug for IccProfile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IccProfile")
@@ -866,7 +870,7 @@ impl Device {
     /// `&Device` for a device another owner created and retains — the
     /// canonical case being iris's `PaintHost::device()`, which hands the
     /// app the device iris owns for its window. Opening a second device is
-    /// unsupported and crashes, so a host that needs a `flux_text::Text`
+    /// unsupported and crashes, so a host that needs a `glyph::Text`
     /// context (or any `&Device` consumer) inside iris's paint callback
     /// **must** borrow iris's device rather than creating its own.
     ///
@@ -1029,6 +1033,11 @@ impl Drop for Device {
         }
     }
 }
+
+// SAFETY: flux_device is free-threaded after creation; all internal queues,
+// allocators, and heaps are protected by internal locks (docs/reference/thread-safety.md).
+unsafe impl Send for Device {}
+unsafe impl Sync for Device {}
 
 /// One exported offscreen frame suitable for direct display through DRM/KMS
 /// or another dma-buf consumer. The file descriptor is closed on drop.
@@ -2219,11 +2228,20 @@ impl Drop for Sampler {
     }
 }
 
+// SAFETY: flux_sampler is refcounted with atomic operations; creation and release
+// are safe from any thread (docs/reference/thread-safety.md).
+unsafe impl Send for Sampler {}
+unsafe impl Sync for Sampler {}
+
 impl Drop for Material {
     fn drop(&mut self) {
         unsafe { sys::flux_material_release(self.raw) };
     }
 }
+
+// SAFETY: flux_material is immutable after creation and refcounted atomically (docs/reference/thread-safety.md).
+unsafe impl Send for Material {}
+unsafe impl Sync for Material {}
 
 /// Refcounted render target. Scene passes use a depth target matching the
 /// surface extent, with one target per frame-in-flight slot.
@@ -2790,7 +2808,7 @@ impl Canvas {
     }
 
     /// Set the content scale (device-pixel ratio). The canvas then draws in
-    /// logical units mapped onto the physical surface, and `flux_text`
+    /// logical units mapped onto the physical surface, and `glyph`
     /// rasterises glyphs to match — set this once when the surface scale
     /// changes instead of applying a per-frame [`scale`](Self::scale).
     pub fn set_scale(&mut self, scale: f32) {
@@ -4612,7 +4630,7 @@ impl CanvasCommands<'_> {
 
     /// Scale the coordinate system by `(sx, sy)`. Used to map a logical
     /// (DPI-independent) coordinate space onto the physical framebuffer: pair
-    /// `scale(s, s)` with `flux_text`'s device scale `s` for crisp HiDPI text.
+    /// `scale(s, s)` with `glyph`'s device scale `s` for crisp HiDPI text.
     pub fn scale(&self, sx: f32, sy: f32) {
         unsafe { sys::flux_canvas_scale(self.raw, sx, sy) };
     }

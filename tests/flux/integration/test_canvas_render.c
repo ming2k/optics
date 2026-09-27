@@ -12,7 +12,7 @@
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 #if defined(FLUX_TEXT_HAVE_FTHB)
-#include <flux-text/text.h>
+#include <glyph/glyph.h>
 #endif
 #include "test_helpers.h"
 
@@ -234,22 +234,22 @@ static void replay_record(flux_canvas *canvas, void *user) {
 
 #if defined(FLUX_TEXT_HAVE_FTHB)
 typedef struct text_family_case {
-    flux_text *text;
+    glyph_ctx *text;
     flux_arena *arena;
-    flux_text_family family;
+    glyph_family family;
     float y;
 } text_family_case;
 
 static void draw_text_family(flux_canvas *canvas, void *user) {
     text_family_case *tc = user;
     const char *s = "Visible";
-    flux_text_style style = {
+    glyph_style style = {
         .size_px = 24.0f,
         .weight = 400.0f,
         .color = flux_color_rgba(255, 255, 255, 255),
         .family = tc->family,
     };
-    flux_text_draw(tc->text, canvas, tc->arena, 12.0f, tc->y, s, strlen(s), &style);
+    glyph_draw(tc->text, canvas, tc->arena, 12.0f, tc->y, s, strlen(s), &style);
 }
 
 static bool region_has_ink(const uint8_t *px, uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1) {
@@ -695,9 +695,9 @@ int main(void) {
      * fenced code blocks to MONO, which made code backgrounds render while
      * the actual code vanished. --- */
     {
-        flux_text *text = nullptr;
-        flux_text_desc td = {.device = d, .scale = 1.0f};
-        EXPECT(flux_text_create(&td, &text) == FLUX_OK);
+        glyph_ctx *text = nullptr;
+        glyph_desc td = {.device = d, .scale = 1.0f};
+        EXPECT(glyph_create(&td, &text) == FLUX_OK);
         EXPECT(text != nullptr);
 
         text_family_case cases[3] = {
@@ -708,13 +708,13 @@ int main(void) {
 
         for (int i = 0; i < 3; i++) {
             const char *text_s = "Visible";
-            flux_text_style style = {
+            glyph_style style = {
                 .size_px = 24.0f,
                 .weight = 400.0f,
                 .color = flux_color_rgba(255, 255, 255, 255),
                 .family = cases[i].family,
             };
-            flux_text_metrics m = flux_text_measure(text, text_s, strlen(text_s), &style);
+            glyph_metrics m = glyph_measure(text, text_s, strlen(text_s), &style);
             EXPECT(m.width > 0.0f);
             EXPECT(m.height > 0.0f);
 
@@ -724,7 +724,7 @@ int main(void) {
             EXPECT(region_has_ink(px, 10, (uint32_t)cases[i].y, 120, (uint32_t)cases[i].y + 32));
         }
 
-        flux_text_release(text);
+        glyph_release(text);
     }
 #endif
 

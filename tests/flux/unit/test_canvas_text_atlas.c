@@ -1,7 +1,7 @@
 /*
  * Atlas-clear invalidation test (CPU backend, no Vulkan device).
  *
- * flux_text's glyph atlas is rearranged wholesale by atlas_clear when the
+ * glyph_ctx's glyph atlas is rearranged wholesale by atlas_clear when the
  * shelf packer exhausts the texture. A display-list segment recorded
  * before the clear carries glyph UVs into the pre-clear layout; replaying
  * it against rearranged texels would silently mis-sample. The canvas
@@ -17,7 +17,7 @@
  * present (same gate as test_canvas_cpu_text).
  */
 #include "test_helpers.h"
-#include <flux-text/text.h>
+#include <glyph/glyph.h>
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <flux/math.h>
@@ -48,31 +48,31 @@ static void begin_clear(flux_canvas *c) {
 }
 
 int main(void) {
-    flux_text *t = nullptr;
-    EXPECT(flux_text_create(&(flux_text_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
+    glyph_ctx *t = nullptr;
+    EXPECT(glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
     EXPECT(t != nullptr);
 
     /* No shaping backend → measure-only context → nothing to check. */
-    flux_text_metrics m = flux_text_measure(t, "A", 1, nullptr);
+    glyph_metrics m = glyph_measure(t, "A", 1, nullptr);
     if (m.width <= 0.0f) {
-        flux_text_release(t);
+        glyph_release(t);
         TEST_SUMMARY();
     }
 
     flux_canvas *c = nullptr;
     EXPECT(flux_canvas_create_cpu(W, H, SCALE, &c) == FLUX_OK);
 
-    flux_text_style style = {0};
+    glyph_style style = {0};
     style.size_px = 64.0f;
     style.color = flux_color_rgba_premul(255, 255, 255, 255);
 
-    flux_text_stats st_before, st_after;
-    flux_text_get_stats(t, &st_before);
+    glyph_stats st_before, st_after;
+    glyph_get_stats(t, &st_before);
 
     /* Frame 1: record two glyphs. */
     begin_clear(c);
     EXPECT(flux_canvas_cache_begin(c));
-    flux_text_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
+    glyph_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
     flux_canvas_cache_entry rec = flux_canvas_cache_end(c);
     EXPECT(rec.slot != nullptr);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
@@ -95,13 +95,13 @@ int main(void) {
     filler[94] = '\0';
     begin_clear(c);
     for (int k = 0; k < 8; ++k) {
-        flux_text_get_stats(t, &st_after);
+        glyph_get_stats(t, &st_after);
         if (st_after.atlas_clears > st_before.atlas_clears)
             break;
-        flux_text_draw(t, c, nullptr, 0.13f * (float)k, 4.0f, filler, 94, &style);
+        glyph_draw(t, c, nullptr, 0.13f * (float)k, 4.0f, filler, 94, &style);
     }
     EXPECT(flux_canvas_end(c) == FLUX_OK);
-    flux_text_get_stats(t, &st_after);
+    glyph_get_stats(t, &st_after);
     /* atlas_clears keeps its counting semantics (consumers poll it as a
      * generation signal). */
     EXPECT(st_after.atlas_clears > st_before.atlas_clears);
@@ -110,7 +110,7 @@ int main(void) {
      * draws; draw once more so the refusal below keys on the post-clear
      * generation even when the final filler draw triggered the clear. */
     begin_clear(c);
-    flux_text_draw(t, c, nullptr, 4.0f, 4.0f, "x", 1, &style);
+    glyph_draw(t, c, nullptr, 4.0f, 4.0f, "x", 1, &style);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* Frame 3: the pre-clear segment must be REFUSED — its baked UVs name
@@ -133,7 +133,7 @@ int main(void) {
     /* Frame 4: live re-draw re-rasterises into the new atlas generation
      * and reproduces the recorded pixels exactly. */
     begin_clear(c);
-    flux_text_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
+    glyph_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint8_t *redrawn = snapshot(c);
     EXPECT(memcmp(live, redrawn, (size_t)W * H * 4) == 0);
@@ -143,7 +143,7 @@ int main(void) {
     /* A segment recorded after the clear replays normally. */
     begin_clear(c);
     EXPECT(flux_canvas_cache_begin(c));
-    flux_text_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
+    glyph_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
     flux_canvas_cache_entry rec2 = flux_canvas_cache_end(c);
     EXPECT(rec2.slot != nullptr);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
@@ -154,6 +154,6 @@ int main(void) {
     flux_canvas_cache_release(c, rec);
     flux_canvas_cache_release(c, rec2);
     flux_canvas_release(c);
-    flux_text_release(t);
+    glyph_release(t);
     TEST_SUMMARY();
 }

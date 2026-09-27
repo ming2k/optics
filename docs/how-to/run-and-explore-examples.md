@@ -59,7 +59,7 @@ The flagship visual comparison demo for `libs/prism` (ADR-0096 / ADR-0097). It c
 
 ---
 
-## 3. 2D Canvas & 3D Core Graphics (`examples/flux/`, `flux-scene-graph/`, `flux-text/`)
+## 3. 2D Canvas & 3D Core Graphics (`examples/flux/`, `vista/`, `glyph/`)
 
 These examples demonstrate the fundamental rendering primitives in `libs/flux`.
 
@@ -69,20 +69,20 @@ These examples demonstrate the fundamental rendering primitives in `libs/flux`.
 | `build/examples/flux/scene_cube` | 3D mesh rendering | Depth buffer management, matrix transforms, Phong lighting with transient buffer device addresses. |
 | `build/examples/flux/compute_fill` | Compute-to-canvas integration | Offscreen compute dispatch with synchronization barriers. |
 | `build/examples/flux/image_animation` | Animated texture streaming | Host-clock synchronization, strided image updates. |
-| `build/examples/flux-scene-graph/gltf_viewer` | glTF 2.0 3D asset viewer | Scene hierarchy traversal, PBR material evaluation, bundled `Duck.glb` rendering. |
-| `build/examples/flux-text/text_hello` | Typography & text shaping | HarfBuzz shaping, dual-layer R8 glyph atlas, subpixel glyph blitting. |
+| `build/examples/vista/gltf_viewer` | glTF 2.0 3D asset viewer | Scene hierarchy traversal, PBR material evaluation, bundled `Duck.glb` rendering. |
+| `build/examples/glyph/text_hello` | Typography & text shaping | HarfBuzz shaping, dual-layer R8 glyph atlas, subpixel glyph blitting. |
 
 **Quick run:**
 ```bash
 ./build/examples/flux/canvas_hello
 ./build/examples/flux/scene_cube
-./build/examples/flux-scene-graph/gltf_viewer
-./build/examples/flux-text/text_hello
+./build/examples/vista/gltf_viewer
+./build/examples/glyph/text_hello
 ```
 
 ---
 
-## 4. UI Components, Window Shell & Interactions (`examples/iris/`, `examples/lens/`, `examples/anim/`)
+## 4. UI Components, Window Shell & Interactions (`examples/iris/`, `examples/lens/`, `examples/transit/`)
 
 These examples demonstrate user interface state management, window shell integration, and physics-based motion.
 
@@ -118,12 +118,12 @@ Demonstrates the spatial overlay architecture (`Place` layer): non-clipping tool
 ./build/examples/iris/overlay_demo
 ```
 
-### `examples/anim/motion_spring` — Spring Physics Dynamics
+### `examples/transit/motion_spring` — Spring Physics Dynamics
 
 Demonstrates critically damped, under-damped, and over-damped analytical spring curves (ADR-0077) driving interface transformations without fixed duration timers.
 
 ```bash
-./build/examples/anim/motion_spring
+./build/examples/transit/motion_spring
 ```
 
 ### Headless & Accessibility Verification (`examples/lens/`)
@@ -149,15 +149,15 @@ These tools run in CI or headless environments without an active GPU or display 
 | **3D Cube** | `./build/examples/flux/scene_cube` | Yes (Vulkan + GLFW) |
 | **Compute Fill** | `./build/examples/flux/compute_fill` | Yes (Vulkan + GLFW) |
 | **Image Animation** | `./build/examples/flux/image_animation` | Yes (Vulkan + GLFW) |
-| **glTF 3D Viewer** | `./build/examples/flux-scene-graph/gltf_viewer` | Yes (Vulkan + GLFW) |
-| **Typography** | `./build/examples/flux-text/text_hello` | Yes (Vulkan + GLFW) |
+| **glTF 3D Viewer** | `./build/examples/vista/gltf_viewer` | Yes (Vulkan + GLFW) |
+| **Typography** | `./build/examples/glyph/text_hello` | Yes (Vulkan + GLFW) |
 | **UI Widgets** | `./build/examples/iris/widgets` | Yes (Wayland / Win32 / Cocoa) |
 | **Desktop Shell** | `./build/examples/iris/desktop_demo` | Yes (Wayland / Win32 / Cocoa) |
 | **Drag & Drop** | `./build/examples/iris/dnd_demo` | Yes (Wayland / Win32 / Cocoa) |
 | **Popups & Menus** | `./build/examples/iris/overlay_demo` | Yes (Wayland / Win32 / Cocoa) |
 | **Damage Tracking** | `./build/examples/iris/paint_static_demo` | Yes (Wayland / Win32 / Cocoa) |
 | **Font Discovery** | `./build/examples/iris/fonts` | Yes (Wayland / Win32 / Cocoa) |
-| **Spring Motion** | `./build/examples/anim/motion_spring` | Yes (Wayland / Win32 / Cocoa) |
+| **Spring Motion** | `./build/examples/transit/motion_spring` | Yes (Wayland / Win32 / Cocoa) |
 | **Headless UI Walk**| `./build/examples/lens/headless_demo` | **No** (Headless CPU) |
 | **A11y Tree Dump** | `./build/examples/lens/a11y_tree_demo` | **No** (Headless CPU) |
 | **Reactive State** | `./build/examples/lens/state_demo` | **No** (Headless CPU) |

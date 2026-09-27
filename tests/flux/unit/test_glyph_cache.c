@@ -13,7 +13,7 @@
  * dependencies, so this test compiles glyph_cache.c directly (matching
  * the test_canvas_tess pattern) and runs on any host.
  */
-#include "../../../libs/flux/text/src/glyph_cache.c" /* direct compile */
+#include "../../../libs/glyph/src/glyph_cache.c" /* direct compile */
 #include <stdint.h>
 #include <stdio.h>
 

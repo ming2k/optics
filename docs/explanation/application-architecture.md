@@ -9,10 +9,12 @@ Optics libraries, and Vulkan fit together.
 application
   ├── iris ── window, event loop, desktop integration
   │     └── lens ── UI state, layout, input, draw lists
-  │           ├── flux-text ── shaping and glyph runs
+  │           ├── glyph ── text shaping and dynamic atlas
   │           └── flux canvas
   └── direct rendering
-        ├── flux-scene-graph ── glTF content
+        ├── vista ── glTF content and scene hierarchy
+        ├── transit ── motion vocabulary and state transition
+        ├── prism ── physical materials and liquid glass
         └── flux canvas / scene / compute / effect
                     └── flux-core ── device, frame, memory, sync
                                       └── Vulkan 1.3
@@ -60,10 +62,11 @@ not on each other. They can be used together in a single frame because each
 records into the same `VkCommandBuffer` returned by
 `flux_frame_vk_command_buffer`. The application is the integration point.
 
-### Content Libraries Feed Draw Primitives
+### Content and Domain Libraries Feed Draw Primitives
 
-`flux-text` shapes text and feeds `flux_canvas_draw_glyph_run`;
-`flux-scene-graph` loads glTF content and feeds scene mesh draws. They link
+`glyph` shapes text and feeds `flux_canvas_draw_glyph_run`;
+`vista` loads glTF content and feeds scene mesh draws;
+`transit` provides closed-form non-divergent motion dynamics. They link
 through public `flux` APIs and remain separately consumable libraries.
 
 ## Worked Example: 3D Scene with a 2D HUD

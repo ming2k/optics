@@ -266,7 +266,7 @@ struct flux_canvas {
 
     /* Content scale (device-pixel ratio). The base transform at index 0 is
      * this scale, so callers draw in logical units; 1.0 means logical ==
-     * physical. flux_text reads it via flux_canvas_get_scale. */
+     * physical. glyph reads it via flux_canvas_get_scale. */
     float content_scale;
 
     /* Transform / clip stack. Index 0 is the content-scale base transform. */
@@ -460,7 +460,7 @@ struct flux_record_op {
     uint32_t vert_offset;  /* into the segment's vertex buffer                  */
     uint32_t vert_count;
     /* Host R8 glyph atlas borrowed by the CPU backend (ADR-0019); NULL for
-     * non-glyph ops. Points into flux_text's persistent atlas buffer.
+     * non-glyph ops. Points into glyph's persistent atlas buffer.
      * host_atlas_gen is the producer generation at capture time
      * (FLUX_HOST_ATLAS_UNVERSIONED when the run carried no extension):
      * replay refuses the segment when the canvas has since seen a newer

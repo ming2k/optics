@@ -66,6 +66,11 @@ impl Drop for Snapshot {
     }
 }
 
+// SAFETY: Snapshot is an owned, immutable visual publication; internal refcounts
+// are atomic and reading its geometry/generation is thread-safe.
+unsafe impl Send for Snapshot {}
+unsafe impl Sync for Snapshot {}
+
 mod input;
 pub mod patterns;
 pub mod reactive;

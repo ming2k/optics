@@ -1,5 +1,5 @@
-# liblens depends on libflux (rendering) and libflux-text (shaping) — both
-# are siblings in this monorepo (ADR-0023). The flux_dep / flux_text_dep
+# liblens depends on libflux (rendering) and libglyph (shaping) — both
+# are siblings in this monorepo (ADR-0023). The flux_dep / glyph_dep
 # variables are declared by libs/flux/meson.build when it is subdir()'d
 # earlier from the root meson.build.
 
@@ -66,7 +66,7 @@ lens_lib = library('lens',
   # most common lens misuse (stack temporaries) in debug AND release
   # alike. Builds that must not abort can define LENS_NO_BORROW_CHECK.
   c_args                : ['-DLENS_BUILDING=1', '-DLENS_DEBUG_BORROWS=1'],
-  dependencies          : [flux_dep, flux_text_dep, m_dep],
+  dependencies          : [flux_dep, glyph_dep, m_dep],
   gnu_symbol_visibility : 'hidden',
   soversion             : optics_soname,
   version               : meson.project_version(),
@@ -85,7 +85,7 @@ install_headers(
 lens_dep = declare_dependency(
   link_with           : lens_lib,
   include_directories : lens_inc,
-  dependencies        : [flux_dep, flux_text_dep],
+  dependencies        : [flux_dep, glyph_dep],
 )
 
 pkg.generate(
@@ -94,6 +94,6 @@ pkg.generate(
   filebase    : 'lens',
   description : 'Immediate-mode UI over a retained core, built on flux',
   version     : meson.project_version(),
-  requires    : ['flux >= ' + meson.project_version(), 'flux-text >= ' + meson.project_version()],
+  requires    : ['flux >= ' + meson.project_version(), 'glyph >= ' + meson.project_version()],
 )
 

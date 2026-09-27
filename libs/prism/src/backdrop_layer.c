@@ -419,7 +419,9 @@ static bool valid_backdrop_layer_desc(const prism_backdrop_layer_desc *desc) {
         !isfinite(desc->rim_light) || !isfinite(desc->light_direction.x) ||
         !isfinite(desc->light_direction.y) || !isfinite(desc->opacity) ||
         !isfinite(desc->size_reference) || !isfinite(desc->size_scale_min) ||
-        !isfinite(desc->tint_strength) || !isfinite(desc->frost_strength))
+        !isfinite(desc->tint_strength) || !isfinite(desc->frost_strength) ||
+        !isfinite(desc->curvature) || !isfinite(desc->contact_ao) ||
+        !isfinite(desc->ambient_fresnel))
         return false;
     for (uint32_t i = 0; i < desc->frost_count; ++i) {
         const prism_backdrop_frost *frost = &desc->frost[i];
@@ -810,9 +812,9 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         .size_scale_min = desc->size_scale_min,
         .tint_strength = desc->tint_strength,
         .frost_strength = desc->frost_strength,
-        .curvature = 0.0f,
-        .contact_ao = 0.35f,
-        .ambient_fresnel = 0.50f,
+        .curvature = desc->curvature,
+        .contact_ao = desc->contact_ao,
+        .ambient_fresnel = desc->ambient_fresnel,
     };
     bool glass_dispatched = false;
     for (uint32_t i = 0; i < current_group_count; ++i) {

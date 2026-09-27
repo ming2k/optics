@@ -259,10 +259,10 @@ static size_t line_length(const char *buf, size_t len, size_t start) {
 static float prefix_width(lens *ui, const char *str, size_t len, float font_size) {
     if (!str || len == 0)
         return 0.0f;
-    return flux_text_measure(ui->text, str, len,
-                             &(flux_text_style){.size_px = font_size,
+    return glyph_measure(ui->text, str, len,
+                             &(glyph_style){.size_px = font_size,
                                                 .weight = 0.0f,
-                                                .family = (flux_text_family)ui->text_family})
+                                                .family = (glyph_family)ui->text_family})
         .width;
 }
 

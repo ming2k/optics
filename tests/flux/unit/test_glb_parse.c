@@ -1,5 +1,5 @@
 /*
- * Deviceless GLB parse stage (flux_sg_parse_glb, ADR-0016): the parse
+ * Deviceless GLB parse stage (vista_parse_glb, ADR-0016): the parse
  * and the GPU build are separate seams, so every parser behaviour is
  * testable without a Vulkan device.
  *
@@ -22,7 +22,7 @@
  * integration suites; this file is deliberately device-free.
  */
 #include "test_helpers.h"
-#include <flux-scene-graph/scene-graph.h>
+#include <vista/vista.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -84,59 +84,59 @@ int main(void) {
     size_t glb_len = make_glb(buf, CAP, MINIMAL_JSON, (const uint8_t *)verts, sizeof verts, NULL);
     EXPECT(glb_len > 0);
 
-    flux_sg_scene_data *d1 = NULL, *d2 = NULL;
-    EXPECT(flux_sg_parse_glb(buf, glb_len, &d1) == FLUX_OK);
+    vista_scene_data *d1 = NULL, *d2 = NULL;
+    EXPECT(vista_parse_glb(buf, glb_len, &d1) == FLUX_OK);
     EXPECT(d1 != NULL);
-    EXPECT(flux_sg_scene_data_primitive_count(d1) == 1);
+    EXPECT(vista_scene_data_primitive_count(d1) == 1);
 
     flux_vec3 mn = {0}, mx = {0};
-    EXPECT(flux_sg_scene_data_bounds(d1, &mn, &mx));
+    EXPECT(vista_scene_data_bounds(d1, &mn, &mx));
     EXPECT(mn.x == 0.0f && mn.y == 0.0f && mn.z == 0.0f);
     EXPECT(mx.x == 1.0f && mx.y == 1.0f && mx.z == 0.0f);
 
     /* Determinism: a second parse produces the same shape. */
-    EXPECT(flux_sg_parse_glb(buf, glb_len, &d2) == FLUX_OK);
-    EXPECT(flux_sg_scene_data_primitive_count(d2) == 1);
+    EXPECT(vista_parse_glb(buf, glb_len, &d2) == FLUX_OK);
+    EXPECT(vista_scene_data_primitive_count(d2) == 1);
     flux_vec3 mn2 = {0}, mx2 = {0};
-    EXPECT(flux_sg_scene_data_bounds(d2, &mn2, &mx2));
+    EXPECT(vista_scene_data_bounds(d2, &mn2, &mx2));
     EXPECT(memcmp(&mn, &mn2, sizeof mn) == 0 && memcmp(&mx, &mx2, sizeof mx) == 0);
-    flux_sg_scene_data_free(d1);
-    flux_sg_scene_data_free(d2);
+    vista_scene_data_free(d1);
+    vista_scene_data_free(d2);
 
     /* --- truncation at every structural boundary fails cleanly -------- */
     for (size_t cut = 0; cut < glb_len; cut++) {
-        flux_sg_scene_data *d =
-            (flux_sg_scene_data *)(uintptr_t)0x1; /* sentinel: must be set to NULL */
-        flux_result r = flux_sg_parse_glb(buf, cut, &d);
+        vista_scene_data *d =
+            (vista_scene_data *)(uintptr_t)0x1; /* sentinel: must be set to NULL */
+        flux_result r = vista_parse_glb(buf, cut, &d);
         EXPECT(r != FLUX_OK);
         EXPECT(d == NULL); /* documented contract: NULL out on failure */
         /* ASan verifies nothing was retained on the error path. */
     }
 
     /* --- hostile container headers ------------------------------------ */
-    flux_sg_scene_data *d = NULL;
+    vista_scene_data *d = NULL;
     size_t json_off = 0;
     (void)make_glb(buf, CAP, MINIMAL_JSON, (const uint8_t *)verts, sizeof verts, &json_off);
 
     /* total=0: the unsigned-underflow crash found by fuzz_glb_parse. */
     wr_u32(buf + 8, 0);
-    EXPECT(flux_sg_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
+    EXPECT(vista_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
 
     /* total beyond the buffer. */
     wr_u32(buf + 8, (uint32_t)glb_len + 1);
-    EXPECT(flux_sg_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
+    EXPECT(vista_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
 
     /* total below the header minimum. */
     wr_u32(buf + 8, 8);
-    EXPECT(flux_sg_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
+    EXPECT(vista_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
 
     /* bad magic / bad version. */
     wr_u32(buf + 8, (uint32_t)glb_len);
     buf[0] = 'X';
-    EXPECT(flux_sg_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
+    EXPECT(vista_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
     buf[0] = 'g';
     wr_u32(buf + 4, 3);
-    EXPECT(flux_sg_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
+    EXPECT(vista_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
     wr_u32(buf + 4, 2);
 
     /* --- hostile JSON bodies (parse must fail or degrade safely) ------ */
@@ -174,10 +174,10 @@ int main(void) {
         /* Acceptance here is value-based (some hostile content parses to
          * a valid-but-degenerate scene); the hard requirements are: no
          * crash, no hang, no leak, and the out-handle contract. */
-        flux_result r = flux_sg_parse_glb(buf, n, &d);
+        flux_result r = vista_parse_glb(buf, n, &d);
         if (r == FLUX_OK) {
             EXPECT(d != NULL);
-            flux_sg_scene_data_free(d);
+            vista_scene_data_free(d);
         } else {
             EXPECT(d == NULL);
         }
@@ -193,20 +193,20 @@ int main(void) {
             wr_u32(buf + i, x);
         }
         d = NULL;
-        flux_result r = flux_sg_parse_glb(buf, 512, &d);
+        flux_result r = vista_parse_glb(buf, 512, &d);
         if (r == FLUX_OK)
-            flux_sg_scene_data_free(d);
+            vista_scene_data_free(d);
         else
             EXPECT(d == NULL);
     }
 
     /* --- null-argument guards ----------------------------------------- */
-    d = (flux_sg_scene_data *)(uintptr_t)0x1;
-    EXPECT(flux_sg_parse_glb(NULL, 10, &d) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(flux_sg_parse_glb(buf, 10, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(flux_sg_scene_data_primitive_count(NULL) == 0);
-    EXPECT(!flux_sg_scene_data_bounds(NULL, &mn, &mx));
-    flux_sg_scene_data_free(NULL); /* no-op by contract */
+    d = (vista_scene_data *)(uintptr_t)0x1;
+    EXPECT(vista_parse_glb(NULL, 10, &d) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(vista_parse_glb(buf, 10, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(vista_scene_data_primitive_count(NULL) == 0);
+    EXPECT(!vista_scene_data_bounds(NULL, &mn, &mx));
+    vista_scene_data_free(NULL); /* no-op by contract */
 
     TEST_SUMMARY();
 }
