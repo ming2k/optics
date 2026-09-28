@@ -13,6 +13,25 @@ either.
 
 ## [Unreleased]
 
+### Changed
+
+- **transit** (breaking, pre-1.0): every advance entry point now takes an
+  explicit `reduced_motion` flag — `transit_approach`, `transit_decay`,
+  `transit_hysteresis_step`, and `transit_smoother_step`. When set, the
+  primitive resolves to its end state in a single step (mirroring the
+  existing `transit_spring_snap_to`), so a caller never hand-rolls the
+  reduced-motion rule per primitive.
+- **transit-rs**: mirrors the flag on `approach`, `decay`, and the
+  `Smoother`/`Hysteresis` `step` methods; adds `Default` for `Spring`,
+  `Smoother`, and `Hysteresis`, `SpringParams::new`, and `dt_clamp`.
+
+### Fixed
+
+- **build**: `glyph` and `vista` `.pc` files now require
+  `flux >= <version>` instead of an unversioned `flux`, so a partially
+  upgraded install fails at `pkg-config` time rather than linking against a
+  newer `libflux` than the headers were built for.
+
 ## [0.0.51] - 2026-09-27
 
 ### Added

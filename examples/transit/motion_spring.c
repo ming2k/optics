@@ -54,7 +54,7 @@ int main(void) {
     transit_smoother smoother = transit_smoother_init(80.0f);
     for (int step = 0; step < 6; ++step) {
         float noisy_input = 80.0f + (float)(step % 2 == 0 ? 8 : -8);
-        transit_smoother_step(&smoother, noisy_input, 0.10f, 2.5f, 0.5f, dt);
+        transit_smoother_step(&smoother, noisy_input, 0.10f, 2.5f, 0.5f, dt, false);
         char tag[32];
         snprintf(tag, sizeof(tag), "Raw %4.1f -> Smooth", noisy_input);
         print_bar(tag, smoother.value, 100.0f);

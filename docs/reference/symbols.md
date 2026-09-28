@@ -682,15 +682,15 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `transit_spring_settled` | True when the spring rests on `target` within the given tolerances and can be dropped from the frame-cadence decision. |
 | `transit_spring_advance` | Advance toward `target` by clamped `dt_seconds`; returns the new value. |
 | `transit_spring_snap_to` | One-step resolve (reduced motion, or an animation that must end now). |
-| `transit_approach` | Move `current` toward `target` by rate per second: after t seconds the remaining distance is e^(−rate·t) of the original. |
-| `transit_decay` | Exponential decay toward zero (opacity tails, trailing values). |
+| `transit_approach` | Move `current` toward `target` by rate per second: after t seconds the remaining distance is e^(−rate·t) of the original. `reduced_motion` resolves to the target in one step. |
+| `transit_decay` | Exponential decay toward zero (opacity tails, trailing values). `reduced_motion` resolves to zero in one step. |
 | `transit_ease_out_cubic` | ================================================================== |
 | `transit_ease_in_cubic` |  |
 | `transit_ease_in_out_cubic` |  |
 | `transit_ease_out_back` |  |
 | `transit_hysteresis_init` |  |
-| `transit_hysteresis_step` | Advance the latch. |
+| `transit_hysteresis_step` | Advance the latch. `reduced_motion` latches to the input's request in one step, bypassing the dwell timer. |
 | `transit_smoother_init` |  |
-| `transit_smoother_step` | Advance toward `target`. |
+| `transit_smoother_step` | Advance toward `target`. `reduced_motion` resolves to the target in one step. |
 
 Every fallible function returns `flux_result`-style codes; see [API Reference](api.md#error-model). Functions returning `void` either cannot fail or report through the library's error channel as noted.

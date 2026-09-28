@@ -100,11 +100,14 @@ TRANSIT_API float transit_spring_snap_to(transit_spring *s, float target);
 /*  Approach / decay — exponential, frame-rate independent            */
 /* ================================================================== */
 
-/* Move `current` toward `target` by rate per second. */
-TRANSIT_API float transit_approach(float current, float target, float rate, float dt_seconds);
+/* Move `current` toward `target` by rate per second.
+ * `reduced_motion` resolves to the target in one step. */
+TRANSIT_API float transit_approach(float current, float target, float rate, float dt_seconds,
+                                   bool reduced_motion);
 
-/* Exponential decay toward zero (opacity tails, trailing values). */
-TRANSIT_API float transit_decay(float value, float rate, float dt_seconds);
+/* Exponential decay toward zero (opacity tails, trailing values).
+ * `reduced_motion` resolves to zero in one step. */
+TRANSIT_API float transit_decay(float value, float rate, float dt_seconds, bool reduced_motion);
 
 /* ================================================================== */
 /*  Easing — normalized [0,1] curves                                  */
@@ -127,10 +130,12 @@ typedef struct transit_hysteresis {
 
 TRANSIT_API transit_hysteresis transit_hysteresis_init(bool initial_high);
 
+/* Advance the latch. `reduced_motion` latches to the input's request in one
+ * step, bypassing the dwell timer. */
 TRANSIT_API bool transit_hysteresis_step(transit_hysteresis *h, bool input_high,
                                         float low_threshold, float high_threshold,
                                         float measurement, float dwell_seconds,
-                                        float dt_seconds);
+                                        float dt_seconds, bool reduced_motion);
 
 /* ================================================================== */
 /*  Smoother — critically-damped filter, motion-adaptive τ            */
@@ -143,9 +148,11 @@ typedef struct transit_smoother {
 
 TRANSIT_API transit_smoother transit_smoother_init(float initial);
 
+/* Advance toward `target`. `reduced_motion` resolves to the target in one
+ * step (velocity cleared). */
 TRANSIT_API float transit_smoother_step(transit_smoother *s, float target, float tau_rest,
                                        float motion_scale, float motion_epsilon,
-                                       float dt_seconds);
+                                       float dt_seconds, bool reduced_motion);
 
 #ifdef __cplusplus
 }

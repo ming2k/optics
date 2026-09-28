@@ -1,4 +1,4 @@
-use transit::{Spring, SpringParams, Smoother, Hysteresis};
+use transit::{Hysteresis, Smoother, Spring, SpringParams};
 
 #[test]
 fn test_version_smoke() {
@@ -21,13 +21,33 @@ fn test_spring_dynamics() {
 }
 
 #[test]
+fn test_reduced_motion_resolves_every_primitive_in_one_step() {
+    // The ADR-0029 rule is uniform across the vocabulary: one flag, one step.
+    let mut spring = Spring::new(0.0);
+    assert_eq!(spring.advance(1.0, SpringParams::gentle(), 1.0 / 60.0, true), 1.0);
+
+    assert_eq!(transit::approach(0.0, 1.0, 1.0, 1.0 / 60.0, true), 1.0);
+    assert_eq!(transit::decay(1.0, 1.0, 1.0 / 60.0, true), 0.0);
+
+    let mut smoother = Smoother::new(0.0);
+    assert_eq!(smoother.step(1.0, 0.1, 2.0, 0.1, 1.0 / 60.0, true), 1.0);
+    assert_eq!(smoother.value, 1.0);
+    assert_eq!(smoother.velocity, 0.0);
+
+    // A long dwell must not delay the latch under reduced motion.
+    let mut h = Hysteresis::new(false);
+    assert!(h.step(true, 0.0, 0.0, 0.0, 10.0, 0.0, true));
+    assert!(h.high);
+}
+
+#[test]
 fn test_smoother_and_hysteresis() {
     let mut smoother = Smoother::new(0.0);
-    let v = smoother.step(10.0, 0.1, 2.0, 0.1, 0.016);
+    let v = smoother.step(10.0, 0.1, 2.0, 0.1, 0.016, false);
     assert!(v > 0.0);
 
     let mut h = Hysteresis::new(false);
-    assert!(!h.step(true, 0.3, 0.7, 0.5, 0.2, 0.016));
+    assert!(!h.step(true, 0.3, 0.7, 0.5, 0.2, 0.016, false));
 }
 
 #[test]

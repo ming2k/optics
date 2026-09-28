@@ -133,9 +133,12 @@ float transit_spring_advance(transit_spring *s, float target, transit_spring_par
 
 /* ---- approach / decay ------------------------------------------------ */
 
-float transit_approach(float current, float target, float rate, float dt_seconds) {
+float transit_approach(float current, float target, float rate, float dt_seconds,
+                       bool reduced_motion) {
     if (target != target) /* NaN target: state stands */
         return current;
+    if (reduced_motion)
+        return target;
     if (!(rate > 0.0f))
         return target;
     float dt = transit_dt_clamp(dt_seconds);
@@ -146,7 +149,9 @@ float transit_approach(float current, float target, float rate, float dt_seconds
     return current + (target - current) * (1.0f - expf(-rate * dt));
 }
 
-float transit_decay(float value, float rate, float dt_seconds) {
+float transit_decay(float value, float rate, float dt_seconds, bool reduced_motion) {
+    if (reduced_motion)
+        return 0.0f;
     if (!(rate > 0.0f))
         return 0.0f;
     float dt = transit_dt_clamp(dt_seconds);
@@ -189,10 +194,9 @@ transit_hysteresis transit_hysteresis_init(bool initial_high) {
 
 bool transit_hysteresis_step(transit_hysteresis *h, bool input_high, float low_threshold,
                              float high_threshold, float measurement, float dwell_seconds,
-                             float dt_seconds) {
+                             float dt_seconds, bool reduced_motion) {
     if (!h)
         return false;
-    float dt = transit_dt_clamp(dt_seconds);
 
     bool wants;
     if (low_threshold < high_threshold && measurement == measurement) {
@@ -204,6 +208,16 @@ bool transit_hysteresis_step(transit_hysteresis *h, bool input_high, float low_t
     } else {
         wants = input_high;
     }
+
+    if (reduced_motion) {
+        /* Bypass the dwell/dead band entirely: latch to the request now. */
+        h->high = wants;
+        h->candidate = wants;
+        h->dwell = 0.0f;
+        return h->high;
+    }
+
+    float dt = transit_dt_clamp(dt_seconds);
 
     if (wants != h->high) {
         h->candidate = wants;
@@ -227,9 +241,14 @@ transit_smoother transit_smoother_init(float initial) {
 }
 
 float transit_smoother_step(transit_smoother *s, float target, float tau_rest, float motion_scale,
-                            float motion_epsilon, float dt_seconds) {
+                            float motion_epsilon, float dt_seconds, bool reduced_motion) {
     if (!s)
         return target;
+    if (reduced_motion) {
+        s->value = target;
+        s->velocity = 0.0f;
+        return target;
+    }
     float dt = transit_dt_clamp(dt_seconds);
     if (dt <= 0.0f)
         return s->value;

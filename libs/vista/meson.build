@@ -38,5 +38,5 @@ pkg.generate(
   filebase     : 'vista',
   description  : 'glTF 2.0 3D scene hierarchy and asset runtime over flux',
   version      : meson.project_version(),
-  requires     : 'flux',
+  requires     : ['flux >= ' + meson.project_version()],
 )

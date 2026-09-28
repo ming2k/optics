@@ -73,6 +73,6 @@ pkg.generate(
   filebase     : 'glyph',
   description  : 'HarfBuzz shaping and dynamic glyph atlas runtime over flux',
   version      : meson.project_version(),
-  requires     : 'flux',
+  requires     : ['flux >= ' + meson.project_version()],
   extra_cflags : glyph_public_defines,
 )

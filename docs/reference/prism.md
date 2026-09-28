@@ -134,7 +134,7 @@ if (prism_liquid_glass_filter_stats(filter, frame, stats, 8, &stat_count) == FLU
          * is crossing content — fast to settle, slow to flicker. */
         float smoothed_energy =
             transit_smoother_step(&energy[i], stats[i].high_freq_energy,
-                               0.060f, 8.0f, 0.05f, lens_dt(ui));
+                               0.060f, 8.0f, 0.05f, lens_dt(ui), false);
         (void)smoothed_energy;
     }
 }
