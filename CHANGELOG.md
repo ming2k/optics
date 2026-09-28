@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.53] - 2026-09-28
+
 ### Changed
 
 - **transit** (breaking, pre-1.0): every advance entry point now takes an
@@ -28,7 +30,7 @@ either.
 ### Fixed
 
 - **build**: `glyph` and `vista` `.pc` files now require
-  `flux >= <version>` instead of an unversioned `flux`, so a partially
+  `flux >= 0.0.53` instead of an unversioned `flux`, so a partially
   upgraded install fails at `pkg-config` time rather than linking against a
   newer `libflux` than the headers were built for.
 

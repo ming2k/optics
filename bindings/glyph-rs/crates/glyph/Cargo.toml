@@ -8,5 +8,5 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-glyph-sys = { path = "../glyph-sys", version = "0.0.52" }
-flux = { path = "../../../flux-rs/crates/flux", version = "0.0.52" }
+glyph-sys = { path = "../glyph-sys", version = "0.0.53" }
+flux = { path = "../../../flux-rs/crates/flux", version = "0.0.53" }
