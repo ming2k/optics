@@ -247,6 +247,19 @@ static void test_smoother_reduced_motion_resolves_in_one_step(void) {
     CHECK_NEAR(s.velocity, 0.0f, 0.0);
 }
 
+static void test_smoothstep(void) {
+    CHECK_NEAR(transit_smoothstep(0.0f), 0.0f, 1e-6);
+    CHECK_NEAR(transit_smoothstep(1.0f), 1.0f, 1e-6);
+    CHECK_NEAR(transit_smoothstep(0.5f), 0.5f, 1e-6);
+    /* Symmetry about 0.5 */
+    CHECK_NEAR(transit_smoothstep(0.2f) + transit_smoothstep(0.8f), 1.0f, 1e-6);
+    /* Clamping */
+    CHECK_NEAR(transit_smoothstep(-0.5f), 0.0f, 1e-6);
+    CHECK_NEAR(transit_smoothstep(1.5f), 1.0f, 1e-6);
+    /* Monotonicity */
+    CHECK(transit_smoothstep(0.3f) < transit_smoothstep(0.4f));
+}
+
 /* ---- NULL safety ---------------------------------------------------------- */
 
 static void test_null_safety(void) {
@@ -269,6 +282,7 @@ int main(void) {
     test_approach_and_decay();
     test_approach_and_decay_reduced_motion_one_step();
     test_easing_endpoints_and_monotone();
+    test_smoothstep();
     test_hysteresis_dwell_blocks_flip();
     test_hysteresis_dead_band_holds();
     test_hysteresis_zero_dwell_tracks_input();

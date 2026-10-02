@@ -51,6 +51,16 @@ fn test_smoother_and_hysteresis() {
 }
 
 #[test]
+fn test_smoothstep() {
+    assert_eq!(transit::smoothstep(0.0), 0.0);
+    assert_eq!(transit::smoothstep(1.0), 1.0);
+    assert!((transit::smoothstep(0.5) - 0.5).abs() < 1e-6);
+    assert!((transit::smoothstep(0.2) + transit::smoothstep(0.8) - 1.0).abs() < 1e-6);
+    assert_eq!(transit::smoothstep(-0.5), 0.0);
+    assert_eq!(transit::smoothstep(1.5), 1.0);
+}
+
+#[test]
 fn test_thread_safety() {
     fn assert_send<T: Send>() {}
     fn assert_sync<T: Sync>() {}

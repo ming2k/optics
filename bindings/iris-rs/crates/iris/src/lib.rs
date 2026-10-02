@@ -46,8 +46,8 @@ pub use iris_sys as sys;
 pub use lens::key;
 pub use lens::mods;
 pub use lens::{
-    Align, Band, Color, CursorHint, DndDropInfo, Frame, Icon, Input, LayoutOpts, MouseButton, PlaceMode,
-    PlaceOpts, Rect, Response, Style, TextBuf, Theme, Ui,
+    Align, Band, Color, CursorHint, DndDropInfo, Frame, Icon, Input, LayoutOpts, MouseButton,
+    PlaceMode, PlaceOpts, Rect, Response, Style, TextBuf, Theme, Ui,
 };
 
 /// A thin wrapper over the raw pointers iris hands to the paint
@@ -1430,11 +1430,7 @@ pub mod dnd {
             callbacks: unsafe { std::mem::zeroed() },
         };
         let rc = unsafe { sys::iris_dnd_start(&src) };
-        if rc == 0 {
-            Ok(())
-        } else {
-            Err(())
-        }
+        if rc == 0 { Ok(()) } else { Err(()) }
     }
 
     /// Query whether a drag session is currently active.
@@ -1594,14 +1590,8 @@ mod tests {
             title: std::ptr::null(),
             ..Default::default()
         };
-        let rc = unsafe {
-            sys::iris_pick_save_path(
-                &opts,
-                std::ptr::null(),
-                std::ptr::null_mut(),
-                0,
-            )
-        };
+        let rc =
+            unsafe { sys::iris_pick_save_path(&opts, std::ptr::null(), std::ptr::null_mut(), 0) };
         assert_eq!(rc, sys::IRIS_PICK_UNAVAILABLE);
     }
 

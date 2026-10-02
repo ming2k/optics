@@ -129,13 +129,19 @@ impl Text {
 
     pub fn measure(&self, text: &str, style: &Style) -> Metrics {
         let s = style.to_sys();
-        unsafe {
-            glyph_sys::glyph_measure(self.raw, text.as_ptr() as *const i8, text.len(), &s)
-        }
-        .into()
+        unsafe { glyph_sys::glyph_measure(self.raw, text.as_ptr() as *const i8, text.len(), &s) }
+            .into()
     }
 
-    pub fn draw(&self, canvas: &CanvasCommands<'_>, arena: &Arena, x: f32, y: f32, text: &str, style: &Style) {
+    pub fn draw(
+        &self,
+        canvas: &CanvasCommands<'_>,
+        arena: &Arena,
+        x: f32,
+        y: f32,
+        text: &str,
+        style: &Style,
+    ) {
         let s = style.to_sys();
         unsafe {
             glyph_sys::glyph_draw(
@@ -154,13 +160,7 @@ impl Text {
     pub fn x_for_byte(&self, text: &str, byte: usize, style: &Style) -> f32 {
         let s = style.to_sys();
         unsafe {
-            glyph_sys::glyph_x_for_byte(
-                self.raw,
-                text.as_ptr() as *const i8,
-                text.len(),
-                byte,
-                &s,
-            )
+            glyph_sys::glyph_x_for_byte(self.raw, text.as_ptr() as *const i8, text.len(), byte, &s)
         }
     }
 

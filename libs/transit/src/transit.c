@@ -185,6 +185,11 @@ float transit_ease_out_back(float t) {
     return 1.0f + c3 * d * d * d + c1 * d * d;
 }
 
+float transit_smoothstep(float t) {
+    float c = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    return c * c * (3.0f - 2.0f * c);
+}
+
 /* ---- hysteresis ------------------------------------------------------- */
 
 transit_hysteresis transit_hysteresis_init(bool initial_high) {

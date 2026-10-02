@@ -285,3 +285,7 @@ pub fn ease_in_out_cubic(t: f32) -> f32 {
 pub fn ease_out_back(t: f32) -> f32 {
     unsafe { sys::transit_ease_out_back(t) }
 }
+
+pub fn smoothstep(t: f32) -> f32 {
+    unsafe { sys::transit_smoothstep(t) }
+}

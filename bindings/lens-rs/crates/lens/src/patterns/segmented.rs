@@ -81,14 +81,20 @@ impl SegmentedControl {
         let id_c = CString::new(self.id.as_str()).unwrap_or_default();
         let c_labels: Vec<Option<CString>> = items
             .iter()
-            .map(|item| item.label.as_ref().map(|s| CString::new(s.as_str()).unwrap_or_default()))
+            .map(|item| {
+                item.label
+                    .as_ref()
+                    .map(|s| CString::new(s.as_str()).unwrap_or_default())
+            })
             .collect();
 
         let c_items: Vec<lens_sys::lens_segmented_item> = items
             .iter()
             .enumerate()
             .map(|(i, item)| lens_sys::lens_segmented_item {
-                label: c_labels[i].as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+                label: c_labels[i]
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
                 icon: item.icon,
                 disabled: item.disabled,
             })

@@ -97,7 +97,9 @@ fn main() {
         .blocklist_type("flux_arena")
         .blocklist_type("flux_color")
         .blocklist_type("flux_result")
-        .raw_line("pub use flux_sys::{flux_arena, flux_canvas, flux_color, flux_device, flux_result};")
+        .raw_line(
+            "pub use flux_sys::{flux_arena, flux_canvas, flux_color, flux_device, flux_result};",
+        )
         .default_enum_style(bindgen::EnumVariation::Rust {
             non_exhaustive: false,
         })
@@ -113,7 +115,10 @@ fn main() {
 
     println!("cargo:rerun-if-changed=wrapper.h");
     if let Some(src) = &source_dir {
-        println!("cargo:rerun-if-changed={}", src.join("include/glyph/glyph.h").display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            src.join("include/glyph/glyph.h").display()
+        );
     }
 }
 

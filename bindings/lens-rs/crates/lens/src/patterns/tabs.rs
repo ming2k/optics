@@ -105,12 +105,7 @@ impl TabStrip {
     }
 
     /// Show the tab strip and return any action triggered this frame.
-    pub fn show(
-        &self,
-        frame: &mut Frame,
-        tabs: &[TabItem],
-        active_index: usize,
-    ) -> TabAction {
+    pub fn show(&self, frame: &mut Frame, tabs: &[TabItem], active_index: usize) -> TabAction {
         let id_c = CString::new(self.id.as_str()).unwrap_or_default();
         let c_titles: Vec<CString> = tabs
             .iter()

@@ -1,7 +1,7 @@
 //! Headless software-canvas smoke test: exercises the CPU backend end to end
 //! from the safe Rust API with no GPU, device, or window.
 
-use flux::{CanvasPassOptions, Canvas, Encoder, GradientStop, Target, rgba};
+use flux::{Canvas, CanvasPassOptions, Encoder, GradientStop, Target, rgba};
 
 #[test]
 fn cpu_canvas_renders_and_reads_back() {
@@ -10,7 +10,15 @@ fn cpu_canvas_renders_and_reads_back() {
     let black = rgba(0, 0, 0, 255);
     let red = rgba(255, 0, 0, 255);
 
-    let session = c.begin_session((), CanvasPassOptions { clear: Some(black), ..Default::default() }).expect("begin");
+    let session = c
+        .begin_session(
+            (),
+            CanvasPassOptions {
+                clear: Some(black),
+                ..Default::default()
+            },
+        )
+        .expect("begin");
     session.fill_rrect(8.0, 8.0, 48.0, 48.0, 12.0, red);
     session.end().expect("end checked CPU pass");
 
@@ -33,7 +41,15 @@ fn cpu_canvas_renders_and_reads_back() {
 fn unified_factory_selects_cpu() {
     // The Skia-style path: begin_frame(None, ..) drives a CPU canvas.
     let mut c = Canvas::new_cpu(32, 32, 1.0).unwrap();
-    let session = c.begin_session((), CanvasPassOptions { clear: Some(rgba(0, 0, 0, 255)), ..Default::default() }).unwrap();
+    let session = c
+        .begin_session(
+            (),
+            CanvasPassOptions {
+                clear: Some(rgba(0, 0, 0, 255)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     session.fill_rect(0.0, 0.0, 32.0, 32.0, rgba(0, 0, 255, 255));
     session.end().unwrap();
     let (_, _, stride, px) = c.read_pixels().unwrap();
@@ -44,7 +60,15 @@ fn unified_factory_selects_cpu() {
 #[test]
 fn rgba_premultiplies_translucent_colours_for_src_over() {
     let mut c = Canvas::new_cpu(1, 1, 1.0).unwrap();
-    let session = c.begin_session((), CanvasPassOptions { clear: Some(rgba(0, 0, 0, 255)), ..Default::default() }).unwrap();
+    let session = c
+        .begin_session(
+            (),
+            CanvasPassOptions {
+                clear: Some(rgba(0, 0, 0, 255)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     session.fill_rect(0.0, 0.0, 1.0, 1.0, rgba(255, 255, 255, 32));
     session.end().unwrap();
     let (_, _, _, pixels) = c.read_pixels().expect("CPU readback");
@@ -64,7 +88,15 @@ fn rgba_premultiplies_translucent_colours_for_src_over() {
 #[test]
 fn safe_radial_gradient_reaches_canvas_backend() {
     let mut c = Canvas::new_cpu(32, 32, 1.0).unwrap();
-    let session = c.begin_session((), CanvasPassOptions { clear: Some(rgba(0, 0, 0, 255)), ..Default::default() }).unwrap();
+    let session = c
+        .begin_session(
+            (),
+            CanvasPassOptions {
+                clear: Some(rgba(0, 0, 0, 255)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     session.fill_rect_radial_gradient(
         (0.0, 0.0, 32.0, 32.0),
         (16.0, 16.0),
@@ -89,7 +121,15 @@ fn radial_gradient_follows_canvas_transform() {
     // radius 32. Regression test for build_push copying gradient parameters
     // without applying the canvas transform.
     let mut c = Canvas::new_cpu(128, 128, 1.0).unwrap();
-    let session = c.begin_session((), CanvasPassOptions { clear: Some(rgba(0, 0, 0, 255)), ..Default::default() }).unwrap();
+    let session = c
+        .begin_session(
+            (),
+            CanvasPassOptions {
+                clear: Some(rgba(0, 0, 0, 255)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     session.save();
     session.scale(2.0, 2.0);
     session.fill_rect_radial_gradient(
@@ -122,7 +162,15 @@ fn radial_gradient_follows_canvas_transform() {
 fn linear_gradient_follows_canvas_transform() {
     // from (0,0) to (64,0) under a 2x transform spans device x 0..=128.
     let mut c = Canvas::new_cpu(128, 128, 1.0).unwrap();
-    let session = c.begin_session((), CanvasPassOptions { clear: Some(rgba(0, 0, 0, 255)), ..Default::default() }).unwrap();
+    let session = c
+        .begin_session(
+            (),
+            CanvasPassOptions {
+                clear: Some(rgba(0, 0, 0, 255)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     session.save();
     session.scale(2.0, 2.0);
     session.fill_rect_linear_gradient(
@@ -157,10 +205,26 @@ fn linear_gradient_follows_canvas_transform() {
 #[test]
 fn pixel_snapshot_survives_subsequent_frames() {
     let mut c = Canvas::new_cpu(8, 8, 1.0).unwrap();
-    let session = c.begin_session((), CanvasPassOptions { clear: Some(rgba(255, 0, 0, 255)), ..Default::default() }).unwrap();
+    let session = c
+        .begin_session(
+            (),
+            CanvasPassOptions {
+                clear: Some(rgba(255, 0, 0, 255)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     session.end().unwrap();
     let (_, _, _, first) = c.read_pixels().unwrap();
-    let session = c.begin_session((), CanvasPassOptions { clear: Some(rgba(0, 0, 255, 255)), ..Default::default() }).unwrap();
+    let session = c
+        .begin_session(
+            (),
+            CanvasPassOptions {
+                clear: Some(rgba(0, 0, 255, 255)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     session.end().unwrap();
     let (_, _, _, second) = c.read_pixels().unwrap();
     assert_eq!(&first[..4], &[255, 0, 0, 255]);
@@ -175,7 +239,15 @@ fn canvas_session_renders_to_cpu_target() {
     let green = rgba(0, 255, 0, 255);
     let red = rgba(255, 0, 0, 255);
 
-    let session = c.begin_session(&mut target, CanvasPassOptions { clear: Some(green), ..Default::default() }).expect("begin session");
+    let session = c
+        .begin_session(
+            &mut target,
+            CanvasPassOptions {
+                clear: Some(green),
+                ..Default::default()
+            },
+        )
+        .expect("begin session");
     session.fill_rect(8.0, 8.0, 16.0, 16.0, red);
     session.end().expect("end session cleanly");
 
@@ -208,8 +280,18 @@ fn encoder_display_list_playback_to_target() {
     let cloned_dl = dl.clone();
     drop(dl);
 
-    let session = c.begin_session(&mut target, CanvasPassOptions { clear: Some(rgba(0, 0, 0, 255)), ..Default::default() }).expect("begin session");
-    session.submit_display_list(&cloned_dl).expect("submit display list");
+    let session = c
+        .begin_session(
+            &mut target,
+            CanvasPassOptions {
+                clear: Some(rgba(0, 0, 0, 255)),
+                ..Default::default()
+            },
+        )
+        .expect("begin session");
+    session
+        .submit_display_list(&cloned_dl)
+        .expect("submit display list");
     session.end().expect("end session");
 
     let pixels = target.cpu_pixels().expect("read CPU target pixels");

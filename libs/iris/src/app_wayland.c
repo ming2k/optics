@@ -1365,10 +1365,8 @@ static void kb_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uin
     wp_platform *pl = data;
     if (!pl->xkb_state)
         return;
-    /* A modifier change ends any in-flight repeat: the held key's meaning
-     * (and text) just changed under it. */
-    wp_repeat_cancel(pl);
-    xkb_state_update_mask(pl->xkb_state, dep, latched, locked, 0, 0, group);
+    enum xkb_state_component changed =
+        xkb_state_update_mask(pl->xkb_state, dep, latched, locked, 0, 0, group);
     struct {
         const char *name;
         uint32_t bit;
@@ -1378,14 +1376,20 @@ static void kb_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uin
         {XKB_MOD_NAME_ALT, LENS_MOD_ALT},
         {XKB_MOD_NAME_LOGO, LENS_MOD_SUPER},
     };
+    uint32_t new_mods = 0;
     for (size_t i = 0; i < sizeof m / sizeof m[0]; i++) {
-        bool on =
-            xkb_state_mod_name_is_active(pl->xkb_state, m[i].name, XKB_STATE_MODS_EFFECTIVE) > 0;
-        if (on)
-            pl->acc.mods |= m[i].bit;
-        else
-            pl->acc.mods &= ~m[i].bit;
+        if (xkb_state_mod_name_is_active(pl->xkb_state, m[i].name, XKB_STATE_MODS_EFFECTIVE) > 0)
+            new_mods |= m[i].bit;
     }
+    bool mods_changed = (new_mods != pl->acc.mods);
+    pl->acc.mods = new_mods;
+
+    /* A genuine modifier or layout change ends any in-flight repeat:
+     * the held key's meaning (and text) just changed under it. Compositors
+     * post an authoritative modifier snapshot after every key event;
+     * unchanged snapshots must NOT cancel the repeat timer. */
+    if (mods_changed || (changed & (XKB_STATE_MODS_EFFECTIVE | XKB_STATE_LAYOUT_EFFECTIVE)))
+        wp_repeat_cancel(pl);
 }
 /* The compositor's repeat preference (wl_keyboard ≥ v4). rate 0 disables
  * repeat entirely; a change re-arms an in-flight repeat with the new
@@ -3017,6 +3021,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                         * we fail before the bridge is started */
         .wakeup_fd = -1,
         .repeat_fd = -1,
+        .repeat_rate = 25,
+        .repeat_delay = 250,
     };
 
     /* Publish `pl` as the active app instance so the context-free

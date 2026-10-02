@@ -152,9 +152,7 @@ impl<T: Clone + 'static> Memo<T> {
 }
 
 /// Create a derived computation that re-evaluates only when its dependencies change.
-pub fn create_memo<T: Clone + PartialEq + 'static>(
-    f: impl Fn() -> T + 'static,
-) -> Memo<T> {
+pub fn create_memo<T: Clone + PartialEq + 'static>(f: impl Fn() -> T + 'static) -> Memo<T> {
     let initial = f();
     let (read, write) = create_signal(initial);
     let compute = Rc::new(f);

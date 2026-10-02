@@ -117,6 +117,7 @@ TRANSIT_API float transit_ease_out_cubic(float t);
 TRANSIT_API float transit_ease_in_cubic(float t);
 TRANSIT_API float transit_ease_in_out_cubic(float t);
 TRANSIT_API float transit_ease_out_back(float t);
+TRANSIT_API float transit_smoothstep(float t);
 
 /* ================================================================== */
 /*  Hysteresis — the de-jitter primitive for binary decisions        */

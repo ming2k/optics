@@ -1,7 +1,7 @@
 //! Tests for fine-grained reactivity and declarative retained views.
 
 use lens::reactive::{create_effect, create_memo, create_signal};
-use lens::view::{dyn_button, dyn_label, h_stack, v_stack, View};
+use lens::view::{View, dyn_button, dyn_label, h_stack, v_stack};
 use std::cell::RefCell;
 use std::rc::Rc;
 

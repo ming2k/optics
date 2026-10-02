@@ -8,8 +8,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::{Frame, LayoutOpts};
 use crate::reactive::create_effect;
+use crate::{Frame, LayoutOpts};
 
 /// A persistent node in the declarative retained UI tree.
 pub trait View: 'static {

@@ -2373,7 +2373,10 @@ impl<'session> CanvasCommands<'session> {
     /// The owner must keep the Canvas alive and recording throughout
     /// `'session`, serialize access, and check the pass result when closing it.
     pub unsafe fn borrow_raw(raw: *mut sys::flux_canvas) -> Self {
-        Self { raw, _session: PhantomData }
+        Self {
+            raw,
+            _session: PhantomData,
+        }
     }
 }
 
@@ -2394,7 +2397,9 @@ impl<T: AsTarget> CanvasSession<'_, T> {
 }
 impl<'canvas, T: AsTarget> std::ops::Deref for CanvasSession<'canvas, T> {
     type Target = CanvasCommands<'canvas>;
-    fn deref(&self) -> &Self::Target { &self.commands }
+    fn deref(&self) -> &Self::Target {
+        &self.commands
+    }
 }
 impl<T: AsTarget> Drop for CanvasSession<'_, T> {
     fn drop(&mut self) {
@@ -2784,7 +2789,10 @@ impl Canvas {
         let raw = self.raw;
         Ok(CanvasSession {
             canvas: self,
-            commands: CanvasCommands { raw, _session: PhantomData },
+            commands: CanvasCommands {
+                raw,
+                _session: PhantomData,
+            },
             _target: target,
             ended: false,
         })
@@ -2821,8 +2829,9 @@ impl Canvas {
     }
 
     /// Borrow the raw Canvas for unsafe integration.
-    pub fn as_raw(&self) -> *mut sys::flux_canvas { self.raw }
-
+    pub fn as_raw(&self) -> *mut sys::flux_canvas {
+        self.raw
+    }
 }
 
 /// One colour sample in a canvas gradient.
@@ -2835,10 +2844,7 @@ pub struct GradientStop {
 impl GradientStop {
     /// Create a stop, clamping its offset to the gradient's `[0, 1]` domain.
     pub fn new(offset: f32, color: u32) -> Self {
-        Self {
-            offset,
-            color,
-        }
+        Self { offset, color }
     }
 }
 
@@ -2995,25 +3001,33 @@ impl LineJoin {
 
 /// Surface coloring, independent of geometry and stroke topology.
 #[derive(Clone, Copy)]
-pub struct Brush { raw: sys::flux_brush }
+pub struct Brush {
+    raw: sys::flux_brush,
+}
 impl Brush {
     pub fn solid(color: u32) -> Self {
-        Self { raw: sys::flux_brush {
-            kind: sys::flux_brush_kind::FLUX_BRUSH_SOLID,
-            blend: sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
-            opacity: 1.0,
-            __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
-                solid: sys::flux_brush_solid_data { color },
+        Self {
+            raw: sys::flux_brush {
+                kind: sys::flux_brush_kind::FLUX_BRUSH_SOLID,
+                blend: sys::flux_blend_mode::FLUX_BLEND_SRC_OVER,
+                opacity: 1.0,
+                __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
+                    solid: sys::flux_brush_solid_data { color },
+                },
             },
-        } }
+        }
     }
     pub fn with_blend(mut self, blend: BlendMode) -> Self {
-        self.raw.blend = blend.raw(); self
+        self.raw.blend = blend.raw();
+        self
     }
     pub fn with_opacity(mut self, opacity: f32) -> Self {
-        self.raw.opacity = opacity; self
+        self.raw.opacity = opacity;
+        self
     }
-    pub fn as_raw(&self) -> &sys::flux_brush { &self.raw }
+    pub fn as_raw(&self) -> &sys::flux_brush {
+        &self.raw
+    }
 }
 #[derive(Clone, Copy, Debug)]
 pub struct StrokeStyle {
@@ -3023,25 +3037,52 @@ pub struct StrokeStyle {
     pub join: LineJoin,
 }
 impl Default for StrokeStyle {
-    fn default() -> Self { Self { width: 1.0, miter_limit: 4.0, cap: LineCap::Butt, join: LineJoin::Miter } }
+    fn default() -> Self {
+        Self {
+            width: 1.0,
+            miter_limit: 4.0,
+            cap: LineCap::Butt,
+            join: LineJoin::Miter,
+        }
+    }
 }
 impl StrokeStyle {
     fn raw(self) -> sys::flux_stroke_style {
-        sys::flux_stroke_style { width: self.width, miter_limit: self.miter_limit, cap: self.cap.raw(), join: self.join.raw() }
+        sys::flux_stroke_style {
+            width: self.width,
+            miter_limit: self.miter_limit,
+            cap: self.cap.raw(),
+            join: self.join.raw(),
+        }
     }
 }
 #[derive(Clone, Copy, Debug, Default)]
-pub enum FillRule { #[default] NonZero, EvenOdd }
+pub enum FillRule {
+    #[default]
+    NonZero,
+    EvenOdd,
+}
 impl FillRule {
     fn raw(self) -> sys::flux_fill_rule {
-        match self { Self::NonZero => sys::flux_fill_rule::FLUX_FILL_NON_ZERO, Self::EvenOdd => sys::flux_fill_rule::FLUX_FILL_EVEN_ODD }
+        match self {
+            Self::NonZero => sys::flux_fill_rule::FLUX_FILL_NON_ZERO,
+            Self::EvenOdd => sys::flux_fill_rule::FLUX_FILL_EVEN_ODD,
+        }
     }
 }
 /// Image modulation. Zero tint and opacity remain transparent.
 #[derive(Clone, Copy, Debug)]
-pub struct ImageStyle { pub tint: u32, pub blend: BlendMode }
+pub struct ImageStyle {
+    pub tint: u32,
+    pub blend: BlendMode,
+}
 impl Default for ImageStyle {
-    fn default() -> Self { Self { tint: 0xFFFFFFFF, blend: BlendMode::SrcOver } }
+    fn default() -> Self {
+        Self {
+            tint: 0xFFFFFFFF,
+            blend: BlendMode::SrcOver,
+        }
+    }
 }
 
 /// A vector path allocated from an [`Arena`] (mirrors `flux_path`).
@@ -4580,7 +4621,10 @@ impl CanvasCommands<'_> {
                 sys::flux_geom_kind::FLUX_GEOM_RECT
             },
             _pad: [0; 3],
-            stroke: sys::flux_stroke_style { width: 0.0, ..Default::default() },
+            stroke: sys::flux_stroke_style {
+                width: 0.0,
+                ..Default::default()
+            },
             __bindgen_anon_1: if is_rrect {
                 sys::flux_geometry__bindgen_ty_1 {
                     rrect: sys::flux_geom_rrect_data {
@@ -4651,7 +4695,10 @@ impl CanvasCommands<'_> {
         let geom = sys::flux_geometry {
             kind: sys::flux_geom_kind::FLUX_GEOM_RECT,
             _pad: [0; 3],
-            stroke: sys::flux_stroke_style { width: 0.0, ..Default::default() },
+            stroke: sys::flux_stroke_style {
+                width: 0.0,
+                ..Default::default()
+            },
             __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
                 rect: sys::flux_geom_rect_data {
                     rect: sys::flux_rect { x, y, w, h },
@@ -4675,7 +4722,10 @@ impl CanvasCommands<'_> {
         let geom = sys::flux_geometry {
             kind: sys::flux_geom_kind::FLUX_GEOM_RRECT,
             _pad: [0; 3],
-            stroke: sys::flux_stroke_style { width: 0.0, ..Default::default() },
+            stroke: sys::flux_stroke_style {
+                width: 0.0,
+                ..Default::default()
+            },
             __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
                 rrect: sys::flux_geom_rrect_data {
                     rect: sys::flux_rect { x, y, w, h },
@@ -4709,7 +4759,10 @@ impl CanvasCommands<'_> {
         let geom = sys::flux_geometry {
             kind: sys::flux_geom_kind::FLUX_GEOM_RRECT,
             _pad: [0; 3],
-            stroke: sys::flux_stroke_style { width: width, ..Default::default() },
+            stroke: sys::flux_stroke_style {
+                width: width,
+                ..Default::default()
+            },
             __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
                 rrect: sys::flux_geom_rrect_data {
                     rect: sys::flux_rect { x, y, w, h },
@@ -4733,7 +4786,10 @@ impl CanvasCommands<'_> {
         let geom = sys::flux_geometry {
             kind: sys::flux_geom_kind::FLUX_GEOM_PATH,
             _pad: [0; 3],
-            stroke: sys::flux_stroke_style { width: 0.0, ..Default::default() },
+            stroke: sys::flux_stroke_style {
+                width: 0.0,
+                ..Default::default()
+            },
             __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
                 path: sys::flux_geom_path_data {
                     path: path.raw,
@@ -4776,7 +4832,10 @@ impl CanvasCommands<'_> {
         let geom = sys::flux_geometry {
             kind: sys::flux_geom_kind::FLUX_GEOM_RECT,
             _pad: [0; 3],
-            stroke: sys::flux_stroke_style { width: 0.0, ..Default::default() },
+            stroke: sys::flux_stroke_style {
+                width: 0.0,
+                ..Default::default()
+            },
             __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
                 rect: sys::flux_geom_rect_data {
                     rect: sys::flux_rect {
@@ -4827,7 +4886,10 @@ impl CanvasCommands<'_> {
         let geom = sys::flux_geometry {
             kind: sys::flux_geom_kind::FLUX_GEOM_RECT,
             _pad: [0; 3],
-            stroke: sys::flux_stroke_style { width: 0.0, ..Default::default() },
+            stroke: sys::flux_stroke_style {
+                width: 0.0,
+                ..Default::default()
+            },
             __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
                 rect: sys::flux_geom_rect_data {
                     rect: sys::flux_rect {
@@ -5180,7 +5242,8 @@ impl CanvasCommands<'_> {
     /// retains ownership.
     pub fn as_raw(&self) -> *mut sys::flux_canvas {
         self.raw
-    }    /// Wait a producer sync-file before this frame samples an already
+    }
+    /// Wait a producer sync-file before this frame samples an already
     /// imported dma-buf image.
     ///
     /// Call between [`Canvas::begin_frame`] and [`Canvas::end_frame`], before
@@ -5195,6 +5258,4 @@ impl CanvasCommands<'_> {
         std::mem::forget(acquire_fence);
         Ok(())
     }
-
-
 }
