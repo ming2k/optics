@@ -46,7 +46,7 @@ extern "C" {
 
 #define LENS_VERSION_MAJOR 0
 #define LENS_VERSION_MINOR 0
-#define LENS_VERSION_PATCH 53
+#define LENS_VERSION_PATCH 54
 
 /* Stringify helpers used by lens_version_string(); LENS_STRINGIFY_ adds the
  * indirection level required for macro-expansion of literal tokens. */

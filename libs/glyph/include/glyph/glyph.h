@@ -39,7 +39,7 @@ extern "C" {
 
 #define GLYPH_VERSION_MAJOR 0
 #define GLYPH_VERSION_MINOR 0
-#define GLYPH_VERSION_PATCH 53
+#define GLYPH_VERSION_PATCH 54
 
 /* Packed integer version, monotonic — identical layout to FLUX_VERSION_NUMBER. */
 #define GLYPH_VERSION_NUMBER                                                                       \

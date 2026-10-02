@@ -13,6 +13,17 @@ either.
 
 ## [Unreleased]
 
+## [0.0.54] - 2026-10-02
+
+### Added
+
+- **transit**: `transit_smoothstep` cubic Hermite interpolation easing function.
+- **transit-rs**: `smoothstep` wrapper and smoke tests.
+
+### Fixed
+
+- **iris**: Wayland repeat timer cancellation on redundant compositor modifier snapshots; explicit default repeat rate and delay initialization.
+
 ## [0.0.53] - 2026-09-28
 
 ### Changed
