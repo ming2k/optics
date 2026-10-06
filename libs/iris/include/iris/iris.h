@@ -32,6 +32,7 @@
 #include <iris/capability.h>
 #include <iris/cursor.h>
 #include <iris/dnd.h>
+#include <iris/event.h>
 #include <iris/file_dialog.h>
 #include <iris/theme.h>
 #include <iris/window.h>

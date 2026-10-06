@@ -24,6 +24,7 @@ iris_inc = include_directories('include')
 iris_sources = files(
   'src/version.c',
   'src/app.c',
+  'src/event.c',
   'src/capability.c',
   'src/a11y_util.c',
   'src/platform_text.c',
@@ -191,6 +192,7 @@ install_headers(
   'include/iris/capability.h',
   'include/iris/cursor.h',
   'include/iris/dnd.h',
+  'include/iris/event.h',
   'include/iris/theme.h',
   'include/iris/file_dialog.h',
   'include/iris/a11y.h',

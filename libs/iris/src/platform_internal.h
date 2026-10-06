@@ -56,6 +56,14 @@
  *   include another platform's headers (linux/input-event-codes.h is
  *   Linux-only, windows.h Win32-only, …).
  *
+ * Event seam (event_internal.h, ADR-0107):
+ *   Every native event is reified into one iris_event and routed through
+ *   iris__event_seam_emit() BEFORE it is applied to the backend
+ *   accumulator; only survivors are folded into lens_input. A backend must
+ *   not write lens_input directly, and must not apply an event the seam
+ *   dropped. Host rewrites are read back out of the same iris_event. Emit
+ *   order is arrival order; iris stamps the monotonic sequence.
+ *
  * Keyboard contract (all three backends MUST hold these; lens relies on
  * them):
  *   (a) Both edges are reported: every mappable key produces a
@@ -115,6 +123,8 @@
 #define IRIS_PLATFORM_INTERNAL_H
 
 #include "iris/app.h"
+
+#include "event_internal.h"
 
 /* Wayland — implemented by app_wayland.c (Linux). */
 int iris_app_run_wayland(const iris_app_config *cfg);

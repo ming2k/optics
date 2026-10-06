@@ -470,25 +470,146 @@ static int mouse_index_from_event(NSEvent *event) {
     return iris_pointer_button_to_lens(b);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Pre-fold event seam helpers (ADR-0107) — mirror app_win32.c        */
+/* ------------------------------------------------------------------ */
+/* Reify → run the host seam (event_internal.h) → apply the surviving,
+ * possibly host-rewritten event to the accumulator. */
+
+static bool cocoa_emit_pointer(IrisPlatform *pl, iris_event_type type, double x, double y) {
+    iris_event ev = {.type = type, .pointer = {.x = (float)x, .y = (float)y}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    pl->acc.cx = ev.pointer.x;
+    pl->acc.cy = ev.pointer.y;
+    return true;
+}
+
+static bool cocoa_emit_button(IrisPlatform *pl, double x, double y, int lens_button, bool down) {
+    iris_event ev = {.type = IRIS_EVENT_POINTER_BUTTON,
+                     .button = {.x = (float)x,
+                                .y = (float)y,
+                                .button = lens_button,
+                                .pressed = down}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    int i = ev.button.button;
+    if (i < 0 || i >= LENS_MOUSE_COUNT)
+        return false;
+    pl->acc.cx = ev.button.x;
+    pl->acc.cy = ev.button.y;
+    bool d = ev.button.pressed;
+    if (d && !pl->acc.down[i])
+        pl->acc.pressed[i] = true;
+    if (!d && pl->acc.down[i])
+        pl->acc.released[i] = true;
+    pl->acc.down[i] = d;
+    return true;
+}
+
+static bool cocoa_emit_scroll(IrisPlatform *pl, double dx, double dy, bool continuous) {
+    iris_event ev = {
+        .type = IRIS_EVENT_SCROLL, .scroll = {.dx = (float)dx, .dy = (float)dy, .continuous = continuous}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.scroll.dx != 0.0f)
+        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                               &pl->acc.scroll_px_x, 1, (double)ev.scroll.dx, ev.scroll.continuous);
+    if (ev.scroll.dy != 0.0f)
+        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                               &pl->acc.scroll_px_x, 0, (double)ev.scroll.dy, ev.scroll.continuous);
+    return true;
+}
+
+static bool cocoa_emit_key(IrisPlatform *pl, int key, bool pressed, bool repeat, uint32_t mods) {
+    iris_event ev = {.type = IRIS_EVENT_KEY,
+                     .keyboard = {.key = key, .pressed = pressed, .repeat = repeat, .mods = mods}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.keyboard.key != 0 && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
+        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){.key = ev.keyboard.key,
+                                                             .pressed = ev.keyboard.pressed,
+                                                             .repeat = ev.keyboard.repeat};
+    return true;
+}
+
+static bool cocoa_emit_modifiers(IrisPlatform *pl, uint32_t mods) {
+    iris_event ev = {.type = IRIS_EVENT_MODIFIERS, .modifiers = {.mods = mods}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    pl->acc.mods = ev.modifiers.mods;
+    return true;
+}
+
+static bool cocoa_emit_text(IrisPlatform *pl, const char *utf8, size_t n) {
+    iris_event ev = {.type = IRIS_EVENT_TEXT_COMMIT, .text = {.utf8 = utf8, .len = n}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.text.utf8 && ev.text.len)
+        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, ev.text.utf8, ev.text.len);
+    return true;
+}
+
+static bool cocoa_emit_preedit(IrisPlatform *pl, const char *utf8, uint32_t cursor, uint32_t sel_lo,
+                               uint32_t sel_hi) {
+    iris_event ev = {.type = IRIS_EVENT_PREEDIT,
+                     .preedit = {.utf8 = utf8,
+                                 .len = utf8 ? strlen(utf8) : 0,
+                                 .cursor = cursor,
+                                 .sel_lo = sel_lo,
+                                 .sel_hi = sel_hi}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.preedit.utf8 && ev.preedit.utf8[0]) {
+        iris_utf8_copy(pl->acc.preedit, sizeof pl->acc.preedit, ev.preedit.utf8);
+        uint32_t alen = (uint32_t)strlen(pl->acc.preedit);
+        pl->acc.preedit_cursor = ev.preedit.cursor > alen ? alen : ev.preedit.cursor;
+        pl->acc.preedit_sel_lo = ev.preedit.sel_lo > alen ? alen : ev.preedit.sel_lo;
+        pl->acc.preedit_sel_hi = ev.preedit.sel_hi > alen ? alen : ev.preedit.sel_hi;
+    } else {
+        pl->acc.preedit[0] = '\0';
+        pl->acc.preedit_cursor = 0;
+        pl->acc.preedit_sel_lo = pl->acc.preedit_sel_hi = 0;
+    }
+    return true;
+}
+
+/* Lifecycle events are observe-only (undroppable). */
+static void cocoa_emit_resize(uint32_t w, uint32_t h) {
+    iris_event ev = {.type = IRIS_EVENT_RESIZE,
+                     .flags = IRIS_EVENT_F_UNDROPPABLE,
+                     .resize = {.width = w, .height = h}};
+    (void)iris__event_seam_emit(&ev);
+}
+static void cocoa_emit_scale(float scale) {
+    iris_event ev = {
+        .type = IRIS_EVENT_SCALE, .flags = IRIS_EVENT_F_UNDROPPABLE, .scale = {.scale = scale}};
+    (void)iris__event_seam_emit(&ev);
+}
+static void cocoa_emit_focus(bool focused) {
+    iris_event ev = {
+        .type = IRIS_EVENT_FOCUS, .flags = IRIS_EVENT_F_UNDROPPABLE, .focus = {.focused = focused}};
+    (void)iris__event_seam_emit(&ev);
+}
+static void cocoa_emit_close(void) {
+    iris_event ev = {.type = IRIS_EVENT_CLOSE, .flags = IRIS_EVENT_F_UNDROPPABLE};
+    (void)iris__event_seam_emit(&ev);
+}
+
 static void update_cursor_pos(IrisPlatform *pl, NSEvent *event) {
     if (!pl->view)
         return;
     /* The view is flipped (isFlipped == YES), so the converted point is
      * already in lens's top-left-origin UI space — no Y inversion. */
     NSPoint p = [pl->view convertPoint:[event locationInWindow] fromView:nil];
-    pl->acc.cx = p.x;
-    pl->acc.cy = p.y;
+    (void)cocoa_emit_pointer(pl, IRIS_EVENT_POINTER_MOVE, p.x, p.y);
 }
 
 static void mouse_button(IrisPlatform *pl, NSEvent *event, bool down) {
     int i = mouse_index_from_event(event);
     if (i < 0)
         return;
-    if (down && !pl->acc.down[i])
-        pl->acc.pressed[i] = true;
-    if (!down && pl->acc.down[i])
-        pl->acc.released[i] = true;
-    pl->acc.down[i] = down;
+    (void)cocoa_emit_button(pl, pl->acc.cx, pl->acc.cy, i, down);
 }
 
 /* ------------------------------------------------------------------ */
@@ -576,13 +697,6 @@ static int key_sentinel(unsigned short keyCode) {
     default:
         return 0;
     }
-}
-
-/* Append NUL-terminated UTF-8 to a capped accumulator buffer, truncating
- * on a code-point boundary (shared helper — the old byte-count cut could
- * split a multi-byte sequence and emit invalid UTF-8). */
-static void acc_append_text(char *dst, size_t cap, const char *utf8) {
-    iris_utf8_append(dst, cap, utf8, strlen(utf8));
 }
 
 /* ------------------------------------------------------------------ */
@@ -745,7 +859,7 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
     (void)event;
     if (!_platform)
         return;
-    _platform->acc.cx = _platform->acc.cy = -100000.0; /* off-window: clears hover */
+    (void)cocoa_emit_pointer(_platform, IRIS_EVENT_POINTER_LEAVE, -100000.0, -100000.0);
 }
 
 - (void)mouseMoved:(NSEvent *)event {
@@ -814,11 +928,9 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
     if (!_platform)
         return;
     if ([event hasPreciseScrollingDeltas]) {
-        _platform->acc.scroll_px_x += [event scrollingDeltaX];
-        _platform->acc.scroll_px_y += [event scrollingDeltaY];
+        (void)cocoa_emit_scroll(_platform, [event scrollingDeltaX], [event scrollingDeltaY], true);
     } else {
-        _platform->acc.scroll_x += [event deltaX];
-        _platform->acc.scroll_y += [event deltaY];
+        (void)cocoa_emit_scroll(_platform, [event deltaX], [event deltaY], false);
     }
     (void)[event momentumPhase]; /* momentum is precise-delta traffic; handled above */
 }
@@ -846,10 +958,8 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
                 fk = (int)c;
         }
     }
-    if (fk && pl->acc.key_count < LENS_INPUT_MAX_KEYS) {
-        pl->acc.keys[pl->acc.key_count++] =
-            (lens_key_event){.key = fk, .pressed = true, .repeat = [event isARepeat]};
-    }
+    if (fk)
+        (void)cocoa_emit_key(pl, fk, true, [event isARepeat], pl->acc.mods);
 
     /* Committed text, only when the input context did not already deliver
      * it and no Command / Control chord is down (otherwise Cmd+C would
@@ -865,7 +975,7 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
         if (iris_cp_is_text(c0)) {
             const char *utf8 = [chars UTF8String];
             if (utf8)
-                acc_append_text(pl->acc.text, sizeof pl->acc.text, utf8);
+                (void)cocoa_emit_text(pl, utf8, strlen(utf8));
         }
     }
 }
@@ -906,10 +1016,8 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
                 fk = (int)c;
         }
     }
-    if (fk && pl->acc.key_count < LENS_INPUT_MAX_KEYS) {
-        pl->acc.keys[pl->acc.key_count++] =
-            (lens_key_event){.key = fk, .pressed = false, .repeat = false};
-    }
+    if (fk)
+        (void)cocoa_emit_key(pl, fk, false, false, pl->acc.mods);
 }
 
 - (void)flagsChanged:(NSEvent *)event {
@@ -926,7 +1034,7 @@ static void acc_append_text(char *dst, size_t cap, const char *utf8) {
         m |= LENS_MOD_ALT;
     if (f & NSEventModifierFlagCommand)
         m |= LENS_MOD_SUPER;
-    pl->acc.mods = m;
+    (void)cocoa_emit_modifiers(pl, m);
 }
 
 /* --- NSTextInputClient (IME) --------------------------------------- */
@@ -942,12 +1050,8 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 - (void)irisUnmark {
     _marked_text = nil;
     _selected_in_marked = NSMakeRange(NSNotFound, 0);
-    if (_platform) {
-        _platform->acc.preedit[0] = '\0';
-        _platform->acc.preedit_cursor = 0;
-        _platform->acc.preedit_sel_lo = 0;
-        _platform->acc.preedit_sel_hi = 0;
-    }
+    if (_platform)
+        (void)cocoa_emit_preedit(_platform, "", 0, 0, 0);
 }
 
 - (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
@@ -963,7 +1067,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
     [self irisUnmark];
     const char *utf8 = [s UTF8String];
     if (utf8)
-        acc_append_text(pl->acc.text, sizeof pl->acc.text, utf8);
+        (void)cocoa_emit_text(pl, utf8, strlen(utf8));
     _ime_delivered_this_event = true;
 }
 
@@ -982,13 +1086,14 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
     }
     _marked_text = [s copy];
 
+    char pre[LENS_PREEDIT_MAX];
     const char *utf8 = [_marked_text UTF8String];
     if (utf8) {
         /* boundary-aware copy: a raw byte cap could split a multi-byte
          * sequence at LENS_PREEDIT_MAX and hand lens invalid UTF-8. */
-        iris_utf8_copy(pl->acc.preedit, sizeof pl->acc.preedit, utf8);
+        iris_utf8_copy(pre, sizeof pre, utf8);
     } else {
-        pl->acc.preedit[0] = '\0';
+        pre[0] = '\0';
     }
 
     NSUInteger loc = selectedRange.location;
@@ -1000,19 +1105,11 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
     if (len > [_marked_text length] - loc)
         len = [_marked_text length] - loc;
     _selected_in_marked = NSMakeRange(loc, len);
-    pl->acc.preedit_cursor = utf8_byte_offset(_marked_text, loc);
-    pl->acc.preedit_sel_lo = utf8_byte_offset(_marked_text, loc);
-    pl->acc.preedit_sel_hi = utf8_byte_offset(_marked_text, loc + len);
-    /* The preedit buffer caps at LENS_PREEDIT_MAX - 1 bytes; an over-long
-     * composition is truncated, so clamp the offsets into the truncated
-     * string to keep them in range for lens. */
-    size_t plen = strlen(pl->acc.preedit);
-    if (pl->acc.preedit_cursor > plen)
-        pl->acc.preedit_cursor = (uint32_t)plen;
-    if (pl->acc.preedit_sel_lo > plen)
-        pl->acc.preedit_sel_lo = (uint32_t)plen;
-    if (pl->acc.preedit_sel_hi > plen)
-        pl->acc.preedit_sel_hi = (uint32_t)plen;
+    /* The preedit buffer caps at LENS_PREEDIT_MAX - 1 bytes; cocoa_emit_preedit
+     * truncates on a code-point boundary and clamps the offsets to match. */
+    (void)cocoa_emit_preedit(pl, pre, utf8_byte_offset(_marked_text, loc),
+                             utf8_byte_offset(_marked_text, loc),
+                             utf8_byte_offset(_marked_text, loc + len));
     _ime_delivered_this_event = true;
 }
 
@@ -1107,8 +1204,10 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 
 - (BOOL)windowShouldClose:(NSWindow *)sender {
     (void)sender;
-    if (_platform)
+    if (_platform) {
+        cocoa_emit_close();
         _platform->running = false;
+    }
     return NO; /* teardown happens on the iris_app_run_cocoa exit path */
 }
 
@@ -1124,8 +1223,19 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
         pl->width = w;
         pl->height = h;
         pl->resized = true;
+        cocoa_emit_resize((uint32_t)w, (uint32_t)h);
     }
     [pl->view irisUpdateMetalLayer];
+}
+
+- (void)windowDidBecomeKey:(NSNotification *)notification {
+    (void)notification;
+    cocoa_emit_focus(true);
+}
+
+- (void)windowDidResignKey:(NSNotification *)notification {
+    (void)notification;
+    cocoa_emit_focus(false);
 }
 
 - (void)windowDidChangeBackingProperties:(NSNotification *)notification {
@@ -1467,6 +1577,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         CGFloat factor = [window backingScaleFactor];
         pl->scale = factor > 0.0 ? (float)factor : 1.0f;
         pl->pending_scale = pl->scale;
+        cocoa_emit_scale(pl->scale);
         [view irisUpdateMetalLayer];
 
         /* --- Vulkan instance via flux (Metal WSI extensions) -------- */
@@ -1703,6 +1814,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                 bool resized_this_frame = false;
                 if (pl->pending_scale > 0.0f && pl->pending_scale != pl->scale) {
                     pl->scale = pl->pending_scale;
+                    cocoa_emit_scale(pl->scale);
                     lens_set_scale(ui, pl->scale);
                     pl->resized = true;
                 }

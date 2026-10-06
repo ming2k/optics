@@ -289,12 +289,145 @@ static int utf8_encode(uint32_t cp, char out[4]) {
     return 4;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Pre-fold event seam helpers (ADR-0107)                            */
+/* ------------------------------------------------------------------ */
+/* Every lens-facing input mutation goes through one of these: reify,
+ * run the host seam (event_internal.h), apply the surviving — possibly
+ * host-rewritten — event to the accumulator. Platform bookkeeping
+ * (capture, cursor, IME state) stays outside the seam. */
+
+static bool w32_emit_pointer(w32_platform *pl, iris_event_type type, double x, double y) {
+    iris_event ev = {.type = type, .pointer = {.x = (float)x, .y = (float)y}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    pl->acc.cx = ev.pointer.x;
+    pl->acc.cy = ev.pointer.y;
+    return true;
+}
+
+static bool w32_emit_button(w32_platform *pl, double x, double y, int lens_button, bool down) {
+    iris_event ev = {.type = IRIS_EVENT_POINTER_BUTTON,
+                     .button = {.x = (float)x,
+                                .y = (float)y,
+                                .button = lens_button,
+                                .pressed = down}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    int i = ev.button.button;
+    if (i < 0 || i >= LENS_MOUSE_COUNT)
+        return false;
+    pl->acc.cx = ev.button.x;
+    pl->acc.cy = ev.button.y;
+    bool d = ev.button.pressed;
+    if (d && !pl->acc.down[i])
+        pl->acc.pressed[i] = true;
+    if (!d && pl->acc.down[i])
+        pl->acc.released[i] = true;
+    pl->acc.down[i] = d;
+    return true;
+}
+
+static bool w32_emit_scroll(w32_platform *pl, bool horizontal, double lens_delta, bool continuous) {
+    iris_event ev = {.type = IRIS_EVENT_SCROLL, .scroll = {.continuous = continuous}};
+    if (horizontal)
+        ev.scroll.dx = (float)lens_delta;
+    else
+        ev.scroll.dy = (float)lens_delta;
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.scroll.dx != 0.0f)
+        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                               &pl->acc.scroll_px_x, 1, (double)ev.scroll.dx, ev.scroll.continuous);
+    if (ev.scroll.dy != 0.0f)
+        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                               &pl->acc.scroll_px_x, 0, (double)ev.scroll.dy, ev.scroll.continuous);
+    return true;
+}
+
+static bool w32_emit_key(w32_platform *pl, int key, bool pressed, bool repeat, uint32_t mods) {
+    iris_event ev = {.type = IRIS_EVENT_KEY,
+                     .keyboard = {.key = key, .pressed = pressed, .repeat = repeat, .mods = mods}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.keyboard.key != 0 && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
+        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){.key = ev.keyboard.key,
+                                                             .pressed = ev.keyboard.pressed,
+                                                             .repeat = ev.keyboard.repeat};
+    return true;
+}
+
+static bool w32_emit_modifiers(w32_platform *pl, uint32_t mods) {
+    iris_event ev = {.type = IRIS_EVENT_MODIFIERS, .modifiers = {.mods = mods}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    pl->acc.mods = ev.modifiers.mods;
+    return true;
+}
+
+static bool w32_emit_text(w32_platform *pl, const char *utf8, size_t n) {
+    iris_event ev = {.type = IRIS_EVENT_TEXT_COMMIT, .text = {.utf8 = utf8, .len = n}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.text.utf8 && ev.text.len)
+        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, ev.text.utf8, ev.text.len);
+    return true;
+}
+
+static bool w32_emit_preedit(w32_platform *pl, const char *utf8, uint32_t cursor, uint32_t sel_lo,
+                             uint32_t sel_hi) {
+    iris_event ev = {.type = IRIS_EVENT_PREEDIT,
+                     .preedit = {.utf8 = utf8,
+                                 .len = utf8 ? strlen(utf8) : 0,
+                                 .cursor = cursor,
+                                 .sel_lo = sel_lo,
+                                 .sel_hi = sel_hi}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.preedit.utf8 && ev.preedit.utf8[0]) {
+        iris_utf8_copy(pl->acc.preedit, sizeof pl->acc.preedit, ev.preedit.utf8);
+        uint32_t alen = (uint32_t)strlen(pl->acc.preedit);
+        pl->acc.preedit_cursor = ev.preedit.cursor > alen ? alen : ev.preedit.cursor;
+        pl->acc.preedit_sel_lo = ev.preedit.sel_lo > alen ? alen : ev.preedit.sel_lo;
+        pl->acc.preedit_sel_hi = ev.preedit.sel_hi > alen ? alen : ev.preedit.sel_hi;
+    } else {
+        pl->acc.preedit[0] = '\0';
+        pl->acc.preedit_cursor = 0;
+        pl->acc.preedit_sel_lo = pl->acc.preedit_sel_hi = 0;
+    }
+    return true;
+}
+
+/* Lifecycle events are observe-only (undroppable): iris already applied
+ * the platform state; the host may read them but the payload is not folded
+ * back. */
+static void w32_emit_resize(uint32_t w, uint32_t h) {
+    iris_event ev = {.type = IRIS_EVENT_RESIZE,
+                     .flags = IRIS_EVENT_F_UNDROPPABLE,
+                     .resize = {.width = w, .height = h}};
+    (void)iris__event_seam_emit(&ev);
+}
+static void w32_emit_scale(float scale) {
+    iris_event ev = {
+        .type = IRIS_EVENT_SCALE, .flags = IRIS_EVENT_F_UNDROPPABLE, .scale = {.scale = scale}};
+    (void)iris__event_seam_emit(&ev);
+}
+static void w32_emit_focus(bool focused) {
+    iris_event ev = {
+        .type = IRIS_EVENT_FOCUS, .flags = IRIS_EVENT_F_UNDROPPABLE, .focus = {.focused = focused}};
+    (void)iris__event_seam_emit(&ev);
+}
+static void w32_emit_close(void) {
+    iris_event ev = {.type = IRIS_EVENT_CLOSE, .flags = IRIS_EVENT_F_UNDROPPABLE};
+    (void)iris__event_seam_emit(&ev);
+}
+
 /* Append UTF-8 text to the per-frame commit accumulator (cap 255 + NUL,
  * matching lens_input.text_utf8; enforced by the static_assert at the
  * w32_accum definition), truncating on a code-point boundary (shared
  * helper, platform_text.h). Same cap as app_wayland.c. */
 static void accum_text_append(w32_platform *pl, const char *utf8, size_t n) {
-    iris_utf8_append(pl->acc.text, sizeof pl->acc.text, utf8, n);
+    (void)w32_emit_text(pl, utf8, n);
 }
 
 static void accum_text_cp(w32_platform *pl, uint32_t cp) {
@@ -442,14 +575,11 @@ static void update_mods(w32_platform *pl) {
         m |= LENS_MOD_ALT;
     if ((GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000))
         m |= LENS_MOD_SUPER;
-    pl->acc.mods = m;
+    (void)w32_emit_modifiers(pl, m);
 }
 
 static void accum_key(w32_platform *pl, int key, bool pressed, bool repeat) {
-    if (pl->acc.key_count >= LENS_INPUT_MAX_KEYS)
-        return;
-    pl->acc.keys[pl->acc.key_count++] =
-        (lens_key_event){.key = key, .pressed = pressed, .repeat = repeat};
+    (void)w32_emit_key(pl, key, pressed, repeat, pl->acc.mods);
 }
 
 static void on_key(w32_platform *pl, WPARAM vk, LPARAM lp, bool down_edge) {
@@ -493,20 +623,14 @@ static void on_mouse_button(w32_platform *pl, UINT msg, bool down_edge) {
     if (i < 0)
         return;
     update_mods(pl);
+    (void)w32_emit_button(pl, pl->acc.cx, pl->acc.cy, i, down_edge);
     if (down_edge) {
-        if (!pl->acc.down[i])
-            pl->acc.pressed[i] = true;
-        pl->acc.down[i] = true;
         /* Implicit grab: keep receiving moves/up outside the client area
          * while a button is held (what the Wayland seat gives us for free). */
         SetCapture(pl->hwnd);
-    } else {
-        if (pl->acc.down[i])
-            pl->acc.released[i] = true;
-        pl->acc.down[i] = false;
-        if (!pl->acc.down[LENS_MOUSE_LEFT] && !pl->acc.down[LENS_MOUSE_RIGHT] &&
-            !pl->acc.down[LENS_MOUSE_MIDDLE])
-            ReleaseCapture();
+    } else if (!pl->acc.down[LENS_MOUSE_LEFT] && !pl->acc.down[LENS_MOUSE_RIGHT] &&
+               !pl->acc.down[LENS_MOUSE_MIDDLE]) {
+        ReleaseCapture();
     }
 }
 
@@ -522,15 +646,12 @@ static void on_mouse_button(w32_platform *pl, UINT msg, bool down_edge) {
 static void on_mouse_wheel(w32_platform *pl, WPARAM wParam, bool horizontal) {
     int delta = GET_WHEEL_DELTA_WPARAM(wParam);
     update_mods(pl);
-    double *steps = horizontal ? &pl->acc.scroll_x : &pl->acc.scroll_y;
-    double *pixels = horizontal ? &pl->acc.scroll_px_x : &pl->acc.scroll_px_y;
     double notch = (double)delta / (double)WHEEL_DELTA;
     if (horizontal)
         notch = -notch;
-    if (delta % WHEEL_DELTA == 0)
-        *steps += notch;
-    else
-        *pixels += notch * W32_WHEEL_PIXELS_PER_NOTCH;
+    bool continuous = (delta % WHEEL_DELTA != 0);
+    double lens = continuous ? notch * W32_WHEEL_PIXELS_PER_NOTCH : notch;
+    (void)w32_emit_scroll(pl, horizontal, lens, continuous);
 }
 
 /* ------------------------------------------------------------------ */
@@ -577,9 +698,7 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
                 accum_text_append(pl, u8, (size_t)n);
         }
         /* Result committed: the composition is over, preedit clears. */
-        pl->acc.preedit[0] = '\0';
-        pl->acc.preedit_cursor = 0;
-        pl->acc.preedit_sel_lo = pl->acc.preedit_sel_hi = 0;
+        (void)w32_emit_preedit(pl, "", 0, 0, 0);
     }
 
     if (flags & (GCS_COMPSTR | GCS_CURSORPOS | GCS_COMPATTR)) {
@@ -590,19 +709,20 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
         int n = wlen > 0 ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)wlen, u8, (int)sizeof u8,
                                                NULL, NULL)
                          : 0;
-        size_t kept = iris_utf8_floor_boundary(u8, (size_t)n, sizeof pl->acc.preedit - 1);
-        memcpy(pl->acc.preedit, u8, kept);
-        pl->acc.preedit[kept] = '\0';
+        char pre[LENS_PREEDIT_MAX];
+        size_t kept = iris_utf8_floor_boundary(u8, (size_t)n, sizeof pre - 1);
+        memcpy(pre, u8, kept);
+        pre[kept] = '\0';
 
         LONG cur = ImmGetCompositionStringW(himc, GCS_CURSORPOS, NULL, 0);
         if (cur < 0 || cur > wlen)
             cur = wlen;
         int cb = cur > 0 ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)cur, NULL, 0, NULL, NULL) : 0;
-        pl->acc.preedit_cursor = (uint32_t)((size_t)cb <= kept ? (size_t)cb : kept);
+        uint32_t pcursor = (uint32_t)((size_t)cb <= kept ? (size_t)cb : kept);
 
         /* Active clause: the run of ATTR_TARGET_* bytes under conversion.
          * IMM32 reports one attribute byte per WCHAR. */
-        pl->acc.preedit_sel_lo = pl->acc.preedit_sel_hi = 0;
+        uint32_t p_lo = 0, p_hi = 0;
         if (wlen > 0) {
             BYTE attr[256];
             LONG abytes = ImmGetCompositionStringW(himc, GCS_COMPATTR, attr, sizeof attr);
@@ -622,10 +742,11 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
                     hi = abytes;
                 int blo = WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)lo, NULL, 0, NULL, NULL);
                 int bhi = WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)hi, NULL, 0, NULL, NULL);
-                pl->acc.preedit_sel_lo = (uint32_t)((size_t)blo <= kept ? (size_t)blo : kept);
-                pl->acc.preedit_sel_hi = (uint32_t)((size_t)bhi <= kept ? (size_t)bhi : kept);
+                p_lo = (uint32_t)((size_t)blo <= kept ? (size_t)blo : kept);
+                p_hi = (uint32_t)((size_t)bhi <= kept ? (size_t)bhi : kept);
             }
         }
+        (void)w32_emit_preedit(pl, pre, pcursor, p_lo, p_hi);
     }
 
     ImmReleaseContext(pl->hwnd, himc);
@@ -1283,8 +1404,10 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 
     case WM_CLOSE:
         /* The window object outlives the loop; teardown destroys it. */
-        if (pl)
+        if (pl) {
+            w32_emit_close();
             pl->running = false;
+        }
         return 0;
     case WM_DESTROY:
         if (pl)
@@ -1323,9 +1446,19 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             pl->width = lw;
             pl->height = lh;
             pl->resized = true;
+            w32_emit_resize((uint32_t)lw, (uint32_t)lh);
         }
         return 0;
     }
+
+    case WM_SETFOCUS:
+        if (pl)
+            w32_emit_focus(true);
+        break;
+    case WM_KILLFOCUS:
+        if (pl)
+            w32_emit_focus(false);
+        break;
 
     case WM_DPICHANGED: {
         if (!pl)
@@ -1376,8 +1509,9 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 
     case WM_MOUSEMOVE:
         if (pl) {
-            pl->acc.cx = (double)GET_X_LPARAM(lParam) / (double)pl->scale;
-            pl->acc.cy = (double)GET_Y_LPARAM(lParam) / (double)pl->scale;
+            (void)w32_emit_pointer(pl, IRIS_EVENT_POINTER_MOVE,
+                                   (double)GET_X_LPARAM(lParam) / (double)pl->scale,
+                                   (double)GET_Y_LPARAM(lParam) / (double)pl->scale);
             if (!pl->cursor_inside) {
                 pl->cursor_inside = true;
                 SetCursor(w32_cursor_handle(pl->effective_cursor));
@@ -1393,7 +1527,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         if (pl) {
             pl->tracking_leave = false;
             pl->cursor_inside = false;
-            pl->acc.cx = pl->acc.cy = -100000.0; /* off-window: clears hover */
+            (void)w32_emit_pointer(pl, IRIS_EVENT_POINTER_LEAVE, -100000.0, -100000.0);
         }
         return 0;
 
@@ -1455,9 +1589,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     case WM_IME_ENDCOMPOSITION:
         if (pl) {
             pl->ime_composing = false;
-            pl->acc.preedit[0] = '\0';
-            pl->acc.preedit_cursor = 0;
-            pl->acc.preedit_sel_lo = pl->acc.preedit_sel_hi = 0;
+            (void)w32_emit_preedit(pl, "", 0, 0, 0);
         }
         return 0;
 
@@ -1967,6 +2099,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         bool resized_this_frame = false;
         if (pl.pending_scale > 0.0f && fabsf(pl.pending_scale - pl.scale) > 0.0001f) {
             pl.scale = pl.pending_scale;
+            w32_emit_scale(pl.scale);
             lens_set_scale(ui, pl.scale);
             pl.resized = true;
         }

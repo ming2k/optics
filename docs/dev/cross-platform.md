@@ -116,6 +116,16 @@ platform code must preserve them:
    `repeat_info`, Win32 and Cocoa report OS auto-repeat) and lens treats a
    repeat exactly like a press. The authoritative statement lives in
    `src/platform_internal.h`.
+8. **Event seam (ADR-0107).** Every backend reifies each native event into
+   an `iris_event` (`<iris/event.h>`) and routes it through
+   `iris__event_seam_emit` (`src/event_internal.h`) *before* folding
+   survivors into `lens_input`. No backend writes the input accumulator
+   directly for lens-facing input. The host may observe, drop, or rewrite
+   each event at the single pre-fold seam (`iris_app_opts.on_event`).
+   Lifecycle events (CLOSE / RESIZE / SCALE / FOCUS) carry
+   `IRIS_EVENT_F_UNDROPPABLE` and are observe-only. Platform bookkeeping
+   (input serials, cursor shape, IME session, pointer capture) stays
+   outside the seam.
 
 ## Current platform feature gaps
 

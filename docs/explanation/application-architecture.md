@@ -69,6 +69,18 @@ records into the same `VkCommandBuffer` returned by
 `transit` provides closed-form non-divergent motion dynamics. They link
 through public `flux` APIs and remain separately consumable libraries.
 
+### Events Are Reified, Intercepted, Then Folded
+
+`iris` reifies each native event — Wayland `wl_pointer`, Win32 `WM_*`,
+Cocoa `NSEvent` — into one platform-neutral `iris_event`
+(`<iris/event.h>`) in arrival order. Before folding the survivors into the
+frame's `lens_input`, `iris` runs the host's optional
+`iris_app_opts.on_event` callback, which may drop or rewrite each event.
+This is the only point at which a host may change what `lens` sees;
+`build`'s `in` is a read-only copy of the already-folded snapshot. `iris`
+itself applies no policy — it reifies, orders, folds, and forwards. See
+[ADR-0107](../adr/0107-iris-pre-lens-event-seam.md).
+
 ## Worked Example: 3D Scene with a 2D HUD
 
 ```c
@@ -133,3 +145,4 @@ application can use to build a custom renderer on top of `flux-core`. See
 - [ADR-0001 — project foundations](../adr/0001-project-foundations.md)
 - [ADR-0002 — per-module device state](../adr/0002-per-module-device-state.md)
 - [ADR-0023 — unified monorepo build](../adr/0023-unified-monorepo-build.md)
+- [ADR-0107 — the pre-lens event seam](../adr/0107-iris-pre-lens-event-seam.md)

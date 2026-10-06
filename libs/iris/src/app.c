@@ -12,6 +12,7 @@
 
 #include <iris/app.h>
 
+#include "event_internal.h"
 #include "platform_internal.h"
 #include "platform_wakeup.h"
 
@@ -66,12 +67,19 @@ IRIS_API int iris_app_run(const iris_app_config *cfg) {
     if (!cfg) {
         return 1;
     }
+#if defined(IRIS_BACKEND_WAYLAND) || defined(IRIS_BACKEND_WIN32) || defined(IRIS_BACKEND_COCOA)
+    /* Install the pre-fold event seam (ADR-0107) for the whole run; the
+     * active backend routes every reified event through it. */
+    iris__event_seam_configure(cfg->on_event, cfg->user);
 #if defined(IRIS_BACKEND_WAYLAND)
-    return iris_app_run_wayland(cfg);
+    int rc = iris_app_run_wayland(cfg);
 #elif defined(IRIS_BACKEND_WIN32)
-    return iris_app_run_win32(cfg);
-#elif defined(IRIS_BACKEND_COCOA)
-    return iris_app_run_cocoa(cfg);
+    int rc = iris_app_run_win32(cfg);
+#else
+    int rc = iris_app_run_cocoa(cfg);
+#endif
+    iris__event_seam_clear();
+    return rc;
 #else
     return 2; /* IRIS_BUILD_NO_BACKEND */
 #endif

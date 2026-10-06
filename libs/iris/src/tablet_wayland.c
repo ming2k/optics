@@ -51,11 +51,52 @@ static iris_tablet_host g_host;
 static struct wl_seat *g_pending_seat;
 
 /* ------------------------------------------------------------------ */
+/*  Pre-fold seam (ADR-0107) for pen state                             */
+/* ------------------------------------------------------------------ */
+/* Motion and tip/barrel buttons reach lens as POINTER_MOVE/BUTTON via
+ * g_host (app_wayland.c routes those through the seam). The remaining
+ * pen state lens consumes — pen_active / pen_pressure / pen_eraser — is
+ * gated here so the host can observe or rewrite it before the fold. */
+
+static bool tablet_emit_pressure(double pressure) {
+    iris_event ev = {.type = IRIS_EVENT_TABLET,
+                     .tablet = {.pressure = (float)pressure,
+                                .eraser = g_tablet.eraser,
+                                .proximity = g_tablet.in_proximity}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    g_tablet.pressure = ev.tablet.pressure;
+    return true;
+}
+
+static bool tablet_emit_eraser(bool eraser) {
+    iris_event ev = {.type = IRIS_EVENT_TABLET,
+                     .tablet = {.pressure = (float)g_tablet.pressure,
+                                .eraser = eraser,
+                                .proximity = g_tablet.in_proximity}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    g_tablet.eraser = ev.tablet.eraser;
+    return true;
+}
+
+static bool tablet_emit_proximity(bool proximity) {
+    iris_event ev = {.type = IRIS_EVENT_TABLET,
+                     .tablet = {.pressure = (float)g_tablet.pressure,
+                                .eraser = g_tablet.eraser,
+                                .proximity = proximity}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    g_tablet.in_proximity = ev.tablet.proximity;
+    return true;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Tool events → pointer accumulator                                  */
 /* ------------------------------------------------------------------ */
 
 static void tool_type_eraser(uint32_t type) {
-    g_tablet.eraser = (type == ZWP_TABLET_TOOL_V2_TYPE_ERASER);
+    (void)tablet_emit_eraser(type == ZWP_TABLET_TOOL_V2_TYPE_ERASER);
 }
 
 static void tool_apply_down(bool down) {
@@ -74,7 +115,7 @@ static void tablet_tool_proximity_in(void *data, struct zwp_tablet_tool_v2 *tool
     if (g_tablet.active_tool && g_tablet.active_tool != tool)
         return; /* a second tool while one is live: ignore until it leaves */
     g_tablet.active_tool = tool;
-    g_tablet.in_proximity = true;
+    (void)tablet_emit_proximity(true);
     g_tablet.proximity_serial = serial;
     if (g_host.serial)
         g_host.serial(g_host.user, serial); /* selection ops may be pen-initiated */
@@ -86,7 +127,7 @@ static void tablet_tool_proximity_out(void *data, struct zwp_tablet_tool_v2 *too
     if (!g_tablet.in_proximity)
         return;
     tool_apply_down(false);
-    g_tablet.in_proximity = false;
+    (void)tablet_emit_proximity(false);
     g_tablet.active_tool = NULL;
     g_tablet.eraser = false;
     g_tablet.pressure = 0.0;
@@ -119,7 +160,7 @@ static void tablet_tool_pressure(void *data, struct zwp_tablet_tool_v2 *tool, ui
     (void)tool;
     /* Normalised 0..65535 per the protocol. Tools that report no pressure
      * axis deliver none of these events; the default below covers them. */
-    g_tablet.pressure = p / 65535.0;
+    (void)tablet_emit_pressure(p / 65535.0);
 }
 
 static void tablet_tool_distance(void *data, struct zwp_tablet_tool_v2 *tool, uint32_t d) {

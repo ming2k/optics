@@ -13,6 +13,15 @@ either.
 
 ## [Unreleased]
 
+### Added
+
+- **iris**: `iris_event` and the pre-fold `iris_app_opts.on_event` interception seam (ADR-0107) — hosts can observe, drop, or rewrite native input before it folds into `lens_input`. Wired across the Wayland, Win32, and Cocoa backends (pointer, scroll, keyboard, modifiers, text/IME, touch, pen, drag-and-drop, and lifecycle events).
+- **tooling**: `actionlint` gate (`ci.yml` `workflow-lint` job) so a malformed workflow file fails the pull request instead of silently disabling every job it contains.
+
+### Fixed
+
+- **tooling**: Repaired `.github/workflows/ci-cross.yml` — a malformed `runs-on`/`env` line made the file invalid YAML, so GitHub rejected the entire cross-platform workflow and silently disabled every cross-platform gate (native Windows, macOS/Cocoa, and the `zig-win32-check` compile job).
+
 ## [0.0.54] - 2026-10-02
 
 ### Added

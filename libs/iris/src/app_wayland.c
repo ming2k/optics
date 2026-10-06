@@ -385,15 +385,188 @@ static int mouse_index(uint32_t button) {
  * enters our surface. */
 static void cursor_apply(wp_platform *pl);
 
+/* ------------------------------------------------------------------ */
+/*  Pre-fold event seam helpers (ADR-0107)                            */
+/*                                                                    */
+/*  Every lens-facing input mutation goes through one of these: they   */
+/*  reify the native event, run the host seam (event_internal.h), and  */
+/*  apply the surviving — possibly host-rewritten — event to the       */
+/*  accumulator. Platform bookkeeping (serials, cursor shape, DnD      */
+/*  state) stays outside the seam.                                    */
+/* ------------------------------------------------------------------ */
+
+/* Clamp a text-input-v3 byte offset (-1 = none) into [0, len]. */
+static uint32_t clamp_preedit_off(int32_t off, uint32_t len) {
+    if (off < 0)
+        return 0;
+    return (uint32_t)off > len ? len : (uint32_t)off;
+}
+
+static bool wp_emit_pointer(wp_platform *pl, iris_event_type type, double x, double y) {
+    iris_event ev = {.type = type, .pointer = {.x = (float)x, .y = (float)y}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    pl->acc.cx = ev.pointer.x;
+    pl->acc.cy = ev.pointer.y;
+    return true;
+}
+
+static bool wp_emit_button(wp_platform *pl, double x, double y, int lens_button, bool down) {
+    iris_event ev = {.type = IRIS_EVENT_POINTER_BUTTON,
+                     .button = {.x = (float)x,
+                                .y = (float)y,
+                                .button = lens_button,
+                                .pressed = down}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    int i = ev.button.button;
+    if (i < 0 || i >= LENS_MOUSE_COUNT)
+        return false; /* host rewrote the button out of range: drop */
+    pl->acc.cx = ev.button.x;
+    pl->acc.cy = ev.button.y;
+    bool d = ev.button.pressed;
+    if (d && !pl->acc.down[i])
+        pl->acc.pressed[i] = true;
+    if (!d && pl->acc.down[i])
+        pl->acc.released[i] = true;
+    pl->acc.down[i] = d;
+    return true;
+}
+
+static bool wp_emit_scroll(wp_platform *pl, uint32_t axis, double platform_delta, bool continuous) {
+    iris_event ev = {.type = IRIS_EVENT_SCROLL, .scroll = {.continuous = continuous}};
+    double lens = iris_scroll_lens_delta(platform_delta);
+    if (axis == 0)
+        ev.scroll.dy = (float)lens;
+    else
+        ev.scroll.dx = (float)lens;
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    /* The host may move the delta between axes or flip `continuous`. */
+    if (ev.scroll.dx != 0.0f)
+        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                               &pl->acc.scroll_px_x, 1, (double)ev.scroll.dx, ev.scroll.continuous);
+    if (ev.scroll.dy != 0.0f)
+        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                               &pl->acc.scroll_px_x, 0, (double)ev.scroll.dy, ev.scroll.continuous);
+    return true;
+}
+
+static bool wp_emit_key(wp_platform *pl, int key, bool pressed, bool repeat, uint32_t mods) {
+    iris_event ev = {.type = IRIS_EVENT_KEY,
+                     .keyboard = {.key = key, .pressed = pressed, .repeat = repeat, .mods = mods}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.keyboard.key != 0 && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
+        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){.key = ev.keyboard.key,
+                                                             .pressed = ev.keyboard.pressed,
+                                                             .repeat = ev.keyboard.repeat};
+    return true;
+}
+
+static bool wp_emit_modifiers(wp_platform *pl, uint32_t mods) {
+    iris_event ev = {.type = IRIS_EVENT_MODIFIERS, .modifiers = {.mods = mods}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    pl->acc.mods = ev.modifiers.mods;
+    return true;
+}
+
+static bool wp_emit_text(wp_platform *pl, const char *utf8, size_t len) {
+    iris_event ev = {.type = IRIS_EVENT_TEXT_COMMIT, .text = {.utf8 = utf8, .len = len}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.text.utf8 && ev.text.len)
+        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, ev.text.utf8, ev.text.len);
+    return true;
+}
+
+static bool wp_emit_preedit(wp_platform *pl, const char *utf8, int32_t cursor_begin,
+                            int32_t cursor_end) {
+    char clipped[LENS_PREEDIT_MAX];
+    iris_utf8_copy(clipped, sizeof clipped, utf8);
+    uint32_t plen = (uint32_t)strlen(clipped);
+    uint32_t lo = clamp_preedit_off(cursor_begin, plen);
+    uint32_t hi = cursor_end >= 0 ? clamp_preedit_off(cursor_end, plen) : lo;
+    if (hi < lo)
+        hi = lo;
+    iris_event ev = {.type = IRIS_EVENT_PREEDIT,
+                     .preedit = {.utf8 = clipped, .len = plen, .cursor = lo, .sel_lo = lo, .sel_hi = hi}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    if (ev.preedit.utf8 && ev.preedit.utf8[0]) {
+        iris_utf8_copy(pl->acc.preedit, sizeof pl->acc.preedit, ev.preedit.utf8);
+        uint32_t alen = (uint32_t)strlen(pl->acc.preedit);
+        pl->acc.preedit_cursor = ev.preedit.cursor > alen ? alen : ev.preedit.cursor;
+        pl->acc.preedit_sel_lo = ev.preedit.sel_lo > alen ? alen : ev.preedit.sel_lo;
+        pl->acc.preedit_sel_hi = ev.preedit.sel_hi > alen ? alen : ev.preedit.sel_hi;
+    } else {
+        pl->acc.preedit[0] = '\0';
+        pl->acc.preedit_cursor = 0;
+        pl->acc.preedit_sel_lo = pl->acc.preedit_sel_hi = 0;
+    }
+    return true;
+}
+
+static bool wp_emit_ime_delete(wp_platform *pl, uint32_t before, uint32_t after) {
+    iris_event ev = {.type = IRIS_EVENT_IME_DELETE,
+                     .ime_delete = {.before = before, .after = after}};
+    if (!iris__event_seam_emit(&ev)) {
+        pl->ime.delete_before = pl->ime.delete_after = 0;
+        return false;
+    }
+    pl->ime.delete_before = ev.ime_delete.before;
+    pl->ime.delete_after = ev.ime_delete.after;
+    pl->ime.has_delete = true;
+    return true;
+}
+
+/* Drag-and-drop position. The dropped payload itself is delivered through
+ * the async paste path (lens_deliver_drop), not folded into lens_input;
+ * this event carries the cursor position and DnD activity so the host can
+ * observe/intercept it like any other pointer motion. */
+static bool wp_emit_dnd(wp_platform *pl, double x, double y, bool active) {
+    iris_event ev = {
+        .type = IRIS_EVENT_DND, .dnd = {.x = (float)x, .y = (float)y, .active = active}};
+    if (!iris__event_seam_emit(&ev))
+        return false;
+    pl->acc.cx = ev.dnd.x;
+    pl->acc.cy = ev.dnd.y;
+    return true;
+}
+
+/* Lifecycle events are observe-only: iris already applied the platform
+ * state, so the host may read them but the payload is not folded back. */
+static void wp_emit_resize(uint32_t w, uint32_t h) {
+    iris_event ev = {.type = IRIS_EVENT_RESIZE,
+                     .flags = IRIS_EVENT_F_UNDROPPABLE,
+                     .resize = {.width = w, .height = h}};
+    (void)iris__event_seam_emit(&ev);
+}
+static void wp_emit_scale(float scale) {
+    iris_event ev = {
+        .type = IRIS_EVENT_SCALE, .flags = IRIS_EVENT_F_UNDROPPABLE, .scale = {.scale = scale}};
+    (void)iris__event_seam_emit(&ev);
+}
+static void wp_emit_focus(bool focused) {
+    iris_event ev = {
+        .type = IRIS_EVENT_FOCUS, .flags = IRIS_EVENT_F_UNDROPPABLE, .focus = {.focused = focused}};
+    (void)iris__event_seam_emit(&ev);
+}
+static void wp_emit_close(void) {
+    iris_event ev = {.type = IRIS_EVENT_CLOSE, .flags = IRIS_EVENT_F_UNDROPPABLE};
+    (void)iris__event_seam_emit(&ev);
+}
+
 static void ptr_enter(void *data, struct wl_pointer *p, uint32_t serial, struct wl_surface *surf,
                       wl_fixed_t x, wl_fixed_t y) {
     (void)p;
     (void)surf;
     wp_platform *pl = data;
-    pl->acc.cx = wl_fixed_to_double(x);
-    pl->acc.cy = wl_fixed_to_double(y);
     pl->cursor_inside = true;
     pl->cursor_serial = serial;
+    (void)wp_emit_pointer(pl, IRIS_EVENT_POINTER_ENTER, wl_fixed_to_double(x),
+                          wl_fixed_to_double(y));
     cursor_apply(pl);
 }
 static void ptr_leave(void *data, struct wl_pointer *p, uint32_t serial, struct wl_surface *surf) {
@@ -401,15 +574,16 @@ static void ptr_leave(void *data, struct wl_pointer *p, uint32_t serial, struct 
     (void)serial;
     (void)surf;
     wp_platform *pl = data;
-    pl->acc.cx = pl->acc.cy = -100000.0; /* off-window: clears hover */
     pl->cursor_inside = false;
+    /* Off-window sentinel clears hover. */
+    (void)wp_emit_pointer(pl, IRIS_EVENT_POINTER_LEAVE, -100000.0, -100000.0);
 }
 static void ptr_motion(void *data, struct wl_pointer *p, uint32_t t, wl_fixed_t x, wl_fixed_t y) {
     (void)p;
     (void)t;
     wp_platform *pl = data;
-    pl->acc.cx = wl_fixed_to_double(x);
-    pl->acc.cy = wl_fixed_to_double(y);
+    (void)wp_emit_pointer(pl, IRIS_EVENT_POINTER_MOVE, wl_fixed_to_double(x),
+                          wl_fixed_to_double(y));
 }
 /* Forward decl: defined in the primary-selection section, but ptr_button
  * needs it for middle-click paste. */
@@ -427,11 +601,7 @@ static void ptr_button(void *data, struct wl_pointer *p, uint32_t serial, uint32
      * (middle-click paste below, clipboard ops driven by mouse chords). */
     pl->last_serial = serial;
     bool down = (state == WL_POINTER_BUTTON_STATE_PRESSED);
-    if (down && !pl->acc.down[i])
-        pl->acc.pressed[i] = true;
-    if (!down && pl->acc.down[i])
-        pl->acc.released[i] = true;
-    pl->acc.down[i] = down;
+    (void)wp_emit_button(pl, pl->acc.cx, pl->acc.cy, i, down);
     if (down && button == BTN_MIDDLE)
         primsel_paste(pl);
 }
@@ -451,8 +621,7 @@ static void ptr_button(void *data, struct wl_pointer *p, uint32_t serial, uint32
  * policy. The source is delivered at the head of each frame group (see
  * ptr_frame). */
 static void wp_axis_accum(wp_platform *pl, uint32_t axis, double delta, bool continuous) {
-    iris_scroll_accum(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
-                      &pl->acc.scroll_px_x, axis, delta, continuous);
+    (void)wp_emit_scroll(pl, axis, delta, continuous);
 }
 
 static void ptr_axis(void *data, struct wl_pointer *p, uint32_t t, uint32_t axis,
@@ -879,12 +1048,11 @@ static void touch_down(void *data, struct wl_touch *t, uint32_t serial, uint32_t
     wp_platform *pl = data;
     if (g_touch_active_id == -1) {
         g_touch_active_id = id;
-        pl->acc.cx = wl_fixed_to_double(x);
-        pl->acc.cy = wl_fixed_to_double(y);
-        if (!pl->acc.down[LENS_MOUSE_LEFT]) {
-            pl->acc.pressed[LENS_MOUSE_LEFT] = true;
-            pl->acc.down[LENS_MOUSE_LEFT] = true;
-        }
+        double tx = wl_fixed_to_double(x), ty = wl_fixed_to_double(y);
+        if (!pl->acc.down[LENS_MOUSE_LEFT])
+            (void)wp_emit_button(pl, tx, ty, LENS_MOUSE_LEFT, true);
+        else
+            (void)wp_emit_pointer(pl, IRIS_EVENT_POINTER_MOVE, tx, ty);
     }
 }
 static void touch_up(void *data, struct wl_touch *t, uint32_t serial, uint32_t time, int32_t id) {
@@ -894,10 +1062,8 @@ static void touch_up(void *data, struct wl_touch *t, uint32_t serial, uint32_t t
     wp_platform *pl = data;
     if (g_touch_active_id == id) {
         g_touch_active_id = -1;
-        if (pl->acc.down[LENS_MOUSE_LEFT]) {
-            pl->acc.released[LENS_MOUSE_LEFT] = true;
-            pl->acc.down[LENS_MOUSE_LEFT] = false;
-        }
+        if (pl->acc.down[LENS_MOUSE_LEFT])
+            (void)wp_emit_button(pl, pl->acc.cx, pl->acc.cy, LENS_MOUSE_LEFT, false);
     }
 }
 static void touch_motion(void *data, struct wl_touch *t, uint32_t time, int32_t id, wl_fixed_t x,
@@ -905,10 +1071,9 @@ static void touch_motion(void *data, struct wl_touch *t, uint32_t time, int32_t 
     (void)t;
     (void)time;
     wp_platform *pl = data;
-    if (g_touch_active_id == id) {
-        pl->acc.cx = wl_fixed_to_double(x);
-        pl->acc.cy = wl_fixed_to_double(y);
-    }
+    if (g_touch_active_id == id)
+        (void)wp_emit_pointer(pl, IRIS_EVENT_POINTER_MOVE, wl_fixed_to_double(x),
+                              wl_fixed_to_double(y));
 }
 static void touch_frame(void *d, struct wl_touch *t) {
     (void)d;
@@ -1005,16 +1170,15 @@ static void kb_emit_text(wp_platform *pl, xkb_keycode_t code) {
      * mapping is exactly U+007F, so the plain test let every Delete press
      * leak "\x7f" into text_utf8 alongside the (correct) key event. */
     if (n > 0 && iris_cp_is_text((unsigned char)buf[0]))
-        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, buf, (size_t)n);
+        (void)wp_emit_text(pl, buf, (size_t)n);
 }
 
 /* One repeat tick: the key event (repeat=true) plus its text. Repeats
  * deliberately bypass the compose state — a composed sequence completes on
  * the original press; the held key repeats its own character. */
 static void repeat_emit_one(wp_platform *pl) {
-    if (pl->rep_lens_key && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
-        pl->acc.keys[pl->acc.key_count++] =
-            (lens_key_event){.key = pl->rep_lens_key, .pressed = true, .repeat = true};
+    if (pl->rep_lens_key)
+        (void)wp_emit_key(pl, pl->rep_lens_key, true, true, pl->acc.mods);
     kb_emit_text(pl, pl->rep_key + 8); /* evdev -> xkb */
 }
 
@@ -1113,6 +1277,7 @@ static void kb_enter(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surfa
     (void)surf;
     wp_platform *pl = d;
     pl->kb_focused = true;
+    wp_emit_focus(true);
 }
 static void kb_leave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surface *surf) {
     (void)k;
@@ -1120,6 +1285,7 @@ static void kb_leave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surfa
     (void)surf;
     wp_platform *pl = d;
     pl->kb_focused = false;
+    wp_emit_focus(false);
     wp_repeat_cancel(pl);
     if (pl->im_active)
         im_deactivate(pl);
@@ -1145,13 +1311,6 @@ static void ti_leave(void *data, struct zwp_text_input_v3 *ti, struct wl_surface
     /* The compositor's text-input focus left our surface: drop any pending
      * composition so an abandoned preedit never renders afterwards. */
     im_clear_pending(pl);
-}
-
-/* Clamp a text-input-v3 byte offset (-1 = none) into [0, len]. */
-static uint32_t clamp_preedit_off(int32_t off, uint32_t len) {
-    if (off < 0)
-        return 0;
-    return (uint32_t)off > len ? len : (uint32_t)off;
 }
 
 static void ti_preedit(void *data, struct zwp_text_input_v3 *ti, const char *text,
@@ -1195,43 +1354,20 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
      * The actual deletion is performed by lens when it sees the
      * ime_delete_before / ime_delete_after fields in lens_input — we just
      * forward the request through drain_input. */
-    if (pl->ime.has_delete) {
-        /* Keep has_delete set; drain_input copies the values into lens_input
-         * and clears them after the frame. */
-    }
+    if (pl->ime.has_delete)
+        (void)wp_emit_ime_delete(pl, pl->ime.delete_before, pl->ime.delete_after);
 
     if (pl->ime.has_commit && pl->ime.commit[0]) {
         /* Boundary-aware append: an over-long commit is clipped on a
          * code-point boundary instead of being dropped wholesale (old
          * behaviour) or split mid-sequence. */
-        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, pl->ime.commit, strlen(pl->ime.commit));
+        (void)wp_emit_text(pl, pl->ime.commit, strlen(pl->ime.commit));
         pl->ime.commit[0] = '\0';
     }
 
-    if (pl->ime.has_preedit) {
-        if (pl->ime.preedit[0]) {
-            iris_utf8_copy(pl->acc.preedit, sizeof pl->acc.preedit, pl->ime.preedit);
-            uint32_t plen = (uint32_t)strlen(pl->acc.preedit);
-            /* Caret + active clause are byte offsets into the ORIGINAL
-             * preedit; clamp both to the truncated copy (a negative offset
-             * means "no caret"/"no clause" and collapses to the caret).
-             * IMs signal "no active clause" with begin == end == caret,
-             * which yields lo == hi and lens renders no clause underline. */
-            uint32_t lo = clamp_preedit_off(pl->ime.preedit_cursor_begin, plen);
-            uint32_t hi = pl->ime.preedit_cursor_end >= 0
-                              ? clamp_preedit_off(pl->ime.preedit_cursor_end, plen)
-                              : lo;
-            if (hi < lo)
-                hi = lo;
-            pl->acc.preedit_cursor = lo;
-            pl->acc.preedit_sel_lo = lo;
-            pl->acc.preedit_sel_hi = hi;
-        } else {
-            pl->acc.preedit[0] = '\0';
-            pl->acc.preedit_cursor = 0;
-            pl->acc.preedit_sel_lo = pl->acc.preedit_sel_hi = 0;
-        }
-    }
+    if (pl->ime.has_preedit)
+        (void)wp_emit_preedit(pl, pl->ime.preedit, pl->ime.preedit_cursor_begin,
+                              pl->ime.preedit_cursor_end);
 
     pl->ime.has_commit = false;
     pl->ime.has_preedit = false;
@@ -1308,8 +1444,7 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
             /* Physical press/release edges carry repeat=false; repeats are
              * synthesised by the timerfd path (repeat_emit_one) and carry
              * repeat=true. Lens treats a repeat like any other press. */
-            pl->acc.keys[pl->acc.key_count++] =
-                (lens_key_event){.key = fk, .pressed = pressed, .repeat = false};
+            (void)wp_emit_key(pl, fk, pressed, false, pl->acc.mods);
         }
     }
 
@@ -1343,7 +1478,7 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
                     int n = xkb_compose_state_get_utf8(pl->compose_state, buf, sizeof buf);
                     xkb_compose_state_reset(pl->compose_state);
                     if (n > 0)
-                        iris_utf8_append(pl->acc.text, sizeof pl->acc.text, buf, (size_t)n);
+                        (void)wp_emit_text(pl, buf, (size_t)n);
                     return;
                 }
                 case XKB_COMPOSE_CANCELLED:
@@ -1382,7 +1517,7 @@ static void kb_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uin
             new_mods |= m[i].bit;
     }
     bool mods_changed = (new_mods != pl->acc.mods);
-    pl->acc.mods = new_mods;
+    (void)wp_emit_modifiers(pl, new_mods);
 
     /* A genuine modifier or layout change ends any in-flight repeat:
      * the held key's meaning (and text) just changed under it. Compositors
@@ -1678,8 +1813,7 @@ static void ddev_enter(void *d, struct wl_data_device *dev, uint32_t s, struct w
     wp_platform *pl = d;
     pl->dnd_inside = true;
     pl->dnd_pos = (flux_point){wl_fixed_to_double(x), wl_fixed_to_double(y)};
-    pl->acc.cx = pl->dnd_pos.x;
-    pl->acc.cy = pl->dnd_pos.y;
+    (void)wp_emit_dnd(pl, pl->dnd_pos.x, pl->dnd_pos.y, true);
     if (pl->dnd_offer != o) {
         if (pl->dnd_offer)
             wl_data_offer_destroy(pl->dnd_offer);
@@ -1706,6 +1840,7 @@ static void ddev_leave(void *d, struct wl_data_device *dev) {
     (void)dev;
     wp_platform *pl = d;
     pl->dnd_inside = false;
+    (void)wp_emit_dnd(pl, pl->dnd_pos.x, pl->dnd_pos.y, false);
     if (pl->dnd_offer) {
         wl_data_offer_destroy(pl->dnd_offer);
         pl->dnd_offer = NULL;
@@ -1718,8 +1853,7 @@ static void ddev_motion(void *d, struct wl_data_device *dev, uint32_t t, wl_fixe
     (void)t;
     wp_platform *pl = d;
     pl->dnd_pos = (flux_point){wl_fixed_to_double(x), wl_fixed_to_double(y)};
-    pl->acc.cx = pl->dnd_pos.x;
-    pl->acc.cy = pl->dnd_pos.y;
+    (void)wp_emit_dnd(pl, pl->dnd_pos.x, pl->dnd_pos.y, true);
 }
 static void ddev_drop(void *d, struct wl_data_device *dev) {
     (void)dev;
@@ -2238,16 +2372,11 @@ static void wp_maybe_create_text_input(wp_platform *pl) {
  * RIGHT/MIDDLE — so every existing widget works with a pen unchanged. */
 static void tablet_motion(void *user, double x, double y) {
     wp_platform *pl = user;
-    pl->acc.cx = x;
-    pl->acc.cy = y;
+    (void)wp_emit_pointer(pl, IRIS_EVENT_POINTER_MOVE, x, y);
 }
 static void tablet_button(void *user, int i, bool down) {
     wp_platform *pl = user;
-    if (down && !pl->acc.down[i])
-        pl->acc.pressed[i] = true;
-    if (!down && pl->acc.down[i])
-        pl->acc.released[i] = true;
-    pl->acc.down[i] = down;
+    (void)wp_emit_button(pl, pl->acc.cx, pl->acc.cy, i, down);
 }
 static void tablet_serial(void *user, uint32_t serial) {
     wp_platform *pl = user;
@@ -2648,6 +2777,7 @@ static void xdg_surf_configure(void *data, struct xdg_surface *s, uint32_t seria
         pl->width = pl->pending_w;
         pl->height = pl->pending_h;
         pl->resized = true;
+        wp_emit_resize((uint32_t)pl->width, (uint32_t)pl->height);
     }
 }
 static const struct xdg_surface_listener xdg_surface_listener = {
@@ -2664,6 +2794,7 @@ static void top_configure(void *data, struct xdg_toplevel *t, int32_t w, int32_t
 }
 static void top_close(void *data, struct xdg_toplevel *t) {
     (void)t;
+    wp_emit_close();
     ((wp_platform *)data)->running = false;
 }
 static void top_bounds(void *d, struct xdg_toplevel *t, int32_t w, int32_t h) {
@@ -3158,8 +3289,10 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
 
     /* If no output reported yet (rare), keep the default scale = 1; the
      * frame loop will pick up changes via pl.pending_scale. */
-    if (pl.pending_scale > 0)
+    if (pl.pending_scale > 0) {
         pl.buffer_scale = pl.pending_scale;
+        wp_emit_scale((float)pl.buffer_scale);
+    }
 
     /* --- Vulkan surface + flux surface/canvas ------------------- */
     vk_surface = wp_create_vk_surface(device, pl.display, pl.surface);
@@ -3371,6 +3504,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         bool resized_this_frame = false;
         if (pl.pending_scale > 0 && pl.pending_scale != pl.buffer_scale) {
             pl.buffer_scale = pl.pending_scale;
+            wp_emit_scale((float)pl.buffer_scale);
             wl_surface_set_buffer_scale(pl.surface, pl.buffer_scale);
             wl_surface_commit(pl.surface);
             lens_set_scale(ui, (float)pl.buffer_scale);

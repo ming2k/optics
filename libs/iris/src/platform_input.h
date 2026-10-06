@@ -103,20 +103,39 @@ static inline bool iris_scroll_source_is_continuous(uint32_t source) {
  *
  * `axis` is 0 for vertical, 1 for horizontal (the WL_POINTER_AXIS_*
  * values; passed numerically so the header stays wayland-free). */
+/* Map one platform scroll delta to the lens convention (the sign contract
+ * above). Used by backends whose platform sign differs from lens's
+ * (Wayland inverts); backends whose deltas already match the lens
+ * convention (Win32 vertical, Cocoa) pass their delta straight to
+ * iris_scroll_accum_lens. */
+static inline double iris_scroll_lens_delta(double platform_delta) {
+    return -platform_delta;
+}
+
+/* Apply an already-lens-space scroll delta to the accumulator channels
+ * (axis 0 = vertical, 1 = horizontal). */
+static inline void iris_scroll_accum_lens(double *steps_y, double *pixels_y, double *steps_x,
+                                          double *pixels_x, uint32_t axis, double lens_delta,
+                                          bool continuous) {
+    if (axis == 0) { /* WL_POINTER_AXIS_VERTICAL_SCROLL */
+        if (continuous)
+            *pixels_y += lens_delta;
+        else
+            *steps_y += lens_delta;
+    } else { /* WL_POINTER_AXIS_HORIZONTAL_SCROLL */
+        if (continuous)
+            *pixels_x += lens_delta;
+        else
+            *steps_x += lens_delta;
+    }
+}
+
+/* Platform-delta entry point: invert once, then apply. */
 static inline void iris_scroll_accum(double *steps_y, double *pixels_y, double *steps_x,
                                      double *pixels_x, uint32_t axis, double delta,
                                      bool continuous) {
-    if (axis == 0) { /* WL_POINTER_AXIS_VERTICAL_SCROLL */
-        if (continuous)
-            *pixels_y -= delta;
-        else
-            *steps_y -= delta;
-    } else { /* WL_POINTER_AXIS_HORIZONTAL_SCROLL */
-        if (continuous)
-            *pixels_x -= delta;
-        else
-            *steps_x -= delta;
-    }
+    iris_scroll_accum_lens(steps_y, pixels_y, steps_x, pixels_x, axis, iris_scroll_lens_delta(delta),
+                           continuous);
 }
 
 #endif /* IRIS_PLATFORM_INPUT_H */

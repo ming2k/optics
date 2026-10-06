@@ -1,6 +1,6 @@
 # Platform Backend & OS Integration Governance (Iris)
 
-This document details the governance criteria for platform windowing, event loops, and host services in `libs/iris` (formalizing ADR-0043, ADR-0044, ADR-0052, ADR-0056).
+This document details the governance criteria for platform windowing, event loops, and host services in `libs/iris` (formalizing ADR-0043, ADR-0044, ADR-0052, ADR-0056, ADR-0107).
 
 ---
 
@@ -12,6 +12,7 @@ Platform integration is strictly decomposed into three non-overlapping responsib
    - Manages native window handles, Vulkan swapchains, and DPI scale notifications across Linux (Wayland/X11), macOS (Cocoa/MoltenVK), and Windows (Win32).
 2. **Unified Event Pump**:
    - Translates raw OS window/keyboard/pointer events into uniform `iris_event` snapshots. No business logic or widget interpretation is performed inside the event loop.
+   - Each event passes the single pre-fold host seam (`iris_app_opts.on_event`, ADR-0107) — the only point where a host may observe, drop, or rewrite input — before survivors are folded into `lens_input`.
 3. **Host Service Bridges**:
    - Completely modular interfaces for system clipboard, text-input (IME text-input-v3), and assistive technology (AT-SPI, UIA).
 

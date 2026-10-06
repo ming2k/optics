@@ -62,3 +62,13 @@ exe_pinput = executable('test_platform_input',
   dependencies        : [lens_dep, m_dep],
 )
 test('test_platform_input', exe_pinput)
+
+# test_event pins the pre-fold event seam (ADR-0107): sequence stamping,
+# PASS/DROP dispositions, host rewrites, and the undroppable rule. event.c
+# is compiled directly because the seam helper has hidden visibility.
+exe_event = executable('test_event',
+  ['test_event.c', '../../libs/iris/src/event.c'],
+  include_directories : [iris_inc, src_inc],
+  dependencies        : [lens_dep, m_dep],
+)
+test('test_event', exe_event)

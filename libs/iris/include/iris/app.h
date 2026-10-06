@@ -32,6 +32,7 @@
 
 #include <flux/canvas.h>
 #include <flux/core.h>
+#include <iris/event.h>
 #include <lens/lens.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -149,6 +150,21 @@ typedef void (*iris_prepare_fn)(flux_frame *frame, flux_canvas *canvas, flux_dev
 typedef bool (*iris_start_fn)(lens *ui, flux_device *device, void *user);
 typedef void (*iris_stop_fn)(lens *ui, flux_device *device, void *user);
 
+/* Pre-fold event interception (optional, ADR-0107).
+ *
+ * iris reifies each native event into an `iris_event` (iris/event.h) in
+ * arrival order. When `on_event` is set, iris invokes it once per event,
+ * synchronously on the iris_app_run thread, *before* folding survivors
+ * into the frame's lens_input and outside any lens_begin/end pair. The
+ * host may drop an event (return IRIS_EVENT_DROP) or rewrite its fields
+ * and deliver it (mutate `*ev`, return IRIS_EVENT_PASS). This is the only
+ * point at which a host may change what lens sees; `build`'s `in` is a
+ * read-only copy of the already-folded snapshot.
+ *
+ * `on_event == nullptr` (the default) is behaviourally identical to a
+ * build without this seam and incurs no per-event cost. Events flagged
+ * IRIS_EVENT_F_UNDROPPABLE (CLOSE / RESIZE / SCALE / FOCUS) are still
+ * delivered to the callback but cannot be dropped. */
 typedef struct iris_app_opts {
     const char *title;       /* window title (UTF-8, optional)       */
     const char *app_id;      /* Wayland desktop app ID (optional)    */
@@ -157,6 +173,7 @@ typedef struct iris_app_opts {
     bool dark;               /* force dark; false = follow system    */
     bool log_raw;            /* debug raw input events to stderr     */
     bool no_clear;           /* skip canvas clear; preserves content rendered in prepare */
+    iris_event_fn on_event;  /* pre-fold event interception (optional, ADR-0107) */
     iris_start_fn start;     /* resource setup before first frame (optional) */
     iris_stop_fn stop;       /* resource teardown before iris GPU teardown (optional) */
     iris_build_fn build;     /* per-frame build callback (may be nullptr) */

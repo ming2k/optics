@@ -92,5 +92,27 @@ int main(void) {
         CHECK(sy4 == -5.0 && py4 == 0.0);
     }
 
+    /* --- reify/apply split for the event seam (ADR-0107) ---------------
+     *
+     * The seam reifies a platform delta into lens space exactly once
+     * (iris_scroll_lens_delta), and the backend applies the surviving —
+     * possibly host-rewritten — delta with iris_scroll_accum_lens. The
+     * two must compose to the old iris_scroll_accum behaviour. */
+    {
+        CHECK(iris_scroll_lens_delta(1.0) == -1.0);
+        CHECK(iris_scroll_lens_delta(-25.0) == 25.0);
+
+        double sy = 0, py = 0, sx = 0, px = 0;
+        iris_scroll_accum_lens(&sy, &py, &sx, &px, 0, -1.0, false);
+        double sy2 = 0, py2 = 0, sx2 = 0, px2 = 0;
+        iris_scroll_accum(&sy2, &py2, &sx2, &px2, 0, 1.0, false);
+        CHECK(sy == sy2 && py == py2 && sy == -1.0);
+
+        /* A host rewrite in lens space lands on the chosen channel. */
+        double sy3 = 0, py3 = 0, sx3 = 0, px3 = 0;
+        iris_scroll_accum_lens(&sy3, &py3, &sx3, &px3, 1, -25.0, true);
+        CHECK(sx3 == 0.0 && px3 == -25.0);
+    }
+
     return TEST_REPORT();
 }

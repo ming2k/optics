@@ -63,6 +63,7 @@ LIBRARIES = [
         "iris — application toolkit",
         [
             "libs/iris/include/iris/app.h",
+            "libs/iris/include/iris/event.h",
             "libs/iris/include/iris/iris.h",
             "libs/iris/include/iris/window.h",
             "libs/iris/include/iris/cursor.h",
