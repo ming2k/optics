@@ -35,6 +35,24 @@ jobs:
       - name: Format check
         run: tools/check-format.sh
 
+  workflow-lint:
+    name: workflow lint (actionlint)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub rejects a workflow file whose YAML is invalid *as a whole*:
+      # every job in it is silently disabled. That is exactly how
+      # ci-cross.yml (native Windows + macOS/Cocoa + zig gates) went dark
+      # for weeks. actionlint runs from this healthy workflow and fails the
+      # PR on any workflow syntax or expression error. shellcheck/pyflakes
+      # are disabled here — this gate's job is workflow validity, not shell
+      # style.
+      - name: Lint GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color -shellcheck= -pyflakes=
+
   build-and-test:
     name: build & test (ubuntu-24.04, ${{ matrix.config }})
     runs-on: ubuntu-24.04
