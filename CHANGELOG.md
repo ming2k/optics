@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.55] - 2026-10-09
+
 ### Added
 
 - **iris**: `iris_event` and the pre-fold `iris_app_opts.on_event` interception seam (ADR-0107) — hosts can observe, drop, or rewrite native input before it folds into `lens_input`. Wired across the Wayland, Win32, and Cocoa backends (pointer, scroll, keyboard, modifiers, text/IME, touch, pen, drag-and-drop, and lifecycle events).
