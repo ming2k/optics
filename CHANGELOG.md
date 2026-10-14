@@ -13,6 +13,15 @@ either.
 
 ## [Unreleased]
 
+## [0.0.56] - 2026-10-14
+
+### Added
+
+- **transit**: `transit_spring_advance_substep` bounded sub-stepping integration for harmonic springs (ADR-0108), ensuring continuous physical trajectory and velocity integration under irregular frame delivery.
+- **transit-rs**: `Spring::advance_substep` binding and test coverage.
+- **flux**: `flux_bucket_extent` 128-pixel extent bucketing in `<flux/math.h>` to prevent dynamic size sweeps from thrashing render-target allocations.
+- **flux-rs**: `flux::bucket_extent` helper.
+
 ## [0.0.55] - 2026-10-09
 
 ### Added

@@ -47,7 +47,7 @@ extern "C" {
 
 #define VISTA_VERSION_MAJOR 0
 #define VISTA_VERSION_MINOR 0
-#define VISTA_VERSION_PATCH 55
+#define VISTA_VERSION_PATCH 56
 
 /* Packed integer version, monotonic — identical layout to
  * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7). */
