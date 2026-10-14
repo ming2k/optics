@@ -75,8 +75,17 @@ meson compile -C build-asan
 meson test -C build-asan --no-suite bench
 ```
 
-GPU drivers and system libraries may produce external sanitizer noise. Triage
-the first stack frame in project code before changing suppressions.
+Standalone leak inspection (`-Db_sanitize=leak`) and thread safety (`-Db_sanitize=thread`) are also supported.
+
+### Unified Sanitizer Test Setup
+
+Whenever any sanitizer is configured, Meson automatically activates the default `sanitizer` test setup across all test suites:
+
+- **Suppression Binding (`LSAN_OPTIONS`)**: Automatically resolves and prepends `tools/lsan.supp`, suppressing upstream process-lifetime pattern caches (`fontconfig`). Vulkan ICD caches are pinned with `RTLD_NODELETE` in `tests/flux/test_helpers.c`.
+- **Diagnostic Hardening**: Prepend `ASAN_OPTIONS=abort_on_error=1:halt_on_error=0` and `UBSAN_OPTIONS=print_stacktrace=1` to ensure failures produce immediate backtraces.
+- **Timeout Scaling**: Automatically applies `timeout_multiplier: 4` to prevent false positive test timeouts caused by shadow memory and instrumentation overhead.
+
+Running `meson test` inherits this environment natively without manual `export` or CLI flags. External library noise is pre-filtered; always triage the first stack frame in project code before modifying suppression rules.
 
 ## Rust Workspaces
 
@@ -157,10 +166,12 @@ Build examples with `-Dexamples=true`, then run the smallest relevant program:
 ```
 
 Record the compositor, driver, and GPU when reporting a visual or
-platform-specific result.
+platform-specific result. For the complete interactive inspection protocol,
+material test cases, and cross-platform matrix, see [Manual testing](manual-testing.md).
 
 ## See Also
 
+- [Manual testing](manual-testing.md)
 - [Setup](setup.md)
 - [Project layout](project-layout.md)
 - [Application architecture](../explanation/application-architecture.md)

@@ -78,6 +78,35 @@ impl Spring {
         res
     }
 
+    /// Advance toward `target` using bounded sub-steps (each `<= max_substep_dt`)
+    /// to prevent discrete jumps under irregular frame delivery.
+    pub fn advance_substep(
+        &mut self,
+        target: f32,
+        params: SpringParams,
+        dt_seconds: f32,
+        max_substep_dt: f32,
+        reduced_motion: bool,
+    ) -> f32 {
+        let mut raw = sys::transit_spring {
+            value: self.value,
+            velocity: self.velocity,
+        };
+        let res = unsafe {
+            sys::transit_spring_advance_substep(
+                &mut raw,
+                target,
+                params.raw(),
+                dt_seconds,
+                max_substep_dt,
+                reduced_motion,
+            )
+        };
+        self.value = raw.value;
+        self.velocity = raw.velocity;
+        res
+    }
+
     /// One-step resolve (reduced motion, or an animation that must end now).
     pub fn snap_to(&mut self, target: f32) -> f32 {
         let mut raw = sys::transit_spring {

@@ -123,3 +123,4 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0105 | [Lens flow wrap and stack in-tree layout subsystems and semantic surface tokens](0105-lens-flow-wrap-and-stack-layout-and-surface-tokens.md) | Accepted |
 | 0106 | [Monorepo Identity Unification — glyph, vista, and transit](0106-monorepo-identity-unification-glyph-vista-transit.md) | Accepted |
 | 0107 | [Iris pre-lens event seam — ordered iris_event interception before snapshot folding](0107-iris-pre-lens-event-seam.md) | Accepted |
+| 0108 | [Motion Sub-stepping Integration and Render Target Bucket Allocation for Realtime Animation Safety](0108-motion-substepping-and-render-target-bucket-allocation.md) | Accepted |

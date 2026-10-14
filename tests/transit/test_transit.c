@@ -260,6 +260,24 @@ static void test_smoothstep(void) {
     CHECK(transit_smoothstep(0.3f) < transit_smoothstep(0.4f));
 }
 
+static void test_spring_advance_substep(void) {
+    transit_spring s1 = transit_spring_at(0.0f);
+    transit_spring s2 = transit_spring_at(0.0f);
+    transit_spring_params p = transit_spring_snappy();
+
+    /* Sub-stepping with a large dt advances stably without discrete jump */
+    float v1 = transit_spring_advance_substep(&s1, 100.0f, p, 0.050f, 0.016f, false);
+    CHECK(isfinite(v1));
+    CHECK(v1 > 0.0f && v1 < 100.0f);
+
+    /* Reduced motion snaps to target in one step */
+    transit_spring s_red = transit_spring_at(0.0f);
+    float v_red = transit_spring_advance_substep(&s_red, 50.0f, p, 0.050f, 0.016f, true);
+    CHECK_NEAR(v_red, 50.0f, 1e-6);
+    CHECK_NEAR(s_red.value, 50.0f, 1e-6);
+    CHECK_NEAR(s_red.velocity, 0.0f, 1e-6);
+}
+
 /* ---- NULL safety ---------------------------------------------------------- */
 
 static void test_null_safety(void) {
@@ -283,6 +301,7 @@ int main(void) {
     test_approach_and_decay_reduced_motion_one_step();
     test_easing_endpoints_and_monotone();
     test_smoothstep();
+    test_spring_advance_substep();
     test_hysteresis_dwell_blocks_flip();
     test_hysteresis_dead_band_holds();
     test_hysteresis_zero_dwell_tracks_input();

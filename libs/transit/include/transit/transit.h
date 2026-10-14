@@ -93,6 +93,13 @@ TRANSIT_API bool transit_spring_settled(const transit_spring *s, float target, f
 TRANSIT_API float transit_spring_advance(transit_spring *s, float target, transit_spring_params p,
                                         float dt_seconds, bool reduced_motion);
 
+/* Advance toward `target` using bounded sub-steps (each <= max_substep_dt) to prevent
+ * discrete jumps under irregular frame delivery; returns the new value.
+ * If max_substep_dt <= 0, defaults to 1/60 s. */
+TRANSIT_API float transit_spring_advance_substep(transit_spring *s, float target,
+                                                 transit_spring_params p, float dt_seconds,
+                                                 float max_substep_dt, bool reduced_motion);
+
 /* One-step resolve (reduced motion, or an animation that must end now). */
 TRANSIT_API float transit_spring_snap_to(transit_spring *s, float target);
 

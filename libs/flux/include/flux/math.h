@@ -201,6 +201,14 @@ FLUX_API void *flux_arena_alloc(flux_arena *a, size_t bytes);
 FLUX_API void *flux_arena_alloc_aligned(flux_arena *a, size_t bytes, size_t align);
 FLUX_API void flux_arena_reset(flux_arena *a);
 
+/* Bucket an extent value to the nearest multiple of `step` (e.g. 128px),
+ * preventing dynamic size sweeps from thrashing render-target allocations. */
+static inline uint32_t flux_bucket_extent(uint32_t extent, uint32_t step) {
+    if (extent == 0 || step == 0)
+        return 0;
+    return ((extent + step - 1) / step) * step;
+}
+
 #ifdef __cplusplus
 }
 #endif

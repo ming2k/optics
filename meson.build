@@ -91,8 +91,6 @@ if get_option('examples')
   subdir('examples/scenarios')
 endif
 
-# LeakSanitizer suppressions (fontconfig's process-lifetime pattern cache
-# is upstream-owned and never freed). Default test setup when ASan is on.
 if get_option('fuzz')
   # Single point of truth for libFuzzer availability. The engine needs
   # its runtime linked; the -fsanitize=fuzzer compile flag alone is not
@@ -132,11 +130,38 @@ if get_option('fuzz')
   endif
 endif
 
-if 'address' in get_option('b_sanitize')
+# Sanitizer test setup: suppresses known process-lifetime allocations
+# (upstream fontconfig pattern cache) and unifies diagnostic aborts,
+# stack traces, and execution timeouts across all sanitizer suites.
+san_opts = get_option('b_sanitize')
+if san_opts != 'none' and san_opts != ''
+  san_env = environment()
+
+  if 'address' in san_opts or 'leak' in san_opts
+    san_env.prepend('LSAN_OPTIONS', 'suppressions=' + meson.project_source_root() / 'tools' / 'lsan.supp', separator : ':')
+  endif
+
+  if 'address' in san_opts
+    san_env.prepend('ASAN_OPTIONS', 'abort_on_error=1:halt_on_error=0', separator : ':')
+  endif
+
+  if 'undefined' in san_opts
+    san_env.prepend('UBSAN_OPTIONS', 'print_stacktrace=1', separator : ':')
+  endif
+
+  if 'thread' in san_opts
+    san_env.prepend('TSAN_OPTIONS', 'abort_on_error=1:halt_on_error=1', separator : ':')
+  endif
+
+  if 'memory' in san_opts
+    san_env.prepend('MSAN_OPTIONS', 'abort_on_error=1:halt_on_error=1', separator : ':')
+  endif
+
   add_test_setup(
-    'asan',
-    env: {'LSAN_OPTIONS': 'suppressions=' + meson.project_source_root() / 'tools' / 'lsan.supp'},
-    is_default: true,
+    'sanitizer',
+    env : san_env,
+    timeout_multiplier : 4,
+    is_default : true,
   )
 endif
 

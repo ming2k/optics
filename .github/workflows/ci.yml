@@ -130,19 +130,10 @@ jobs:
       - name: Test (Lavapipe via VK_ICD_FILENAMES)
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          # Leak detection is ON: the root meson.build registers an 'asan'
-          # test setup (default when b_sanitize includes 'address') that
-          # points LSAN_OPTIONS at tools/lsan.supp, which suppresses the
-          # fontconfig process-lifetime pattern cache (upstream design,
-          # not our allocation) and the Vulkan ICD driver caches
-          # (suppressed per-ICD in tests/flux/test_helpers.c). With those
-          # in place the suite runs leak-clean — verified across the full
-          # local matrix. If a new legitimate leak appears, the
-          # LeakSanitizer report is the signal; fix the leak rather than
-          # re-disabling detection here.
-          ASAN_OPTIONS: abort_on_error=1:halt_on_error=0
-          UBSAN_OPTIONS: print_stacktrace=1
-        run: meson test -C build --no-suite bench --print-errorlogs --timeout-multiplier 4
+          # Leak detection & diagnostic hardening are ON: the root meson.build
+          # registers the default 'sanitizer' test setup (active under any b_sanitize)
+          # that binds LSAN_OPTIONS (tools/lsan.supp), abort behaviors, and timeouts.
+        run: meson test -C build --no-suite bench --print-errorlogs
 
   clang-build:
     name: build (clang, ubuntu-24.04)

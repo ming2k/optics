@@ -45,14 +45,14 @@ LIBRARIES = [
         r"FLUX_API",
     ),
     (
-        "flux-text — text shaping (sibling of flux)",
-        ["libs/flux/text/include/flux-text/text.h"],
-        r"FLUX_TEXT_API",
+        "glyph — text shaping & layout engine",
+        ["libs/glyph/include/glyph/glyph.h"],
+        r"GLYPH_API",
     ),
     (
-        "flux-scene-graph — glTF scene layer (sibling of flux)",
-        ["libs/flux/scene_graph/include/flux-scene-graph/scene-graph.h"],
-        r"FLUX_SG_API",
+        "vista — 3D scene & skeletal animation engine",
+        ["libs/vista/include/vista/vista.h"],
+        r"VISTA_API",
     ),
     (
         "lens — immediate-mode UI",
@@ -88,9 +88,9 @@ LIBRARIES = [
         r"PRISM_API",
     ),
     (
-        "anim — motion vocabulary",
-        ["libs/anim/include/anim/anim.h"],
-        r"ANIM_API",
+        "transit — motion vocabulary",
+        ["libs/transit/include/transit/transit.h"],
+        r"TRANSIT_API",
     ),
 ]
 

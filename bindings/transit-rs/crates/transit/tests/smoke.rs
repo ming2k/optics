@@ -21,6 +21,21 @@ fn test_spring_dynamics() {
 }
 
 #[test]
+fn test_spring_advance_substep() {
+    let mut spring = Spring::new(0.0);
+    let params = SpringParams::snappy();
+    let target = 100.0;
+    // Advance with a large dt using 16.6ms sub-steps
+    let val = spring.advance_substep(target, params, 0.050, 1.0 / 60.0, false);
+    assert!(val > 0.0 && val < target);
+
+    // Reduced motion snaps in one step
+    let mut s_red = Spring::new(0.0);
+    assert_eq!(s_red.advance_substep(50.0, params, 0.050, 1.0 / 60.0, true), 50.0);
+    assert_eq!(s_red.value, 50.0);
+}
+
+#[test]
 fn test_reduced_motion_resolves_every_primitive_in_one_step() {
     // The ADR-0029 rule is uniform across the vocabulary: one flag, one step.
     let mut spring = Spring::new(0.0);

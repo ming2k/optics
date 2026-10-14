@@ -2879,6 +2879,17 @@ pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> u32 {
     unsafe { sys::flux_color_rgba_premul(r, g, b, a) }
 }
 
+/// Bucket an extent value to the nearest multiple of `step` (e.g. 128px),
+/// preventing dynamic size sweeps from thrashing render-target allocations.
+#[inline]
+pub fn bucket_extent(extent: u32, step: u32) -> u32 {
+    if extent == 0 || step == 0 {
+        0
+    } else {
+        ((extent + step - 1) / step) * step
+    }
+}
+
 /// A CPU-side bump allocator (`flux_arena`). flux's per-frame value types —
 /// paths, and the glyph quads that flux-text emits — are allocated from one of
 /// these and discarded wholesale via [`Arena::reset`] each frame.

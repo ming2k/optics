@@ -44,8 +44,9 @@ meson test -C build-release-asan --no-suite bench
 ```
 
 Point the binding build scripts at `build-release` and run all three Cargo
-workspaces as described in [Testing](testing.md#rust-workspaces). Manually run
-at least one `flux` windowed example and one `iris` example on Wayland.
+workspaces as described in [Testing](testing.md#rust-workspaces). Follow the
+[Pre-release smoke verification checklist](manual-testing.md#7-pre-release-smoke-verification-checklist)
+to manually verify interactive `flux`, `prism`, and `iris` applications.
 
 ## Create the Source Artifact
 

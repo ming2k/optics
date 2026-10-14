@@ -131,6 +131,31 @@ float transit_spring_advance(transit_spring *s, float target, transit_spring_par
     return s->value;
 }
 
+float transit_spring_advance_substep(transit_spring *s, float target, transit_spring_params p,
+                                     float dt_seconds, float max_substep_dt, bool reduced_motion) {
+    if (!s)
+        return target;
+    if (reduced_motion)
+        return transit_spring_snap_to(s, target);
+    if (target != target)
+        return s->value;
+    if (!(dt_seconds > 0.0f))
+        return s->value;
+
+    /* Cap total dt to 0.10s (100ms) to prevent divergence on long halts */
+    float remaining = dt_seconds > 0.10f ? 0.10f : dt_seconds;
+    float step = (max_substep_dt > 0.0f) ? max_substep_dt : (1.0f / 60.0f);
+    if (step > TRANSIT_DT_MAX)
+        step = TRANSIT_DT_MAX;
+
+    while (remaining > 0.0f) {
+        float sub_dt = remaining > step ? step : remaining;
+        transit_spring_advance(s, target, p, sub_dt, false);
+        remaining -= sub_dt;
+    }
+    return s->value;
+}
+
 /* ---- approach / decay ------------------------------------------------ */
 
 float transit_approach(float current, float target, float rate, float dt_seconds,

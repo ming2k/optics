@@ -6,6 +6,7 @@ These pages cover maintenance of the Optics monorepo:
 - [Design philosophy](../explanation/design-philosophy.md) — foundational architectural principles and layered system model.
 - [Setup](setup.md) — install dependencies and configure a development build.
 - [Testing](testing.md) — run, select, debug, and extend the C and Rust suites.
+- [Manual testing](manual-testing.md) — interactive verification, graphics and material inspection, UI and input checks, and platform matrix runbooks.
 - [Cross-platform](cross-platform.md) — Windows/macOS requirements,
   verification tooling, and the consistency invariants platform code must keep.
 - [Project layout](project-layout.md) — find the owner of code, tests,

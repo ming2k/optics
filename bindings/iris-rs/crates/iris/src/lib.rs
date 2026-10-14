@@ -504,6 +504,7 @@ impl Application {
             dark: config.dark,
             log_raw: config.log_raw,
             no_clear: false,
+            on_event: None,
             start: start_fn,
             stop: stop_fn,
             build: Some(build_trampoline::<B, P, S, T>),
