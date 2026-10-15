@@ -13,6 +13,13 @@ either.
 
 ## [Unreleased]
 
+## [0.0.58] - 2026-10-15
+
+### Added
+
+- **lens, flux, glyph**: Command-level premultiplied opacity modulation, scissor-bounded Vulkan offscreen layer passes, and batched GPU glyph runs (ADR-0109).
+- **lens-rs**: Exposed `NodeBuilder::opacity` API for node-level opacity control.
+
 ## [0.0.57] - 2026-10-14
 
 ## [0.0.56] - 2026-10-14
