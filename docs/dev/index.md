@@ -12,6 +12,7 @@ These pages cover maintenance of the Optics monorepo:
 - [Project layout](project-layout.md) — find the owner of code, tests,
   examples, bindings, and documentation.
 - [Release](release.md) — prepare and verify a source release.
+- [Animation, opacity, and layer performance know-how](animation-and-layer-performance.md) — premultiplied command opacity invariants, scissor-bounded Vulkan layer passes, stencil synchronization, and GPU glyph batching ([ADR-0109](../adr/0109-premultiplied-command-opacity-scissor-bounded-layers-and-glyph-run-batching.md)).
 - [Architecture implementation review](architecture-review-2026-09-14.md) —
   inspected implementation gaps, work packages, and verification evidence for ADR-0089–0094.
 

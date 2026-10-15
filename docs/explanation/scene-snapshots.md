@@ -46,5 +46,10 @@ presentation. The raw Canvas submission method is unsafe because the caller
 must uphold Canvas state, target exclusivity and device requirements.
 
 There is no `lens_render` or borrowed `lens_draw_list` compatibility path.
+Frame-scoped node opacity (`lens_set_opacity`) is modulated directly into each
+node's compiled draw commands using premultiplied sRGB channel scaling
+([ADR-0109](../adr/0109-premultiplied-command-opacity-scissor-bounded-layers-and-glyph-run-batching.md)),
+so animated panel and HUD fades execute inside the single active Canvas pass
+without spawning per-node offscreen render passes.
 Remaining resource-version, execution-plan and specialized-input milestones are
 tracked in internal developer implementation records.

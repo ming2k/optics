@@ -65,8 +65,15 @@ impl Color {
     }
 
     pub fn with_alpha(self, a: u8) -> Color {
-        let (r, g, b, _) = self.components();
-        Color::rgba(r, g, b, a)
+        let (pr, pg, pb, a0) = self.components();
+        if a0 == 255 || a0 == 0 {
+            Color::rgba(pr, pg, pb, a)
+        } else {
+            let unpremul = |c: u8| -> u8 {
+                ((c as u32 * 255 + (a0 as u32 / 2)) / a0 as u32).min(255) as u8
+            };
+            Color::rgba(unpremul(pr), unpremul(pg), unpremul(pb), a)
+        }
     }
 
     pub fn components(self) -> (u8, u8, u8, u8) {

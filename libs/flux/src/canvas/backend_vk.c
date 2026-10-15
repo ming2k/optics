@@ -64,6 +64,7 @@ typedef struct canvas_target_slot {
 typedef struct canvas_vk_layer {
     canvas_attachment_set attachments;
     float opacity;
+    flux_recti area;
     VkSampleCountFlagBits saved_samples;
     bool saved_stencil;
     flux_pass_desc parent_pass;
@@ -1167,9 +1168,33 @@ static flux_result vk_save_layer(const flux_canvas_backend *self, flux_canvas *c
     batch_flush(c);
     flux_frame_end_pass(c->frame);
 
+    flux_recti area = c->states[c->state_top].scissor;
+    uint32_t w = c->fb_width;
+    uint32_t h = c->fb_height;
+    if (area.x < 0) {
+        area.w = area.w > (uint32_t)(-area.x) ? area.w - (uint32_t)(-area.x) : 0;
+        area.x = 0;
+    }
+    if (area.y < 0) {
+        area.h = area.h > (uint32_t)(-area.y) ? area.h - (uint32_t)(-area.y) : 0;
+        area.y = 0;
+    }
+    if ((uint32_t)area.x >= w || (uint32_t)area.y >= h) {
+        area.x = 0;
+        area.y = 0;
+        area.w = 0;
+        area.h = 0;
+    } else {
+        if ((uint32_t)area.x + area.w > w)
+            area.w = w - (uint32_t)area.x;
+        if ((uint32_t)area.y + area.h > h)
+            area.h = h - (uint32_t)area.y;
+    }
+
     uint32_t layer_idx = v->layer_top;
     canvas_vk_layer *layer = &v->layers[layer_idx];
     layer->opacity = opacity;
+    layer->area = area;
     layer->saved_samples = v->active_samples;
     layer->saved_stencil = v->active_stencil;
     layer->parent_pass = v->current_pass;
@@ -1178,9 +1203,8 @@ static flux_result vk_save_layer(const flux_canvas_backend *self, flux_canvas *c
 
     v->active_samples = VK_SAMPLE_COUNT_1_BIT;
     v->active_stencil = false;
+    c->stencil_available = false;
 
-    uint32_t w = c->fb_width;
-    uint32_t h = c->fb_height;
     bool was_cached = layer->attachments.linear.image != VK_NULL_HANDLE;
     if (!linear_ensure(c, &layer->attachments, w, h)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "canvas layer linear attachment unavailable");
@@ -1200,7 +1224,7 @@ static flux_result vk_save_layer(const flux_canvas_backend *self, flux_canvas *c
         linear->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     linear->layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    /* Layer clears to transparent black */
+    /* Layer clears only the active scissor region to transparent black */
     v->current_color_att = (flux_pass_attachment){
         .load_op = FLUX_LOAD_CLEAR,
         .store_op = FLUX_STORE_STORE,
@@ -1213,8 +1237,10 @@ static flux_result vk_save_layer(const flux_canvas_backend *self, flux_canvas *c
         .color_attachment_count = 1,
         .color_attachments = &v->current_color_att,
         .stencil = nullptr,
-        .width = w,
-        .height = h,
+        .width = area.w > 0 ? area.w : 1u,
+        .height = area.h > 0 ? area.h : 1u,
+        .render_offset_x = area.x,
+        .render_offset_y = area.y,
     };
     flux_frame_begin_pass(c->frame, &v->current_pass);
 
@@ -1252,6 +1278,7 @@ static void vk_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
     /* Resume parent pass with previous MSAA/stencil configuration */
     v->active_samples = layer->saved_samples;
     v->active_stencil = layer->saved_stencil;
+    c->stencil_available = layer->saved_stencil;
     v->current_pass = layer->parent_pass;
     v->current_color_att = layer->parent_color_att;
     v->current_color_att.load_op = FLUX_LOAD_LOAD;
@@ -1265,21 +1292,36 @@ static void vk_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
     v->bound_pipeline = VK_NULL_HANDLE;
     vk_set_scissor(self, c, c->states[c->state_top].scissor);
 
-    /* Composite layer onto parent with layer->opacity modulation */
-    float opacity = fminf(fmaxf(layer->opacity, 0.0f), 1.0f);
-    uint32_t a = (uint32_t)(255.0f * opacity + 0.5f);
-    uint32_t tint = (a << 24) | (a << 16) | (a << 8) | a;
+    /* Composite scissor-bounded layer region onto parent with layer->opacity modulation */
+    if (layer->area.w > 0 && layer->area.h > 0 && c->fb_width > 0 && c->fb_height > 0) {
+        float opacity = fminf(fmaxf(layer->opacity, 0.0f), 1.0f);
+        uint32_t a = (uint32_t)(255.0f * opacity + 0.5f);
+        uint32_t tint = (a << 24) | (a << 16) | (a << 8) | a;
 
-    flux_mat3x2 saved_tx = c->states[c->state_top].transform;
-    c->states[c->state_top].transform = flux_mat3x2_identity();
+        flux_mat3x2 saved_tx = c->states[c->state_top].transform;
+        c->states[c->state_top].transform = flux_mat3x2_identity();
 
-    draw_image_with_sampler_handle(
-        c, nullptr, layer_linear->bindless, nullptr, flux_device_default_sampler_handle(c->device),
-        (flux_rect){0, 0, (float)c->fb_width, (float)c->fb_height},
-        (flux_rect){0.0f, 0.0f, 1.0f, 1.0f}, tint, FLUX_BLEND_SRC_OVER, 3u, nullptr, 0.0f);
-    batch_flush(c);
+        flux_rect dst = {
+            (float)layer->area.x,
+            (float)layer->area.y,
+            (float)layer->area.w,
+            (float)layer->area.h,
+        };
+        flux_rect src = {
+            (float)layer->area.x / (float)c->fb_width,
+            (float)layer->area.y / (float)c->fb_height,
+            (float)layer->area.w / (float)c->fb_width,
+            (float)layer->area.h / (float)c->fb_height,
+        };
 
-    c->states[c->state_top].transform = saved_tx;
+        draw_image_with_sampler_handle(
+            c, nullptr, layer_linear->bindless, nullptr,
+            flux_device_default_sampler_handle(c->device), dst, src, tint, FLUX_BLEND_SRC_OVER, 3u,
+            nullptr, 0.0f);
+        batch_flush(c);
+
+        c->states[c->state_top].transform = saved_tx;
+    }
 }
 
 static const flux_canvas_backend vk_backend = {

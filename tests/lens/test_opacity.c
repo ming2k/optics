@@ -69,6 +69,14 @@ int main(void) {
     CHECK(dim_cmd != NULL);
     CHECK(alpha_of(dim_cmd->color) == (uint8_t)full);
 
+    /* Premultiplied sRGB invariant (ADR-0109): lensi_opacity_color scales all
+     * four channels proportionally so R, G, B <= A holds for linear decoding. */
+    flux_color white = flux_color_rgba_premul(255, 200, 100, 255);
+    flux_color half_white = lensi_opacity_color(white, 0.5f);
+    CHECK(half_white == flux_color_rgba_premul(255, 200, 100, 128));
+    CHECK(lensi_opacity_color(white, 0.0f) == 0u);
+    CHECK(lensi_opacity_color(white, 1.0f) == white);
+
     lens_release(ui);
     return TEST_REPORT();
 }

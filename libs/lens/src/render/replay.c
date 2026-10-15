@@ -298,7 +298,9 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                     uint32_t rc = ri->color;
                     uint8_t rr = (uint8_t)(rc >> 16), rg = (uint8_t)(rc >> 8), rb = (uint8_t)rc,
                             ra = (uint8_t)(rc >> 24);
-                    flux_color color = rc == 0 ? c->color : flux_color_rgba_premul(rr, rg, rb, ra);
+                    flux_color color =
+                        rc == 0 ? c->color
+                                : lensi_opacity_color(flux_color_rgba_premul(rr, rg, rb, ra), alpha);
                     flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
                     if (!ri->fill) {
                         g.stroke.width = c->width > 0 ? c->width : 2.0f * s;
@@ -436,16 +438,10 @@ static flux_result lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n,
 static flux_result lensi_compile_node_body(lens *ui, flux_encoder *enc, lens_node *n,
                                            flux_rect clip) {
     flux_rect box = n->final_rect;
-    bool has_group_opacity = (n->opacity >= 0.0f && n->opacity < 1.0f);
-    if (has_group_opacity) {
-        flux_encoder_save_layer(enc, &box, n->opacity);
-    }
-
-    flux_result result = lensi_compile_commands(ui, enc, box, clip, n->cmds, n->cmd_count, 1.0f);
+    flux_result result =
+        lensi_compile_commands(ui, enc, box, clip, n->cmds, n->cmd_count, n->opacity);
     if (result != FLUX_OK)
         return result;
-    if (has_group_opacity)
-        flux_encoder_restore(enc);
 
     bool pushed_clip = false;
     if (n->is_scroll && n->first_child) {

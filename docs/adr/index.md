@@ -124,3 +124,4 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0106 | [Monorepo Identity Unification — glyph, vista, and transit](0106-monorepo-identity-unification-glyph-vista-transit.md) | Accepted |
 | 0107 | [Iris pre-lens event seam — ordered iris_event interception before snapshot folding](0107-iris-pre-lens-event-seam.md) | Accepted |
 | 0108 | [Motion Sub-stepping Integration and Render Target Bucket Allocation for Realtime Animation Safety](0108-motion-substepping-and-render-target-bucket-allocation.md) | Accepted |
+| 0109 | [Premultiplied Command Opacity Modulation, Scissor-Bounded Vulkan Layer Passes, and GPU Glyph Run Batching](0109-premultiplied-command-opacity-scissor-bounded-layers-and-glyph-run-batching.md) | Accepted |

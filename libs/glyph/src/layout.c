@@ -716,7 +716,7 @@ static flux_result draw_layout_pass(glyph_ctx *t, flux_canvas *canvas, flux_enco
 
         /* Capture pending host texels before fetching a glyph can recycle
          * their atlas storage. Recorder capture owns the cropped coverage. */
-        if (encoder && n > 0) {
+        if (encoder && !t->atlas && n > 0) {
             run.quad_count = n;
             flux_encoder_draw_glyph_run(encoder, &run);
             result = flux_encoder_status(encoder);
@@ -740,7 +740,14 @@ static flux_result draw_layout_pass(glyph_ctx *t, flux_canvas *canvas, flux_enco
             clears = t->atlas_clears;
             if (n > 0) {
                 run.quad_count = n;
-                flux_canvas_draw_glyph_run(canvas, &run);
+                if (canvas)
+                    flux_canvas_draw_glyph_run(canvas, &run);
+                else if (encoder) {
+                    flux_encoder_draw_glyph_run(encoder, &run);
+                    result = flux_encoder_status(encoder);
+                    if (result != FLUX_OK)
+                        goto done;
+                }
                 n = 0;
             }
             if (batch_atlas) {
@@ -772,8 +779,16 @@ static flux_result draw_layout_pass(glyph_ctx *t, flux_canvas *canvas, flux_enco
          * packer rolled over. The batch retain swaps with the page. */
         if (t->atlas && e->atlas_page != run_page) {
             if (n > 0) {
+                txt_atlas_flush(t);
                 run.quad_count = n;
-                flux_canvas_draw_glyph_run(canvas, &run);
+                if (canvas)
+                    flux_canvas_draw_glyph_run(canvas, &run);
+                else if (encoder) {
+                    flux_encoder_draw_glyph_run(encoder, &run);
+                    result = flux_encoder_status(encoder);
+                    if (result != FLUX_OK)
+                        goto done;
+                }
                 n = 0;
             }
             run_page = e->atlas_page;

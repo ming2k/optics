@@ -257,18 +257,16 @@ bool lensi_ghost_active(const lens *ui) {
 /* ---- render ------------------------------------------------------------- */
 
 static flux_result compile_ghost_node(lens *ui, flux_encoder *encoder, const lens_ghost_node *g,
-                                      flux_rect clip) {
+                                      flux_rect clip, float ghost_alpha) {
     flux_rect box = g->final_rect;
     if (box.w <= 0.0f || box.h <= 0.0f)
         return FLUX_OK;
-    if (g->opacity < 1.0f)
-        flux_encoder_save_layer(encoder, nullptr, g->opacity);
-    flux_result result = lensi_compile_commands(
-        ui, encoder, box, clip, g->cmd_count ? &g->cmds[0].cmd : nullptr, g->cmd_count, 1.0f);
+    float effective_alpha = ghost_alpha * g->opacity;
+    flux_result result =
+        lensi_compile_commands(ui, encoder, box, clip, g->cmd_count ? &g->cmds[0].cmd : nullptr,
+                               g->cmd_count, effective_alpha);
     if (result != FLUX_OK)
         return result;
-    if (g->opacity < 1.0f)
-        flux_encoder_restore(encoder);
     bool pushed = g->is_scroll && g->first_child;
     if (pushed) {
         float width = fmaxf(0.0f, box.w - 2.0f * g->pad - g->scroll_gutter);
@@ -281,7 +279,7 @@ static flux_result compile_ghost_node(lens *ui, flux_encoder *encoder, const len
         flux_encoder_clip_rect(encoder, clip);
     }
     for (const lens_ghost_node *c = g->first_child; c; c = c->next_sibling) {
-        result = compile_ghost_node(ui, encoder, c, clip);
+        result = compile_ghost_node(ui, encoder, c, clip, ghost_alpha);
         if (result != FLUX_OK)
             return result;
     }
@@ -295,18 +293,15 @@ flux_result lensi_ghost_compile(lens *ui, flux_encoder *encoder) {
     for (lens_band b = LENS_BAND_BASE; b < LENS_BAND_COUNT; b++) {
         for (uint32_t i = 0; i < ui->ghost_count; i++) {
             lens_ghost *gh = ui->ghosts[i];
-            if (gh->band != b || !gh->root)
+            if (gh->band != b || !gh->root || gh->alpha <= 0.0f)
                 continue;
             lens_node *live = lensi_store_find(ui, gh->root_id);
             if (live && live->phase != LENS_NODE_LEAVING)
                 continue;
             flux_rect clip = gh->root->has_place_bounds ? gh->root->place_bounds : no_clip;
-            if (gh->alpha < 1.0f)
-                flux_encoder_save_layer(encoder, nullptr, gh->alpha);
-            else
-                flux_encoder_save(encoder);
+            flux_encoder_save(encoder);
             flux_encoder_clip_rect(encoder, clip);
-            flux_result result = compile_ghost_node(ui, encoder, gh->root, clip);
+            flux_result result = compile_ghost_node(ui, encoder, gh->root, clip, gh->alpha);
             if (result != FLUX_OK)
                 return result;
             flux_encoder_restore(encoder);

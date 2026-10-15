@@ -885,15 +885,19 @@ static inline flux_color lensi_color_alpha(flux_color c, uint8_t a) {
     return (c & 0x00FFFFFFu) | ((uint32_t)a << 24);
 }
 
-/* Scale a packed colour's alpha by `o` (clamped 0..1), RGB untouched — the
- * fade bake behind lens_set_opacity. */
+/* Scale a premultiplied colour's RGBA channels by `o` (clamped 0..1) — the
+ * fade bake behind lens_set_opacity. Preserves the premultiplied sRGB
+ * invariant (R, G, B <= A) required by flux_decode_premul_srgb. */
 static inline flux_color lensi_opacity_color(flux_color c, float o) {
-    if (o < 0.0f)
-        o = 0.0f;
-    if (o > 1.0f)
-        o = 1.0f;
-    uint32_t a = (uint32_t)((float)(uint8_t)(c >> 24) * o + 0.5f);
-    return (c & 0x00FFFFFFu) | (a << 24);
+    if (o <= 0.0f)
+        return 0;
+    if (o >= 1.0f)
+        return c;
+    uint32_t a = (uint32_t)((float)((c >> 24) & 0xFFu) * o + 0.5f);
+    uint32_t r = (uint32_t)((float)((c >> 16) & 0xFFu) * o + 0.5f);
+    uint32_t g = (uint32_t)((float)((c >> 8) & 0xFFu) * o + 0.5f);
+    uint32_t b = (uint32_t)((float)(c & 0xFFu) * o + 0.5f);
+    return (a << 24) | (r << 16) | (g << 8) | b;
 }
 
 #endif /* LENSI_INTERNAL_H */
