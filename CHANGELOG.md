@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.59] - 2026-10-16
+
 ### Added
 
 - **flux**: `flux_frame_abandon` — release a submitted frame-slot borrow without presenting or advancing the offscreen ring slot, so a deferred or rejected external KMS flip reuses the same free backbuffer on retry (ADR-0110).
