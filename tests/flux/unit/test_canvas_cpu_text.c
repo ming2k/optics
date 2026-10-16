@@ -8,10 +8,10 @@
  * test skips (no ink drawn) rather than failing.
  */
 #include "test_helpers.h"
-#include <glyph/glyph.h>
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <flux/math.h>
+#include <glyph/glyph.h>
 #include <string.h>
 
 #define W 128
@@ -24,8 +24,7 @@
  * that lays out all heading sizes before painting its body text. */
 static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
     glyph_ctx *text = nullptr;
-    if (glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &text) != FLUX_OK ||
-        !text)
+    if (glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &text) != FLUX_OK || !text)
         return false;
 
     glyph_style small = {.size_px = 17.0f, .color = flux_color_rgba_premul(255, 255, 255, 255)};
@@ -89,7 +88,7 @@ int main(void) {
     style.color = white;
     glyph_draw(t, c, nullptr, 8.0f, 8.0f, "Aa", 2, &style);
     glyph_draw_outlined(t, c, nullptr, 72.0f, 8.0f, "Aa", 2, &style,
-                            flux_color_rgba_premul(255, 0, 0, 255), 2.0f);
+                        flux_color_rgba_premul(255, 0, 0, 255), 2.0f);
 
     EXPECT(flux_canvas_end(c) == FLUX_OK);
 

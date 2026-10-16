@@ -299,8 +299,9 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                     uint8_t rr = (uint8_t)(rc >> 16), rg = (uint8_t)(rc >> 8), rb = (uint8_t)rc,
                             ra = (uint8_t)(rc >> 24);
                     flux_color color =
-                        rc == 0 ? c->color
-                                : lensi_opacity_color(flux_color_rgba_premul(rr, rg, rb, ra), alpha);
+                        rc == 0
+                            ? c->color
+                            : lensi_opacity_color(flux_color_rgba_premul(rr, rg, rb, ra), alpha);
                     flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
                     if (!ri->fill) {
                         g.stroke.width = c->width > 0 ? c->width : 2.0f * s;
@@ -408,15 +409,15 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                                 y = r.y;
                         }
                     }
-                    flux_result result = glyph_record(
-                        ui->text, enc,
-                        &(glyph_record_desc){.x = x,
-                                                 .y = y,
-                                                 .utf8 = c->text,
-                                                 .len = vlen,
-                                                 .style = style,
-                                                 .outline_color = c->outline_color,
-                                                 .outline_width = c->outline_width});
+                    flux_result result =
+                        glyph_record(ui->text, enc,
+                                     &(glyph_record_desc){.x = x,
+                                                          .y = y,
+                                                          .utf8 = c->text,
+                                                          .len = vlen,
+                                                          .style = style,
+                                                          .outline_color = c->outline_color,
+                                                          .outline_width = c->outline_width});
                     if (result != FLUX_OK)
                         return result;
                 }
@@ -571,13 +572,13 @@ static flux_result compile_visuals(lens *ui, flux_display_list **out_list) {
 
         if (ui->text) {
             glyph_style ts = {.size_px = size,
-                                  .color = lensi_opacity_color(t->color_fg, ui->tooltip.opacity)};
+                              .color = lensi_opacity_color(t->color_fg, ui->tooltip.opacity)};
             r = glyph_record(ui->text, enc,
-                                 &(glyph_record_desc){.x = x + pad,
-                                                          .y = y + pad,
-                                                          .utf8 = ui->tooltip.text,
-                                                          .len = strlen(ui->tooltip.text),
-                                                          .style = ts});
+                             &(glyph_record_desc){.x = x + pad,
+                                                  .y = y + pad,
+                                                  .utf8 = ui->tooltip.text,
+                                                  .len = strlen(ui->tooltip.text),
+                                                  .style = ts});
             if (r != FLUX_OK)
                 goto done;
         }

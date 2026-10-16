@@ -183,7 +183,7 @@ int main(void) {
     vista_animation *animation = NULL;
     if (scene)
         EXPECT(vista_load_animation_glb(scene, animation_glb.bytes, animation_glb.size,
-                                          &animation) == FLUX_OK);
+                                        &animation) == FLUX_OK);
 
     if (scene && animation) {
         EXPECT_NEAR(vista_animation_duration(animation), 1.0f, 1e-6);

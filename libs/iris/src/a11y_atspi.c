@@ -906,11 +906,14 @@ IRIS_API int iris_a11y_init(void) {
         int val = 0;
         bool system_enabled = false;
         if (sd_bus_get_property_trivial(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Status",
-                                        "ScreenReaderEnabled", &err, 'b', &val) >= 0 && val) {
+                                        "ScreenReaderEnabled", &err, 'b', &val) >= 0 &&
+            val) {
             system_enabled = true;
             g_a11y_active = true;
-        } else if (sd_bus_get_property_trivial(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Status",
-                                               "IsEnabled", &err, 'b', &val) >= 0 && val) {
+        } else if (sd_bus_get_property_trivial(session, "org.a11y.Bus", "/org/a11y/bus",
+                                               "org.a11y.Status", "IsEnabled", &err, 'b',
+                                               &val) >= 0 &&
+                   val) {
             system_enabled = true;
         }
 
@@ -925,7 +928,8 @@ IRIS_API int iris_a11y_init(void) {
         char *addr_owned = NULL;
         rc = sd_bus_get_property_string(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
                                         "BusAddress", &err, &addr_owned);
-        if (rc >= 0 && addr_owned && addr_owned[0] != '\0' && strlen(addr_owned) < sizeof addr_buf) {
+        if (rc >= 0 && addr_owned && addr_owned[0] != '\0' &&
+            strlen(addr_owned) < sizeof addr_buf) {
             memcpy(addr_buf, addr_owned, strlen(addr_owned) + 1);
         } else {
             /* Fallback: GetAddress method call (used by legacy broker setups). */
@@ -942,8 +946,8 @@ IRIS_API int iris_a11y_init(void) {
             }
             const char *reply_addr = NULL;
             rc = sd_bus_message_read(reply, "s", &reply_addr);
-            bool valid =
-                rc >= 0 && reply_addr && reply_addr[0] != '\0' && strlen(reply_addr) < sizeof addr_buf;
+            bool valid = rc >= 0 && reply_addr && reply_addr[0] != '\0' &&
+                         strlen(reply_addr) < sizeof addr_buf;
             if (valid)
                 memcpy(addr_buf, reply_addr, strlen(reply_addr) + 1);
             sd_bus_message_unref(reply);

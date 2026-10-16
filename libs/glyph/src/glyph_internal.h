@@ -164,8 +164,8 @@ typedef struct txt_face_slot {
     int count;
     int cap;
     glyph_family family; /* slot's family, for charset patch queries */
-    float weight;            /* slot's CSS weight, for charset patch queries */
-    bool italic;             /* slot's italic flag, for charset patch queries */
+    float weight;        /* slot's CSS weight, for charset patch queries */
+    bool italic;         /* slot's italic flag, for charset patch queries */
 } txt_face_slot;
 
 /* One cached glyph image. Defined in glyph_cache.h — included above.

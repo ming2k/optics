@@ -27,22 +27,20 @@
 #ifdef IRIS_HAVE_PORTAL_WATCH
 #include <systemd/sd-bus.h>
 
-static bool portal_read_setting(sd_bus *bus, const char *ns, const char *key,
-                                char type_char, void *out) {
+static bool portal_read_setting(sd_bus *bus, const char *ns, const char *key, char type_char,
+                                void *out) {
     if (!bus)
         return false;
     sd_bus_error err = SD_BUS_ERROR_NULL;
     sd_bus_message *reply = NULL;
-    int rc = sd_bus_call_method(bus, "org.freedesktop.portal.Desktop",
-                                "/org/freedesktop/portal/desktop",
-                                "org.freedesktop.portal.Settings",
-                                "ReadOne", &err, &reply, "ss", ns, key);
+    int rc = sd_bus_call_method(
+        bus, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.Settings", "ReadOne", &err, &reply, "ss", ns, key);
     if (rc < 0) {
         sd_bus_error_free(&err);
-        rc = sd_bus_call_method(bus, "org.freedesktop.portal.Desktop",
-                                "/org/freedesktop/portal/desktop",
-                                "org.freedesktop.portal.Settings",
-                                "Read", &err, &reply, "ss", ns, key);
+        rc = sd_bus_call_method(
+            bus, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Settings", "Read", &err, &reply, "ss", ns, key);
     }
     if (rc < 0) {
         sd_bus_error_free(&err);
@@ -92,20 +90,24 @@ IRIS_API iris_a11y_prefs iris_a11y_prefs_query(void) {
         (void)sd_bus_set_method_call_timeout(session, 50000); /* 50ms fail-fast */
 
         bool anim = true;
-        if (portal_read_setting(session, "org.gnome.desktop.interface", "enable-animations", 'b', &anim))
+        if (portal_read_setting(session, "org.gnome.desktop.interface", "enable-animations", 'b',
+                                &anim))
             p.reduced_motion = !anim;
 
         uint32_t contrast = 0;
-        if (portal_read_setting(session, "org.freedesktop.appearance", "contrast", 'u', &contrast)) {
+        if (portal_read_setting(session, "org.freedesktop.appearance", "contrast", 'u',
+                                &contrast)) {
             p.high_contrast = (contrast == 1);
         } else {
             bool hc = false;
-            if (portal_read_setting(session, "org.gnome.desktop.a11y.interface", "high-contrast", 'b', &hc))
+            if (portal_read_setting(session, "org.gnome.desktop.a11y.interface", "high-contrast",
+                                    'b', &hc))
                 p.high_contrast = hc;
         }
 
         double scale = 1.0;
-        if (portal_read_setting(session, "org.gnome.desktop.interface", "text-scaling-factor", 'd', &scale)) {
+        if (portal_read_setting(session, "org.gnome.desktop.interface", "text-scaling-factor", 'd',
+                                &scale)) {
             if (scale > 0.0 && scale <= 10.0)
                 p.text_scale = (float)scale;
         }

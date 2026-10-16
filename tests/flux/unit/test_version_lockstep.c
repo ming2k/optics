@@ -12,13 +12,13 @@
  *     newer major/minor/patch combination.
  */
 #include "test_helpers.h"
-#include <transit/transit.h>
-#include <vista/vista.h>
-#include <glyph/glyph.h>
 #include <flux/flux.h>
+#include <glyph/glyph.h>
 #include <iris/app.h>
 #include <lens/lens.h>
 #include <prism/prism.h>
+#include <transit/transit.h>
+#include <vista/vista.h>
 
 #include <string.h>
 

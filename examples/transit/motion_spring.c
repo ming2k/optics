@@ -5,8 +5,8 @@
  * and adaptive smoothing without clock, timeline, or heap allocation.
  */
 
-#include <transit/transit.h>
 #include <stdio.h>
+#include <transit/transit.h>
 
 static void print_bar(const char *label, float value, float max_val) {
     int width = 36;

@@ -13,14 +13,14 @@
  * frame is rebuilt from the caller's tab array, so nothing here owns tab
  * identity — only the in-flight drag is remembered. */
 typedef struct tab_strip_drag {
-    bool active;           /* pointer captured and past the drag threshold */
-    bool armed;            /* a press is held and may still cross the threshold */
-    uint32_t from;         /* index of the tab being dragged */
-    uint32_t hover;        /* current predicted insertion slot (0..tab_count-1) */
-    uint32_t count;        /* tab_count captured at press, to detect model drift */
-    flux_point press;      /* pointer position at press */
-    bool close_pressed;    /* press captured on a tab's close button */
-    uint32_t close_index;  /* index of the tab whose close button is pressed */
+    bool active;          /* pointer captured and past the drag threshold */
+    bool armed;           /* a press is held and may still cross the threshold */
+    uint32_t from;        /* index of the tab being dragged */
+    uint32_t hover;       /* current predicted insertion slot (0..tab_count-1) */
+    uint32_t count;       /* tab_count captured at press, to detect model drift */
+    flux_point press;     /* pointer position at press */
+    bool close_pressed;   /* press captured on a tab's close button */
+    uint32_t close_index; /* index of the tab whose close button is pressed */
 } tab_strip_drag;
 
 lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item *tabs,
@@ -98,8 +98,8 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
             .h = close_size,
         };
 
-        bool close_hovered = tab->closable && (r.w > 0.0f) &&
-                             lensi_point_in(ui->input.cursor, close_rect);
+        bool close_hovered =
+            tab->closable && (r.w > 0.0f) && lensi_point_in(ui->input.cursor, close_rect);
         bool tab_hovered = resp.hovered;
 
         /* Press / click on the close button */
@@ -178,8 +178,8 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
         }
 
         /* Draw close button inside tab pill (progressive disclosure: visible on hover) */
-        bool show_close =
-            tab->closable && (tab_hovered || (drag && drag->close_pressed && drag->close_index == i));
+        bool show_close = tab->closable &&
+                          (tab_hovered || (drag && drag->close_pressed && drag->close_index == i));
         if (show_close) {
             lens_node *n = lensi_store_touch(ui, resp.id);
             if (n) {
@@ -202,18 +202,20 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
                                         });
                 }
 
-                flux_color close_fg =
-                    close_hovered ? ui->theme.color_fg : lensi_opacity_color(ui->theme.color_fg, 0.65f);
+                flux_color close_fg = close_hovered
+                                          ? ui->theme.color_fg
+                                          : lensi_opacity_color(ui->theme.color_fg, 0.65f);
                 if (opts && opts->close_icon != LENS_ICON_INVALID) {
                     lensi_drawlist_push(ui, n,
                                         (lens_draw_cmd){
                                             .kind = LENS_DRAW_ICON,
-                                            .rel = {
-                                                .x = -pad_right - 2.0f,
-                                                .y = (tab_h - (close_size - 4.0f)) * 0.5f,
-                                                .w = close_size - 4.0f,
-                                                .h = close_size - 4.0f,
-                                            },
+                                            .rel =
+                                                {
+                                                    .x = -pad_right - 2.0f,
+                                                    .y = (tab_h - (close_size - 4.0f)) * 0.5f,
+                                                    .w = close_size - 4.0f,
+                                                    .h = close_size - 4.0f,
+                                                },
                                             .color = close_fg,
                                             .icon_id = opts->close_icon,
                                             .width = 1.5f,
@@ -222,12 +224,13 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
                     lensi_drawlist_push(ui, n,
                                         (lens_draw_cmd){
                                             .kind = LENS_DRAW_TEXT,
-                                            .rel = {
-                                                .x = -pad_right - 4.0f,
-                                                .y = (tab_h - 12.0f) * 0.5f - 1.0f,
-                                                .w = 0,
-                                                .h = 0,
-                                            },
+                                            .rel =
+                                                {
+                                                    .x = -pad_right - 4.0f,
+                                                    .y = (tab_h - 12.0f) * 0.5f - 1.0f,
+                                                    .w = 0,
+                                                    .h = 0,
+                                                },
                                             .color = close_fg,
                                             .text = "×",
                                             .text_size = 12.0f,

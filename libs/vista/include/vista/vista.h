@@ -1,5 +1,6 @@
 /*
- * vista/vista.h — glTF 2.0 3D scene hierarchy, TRS transforms, and asset runtime (ADR-0016, ADR-0106).
+ * vista/vista.h — glTF 2.0 3D scene hierarchy, TRS transforms, and asset runtime (ADR-0016,
+ * ADR-0106).
  *
  * Sibling library to libflux: it parses glTF, builds flux mesh resources, and
  * records 3D scene draws. It feeds the flux_scene_draw_mesh primitive.
@@ -108,12 +109,10 @@ FLUX_NODISCARD VISTA_API flux_result vista_scene_set_materials(vista_scene *scen
 VISTA_API uint32_t vista_scene_primitive_count(const vista_scene *scene);
 
 /* World-space axis-aligned bounding box of every primitive drawn by the scene. */
-VISTA_API bool vista_scene_bounds(const vista_scene *scene, flux_vec3 *out_min,
-                                  flux_vec3 *out_max);
+VISTA_API bool vista_scene_bounds(const vista_scene *scene, flux_vec3 *out_min, flux_vec3 *out_max);
 
 /* Current model-space position of a VRM humanoid bone (e.g. "head" or "hips"). */
-VISTA_API bool vista_scene_humanoid_bone_position(const vista_scene *scene,
-                                                  const char *bone_name,
+VISTA_API bool vista_scene_humanoid_bone_position(const vista_scene *scene, const char *bone_name,
                                                   flux_vec3 *out_position);
 
 /* Load animation from a binary glTF/VRMA file and bind its channels to `target`. */
@@ -127,8 +126,9 @@ VISTA_API float vista_animation_duration(const vista_animation *animation);
 VISTA_API uint32_t vista_animation_channel_count(const vista_animation *animation);
 
 /* Reset to the model rest pose, then sample and apply the clip. */
-FLUX_NODISCARD VISTA_API flux_result vista_scene_apply_animation(
-    vista_scene *scene, const vista_animation *animation, float time_seconds, bool loop);
+FLUX_NODISCARD VISTA_API flux_result vista_scene_apply_animation(vista_scene *scene,
+                                                                 const vista_animation *animation,
+                                                                 float time_seconds, bool loop);
 VISTA_API void vista_scene_reset_pose(vista_scene *scene);
 
 /* ================================================================== */

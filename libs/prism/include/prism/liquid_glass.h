@@ -63,7 +63,8 @@ typedef struct prism_liquid_glass_shape {
  * - frost_strength / tint_strength / saturation: per-body override of the
  *   same desc knob (<0 inherits the desc value; >=0 is used verbatim and
  *   clamped like the desc value);
- * - curvature: [0, 1] continuous curvature blend factor: 0 = rounded rect, 1 = G2 superellipse (p=4);
+ * - curvature: [0, 1] continuous curvature blend factor: 0 = rounded rect, 1 = G2 superellipse
+ * (p=4);
  * - contact_ao: [0, 1] sub-pixel contact ambient occlusion (CAO) at silhouette boundary;
  * - ambient_fresnel: [0, 1] 360-degree isotropic environmental Fresnel sheen.
  *
@@ -160,10 +161,11 @@ typedef struct prism_liquid_glass_desc {
     float size_scale_min;
     float tint_strength;
     float frost_strength;
-    float curvature; /* [0, 1] continuous curvature (squircle) blend factor: 0 = rounded rect, 1 =
-                        G2 superellipse */
-    float contact_ao;      /* [0, 1] Contact ambient occlusion default (default: 0.35) */
-    float ambient_fresnel; /* [0, 1] Isotropic environmental Fresnel sheen default (default: 0.50) */
+    float curvature;  /* [0, 1] continuous curvature (squircle) blend factor: 0 = rounded rect, 1 =
+                         G2 superellipse */
+    float contact_ao; /* [0, 1] Contact ambient occlusion default (default: 0.35) */
+    float
+        ambient_fresnel; /* [0, 1] Isotropic environmental Fresnel sheen default (default: 0.50) */
 } prism_liquid_glass_desc;
 
 #define PRISM_LIQUID_GLASS_DESC_INIT                                                               \

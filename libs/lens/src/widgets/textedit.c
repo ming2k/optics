@@ -260,9 +260,9 @@ static float prefix_width(lens *ui, const char *str, size_t len, float font_size
     if (!str || len == 0)
         return 0.0f;
     return glyph_measure(ui->text, str, len,
-                             &(glyph_style){.size_px = font_size,
-                                                .weight = 0.0f,
-                                                .family = (glyph_family)ui->text_family})
+                         &(glyph_style){.size_px = font_size,
+                                        .weight = 0.0f,
+                                        .family = (glyph_family)ui->text_family})
         .width;
 }
 

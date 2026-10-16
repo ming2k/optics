@@ -8,7 +8,6 @@
  *   - Native Iris windowing (zero GLFW, system cursor, fractional HiDPI).
  */
 
-#include <vista/vista.h>
 #include <flux/flux.h>
 #include <flux/scene.h>
 #include <flux/vulkan.h>
@@ -16,6 +15,7 @@
 #include <iris/iris.h>
 #include <iris/window.h>
 #include <lens/lens.h>
+#include <vista/vista.h>
 
 #include <math.h>
 #include <stdbool.h>

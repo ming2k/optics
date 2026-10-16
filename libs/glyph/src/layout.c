@@ -375,8 +375,7 @@ void txt_layout_cache_reset(glyph_ctx *t) {
 /* ------------------------------------------------------------------ */
 
 bool txt_text_layout_build(glyph_ctx *t, const char *utf8, size_t len, float size_px, float weight,
-                           bool italic, glyph_family family, float scale,
-                           txt_text_layout *out) {
+                           bool italic, glyph_family family, float scale, txt_text_layout *out) {
     memset(out, 0, sizeof *out);
     if (!t || !utf8 || len == 0 || size_px <= 0.0f)
         return false;
@@ -603,8 +602,7 @@ void glyph_set_default_family(glyph_ctx *t, glyph_family family) {
 /*  Measure                                                            */
 /* ------------------------------------------------------------------ */
 
-glyph_metrics glyph_measure(glyph_ctx *t, const char *utf8, size_t len,
-                                    const glyph_style *style) {
+glyph_metrics glyph_measure(glyph_ctx *t, const char *utf8, size_t len, const glyph_style *style) {
     glyph_metrics m = {0};
     if (!t || !utf8 || len == 0)
         return m;
@@ -895,12 +893,11 @@ static flux_result text_draw_impl(glyph_ctx *t, flux_canvas *canvas, flux_encode
 }
 
 void glyph_draw(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
-                    const char *utf8, size_t len, const glyph_style *style) {
+                const char *utf8, size_t len, const glyph_style *style) {
     text_draw_impl(t, canvas, nullptr, arena, x, y, utf8, len, style, 0, 0.0f);
 }
 
-flux_result glyph_record(glyph_ctx *t, flux_encoder *encoder,
-                             const glyph_record_desc *desc) {
+flux_result glyph_record(glyph_ctx *t, flux_encoder *encoder, const glyph_record_desc *desc) {
     flux_result result;
     if (!t || !encoder || !desc || (!desc->utf8 && desc->len) || !isfinite(desc->x) ||
         !isfinite(desc->y) || !isfinite(desc->outline_width) || desc->outline_width < 0) {
@@ -917,8 +914,8 @@ flux_result glyph_record(glyph_ctx *t, flux_encoder *encoder,
 }
 
 void glyph_draw_outlined(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
-                             const char *utf8, size_t len, const glyph_style *style,
-                             flux_color outline_color, float outline_width) {
+                         const char *utf8, size_t len, const glyph_style *style,
+                         flux_color outline_color, float outline_width) {
     text_draw_impl(t, canvas, nullptr, arena, x, y, utf8, len, style, outline_color, outline_width);
 }
 
@@ -931,7 +928,7 @@ void glyph_draw_outlined(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, f
  * lands on the correct edge in RTL/mixed text; for pure LTR this reduces to
  * the summed advance of the preceding glyphs. */
 float glyph_x_for_byte(glyph_ctx *t, const char *utf8, size_t len, size_t byte,
-                           const glyph_style *style) {
+                       const glyph_style *style) {
     if (!t || !t->has_backend || !utf8 || len == 0)
         return 0.0f;
     float size_px, weight;
@@ -969,7 +966,7 @@ float glyph_x_for_byte(glyph_ctx *t, const char *utf8, size_t len, size_t byte,
  * one rect and a direction flip (an unselected glyph appearing between two
  * selected ones in visual order) naturally splits into separate rects. */
 int glyph_selection_rects(glyph_ctx *t, const char *utf8, size_t len, size_t lo, size_t hi,
-                              const glyph_style *style, glyph_xrange *out, int max) {
+                          const glyph_style *style, glyph_xrange *out, int max) {
     if (!t || !t->has_backend || !utf8 || len == 0 || lo >= hi || max <= 0)
         return 0;
     float size_px, weight;
@@ -1027,7 +1024,7 @@ int glyph_selection_rects(glyph_ctx *t, const char *utf8, size_t len, size_t lo,
  * trailing edge of the logically-last glyph. Visual movement walks these stops
  * ordered by x. */
 size_t glyph_visual_move(glyph_ctx *t, const char *utf8, size_t len, size_t byte, bool forward,
-                             const glyph_style *style) {
+                         const glyph_style *style) {
     if (!t || !t->has_backend || !utf8 || len == 0)
         return byte;
     float size_px, weight;
@@ -1086,7 +1083,7 @@ size_t glyph_visual_move(glyph_ctx *t, const char *utf8, size_t len, size_t byte
 
 /* Source byte offset of the caret nearest local x (relative to text origin). */
 size_t glyph_byte_for_x(glyph_ctx *t, const char *utf8, size_t len, float local_x,
-                            const glyph_style *style) {
+                        const glyph_style *style) {
     if (!t || !t->has_backend || !utf8 || len == 0)
         return 0;
     float size_px, weight;

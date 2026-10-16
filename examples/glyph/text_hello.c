@@ -8,9 +8,9 @@
  * scaling work out of the box via Iris.
  */
 
-#include <glyph/glyph.h>
 #include <flux/canvas.h>
 #include <flux/flux.h>
+#include <glyph/glyph.h>
 #include <iris/app.h>
 #include <iris/iris.h>
 #include <iris/window.h>

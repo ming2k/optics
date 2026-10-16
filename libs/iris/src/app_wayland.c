@@ -412,11 +412,9 @@ static bool wp_emit_pointer(wp_platform *pl, iris_event_type type, double x, dou
 }
 
 static bool wp_emit_button(wp_platform *pl, double x, double y, int lens_button, bool down) {
-    iris_event ev = {.type = IRIS_EVENT_POINTER_BUTTON,
-                     .button = {.x = (float)x,
-                                .y = (float)y,
-                                .button = lens_button,
-                                .pressed = down}};
+    iris_event ev = {
+        .type = IRIS_EVENT_POINTER_BUTTON,
+        .button = {.x = (float)x, .y = (float)y, .button = lens_button, .pressed = down}};
     if (!iris__event_seam_emit(&ev))
         return false;
     int i = ev.button.button;
@@ -458,9 +456,8 @@ static bool wp_emit_key(wp_platform *pl, int key, bool pressed, bool repeat, uin
     if (!iris__event_seam_emit(&ev))
         return false;
     if (ev.keyboard.key != 0 && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
-        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){.key = ev.keyboard.key,
-                                                             .pressed = ev.keyboard.pressed,
-                                                             .repeat = ev.keyboard.repeat};
+        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){
+            .key = ev.keyboard.key, .pressed = ev.keyboard.pressed, .repeat = ev.keyboard.repeat};
     return true;
 }
 
@@ -490,8 +487,9 @@ static bool wp_emit_preedit(wp_platform *pl, const char *utf8, int32_t cursor_be
     uint32_t hi = cursor_end >= 0 ? clamp_preedit_off(cursor_end, plen) : lo;
     if (hi < lo)
         hi = lo;
-    iris_event ev = {.type = IRIS_EVENT_PREEDIT,
-                     .preedit = {.utf8 = clipped, .len = plen, .cursor = lo, .sel_lo = lo, .sel_hi = hi}};
+    iris_event ev = {
+        .type = IRIS_EVENT_PREEDIT,
+        .preedit = {.utf8 = clipped, .len = plen, .cursor = lo, .sel_lo = lo, .sel_hi = hi}};
     if (!iris__event_seam_emit(&ev))
         return false;
     if (ev.preedit.utf8 && ev.preedit.utf8[0]) {
@@ -526,8 +524,8 @@ static bool wp_emit_ime_delete(wp_platform *pl, uint32_t before, uint32_t after)
  * this event carries the cursor position and DnD activity so the host can
  * observe/intercept it like any other pointer motion. */
 static bool wp_emit_dnd(wp_platform *pl, double x, double y, bool active) {
-    iris_event ev = {
-        .type = IRIS_EVENT_DND, .dnd = {.x = (float)x, .y = (float)y, .active = active}};
+    iris_event ev = {.type = IRIS_EVENT_DND,
+                     .dnd = {.x = (float)x, .y = (float)y, .active = active}};
     if (!iris__event_seam_emit(&ev))
         return false;
     pl->acc.cx = ev.dnd.x;

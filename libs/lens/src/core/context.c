@@ -135,8 +135,7 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
      * monospace metrics internally when no shaping backend or font is
      * available, so widgets never branch on backend presence. Only fails
      * on allocation, which is non-fatal here (text simply stays blank). */
-    if (glyph_create(&(glyph_desc){.device = ui->device, .scale = ui->scale}, &ui->text) !=
-        FLUX_OK)
+    if (glyph_create(&(glyph_desc){.device = ui->device, .scale = ui->scale}, &ui->text) != FLUX_OK)
         ui->text = NULL;
 
     *out = ui;

@@ -181,10 +181,8 @@ int main(void) {
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     {
-        lens_tab_item tabs[4] = {{.title = "Alpha"},
-                                 {.title = "Beta"},
-                                 {.title = "Gamma"},
-                                 {.title = "Delta"}};
+        lens_tab_item tabs[4] = {
+            {.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}, {.title = "Delta"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
         a = lens_tab_strip(ui, "##main-tabs", tabs, 4, 0, &opts);
     }

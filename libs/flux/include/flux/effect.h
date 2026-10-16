@@ -146,8 +146,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_apply(flux_blur_filter *fil
  *     valid recorded blur output.
  *   FLUX_ERROR_OUT_OF_RANGE     — frame slot index >= FLUX_MAX_FRAMES_IN_FLIGHT. */
 FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_current(flux_blur_filter *filter,
-                                                             flux_frame *frame,
-                                                             flux_image **out);
+                                                             flux_frame *frame, flux_image **out);
 
 /* ------------------------------------------------------------------ */
 /*  Drop shadow                                                       */

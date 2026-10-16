@@ -27,8 +27,8 @@
 #include <flux/canvas_cpu.h>
 
 /* one begin/end pair per frame */
-#include <glyph/glyph.h>
 #include <flux/math.h>
+#include <glyph/glyph.h>
 
 #include <string.h>
 

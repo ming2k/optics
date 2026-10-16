@@ -52,12 +52,12 @@ bool vista_version_check(int major, int minor, int patch) {
 }
 
 VISTA_API const char *vista_version_string(void) {
-    return FLUX_SG_STR(VISTA_VERSION_MAJOR) "." FLUX_SG_STR(
-        VISTA_VERSION_MINOR) "." FLUX_SG_STR(VISTA_VERSION_PATCH);
+    return FLUX_SG_STR(VISTA_VERSION_MAJOR) "." FLUX_SG_STR(VISTA_VERSION_MINOR) "." FLUX_SG_STR(
+        VISTA_VERSION_PATCH);
 }
 
-VISTA_API flux_result vista_load_glb(flux_device *device, const void *glb_bytes,
-                                         size_t byte_count, vista_scene **out) {
+VISTA_API flux_result vista_load_glb(flux_device *device, const void *glb_bytes, size_t byte_count,
+                                     vista_scene **out) {
     if (!device || !glb_bytes || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = NULL;
@@ -96,7 +96,7 @@ VISTA_API flux_result vista_load_glb(flux_device *device, const void *glb_bytes,
  * internal storage are one type — no downcasts, no layout drift. */
 
 VISTA_API flux_result vista_parse_glb(const void *glb_bytes, size_t byte_count,
-                                          vista_scene_data **out) {
+                                      vista_scene_data **out) {
     if (!glb_bytes || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = NULL;
@@ -147,7 +147,7 @@ VISTA_API uint32_t vista_scene_data_primitive_count(const vista_scene_data *data
 }
 
 VISTA_API bool vista_scene_data_bounds(const vista_scene_data *data, flux_vec3 *out_min,
-                                           flux_vec3 *out_max) {
+                                       flux_vec3 *out_max) {
     if (!out_min || !out_max || !data)
         return false;
     flux_vec3 wmin = {FLT_MAX, FLT_MAX, FLT_MAX};
@@ -256,7 +256,7 @@ flux_result sg_data_build(flux_device *dev, sg_scene_data *data, vista_scene *sc
 }
 
 VISTA_API flux_result vista_scene_data_build(flux_device *device, vista_scene_data *data,
-                                                 vista_scene **out) {
+                                             vista_scene **out) {
     if (!device || !data || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = NULL;
@@ -310,10 +310,8 @@ VISTA_API void vista_scene_release(vista_scene *scene) {
     free(scene);
 }
 
-VISTA_API flux_result vista_scene_set_materials(vista_scene *scene,
-                                                    flux_material *const *materials,
-                                                    uint32_t material_count,
-                                                    flux_material *fallback) {
+VISTA_API flux_result vista_scene_set_materials(vista_scene *scene, flux_material *const *materials,
+                                                uint32_t material_count, flux_material *fallback) {
     if (!scene || (material_count > 0 && !materials))
         return FLUX_ERROR_INVALID_ARGUMENT;
     flux_material **replacement = NULL;
@@ -344,9 +342,8 @@ VISTA_API uint32_t vista_scene_primitive_count(const vista_scene *scene) {
     return scene ? scene->prim_count : 0;
 }
 
-VISTA_API bool vista_scene_humanoid_bone_position(const vista_scene *scene,
-                                                      const char *bone_name,
-                                                      flux_vec3 *out_position) {
+VISTA_API bool vista_scene_humanoid_bone_position(const vista_scene *scene, const char *bone_name,
+                                                  flux_vec3 *out_position) {
     if (!scene || !bone_name || !out_position)
         return false;
     int bone = sg_human_bone_index(bone_name, false);
@@ -542,7 +539,7 @@ static void expand_world_aabb(flux_mat4 m, flux_vec3 bmin, flux_vec3 bmax, flux_
 }
 
 VISTA_API bool vista_scene_bounds(const vista_scene *scene, flux_vec3 *out_min,
-                                      flux_vec3 *out_max) {
+                                  flux_vec3 *out_max) {
     if (!scene || !out_min || !out_max)
         return false;
     flux_vec3 wmin = {1e30f, 1e30f, 1e30f};
@@ -579,8 +576,7 @@ VISTA_API bool vista_scene_bounds(const vista_scene *scene, flux_vec3 *out_min,
     return true;
 }
 
-static flux_material *primitive_material(const vista_scene *scene,
-                                         const vista_primitive *primitive,
+static flux_material *primitive_material(const vista_scene *scene, const vista_primitive *primitive,
                                          flux_material *override) {
     if (override)
         return override;
@@ -613,7 +609,7 @@ static void draw_primitive(flux_frame *frame, const flux_camera *cam, flux_mat4 
 }
 
 VISTA_API void vista_draw(flux_frame *frame, const flux_camera *cam, const vista_scene *scene,
-                              const vista_draw_opts *opts) {
+                          const vista_draw_opts *opts) {
     if (!frame || !cam || !scene || !opts)
         return;
 
@@ -635,8 +631,8 @@ VISTA_API void vista_draw(flux_frame *frame, const flux_camera *cam, const vista
                 if (!material || blend != (blend_phase != 0))
                     continue;
                 const vista_skin *skin = n->skin >= 0 && (uint32_t)n->skin < scene->skin_count
-                                               ? &scene->skins[n->skin]
-                                               : NULL;
+                                             ? &scene->skins[n->skin]
+                                             : NULL;
                 draw_primitive(frame, cam, n->world, p, material, opts->light, skin);
             }
         }

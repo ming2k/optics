@@ -146,8 +146,8 @@ GLYPH_API glyph_metrics glyph_measure(glyph_ctx *t, const char *utf8, size_t len
 /*  Draw                                                              */
 /* ================================================================== */
 
-GLYPH_API void glyph_draw(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x,
-                          float y, const char *utf8, size_t len, const glyph_style *style);
+GLYPH_API void glyph_draw(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
+                          const char *utf8, size_t len, const glyph_style *style);
 
 typedef struct glyph_record_desc {
     float x, y;
@@ -161,10 +161,9 @@ typedef struct glyph_record_desc {
 FLUX_NODISCARD GLYPH_API flux_result glyph_record(glyph_ctx *t, flux_encoder *encoder,
                                                   const glyph_record_desc *desc);
 
-GLYPH_API void glyph_draw_outlined(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena,
-                                   float x, float y, const char *utf8, size_t len,
-                                   const glyph_style *style, flux_color outline_color,
-                                   float outline_width);
+GLYPH_API void glyph_draw_outlined(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x,
+                                   float y, const char *utf8, size_t len, const glyph_style *style,
+                                   flux_color outline_color, float outline_width);
 
 /* ================================================================== */
 /*  Caret and selection mapping (BiDi-correct)                        */
@@ -177,8 +176,8 @@ GLYPH_API size_t glyph_byte_for_x(glyph_ctx *t, const char *utf8, size_t len, fl
                                   const glyph_style *style);
 
 GLYPH_API int glyph_selection_rects(glyph_ctx *t, const char *utf8, size_t len, size_t lo,
-                                    size_t hi, const glyph_style *style,
-                                    glyph_xrange *out, int max);
+                                    size_t hi, const glyph_style *style, glyph_xrange *out,
+                                    int max);
 
 GLYPH_API size_t glyph_visual_move(glyph_ctx *t, const char *utf8, size_t len, size_t byte,
                                    bool forward, const glyph_style *style);

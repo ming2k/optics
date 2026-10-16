@@ -519,7 +519,7 @@ void vista_scene_reset_pose(vista_scene *scene) {
 }
 
 flux_result vista_scene_apply_animation(vista_scene *scene, const vista_animation *animation,
-                                          float time_seconds, bool loop) {
+                                        float time_seconds, bool loop) {
     if (!scene || !animation || animation->target != scene || !isfinite(time_seconds))
         return FLUX_ERROR_INVALID_ARGUMENT;
     vista_scene_reset_pose(scene);
@@ -546,7 +546,7 @@ flux_result vista_scene_apply_animation(vista_scene *scene, const vista_animatio
 }
 
 flux_result vista_load_animation_glb(const vista_scene *target, const void *glb_bytes,
-                                       size_t byte_count, vista_animation **out) {
+                                     size_t byte_count, vista_animation **out) {
     return sg_parse_animation_glb(target, glb_bytes, byte_count, out);
 }
 

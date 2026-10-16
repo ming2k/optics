@@ -77,13 +77,12 @@ static test_glb make_chain(uint32_t count) {
             off += (size_t)snprintf(json + off, cap - off,
                                     "{\"translation\":[0,0.01,0],\"children\":[%u]}", i + 1u);
         else
-            off += (size_t)snprintf(json + off, cap - off,
-                                    "{\"translation\":[0,0.01,0],\"mesh\":0}");
+            off +=
+                (size_t)snprintf(json + off, cap - off, "{\"translation\":[0,0.01,0],\"mesh\":0}");
     }
-    off += (size_t)snprintf(json + off, cap - off,
-                            "],\"scenes\":[{\"nodes\":[%u]}],\"scene\":0}", count - 1u);
-    static const float positions[9] = {-0.1f, -0.1f, 0.0f, 0.1f,
-                                       -0.1f, 0.0f,  0.0f, 0.1f, 0.0f};
+    off += (size_t)snprintf(json + off, cap - off, "],\"scenes\":[{\"nodes\":[%u]}],\"scene\":0}",
+                            count - 1u);
+    static const float positions[9] = {-0.1f, -0.1f, 0.0f, 0.1f, -0.1f, 0.0f, 0.0f, 0.1f, 0.0f};
     test_glb glb = make_glb(json, positions, sizeof(positions));
     free(json);
     return glb;
@@ -118,8 +117,8 @@ int main(int argc, char **argv) {
     for (int i = 0; i < iters; ++i)
         vista_scene_reset_pose(scene);
     double t1 = now_ms();
-    printf("nodes=%u iters=%d  reset_pose_total=%.2fms  per_call=%.4fms\n", count, iters,
-           t1 - t0, (t1 - t0) / iters);
+    printf("nodes=%u iters=%d  reset_pose_total=%.2fms  per_call=%.4fms\n", count, iters, t1 - t0,
+           (t1 - t0) / iters);
     flux_device_wait_idle(device);
     vista_scene_release(scene);
     free(glb.bytes);

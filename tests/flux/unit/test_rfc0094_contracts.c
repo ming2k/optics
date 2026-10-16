@@ -8,11 +8,11 @@
  */
 
 #include "test_helpers.h"
-#include <glyph/glyph.h>
 #include <flux/canvas.h>
 #include <flux/canvas_helpers.h>
 #include <flux/core.h>
 #include <flux/math.h>
+#include <glyph/glyph.h>
 
 static void test_flux_init_macro(void) {
     /* Lowercase struct form */

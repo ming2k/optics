@@ -9,9 +9,8 @@
 #include "../internal.h"
 
 static glyph_style style_of(const lens *ui, float size_px, float weight) {
-    return (glyph_style){.size_px = size_px,
-                             .weight = weight,
-                             .family = (glyph_family)(ui ? ui->text_family : 0)};
+    return (glyph_style){
+        .size_px = size_px, .weight = weight, .family = (glyph_family)(ui ? ui->text_family : 0)};
 }
 
 static lens_text_metrics to_fx(glyph_metrics m) {
@@ -64,8 +63,7 @@ int lensi_text_sel_rects(lens *ui, const char *utf8, size_t lo, size_t hi, float
     if (!utf8 || lo >= hi || max <= 0)
         return 0;
     glyph_style s = style_of(ui, size_px, weight);
-    return glyph_selection_rects(ui ? ui->text : NULL, utf8, strlen(utf8), lo, hi, &s, out,
-                                     max);
+    return glyph_selection_rects(ui ? ui->text : NULL, utf8, strlen(utf8), lo, hi, &s, out, max);
 }
 
 size_t lensi_text_caret_visual(lens *ui, const char *utf8, size_t byte, bool forward, float size_px,

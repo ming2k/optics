@@ -32,10 +32,9 @@ static size_t utf8_prev_boundary(const char *text, size_t pos) {
 }
 
 static glyph_metrics measure_slice(lens *ui, const char *text, size_t len, float size) {
-    return glyph_measure(ui->text, text, len,
-                             &(glyph_style){.size_px = size,
-                                                .weight = 0.0f,
-                                                .family = (glyph_family)ui->text_family});
+    return glyph_measure(
+        ui->text, text, len,
+        &(glyph_style){.size_px = size, .weight = 0.0f, .family = (glyph_family)ui->text_family});
 }
 
 static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t start, float size,

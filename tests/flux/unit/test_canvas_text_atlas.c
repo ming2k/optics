@@ -17,10 +17,10 @@
  * present (same gate as test_canvas_cpu_text).
  */
 #include "test_helpers.h"
-#include <glyph/glyph.h>
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <flux/math.h>
+#include <glyph/glyph.h>
 
 #include <string.h>
 

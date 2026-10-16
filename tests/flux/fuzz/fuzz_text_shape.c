@@ -24,8 +24,8 @@
  * continuation bytes, truncated sequences, overlong encodings,
  * embedded NULs, leading combining marks, and long mixed strings. */
 
-#include <glyph/glyph.h>
 #include <flux/core.h>
+#include <glyph/glyph.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>

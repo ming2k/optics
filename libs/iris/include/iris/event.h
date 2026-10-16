@@ -56,19 +56,19 @@ typedef enum iris_event_type : uint32_t {
     IRIS_EVENT_POINTER_BUTTON, /* payload: button                        */
     IRIS_EVENT_SCROLL,         /* payload: scroll                        */
 
-    IRIS_EVENT_KEY,            /* payload: keyboard                      */
-    IRIS_EVENT_MODIFIERS,      /* payload: modifiers (level state)       */
-    IRIS_EVENT_TEXT_COMMIT,    /* payload: text (IME / layout commit)    */
-    IRIS_EVENT_PREEDIT,        /* payload: preedit                       */
-    IRIS_EVENT_IME_DELETE,     /* payload: ime_delete (delete_surrounding)*/
+    IRIS_EVENT_KEY,         /* payload: keyboard                      */
+    IRIS_EVENT_MODIFIERS,   /* payload: modifiers (level state)       */
+    IRIS_EVENT_TEXT_COMMIT, /* payload: text (IME / layout commit)    */
+    IRIS_EVENT_PREEDIT,     /* payload: preedit                       */
+    IRIS_EVENT_IME_DELETE,  /* payload: ime_delete (delete_surrounding)*/
 
-    IRIS_EVENT_TABLET,         /* payload: tablet (pen: pressure, tilt)  */
-    IRIS_EVENT_DND,            /* payload: dnd (drag-and-drop)           */
+    IRIS_EVENT_TABLET, /* payload: tablet (pen: pressure, tilt)  */
+    IRIS_EVENT_DND,    /* payload: dnd (drag-and-drop)           */
 
-    IRIS_EVENT_RESIZE,         /* payload: resize                        */
-    IRIS_EVENT_SCALE,          /* payload: scale                         */
-    IRIS_EVENT_FOCUS,          /* payload: focus                         */
-    IRIS_EVENT_CLOSE,          /* payload: none                          */
+    IRIS_EVENT_RESIZE, /* payload: resize                        */
+    IRIS_EVENT_SCALE,  /* payload: scale                         */
+    IRIS_EVENT_FOCUS,  /* payload: focus                         */
+    IRIS_EVENT_CLOSE,  /* payload: none                          */
 } iris_event_type;
 
 /* Event flags, OR'd into iris_event.flags. */
@@ -95,9 +95,9 @@ typedef struct iris_event {
         } pointer;
 
         struct {
-            float x, y;    /* logical surface-local pixels     */
-            int button;    /* LENS_MOUSE_LEFT / _RIGHT / _MIDDLE */
-            bool pressed;  /* true = down edge, false = up edge  */
+            float x, y;   /* logical surface-local pixels     */
+            int button;   /* LENS_MOUSE_LEFT / _RIGHT / _MIDDLE */
+            bool pressed; /* true = down edge, false = up edge  */
         } button;
 
         struct {
@@ -136,12 +136,12 @@ typedef struct iris_event {
         } ime_delete;
 
         struct {
-            float x, y;      /* logical surface-local pixels */
-            float pressure;   /* normalised 0..1             */
+            float x, y;           /* logical surface-local pixels */
+            float pressure;       /* normalised 0..1             */
             float tilt_x, tilt_y; /* normalised -1..1        */
-            bool eraser;      /* eraser end of the tool      */
-            bool barrel;      /* barrel button pressed       */
-            bool proximity;   /* tool in range (not necessarily down) */
+            bool eraser;          /* eraser end of the tool      */
+            bool barrel;          /* barrel button pressed       */
+            bool proximity;       /* tool in range (not necessarily down) */
         } tablet;
 
         struct {

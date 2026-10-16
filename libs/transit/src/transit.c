@@ -39,8 +39,8 @@ bool transit_version_check(int major, int minor, int patch) {
 }
 
 const char *transit_version_string(void) {
-    return TRANSIT_STR(TRANSIT_VERSION_MAJOR) "." TRANSIT_STR(TRANSIT_VERSION_MINOR) "." TRANSIT_STR(
-        TRANSIT_VERSION_PATCH);
+    return TRANSIT_STR(TRANSIT_VERSION_MAJOR) "." TRANSIT_STR(
+        TRANSIT_VERSION_MINOR) "." TRANSIT_STR(TRANSIT_VERSION_PATCH);
 }
 
 float transit_dt_clamp(float dt_seconds) {
@@ -81,8 +81,8 @@ float transit_spring_snap_to(transit_spring *s, float target) {
     return target;
 }
 
-float transit_spring_advance(transit_spring *s, float target, transit_spring_params p, float dt_seconds,
-                             bool reduced_motion) {
+float transit_spring_advance(transit_spring *s, float target, transit_spring_params p,
+                             float dt_seconds, bool reduced_motion) {
     if (!s)
         return target;
     if (target != target) /* NaN target = no target: state stands */

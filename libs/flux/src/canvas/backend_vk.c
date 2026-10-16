@@ -1314,10 +1314,9 @@ static void vk_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
             (float)layer->area.h / (float)c->fb_height,
         };
 
-        draw_image_with_sampler_handle(
-            c, nullptr, layer_linear->bindless, nullptr,
-            flux_device_default_sampler_handle(c->device), dst, src, tint, FLUX_BLEND_SRC_OVER, 3u,
-            nullptr, 0.0f);
+        draw_image_with_sampler_handle(c, nullptr, layer_linear->bindless, nullptr,
+                                       flux_device_default_sampler_handle(c->device), dst, src,
+                                       tint, FLUX_BLEND_SRC_OVER, 3u, nullptr, 0.0f);
         batch_flush(c);
 
         c->states[c->state_top].transform = saved_tx;

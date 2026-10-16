@@ -307,11 +307,9 @@ static bool w32_emit_pointer(w32_platform *pl, iris_event_type type, double x, d
 }
 
 static bool w32_emit_button(w32_platform *pl, double x, double y, int lens_button, bool down) {
-    iris_event ev = {.type = IRIS_EVENT_POINTER_BUTTON,
-                     .button = {.x = (float)x,
-                                .y = (float)y,
-                                .button = lens_button,
-                                .pressed = down}};
+    iris_event ev = {
+        .type = IRIS_EVENT_POINTER_BUTTON,
+        .button = {.x = (float)x, .y = (float)y, .button = lens_button, .pressed = down}};
     if (!iris__event_seam_emit(&ev))
         return false;
     int i = ev.button.button;
@@ -351,9 +349,8 @@ static bool w32_emit_key(w32_platform *pl, int key, bool pressed, bool repeat, u
     if (!iris__event_seam_emit(&ev))
         return false;
     if (ev.keyboard.key != 0 && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
-        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){.key = ev.keyboard.key,
-                                                             .pressed = ev.keyboard.pressed,
-                                                             .repeat = ev.keyboard.repeat};
+        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){
+            .key = ev.keyboard.key, .pressed = ev.keyboard.pressed, .repeat = ev.keyboard.repeat};
     return true;
 }
 

@@ -134,8 +134,8 @@ static inline void iris_scroll_accum_lens(double *steps_y, double *pixels_y, dou
 static inline void iris_scroll_accum(double *steps_y, double *pixels_y, double *steps_x,
                                      double *pixels_x, uint32_t axis, double delta,
                                      bool continuous) {
-    iris_scroll_accum_lens(steps_y, pixels_y, steps_x, pixels_x, axis, iris_scroll_lens_delta(delta),
-                           continuous);
+    iris_scroll_accum_lens(steps_y, pixels_y, steps_x, pixels_x, axis,
+                           iris_scroll_lens_delta(delta), continuous);
 }
 
 #endif /* IRIS_PLATFORM_INPUT_H */
