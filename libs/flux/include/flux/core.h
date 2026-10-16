@@ -1247,11 +1247,16 @@ FLUX_NODISCARD FLUX_API flux_result
 flux_frame_request_readback_region(flux_frame *f, const flux_readback_region *region);
 
 /* Frames follow a strict single-use state machine:
- * begin_frame -> submit -> present. Calling either transition out of order or
- * more than once returns FLUX_ERROR_INVALID_STATE. The frame pointer is a
- * surface-owned borrow and becomes invalid when present returns. */
+ * begin_frame -> submit -> present (or abandon). Calling a transition out of
+ * order or more than once returns FLUX_ERROR_INVALID_STATE. The frame pointer
+ * is a surface-owned borrow and becomes invalid when present or abandon
+ * returns. On offscreen surfaces, flux_frame_abandon releases the frame-slot
+ * borrow without advancing current_frame, so a rejected external KMS flip
+ * reuses the same free backbuffer slot on retry instead of rotating into an
+ * active scanout buffer. */
 FLUX_NODISCARD FLUX_API flux_result flux_frame_submit(flux_frame *f);
 FLUX_NODISCARD FLUX_API flux_result flux_frame_present(flux_frame *f);
+FLUX_API void flux_frame_abandon(flux_frame *f);
 
 /* Per-frame transient memory — GPU-visible, mapped, recycled after
  * FLUX_FRAMES_IN_FLIGHT frames. Returns aligned pointer + offset

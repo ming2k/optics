@@ -79,6 +79,16 @@ flux_device *test_helpers_make_dmabuf_device(void);
 flux_device *test_helpers_make_validation_device(flux_log_fn log);
 
 /*
+ * Create a device that is both validation-enabled AND requires the
+ * dma-buf external-memory extensions. This is the only configuration in
+ * which a dma-buf ownership defect that the driver tolerates silently is
+ * observable: an exportable offscreen surface exists *and* the validation
+ * layers report the resulting misuse. Returns nullptr if either the
+ * validation layers or the dma-buf extensions are missing on the host.
+ */
+flux_device *test_helpers_make_validation_dmabuf_device(flux_log_fn log);
+
+/*
  * Pick a memory type index that satisfies both the `filter`
  * bitmask (VkMemoryRequirements::memoryTypeBits) and the `want`
  * VkMemoryPropertyFlags. Returns UINT32_MAX if no type matches

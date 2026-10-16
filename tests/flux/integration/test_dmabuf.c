@@ -130,6 +130,25 @@ int main(void) {
         flux_result sr = flux_surface_create(dd, &sd, &surface);
         if (sr == FLUX_OK) {
             if (flux_surface_exportable(surface)) {
+                /* An abandoned submission (ADR-0110) releases the frame-slot
+                 * borrow without advancing the offscreen ring, so the very next
+                 * begin_frame reuses the *same* slot. On an exportable surface
+                 * that slot's SYNC_FD export semaphore was signalled by the
+                 * abandoned submit and never had its payload exported: the
+                 * begin must reset it, or the retry's vkQueueSubmit2 would start
+                 * from an already-signalled binary semaphore. */
+                flux_frame *abandoned = nullptr;
+                EXPECT(flux_surface_begin_frame(surface, nullptr, &abandoned) == FLUX_OK);
+                EXPECT(flux_frame_submit(abandoned) == FLUX_OK);
+                flux_frame_abandon(abandoned);
+                /* Abandon consumed the frame: later transitions reject. */
+                EXPECT(flux_frame_present(abandoned) == FLUX_ERROR_INVALID_STATE);
+
+                flux_frame *retry = nullptr;
+                EXPECT(flux_surface_begin_frame(surface, nullptr, &retry) == FLUX_OK);
+                EXPECT(flux_frame_submit(retry) == FLUX_OK);
+                EXPECT(flux_frame_present(retry) == FLUX_OK);
+
                 flux_frame *frame = nullptr;
                 EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
                 EXPECT(flux_frame_submit(frame) == FLUX_OK);

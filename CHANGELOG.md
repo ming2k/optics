@@ -13,6 +13,17 @@ either.
 
 ## [Unreleased]
 
+### Added
+
+- **flux**: `flux_frame_abandon` — release a submitted frame-slot borrow without presenting or advancing the offscreen ring slot, so a deferred or rejected external KMS flip reuses the same free backbuffer on retry (ADR-0110).
+- **flux-rs**: `SubmittedFrame::abandon` and a `Drop` implementation that releases an unpresented frame deterministically.
+
+### Fixed
+
+- **flux**: Offscreen export semaphores are recreated on the next `begin_frame` after an abandoned external flip, so `vkQueueSubmit2` never starts from an already-signalled binary semaphore (ADR-0110).
+- **flux**: The backdrop effect clamps every sampling tap to the captured region extent, eliminating the bright seam where a sub-region glass capture wrapped neighbouring output content into its edge (ADR-0110).
+- **tests**: `test_helpers_make_validation_dmabuf_device` provides a validation-enabled device with the dma-buf external-memory features, the only configuration in which a silently-tolerated dma-buf ownership defect is observable.
+
 ## [0.0.58] - 2026-10-15
 
 ### Added

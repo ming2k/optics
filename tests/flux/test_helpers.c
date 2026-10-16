@@ -83,6 +83,35 @@ flux_device *test_helpers_make_headless_device(void) {
     return out;
 }
 
+/*
+ * Whether the Khronos validation layer is installed on this host.
+ * `flux_device_create` asks for `VK_LAYER_KHRONOS_validation` but
+ * proceeds silently without it, so a device created with
+ * FLUX_VALIDATION_ON can still return success with no layer loaded —
+ * which would make every "zero validation errors" assertion in
+ * test_validation pass vacuously. Probe the layer list directly so the
+ * validation tests skip honestly instead of reporting a false clean.
+ */
+static bool validation_layer_available(void) {
+    uint32_t count = 0;
+    if (vkEnumerateInstanceLayerProperties(&count, nullptr) != VK_SUCCESS || count == 0)
+        return false;
+    VkLayerProperties *props = calloc(count, sizeof(*props));
+    if (!props)
+        return false;
+    bool found = false;
+    if (vkEnumerateInstanceLayerProperties(&count, props) == VK_SUCCESS) {
+        for (uint32_t i = 0; i < count; ++i) {
+            if (strcmp(props[i].layerName, "VK_LAYER_KHRONOS_validation") == 0) {
+                found = true;
+                break;
+            }
+        }
+    }
+    free(props);
+    return found;
+}
+
 flux_device *test_helpers_make_dmabuf_device(void) {
     flux_device_features_desc features = FLUX_DEVICE_FEATURES_DESC_INIT;
     features.required = FLUX_DEVICE_FEATURE_DMABUF | FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
@@ -99,7 +128,27 @@ flux_device *test_helpers_make_dmabuf_device(void) {
 }
 
 flux_device *test_helpers_make_validation_device(flux_log_fn log) {
+    if (!validation_layer_available())
+        return nullptr;
     flux_device_desc d = FLUX_DEVICE_DESC_INIT;
+    d.headless = true;
+    d.frames_in_flight = 1;
+    d.validation = FLUX_VALIDATION_ON;
+    d.log = log;
+    flux_device *out = nullptr;
+    if (flux_device_create(&d, &out) != FLUX_OK)
+        return nullptr;
+    pin_loaded_vulkan_drivers();
+    return out;
+}
+
+flux_device *test_helpers_make_validation_dmabuf_device(flux_log_fn log) {
+    if (!validation_layer_available())
+        return nullptr;
+    flux_device_features_desc features = FLUX_DEVICE_FEATURES_DESC_INIT;
+    features.required = FLUX_DEVICE_FEATURE_DMABUF | FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
+    flux_device_desc d = FLUX_DEVICE_DESC_INIT;
+    d.next = &features;
     d.headless = true;
     d.frames_in_flight = 1;
     d.validation = FLUX_VALIDATION_ON;

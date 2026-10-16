@@ -5,6 +5,14 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `SubmittedFrame::abandon` and a `Drop` implementation that releases a
+  submitted frame without presenting or advancing the offscreen ring slot, so a
+  deferred or rejected external KMS flip retries on the same free backbuffer
+  (Optics ADR-0110). `present` and `abandon` both consume the raw frame, making
+  `Drop` a no-op after either transition.
+
 ### Changed
 
 - Replace `Encoder::with_budget` with `Encoder::with_limits` for storage and expanded execution budgets; add shared child composition through `Encoder::draw_display_list`.

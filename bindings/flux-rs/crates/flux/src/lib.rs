@@ -2611,12 +2611,31 @@ pub struct SubmittedFrame<'surface> {
 
 impl SubmittedFrame<'_> {
     /// Present the frame and consume the surface-owned frame-slot borrow.
-    pub fn present(self) -> Result<(), Error> {
-        Error::check(unsafe { sys::flux_frame_present(self.raw) })
+    pub fn present(mut self) -> Result<(), Error> {
+        let raw = std::mem::replace(&mut self.raw, std::ptr::null_mut());
+        Error::check(unsafe { sys::flux_frame_present(raw) })
+    }
+
+    /// Release the submitted frame without presenting or advancing the
+    /// offscreen ring slot (used when an external KMS page flip is deferred or
+    /// rejected so the next frame reuses the same free backbuffer slot).
+    pub fn abandon(mut self) {
+        let raw = std::mem::replace(&mut self.raw, std::ptr::null_mut());
+        if !raw.is_null() {
+            unsafe { sys::flux_frame_abandon(raw) };
+        }
     }
 
     pub fn as_raw(&self) -> *mut sys::flux_frame {
         self.raw
+    }
+}
+
+impl Drop for SubmittedFrame<'_> {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe { sys::flux_frame_abandon(self.raw) };
+        }
     }
 }
 

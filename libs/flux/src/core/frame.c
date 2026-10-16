@@ -414,6 +414,31 @@ flux_result flux_surface_begin_frame(flux_surface *s, const flux_frame_begin_des
     flux_vk_note_graphics_completed(s->device, pf->submitted_serial);
     foreign_images_clear(s, pf);
 
+    /* If a previous offscreen submission on this slot signalled the binary
+     * export semaphore without exporting its SYNC_FD (e.g. a deferred or
+     * abandoned external flip), recreate the semaphore now that pf->in_flight
+     * has retired so the upcoming vkQueueSubmit2 starts from an unsignalled
+     * binary semaphore. */
+    if (s->offscreen && pf->submitted_serial > 0 && s->render_finished[slot] != VK_NULL_HANDLE &&
+        !s->image_sync_exported[slot]) {
+        vkDestroySemaphore(vkd, s->render_finished[slot], nullptr);
+        s->render_finished[slot] = VK_NULL_HANDLE;
+        VkExportSemaphoreCreateInfo export_info = {
+            .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+            .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+        };
+        VkSemaphoreCreateInfo semaphore_info = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+            .pNext = &export_info,
+        };
+        vr = vkCreateSemaphore(vkd, &semaphore_info, nullptr, &s->render_finished[slot]);
+        if (vr != VK_SUCCESS) {
+            FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "offscreen export semaphore reset failed", vr);
+            return FLUX_ERROR_BACKEND_FAILURE;
+        }
+        s->image_sync_exported[slot] = true;
+    }
+
     /* Acquire. Offscreen surfaces have no swapchain (ADR-0013): the
      * image index is the frame slot and the fence wait above already
      * serialised its reuse. */
@@ -987,6 +1012,16 @@ flux_result flux_frame_present(flux_frame *f) {
         return FLUX_ERROR_BACKEND_FAILURE;
     }
     return FLUX_OK;
+}
+
+void flux_frame_abandon(flux_frame *f) {
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_SUBMITTED)
+        return;
+    flux_surface *s = f->surface;
+    if (!s->offscreen)
+        s->needs_recreate = true;
+    s->frame_active = false;
+    f->state = FLUX_FRAME_STATE_PRESENTED;
 }
 
 /* ------------------------------------------------------------------ */

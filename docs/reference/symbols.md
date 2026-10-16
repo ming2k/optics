@@ -80,8 +80,9 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_frame_has_active_pass` | True between flux_frame_begin_pass and flux_frame_end_pass. |
 | `flux_frame_request_readback` | Capture the exact color attachment produced by this recording frame. |
 | `flux_frame_request_readback_region` | Capture only `region` from this frame into tightly packed staging. |
-| `flux_frame_submit` | Frames follow a strict single-use state machine: begin_frame -> submit -> present. |
+| `flux_frame_submit` | Frames follow a strict single-use state machine: begin_frame -> submit -> present (or abandon). |
 | `flux_frame_present` |  |
+| `flux_frame_abandon` |  |
 | `flux_frame_alloc_transient` | `alignment` must be a power of two between 1 and 256 inclusive. |
 | `flux_frame_index` |  |
 | `flux_frame_timestamp_begin` | ================================================================== |

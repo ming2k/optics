@@ -38,14 +38,14 @@ layout(push_constant) uniform PC {
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
-vec4 sample_input(uint image_handle, uint sampler_handle, vec2 uv)
+vec4 sample_input(uint image_handle, uint sampler_handle, vec2 uv, vec2 uv_min, vec2 uv_max)
 {
     return texture(
         sampler2D(
             u_sampled[nonuniformEXT(image_handle)],
             u_samplers[nonuniformEXT(sampler_handle)]
         ),
-        uv
+        clamp(uv, uv_min, uv_max)
     );
 }
 
@@ -59,30 +59,36 @@ void main()
     uint ih = pc.in_handle & 0x0FFFFFFFu;
     uint sh = pc.sampler_handle & 0x0FFFFFFFu;
     uint oh = pc.out_handle & 0x0FFFFFFFu;
-    vec2 uv = (vec2(p) + 0.5) / vec2(pc.output_width, pc.output_height);
+    vec2 inv_out = 1.0 / vec2(pc.output_width, pc.output_height);
+    vec2 uv_min = (vec2(pc.origin_x, pc.origin_y) + 0.5) * inv_out;
+    vec2 uv_max = max(
+        uv_min,
+        (vec2(pc.origin_x + pc.region_width, pc.origin_y + pc.region_height) - 0.5) * inv_out
+    );
+    vec2 uv = (vec2(p) + 0.5) * inv_out;
     if (pc.mode == 2u) {
-        imageStore(u_storage[nonuniformEXT(oh)], ivec2(p), sample_input(ih, sh, uv));
+        imageStore(u_storage[nonuniformEXT(oh)], ivec2(p), sample_input(ih, sh, uv, uv_min, uv_max));
         return;
     }
 
     vec2 half_pixel = (0.5 * pc.offset) / vec2(pc.input_width, pc.input_height);
     vec4 colour;
     if (pc.mode == 0u) {
-        colour = sample_input(ih, sh, uv) * 4.0;
-        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0, -1.0));
-        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0, -1.0));
-        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0,  1.0));
-        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0,  1.0));
+        colour = sample_input(ih, sh, uv, uv_min, uv_max) * 4.0;
+        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0, -1.0), uv_min, uv_max);
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0, -1.0), uv_min, uv_max);
+        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0,  1.0), uv_min, uv_max);
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0,  1.0), uv_min, uv_max);
         colour *= 0.125;
     } else {
-        colour  = sample_input(ih, sh, uv + half_pixel * vec2(-2.0,  0.0));
-        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0,  1.0)) * 2.0;
-        colour += sample_input(ih, sh, uv + half_pixel * vec2( 0.0,  2.0));
-        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0,  1.0)) * 2.0;
-        colour += sample_input(ih, sh, uv + half_pixel * vec2( 2.0,  0.0));
-        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0, -1.0)) * 2.0;
-        colour += sample_input(ih, sh, uv + half_pixel * vec2( 0.0, -2.0));
-        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0, -1.0)) * 2.0;
+        colour  = sample_input(ih, sh, uv + half_pixel * vec2(-2.0,  0.0), uv_min, uv_max);
+        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0,  1.0), uv_min, uv_max) * 2.0;
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 0.0,  2.0), uv_min, uv_max);
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0,  1.0), uv_min, uv_max) * 2.0;
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 2.0,  0.0), uv_min, uv_max);
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 1.0, -1.0), uv_min, uv_max) * 2.0;
+        colour += sample_input(ih, sh, uv + half_pixel * vec2( 0.0, -2.0), uv_min, uv_max);
+        colour += sample_input(ih, sh, uv + half_pixel * vec2(-1.0, -1.0), uv_min, uv_max) * 2.0;
         colour /= 12.0;
     }
 

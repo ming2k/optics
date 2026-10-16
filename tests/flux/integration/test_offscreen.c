@@ -191,6 +191,38 @@ int main(void) {
         EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
     }
 
+    /* --- frame state machine: abandon releases the slot without ring
+     * advance (ADR-0110) --- */
+    {
+        /* A null frame and a recording frame are both no-ops: abandon only
+         * consumes a *submitted* frame's borrow. */
+        flux_frame_abandon(nullptr);
+
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        flux_frame_abandon(frame);
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = nullptr}) == FLUX_OK);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+
+        /* Abandon consumes the submitted frame: both later transitions are
+         * single-use and must reject. */
+        flux_frame_abandon(frame);
+        EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
+        EXPECT(flux_frame_submit(frame) == FLUX_ERROR_INVALID_STATE);
+        flux_frame_abandon(frame);
+
+        /* The abandoned slot is immediately reusable and still renders the
+         * same content: the surface never wedges. */
+        EXPECT(render_frame(s, canvas) == FLUX_OK);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
+        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+    }
+
     /* --- cross-surface frame ownership: a canvas refuses a frame from a
      * different surface (the command buffer belongs to that surface's
      * per-slot pool) --- */

@@ -7,6 +7,7 @@
  */
 #include "test_helpers.h"
 #include <flux/compute.h>
+#include <flux/dmabuf.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
@@ -193,6 +194,60 @@ int main(void) {
         vkFreeMemory(vk, memory, nullptr);
     if (buffer)
         vkDestroyBuffer(vk, buffer, nullptr);
+    /* --- ADR-0110: abandoning a submitted frame must reset the offscreen
+     * export semaphore ---
+     * A deferred/rejected external flip abandons the frame instead of
+     * presenting it, so the export semaphore that the abandoned
+     * `vkQueueSubmit2` signalled is left signalled with no exported payload.
+     * The retry reuses the *same* ring slot, so `flux_surface_begin_frame`
+     * must recreate that semaphore — otherwise the retry's submit signals an
+     * already-signalled binary semaphore. Only a validation layer observes
+     * that, which is exactly what this binary enables. */
+    {
+        /* The dma-buf features are opt-in, so the validation device above
+         * does not expose them; a device that enables both is the only
+         * configuration where an exportable offscreen surface exists *and*
+         * the layers report misuse of it. */
+        flux_device *dd = test_helpers_make_validation_dmabuf_device(counting_logger);
+        if (dd) {
+            uint64_t modifiers[512];
+            uint32_t modifier_count = 512;
+            if (flux_dmabuf_format_modifiers(dd, FLUX_FORMAT_BGRA8_UNORM, modifiers,
+                                             &modifier_count) == FLUX_OK) {
+                flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
+                sd.width = 16;
+                sd.height = 16;
+                flux_surface_dmabuf_desc dm = FLUX_SURFACE_DMABUF_DESC_INIT;
+                if (modifier_count > 0) {
+                    dm.modifiers = modifiers;
+                    dm.modifier_count = modifier_count;
+                    sd.next = &dm;
+                }
+                flux_surface *surface = nullptr;
+                if (flux_surface_create(dd, &sd, &surface) == FLUX_OK && surface) {
+                    if (flux_surface_exportable(surface)) {
+                        flux_frame *abandoned = nullptr;
+                        EXPECT(flux_surface_begin_frame(surface, nullptr, &abandoned) == FLUX_OK);
+                        EXPECT(flux_frame_submit(abandoned) == FLUX_OK);
+                        flux_frame_abandon(abandoned);
+                        /* Abandon released the borrow: the same ring slot
+                         * begins again with no advance, and the submit's
+                         * already-signalled export semaphore must have been
+                         * reset (a validation error otherwise). */
+                        EXPECT(flux_frame_present(abandoned) == FLUX_ERROR_INVALID_STATE);
+
+                        flux_frame *retry = nullptr;
+                        EXPECT(flux_surface_begin_frame(surface, nullptr, &retry) == FLUX_OK);
+                        EXPECT(flux_frame_submit(retry) == FLUX_OK);
+                        EXPECT(flux_frame_present(retry) == FLUX_OK);
+                    }
+                    flux_surface_release(surface);
+                }
+            }
+            flux_device_release(dd);
+        }
+    }
+
     flux_device_release(d);
 
     /* Final assertion: zero validation errors, zero validation warnings.
