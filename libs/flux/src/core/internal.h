@@ -561,12 +561,9 @@ VkResult flux_vk_submit_upload(flux_device *d, VkQueue queue, VkCommandBuffer cm
                                VkSemaphore wait_sem, VkPipelineStageFlags2 wait_stage,
                                VkSemaphore signal_sem, VkPipelineStageFlags2 signal_stage,
                                VkFence *out_fence, uint64_t *out_serial);
-void flux_vk_upload_pending_park(flux_device *d, VkFence fence, VkCommandPool pool,
-                                 VkCommandPool pool2, VkSemaphore sem, flux_staging_buf *stagings,
-                                 uint64_t serial);
-/* Same as flux_vk_upload_pending_park but tags each pool with its queue
- * family so the recycle path can return it to the transient pool cache
- * instead of destroying it. Pass UINT32_MAX for an unknown family.
+/* Park a pending upload batch and tag each pool with its queue family
+ * so the recycle path returns it to the transient pool cache instead of
+ * destroying it. Pass UINT32_MAX for an unknown/unused family.
  * pool_cmd/pool2_cmd are the command buffers allocated from the pools
  * (VK_NULL_HANDLE when none); the recycle path frees them before the
  * pools return to the cache, because a reset pool keeps its allocated

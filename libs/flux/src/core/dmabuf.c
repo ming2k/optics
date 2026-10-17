@@ -66,10 +66,13 @@ static bool format_modifier_supports_sampling(flux_device *d, VkFormat format, u
     if (list.drmFormatModifierCount == 0)
         return false;
 
-    VkDrmFormatModifierPropertiesEXT *mods =
-        flux_internal_alloc(d, sizeof(*mods) * list.drmFormatModifierCount);
-    if (!mods)
-        return false;
+    VkDrmFormatModifierPropertiesEXT stack_mods[64];
+    VkDrmFormatModifierPropertiesEXT *mods = stack_mods;
+    if (list.drmFormatModifierCount > 64u) {
+        mods = flux_internal_alloc(d, sizeof(*mods) * list.drmFormatModifierCount);
+        if (!mods)
+            return false;
+    }
 
     list.pDrmFormatModifierProperties = mods;
     vkGetPhysicalDeviceFormatProperties2(d->physical_device, format, &props);
@@ -88,7 +91,8 @@ static bool format_modifier_supports_sampling(flux_device *d, VkFormat format, u
         break;
     }
 
-    flux_internal_free(d, mods);
+    if (mods != stack_mods)
+        flux_internal_free(d, mods);
     return supported;
 }
 
@@ -429,9 +433,12 @@ static flux_result dmabuf_transition_image_layout(flux_device *d, VkImage img,
                                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, &fence,
                                    &serial);
         if (vr == VK_SUCCESS) {
-            /* Ownership of the command pool and acquire_sem moves to the
-             * pending entry; both are recycled when the batch retires. */
-            flux_vk_upload_pending_park(d, fence, pool, VK_NULL_HANDLE, acquire_sem, NULL, serial);
+            /* Ownership of the command pool, command buffer, and acquire_sem
+             * moves to the pending entry; the pool is recycled back to the
+             * graphics-family transient pool cache when the batch retires. */
+            flux_vk_upload_pending_park_families(d, fence, pool, d->graphics_family, cmd,
+                                                 VK_NULL_HANDLE, UINT32_MAX, VK_NULL_HANDLE,
+                                                 acquire_sem, NULL, serial);
             return FLUX_OK;
         }
     }

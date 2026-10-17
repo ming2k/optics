@@ -479,17 +479,6 @@ void flux_vk_upload_pending_park_families(flux_device *d, VkFence fence, VkComma
     flux_platform_mutex_unlock(&d->upload_pending_lock);
 }
 
-void flux_vk_upload_pending_park(flux_device *d, VkFence fence, VkCommandPool pool,
-                                 VkCommandPool pool2, VkSemaphore sem, flux_staging_buf *stagings,
-                                 uint64_t serial) {
-    /* Callers of the plain API (dma-buf import) don't tag pool
-     * families; their pools are destroyed on recycle, not cached, so
-     * the command buffers die with the pool and need no explicit free
-     * here. */
-    flux_vk_upload_pending_park_families(d, fence, pool, UINT32_MAX, VK_NULL_HANDLE, pool2,
-                                         UINT32_MAX, VK_NULL_HANDLE, sem, stagings, serial);
-}
-
 /* Fence + queue submission shared by every deferred upload path. On
  * success *out_fence (when non-NULL) receives a fence that signals when
  * the batch retires; on failure nothing is pending, the fence is
