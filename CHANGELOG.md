@@ -13,6 +13,12 @@ either.
 
 ## [Unreleased]
 
+## [0.0.60] - 2026-10-17
+
+### Fixed
+
+- **flux**: The deferred dma-buf `FOREIGN → graphics-family` acquire transition now recycles its command pool into the graphics-family transient cache (and frees the command buffer) instead of destroying and recreating it on every import. The pool is tagged with its real queue family rather than an unknown one, so the removed `flux_vk_upload_pending_park` entry point no longer forces a per-import `vkDestroyCommandPool` + `vkCreateCommandPool`.
+
 ## [0.0.59] - 2026-10-16
 
 ### Added
