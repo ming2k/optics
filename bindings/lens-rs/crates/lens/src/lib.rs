@@ -78,6 +78,7 @@ mod types;
 pub mod view;
 
 pub use input::{Input, MouseButton, key, mods};
+pub use patterns::{SegmentedControl, SegmentedItem};
 pub use types::{
     Align, Band, ButtonVariant, CheckboxAppearance, Color, CursorHint, DndDropInfo, FontFamily,
     Icon, LayoutOpts, PlaceMode, PlaceOpts, Rect, Response, SkinFn, Style, StyleResolved, TextLine,
@@ -983,6 +984,40 @@ impl<'frame> Frame<'frame> {
             }
         });
         resp
+    }
+
+    /// Renders a native segmented control across an array of textual options.
+    pub fn segmented(&mut self, id: &str, selected: &mut usize, items: &[&str]) -> bool {
+        let seg_items: Vec<patterns::SegmentedItem> = items
+            .iter()
+            .map(|&s| patterns::SegmentedItem::text(s))
+            .collect();
+        patterns::SegmentedControl::new(id).show(self, &seg_items, selected)
+    }
+
+    /// Renders a settings-row pattern containing a label, description, and segmented control.
+    pub fn setting_segmented(
+        &mut self,
+        id: &str,
+        label: &str,
+        description: &str,
+        selected: &mut usize,
+        items: &[&str],
+    ) -> bool {
+        let mut changed = false;
+        self.row().id(id).cross(Align::Center).show(|frame| {
+            frame.col().flex(1.0).show(|frame| {
+                frame.label(label);
+                if !description.is_empty() {
+                    let muted_color = frame.theme().fg().with_alpha(160);
+                    frame.push_style(Style::new().with_fg(muted_color));
+                    frame.label_sized(description, frame.theme().font_size_sm());
+                    frame.pop_style();
+                }
+            });
+            changed = frame.segmented(id, selected, items);
+        });
+        changed
     }
 
     pub fn label(&mut self, text: &str) {

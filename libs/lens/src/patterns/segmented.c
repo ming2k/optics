@@ -47,12 +47,18 @@ bool lens_segmented_control(lens *ui, const char *id_str, const lens_segmented_i
         bool is_selected = (i == curr_sel);
         char item_id[32];
         snprintf(item_id, sizeof(item_id), "seg_%u", i);
+        float inner_radius = radius > 2.0f ? radius - 2.0f : radius;
 
         lens_button_opts btn = {
             .box =
                 {
                     .id = item_id,
                     .height = h - 4.0f,
+                    .style =
+                        {
+                            .corner_radius = inner_radius,
+                            .fields = LENS_STYLE_CORNER_RADIUS,
+                        },
                 },
             .label = item->label,
             .icon = item->icon,

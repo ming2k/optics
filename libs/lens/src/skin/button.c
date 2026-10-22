@@ -74,13 +74,21 @@ void lensi_skin_button(lens *ui, lens_node *n, const lens_widget_record *rec) {
     }
 
     /* Background and border */
+    float btn_radius = rs->corner_radius;
+    if (rec->content.variant == LENS_BUTTON_SUBTLE && !(rec->style_fields & LENS_STYLE_CORNER_RADIUS)) {
+        float max_r = fmaxf(h * 0.25f, 4.0f);
+        if (btn_radius > max_r) {
+            btn_radius = max_r;
+        }
+    }
+
     if ((bg & 0xFF000000u) != 0) {
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){
                                 .kind = LENS_DRAW_RECT,
                                 .rel = {0, 0, w, h},
                                 .color = bg,
-                                .radius = rs->corner_radius,
+                                .radius = btn_radius,
                             });
     }
 
@@ -92,7 +100,7 @@ void lensi_skin_button(lens *ui, lens_node *n, const lens_widget_record *rec) {
                                 .rel = {0, 0, w, h},
                                 .color = rs->border,
                                 .width = rs->border_width,
-                                .radius = rs->corner_radius,
+                                .radius = btn_radius,
                             });
     }
 
