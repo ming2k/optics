@@ -270,6 +270,7 @@ typedef enum flux_struct_type {
     FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC = 31,
     FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC = 32,
     FLUX_TYPE_CANVAS_ANTIALIAS_DESC = 33,
+    FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC = 34,
     FLUX_TYPE_EFFECT_SHADOW_DESC = 40,
     FLUX_TYPE_CPU_TARGET_DESC = 46,
     /* Append only. Never repurpose. */
@@ -283,6 +284,8 @@ typedef enum flux_struct_type {
  * docs/reference/api.md before changing them. */
 static_assert(FLUX_TYPE_DEVICE_DESC == 1, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_CANVAS_ANTIALIAS_DESC == 33,
+              "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC == 34,
               "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_EFFECT_SHADOW_DESC == 40, "flux_struct_type: append only — never renumber");
 

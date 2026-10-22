@@ -384,6 +384,7 @@ typedef struct lens_theme {
 
     lens_font *font;
     float font_size;
+    float icon_size; /* Default glyph/icon box size. 0 = fall back to font_size. */
 
     /* Semantic text sizes (ADR-0034 extension). 0 = fall back to font_size. */
     float font_size_title;
@@ -475,6 +476,7 @@ typedef enum lens_style_field : uint32_t {
     LENS_STYLE_PADDING = 1u << 8,
     LENS_STYLE_GAP = 1u << 9,
     LENS_STYLE_FONT_SIZE = 1u << 10,
+    LENS_STYLE_ICON_SIZE = 1u << 11,     /* glyph/icon box size        */
     LENS_STYLE_OUTLINE_COLOR = 1u << 12, /* foreground contour colour  */
     LENS_STYLE_OUTLINE_WIDTH = 1u << 13, /* contour radius, logical px */
     LENS_STYLE_MATERIAL = 1u << 14,      /* semantic material kind     */
@@ -493,6 +495,7 @@ typedef struct lens_style {
     float padding;
     float gap;
     float font_size;
+    float icon_size;
     /* Opt-in contour behind foreground content (text, glyphs, images)
      * floating over imagery or translucent material. State-independent
      * decoration atoms: the resolver neither derives nor dims them, and
@@ -530,6 +533,7 @@ typedef struct lens_style_resolved {
     float padding;
     float gap;
     float font_size;
+    float icon_size;
     flux_color outline_color;
     float outline_width;
     lens_material_kind material;
@@ -1171,6 +1175,7 @@ typedef struct lens_selectable_opts {
     const char *label;
     bool selected;
     lens_icon_id icon;
+    float icon_size; /* 0 = fall back to style / theme icon_size */
 } lens_selectable_opts;
 
 LENS_API lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts);

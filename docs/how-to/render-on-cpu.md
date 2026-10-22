@@ -61,6 +61,32 @@ each call:
 on a CPU canvas and `NULL` on a GPU canvas (use the offscreen surface /
 [render-offscreen](render-offscreen.md) path for GPU readback).
 
+## Bake a coverage mask
+
+`flux_canvas_cpu_coverage` returns a single-channel coverage plane instead of
+RGBA: one 8-bit value per pixel, the box-filtered mean alpha, `stride == width`.
+It is what a resolution-specific mask is made of — clear to transparent, draw
+the geometry once, read the plane:
+
+    uint32_t w, h, stride;
+    const uint8_t *coverage = flux_canvas_cpu_coverage(c, &w, &h, &stride);
+
+The number of distinct coverage levels a pixel can carry is set by the
+supersampling factor, not by 8-bit quantisation: N samples resolve N+1 levels.
+The default (2 → 4 samples) gives 5, which is why a baked mask that will be
+sampled 1:1 on screen wants more. Ask for it explicitly with
+`flux_canvas_create_cpu_ss`, or through `flux_canvas_supersample_desc` on
+`flux_canvas_create`:
+
+    flux_canvas *c;   /* 8x8 = 64 samples/px -> 65 coverage levels */
+    flux_canvas_create_cpu_ss(64, 64, 1.0f, FLUX_CANVAS_ANTIALIAS_AUTO, 8, &c);
+
+`flux_canvas_create_cpu_ss` is a bake-time tool: the sample buffer costs
+`ss*ss` float RGBA per pixel, so a display canvas should keep the default. Blit
+a finished mask 1:1 with a NEAREST sampler — filtering it reintroduces the blur
+the mask exists to remove. `lens` builds its icon cache on exactly this pair
+(ADR-0112).
+
 ## Rust
 
 The `flux` crate mirrors this:

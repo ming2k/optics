@@ -81,6 +81,43 @@ test_borrow_check = executable('test_borrow_check',
 )
 test('borrow_check', test_borrow_check)
 
+# Icon coverage-mask cache (ADR-0112): bake sizing, key identity, layer
+# separation, device-grid-exact placement at fractional scales, and the run
+# resolver that keeps the mask path and the vector fallback in agreement.
+#
+# icon_mask.c is compiled in directly because lensi_icon_mask_* are hidden in
+# liblens (same direct-link pattern as test_icon_runtime_content), which also
+# means the icon registry must be compiled in — icon_mask.c resolves runs through
+# it. That local registry is why this binary contains no runtime-SVG rendering
+# assertion: a runtime icon registered here would live in this binary's registry,
+# invisible to the liblens replay that draws it. End-to-end runtime-icon
+# rendering is covered by test_icon_mask_render below, which links only the
+# shared library.
+test_icon_mask = executable('test_icon_mask',
+  'test_icon_mask.c',
+  '../../libs/lens/src/render/icon_mask.c',
+  '../../libs/lens/src/icon_runtime.c',
+  '../../libs/lens/src/icon_data.c',
+  '../../libs/lens/src/icon_svg.c',
+  dependencies        : [lens_dep, m_dep],
+  include_directories : [lens_inc, flux_inc],
+)
+test('icon_mask', test_icon_mask)
+
+# End-to-end runtime-icon rendering through the PUBLIC API only (ADR-0112).
+# Links solely against the shared libraries: compiling any icon registry source
+# here would create a second registry, and a runtime SVG registered into it would
+# be invisible to liblens's replay — the icon would render blank and the pixel
+# assertions would look like a mask bug. Per-run colour survival on both the mask
+# path and the vector fallback is asserted here because only this link line can
+# observe the real registry.
+test_icon_mask_render = executable('test_icon_mask_render',
+  'test_icon_mask_render.c',
+  dependencies        : [lens_dep, m_dep],
+  include_directories : lens_inc,
+)
+test('icon_mask_render', test_icon_mask_render)
+
 # Content of registered runtime-icon streams. Compiles the registration
 # sources directly (same pattern as test_drawlist_hash): the registry
 # accessors are hidden symbols that do not link from liblens.so.

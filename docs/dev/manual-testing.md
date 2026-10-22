@@ -103,6 +103,7 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 2. Confirm antialiased geometry boundaries are smooth and free of dark fringe halos against contrasting backgrounds.
 3. Verify linear gradient brush interpolation has smooth color transitions without banding.
 4. Resize the window repeatedly: verify canvas viewport adjusts dynamically without stretching or aspect-ratio distortion.
+5. At the default window size, inspect the small icons (14–24 px) in the control row: their diagonal and curved strokes must show a graded edge, not a two-tone staircase. Icon edges come from baked device-resolution coverage masks (ADR-0112), so a staircase here means the bake fell back to the vector path — check the log for a mask allocation failure before assuming a rasteriser regression.
 
 ### 4.2 3D Lighting & Transform Pipeline (`examples/flux/scene_cube`)
 

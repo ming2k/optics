@@ -66,6 +66,10 @@ typedef struct flux_cpu_canvas {
      * Fixed for the canvas lifetime: the sample buffer, stencil, and the
      * readback downsample are all sized from it. */
     uint32_t ss;
+    /* Cached single-channel coverage plane (flux_canvas_cpu_coverage):
+     * width*height bytes, the box-filtered mean alpha. Allocated on first
+     * read; invalidated implicitly by the next draw (recomputed on read). */
+    uint8_t *coverage;
     float *fb;      /* premultiplied RGBA, sw*sh*4, row-major (active layer or base) */
     float *base_fb; /* root destination sample buffer */
     uint8_t *rgba8; /* cached downsampled 8-bit view (width*height*4) */
@@ -577,7 +581,11 @@ static flux_result cpu_canvas_init(const flux_canvas_backend *self, flux_canvas 
      * (4 samples/pixel) that mirrors the GPU's 4x MSAA. The factor is
      * fixed at create time: buffer sizing, clipping, and the readback
      * downsample all derive from it. */
-    uint32_t ss = (c->create_antialias == FLUX_CANVAS_ANTIALIAS_NONE) ? 1u : FLUX_CPU_SS_DEFAULT;
+    /* Supersampling factor: configured factor wins; 0 keeps the default (2 = 4
+     * samples/px) mirroring the GPU's 4x MSAA. */
+    uint32_t ss = (c->cpu_supersample > 0) ? c->cpu_supersample : FLUX_CPU_SS_DEFAULT;
+    if (ss > FLUX_CANVAS_SUPERSAMPLE_MAX)
+        ss = FLUX_CANVAS_SUPERSAMPLE_MAX;
     if (c->fb_width == 0 || c->fb_height == 0 || c->fb_width > UINT32_MAX / ss ||
         c->fb_height > UINT32_MAX / ss) {
         FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "CPU canvas dimensions overflow sample buffer");
@@ -624,6 +632,7 @@ static void cpu_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) 
     }
     free(v->base_fb);
     free(v->rgba8);
+    free(v->coverage);
     free(v->stencil);
     free(v);
     c->backend_data = nullptr;
@@ -745,11 +754,10 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
         if (!v) {
             c->fb_width = width;
             c->fb_height = height;
-            flux_canvas_antialias saved = c->create_antialias;
-            c->create_antialias =
-                ss == 1 ? FLUX_CANVAS_ANTIALIAS_NONE : FLUX_CANVAS_ANTIALIAS_MSAA_4X;
+            uint32_t saved_ss = c->cpu_supersample;
+            c->cpu_supersample = ss;
             flux_result result = cpu_canvas_init(self, c);
-            c->create_antialias = saved;
+            c->cpu_supersample = saved_ss;
             if (result != FLUX_OK) {
                 c->backend_data = root;
                 return result;
@@ -933,6 +941,48 @@ static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canv
     return v->rgba8;
 }
 
+/* Single-channel coverage plane: the box-filtered mean of the supersampled
+ * alpha channel, quantised to 8 bits. This is the mask a coverage cache bakes
+ * from vector geometry (see flux_canvas_cpu_coverage in <flux/canvas_cpu.h>).
+ * The resolve matches cpu_read_pixels' alpha channel exactly, so a mask read
+ * here and a premultiplied pixel read there agree on coverage. */
+static const uint8_t *cpu_read_coverage(const flux_canvas_backend *self, flux_canvas *c,
+                                        uint32_t *width, uint32_t *height, uint32_t *stride) {
+    (void)self;
+    flux_cpu_canvas *v = cpu(c);
+    if (!v || !v->fb || v->width == 0 || v->height == 0)
+        return nullptr;
+    if (!v->coverage) {
+        if ((size_t)v->width > SIZE_MAX / (size_t)v->height)
+            return nullptr;
+        v->coverage = malloc((size_t)v->width * v->height);
+        if (!v->coverage)
+            return nullptr;
+    }
+    const uint32_t ss = v->ss;
+    const float norm = 1.0f / (float)(ss * ss);
+    for (uint32_t y = 0; y < v->height; ++y) {
+        for (uint32_t x = 0; x < v->width; ++x) {
+            float acc = 0.0f;
+            for (uint32_t sy = 0; sy < ss; ++sy) {
+                for (uint32_t sx = 0; sx < ss; ++sx) {
+                    const float *s = &v->fb[(((size_t)(y * ss + sy)) * v->sw + (x * ss + sx)) * 4];
+                    acc += s[3];
+                }
+            }
+            v->coverage[(size_t)y * v->width + x] =
+                (uint8_t)(clampf(acc * norm, 0.0f, 1.0f) * 255.0f + 0.5f);
+        }
+    }
+    if (width)
+        *width = v->width;
+    if (height)
+        *height = v->height;
+    if (stride)
+        *stride = v->width;
+    return v->coverage;
+}
+
 static const flux_canvas_backend cpu_backend = {
     .name = "cpu",
     .canvas_init = cpu_canvas_init,
@@ -943,6 +993,7 @@ static const flux_canvas_backend cpu_backend = {
     .bind_program = cpu_bind_program,
     .submit = cpu_submit,
     .read_pixels = cpu_read_pixels,
+    .read_coverage = cpu_read_coverage,
     .save_layer = cpu_save_layer,
     .restore_layer = cpu_restore_layer,
 };
@@ -957,20 +1008,31 @@ const flux_canvas_backend *flux_canvas_backend_cpu(void) {
 
 flux_result flux_canvas_create_cpu(uint32_t width, uint32_t height, float scale,
                                    flux_canvas **out) {
-    /* Historical default: supersampled oracle quality. */
-    return flux_canvas_create_cpu_aa(width, height, scale, FLUX_CANVAS_ANTIALIAS_AUTO, out);
+    /* Default: 2x supersampling (4 samples/pixel), matching GPU 4x MSAA. */
+    return flux_canvas_create_cpu_ss(width, height, scale, 0, out);
 }
 
 flux_result flux_canvas_create_cpu_aa(uint32_t width, uint32_t height, float scale,
                                       flux_canvas_antialias antialias, flux_canvas **out) {
-    if (!out || width == 0 || height == 0) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "width/height must be non-zero");
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    }
     if (antialias != FLUX_CANVAS_ANTIALIAS_AUTO && antialias != FLUX_CANVAS_ANTIALIAS_NONE &&
         antialias != FLUX_CANVAS_ANTIALIAS_MSAA_4X) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "unknown flux_canvas_antialias value");
         return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    uint32_t ss = (antialias == FLUX_CANVAS_ANTIALIAS_NONE) ? 1u : 2u;
+    return flux_canvas_create_cpu_ss(width, height, scale, ss, out);
+}
+
+flux_result flux_canvas_create_cpu_ss(uint32_t width, uint32_t height, float scale,
+                                      uint32_t supersample, flux_canvas **out) {
+    if (!out || width == 0 || height == 0) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "width/height must be non-zero");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (supersample > FLUX_CANVAS_SUPERSAMPLE_MAX) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE,
+                  "supersample factor exceeds FLUX_CANVAS_SUPERSAMPLE_MAX");
+        return FLUX_ERROR_OUT_OF_RANGE;
     }
     *out = nullptr;
 
@@ -986,7 +1048,7 @@ flux_result flux_canvas_create_cpu_aa(uint32_t width, uint32_t height, float sca
     c->state_top = 0;
     c->fb_width = width;
     c->fb_height = height;
-    c->create_antialias = antialias;
+    c->cpu_supersample = supersample;
 
     flux_result r = c->backend->canvas_init(c->backend, c);
     if (r != FLUX_OK) {
@@ -1006,4 +1068,11 @@ flux_result flux_canvas_create_cpu_aa(uint32_t width, uint32_t height, float sca
 const uint8_t *flux_canvas_cpu_pixels(const flux_canvas *c, uint32_t *width, uint32_t *height,
                                       uint32_t *stride) {
     return flux_canvas_read_pixels((flux_canvas *)c, width, height, stride);
+}
+
+const uint8_t *flux_canvas_cpu_coverage(const flux_canvas *c, uint32_t *width, uint32_t *height,
+                                        uint32_t *stride) {
+    if (!c)
+        return nullptr;
+    return c->backend->read_coverage(c->backend, (flux_canvas *)c, width, height, stride);
 }

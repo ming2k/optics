@@ -588,6 +588,15 @@ impl Theme {
         self
     }
 
+    pub fn with_icon_size(mut self, size: f32) -> Theme {
+        self.0.icon_size = size;
+        self
+    }
+
+    pub fn icon_size(&self) -> f32 {
+        self.0.icon_size
+    }
+
     pub fn with_font_size_sm(mut self, size: f32) -> Theme {
         self.0.font_size_h3 = size;
         self
@@ -776,6 +785,12 @@ impl Style {
     pub fn with_font_size(mut self, size: f32) -> Style {
         self.0.font_size = size;
         self.0.fields |= sys::lens_style_field::LENS_STYLE_FONT_SIZE as u32;
+        self
+    }
+
+    pub fn with_icon_size(mut self, size: f32) -> Style {
+        self.0.icon_size = size;
+        self.0.fields |= sys::lens_style_field::LENS_STYLE_ICON_SIZE as u32;
         self
     }
 

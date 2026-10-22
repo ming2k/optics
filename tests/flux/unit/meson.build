@@ -68,6 +68,16 @@ test_canvas_cpu = executable('test_canvas_cpu',
 )
 test('canvas_cpu', test_canvas_cpu, suite : 'unit')
 
+# Supersample factor and coverage-plane contracts (ADR-0112): the knobs the
+# lens icon-mask cache is built on. Uses stroked path geometry on purpose —
+# rounded rects/circles take the analytic SDF path, whose coverage is
+# independent of the sample count and would make this pass vacuously.
+test_canvas_coverage = executable('test_canvas_coverage',
+  'test_canvas_coverage.c',
+  dependencies : [test_helpers_dep],
+)
+test('canvas_coverage', test_canvas_coverage, suite : 'unit')
+
 # Headless CPU-canvas GLYPH run test (ADR-0019): draws text on a device-less
 # canvas via the host R8 coverage atlas path. Links glyph for shaping.
 test_canvas_cpu_text = executable('test_canvas_cpu_text',

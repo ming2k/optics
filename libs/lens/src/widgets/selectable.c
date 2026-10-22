@@ -30,17 +30,20 @@ lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts) {
     float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
     lens_text_metrics tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
-    bool has_icon = opts->icon != 0 && lensi_icon_valid((int32_t)opts->icon);
-    float icon_size = has_icon ? font_size : 0.0f;
-    float icon_gap = has_icon ? 8.0f : 0.0f;
-    float content_w = icon_size + icon_gap + tm.width;
-    float w = (n->fixed_w > 0) ? n->fixed_w : content_w + 2.0f * padding;
-    float h = (n->fixed_h > 0) ? n->fixed_h : font_size + 2.0f * padding;
-    n->measured = (flux_point){w, h};
 
     lens_response r = lensi_interact(ui, n, true, disabled);
     if (opts->selected)
         r.state |= LENS_STATE_SELECTED;
+
+    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
+    float resolved_icon_size = opts->icon_size > 0.0f ? opts->icon_size : rs.icon_size;
+    bool has_icon = opts->icon != 0 && lensi_icon_valid((int32_t)opts->icon);
+    float icon_size = has_icon ? resolved_icon_size : 0.0f;
+    float icon_gap = has_icon ? (rs.gap > 0.0f ? rs.gap : 8.0f) : 0.0f;
+    float content_w = icon_size + icon_gap + tm.width;
+    float w = (n->fixed_w > 0) ? n->fixed_w : content_w + 2.0f * padding;
+    float h = (n->fixed_h > 0) ? n->fixed_h : font_size + 2.0f * padding;
+    n->measured = (flux_point){w, h};
 
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0) |
                          (opts->selected ? LENS_A11Y_CHECKED : 0);
@@ -48,8 +51,6 @@ lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts) {
 
     if (!disabled)
         n->hover_t = r.hovered ? 1.0f : 0.0f;
-
-    lens_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
 
     lensi_skin_emit(ui, n,
                     &(lens_widget_record){
@@ -61,7 +62,12 @@ lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts) {
                         .style_fields = eff.fields,
                         .hover_t = n->hover_t,
                         .active_t = n->active_t,
-                        .content = {.label = label, .text = tm, .icon = opts->icon},
+                        .content = {
+                            .label = label,
+                            .text = tm,
+                            .icon = opts->icon,
+                            .glyph_size = icon_size,
+                        },
                     });
 
     ui->last_response = r;

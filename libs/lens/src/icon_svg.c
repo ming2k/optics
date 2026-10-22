@@ -1317,16 +1317,17 @@ bool lensi_svg_parse(const char *svg_text, lensi_svg_result *out) {
                 }
             }
 
-            /* If all runs are theme-colored (color == 0) and uniform, collapse to runs == nullptr
-             */
-            bool all_theme = true;
+            /* If all runs are theme-colored (color == 0) and have identical fill/stroke mode,
+             * collapse to runs == nullptr. If runs mix stroke and fill, keep them so replay
+             * dispatches per-shape fill and stroke correctly. */
+            bool can_collapse = true;
             for (uint32_t i = 0; i < run_count; ++i) {
-                if (runs[i].color != 0) {
-                    all_theme = false;
+                if (runs[i].color != 0 || runs[i].fill != runs[0].fill) {
+                    can_collapse = false;
                     break;
                 }
             }
-            if (all_theme) {
+            if (can_collapse) {
                 free(runs);
                 runs = nullptr;
                 run_count = 0;

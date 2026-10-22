@@ -208,6 +208,32 @@ typedef struct flux_canvas_antialias_desc {
 
 #define FLUX_CANVAS_ANTIALIAS_DESC_INIT {.type = FLUX_TYPE_CANVAS_ANTIALIAS_DESC}
 
+/* Optional pNext extension on flux_canvas_desc: the software backend's
+ * supersampling factor per axis (ss x ss samples per pixel). 0 keeps the
+ * backend default (2 = 4 samples/px). This is the *coverage resolution*
+ * knob: with N = ss*ss samples a pixel can carry N+1 distinct coverage
+ * levels, so ss=4 (16 samples, 17 levels) already matches what a good
+ * analytic rasteriser produces and ss=8 (65 levels) is effectively exact.
+ *
+ * It exists because coverage masks — icon/image caches baked from vector
+ * geometry and then blitted 1:1 — are sampled once and reused, so their
+ * banding is permanent and cannot be hidden by the display's MSAA. See
+ * flux_canvas_cpu_coverage for the mask readback this pairs with.
+ *
+ * Upper bound FLUX_CANVAS_SUPERSAMPLE_MAX keeps sample-buffer memory
+ * bounded (ss=8 costs 64 float RGBA samples per pixel); out-of-range
+ * requests fail creation with FLUX_ERROR_OUT_OF_RANGE rather than
+ * silently clamping, so a caller can never believe it got more fidelity
+ * than the buffer holds. */
+#define FLUX_CANVAS_SUPERSAMPLE_MAX 8u
+typedef struct flux_canvas_supersample_desc {
+    flux_struct_type type; /* FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC */
+    const void *next;
+    uint32_t supersample; /* 0 = backend default; 1..FLUX_CANVAS_SUPERSAMPLE_MAX */
+} flux_canvas_supersample_desc;
+
+#define FLUX_CANVAS_SUPERSAMPLE_DESC_INIT {.type = FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC}
+
 /* Create a canvas on the selected backend. GPU canvases need desc->surface;
  * CPU canvases need desc->width/height (see flux/canvas_cpu.h for a convenience
  * wrapper and pixel readback). Release with flux_canvas_release. */

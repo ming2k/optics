@@ -150,6 +150,7 @@ lens_theme lens_theme_dark(void) {
 
     t.font = NULL;
     t.font_size = 14.0f;
+    t.icon_size = 0.0f;
     t.font_size_title = 28.0f;
     t.font_size_h1 = 22.0f;
     t.font_size_h2 = 18.0f;
@@ -206,6 +207,7 @@ lens_theme lens_theme_default(void) {
 
     t.font = NULL;
     t.font_size = 14.0f;
+    t.icon_size = 0.0f;
     t.font_size_title = 28.0f;
     t.font_size_h1 = 22.0f;
     t.font_size_h2 = 18.0f;

@@ -55,12 +55,23 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_create_cpu(uint32_t width, uint3
                                                            float scale, flux_canvas **out);
 
 /* flux_canvas_create_cpu with an explicit antialiasing request. AUTO and
- * MSAA_4X both select the supersampled default; NONE selects the aliased
- * 1-sample buffer. flux_canvas_create with backend CPU honours the
- * descriptor's antialias the same way. */
+ * MSAA_4X select the 2x supersampled default (4 samples/px); NONE selects the
+ * aliased 1-sample buffer (1 sample/px). */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_create_cpu_aa(uint32_t width, uint32_t height,
                                                               float scale,
                                                               flux_canvas_antialias antialias,
+                                                              flux_canvas **out);
+
+/* flux_canvas_create_cpu with an explicit supersampling factor per axis
+ * (ss x ss samples per pixel). `supersample == 0` keeps the default (2 = 4
+ * samples/px); 1 selects 1 sample/px (aliased); 2..FLUX_CANVAS_SUPERSAMPLE_MAX
+ * sets the factor. Out of range fails with FLUX_ERROR_OUT_OF_RANGE.
+ *
+ * Higher factors buy grey levels: N samples resolve N+1 coverage steps (ss=4 ->
+ * 17, ss=8 -> 65). This is the direct constructor for coverage-mask bakers
+ * (flux_canvas_cpu_coverage); display canvases should keep the default. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_create_cpu_ss(uint32_t width, uint32_t height,
+                                                              float scale, uint32_t supersample,
                                                               flux_canvas **out);
 
 /* Return the premultiplied-RGBA8 framebuffer (row-major, tightly packed:
@@ -69,6 +80,25 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_create_cpu_aa(uint32_t width, ui
  * is not a CPU canvas. `width`/`height`/`stride` are optional out-params. */
 FLUX_API const uint8_t *flux_canvas_cpu_pixels(const flux_canvas *c, uint32_t *width,
                                                uint32_t *height, uint32_t *stride);
+
+/* Return a single-channel alpha-coverage plane of the software framebuffer:
+ * width*height bytes, one 8-bit coverage value per output pixel, row-major,
+ * tightly packed. This is the mask readback that coverage caches are baked
+ * from — clear to transparent, render the geometry once, read this plane, and
+ * the bytes are an exact resolution-specific coverage mask for that geometry
+ * at that size.
+ *
+ * The value is the box-filtered mean of the supersampled alpha channel (the
+ * same resolve flux_canvas_cpu_pixels performs), so the number of distinct
+ * coverage levels is bounded by the canvas's supersample factor rather than by
+ * 8-bit quantisation: ss=1 gives {0,1}, ss=4 gives 17, ss=8 gives 65. Request
+ * the factor through flux_canvas_supersample_desc (<flux/canvas.h>).
+ *
+ * The buffer is refreshed on each call and owned by the canvas; a later draw
+ * into the canvas invalidates it. Returns NULL if `c` is not a CPU canvas.
+ * `width`/`height`/`stride` are optional out-params (stride == width). */
+FLUX_API const uint8_t *flux_canvas_cpu_coverage(const flux_canvas *c, uint32_t *width,
+                                                 uint32_t *height, uint32_t *stride);
 
 #ifdef __cplusplus
 }

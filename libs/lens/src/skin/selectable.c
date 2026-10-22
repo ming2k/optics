@@ -14,8 +14,11 @@ void lensi_skin_selectable(lens *ui, lens_node *n, const lens_widget_record *rec
     float h = rec->bounds.h;
 
     bool has_icon = rec->content.icon != 0 && lensi_icon_valid((int32_t)rec->content.icon);
-    float icon_size = has_icon ? rs->font_size : 0.0f;
-    float icon_gap = has_icon ? 8.0f : 0.0f;
+    float icon_size = has_icon
+                          ? (rec->content.glyph_size > 0.0f ? rec->content.glyph_size
+                                                            : rs->icon_size)
+                          : 0.0f;
+    float icon_gap = has_icon ? (rs->gap > 0.0f ? rs->gap : 8.0f) : 0.0f;
 
     /* Background: transparent at rest. A selected row always uses the
      * active-surface colour. */
@@ -29,14 +32,14 @@ void lensi_skin_selectable(lens *ui, lens_node *n, const lens_widget_record *rec
                                             .radius = rs->corner_radius});
     }
 
-    float text_y = (h - rec->content.text.height) * 0.5f;
+    float text_y = floorf((h - rec->content.text.height) * 0.5f);
     if (text_y < 0.0f)
         text_y = 0.0f;
 
-    float x = rs->padding;
+    float x = floorf(rs->padding);
     flux_color fg = disabled ? rs->disabled : rs->fg;
     if (has_icon) {
-        float icon_y = (h - icon_size) * 0.5f;
+        float icon_y = floorf((h - icon_size) * 0.5f);
         lensi_drawlist_push(ui, n,
                             (lens_draw_cmd){.kind = LENS_DRAW_ICON,
                                             .rel = {x, icon_y, icon_size, icon_size},

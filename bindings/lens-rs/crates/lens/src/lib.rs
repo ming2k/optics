@@ -1143,6 +1143,24 @@ impl<'frame> Frame<'frame> {
         unsafe { sys::lens_selectable(self.ui, &opts).clicked }
     }
 
+    pub fn selectable_icon_sized(
+        &mut self,
+        label: &str,
+        icon: impl Into<sys::lens_icon_id>,
+        selected: bool,
+        icon_size: f32,
+    ) -> bool {
+        let c = cstr(label);
+        let opts = sys::lens_selectable_opts {
+            label: c.as_ptr(),
+            icon: icon.into(),
+            selected,
+            icon_size,
+            ..Default::default()
+        };
+        unsafe { sys::lens_selectable(self.ui, &opts).clicked }
+    }
+
     pub fn textfield(&mut self, label: &str, buf: &mut TextBuf) -> bool {
         self.textedit(label, buf, false)
     }

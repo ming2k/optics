@@ -90,6 +90,14 @@ struct flux_canvas_backend {
      * backend leaves it NULL (readback goes through an offscreen target). */
     const uint8_t *(*read_pixels)(const flux_canvas_backend *self, flux_canvas *c, uint32_t *w,
                                   uint32_t *h, uint32_t *stride);
+
+    /* Optional (nullable) single-channel alpha-coverage snapshot: the software
+     * rasteriser's resolved coverage per pixel, which is what a baked coverage
+     * mask is made of. Only the CPU backend implements it (a GPU canvas would
+     * have to resolve an MSAA attachment and read it back); the GPU backend
+     * leaves it NULL, and flux_canvas_cpu_coverage returns NULL there. */
+    const uint8_t *(*read_coverage)(const flux_canvas_backend *self, flux_canvas *c, uint32_t *w,
+                                    uint32_t *h, uint32_t *stride);
 };
 
 /* The default GPU backend. Stateless singleton; safe to share across

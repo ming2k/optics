@@ -13,6 +13,25 @@ either.
 
 ## [Unreleased]
 
+### Added
+
+- **lens**: Orthogonal `icon_size` style atom (`LENS_STYLE_ICON_SIZE`), `lens_style.icon_size`, `lens_style_resolved.icon_size`, `lens_theme.icon_size`, and `lens_selectable_opts.icon_size` for decoupled icon and typography scaling (ADR-0111).
+- **lens-rs**: `Theme::with_icon_size`, `Style::with_icon_size`, and `Frame::selectable_icon_sized`.
+- **lens**: Device-resolution icon coverage masks (ADR-0112). Icons are baked once per (icon, device size, stroke, outline, paint run) into a device-free canvas at 8×8 supersampling and blitted 1:1 through the batched glyph-run pipeline, so small-icon edges carry tens of coverage levels instead of the draw-time 4× MSAA budget's three. The cache is bounded (96 entries, LRU) and falls back to the live vector path if a bake fails.
+- **flux**: `flux_canvas_supersample_desc` (pNext on `flux_canvas_desc`) and `flux_canvas_create_cpu_ss` set the software rasteriser's supersampling factor per axis (1..`FLUX_CANVAS_SUPERSAMPLE_MAX`); N samples resolve N+1 coverage levels. Out-of-range fails with `FLUX_ERROR_OUT_OF_RANGE` rather than clamping.
+- **flux**: `flux_canvas_cpu_coverage` returns a single-channel alpha-coverage plane (one byte per pixel) — the mask readback coverage caches are baked from. New optional `read_coverage` backend vtable slot; the Vulkan backend leaves it NULL.
+- **flux**: `flux_glyph_run_desc` may now carry both an `atlas` and a `host_coverage`; the canvas backend selects the source it can sample instead of rejecting the dual payload. This makes one compiled display list replayable into either backend.
+
+### Fixed
+
+- **lens**: Runtime SVG registration preserves per-shape paint runs when theme-colored shapes combine fill and stroke (`currentColor`), preventing premature whole-icon fill collapse (ADR-0111).
+- **lens**: Pixel-snap geometry positions in selectable row and button skins to prevent half-pixel stroke smearing.
+- **lens**: Icon origins and stroke widths are resolved in device space (ADR-0112). Command replay snapped the origin to the device grid and the icon branch then re-rounded it in *logical* space, moving the glyph off the grid at fractional scales (1.25/1.5); icons also drew at a sub-1.5 px stroke that never reached full opacity. Both are fixed and covered by centroid tests at scale 1.0/1.25/1.5/2.0.
+- **lens**: An icon's vector fallback again honours its paint runs. While masks were being introduced, the fallback collapsed the whole command stream into a single paint, discarding every per-shape colour a runtime SVG declares (the regression ADR-0111 had fixed). Run resolution and geometry emission are now single-sourced (`lensi_icon_run_spans` / `lensi_emit_run_path`), consumed by both the mask bake and the fallback, so the two cannot drift again.
+- **lens**: Icons no longer vanish when a device-backed context renders into a device-less canvas (headless snapshot, offscreen export). Mask representation is selected by the consuming canvas rather than by `lens_desc.device`, and every mask keeps its host coverage bytes alongside its R8 image.
+- **lens**: An icon with an outline no longer loses its outline colour — body and outline are separate mask layers, blitted outline-first.
+- **lens**: Icons no longer allocate path scratch from the per-frame arena, removing the dominant per-frame allocation for icon-heavy UIs.
+
 ## [0.0.60] - 2026-10-17
 
 ### Fixed

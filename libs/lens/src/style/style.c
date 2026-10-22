@@ -81,6 +81,8 @@ lens_style lensi_style_merge(const lens_style *base, const lens_style *over) {
         out.gap = over->gap;
     if (f & LENS_STYLE_FONT_SIZE)
         out.font_size = over->font_size;
+    if (f & LENS_STYLE_ICON_SIZE)
+        out.icon_size = over->icon_size;
     if (f & LENS_STYLE_OUTLINE_COLOR)
         out.outline_color = over->outline_color;
     if (f & LENS_STYLE_OUTLINE_WIDTH)
@@ -128,6 +130,8 @@ lens_style_resolved lensi_style_resolve(lens *ui, const lens_style *eff, const l
     r.padding = lensi_style_padding(eff, theme);
     r.gap = (f & LENS_STYLE_GAP) ? eff->gap : theme->gap;
     r.font_size = lensi_style_font_size(ui, eff, theme); /* folds in text_scale */
+    float theme_icon_size = theme->icon_size > 0.0f ? theme->icon_size : r.font_size;
+    r.icon_size = (f & LENS_STYLE_ICON_SIZE) ? eff->icon_size : theme_icon_size;
 
     /* No theme tokens exist for the outline atoms: unset means none. */
     r.outline_color = (f & LENS_STYLE_OUTLINE_COLOR) ? eff->outline_color : 0;

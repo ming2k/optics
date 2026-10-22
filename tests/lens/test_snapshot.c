@@ -106,14 +106,19 @@ static void capture_failure_is_not_partial_success(void) {
     lens_begin(ui, &in);
     lens_icon(ui, &(lens_icon_opts){.id = LENS_ICON_CHECK, .size = 24});
     lens_end(ui);
-    size_t mark = ui->arena.used;
-    ui->arena.used = ui->arena.capacity; /* Fail path scratch allocation. */
+    /* Inject a compile failure through the canonical "frame could not be
+     * compiled" flag (lensi_set_overflow), which is what arena exhaustion
+     * ultimately surfaces as to compile_visuals. Icons no longer allocate from
+     * the frame arena themselves — ADR-0112 bakes their coverage masks once
+     * into a heap-backed device-resolution cache — so exhausting the arena
+     * would no longer fail this frame, and the invariant under test is about
+     * the failure propagating, not about which allocation tripped it. */
+    ui->overflow = true;
     lens_scene_snapshot *snapshot = (void *)(uintptr_t)1;
     CHECK(lens_snapshot_create(ui, &snapshot) == FLUX_ERROR_OUT_OF_MEMORY);
     CHECK(snapshot == nullptr);
-    CHECK(ui->arena.used == ui->arena.capacity);
     CHECK(lens_last_presented_generation(ui) == 0);
-    ui->arena.used = mark;
+    ui->overflow = false;
     CHECK(lens_snapshot_create(ui, &snapshot) == FLUX_OK);
     CHECK(snapshot != nullptr);
     lens_snapshot_release(snapshot);

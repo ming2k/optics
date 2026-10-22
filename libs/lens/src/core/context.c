@@ -1,6 +1,7 @@
 /* context.c — lens lifecycle and the per-frame envelope (ADR-0024/0009). */
 
 #include "../internal.h"
+#include "../render/icon_mask.h"
 #include <stdatomic.h>
 
 void lens_version(int *major, int *minor, int *patch) {
@@ -138,6 +139,10 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
     if (glyph_create(&(glyph_desc){.device = ui->device, .scale = ui->scale}, &ui->text) != FLUX_OK)
         ui->text = NULL;
 
+    /* Icon coverage-mask cache (ADR-0112). Allocation failure is non-fatal:
+     * the pool stays at cap 0 and icons draw through the live vector path. */
+    lensi_icon_mask_pool_init(ui);
+
     *out = ui;
     return FLUX_OK;
 
@@ -154,6 +159,7 @@ void lens_release(lens *ui) {
     if (!ui)
         return;
     lens_snapshot_release(ui->presented_snapshot);
+    lensi_icon_mask_pool_destroy(ui);
     lensi_ghost_destroy(ui);
     glyph_release(ui->text); /* null-safe */
     lensi_store_destroy(ui);

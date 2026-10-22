@@ -73,11 +73,7 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
     if (kind == FLUX_CANVAS_BACKEND_AUTO)
         kind = desc->surface ? FLUX_CANVAS_BACKEND_GPU : FLUX_CANVAS_BACKEND_CPU;
     if (kind == FLUX_CANVAS_BACKEND_CPU) {
-        /* Parse the optional antialias extension so an explicit NONE can
-         * select the aliased 1-sample buffer at create time. Absent
-         * extension (or AUTO/MSAA_4X) keeps the supersampled oracle
-         * default, so existing callers are unchanged. */
-        flux_canvas_antialias aa = FLUX_CANVAS_ANTIALIAS_AUTO;
+        uint32_t supersample = 0;
         const struct {
             flux_struct_type type;
             const void *next;
@@ -92,13 +88,24 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
                               "invalid Canvas antialias extension value");
                     return FLUX_ERROR_INVALID_ARGUMENT;
                 }
-                aa = aa_desc->antialias;
+                /* ANTIALIAS_NONE maps to 1 sample/px (aliased); AUTO/MSAA_4X keep
+                 * the 2x supersampled default (4 samples/px). */
+                if (supersample == 0)
+                    supersample = (aa_desc->antialias == FLUX_CANVAS_ANTIALIAS_NONE) ? 1u : 2u;
+            } else if (ext->type == FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC) {
+                const flux_canvas_supersample_desc *ss_desc = (const void *)ext;
+                if (ss_desc->supersample > FLUX_CANVAS_SUPERSAMPLE_MAX) {
+                    FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE,
+                              "Canvas supersample factor exceeds FLUX_CANVAS_SUPERSAMPLE_MAX");
+                    return FLUX_ERROR_OUT_OF_RANGE;
+                }
+                supersample = ss_desc->supersample;
             }
             ext = ext->next;
         }
         uint32_t w = desc->width ? desc->width : 1024;
         uint32_t h = desc->height ? desc->height : 1024;
-        return flux_canvas_create_cpu_aa(w, h, desc->scale, aa, out);
+        return flux_canvas_create_cpu_ss(w, h, desc->scale, supersample, out);
     }
 
     if (!desc->surface) {
@@ -891,11 +898,13 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
         return;
     }
 
-    /* Two atlas sources, mutually exclusive (ADR-0019):
+    /* Two atlas sources (ADR-0019, extended by ADR-0112):
      *   - GPU:   `atlas` (flux_image, bindless). Requires a device.
-     *   - Host:  `host_coverage` (R8 buffer). Device-less CPU canvas. */
-    const bool host =
-        (desc->host_coverage != NULL && desc->host_atlas_w > 0 && desc->host_atlas_h > 0);
+     *   - Host:  `host_coverage` (R8 buffer). Device-less CPU canvas.
+     * When a caller provides both (e.g. an icon mask cache or multi-backend
+     * display list), the canvas backend chooses its native source rather than
+     * rejecting the dual payload. */
+    const bool host = (c->device == nullptr);
 
     /* Optional producer generation for a host coverage buffer
      * (flux_glyph_run_host_atlas_desc): recorded with each batch so replay
@@ -916,9 +925,9 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
     uint32_t atlas_w = 0, atlas_h = 0;
 
     if (host) {
-        if (c->device) {
+        if (!desc->host_coverage || !desc->host_atlas_w || !desc->host_atlas_h) {
             FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
-                      "host_coverage is for device-less canvases; use atlas on a GPU canvas");
+                      "device-less canvas requires host_coverage in glyph run");
             return;
         }
         atlas_w = desc->host_atlas_w;
@@ -931,8 +940,10 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
             canvas_host_atlas_gen_track(c, desc->host_coverage, host_atlas_gen);
     } else {
         /* GPU path needs a device + a bindless atlas image. */
-        if (!c->device || !desc->atlas)
+        if (!desc->atlas) {
+            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "GPU canvas requires atlas image in glyph run");
             return;
+        }
         /* Ownership: the atlas must live on the canvas's device, else the
          * batch would carry a bindless handle from a foreign heap. Void
          * entry point, so the failure surfaces through the pass's sticky

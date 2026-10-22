@@ -42,6 +42,15 @@ static const char SVG_MIXED[] =
     "<rect x=\"10\" y=\"14\" width=\"8\" height=\"8\" fill=\"#445566\" fill-opacity=\"0.5\"/>"
     "</svg>";
 
+/* Mixed theme: currentColor stroke circle + currentColor filled circle.
+ * Even though all colors are theme (0), runs MUST NOT collapse because
+ * stroke and fill modes are mixed. */
+static const char SVG_THEME_MIXED[] =
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+    "<circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"none\" stroke=\"currentColor\"/>"
+    "<circle cx=\"12\" cy=\"12\" r=\"3\" fill=\"currentColor\"/>"
+    "</svg>";
+
 int main(void) {
     /* Explicit colour -> exactly one run, colour preserved, stroke mode. */
     lens_icon_id red = lens_icon_register_svg(SVG_RED);
@@ -111,6 +120,23 @@ int main(void) {
         CHECK(d->runs[0].first_cmd + d->runs[0].count == d->runs[1].first_cmd);
         CHECK(d->runs[1].first_cmd + d->runs[1].count == d->runs[2].first_cmd);
         CHECK(d->runs[2].first_cmd + d->runs[2].count == d->count);
+    }
+
+    /* Mixed theme stroke and fill: must preserve runs even though all colors are theme (0). */
+    lens_icon_id theme_mixed = lens_icon_register_svg(SVG_THEME_MIXED);
+    CHECK((int)theme_mixed >= (int)LENS_ICON_COUNT);
+    {
+        const lens_icon_desc *d = lensi_icon_desc((int32_t)theme_mixed);
+        CHECK(d != NULL);
+        CHECK(d->runs != NULL);
+        CHECK(d->run_count == 2);
+        CHECK(d->runs[0].color == 0u);
+        CHECK(d->runs[0].fill == 0); /* stroke */
+        CHECK(d->runs[1].color == 0u);
+        CHECK(d->runs[1].fill == 1); /* fill */
+        CHECK(d->runs[0].first_cmd == 0);
+        CHECK(d->runs[0].first_cmd + d->runs[0].count == d->runs[1].first_cmd);
+        CHECK(d->runs[1].first_cmd + d->runs[1].count == d->count);
     }
 
     return TEST_REPORT();

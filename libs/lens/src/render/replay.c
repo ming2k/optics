@@ -1,6 +1,7 @@
 /* Publish immutable visuals from the resolved UI tree. Rendering consumes
  * only the published snapshot; there is no live-tree Canvas replay path. */
 #include "../internal.h"
+#include "icon_mask.h"
 #include <math.h>
 #include <stdatomic.h>
 
@@ -250,117 +251,124 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
             if (!desc || !desc->cmds || desc->count == 0)
                 break;
 
-            float s = r.w / 24.0f;
-            float ox = r.x;
-            float oy = r.y;
+            lensi_icon_run_span spans[LENSI_ICON_MAX_RUNS];
+            uint32_t span_count =
+                lensi_icon_run_spans(desc, lensi_icon_mode(c->icon_id), spans, LENSI_ICON_MAX_RUNS);
+            if (span_count == 0)
+                break;
 
-            if (desc->runs && desc->run_count > 0) {
-                for (uint32_t run = 0; run < desc->run_count; run++) {
-                    const lens_icon_run *ri = &desc->runs[run];
-                    uint32_t end = ri->first_cmd + ri->count;
-                    if (end < ri->first_cmd || end > desc->count)
-                        return FLUX_ERROR_INVALID_ARGUMENT;
-                    flux_path *p = NULL;
-                    flux_result path_result = flux_path_create(&p, &ui->arena);
-                    if (path_result != FLUX_OK)
-                        return path_result;
-                    for (uint32_t i = ri->first_cmd; i < end; i++) {
-                        const lens_icon_cmd *cmd = &desc->cmds[i];
-                        const float *pp = cmd->params;
-                        switch (cmd->type) {
-                        case 0:
-                            flux_path_move_to(p, pp[0] * s + ox, pp[1] * s + oy);
-                            break;
-                        case 1:
-                            flux_path_line_to(p, pp[0] * s + ox, pp[1] * s + oy);
-                            break;
-                        case 2:
-                            flux_path_cubic_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox,
-                                               pp[3] * s + oy, pp[4] * s + ox, pp[5] * s + oy);
-                            break;
-                        case 3:
-                            flux_path_quad_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox,
-                                              pp[3] * s + oy);
-                            break;
-                        case 4:
-                            flux_path_close(p);
-                            break;
-                        case 5:
-                            flux_path_add_circle(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s);
-                            break;
-                        case 6: {
-                            flux_rect ir = {pp[0] * s + ox, pp[1] * s + oy, pp[2] * s, pp[3] * s};
-                            flux_path_add_rect(p, ir);
-                            break;
-                        }
-                        }
+            /* Device-space geometry. A mask is baked at one texel per device
+             * pixel and blitted 1:1, so both the box edge and the origin must
+             * be whole device pixels — a fractional origin would resample the
+             * mask and blur exactly what it exists to keep crisp. The origin is
+             * therefore snapped in *device* space: at scale 1.25/1.5 rounding a
+             * logical coordinate lands between device pixels. */
+            float dev_scale = scale > 0.0f ? scale : 1.0f;
+            float icon_dim = c->rel.w > 0.0f ? c->rel.w : r.w;
+            float dev_px_f = roundf(icon_dim * dev_scale);
+            if (dev_px_f < 1.0f)
+                dev_px_f = 1.0f;
+            uint32_t dev_px = (uint32_t)dev_px_f;
+            float dev_origin_x = floorf(r.x * dev_scale + 0.5f);
+            float dev_origin_y = floorf(r.y * dev_scale + 0.5f);
+
+            /* Stroke width in device pixels. Skins derive it as 2*(size/24);
+             * scaling here keeps HiDPI honest instead of baking a line thinner
+             * than the widget asked for. */
+            float stroke_logical = c->width > 0.0f ? c->width : 2.0f * (icon_dim / 24.0f);
+            float stroke_dev = stroke_logical * dev_scale;
+            bool has_outline = c->outline_width > 0.0f && (c->outline_color >> 24) != 0;
+            float outline_dev = has_outline ? c->outline_width * dev_scale : 0.0f;
+
+            /* Coverage-mask path. Every layer of every run must bake, or none
+             * does: a partially masked icon would mix two rasterisations inside
+             * one glyph. */
+            bool all_masks = true;
+            for (uint32_t run = 0; run < span_count && all_masks; ++run) {
+                if (!lensi_icon_mask_acquire(ui, c->icon_id, dev_px, stroke_dev, 0.0f, run,
+                                             LENSI_ICON_MASK_BODY))
+                    all_masks = false;
+                else if (has_outline &&
+                         !lensi_icon_mask_acquire(ui, c->icon_id, dev_px, stroke_dev, outline_dev,
+                                                  run, LENSI_ICON_MASK_OUTLINE))
+                    all_masks = false;
+            }
+
+            if (all_masks) {
+                flux_sampler *sampler = lensi_icon_mask_sampler(ui);
+                for (uint32_t run = 0; run < span_count; ++run) {
+                    flux_color body_tint = lensi_opacity_color(
+                        lensi_icon_run_color(spans[run].color, c->color), alpha);
+                    flux_color outline_tint = lensi_opacity_color(c->outline_color, alpha);
+                    /* Outline first, body over it — the outline is painted
+                     * beneath the body, exactly like the vector path. */
+                    for (int pass = 0; pass < 2; ++pass) {
+                        bool outline_pass = pass == 0;
+                        if (outline_pass && !has_outline)
+                            continue;
+                        lensi_icon_mask *m = lensi_icon_mask_acquire(
+                            ui, c->icon_id, dev_px, stroke_dev, outline_pass ? outline_dev : 0.0f,
+                            run, outline_pass ? LENSI_ICON_MASK_OUTLINE : LENSI_ICON_MASK_BODY);
+                        if (!m)
+                            continue;
+                        flux_glyph_quad quad = {
+                            .sx = (dev_origin_x - (float)m->halo) / dev_scale,
+                            .sy = (dev_origin_y - (float)m->halo) / dev_scale,
+                            .sw = (float)m->w / dev_scale,
+                            .sh = (float)m->h / dev_scale,
+                            .ax = 0,
+                            .ay = 0,
+                            .aw = (uint16_t)m->w,
+                            .ah = (uint16_t)m->h,
+                            .color = outline_pass ? outline_tint : body_tint,
+                        };
+                        flux_glyph_run_desc gd = FLUX_GLYPH_RUN_DESC_INIT;
+                        gd.atlas = m->image;
+                        gd.host_coverage = m->host;
+                        gd.host_atlas_w = m->host ? m->w : 0;
+                        gd.host_atlas_h = m->host ? m->h : 0;
+                        gd.sampler = sampler;
+                        gd.quads = &quad;
+                        gd.quad_count = 1;
+                        flux_encoder_draw_glyph_run(enc, &gd);
                     }
-                    uint32_t rc = ri->color;
-                    uint8_t rr = (uint8_t)(rc >> 16), rg = (uint8_t)(rc >> 8), rb = (uint8_t)rc,
-                            ra = (uint8_t)(rc >> 24);
-                    flux_color color =
-                        rc == 0
-                            ? c->color
-                            : lensi_opacity_color(flux_color_rgba_premul(rr, rg, rb, ra), alpha);
-                    flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
-                    if (!ri->fill) {
-                        g.stroke.width = c->width > 0 ? c->width : 2.0f * s;
-                    }
-                    flux_brush b = flux_brush_solid(color);
-                    flux_encoder_draw_geometry(enc, &g, &b);
                 }
                 break;
             }
 
-            flux_path *p = NULL;
-            flux_result path_result = flux_path_create(&p, &ui->arena);
-            if (path_result != FLUX_OK)
-                return path_result;
+            /* Vector fallback: reached only when a bake is impossible. It must
+             * render the icon *exactly as described* — per-run colour, per-run
+             * fill/stroke, and the outline underlay — because a fallback that
+             * collapses the stream to one paint silently discards every colour
+             * an SVG declares. */
+            float ox = dev_origin_x / dev_scale;
+            float oy = dev_origin_y / dev_scale;
+            float s = icon_dim / 24.0f;
 
-            for (uint32_t i = 0; i < desc->count; i++) {
-                const lens_icon_cmd *cmd = &desc->cmds[i];
-                const float *pp = cmd->params;
-                switch (cmd->type) {
-                case 0:
-                    flux_path_move_to(p, pp[0] * s + ox, pp[1] * s + oy);
-                    break;
-                case 1:
-                    flux_path_line_to(p, pp[0] * s + ox, pp[1] * s + oy);
-                    break;
-                case 2:
-                    flux_path_cubic_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox,
-                                       pp[3] * s + oy, pp[4] * s + ox, pp[5] * s + oy);
-                    break;
-                case 3:
-                    flux_path_quad_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox,
-                                      pp[3] * s + oy);
-                    break;
-                case 4:
-                    flux_path_close(p);
-                    break;
-                case 5:
-                    flux_path_add_circle(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s);
-                    break;
-                case 6: {
-                    flux_rect ir = {pp[0] * s + ox, pp[1] * s + oy, pp[2] * s, pp[3] * s};
-                    flux_path_add_rect(p, ir);
-                    break;
-                }
-                }
-            }
+            for (uint32_t run = 0; run < span_count; ++run) {
+                flux_path *p = nullptr;
+                if (flux_path_create(&p, &ui->arena) != FLUX_OK)
+                    return FLUX_ERROR_OUT_OF_MEMORY;
+                lensi_emit_run_path(p, desc->cmds, spans[run].first_cmd, spans[run].count, s, ox,
+                                    oy);
 
-            flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
-            if (lensi_icon_mode(c->icon_id) != LENSI_ICON_RENDER_FILL) {
-                g.stroke.width = c->width > 0 ? c->width : 2.0f * s;
+                flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
+                if (!spans[run].fill) {
+                    g.stroke.width = stroke_logical;
+                    g.stroke.cap = FLUX_CAP_ROUND;
+                    g.stroke.join = FLUX_JOIN_ROUND;
+                }
+                flux_color body =
+                    lensi_opacity_color(lensi_icon_run_color(spans[run].color, c->color), alpha);
+                if (has_outline) {
+                    flux_geometry outline = g;
+                    outline.stroke.width = g.stroke.width + c->outline_width * 2.0f;
+                    flux_brush ob = flux_brush_solid(lensi_opacity_color(c->outline_color, alpha));
+                    flux_encoder_draw_geometry(enc, &outline, &ob);
+                }
+                flux_brush bb = flux_brush_solid(body);
+                flux_encoder_draw_geometry(enc, &g, &bb);
             }
-            if (c->outline_width > 0.0f && c->outline_color != 0) {
-                flux_geometry outline = g;
-                outline.stroke.width = g.stroke.width + c->outline_width * 2.0f;
-                flux_brush outline_brush = flux_brush_solid(c->outline_color);
-                flux_encoder_draw_geometry(enc, &outline, &outline_brush);
-            }
-            flux_brush b = flux_brush_solid(c->color);
-            flux_encoder_draw_geometry(enc, &g, &b);
             break;
         }
         case LENS_DRAW_CLIP_PUSH: {

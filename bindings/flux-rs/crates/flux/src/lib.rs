@@ -2775,6 +2775,33 @@ impl Canvas {
         })
     }
 
+    /// Create a headless software canvas with an explicit supersampling factor
+    /// per axis (`ss` × `ss` samples per pixel).
+    ///
+    /// `0` keeps the backend default (2 → 4 samples/pixel). Higher factors buy
+    /// grey levels — N samples resolve N+1 coverage steps, so `4` gives 17 and `8`
+    /// gives 65 — at quadratic sample-buffer cost. Use it for canvases whose only
+    /// job is to bake a coverage mask (see [`cpu_coverage`](Self::cpu_coverage));
+    /// display canvases should keep the default.
+    ///
+    /// Fails with `FLUX_ERROR_OUT_OF_RANGE` (surfaced through [`Error`]) above
+    /// `FLUX_CANVAS_SUPERSAMPLE_MAX` (8) rather than clamping.
+    pub fn new_cpu_supersampled(
+        width: u32,
+        height: u32,
+        scale: f32,
+        supersample: u32,
+    ) -> Result<Canvas, Error> {
+        let mut out: *mut sys::flux_canvas = std::ptr::null_mut();
+        Error::check(unsafe {
+            sys::flux_canvas_create_cpu_ss(width, height, scale, supersample, &mut out)
+        })?;
+        Ok(Canvas {
+            raw: out,
+            borrowed: false,
+        })
+    }
+
     /// Create a headless software canvas with an explicit antialiasing policy
     /// (supersampled by default; [`CanvasAntialias::None`] trades edge quality
     /// for throughput). The CPU analogue of [`CanvasPassOptions::antialias`].

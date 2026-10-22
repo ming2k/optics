@@ -250,13 +250,12 @@ struct flux_canvas {
      * needs no surface handle while recording (the CPU backend has none). */
     uint32_t fb_width, fb_height;
 
-    /* Create-time antialiasing request (from flux_canvas_desc::antialias).
-     * Per-pass policy stays in canvas_pass_config; this field exists so the
-     * CPU backend can size its sample buffer once, at create time: NONE
-     * allocates a 1-sample-per-pixel buffer (4x less memory and raster
-     * work), AUTO/MSAA_4X keep the supersampled oracle default. The GPU
-     * backend ignores it (its MSAA choice is per pass). */
-    flux_canvas_antialias create_antialias;
+    /* Software backend supersample factor per axis (1..FLUX_CANVAS_SUPERSAMPLE_MAX).
+     * 0 = unconfigured (defaults to FLUX_CPU_SS_DEFAULT = 2, i.e. 4 samples/px).
+     * Set once at create time (flux_canvas_supersample_desc or create_cpu_ss);
+     * sizes the sample buffer and sets the maximum expressible coverage levels
+     * (N = ss*ss samples yield N+1 levels). The GPU backend ignores this. */
+    uint32_t cpu_supersample;
 
     /* RenderPlan execution diagnostics (ADR-0089 / ADR-0092) */
     uint32_t pass_count;

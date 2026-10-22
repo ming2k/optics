@@ -22,6 +22,7 @@ lens_sources = files(
   'src/render/drawlist.c',
   'src/render/replay.c',
   'src/render/ghost.c',
+  'src/render/icon_mask.c',
   'src/style/style.c',
   'src/skin/skin.c',
   'src/skin/button.c',

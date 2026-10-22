@@ -126,3 +126,5 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0108 | [Motion Sub-stepping Integration and Render Target Bucket Allocation for Realtime Animation Safety](0108-motion-substepping-and-render-target-bucket-allocation.md) | Accepted |
 | 0109 | [Premultiplied Command Opacity Modulation, Scissor-Bounded Vulkan Layer Passes, and GPU Glyph Run Batching](0109-premultiplied-command-opacity-scissor-bounded-layers-and-glyph-run-batching.md) | Accepted |
 | 0110 | [Frame-Slot Abandonment Without Ring Advance and Region-Clamped Backdrop Sampling](0110-frame-slot-abandonment-without-ring-advance.md) | Accepted |
+| 0111 | [Lens Runtime SVG Mixed Paint Runs and Orthogonal Icon Sizing](0111-lens-runtime-svg-mixed-paint-runs-and-orthogonal-icon-sizing.md) | Accepted |
+| 0112 | [Device-Resolution Icon Coverage Masks and Explicit Supersampling for the Software Rasteriser](0112-device-resolution-icon-coverage-masks.md) | Accepted |

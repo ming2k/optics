@@ -83,6 +83,13 @@ enum {
     LENSI_ICON_RENDER_FILL = 1,
 };
 
+/* Upper bound on the paint runs one icon may resolve to. A runtime SVG keeps
+ * one run per source shape; the registry already caps its shape count, so this
+ * bound is what the replay span buffer and the mask pool are both sized from.
+ * It is a hard ceiling, not a target: an icon with more runs than this is
+ * refused by the bake and rendered through the vector path instead. */
+#define LENSI_ICON_MAX_RUNS 64u
+
 /* Generated beside lens_icon_table from the vendored SVG source style. */
 extern const uint8_t lens_icon_render_modes[LENS_ICON_COUNT];
 
@@ -295,6 +302,20 @@ typedef struct lens_store {
  * the net without misfiring it. */
 #define LENSI_BORROW_SET_MAX 4096
 
+/* Icon coverage-mask pool (ADR-0112). Inline storage, LRU-evicted; see
+ * render/icon_mask.h for why masks exist and how they are keyed. */
+#define LENSI_ICON_MASK_POOL_CAP 96
+
+typedef struct lensi_icon_mask lensi_icon_mask;
+
+typedef struct lensi_icon_mask_pool {
+    lensi_icon_mask *entries; /* cap slots, allocated at lens_create */
+    uint32_t cap;
+    uint32_t count;
+    uint64_t tick;
+    flux_sampler *sampler; /* NEAREST, created on first GPU bake */
+} lensi_icon_mask_pool;
+
 struct lens {
     flux_device *device; /* may be NULL (headless) */
     lens_theme theme;
@@ -318,6 +339,9 @@ struct lens {
                        * build time. */
 
     lens_store store;
+    lensi_icon_mask_pool icon_masks; /* baked coverage masks (ADR-0112); pool
+                                      * storage is allocated at lens_create so
+                                      * the struct stays fixed-size */
     lens_node *root;
     uint64_t frame;
     bool building;
