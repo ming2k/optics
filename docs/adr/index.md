@@ -10,6 +10,14 @@ compatibility forwarders. ADR-0089 records the exact replacement scope,
 superseding ADR-0088 and amending earlier lifecycle and drawing contracts.
 ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 
+The [curve-rendering program](0115-analytic-curve-kernel-single-geometry-authority.md)
+in ADR-0115 through ADR-0117 defines a second clean break: curve geometry gains
+one analytic authority, the canvas rasterizes analytic coverage instead of
+sampled triangles, and the scene gains perspective-correct vector coverage.
+It supersedes the tessellation authority (ADR-0005, ADR-0011, ADR-0014,
+ADR-0113, ADR-0114) and the MSAA/coverage-bake anti-aliasing authority
+(ADR-0071, ADR-0112). Its implementation is tracked, not assumed.
+
 | #    | Title                                                                          | Status   |
 |------|--------------------------------------------------------------------------------|----------|
 | 0001 | [Project foundations](0001-project-foundations.md)                             | Accepted |
@@ -25,7 +33,7 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0011 | [Hole-bridging ear-clipping tessellator](0011-hole-bridging-tessellator.md) | Accepted |
 | 0012 | [Phong lighting parameters ride a transient buffer-device-address block](0012-phong-light-transient-block.md) | Accepted |
 | 0013 | [Offscreen rendering is a surface mode, not a new object](0013-offscreen-surface.md) | Accepted |
-| 0014 | [Stencil-then-cover fallback for self-intersecting fills](0014-stencil-then-cover.md) | Accepted |
+| 0014 | [Stencil-then-cover fallback for self-intersecting fills](0014-stencil-then-cover.md) | Superseded by [ADR-0115](0115-analytic-curve-kernel-single-geometry-authority.md) |
 | 0015 | [Text layering — Layer-0 shaping in libflux, Layer-1 layout in flux-text-layout](0015-text-layering.md) | Superseded by ADR-0016 |
 | 0016 | [Pure RHI and draw primitives — text and scene content move to sibling libraries](0016-pure-rhi-and-draw-primitives.md) | Accepted |
 | 0017 | [Canvas render-target capture for real backdrop effects](0017-canvas-render-target-capture.md) | Accepted |
@@ -85,7 +93,7 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0068 | [Frame-scoped, node-stamped opacity for lens](0068-lens-frame-scoped-node-stamped-opacity.md) | Accepted |
 | 0069 | [Color management — parametric color spaces, scRGB working space, explicit output transform](0069-color-management.md) | Accepted (amended by ADR-0070) |
 | 0070 | [ICC profile support — in-tree C parser over vendored skcms](0070-icc-in-tree-parser.md) | Accepted |
-| 0071 | [Pass-scoped canvas antialiasing policy](0071-pass-scoped-canvas-antialiasing.md) | Accepted |
+| 0071 | [Pass-scoped canvas antialiasing policy](0071-pass-scoped-canvas-antialiasing.md) | Superseded by [ADR-0116](0116-coverage-contract-canvas-rasterization.md) |
 | 0072 | [Long-session resource governance — bounded queues, O(1) eviction, live-list GC](0072-long-session-resource-governance.md) | Accepted |
 | 0073 | [Widget-kind extension range and the user-widget contract](0073-lens-user-widget-kind-range.md) | Accepted |
 | 0074 | [Effect intake path — new visual operators and where choreography never enters](0074-effect-intake-path.md) | Accepted |
@@ -127,4 +135,9 @@ ADR-0094 is an ADR number, not the RFC-0094 referenced by earlier records.
 | 0109 | [Premultiplied Command Opacity Modulation, Scissor-Bounded Vulkan Layer Passes, and GPU Glyph Run Batching](0109-premultiplied-command-opacity-scissor-bounded-layers-and-glyph-run-batching.md) | Accepted |
 | 0110 | [Frame-Slot Abandonment Without Ring Advance and Region-Clamped Backdrop Sampling](0110-frame-slot-abandonment-without-ring-advance.md) | Accepted |
 | 0111 | [Lens Runtime SVG Mixed Paint Runs and Orthogonal Icon Sizing](0111-lens-runtime-svg-mixed-paint-runs-and-orthogonal-icon-sizing.md) | Accepted |
-| 0112 | [Device-Resolution Icon Coverage Masks and Explicit Supersampling for the Software Rasteriser](0112-device-resolution-icon-coverage-masks.md) | Accepted |
+| 0112 | [Device-Resolution Icon Coverage Masks and Explicit Supersampling for the Software Rasteriser](0112-device-resolution-icon-coverage-masks.md) | Superseded by [ADR-0116](0116-coverage-contract-canvas-rasterization.md) |
+| 0113 | [Convex fast-path tessellation and winding-robust convexity test](0113-convex-fast-path-tessellation.md) | Superseded by [ADR-0115](0115-analytic-curve-kernel-single-geometry-authority.md) |
+| 0114 | [Incremental non-convex candidate list for ear clipping](0114-ear-clip-candidate-list.md) | Superseded by [ADR-0115](0115-analytic-curve-kernel-single-geometry-authority.md) |
+| 0115 | [Analytic curve kernel — one geometry authority for Bézier fills and strokes](0115-analytic-curve-kernel-single-geometry-authority.md) | Accepted |
+| 0116 | [Coverage-contract canvas rasterization — analytic coverage backends, MSAA retired](0116-coverage-contract-canvas-rasterization.md) | Accepted |
+| 0117 | [Perspective-correct vector coverage in the scene material system](0117-perspective-correct-scene-vector-coverage.md) | Accepted |

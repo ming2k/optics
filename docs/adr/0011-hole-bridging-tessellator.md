@@ -1,13 +1,19 @@
 ---
 id: ADR-0011
 title: "Hole-bridging ear-clipping tessellator"
-status: accepted
+status: superseded
 date: 2026-01-01
+superseded_by: "ADR-0115"
 ---
 
 # ADR-0011: Hole-bridging ear-clipping tessellator
 
-- Status: Accepted
+- Status: Superseded by [ADR-0115](0115-analytic-curve-kernel-single-geometry-authority.md).
+  The hole-bridging ear-clip tessellator is retired as the geometry
+  authority; holes and self-intersection become winding counts over
+  `flux_curve_cover` strips. The dynamic path-builder growth introduced
+  here (arena-grown segments, no fixed cap) survives as an implementation
+  detail and is carried by ADR-0115.
 - Date: Stage 4.3
 
 ## Context

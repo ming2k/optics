@@ -1,13 +1,19 @@
 ---
 id: ADR-0014
 title: "Stencil-then-cover fallback for self-intersecting fills"
-status: accepted
+status: superseded
 date: 2026-01-01
+superseded_by: "ADR-0115"
 ---
 
 # ADR-0014: Stencil-then-cover fallback for self-intersecting fills
 
-- Status: Accepted
+- Status: Superseded by [ADR-0115](0115-analytic-curve-kernel-single-geometry-authority.md).
+  With no ear-clipping clip to stall, there is no fallback to route to:
+  self-intersection is a winding count over coverage strips, so the
+  canvas-owned stencil attachment and the two-pass stencil-write/cover
+  sequence are retired (see also
+  [ADR-0116](0116-coverage-contract-canvas-rasterization.md)).
 - Date: Stage 9
 
 ## Context

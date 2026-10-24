@@ -8,7 +8,9 @@ superseded_by: "ADR-0011"
 
 # ADR-0005: Ear-clipping tessellator with stencil-then-cover deferred
 
-- Status: Superseded by ADR-0011
+- Status: Superseded by ADR-0011, and by transitivity by
+  [ADR-0115](0115-analytic-curve-kernel-single-geometry-authority.md), which
+  retires CPU tessellation as the geometry authority altogether.
 - Date: Stage 4.2.2
 
 ## Context

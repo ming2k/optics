@@ -1,16 +1,23 @@
 ---
 id: ADR-0112
 title: "Device-Resolution Icon Coverage Masks and Explicit Supersampling for the Software Rasteriser"
-status: accepted
+status: superseded
 date: 2026-10-23
 scope: libs/flux, libs/lens
-superseded_by: null
+superseded_by: "ADR-0116"
 negative_knowledge: true
 ---
 
 # ADR-0112: Device-Resolution Icon Coverage Masks and Explicit Supersampling for the Software Rasteriser
 
-- Status: Accepted
+- Status: Superseded by [ADR-0116](0116-coverage-contract-canvas-rasterization.md).
+  The device-resolution coverage bake existed to lift icons above a
+  five-level MSAA ceiling; analytic coverage gives every curve ≥256 levels
+  with no bake, so the mask pool, its stroke-width key, and the
+  consumer-specific resolution axis are removed. This record is retained
+  in place as negative knowledge: its postmortem (a cache that
+  re-implements a rendering path, and a representation chosen by the wrong
+  owner) is the failure mode ADR-0116 must not repeat.
 - Date: 2026-10-23
 - Scope: `libs/flux` (`include/flux/canvas.h`, `include/flux/canvas_cpu.h`, `include/flux/core.h`, `src/canvas/backend.h`, `src/canvas/backend_cpu.c`, `src/canvas/canvas.c`, `src/canvas/internal.h`), `libs/lens` (`src/render/icon_mask.{h,c}`, `src/render/replay.c`, `src/internal.h`, `src/core/context.c`, `meson.build`).
 - Amends: [ADR-0071](0071-pass-scoped-canvas-antialiasing.md) (AA policy gains a coverage-resolution axis).

@@ -1,9 +1,10 @@
 # Architecture implementation status
 
-Updated 2026-09-15. This matrix tracks the requirements in ADR-0089 through
-ADR-0094. Acceptance of an ADR is a design decision, not implementation
-acceptance. The earlier blanket `Complete` declarations were not supported by
-code and contract tests and have been withdrawn.
+Updated 2026-10-25. This matrix tracks the requirements in ADR-0089 through
+ADR-0094 and the curve-rendering program ADR-0115 through ADR-0117. Acceptance
+of an ADR is a design decision, not implementation acceptance. The earlier
+blanket `Complete` declarations were not supported by code and contract tests
+and have been withdrawn.
 
 ## Implemented and covered
 
@@ -33,6 +34,20 @@ lifetime through frame completion, not arbitrary external mutation of underlying
 | 0092 | In progress | Explicit access dependencies, staging/destination/descriptor lifetimes, completion-driven retirement and budget diagnostics. Text capture still uses physical atlas allocations; logical glyph versions and compilation-time realization remain outstanding. Atlas epoch counters alone do not satisfy this contract. |
 | 0093 | In progress | Complete the plan/session/submission state machines and all unsafe-import and delayed-completion cases. Existing borrow checks and owning Rust snapshots cover only part of the contract. |
 | 0094 | In progress | Complete resource/font dependency keys and retained-memory budgets. Audit remaining specialized interaction state (IME/focus/virtualized widgets) against delayed presentation and complete custom-visual/animation/backend pixel coverage. |
+
+## Curve-rendering program (ADR-0115 through ADR-0117)
+
+None of this program is implemented. The current geometry authority
+(`geometry_flatten.c`, `geometry_tess.c`, `geometry_stroke.c`), the pass-scoped
+MSAA path (ADR-0071), the icon coverage bake (ADR-0112), and the stencil fill
+fallback (ADR-0014) are still the live code; the records below are the accepted
+replacement and the work required before those mechanisms may be deleted.
+
+| ADR | Status | Required work before completion |
+|---|---|---|
+| 0115 | Not started | Land `flux_curve` (`libs/flux/src/curve/`, `include/flux/curve.h`): reduction and exact splitting at inflections/cusps/curvature extrema, Wang segment count, analytic parallel offset, coverage primitives, and the `flux_curve_cover` value. Meet INV-CRV-01…06. Delete `geometry_flatten.c`, `geometry_tess.c`, `geometry_stroke.c`, the tessellation cache, and the triangle-submission path in the same change (no forwarder, per ADR-0089). |
+| 0116 | Not started | Replace the triangle seam with the coverage seam; land `TILE_COMPUTE` and `ANALYTIC_FRAGMENT` backends plus the `CPU` coverage oracle; retire MSAA as the AA authority (INV-COV-05), retire the canvas stencil fill attachment, and delete the icon mask cache. Rewrite `test_canvas_consistency` as a coverage-agreement test. Integrate into the ADR-0089 RenderPlan rather than a drop-in pipeline replacement. |
+| 0117 | Not started | Land the scene coverage material and its shaders; enforce projective correctness (INV-SCV-03), object-space input (INV-SCV-02), no bake (INV-SCV-01), shared semantics with the canvas analytic backend (INV-SCV-04), and module isolation (INV-SCV-05). Migrate in-scene text off the atlas-only path. |
 
 The code changes above are internal migration steps. They do not establish
 whole-architecture completion, a compatibility window, performance improvement,

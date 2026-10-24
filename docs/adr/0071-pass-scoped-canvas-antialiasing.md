@@ -1,13 +1,17 @@
 ---
 id: ADR-0071
 title: "Pass-scoped canvas antialiasing policy"
-status: accepted
+status: superseded
 date: 2026-08-20
+superseded_by: "ADR-0116"
 ---
 
 # ADR-0071: Pass-scoped canvas antialiasing policy
 
-- Status: Accepted
+- Status: Superseded by [ADR-0116](0116-coverage-contract-canvas-rasterization.md).
+  Anti-aliasing stops being a sample count: the canvas rasterizes analytic
+  coverage at 1× sample rate, so there is no multisample attachment to scope
+  to a pass and no `AUTO`/`NONE`/`MSAA_4X` policy to express.
 - Date: 2026-08-20
 - Supersedes: ADR-0009 (canvas sample count joins the pipeline-cache key)
 

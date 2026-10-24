@@ -117,6 +117,16 @@ When submitted via `flux_canvas_submit_display_list(c, list)`, the engine execut
    * *Subsequent frames*: The cache hits. Triangle generation time drops to **zero**, and pre-computed vertices are dispatched immediately.
 3. **Stencil-then-Cover Fallback**: Self-intersecting complex paths or even-odd winding rules that stall ear-clipping fall back to Vulkan stencil-pass evaluation (`CANVAS_PIPE_STENCIL_WRITE`).
 
+> **Accepted direction — not yet implemented.** Steps 2 and 3 above are retired
+> by [ADR-0115](../adr/0115-analytic-curve-kernel-single-geometry-authority.md)
+> through [ADR-0117](../adr/0117-perspective-correct-scene-vector-coverage.md):
+> curve geometry gains a single analytic authority that emits coverage strips
+> instead of triangles, the canvas rasterizes analytic coverage at 1× sample
+> rate (retiring both the tessellation cache and the stencil fallback, and
+> replacing pass-scoped MSAA), and the scene gains perspective-correct vector
+> coverage. The steps above describe the live implementation until that
+> program lands.
+
 ---
 
 ## 5. Architectural Separation: Display Lists vs. Submission Caches
