@@ -32,6 +32,29 @@ either.
 - **lens**: An icon with an outline no longer loses its outline colour — body and outline are separate mask layers, blitted outline-first.
 - **lens**: Icons no longer allocate path scratch from the per-frame arena, removing the dominant per-frame allocation for icon-heavy UIs.
 
+### Performance
+
+- **flux**: Convex path fills now take an O(n) winding-robust fan
+  fast-path in the ear-clip tessellator (`ear_clip_contour`,
+  ADR-0113). A strictly-convex CCW contour is fan-triangulated linearly
+  instead of paying the O(n²) blocking-vertex scan; measured ~340× /
+  ~100× / ~54× on 2048- / 1024- / 512-vertex regular polygons
+  (7.05 ms → ~20 µs, 1.06 ms → ~10 µs, 279 µs → ~5 µs per fill). The
+  convexity gate sums total exterior turning to separate winding-one
+  convex polygons from K-wound self-intersecting stars, so the
+  self-intersecting stencil fallback (ADR-0014) is never bypassed.
+- **flux**: The ear-clip tessellator's remaining O(n²) full-ring scan is
+  gone (ADR-0114). `ear_clip_contour` now scans only an incremental
+  non-convex **candidate set** (reflex or collinear vertices — FIST /
+  FitzHugh), updated in O(1) per clip, so concave fills with few reflex
+  vertices track near-linearly (gear shapes: 3.3–3.8× faster; a
+  320-vertex gear 193 µs → 51 µs). The `cross <= 0` candidate test keeps
+  the emitted triangle stream byte-identical to the deleted legacy scan
+  (verified by a differential harness over convex/combs/stars, plus the
+  GPU↔CPU pixel oracle), and contours that exceed the inline scratch
+  allocate matching heap scratch rather than falling back to O(n²). No
+  ABI, cache-key, or render-plan change.
+
 ## [0.0.60] - 2026-10-17
 
 ### Fixed

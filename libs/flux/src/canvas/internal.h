@@ -280,7 +280,10 @@ struct flux_canvas {
     flux_canvas_contour *scratch_contours; /* FLUX_CANVAS_MAX_CONTOURS */
     uint32_t *scratch_lnk_prev;            /* FLUX_CANVAS_PATH_SCRATCH_CAP */
     uint32_t *scratch_lnk_next;            /* FLUX_CANVAS_PATH_SCRATCH_CAP */
-    stroke_frame *scratch_frames;          /* FLUX_CANVAS_PATH_SCRATCH_CAP */
+    /* ADR-0114 ear-clip candidate list: first half = candidate vertex ids,
+     * second half = id -> slot map. Sized 2 * cap. */
+    uint32_t *scratch_reflex;     /* 2 * FLUX_CANVAS_PATH_SCRATCH_CAP */
+    stroke_frame *scratch_frames; /* FLUX_CANVAS_PATH_SCRATCH_CAP */
 
     /* Tessellation result cache (see above). Self-contained inline
      * storage; zero-initialised with the canvas, no destroy cleanup. */
@@ -661,10 +664,12 @@ float signed_area(const flux_point *pts, uint32_t n);
 /* Returns false when the clip stalled (self-intersecting input
  * tripped the bounded-step guard) — the emitted triangles are then
  * incomplete and the caller should fall back to stencil-then-cover
- * (ADR-0014). */
+ * (ADR-0014). `reflex` is caller-owned scratch of `2 * n` uint32_t used
+ * for the ADR-0114 candidate list ([candidates | id->slot map]); it is
+ * required — there is no legacy full-ring scan left. */
 bool ear_clip_contour(flux_canvas_vertex *verts, uint32_t *v_count, uint32_t verts_cap,
                       flux_mat3x2 tx, flux_color color, flux_point *pts, uint32_t *prev,
-                      uint32_t *next, uint32_t n);
+                      uint32_t *next, uint32_t n, uint32_t *reflex);
 
 /* ------------------------------------------------------------------ */
 /*  Tessellation cache (defined in geometry_tess.c)                   */

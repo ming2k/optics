@@ -89,6 +89,7 @@ flatten_multi flatten_path_to_contours(const flux_path *p, float pixel_scale, fl
 
 static uint32_t *g_prev;
 static uint32_t *g_next;
+static uint32_t *g_reflex;
 
 typedef struct {
     flux_point *pts;
@@ -109,7 +110,7 @@ static void bench_tess_ear_clip(void *p) {
         g_next[i] = (i + 1 == c->n) ? 0 : i + 1;
     }
     ear_clip_contour(c->verts, c->v_count, c->verts_cap, c->tx, c->color, c->pts, g_prev, g_next,
-                     c->n);
+                     c->n, g_reflex);
     c->result = *c->v_count;
 }
 
@@ -142,6 +143,38 @@ static void make_star(flux_point *pts, uint32_t n, float cx, float cy, float r_o
     }
 }
 
+/* Gear: `teeth` trapezoidal teeth (~25% of vertices reflex) — the shape
+ * profile ADR-0114 targets: mostly convex arcs with a minority of reflex
+ * corners, i.e. a small candidate set. Returns the vertex count (8 per
+ * tooth). */
+static uint32_t make_gear(flux_point *pts, uint32_t teeth, float cx, float cy) {
+    uint32_t n = 0;
+    for (uint32_t t = 0; t < teeth; ++t) {
+        for (int k = 0; k < 8; ++k) {
+            float a = ((float)t + (float)k / 8.0f) / (float)teeth * 6.28318530718f;
+            float r = (k < 4) ? 300.0f : 260.0f;
+            pts[n++] = (flux_point){cx + r * cosf(a), cy + r * sinf(a)};
+        }
+    }
+    return n;
+}
+
+/* Comb: `teeth` square teeth on a spine — a pathological concave case
+ * where ~half the vertices are reflex (the candidate set is O(n), so this
+ * bounds the ADR-0114 gain at the low end). Returns the vertex count. */
+static uint32_t make_comb(flux_point *pts, uint32_t teeth) {
+    uint32_t n = 0;
+    pts[n++] = (flux_point){0, 0};
+    for (uint32_t t = 0; t < teeth; ++t) {
+        float x = (float)t * 10.0f;
+        pts[n++] = (flux_point){x + 5, 0};
+        pts[n++] = (flux_point){x + 5, 20};
+        pts[n++] = (flux_point){x + 10, 20};
+        pts[n++] = (flux_point){x + 10, 0};
+    }
+    return n;
+}
+
 int main(void) {
     fprintf(stdout, "=== tessellator benchmarks ===\n");
 
@@ -152,6 +185,7 @@ int main(void) {
     uint32_t v_count = 0;
     g_prev = malloc(max_pts * sizeof(uint32_t));
     g_next = malloc(max_pts * sizeof(uint32_t));
+    g_reflex = malloc(2u * max_pts * sizeof(uint32_t));
 
     tess_ctx ctx = {
         .pts = pts,
@@ -189,10 +223,23 @@ int main(void) {
     make_star(pts, 10, 50, 50, 50, 25);
     BENCH_RUN("tess_star_10point(20 verts)", N, bench_tess_ear_clip, &ctx);
 
+    /* ADR-0114: realistic concave (small candidate set) and pathological
+     * concave (~half reflex). The former should track near-linearly; the
+     * latter shows the residual superlinear worst case. */
+    ctx.n = make_gear(pts, 24, 0, 0);
+    BENCH_RUN("tess_gear_24tooth(192 verts)", N, bench_tess_ear_clip, &ctx);
+
+    ctx.n = make_gear(pts, 32, 0, 0);
+    BENCH_RUN("tess_gear_32tooth(256 verts)", N, bench_tess_ear_clip, &ctx);
+
+    ctx.n = make_comb(pts, 40);
+    BENCH_RUN("tess_comb_40tooth(162 verts)", N, bench_tess_ear_clip, &ctx);
+
     free(pts);
     free(verts);
     free(g_prev);
     free(g_next);
+    free(g_reflex);
 
     fprintf(stdout, "\n");
     return 0;

@@ -43,10 +43,12 @@ bool flux_canvas_alloc_scratch(flux_canvas *c) {
         flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_lnk_prev));
     c->scratch_lnk_next =
         flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_lnk_next));
+    c->scratch_reflex =
+        flux_canvas_alloc(d, 2 * FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_reflex));
     c->scratch_frames =
         flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_frames));
     return c->scratch_pts && c->scratch_verts && c->scratch_contours && c->scratch_lnk_prev &&
-           c->scratch_lnk_next && c->scratch_frames;
+           c->scratch_lnk_next && c->scratch_reflex && c->scratch_frames;
 }
 
 void flux_canvas_free_scratch(flux_canvas *c) {
@@ -56,6 +58,7 @@ void flux_canvas_free_scratch(flux_canvas *c) {
     flux_canvas_free(d, c->scratch_contours);
     flux_canvas_free(d, c->scratch_lnk_prev);
     flux_canvas_free(d, c->scratch_lnk_next);
+    flux_canvas_free(d, c->scratch_reflex);
     flux_canvas_free(d, c->scratch_frames);
 }
 

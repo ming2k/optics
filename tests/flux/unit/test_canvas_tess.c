@@ -157,6 +157,7 @@ static flux_canvas_vertex fk_vrts[FLUX_CANVAS_PATH_SCRATCH_CAP * 3];
 static flux_canvas_contour fk_cons[FLUX_CANVAS_MAX_CONTOURS];
 static uint32_t fk_prev[FLUX_CANVAS_PATH_SCRATCH_CAP];
 static uint32_t fk_next[FLUX_CANVAS_PATH_SCRATCH_CAP];
+static uint32_t fk_reflex[2 * FLUX_CANVAS_PATH_SCRATCH_CAP];
 
 static void reset_capture(void) {
     g_submitted_vertex_count = 0;
@@ -170,6 +171,7 @@ static flux_canvas make_fake_canvas(void) {
     c.scratch_contours = fk_cons;
     c.scratch_lnk_prev = fk_prev;
     c.scratch_lnk_next = fk_next;
+    c.scratch_reflex = fk_reflex;
     c.states[0].transform = flux_mat3x2_identity();
     c.state_top = 0;
     return c;
