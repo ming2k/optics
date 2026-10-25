@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.61] - 2026-10-25
+
 ### Added
 
 - **lens**: Orthogonal `icon_size` style atom (`LENS_STYLE_ICON_SIZE`), `lens_style.icon_size`, `lens_style_resolved.icon_size`, `lens_theme.icon_size`, and `lens_selectable_opts.icon_size` for decoupled icon and typography scaling (ADR-0111).
