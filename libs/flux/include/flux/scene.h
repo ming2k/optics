@@ -90,6 +90,9 @@ typedef enum flux_material_kind {
      * supplied at draw time via flux_scene_draw_mesh_lit; draws made
      * through flux_scene_draw_mesh use FLUX_SCENE_LIGHT_DEFAULT. */
     FLUX_MATERIAL_PHONG = 1,
+    /* ADR-0117: Perspective-correct analytic vector coverage. Consumes
+     * object-space curve segments via flux_material_vector_desc. */
+    FLUX_MATERIAL_VECTOR = 2,
     /* PBR will be added at the end when it ships. Append-only —
      * never repurpose existing values. */
 } flux_material_kind;
@@ -119,6 +122,19 @@ typedef struct flux_material_surface_desc {
 
 #define FLUX_MATERIAL_SURFACE_DESC_INIT                                                            \
     {.type = FLUX_TYPE_MATERIAL_SURFACE_DESC, .uv_scale = {1.0f, 1.0f}, .alpha_cutoff = 0.5f}
+
+/* Optional `flux_material_desc.next` payload for FLUX_MATERIAL_VECTOR (ADR-0117).
+ * Consumes an object-space line/curve segment storage buffer. */
+typedef struct flux_material_vector_desc {
+    flux_struct_type type; /* FLUX_TYPE_MATERIAL_VECTOR_DESC */
+    const void *next;
+    flux_buffer
+        *segments_buffer; /* Storage buffer containing object-space segments (x0,y0,x1,y1) */
+    uint32_t segment_count;
+    uint32_t fill_rule; /* 0 = NonZero, 1 = EvenOdd */
+} flux_material_vector_desc;
+
+#define FLUX_MATERIAL_VECTOR_DESC_INIT {.type = FLUX_TYPE_MATERIAL_VECTOR_DESC}
 
 typedef struct flux_material_desc {
     flux_struct_type type; /* FLUX_TYPE_MATERIAL_DESC */

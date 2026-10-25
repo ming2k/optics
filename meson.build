@@ -106,7 +106,7 @@ if get_option('fuzz')
   libfuzzer_c_args = []
   libfuzzer_link_args = []
   libfuzzer_enabled = false
-  if clang_cc.found()
+  if clang_cc.found() and cc.get_id() == 'clang'
     # Compile+link a complete fuzz program with clang itself.
     probe_src = '/tmp/.optics_libfuzzer_probe.c'
     run_command('sh', '-c',

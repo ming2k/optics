@@ -1,19 +1,20 @@
 /*
  * Curve-flattening tolerance regression.
  *
- * Before this change the flattener used a hard-coded depth limit
- * of 5 (32 segments per curve) regardless of how small or large
- * the curve was on screen. It now subdivides against a screen-pixel
- * tolerance derived from the caller-supplied `pixel_scale`. The
- * test compiles `geometry_flatten.c` into the binary so we can call
- * `flatten_path_to_contours` directly with varying scales.
+ * The flattener subdivides against a screen-pixel tolerance derived from the
+ * caller-supplied `pixel_scale`, now via the flux_curve kernel (ADR-0115):
+ * each cubic is reduced to line/quadratic pieces with a bounded deviation and
+ * each piece is sampled at its Wang segment count. The test compiles
+ * `curve_flatten.c` into the binary so we can call `flatten_path_to_contours`
+ * directly with varying scales.
  */
 #include "../../../libs/flux/src/canvas/internal.h"
 #include "test_helpers.h"
 #include <flux/flux.h>
 
-/* `geometry_flatten.c` uses FLUX_FAIL on scratch exhaustion; not
- * triggered by these tests, but the symbol must still resolve. */
+/* `curve_flatten.c` (and the kernel it calls) use FLUX_FAIL on scratch
+ * exhaustion; not triggered by these tests, but the symbol must still
+ * resolve. */
 void flux_set_last_error(flux_result code, const char *function, const char *file, int line,
                          const char *message, int32_t backend_code) {
     (void)code;

@@ -285,8 +285,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 |--------|-------------|
 | `flux_canvas_create_cpu` | Create a headless CPU canvas with a `width`x`height` (physical pixels) framebuffer. |
 | `flux_canvas_create_cpu_aa` | flux_canvas_create_cpu with an explicit antialiasing request. |
-| `flux_canvas_create_cpu_ss` | flux_canvas_create_cpu with an explicit supersampling factor per axis (ADR-0112); 0 keeps the backend default, above `FLUX_CANVAS_SUPERSAMPLE_MAX` fails with `FLUX_ERROR_OUT_OF_RANGE`. |
-| `flux_canvas_cpu_coverage` | Single-channel alpha-coverage plane of the software framebuffer (ADR-0112), one 8-bit value per pixel — the mask readback coverage caches are baked from. |
+| `flux_canvas_create_cpu_ss` | flux_canvas_create_cpu with an explicit supersampling factor per axis (ss x ss samples per pixel). |
 
 ### `flux/dmabuf.h`
 

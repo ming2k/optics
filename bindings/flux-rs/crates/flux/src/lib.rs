@@ -2005,6 +2005,8 @@ impl SceneLight {
 pub enum MaterialKind {
     Unlit,
     Phong,
+    /// ADR-0117: Perspective-correct analytic vector coverage.
+    Vector,
 }
 
 /// Alpha interpretation and fixed-function blending for a scene material.
@@ -2101,6 +2103,49 @@ pub struct MaterialDesc {
     pub specular: f32,
 }
 
+/// GPU storage or vertex buffer with device address capabilities.
+pub struct GpuBuffer {
+    pub(crate) raw: *mut sys::flux_buffer,
+}
+
+impl GpuBuffer {
+    /// Create a storage buffer from a raw byte slice.
+    pub fn new_storage(device: &Device, data: &[u8]) -> Result<Self, Error> {
+        let desc = sys::flux_buffer_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_BUFFER_DESC,
+            next: std::ptr::null(),
+            size: data.len(),
+            usage: (sys::flux_buffer_usage::FLUX_BUFFER_USAGE_STORAGE as u32)
+                | (sys::flux_buffer_usage::FLUX_BUFFER_USAGE_TRANSFER_SRC as u32),
+            location: sys::flux_buffer_location::FLUX_BUFFER_HOST_VISIBLE,
+            device_address: true,
+            initial_data: data.as_ptr() as *const std::ffi::c_void,
+        };
+        let mut raw = std::ptr::null_mut();
+        let res = unsafe { sys::flux_buffer_create(device.raw, &desc, &mut raw) };
+        if res != sys::flux_result::FLUX_OK {
+            return Err(Error::from_raw(res));
+        }
+        Ok(Self { raw })
+    }
+
+    /// 64-bit GPU virtual address of this buffer.
+    pub fn device_address(&self) -> u64 {
+        unsafe { sys::flux_buffer_device_address(self.raw) }
+    }
+}
+
+impl Drop for GpuBuffer {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe { sys::flux_buffer_release(self.raw) };
+        }
+    }
+}
+
+unsafe impl Send for GpuBuffer {}
+unsafe impl Sync for GpuBuffer {}
+
 /// Refcounted built-in scene material.
 pub struct Material {
     raw: *mut sys::flux_material,
@@ -2119,6 +2164,49 @@ impl Material {
         Self::new_impl(device, desc, Some(options))
     }
 
+    /// Create an ADR-0117 perspective-correct vector coverage material.
+    pub fn new_vector(
+        device: &Device,
+        base_color: [f32; 4],
+        color_format: Format,
+        depth_format: Format,
+        segments_buffer: &GpuBuffer,
+        segment_count: u32,
+        fill_rule: FillRule,
+    ) -> Result<Material, Error> {
+        let raw_vec_desc = sys::flux_material_vector_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_MATERIAL_VECTOR_DESC,
+            next: std::ptr::null(),
+            segments_buffer: segments_buffer.raw,
+            segment_count,
+            fill_rule: fill_rule.raw() as u32,
+        };
+
+        let raw_desc = sys::flux_material_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_MATERIAL_DESC,
+            next: &raw_vec_desc as *const _ as *const std::ffi::c_void,
+            kind: sys::flux_material_kind::FLUX_MATERIAL_VECTOR,
+            base_color: sys::flux_vec4 {
+                x: base_color[0],
+                y: base_color[1],
+                z: base_color[2],
+                w: base_color[3],
+            },
+            color_format: color_format.raw(),
+            depth_format: depth_format.raw(),
+            shininess: 0.0,
+            specular: 0.0,
+        };
+
+        let mut raw = std::ptr::null_mut();
+        let res = unsafe { sys::flux_material_create(device.raw, &raw_desc, &mut raw) };
+        if res != sys::flux_result::FLUX_OK {
+            return Err(Error::from_raw(res));
+        }
+
+        Ok(Material { raw })
+    }
+
     fn new_impl(
         device: &Device,
         desc: MaterialDesc,
@@ -2127,6 +2215,7 @@ impl Material {
         let kind = match desc.kind {
             MaterialKind::Unlit => sys::flux_material_kind::FLUX_MATERIAL_UNLIT,
             MaterialKind::Phong => sys::flux_material_kind::FLUX_MATERIAL_PHONG,
+            MaterialKind::Vector => sys::flux_material_kind::FLUX_MATERIAL_VECTOR,
         };
         let raw_surface = options.map(|options| {
             let texture = options.base_color_texture;
@@ -2932,7 +3021,7 @@ pub fn bucket_extent(extent: u32, step: u32) -> u32 {
     if extent == 0 || step == 0 {
         0
     } else {
-        ((extent + step - 1) / step) * step
+        extent.div_ceil(step) * step
     }
 }
 
@@ -4177,6 +4266,7 @@ pub const DMABUF_DEVICE_EXTENSIONS: [&std::ffi::CStr; 5] = [
 pub const DMABUF_SYNC_DEVICE_EXTENSIONS: [&std::ffi::CStr; 1] = [c"VK_KHR_external_semaphore_fd"];
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -4212,6 +4302,15 @@ mod tests {
         assert_eq!(desc.tint_blue, 0.3);
         assert_eq!(desc.alpha, 0.5);
         assert_eq!(core::mem::size_of::<sys::flux_effect_shadow_desc>(), 56);
+    }
+
+    #[test]
+    fn vector_material_maps_to_ffi_desc() {
+        assert_eq!(
+            sys::flux_struct_type::FLUX_TYPE_MATERIAL_VECTOR_DESC as u32,
+            47
+        );
+        assert_eq!(sys::flux_material_kind::FLUX_MATERIAL_VECTOR as u32, 2);
     }
 
     #[test]
@@ -4817,7 +4916,7 @@ impl CanvasCommands<'_> {
             kind: sys::flux_geom_kind::FLUX_GEOM_RRECT,
             _pad: [0; 3],
             stroke: sys::flux_stroke_style {
-                width: width,
+                width,
                 ..Default::default()
             },
             __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {

@@ -27,9 +27,14 @@ negative_knowledge: true
   [ADR-0092](0092-resource-planning-and-retirement.md) (target-specific
   resources the new backends require).
 - Depends on [ADR-0115](0115-analytic-curve-kernel-single-geometry-authority.md)
-  (the strip) and [ADR-0089](0089-rendering-program-and-execution-plan.md)
+  (the strip), [ADR-0118](0118-coverage-strategy-placement-distance-fields-and-curve-kernel.md)
+  (the peer analytic branch this contract also serves) and
+  [ADR-0089](0089-rendering-program-and-execution-plan.md)
   (the execution owner).
-- Implementation: not started; tracked in
+- Implementation: not started. Executed by the staged plan in
+  [ADR-0119](0119-coverage-seam-migration-staged-plan.md), which sequences the
+  work behind per-stage gates and makes the acceptance harness its first stage.
+  Progress is tracked in
   [the implementation matrix](../dev/architecture-implementation-status.md).
 
 ## Context
@@ -92,6 +97,10 @@ what crosses it is redefined. Concretely:
    encodes fills and strokes as `flux_curve_cover` values plus a brush and
    submits those; it never hands a rasterizer control points to reinterpret
    (INV-CRV-01). Triangle submission as a *public* geometry path is removed.
+   The **glyph-run primitive survives unchanged** (ADR-0010): its coverage
+   atlas is simply precomputed coverage for that run, so an on-canvas glyph run
+   remains valid — only its anti-aliasing axis stops being the canvas's sample
+   count. In-scene glyphs take the ADR-0117 path instead.
 
 2. **One coverage contract, three backend classes.** Every backend maps
    strips + brush → premultiplied linear-light framebuffer samples. A backend
@@ -130,15 +139,26 @@ what crosses it is redefined. Concretely:
 
 6. **The icon mask cache is deleted.** Icons render through the same coverage
    path as every other curve; there is no per-icon bake, no mask pool, no
-   stroke-width key, and no consumer-specific resolution workaround.
+   stroke-width key, and no consumer-specific resolution workaround. What is
+   deleted is the *implicit* fallback: the technique itself is retained as an
+   explicit opt-in by [ADR-0118](0118-coverage-strategy-placement-distance-fields-and-curve-kernel.md).
+
+7. **The analytic distance-field branch is a peer strategy, not a casualty.**
+   Geometry whose class has a closed-form boundary distance (box, rounded rect,
+   circle) keeps its exact analytic path — see
+   [ADR-0118](0118-coverage-strategy-placement-distance-fields-and-curve-kernel.md).
+   "The rasterizer derives no geometry" (INV-COV-01) constrains backends that
+   consume strips; it does not turn an exact analytic field into a strip.
 
 ### Invariants & Behavioral Boundaries
 
 - **INV-COV-01 — No geometry in the rasterizer.** A backend consumes strips; it
   must not derive, re-derive, or approximate geometry itself.
-- **INV-COV-02 — Resolution independence.** A backend must produce at least 256
-  distinct coverage levels for a filled or stroked edge. A sample-count ceiling
-  (≤ 16 levels) is a contract violation, not a quality setting.
+- **INV-COV-02 — Resolution independence.** Coverage must be *continuous*:
+  computed from geometry, not quantised by a sample count. A high-contrast
+  oblique edge must produce a smooth coverage ramp, not a small set of
+  discrete values. A sample-count ceiling (≤ 16 quantisation steps) is a
+  contract violation, not a quality setting.
 - **INV-COV-03 — One meaning per draw.** Backends may differ in cost, tiling,
   and scheduling; they may not differ in the colour, coverage, blend result,
   or failure of a given strip + brush. Divergence is a bug in a backend.

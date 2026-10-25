@@ -14,6 +14,7 @@ Choose a section based on what you are trying to do:
   rendering task.
 - [Explanation](explanation/application-architecture.md) — understand the
   stack boundaries, [Value-Semantic Rendering](explanation/rendering-model.md),
+  [Geometry Representations and Coverage Algorithms](explanation/geometry-and-coverage.md),
   [Liquid Glass Optics](explanation/liquid-glass-optics.md), Vulkan backend,
   and Rust bindings.
 - [Reference](reference/api.md) — look up API contracts, symbols, effects,

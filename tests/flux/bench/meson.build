@@ -24,7 +24,7 @@ test('arena', bench_arena, suite : 'bench', is_parallel : false)
 if opt_canvas
   bench_flatten = executable('bench_flatten',
     'bench_flatten.c',
-    '../../../libs/flux/src/canvas/geometry_flatten.c',
+    '../../../libs/flux/src/canvas/curve_flatten.c',
     include_directories : bench_helpers_inc,
     dependencies : [test_helpers_dep],
   )
@@ -44,6 +44,14 @@ if opt_canvas
     dependencies : [test_helpers_dep],
   )
   test('path', bench_path, suite : 'bench', is_parallel : false)
+
+  bench_coverage = executable('bench_coverage',
+    'bench_coverage.c',
+    '../../../libs/flux/src/canvas/coverage_raster.c',
+    include_directories : bench_helpers_inc,
+    dependencies : [test_helpers_dep],
+  )
+  test('coverage', bench_coverage, suite : 'bench', is_parallel : false)
 
   # GPU compositor-shaped frame loop: one surface pass + two render-target
   # captures per frame, timed end to end.

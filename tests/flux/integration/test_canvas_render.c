@@ -337,18 +337,16 @@ int main(void) {
         EXPECT(px_at(px, W - 2, H - 2)[0] < 20);
     }
 
-    /* A stencil-dependent fill in that strict pass is explicitly rejected;
-     * it must not silently fall back to nonzero semantics or bind a stencil
-     * pipeline incompatible with the attachment-free render pass. */
+    /* With device analytic coverage backend (ADR-0120), even-odd fills no longer
+     * require a stencil attachment and succeed in a no-stencil pass (INV-COV-02). */
     {
         flux_path *p = nullptr;
         EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_add_rect(p, (flux_rect){16, 16, 64, 64});
-        EXPECT(render_frame_no_stencil(s, canvas, draw_even_odd_path, p) ==
-               FLUX_ERROR_INVALID_STATE);
+        EXPECT(render_frame_no_stencil(s, canvas, draw_even_odd_path, p) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 32, 32)[0] < 20);
+        EXPECT(px_at(px, 32, 32)[0] > 200);
         flux_arena_reset(&arena);
     }
 

@@ -1,4 +1,8 @@
 #version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "flux_sdf.glsl"
 #extension GL_EXT_nonuniform_qualifier : require
 
 /*
@@ -86,13 +90,14 @@ void store_source_over(uvec2 pixel, vec4 source)
     );
 }
 
+/* Convention adapter over the single field definition in flux_sdf.glsl
+ * (ADR-0118): `bounds` is (x, y, w, h), and the non-zero half-extent floor
+ * keeps a degenerate group finite. The field itself is not defined here. */
 float rounded_rect_sdf(vec2 p, vec4 bounds, float requested_radius)
 {
     vec2 half_extent = max(bounds.zw * 0.5, vec2(0.001));
     vec2 centre = bounds.xy + half_extent;
-    float radius = clamp(requested_radius, 0.0, min(half_extent.x, half_extent.y));
-    vec2 q = abs(p - centre) - half_extent + radius;
-    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+    return flux_sdf_round_rect(p - centre, half_extent, requested_radius);
 }
 
 void main()

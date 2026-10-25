@@ -108,6 +108,65 @@ void emit_arc(flux_canvas_vertex *verts, uint32_t *count, uint32_t cap, flux_mat
     }
 }
 
+/* Local radius of curvature of the flattened polyline at `pt`, estimated as
+ * arc length over turn angle, and the turn direction. Used only when the
+ * source curve's exact curvature is unavailable (a straight source segment, or
+ * a corner where no single radius applies). Returns a large value when the
+ * polyline is straight or degenerate, so the caller's comparison never fires.
+ *
+ * The exact value comes from the analytic kernel (ADR-0115) and is preferred:
+ * arc-length-over-turn-angle under-estimates R by sin(x)/x and is biased by
+ * the flattening density. */
+static float vertex_radius(flux_point prev, flux_point pt, flux_point next, bool *turning_left) {
+    flux_point d_in = pt_sub(pt, prev);
+    flux_point d_out = pt_sub(next, pt);
+    float l_in = sqrtf(d_in.x * d_in.x + d_in.y * d_in.y);
+    float l_out = sqrtf(d_out.x * d_out.x + d_out.y * d_out.y);
+    if (l_in < 1e-6f || l_out < 1e-6f)
+        return 1e30f;
+    float cross = d_in.x * d_out.y - d_in.y * d_out.x;
+    if (turning_left)
+        *turning_left = cross > 0.0f;
+    float turn_abs = fabsf(atan2f(cross, d_in.x * d_out.x + d_in.y * d_out.y));
+    if (turn_abs < 1e-6f)
+        return 1e30f;
+    return 0.5f * (l_in + l_out) / turn_abs;
+}
+
+/* Clamp the inner-side offset to the local radius of curvature. When the
+ * half-width exceeds it the true inner offset passes through the centre of
+ * curvature and turns back on itself; emitting it anyway makes the band
+ * overlap itself, which is invisible for opaque paint but double-blends a
+ * translucent one. Clamping collapses the inner boundary to the centre (for a
+ * circular arc) so the band tiles its region exactly once. The outer side is
+ * left alone: its offset grows with the mitre factor, which is correct.
+ *
+ * The limit is the POLYLINE's own discrete radius, not the source curve's
+ * exact curvature. That is deliberate and measured (ADR-0115): the band being
+ * emitted is a polyline band, so the limit must be where *its* inner edges
+ * converge. Substituting the analytic radius makes the clamp miss the collapse
+ * — a cubic approximating a small circle has slightly larger curvature radius
+ * than the circle, and the r=2 retrograde case regressed from 0 to 28 units of
+ * double blending when the exact value was used. Enforcing both limits
+ * (min of the two) reproduces the polyline result exactly, so the analytic
+ * radius buys nothing here.
+ */
+static void clamp_inner_offset(stroke_frame *f, flux_point pt, flux_point prev, flux_point next) {
+    flux_point inner = f->turning_left ? f->left : f->right;
+    flux_point dir = pt_sub(inner, pt);
+    float len = sqrtf(dir.x * dir.x + dir.y * dir.y);
+    if (len <= 1e-6f)
+        return;
+    float radius = vertex_radius(prev, pt, next, nullptr);
+    if (len <= radius)
+        return;
+    flux_point clamped = pt_add(pt, pt_scale(dir, radius / len));
+    if (f->turning_left)
+        f->left = clamped;
+    else
+        f->right = clamped;
+}
+
 /* Stroke a single flattened contour (`pts[0..count)`) into the shared
  * `verts` buffer. Factored out of flux_canvas_stroke_path so a path with
  * several subpaths (a move_to starts a new one — e.g. the divider line in a
@@ -153,6 +212,8 @@ static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_m
         flux_point prev = pts[has_prev ? (i == 0 ? n - 1 : i - 1) : 0];
         flux_point next = pts[has_next ? ((i + 1) % n) : 0];
         frames[i] = compute_frame(prev, pts[i], next, half, miter_limit, has_prev, has_next);
+        if (has_prev && has_next)
+            clamp_inner_offset(&frames[i], pts[i], prev, next);
     }
 
     /* Body strip: between consecutive vertices i and i+1, emit two

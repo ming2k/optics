@@ -195,24 +195,40 @@ int main(void) {
     px(fb, stride, 12, 12, p);
     EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
 
-    /* EVEN_ODD cannot be represented by the nonzero ear-clip path. In a
-     * strict no-stencil pass it must diagnose and drop the draw, never
-     * silently substitute different fill semantics. */
+    /* EVEN_ODD used to be unrepresentable here: the ear-clip path computes
+     * non-zero winding, so a no-stencil pass had to diagnose and drop the draw.
+     * Since ADR-0119 S2 a solid SRC_OVER fill is answered by analytic coverage,
+     * whose winding is accumulated from sorted crossings — so even-odd works
+     * with no stencil attachment at all, and this asserts the capability rather
+     * than the old refusal.
+     *
+     * Two nested same-winding squares is the case that separates the rules:
+     * non-zero fills both, even-odd leaves the inner one empty. */
     flux_arena arena;
     EXPECT(flux_arena_init(&arena, 4096, nullptr) == FLUX_OK);
     flux_path *eo_path = nullptr;
     EXPECT(flux_path_create(&eo_path, &arena) == FLUX_OK);
-    flux_path_add_rect(eo_path, (flux_rect){8, 8, 16, 16});
+    flux_path_add_rect(eo_path, (flux_rect){8, 8, 24, 24});
+    flux_path_add_rect(eo_path, (flux_rect){14, 14, 12, 12});
     flux_brush eo = flux_brush_solid(white);
-    flux_fill_rule eo_rule = FLUX_FILL_EVEN_ODD;
     pd.clear_color = &black;
     pd.frame = nullptr;
     EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
-    flux_canvas_fill_path(c, eo_path, eo_rule, &eo);
-    EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_STATE);
+    flux_canvas_fill_path(c, eo_path, FLUX_FILL_EVEN_ODD, &eo);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
-    px(fb, stride, 12, 12, p);
-    EXPECT(p[0] < 5 && p[1] < 5 && p[2] < 5 && p[3] > 250);
+    px(fb, stride, 11, 20, p); /* between the squares: painted */
+    EXPECT(p[0] > 250 && p[3] > 250);
+    px(fb, stride, 20, 20, p); /* inside the inner square: the hole */
+    EXPECT(p[0] < 5 && p[3] > 250);
+    /* Non-zero paints the same path solid, inner square included. */
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    flux_canvas_fill_path(c, eo_path, FLUX_FILL_NON_ZERO, &eo);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    fb = flux_canvas_read_pixels(c, &w, &h, &stride);
+    px(fb, stride, 20, 20, p);
+    EXPECT(p[0] > 250 && p[3] > 250);
     /* The sticky error was consumed by end; the next pass starts clean. */
     pd.frame = nullptr;
     EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);

@@ -14,6 +14,7 @@
  * — struct flux_canvas holds no Vulkan types.
  */
 #include "backend.h"
+#include "canvas_tile.h"
 
 #include <flux/vulkan.h>
 #include <math.h>
@@ -812,13 +813,10 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
         }
     }
 
-    /* A multisample attachment cannot LOAD the contents of its one-sample
-     * resolve destination. AUTO preserves the historical CLEAR => 4x MSAA,
-     * LOAD => single-sample policy; explicit NONE lets image-heavy or
-     * compositor passes clear without allocating and resolving a 4x target. */
-    bool use_msaa =
-        config->antialias == FLUX_CANVAS_ANTIALIAS_MSAA_4X ||
-        (config->antialias == FLUX_CANVAS_ANTIALIAS_AUTO && config->clear_color != nullptr);
+    /* ADR-0116 / ADR-0120 Phase C: device path renders with 1x analytic coverage.
+     * AUTO defaults to single-sample (no MSAA attachment allocation, no resolve).
+     * FLUX_CANVAS_ANTIALIAS_MSAA_4X is retained as an explicit legacy opt-in. */
+    bool use_msaa = (config->antialias == FLUX_CANVAS_ANTIALIAS_MSAA_4X);
     VkSampleCountFlagBits samples = use_msaa ? FLUX_CANVAS_SAMPLES : VK_SAMPLE_COUNT_1_BIT;
     flux_pass_attachment att = {
         .load_op = config->clear_color ? FLUX_LOAD_CLEAR : FLUX_LOAD_LOAD,
@@ -1323,6 +1321,72 @@ static void vk_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
     }
 }
 
+static flux_result vk_submit_cover(const flux_canvas_backend *self, flux_canvas *c,
+                                   const flux_point *pts, const flux_canvas_contour *cons,
+                                   uint32_t ncons, flux_fill_rule rule, const canvas_paint *paint,
+                                   flux_recti clip) {
+    if (!c || !pts || !cons || ncons == 0)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (clip.w <= 0 || clip.h <= 0)
+        return FLUX_OK;
+    if (paint->kind != CANVAS_PAINT_SOLID && paint->kind != CANVAS_PAINT_LINEAR_GRADIENT &&
+        paint->kind != CANVAS_PAINT_RADIAL_GRADIENT)
+        return FLUX_ERROR_UNSUPPORTED;
+
+    flux_tile_segment segs[4096];
+    flux_rect bounds;
+    uint32_t n_segs = canvas_tile_extract_segments(pts, cons, ncons, segs, 4096, &bounds);
+    if (n_segs == 0)
+        return FLUX_OK;
+
+    int x0 = (int)floorf(bounds.x);
+    int y0 = (int)floorf(bounds.y);
+    int x1 = (int)ceilf(bounds.x + bounds.w);
+    int y1 = (int)ceilf(bounds.y + bounds.h);
+    int max_x = clip.x + (int)clip.w;
+    int max_y = clip.y + (int)clip.h;
+    if (x0 < clip.x)
+        x0 = clip.x;
+    if (y0 < clip.y)
+        y0 = clip.y;
+    if (x1 > max_x)
+        x1 = max_x;
+    if (y1 > max_y)
+        y1 = max_y;
+    int w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0)
+        return FLUX_OK;
+
+    /* Pure GPU Analytic Fragment Rasterizer (ADR-0116 ANALYTIC_FRAGMENT).
+     * Segments are copied into the frame transient ring (zero heap alloc, zero texture bake).
+     * Evaluated directly in canvas_vector.frag at 1x sample rate on the physical GPU. */
+    size_t segs_bytes = (size_t)n_segs * sizeof(flux_tile_segment);
+    flux_transient slice;
+    flux_result r = flux_frame_alloc_transient(c->frame, segs_bytes, 16, &slice);
+    if (r != FLUX_OK)
+        return r;
+    memcpy(slice.cpu, segs, segs_bytes);
+
+    flux_canvas_push pc;
+    build_push(c, paint, &pc);
+    pc.vector.segs_address = slice.gpu_address;
+    pc.vector.seg_count = n_segs;
+    pc.vector.fill_rule = (rule == FLUX_FILL_EVEN_ODD) ? 1u : 0u;
+
+    uint32_t c_color = (paint->kind == CANVAS_PAINT_SOLID) ? paint->color : 0xFFFFFFFFu;
+    float fx0 = (float)x0, fy0 = (float)y0;
+    float fx1 = (float)x1, fy1 = (float)y1;
+
+    flux_canvas_vertex quad[6] = {
+        {{fx0, fy0}, c_color, 0}, {{fx1, fy0}, c_color, 0}, {{fx1, fy1}, c_color, 0},
+        {{fx0, fy0}, c_color, 0}, {{fx1, fy1}, c_color, 0}, {{fx0, fy1}, c_color, 0},
+    };
+
+    c->pending_blend = paint->blend;
+    self->submit(self, c, CANVAS_PIPE_VECTOR, &pc, quad, 6);
+    return FLUX_OK;
+}
+
 static const flux_canvas_backend vk_backend = {
     .name = "vulkan",
     .canvas_init = vk_canvas_init,
@@ -1334,6 +1398,7 @@ static const flux_canvas_backend vk_backend = {
     .restore_layer = vk_restore_layer,
     .bind_program = vk_bind_program,
     .submit = vk_submit,
+    .submit_cover = vk_submit_cover,
 };
 
 const flux_canvas_backend *flux_canvas_backend_vk(void) {

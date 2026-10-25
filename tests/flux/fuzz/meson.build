@@ -40,6 +40,13 @@ fuzz_harnesses += {
   'corpus': 'corpus/path_flatten',
 }
 
+fuzz_harnesses += {
+  'name': 'fuzz_coverage_raster',
+  'src': files('fuzz_coverage_raster.c', '../../../libs/flux/src/canvas/coverage_raster.c'),
+  'deps': [flux_dep, m_dep],
+  'corpus': 'corpus/coverage_raster',
+}
+
   # GLB parser: feed arbitrary bytes through the deviceless parse seam
   # (vista_parse_glb, ADR-0016). Public API; libfuzzer-built via the
   # ci-fuzz workflow (see .github/workflows/ci-fuzz.yml matrix).

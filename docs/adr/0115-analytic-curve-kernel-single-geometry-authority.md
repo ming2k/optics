@@ -26,7 +26,22 @@ negative_knowledge: true
   (single semantic authority).
 - Enables: [ADR-0116](0116-coverage-contract-canvas-rasterization.md),
   [ADR-0117](0117-perspective-correct-scene-vector-coverage.md).
-- Implementation: not started; tracked in
+- Implementation: **kernel landed** (`libs/flux/src/curve/`, `include/flux/curve.h`,
+  tested by `tests/flux/unit/test_curve.c`), and the flattening consumer is
+  migrated: the recursive `geometry_flatten.c` is deleted and replaced by
+  `libs/flux/src/canvas/curve_flatten.c`, which samples each curve at the
+  kernel's Wang segment count (one stage, no recursion). The analytic offset
+  and its closed-form retrograde interval also landed
+  (`flux_curve_seg_offset`, `flux_curve_seg_offset_retrograde`), and the
+  **stroker now clamps the inner-side offset to the local radius of curvature**
+  (`clamp_inner_offset` in `geometry_stroke.c`) — the discrete form of the same
+  rule — which removes the band self-overlap that double-blended translucent
+  strokes. The tessellation and stroking consumers are **not** migrated:
+  `geometry_stroke.c` still offsets a *flattened polyline*, so its curvature is
+  a per-vertex estimate rather than the kernel's closed form, and
+  `flux_curve_seg_offset_retrograde` currently has no production consumer —
+  converting the stroker to offset the reduced segments is the next step. The
+  remaining work is tracked in
   [the implementation matrix](../dev/architecture-implementation-status.md).
 
 ## Context
@@ -88,9 +103,14 @@ it emits **coverage strips**, not triangles.
 
 1. **Reduction.** A cubic segment is split at its inflections and curvature
    extrema and each monotone piece is reduced to a quadratic (v1) or Euler
-   spiral (later) with a bounded, provable error in position and tangent. The
-   reduced pieces — never the raw control points — are the input to both
-   offsetting and coverage.
+   spiral (later). The error bound is **exact, not empirical**: for a cubic
+   with third difference `E = P3 − 3·P2 + 3·P1 − P0`, the quadratic through the
+   endpoints with control point `(3·P1 − P0 + 3·P2 − P3)/4` differs from the
+   cubic by exactly `(E/6)·3t(1−t)(1−2t)`, whose magnitude is at most
+   `|E| / (6·2√3) ≈ 0.048113·|E|`. A piece is accepted only when that is within
+   the caller's ε; otherwise it is halved and retried. The reduced pieces —
+   never the raw control points — are the input to both offsetting and
+   coverage.
 2. **Exact splitting.** Tangents, inflections, cusps (retrograde points) and
    curvature extrema are located analytically in the segment parameter. A
    cusp-free, monotone decomposition is a *precondition* for correct
@@ -103,8 +123,13 @@ it emits **coverage strips**, not triangles.
 4. **Analytic parallel offset.** Stroking offsets the *reduced curve* (cubic
    pieces are their own offsets, per Levien's parallel-curve construction),
    resolves offset self-intersection analytically, and removes the loops that
-   polyline offsetting produces. Join and cap topology is a discrete choice
-   applied to the offset curve, not a patch over its artifacts.
+   polyline offsetting produces. **The self-intersection test is closed-form**:
+   for a quadratic the curvature numerator `cross(B', B'')` is constant, so
+   "the offset exceeds the local radius of curvature" reduces to a quadratic in
+   the segment parameter, and the retrograde interval falls out of it
+   (`flux_curve_seg_offset_retrograde`). A line never retrogrades. Join and cap
+   topology is a discrete choice applied to the offset curve, not a patch over
+   its artifacts.
 5. **Coverage primitives.** Conservative bounds, ray/quadratic intersection,
    and signed winding — the minimum a rasterizer needs to compute per-pixel
    coverage (or per-tile winding) without re-deriving geometry.
@@ -190,6 +215,38 @@ the next reader does not re-derive the trade-off.
   re-derive per frame (O(paths), not O(vertices)); retaining a second,
   divergent cache re-creates the drift failure mode of ADR-0112. **If a cache
   is later needed it must key on the strip, not on a triangle batch.**
+- **Option H — Clamp the stroker's inner offset with the kernel's exact
+  source-curve curvature.** *Why considered:* the stroker infers curvature from
+  the flattened polyline (arc length over turn angle), which under-estimates R
+  by `sin(x)/x`; replacing a guess with the kernel's exact radius is exactly the
+  single-authority principle this ADR establishes. *Why rejected:* **measured,
+  and it is worse.** The band being emitted is a *polyline* band, so the clamp
+  limit must be where that band's own inner edges converge; substituting the
+  analytic value makes the collapse miss, because a cubic approximating a small
+  circle has slightly larger curvature radius than the circle. The `r = 2`
+  retrograde case regressed from 0 to 28 coverage units of double blending.
+  Taking the minimum of both limits reproduces the polyline result exactly
+  (measured 0 / 10 / 0 / 15 / 0 across the oracle's five cases), so the analytic
+  radius buys nothing here. **Consequence:** `flux_curve_*_curvature_radius` was
+  implemented, measured, and *removed* rather than left in the tree as an
+  unused primitive, and the stroker keeps its discrete estimate with the reason
+  recorded at `clamp_inner_offset`.
+- **Option I — Re-express the stroker on reduced segments (retire
+  `geometry_stroke.c`).** *Why considered:* it is the last consumer of the
+  polyline model, and the kernel already exposes `flux_curve_seg_offset` and
+  `flux_curve_seg_offset_retrograde`, which would then have a production
+  consumer. *Why rejected — for now, on measured grounds:* both improvements the
+  rewrite was meant to deliver have been measured and neither helps. Exact
+  normals change nothing because the offset placement is already within the
+  flattening tolerance; exact curvature is actively worse (Option H). What
+  remains is the segment-body and inner-join topology, whose only measured
+  benefit is deleting a file. That is not a justification for a rewrite of
+  corner, cap and join geometry that the icon pixel tests would have to defend
+  without an oracle that can tell "different" from "wrong" for a stroked curve.
+  **The stroker is retained by decision, not deferred:** it is the correct
+  stroker for a polyline rasterizer. Revisit only when the coverage backends of
+  ADR-0116 make the fill path stop emitting polylines — at that point the
+  stroker's premise changes, and the retrograde interval becomes reachable.
 
 ## Consequences
 
@@ -203,10 +260,15 @@ Positive:
   retrograde overlap, no miter-limit fudge that trades a spike for a bevel.
 - Hot-path geometry cost becomes O(paths + segments) with a closed-form
   segment count, and is parallel-friendly by construction.
+- Coverage can be derived from a strip two independent ways — winding over the
+  reduced segments, and the closed-form field for the analytic classes — and the
+  two agree on the same shape (`test_curve`'s cross-route check). That agreement
+  is part of the evidence ADR-0116's coverage backends rest on.
 - Curves gain a *value* representation (`flux_curve_cover`) that can be
-  cached, serialised, diffed, and — critically — shared between the 2D canvas
-  and the 3D scene ([ADR-0117](0117-perspective-correct-scene-vector-coverage.md))
-  without either module seeing the other.
+  retained by the caller, diffed, and — critically — shared between the 2D
+  canvas and the 3D scene ([ADR-0117](0117-perspective-correct-scene-vector-coverage.md))
+  without either module seeing the other. (Not a serialization format; see
+  Decision point 6 and ADR-0090.)
 - A better primitive can be dropped in later (Option F) without touching any
   consumer, because the consumer contract is the strip, not the representation.
 
@@ -221,12 +283,65 @@ Negative & trade-offs:
   below; the alternative (an unverified kernel) is worse than the legacy
   machine it replaces.
 - The exact-error reduction is float-precision-sensitive near tangencies and
-  cusps; the kernel must fall back to `double` internally where the analytic
-  test is ill-conditioned (documented, not silent).
+  cusps; the kernel evaluates its analytic tests in `double` internally (the
+  public values stay float), and `solve_quadratic` forms the larger-magnitude
+  root first so a root near zero is not lost to cancellation.
 - Glyph and icon consumers that currently assume a flattened contour buffer
   must migrate to strips in the same change (ADR-0095's "move together").
 
 ## Verification
+
+Landed in `tests/flux/unit/test_curve.c` (181 assertions): reduction error
+bound vs a dense sampling of the source cubic, inflection and cusp location,
+Wang monotonicity and the straight case, analytic line offset and
+quadratic-midpoint offset, ray crossings, winding under both fill rules
+(including a double-wound ring where NONZERO and EVENODD must differ),
+fails-closed on every bad input, and byte-for-byte determinism. The
+**retrograde interval is verified against its defining condition**, not against
+its own formula: the closed form is checked by sampling `T(t)·O'(t)` across the
+segment and asserting the sign flips exactly at the reported interval, with
+positive controls (offset within the radius of curvature, offset the other way,
+a line) returning no interval.
+
+Landed with the flattening migration: `tests/flux/unit/test_canvas_flatten.c`
+(screen-space tolerance still drives subdivision; object radius 1 at scale 100
+and radius 100 at scale 1 flatten identically; a degenerate cubic emits
+nothing and does not starve later contours) plus the unchanged
+`canvas_consistency` GPU↔CPU pixel oracle and `canvas_render` golden tests,
+which pass without modification — evidence that the replacement is
+output-equivalent for the recorded cases.
+
+Landed with the inner-offset clamp: `tests/flux/unit/test_canvas_stroke_region.c`,
+an analytic stroke-coverage oracle. It renders a *translucent* stroke and a
+solid fill of the same paint as a single-coverage reference (self-calibrating,
+so it assumes nothing about the linear→sRGB readback), then asserts every pixel
+inside the stroke's own band carries exactly one coverage. Measured before the
+clamp: 204 double-blended pixels on an r=6 stroke of width 20. After: 4, each
+about one supersample. Every non-retrograde case measures 0.
+
+The same oracle produced the negative result recorded under Option H: replacing
+the stroker's discrete curvature estimate with the kernel's exact radius
+regressed the r=2 retrograde case from 0 to 28, and taking the minimum of both
+limits reproduced the baseline exactly. The five cases currently measure
+0 / 10 / 0 / 15 / 0 against a bound of 20, which is what makes the bound a
+measured headroom rather than a number chosen to pass.
+
+Cross-route coverage evidence: `flux_curve_cover_coverage` (winding over curve
+strips, supersampled and named so) is compared against the closed-form distance
+field on the same square. The two routes share no code, so agreement is
+independent evidence that both are right: worst difference 0.08 at 16×16
+samples and 0.04 at 32×32, monotone under refinement, and a curved (quadratic)
+strip yields more than eight distinct coverage levels — far beyond the five a 4×
+sample count can express, which is the property ADR-0116's backends must have.
+
+That comparison also pinned a limitation of the analytic branch worth recording:
+`coverage = 0.5 − d` is exact where a single edge governs, but where two
+one-pixel ramps overlap near a corner the field's min/max combination is *not*
+the true area coverage (measured 0.25 against a true 0.125 on a unit square).
+This is why ADR-0116's oracle compares against area rather than against the
+field, and why the cross-route test restricts its probes to single-edge pixels.
+
+The remaining checks below describe the migration target, not landed coverage.
 
 - **Reduction error bound.** Randomised cubic corpus: max position/tangent
   deviation of the reduced pieces vs the analytic curve is asserted ≤ ε over
@@ -267,6 +382,11 @@ Negative & trade-offs:
   [ADR-0117](0117-perspective-correct-scene-vector-coverage.md) — the two
   rasterization consumers of the strip.
 - Prior art: Loop & Blinn (2005) implicit curve rendering; Levien, *Parallel
+  curves of cubic Béziers* (2024); Vello/Sparse Strips; Skia Graphite; Slug.
+- Implementation: `libs/flux/src/curve/` (`reduce`, `split`, `wang_count`,
+  `offset`, `cover`, `ray_quadratic`); public surface
+  `libs/flux/include/flux/curve.h`.
+nn (2005) implicit curve rendering; Levien, *Parallel
   curves of cubic Béziers* (2024); Vello/Sparse Strips; Skia Graphite; Slug.
 - Implementation: `libs/flux/src/curve/` (`reduce`, `split`, `wang_count`,
   `offset`, `cover`, `ray_quadratic`); public surface

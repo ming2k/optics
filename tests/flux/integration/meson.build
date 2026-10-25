@@ -195,6 +195,81 @@ if opt_canvas
   )
   test('canvas_consistency', test_canvas_consistency, suite : 'integration')
 
+  # Coverage ceiling (ADR-0119 S3 target): measures the distinct coverage levels
+  # along one oblique edge on the GPU path (4x MSAA) against the CPU coverage
+  # path, so S3's motivation is a number in the suite and its completion inverts
+  # the assertion rather than going unnoticed.
+  test_canvas_coverage_ceiling = executable('test_canvas_coverage_ceiling',
+    'test_canvas_coverage_ceiling.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('canvas_coverage_ceiling', test_canvas_coverage_ceiling, suite : 'integration')
+
+  # Real-driver hardware assertion (ADR-0120 Phase B0 gate)
+  test_device_hardware = executable('test_device_hardware',
+    'test_device_hardware.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('device_hardware', test_device_hardware, suite : 'integration')
+
+  # Tile-compute coverage backend (ADR-0120 Phase B1 gate)
+  test_tile_b1_upload = executable('test_tile_b1_upload',
+    'test_tile_b1_upload.c',
+    '../../../libs/flux/src/canvas/canvas_tile.c',
+    '../../../libs/flux/src/canvas/curve_flatten.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('tile_b1_upload', test_tile_b1_upload, suite : 'integration')
+
+  # Tile-compute coarse raster binning (ADR-0120 Phase B2 gate)
+  test_tile_b2_coarse = executable('test_tile_b2_coarse',
+    'test_tile_b2_coarse.c',
+    '../../../libs/flux/src/canvas/canvas_tile.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('tile_b2_coarse', test_tile_b2_coarse, suite : 'integration')
+
+  # Tile-compute winding backdrop (ADR-0120 Phase B3 gate)
+  test_tile_b3_backdrop = executable('test_tile_b3_backdrop',
+    'test_tile_b3_backdrop.c',
+    '../../../libs/flux/src/canvas/canvas_tile.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('tile_b3_backdrop', test_tile_b3_backdrop, suite : 'integration')
+
+  # Tile-compute fine raster (ADR-0120 Phase B4 gate)
+  test_tile_b4_fine = executable('test_tile_b4_fine',
+    'test_tile_b4_fine.c',
+    '../../../libs/flux/src/canvas/canvas_tile.c',
+    '../../../libs/flux/src/canvas/coverage_raster.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('tile_b4_fine', test_tile_b4_fine, suite : 'integration')
+
+  # Tile-compute blend and clip integration (ADR-0120 Phase B5 gate)
+  test_tile_b5_renderplan = executable('test_tile_b5_renderplan',
+    'test_tile_b5_renderplan.c',
+    '../../../libs/flux/src/canvas/canvas_tile.c',
+    '../../../libs/flux/src/canvas/curve_flatten.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('tile_b5_renderplan', test_tile_b5_renderplan, suite : 'integration')
+
+  # Real-driver GPU Tile-Compute rasterizer execution (Phase B hardware execution)
+  test_tile_gpu_compute = executable('test_tile_gpu_compute',
+    'test_tile_gpu_compute.c',
+    '../../../libs/flux/src/canvas/canvas_tile.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('tile_gpu_compute', test_tile_gpu_compute, suite : 'integration')
+
+  # Perspective-correct vector coverage in scene material (ADR-0117)
+  test_scene_vector = executable('test_scene_vector',
+    'test_scene_vector.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('scene_vector', test_scene_vector, suite : 'integration')
+
   # Colour management (ADR-0069): linear-light blending, P3 output
   # transform, LOAD seeding, and linear gradient interpolation, asserted
   # by offscreen readback against the public colour math API.

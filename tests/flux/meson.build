@@ -93,6 +93,21 @@ test_helpers_dep = declare_dependency(
   dependencies        : [flux_dep, m_dep, vulkan_dep],
 )
 
+# Coverage acceptance harness (ADR-0119 S0): the independent ground truth every
+# coverage backend is measured against. Deliberately NOT part of libflux — a
+# backend must not be able to validate itself against its own algorithm.
+coverage_harness_lib = static_library('coverage_harness',
+  'coverage_harness.c',
+  dependencies : [flux_dep, m_dep],
+  install      : false,
+)
+coverage_harness_dep = declare_dependency(
+  link_with           : [coverage_harness_lib],
+  sources             : ['coverage_harness.h'],
+  include_directories : test_helpers_inc,
+  dependencies        : [test_helpers_dep],
+)
+
 # --- sub-suites ---
 subdir('unit')
 subdir('integration')

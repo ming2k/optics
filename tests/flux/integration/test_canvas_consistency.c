@@ -73,6 +73,22 @@ static void draw_scene(flux_canvas *canvas, flux_arena *arena) {
         flux_fill_rule paint_rule = FLUX_FILL_EVEN_ODD;
         flux_canvas_fill_path(canvas, p, paint_rule, &paint);
     }
+
+    /* Rotated analytic shapes (ADR-0118): the SDF pipeline evaluates its field
+     * in shape space, so a rotated rounded rect / squircle must match the CPU
+     * oracle's evaluation of the same field rather than being drawn
+     * axis-aligned. Placed low-left, away from the probe points, and compared
+     * through the scene-wide statistics. */
+    flux_canvas_save(canvas);
+    flux_canvas_translate(canvas, 28.0f, 104.0f);
+    flux_canvas_rotate(canvas, 0.5235988f); /* 30 degrees */
+    flux_canvas_translate(canvas, -28.0f, -104.0f);
+    flux_canvas_fill_rrect(canvas, (flux_rect){12, 88, 32, 32}, 9.0f,
+                           flux_color_rgba(250, 160, 60, 255));
+    flux_geometry sq = flux_geom_squircle((flux_rect){48, 92, 30, 26}, 11.0f, 0.85f);
+    flux_brush sq_brush = flux_brush_solid(flux_color_rgba(90, 240, 160, 255));
+    flux_canvas_draw_geometry(canvas, &sq, &sq_brush);
+    flux_canvas_restore(canvas);
 }
 
 /* Tight per-channel probes at flat interiors / exact gradient stops. */

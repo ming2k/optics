@@ -123,6 +123,12 @@
       "profile": "core",
       "editable": false,
       "sha256": "2fef4e841c2d8052be33d1f0f7f560ec6cfd06af5e53eeccc61a6600ae670a22"
+    },
+    "directives.snippet": {
+      "role": "template",
+      "profile": "core",
+      "editable": false,
+      "sha256": "ab527a757c1fa1ceecffb6e74f03adb5d6c7107d190301eedc0a60c05eaad75a"
     }
   }
 }

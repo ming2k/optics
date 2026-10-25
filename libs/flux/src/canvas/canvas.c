@@ -820,40 +820,92 @@ void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, uint32_t im
 /*  SDF rounded rectangles / circles                                  */
 /* ------------------------------------------------------------------ */
 
-/* Draw a rounded rect (or, with stroke_hw > 0, its ring border) through the
- * SDF pipeline: resolution-independent analytic AA. The shape is evaluated in
- * screen-pixel space (translation + uniform scale; rotation is not modelled,
- * which suits axis-aligned UI). */
-static void draw_sdf_rrect(flux_canvas *c, flux_rect r, float radius, flux_color color,
-                           float stroke_hw) {
+/* True when the transform's linear part is a similarity: equal-length,
+ * orthogonal columns with a positive determinant (rotation x uniform scale).
+ * The SDF path is exact for these — a rigid motion plus a uniform scale
+ * preserves distances, so shape-space evaluation and screen-space evaluation
+ * agree — and it also covers the historical axis-aligned case. Shear and
+ * anisotropic scale are NOT similarities (distances distort), so those keep
+ * going through tessellation rather than being drawn with an approximated
+ * field. */
+static bool canvas_sdf_similarity(const flux_canvas *c) {
+    flux_mat3x2 t = c->states[c->state_top].transform;
+    float s0 = t.m[0] * t.m[0] + t.m[1] * t.m[1];
+    float s1 = t.m[2] * t.m[2] + t.m[3] * t.m[3];
+    float dot = t.m[0] * t.m[2] + t.m[1] * t.m[3];
+    float det = t.m[0] * t.m[3] - t.m[2] * t.m[1];
+    if (!(s0 > 0.0f) || det <= 0.0f)
+        return false;
+    return fabsf(s0 - s1) <= 1e-6f * s0 && fabsf(dot) <= 1e-6f * s0;
+}
+
+/* Draw a rounded rect / squircle (or, with stroke_hw > 0, its ring border)
+ * through the SDF pipeline: resolution-independent analytic AA. The shape is
+ * evaluated in its OWN space (translation away), with the fragment mapped back
+ * through the inverse of the transform's linear part, so a rotated shape gets
+ * an exact field instead of an axis-aligned stand-in. The mapping is exact for
+ * any similarity, which is what `canvas_sdf_similarity` admits.
+ *
+ * `curvature` selects the corner-arc family (ADR-0118): 0 is a circular-corner
+ * rounded rectangle, 1 is the L4 "G2 squircle", and the field blends between
+ * them. Curvature rides `image_src[2]`, the inverse linear part rides the
+ * otherwise-unused `grad_from`/`grad_to` slots and the shape-unit pixel size
+ * rides `image_src[3]`, so adding the squircle variant and rotation support
+ * costs no ABI change and no extra pipeline. */
+static void draw_sdf_shape(flux_canvas *c, flux_rect r, float radius, float curvature,
+                           flux_color color, float stroke_hw) {
     if (!c || !c->recording || r.w <= 0.0f || r.h <= 0.0f)
         return;
 
     flux_mat3x2 tx = c->states[c->state_top].transform;
-    float s = flux_canvas_mat3x2_pixel_scale(tx);
+    float det = tx.m[0] * tx.m[3] - tx.m[2] * tx.m[1];
+    if (fabsf(det) < 1e-20f)
+        return;
 
-    flux_point center = {r.x + r.w * 0.5f, r.y + r.h * 0.5f};
-    flux_point cp = flux_mat3x2_transform_point(tx, center);
-    float hx = r.w * 0.5f * s;
-    float hy = r.h * 0.5f * s;
-    float rad = radius * s;
+    /* Shape-space half extents and corner radius stay in canvas units: the
+     * field is evaluated before the transform is applied. */
+    float hx = r.w * 0.5f;
+    float hy = r.h * 0.5f;
+    float rad = radius;
     float max_r = fminf(hx, hy);
     if (rad > max_r)
         rad = max_r;
     if (rad < 0.0f)
         rad = 0.0f;
-    float hw = stroke_hw > 0.0f ? stroke_hw * s : 0.0f;
+    float hw = stroke_hw > 0.0f ? stroke_hw : 0.0f;
+    float curv = curvature;
+    if (!(curv > 0.0f))
+        curv = 0.0f;
+    if (curv > 1.0f)
+        curv = 1.0f;
 
-    /* Quad covers the bbox plus the AA fringe and (when stroking) the ring's
-     * outer half-width. Built directly in screen space — the vertex shader
-     * only maps pixels to NDC. */
-    float m = 1.5f + hw;
-    float x0 = cp.x - hx - m, y0 = cp.y - hy - m;
-    float x1 = cp.x + hx + m, y1 = cp.y + hy + m;
+    flux_point center = {r.x + hx, r.y + hy};
+    flux_point cs = flux_mat3x2_transform_point(tx, center);
+
+    /* Screen-space AABB of the transformed corner box, plus the AA fringe and
+     * (when stroking) the ring's outer half-width in screen pixels. */
+    float s = sqrtf(tx.m[0] * tx.m[0] + tx.m[1] * tx.m[1]);
+    float fringe = 1.5f + hw * s;
+    float minx = 1e30f, miny = 1e30f, maxx = -1e30f, maxy = -1e30f;
+    for (int i = 0; i < 4; ++i) {
+        flux_point corner = {center.x + ((i == 1 || i == 2) ? hx : -hx),
+                             center.y + ((i >= 2) ? hy : -hy)};
+        flux_point sp = flux_mat3x2_transform_point(tx, corner);
+        if (sp.x < minx)
+            minx = sp.x;
+        if (sp.x > maxx)
+            maxx = sp.x;
+        if (sp.y < miny)
+            miny = sp.y;
+        if (sp.y > maxy)
+            maxy = sp.y;
+    }
 
     flux_canvas_vertex v[6];
     const flux_point quad[6] = {
-        {x0, y0}, {x1, y0}, {x1, y1}, {x0, y0}, {x1, y1}, {x0, y1},
+        {minx - fringe, miny - fringe}, {maxx + fringe, miny - fringe},
+        {maxx + fringe, maxy + fringe}, {minx - fringe, miny - fringe},
+        {maxx + fringe, maxy + fringe}, {minx - fringe, maxy + fringe},
     };
     for (int i = 0; i < 6; ++i) {
         v[i].pos[0] = quad[i].x;
@@ -864,15 +916,23 @@ static void draw_sdf_rrect(flux_canvas *c, flux_rect r, float radius, flux_color
 
     flux_canvas_push pc;
     build_push(c, nullptr, &pc);
-    /* SDF params share the image_dst / image_src push slots (screen pixels). */
-    pc.image_dst[0] = cp.x;
-    pc.image_dst[1] = cp.y;
-    pc.image_dst[2] = hx;
+    /* SDF params share the image_dst / image_src push slots. */
+    pc.image_dst[0] = cs.x; /* transformed shape centre, screen space */
+    pc.image_dst[1] = cs.y;
+    pc.image_dst[2] = hx; /* half extents in shape units */
     pc.image_dst[3] = hy;
-    pc.image_src[0] = rad;
-    pc.image_src[1] = hw;
-    pc.image_src[2] = 0.0f;
-    pc.image_src[3] = 0.0f;
+    pc.image_src[0] = rad; /* corner radius, shape units */
+    pc.image_src[1] = hw;  /* ring half-width, shape units */
+    pc.image_src[2] = curv;
+    /* One screen pixel spans 1/s shape units: the coverage ramp width. */
+    pc.image_src[3] = s > 0.0f ? 1.0f / s : 1.0f;
+    /* Inverse of the transform's linear part, row-major [[m3,-m2],[-m1,m0]]/det.
+     * The SDF shaders map a fragment back into shape space with it; no other
+     * pipeline reads these slots. */
+    pc.grad_from[0] = tx.m[3] / det;
+    pc.grad_from[1] = -tx.m[2] / det;
+    pc.grad_to[0] = -tx.m[1] / det;
+    pc.grad_to[1] = tx.m[0] / det;
 
     /* Rounded-rect helpers do not take a paint, so their documented blend
      * mode is always SRC_OVER. Do not inherit an image/path draw's mode. */
@@ -1239,8 +1299,8 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
         flux_rect r = geom->rrect.rect;
         float radius = geom->rrect.radius;
         if (p.kind == CANVAS_PAINT_SOLID && p.blend == FLUX_BLEND_SRC_OVER &&
-            canvas_axis_uniform(c)) {
-            draw_sdf_rrect(c, r, radius, p.color, geom->stroke.width * 0.5f);
+            canvas_sdf_similarity(c)) {
+            draw_sdf_shape(c, r, radius, 0.0f, p.color, geom->stroke.width * 0.5f);
             return;
         }
         flux_path_segment segs[16];
@@ -1254,10 +1314,20 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
         break;
     }
     case FLUX_GEOM_SQUIRCLE: {
-        flux_path_segment segs[32];
-        flux_path path = {.segments = segs, .capacity = 32};
-        flux_path_add_squircle(&path, geom->squircle.rect, geom->squircle.radius,
-                               geom->squircle.curvature);
+        flux_rect r = geom->squircle.rect;
+        /* A continuous-curvature corner has an exact distance field
+         * (flux_sdf_squircle), so it takes the analytic path on the same
+         * terms as a rounded rectangle: no flattening, no tessellation, and
+         * resolution-independent coverage (ADR-0118 INV-SDF-03). */
+        if (p.kind == CANVAS_PAINT_SOLID && p.blend == FLUX_BLEND_SRC_OVER &&
+            canvas_sdf_similarity(c)) {
+            draw_sdf_shape(c, r, geom->squircle.radius, geom->squircle.curvature, p.color,
+                           geom->stroke.width * 0.5f);
+            return;
+        }
+        flux_path_segment segs[40];
+        flux_path path = {.segments = segs, .capacity = 40};
+        flux_path_add_squircle(&path, r, geom->squircle.radius, geom->squircle.curvature);
         if (geom->stroke.width <= 0.0f) {
             canvas_fill_path_internal(c, &path, &p);
         } else {
@@ -1271,8 +1341,8 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
         float rad = geom->circle.radius;
         flux_rect r = {cx - rad, cy - rad, rad * 2.0f, rad * 2.0f};
         if (p.kind == CANVAS_PAINT_SOLID && p.blend == FLUX_BLEND_SRC_OVER &&
-            canvas_axis_uniform(c)) {
-            draw_sdf_rrect(c, r, rad, p.color, geom->stroke.width * 0.5f);
+            canvas_sdf_similarity(c)) {
+            draw_sdf_shape(c, r, rad, 0.0f, p.color, geom->stroke.width * 0.5f);
             return;
         }
         flux_path_segment segs[16];

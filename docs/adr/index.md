@@ -16,7 +16,20 @@ one analytic authority, the canvas rasterizes analytic coverage instead of
 sampled triangles, and the scene gains perspective-correct vector coverage.
 It supersedes the tessellation authority (ADR-0005, ADR-0011, ADR-0014,
 ADR-0113, ADR-0114) and the MSAA/coverage-bake anti-aliasing authority
-(ADR-0071, ADR-0112). Its implementation is tracked, not assumed.
+(ADR-0071, ADR-0112).
+
+**Those superseded mechanisms are still the live rendering code.** The geometry
+kernel (ADR-0115) has landed and is tested, but its consumers are not migrated;
+ADR-0116 and ADR-0117 are design-only. Read the superseded records as
+"replaced by decision, still implemented pending migration", and see
+[the implementation matrix](../dev/architecture-implementation-status.md) for
+what is actually in the tree.
+
+[ADR-0118](0118-coverage-strategy-placement-distance-fields-and-curve-kernel.md)
+places the *other* half of the geometry model: closed-form distance fields for
+the analytic primitive classes are a first-class peer of the curve kernel, not a
+casualty of it, and a *baked* field is a deposited explicit opt-in rather than a
+silent fallback. Its primitives have landed.
 
 | #    | Title                                                                          | Status   |
 |------|--------------------------------------------------------------------------------|----------|
@@ -43,9 +56,6 @@ ADR-0113, ADR-0114) and the MSAA/coverage-bake anti-aliasing authority
 | 0021 | [Batched uploads, surface-scoped quiescent waits, prefers-dedicated floor](0021-batched-uploads-and-quiescent-waits.md) | Accepted |
 | 0022 | [Deferred upload submission (amends ADR-0021 item 1)](0022-deferred-upload-submission.md) | Accepted |
 | 0023 | [Unified monorepo build](0023-unified-monorepo-build.md) | Accepted |
-
-|      |                                                                  |          |
-|------|------------------------------------------------------------------|----------|
 | 0024 | [Lens project foundations](0024-lens-foundations.md) | Accepted |
 | 0025 | [Lens draws only through \<flux/canvas.h\>](0025-lens-draws-through-flux-canvas.md) | Accepted |
 | 0026 | [Lens widget identity — FNV-1a hashing over an id stack](0026-lens-id-system.md) | Accepted |
@@ -135,9 +145,12 @@ ADR-0113, ADR-0114) and the MSAA/coverage-bake anti-aliasing authority
 | 0109 | [Premultiplied Command Opacity Modulation, Scissor-Bounded Vulkan Layer Passes, and GPU Glyph Run Batching](0109-premultiplied-command-opacity-scissor-bounded-layers-and-glyph-run-batching.md) | Accepted |
 | 0110 | [Frame-Slot Abandonment Without Ring Advance and Region-Clamped Backdrop Sampling](0110-frame-slot-abandonment-without-ring-advance.md) | Accepted |
 | 0111 | [Lens Runtime SVG Mixed Paint Runs and Orthogonal Icon Sizing](0111-lens-runtime-svg-mixed-paint-runs-and-orthogonal-icon-sizing.md) | Accepted |
-| 0112 | [Device-Resolution Icon Coverage Masks and Explicit Supersampling for the Software Rasteriser](0112-device-resolution-icon-coverage-masks.md) | Superseded by [ADR-0116](0116-coverage-contract-canvas-rasterization.md) |
+| 0112 | [Device-Resolution Icon Coverage Masks and Explicit Supersampling for the Software Rasteriser](0112-device-resolution-icon-coverage-masks.md) | Superseded as the default by [ADR-0116](0116-coverage-contract-canvas-rasterization.md); technique deposited as an explicit opt-in by [ADR-0118](0118-coverage-strategy-placement-distance-fields-and-curve-kernel.md) |
 | 0113 | [Convex fast-path tessellation and winding-robust convexity test](0113-convex-fast-path-tessellation.md) | Superseded by [ADR-0115](0115-analytic-curve-kernel-single-geometry-authority.md) |
 | 0114 | [Incremental non-convex candidate list for ear clipping](0114-ear-clip-candidate-list.md) | Superseded by [ADR-0115](0115-analytic-curve-kernel-single-geometry-authority.md) |
 | 0115 | [Analytic curve kernel — one geometry authority for Bézier fills and strokes](0115-analytic-curve-kernel-single-geometry-authority.md) | Accepted |
 | 0116 | [Coverage-contract canvas rasterization — analytic coverage backends, MSAA retired](0116-coverage-contract-canvas-rasterization.md) | Accepted |
 | 0117 | [Perspective-correct vector coverage in the scene material system](0117-perspective-correct-scene-vector-coverage.md) | Accepted |
+| 0118 | [Coverage strategy placement — closed-form distance fields as a peer of the curve kernel](0118-coverage-strategy-placement-distance-fields-and-curve-kernel.md) | Accepted |
+| 0119 | [Coverage-seam migration — staged plan, acceptance harness first](0119-coverage-seam-migration-staged-plan.md) | Accepted as a plan (no implementation claimed) |
+| 0120 | [GPU analytic coverage — tile-compute plan for a modern 2D rasterizer](0120-gpu-analytic-coverage-tile-compute-plan.md) | Accepted as a plan (no implementation claimed) |

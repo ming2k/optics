@@ -62,12 +62,13 @@ lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts) {
                         .style_fields = eff.fields,
                         .hover_t = n->hover_t,
                         .active_t = n->active_t,
-                        .content = {
-                            .label = label,
-                            .text = tm,
-                            .icon = opts->icon,
-                            .glyph_size = icon_size,
-                        },
+                        .content =
+                            {
+                                .label = label,
+                                .text = tm,
+                                .icon = opts->icon,
+                                .glyph_size = icon_size,
+                            },
                     });
 
     ui->last_response = r;

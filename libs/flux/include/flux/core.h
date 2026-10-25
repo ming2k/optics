@@ -273,6 +273,7 @@ typedef enum flux_struct_type {
     FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC = 34,
     FLUX_TYPE_EFFECT_SHADOW_DESC = 40,
     FLUX_TYPE_CPU_TARGET_DESC = 46,
+    FLUX_TYPE_MATERIAL_VECTOR_DESC = 47,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -304,6 +305,7 @@ static_assert(FLUX_TYPE_EFFECT_SHADOW_DESC == 40, "flux_struct_type: append only
 #define FLUX_TYPE_canvas_desc FLUX_TYPE_CANVAS_DESC
 #define FLUX_TYPE_mesh_desc FLUX_TYPE_MESH_DESC
 #define FLUX_TYPE_material_desc FLUX_TYPE_MATERIAL_DESC
+#define FLUX_TYPE_material_vector_desc FLUX_TYPE_MATERIAL_VECTOR_DESC
 #define FLUX_TYPE_compute_pipeline_desc FLUX_TYPE_COMPUTE_PIPELINE_DESC
 #define FLUX_TYPE_sampler_desc FLUX_TYPE_SAMPLER_DESC
 #define FLUX_TYPE_buffer_desc FLUX_TYPE_BUFFER_DESC

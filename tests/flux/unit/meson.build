@@ -36,6 +36,45 @@ test_math = executable('test_math',
 )
 test('math', test_math, suite : 'unit')
 
+# Analytic curve kernel (ADR-0115): reduction error bound, analytic
+# inflection/cusp splitting, Wang segment counts, analytic offset, and
+# winding under both fill rules. Pure CPU, no device.
+test_curve = executable('test_curve',
+  'test_curve.c',
+  dependencies : [test_helpers_dep],
+)
+test('curve', test_curve, suite : 'unit')
+
+# Analytic distance fields (ADR-0118): sign/magnitude at analytically known
+# points, the Eikonal property that licenses "coverage = 0.5 - d", and
+# differential parity against the canvas SDF shader's expression.
+test_sdf = executable('test_sdf',
+  'test_sdf.c',
+  dependencies : [test_helpers_dep],
+)
+test('sdf', test_sdf, suite : 'unit')
+
+# Coverage acceptance harness self-verification (ADR-0119 S0). Verifies the
+# yardstick, not a rasterizer: area identity, cross-route convergence, the
+# self-intersection scoping limit, and the INV-COV-02 level assertion.
+test_cover_reference = executable('test_cover_reference',
+  'test_cover_reference.c',
+  dependencies : [coverage_harness_dep],
+)
+test('cover_reference', test_cover_reference, suite : 'unit')
+
+# Coverage rasterizer conformance (ADR-0119 S1 gate). The rasterizer is hidden in
+# libflux.so, so it is compiled into the binary directly — same pattern as
+# test_canvas_tess/test_canvas_flatten.
+test_coverage_raster = executable('test_coverage_raster',
+  'test_coverage_raster.c',
+  '../../../libs/flux/src/canvas/coverage_raster.c',
+  '../../../libs/flux/src/canvas/curve_flatten.c',
+  dependencies : [coverage_harness_dep],
+)
+test('coverage_raster', test_coverage_raster, suite : 'unit')
+
+
 test_colorspace = executable('test_colorspace',
   'test_colorspace.c',
   dependencies : [test_helpers_dep],
@@ -141,11 +180,11 @@ test_canvas_tess_cache = executable('test_canvas_tess_cache',
 )
 test('canvas_tess_cache', test_canvas_tess_cache, suite : 'unit')
 
-# Same reasoning as test_canvas_tess: geometry_flatten.c is hidden
+# Same reasoning as test_canvas_tess: curve_flatten.c is hidden
 # in libflux.so, so we compile it into the test binary directly.
 test_canvas_flatten = executable('test_canvas_flatten',
   'test_canvas_flatten.c',
-  '../../../libs/flux/src/canvas/geometry_flatten.c',
+  '../../../libs/flux/src/canvas/curve_flatten.c',
   dependencies : [test_helpers_dep],
 )
 test('canvas_flatten', test_canvas_flatten, suite : 'unit')
@@ -158,6 +197,24 @@ test_canvas_stroke_degenerate = executable('test_canvas_stroke_degenerate',
   dependencies : [test_helpers_dep],
 )
 test('canvas_stroke_degenerate', test_canvas_stroke_degenerate, suite : 'unit')
+
+# Stroke coverage oracle: a translucent stroke must carry exactly one coverage
+# everywhere in its own band. Detects band self-overlap (double blending) that
+# is invisible for opaque paint but shows as a darker seam under translucency.
+test_canvas_stroke_region = executable('test_canvas_stroke_region',
+  'test_canvas_stroke_region.c',
+  dependencies : [test_helpers_dep],
+)
+test('canvas_stroke_region', test_canvas_stroke_region, suite : 'unit')
+
+# Squircle path <-> field agreement (ADR-0118 INV-SDF-06): the fitted corner
+# cubics must lie on flux_sdf_squircle's zero set, so the canvas and the Prism
+# materials describe one shape rather than two.
+test_canvas_squircle = executable('test_canvas_squircle',
+  'test_canvas_squircle.c',
+  dependencies : [test_helpers_dep],
+)
+test('canvas_squircle', test_canvas_squircle, suite : 'unit')
 
 test_scene_camera = executable('test_scene_camera',
   'test_scene_camera.c',

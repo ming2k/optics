@@ -85,6 +85,26 @@ struct flux_canvas_backend {
                    const flux_canvas_push *push, const flux_canvas_vertex *verts,
                    uint32_t vertex_count);
 
+    /* Optional (nullable) analytic-coverage fill (ADR-0119). A backend that can
+     * rasterize contours directly consumes the geometry instead of a tessellated
+     * triangle stream and produces continuous coverage — no ear clipping, no
+     * stencil attachment, no sample count. `pts` are in PHYSICAL PIXELS (the
+     * front end has already applied the canvas transform) and `cons` index runs
+     * within them; `clip` bounds the work. `paint` is the draw's brush — kind, colour and gradient
+     * stops — so a backend evaluates exactly the brushes it would on the triangle path. A backend
+     * returns FLUX_ERROR_UNSUPPORTED for a brush it cannot evaluate, and the
+     * front end falls back to tessellation for that draw.
+     * A backend that leaves this NULL simply keeps the triangle path, so the
+     * two presentations coexist per draw rather than per build.
+     *
+     * Geometry is the geometry; the brush is the brush. Coverage answers *where*
+     * a pixel is painted, so it applies to every paint kind the backend can
+     * evaluate — that is what lets gradient fills reach it too. */
+    flux_result (*submit_cover)(const flux_canvas_backend *self, flux_canvas *c,
+                                const flux_point *pts, const flux_canvas_contour *cons,
+                                uint32_t ncons, flux_fill_rule rule, const canvas_paint *paint,
+                                flux_recti clip);
+
     /* Optional (nullable) pixel snapshot: return premultiplied RGBA8 for the
      * whole canvas. The CPU backend implements it (its framebuffer); the GPU
      * backend leaves it NULL (readback goes through an offscreen target). */

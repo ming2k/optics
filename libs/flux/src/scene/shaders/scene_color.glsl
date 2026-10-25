@@ -18,13 +18,15 @@ layout(set = 0, binding = 2) uniform sampler u_samplers[];
  * Same layout as canvas_image.frag; read only when
  * color_flags & SCENE_COLOR_HAS_PARAMS. */
 struct ColorParams {
-    vec4 primaries[3];  /* content -> working space, column-major mat3 */
-    uint transfer;      /* flux_transfer_func */
+    vec4 primaries[3]; /* content -> working space, column-major mat3 */
+    uint transfer;     /* flux_transfer_func */
     float gamma;
-    uint lut_handle;    /* baked ICC 3D LUT (2D layout), 0xFFFFFFFF = none */
+    uint lut_handle; /* baked ICC 3D LUT (2D layout), 0xFFFFFFFF = none */
     uint lut_size;
 };
-layout(buffer_reference, std430) readonly buffer ColorParamsRef { ColorParams cp; };
+layout(buffer_reference, std430) readonly buffer ColorParamsRef {
+    ColorParams cp;
+};
 
 layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer JointPalette {
     mat4 joints[];
@@ -59,22 +61,42 @@ layout(buffer_reference, std430) readonly buffer PhongParams {
     uint joint_count;
 };
 
-const uint SCENE_COLOR_DECODE     = 0x1u;
+struct GpuCurveSeg {
+    float x0, y0;
+    float x1, y1;
+};
+
+layout(buffer_reference, std430) readonly buffer CurveSegmentsBuf {
+    GpuCurveSeg segs[];
+};
+
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer VectorParams {
+    vec4 base_color;
+    vec4 uv_scale_offset;
+    vec4 uv_rotation_alpha_cutoff;
+    uvec4 texture_info;
+    ColorParamsRef color_params;
+    uint color_flags;
+    CurveSegmentsBuf segs;
+    uint seg_count;
+    uint fill_rule;
+};
+
+const uint SCENE_COLOR_DECODE = 0x1u;
 const uint SCENE_COLOR_HAS_PARAMS = 0x2u;
 
 /* Baked ICC LUT: 2D-laid-out (N² × N), R fastest then G then B; the
  * blue slice is lerped manually. Same layout as canvas_image.frag. */
-vec3 sample_lut3d(uint ih, uint sh, float n, vec3 e)
-{
+vec3 sample_lut3d(uint ih, uint sh, float n, vec3 e) {
     vec3 c = clamp(e, 0.0, 1.0) * (n - 1.0);
     float b0 = floor(c.b);
     float b1 = min(b0 + 1.0, n - 1.0);
     vec2 uv0 = vec2((b0 * n + c.r + 0.5) / (n * n), (c.g + 0.5) / n);
     vec2 uv1 = vec2((b1 * n + c.r + 0.5) / (n * n), (c.g + 0.5) / n);
-    vec3 s0 = texture(sampler2D(u_textures[nonuniformEXT(ih)],
-                                u_samplers[nonuniformEXT(sh)]), uv0).rgb;
-    vec3 s1 = texture(sampler2D(u_textures[nonuniformEXT(ih)],
-                                u_samplers[nonuniformEXT(sh)]), uv1).rgb;
+    vec3 s0 =
+        texture(sampler2D(u_textures[nonuniformEXT(ih)], u_samplers[nonuniformEXT(sh)]), uv0).rgb;
+    vec3 s1 =
+        texture(sampler2D(u_textures[nonuniformEXT(ih)], u_samplers[nonuniformEXT(sh)]), uv1).rgb;
     return mix(s0, s1, c.b - b0);
 }
 
@@ -92,8 +114,7 @@ vec3 sample_lut3d(uint ih, uint sh, float n, vec3 e)
  *                 ? scene_decode_tagged(params.color_params.cp, sh, rgb)
  *                 : flux_tf_decode3(FLUX_TF_SRGB, 0.0, rgb);
  */
-vec3 scene_decode_tagged(ColorParams cp, uint sh, vec3 rgb)
-{
+vec3 scene_decode_tagged(ColorParams cp, uint sh, vec3 rgb) {
     if (cp.lut_handle != 0xFFFFFFFFu)
         return sample_lut3d(cp.lut_handle, sh, float(cp.lut_size), rgb);
     mat3 prim = mat3(cp.primaries[0].xyz, cp.primaries[1].xyz, cp.primaries[2].xyz);

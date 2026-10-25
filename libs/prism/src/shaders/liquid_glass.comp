@@ -1,4 +1,8 @@
 #version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "flux_sdf.glsl"
 #extension GL_EXT_nonuniform_qualifier : require
 
 /*
@@ -144,23 +148,15 @@ void store_source_over(uvec2 pixel, vec4 source)
     );
 }
 
+/* Convention adapter over the single squircle definition in flux_sdf.glsl
+ * (ADR-0118/INV-SDF-02): `bounds` is (x, y, w, h) and the non-zero
+ * half-extent floor keeps a degenerate group finite. The field - the L2/L4
+ * corner blend - is defined once, in flux; this file used to restate it. */
 float squircle_sdf(vec2 p, vec4 bounds, float requested_radius, float curvature)
 {
     vec2 half_extent = max(bounds.zw * 0.5, vec2(0.001));
     vec2 centre = bounds.xy + half_extent;
-    float radius = clamp(requested_radius, 0.0, min(half_extent.x, half_extent.y));
-    vec2 q = abs(p - centre) - half_extent + radius;
-    vec2 q_pos = max(q, vec2(0.0));
-    
-    // Standard Euclidean L2 distance
-    float d_l2 = length(q_pos) + min(max(q.x, q.y), 0.0) - radius;
-    
-    // G2 Superellipse (p = 4 norm) with metric gradient normalization
-    float q4 = pow(pow(q_pos.x, 4.0) + pow(q_pos.y, 4.0), 0.25);
-    float grad_len = (q4 > 1e-4) ? sqrt(pow(q_pos.x, 6.0) + pow(q_pos.y, 6.0)) / pow(q4, 3.0) : 1.0;
-    float d_g2 = (q4 - radius) / max(grad_len, 0.5) + min(max(q.x, q.y), 0.0);
-    
-    return mix(d_l2, d_g2, clamp(curvature, 0.0, 1.0));
+    return flux_sdf_squircle(p - centre, half_extent, requested_radius, curvature);
 }
 
 float smooth_union(float a, float b, float radius)

@@ -107,9 +107,21 @@ int main(void) {
     flux_color white = flux_color_rgba_premul(255, 255, 255, 255);
     uint8_t first[W * H * 4], second[W * H * 4];
 
+    /* The cache is a property of the TESSELLATION path, and that path now serves
+     * only what the coverage seam declines. Since ADR-0119 S2 a solid SRC_OVER
+     * fill is answered analytically, and since the gradient extension so is a
+     * gradient fill — so what still tessellates is a fill whose *blend mode* the
+     * coverage path does not implement. Exercising the cache therefore uses a
+     * gradient with a non-SRC_OVER blend. The narrowing is the point: the cache
+     * serves the draws that still need triangles, not every draw. */
+    flux_color c0 = flux_color_rgba_premul(255, 0, 0, 255);
+    flux_color c1 = flux_color_rgba_premul(0, 0, 255, 255);
+    flux_gradient_stop stops[2] = {{0.0f, c0}, {1.0f, c1}};
+
     /* ---- Fill: second identical render hits and matches exactly ---- */
     flux_path *icon = build_icon_path(&arena);
-    flux_brush fill = flux_brush_solid(white);
+    flux_brush fill = flux_brush_linear_gradient((flux_point){0, 0}, (flux_point){W, H}, stops, 2);
+    fill.blend = FLUX_BLEND_PLUS;
     EXPECT(c->tess_cache_hits == 0 && c->tess_cache_misses == 0 && c->tess_cache_stores == 0);
     render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, first);
     EXPECT(c->tess_cache_misses == 1);

@@ -14,10 +14,9 @@ void lensi_skin_selectable(lens *ui, lens_node *n, const lens_widget_record *rec
     float h = rec->bounds.h;
 
     bool has_icon = rec->content.icon != 0 && lensi_icon_valid((int32_t)rec->content.icon);
-    float icon_size = has_icon
-                          ? (rec->content.glyph_size > 0.0f ? rec->content.glyph_size
-                                                            : rs->icon_size)
-                          : 0.0f;
+    float icon_size =
+        has_icon ? (rec->content.glyph_size > 0.0f ? rec->content.glyph_size : rs->icon_size)
+                 : 0.0f;
     float icon_gap = has_icon ? (rs->gap > 0.0f ? rs->gap : 8.0f) : 0.0f;
 
     /* Background: transparent at rest. A selected row always uses the

@@ -3,6 +3,8 @@
 #extension GL_EXT_buffer_reference     : enable
 #extension GL_GOOGLE_include_directive : require
 
+#include "flux_sdf.glsl"
+
 /*
  * Canvas image fragment shader. Bindless textures + sampler.
  *
@@ -137,9 +139,10 @@ void main()
         if ((kind == 6u || kind == 7u))
             out_color.a = 1.0;
         if ((kind == 5u || kind == 7u)) {
-            vec2 q = abs(v_pos - pc.image_dst.xy) - (pc.image_dst.zw - pc.grad_radius);
-            float distance = min(max(q.x, q.y), 0.0)
-                           + length(max(q, vec2(0.0))) - pc.grad_radius;
+            /* Rounded-image clip (ADR-0051): the shared analytic field
+             * (ADR-0118) — this was the last inline copy of it. */
+            float distance = flux_sdf_round_rect(v_pos - pc.image_dst.xy, pc.image_dst.zw,
+                                                 pc.grad_radius);
             float coverage = clamp(0.5 - distance / max(fwidth(distance), 1e-4), 0.0, 1.0);
             out_color *= coverage;
         }

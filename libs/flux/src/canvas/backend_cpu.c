@@ -33,6 +33,7 @@
 
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
+#include <flux/sdf.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,6 +74,11 @@ typedef struct flux_cpu_canvas {
     float *fb;      /* premultiplied RGBA, sw*sh*4, row-major (active layer or base) */
     float *base_fb; /* root destination sample buffer */
     uint8_t *rgba8; /* cached downsampled 8-bit view (width*height*4) */
+    /* Reusable coverage plane for the analytic fill (ADR-0119). Sized to the
+     * clip on demand and kept for the canvas's lifetime: a per-fill allocation
+     * would churn 8 MB at 1080p and 33 MB at 4K for every solid draw. */
+    float *cover_scratch;
+    size_t cover_scratch_n;
     /* Stencil-then-cover accumulation (ADR-0014), one int8 per sample,
      * lazily allocated on the first stencil submit. STENCIL_WRITE adds the
      * triangle's signed winding, STENCIL_WRITE_EO toggles parity; COVER_*
@@ -151,17 +157,24 @@ static vec4f frag_sdf(const flux_canvas_push *pc, vec4f vcol, float px, float py
     float cx = pc->image_dst[0], cy = pc->image_dst[1];
     float hx = pc->image_dst[2], hy = pc->image_dst[3];
     float radius = pc->image_src[0], stroke_hw = pc->image_src[1];
+    float curvature = pc->image_src[2];
+    float aa = pc->image_src[3]; /* shape units per screen pixel */
 
-    float qx = fabsf(px - cx) - (hx - radius);
-    float qy = fabsf(py - cy) - (hy - radius);
-    float mx = qx > 0.0f ? qx : 0.0f;
-    float my = qy > 0.0f ? qy : 0.0f;
-    float d = fminf(fmaxf(qx, qy), 0.0f) + sqrtf(mx * mx + my * my) - radius;
-    if (stroke_hw > 0.0f)
-        d = fabsf(d) - stroke_hw;
+    /* Map the fragment back into shape space with the inverse linear part,
+     * then evaluate the shared field there (ADR-0118). The mapping is exact
+     * for any similarity, which is all `canvas_sdf_similarity` admits. */
+    float rx = px - cx, ry = py - cy;
+    float i00 = pc->grad_from[0], i01 = pc->grad_from[1];
+    float i10 = pc->grad_to[0], i11 = pc->grad_to[1];
+    flux_point p = {i00 * rx + i01 * ry, i10 * rx + i11 * ry};
 
-    /* Screen-space |grad(d)| ~= 1 px for the canvas transform, so fwidth ~= 1. */
-    float cov = clampf(0.5f - d, 0.0f, 1.0f);
+    /* The *same* primitives the canvas_sdf.frag pipeline evaluates, so host and
+     * device coverage agree by construction rather than by tolerance. This host
+     * port once carried its own copy of the formula; test_canvas_squircle's
+     * dispatch test now compares the two pipelines end to end. */
+    float d = flux_sdf_squircle(p, hx, hy, radius, curvature);
+    d = flux_sdf_ring(d, stroke_hw);
+    float cov = flux_sdf_coverage(d, aa);
     return (vec4f){vcol.r * cov, vcol.g * cov, vcol.b * cov, vcol.a * cov};
 }
 
@@ -632,6 +645,7 @@ static void cpu_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) 
     }
     free(v->base_fb);
     free(v->rgba8);
+    free(v->cover_scratch);
     free(v->coverage);
     free(v->stencil);
     free(v);
@@ -983,6 +997,81 @@ static const uint8_t *cpu_read_coverage(const flux_canvas_backend *self, flux_ca
     return v->coverage;
 }
 
+/* Analytic coverage fill (ADR-0119): rasterize the contours at pixel resolution
+ * and composite the (already premultiplied) colour through the resulting
+ * coverage, once per supersample. Every sample of a pixel receives the same
+ * coverage value, so the existing downsample averages to exactly that coverage —
+ * the plane is already anti-aliased, so supersampling the geometry as well would
+ * be redundant work. */
+static flux_result cpu_submit_cover(const flux_canvas_backend *self, flux_canvas *c,
+                                    const flux_point *pts, const flux_canvas_contour *cons,
+                                    uint32_t ncons, flux_fill_rule rule, const canvas_paint *paint,
+                                    flux_recti clip) {
+    (void)self;
+    flux_cpu_canvas *v = c ? c->backend_data : nullptr;
+    if (!v || !v->fb || !pts || !cons)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (clip.w <= 0 || clip.h <= 0)
+        return FLUX_OK;
+
+    /* Evaluate the brush's kind BEFORE allocating or rasterizing: a refusal must
+     * cost nothing, and it happens per draw. */
+    if (paint->kind != CANVAS_PAINT_SOLID && paint->kind != CANVAS_PAINT_LINEAR_GRADIENT &&
+        paint->kind != CANVAS_PAINT_RADIAL_GRADIENT)
+        return FLUX_ERROR_UNSUPPORTED; /* caller falls back to tessellation */
+
+    uint32_t w = (uint32_t)clip.w, h = (uint32_t)clip.h;
+    size_t need = (size_t)w * h;
+    /* Reuse the canvas's plane: a per-fill allocation would churn 8 MB at 1080p
+     * and 33 MB at 4K for every draw. */
+    if (need > v->cover_scratch_n) {
+        float *grown = realloc(v->cover_scratch, need * sizeof(float));
+        if (!grown)
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        v->cover_scratch = grown;
+        v->cover_scratch_n = need;
+    }
+    float *cov = v->cover_scratch;
+    flux_result rc =
+        canvas_coverage_rasterize(pts, cons, ncons, rule, (float)clip.x, (float)clip.y, w, h, cov);
+    if (rc != FLUX_OK)
+        return rc; /* fail closed: the caller falls back to tessellation */
+
+    /* Coverage answers WHERE a pixel is painted; the brush answers WHAT colour.
+     * So every paint kind this backend can evaluate is served here, not just
+     * solid — gradient fills get the same continuous coverage. */
+    flux_canvas_push pc;
+    build_push(c, paint, &pc);
+
+    for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            float a = cov[(size_t)y * w + x];
+            if (a <= 0.0f)
+                continue;
+            float px_c = (float)(clip.x + (int)x) + 0.5f;
+            float py_c = (float)(clip.y + (int)y) + 0.5f;
+            vec4f src = (paint->kind == CANVAS_PAINT_SOLID) ? unpack_premul(paint->color)
+                                                            : frag_gradient(&pc, px_c, py_c);
+            float sr = src.r * a, sg = src.g * a, sb = src.b * a, sa = src.a * a;
+            int px = clip.x + (int)x, py = clip.y + (int)y;
+            if (px < 0 || py < 0 || px >= (int)v->width || py >= (int)v->height)
+                continue;
+            for (uint32_t oy = 0; oy < v->ss; ++oy) {
+                for (uint32_t ox = 0; ox < v->ss; ++ox) {
+                    size_t sx = (size_t)px * v->ss + ox;
+                    size_t sy = (size_t)py * v->ss + oy;
+                    float *dst = &v->fb[(sy * v->sw + sx) * 4];
+                    dst[0] = sr + dst[0] * (1.0f - sa); /* premultiplied SRC_OVER */
+                    dst[1] = sg + dst[1] * (1.0f - sa);
+                    dst[2] = sb + dst[2] * (1.0f - sa);
+                    dst[3] = sa + dst[3] * (1.0f - sa);
+                }
+            }
+        }
+    }
+    return FLUX_OK;
+}
+
 static const flux_canvas_backend cpu_backend = {
     .name = "cpu",
     .canvas_init = cpu_canvas_init,
@@ -992,6 +1081,7 @@ static const flux_canvas_backend cpu_backend = {
     .set_scissor = cpu_set_scissor,
     .bind_program = cpu_bind_program,
     .submit = cpu_submit,
+    .submit_cover = cpu_submit_cover,
     .read_pixels = cpu_read_pixels,
     .read_coverage = cpu_read_coverage,
     .save_layer = cpu_save_layer,

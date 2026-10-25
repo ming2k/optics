@@ -414,18 +414,23 @@ typedef struct flux_canvas_push {
     float grad_radius;             /* offset 48 */
     float _pad1;                   /* offset 52 */
     flux_canvas_gradient_stop_pc stops[FLUX_GRADIENT_MAX_STOPS]; /* offset 56, size 64 */
-    /* Image draw extension (read by the image and SDF fragment shaders).
+    /* Image and vector draw extension (read by image, SDF and vector fragment shaders).
      * Image UVs are carried per vertex; image_dst remains shared storage for
      * the SDF rounded-rectangle pipeline's screen-space box parameters. */
-    uint32_t image_handle;   /* offset 120 */
-    uint32_t sampler_handle; /* offset 124 */
-    float image_dst[4];      /* offset 128 — SDF box / reserved for images */
-    /* image_src selects the sampled sub-rectangle in NORMALISED texture
-     * coordinates (u, v, du, dv). The per-vertex [0,1] UV is remapped into
-     * it: uv = image_src.xy + v_uv * image_src.zw.
-     * For whole-image draws this is {0,0,1,1}; a glyph atlas passes the
-     * glyph's sub-rect so one texture serves every glyph. */
-    float image_src[4]; /* offset 144 — u, v, du, dv (normalised) */
+    union {
+        struct {
+            uint32_t image_handle;   /* offset 120 */
+            uint32_t sampler_handle; /* offset 124 */
+            float image_dst[4];      /* offset 128 — SDF box / reserved for images */
+            float image_src[4];      /* offset 144 — u, v, du, dv (normalised) */
+        };
+        struct {
+            uint64_t segs_address; /* offset 120 */
+            uint32_t seg_count;    /* offset 128 */
+            uint32_t fill_rule;    /* offset 132 */
+            uint32_t _vec_pad[6];
+        } vector;
+    };
 } flux_canvas_push;
 
 /* Push constants for CANVAS_PIPE_OUTPUT (ADR-0069). Layout matches the
@@ -545,8 +550,9 @@ typedef enum canvas_pipe_id {
     CANVAS_PIPE_STENCIL_WRITE_EO, /* even-odd variant: INVERT both faces */
     CANVAS_PIPE_COVER_SOLID,
     CANVAS_PIPE_COVER_GRADIENT,
-    CANVAS_PIPE_GLYPH, /* batched glyph run (ADR-0010) */
-    CANVAS_PIPE_SDF,   /* analytic rounded-rect / circle (fill + ring) */
+    CANVAS_PIPE_GLYPH,  /* batched glyph run (ADR-0010) */
+    CANVAS_PIPE_SDF,    /* analytic rounded-rect / circle (fill + ring) */
+    CANVAS_PIPE_VECTOR, /* ADR-0116: analytic fragment vector rasterizer */
     /* Working-space intermediate -> destination output transform
      * (ADR-0069). Never emitted by draws; backend_vk records it in
      * end_pass (encode) and in the LOAD seed blit (decode). Always
@@ -645,6 +651,15 @@ typedef struct flatten_multi {
     uint32_t point_count;
     uint32_t contour_count;
 } flatten_multi;
+
+/* Coverage rasterizer (ADR-0119 S1): exact per-pixel area of the region the
+ * fill rule selects, from flattened contours. Returns FLUX_OK, or an explicit
+ * error when the split budget is exhausted (never silently wrong coverage). */
+FLUX_NODISCARD flux_result canvas_coverage_rasterize(const flux_point *pts,
+                                                     const flux_canvas_contour *cons,
+                                                     uint32_t ncons, flux_fill_rule rule, float ox,
+                                                     float oy, uint32_t w, uint32_t h,
+                                                     float *out_cov);
 
 flatten_multi flatten_path_to_contours(const flux_path *p, float pixel_scale, flux_point *out_pts,
                                        uint32_t pts_cap, flux_canvas_contour *out_cons,

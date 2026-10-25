@@ -89,7 +89,7 @@ void submit_triangles_id(flux_canvas *c, const canvas_paint *paint, canvas_pipe_
     submit_triangles(c, paint, verts, vertex_count);
 }
 
-/* Stub for the pixel-scale helper that lives in geometry_flatten.c —
+/* Stub for the pixel-scale helper that lives in curve_flatten.c —
  * the test scripts the flatten output directly, so the actual value
  * is unused. Any positive constant works. */
 float flux_canvas_mat3x2_pixel_scale(flux_mat3x2 m) {

@@ -22,7 +22,7 @@ if get_option('glyph') and not opt_canvas
   error('glyph sibling requires canvas (flux_canvas_draw_glyph_run) — pass -Dcanvas=true with -Dglyph=true')
 endif
 
-flux_inc = include_directories('include')
+flux_inc = [include_directories('include'), include_directories('.')]
 
 # dma-buf (fd-based external memory import/export + sync_file fences) is
 # Linux-only. When off, src/core/dmabuf_stub.c replaces dmabuf.c and
@@ -62,6 +62,8 @@ flux_sources = files(
   'src/math/color.c',
   'src/math/colorspace.c',
   'src/math/arena.c',
+  'src/curve/curve.c',
+  'src/sdf/sdf.c',
 )
 if have_dmabuf
   flux_sources += files('src/core/dmabuf.c')
@@ -90,9 +92,11 @@ if opt_canvas
     'src/canvas/canvas.c',
     'src/canvas/path.c',
     'src/canvas/paint.c',
-    'src/canvas/geometry_flatten.c',
     'src/canvas/geometry_tess.c',
     'src/canvas/geometry_stroke.c',
+    'src/canvas/curve_flatten.c',
+    'src/canvas/coverage_raster.c',
+    'src/canvas/canvas_tile.c',
     'src/canvas/renderer.c',
     'src/canvas/record.c',
     'src/canvas/backend_vk.c',
@@ -130,11 +134,13 @@ if opt_canvas
   )
   canvas_image_frag_spv = custom_target('canvas_image.frag.spv',
     input   : 'src/canvas/shaders/canvas_image.frag',
-    depend_files : 'src/canvas/shaders/canvas_color.glsl',
+    depend_files : ['src/canvas/shaders/canvas_color.glsl',
+                    'include/flux/shaders/flux_sdf.glsl'],
 
     output  : 'canvas_image.frag.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3',
                '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+               '-I' + meson.current_source_dir() / 'include/flux/shaders',
                '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_glyph_frag_spv = custom_target('canvas_glyph.frag.spv',
@@ -146,9 +152,11 @@ if opt_canvas
   )
   canvas_sdf_frag_spv = custom_target('canvas_sdf.frag.spv',
     input   : 'src/canvas/shaders/canvas_sdf.frag',
+    depend_files : 'include/flux/shaders/flux_sdf.glsl',
     output  : 'canvas_sdf.frag.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3',
                '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+               '-I' + meson.current_source_dir() / 'include/flux/shaders',
                '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_output_vert_spv = custom_target('canvas_output.vert.spv',
@@ -167,18 +175,36 @@ if opt_canvas
                '-I' + meson.current_source_dir() / 'src/canvas/shaders',
                '@INPUT@', '-o', '@OUTPUT@'],
   )
+  canvas_tile_raster_comp_spv = custom_target('canvas_tile_raster.comp.spv',
+    input   : 'src/canvas/shaders/canvas_tile_raster.comp',
+    output  : 'canvas_tile_raster.comp.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+               '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  canvas_vector_frag_spv = custom_target('canvas_vector.frag.spv',
+    input   : 'src/canvas/shaders/canvas_vector.frag',
+    depend_files : 'src/canvas/shaders/canvas_color.glsl',
+
+    output  : 'canvas_vector.frag.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+               '@INPUT@', '-o', '@OUTPUT@'],
+  )
   flux_extra_inputs += [canvas_solid_vert_spv, canvas_solid_frag_spv,
                         canvas_gradient_frag_spv, canvas_image_frag_spv,
                         canvas_glyph_frag_spv, canvas_sdf_frag_spv,
-                        canvas_output_vert_spv, canvas_output_frag_spv]
+                        canvas_output_vert_spv, canvas_output_frag_spv,
+                        canvas_tile_raster_comp_spv, canvas_vector_frag_spv]
   flux_shader_spvs += [canvas_solid_vert_spv, canvas_solid_frag_spv,
                        canvas_gradient_frag_spv, canvas_image_frag_spv,
                        canvas_glyph_frag_spv, canvas_sdf_frag_spv,
-                       canvas_output_vert_spv, canvas_output_frag_spv]
+                       canvas_output_vert_spv, canvas_output_frag_spv,
+                       canvas_tile_raster_comp_spv, canvas_vector_frag_spv]
   flux_shader_names += ['canvas_solid_vert_spv', 'canvas_solid_frag_spv',
                         'canvas_gradient_frag_spv', 'canvas_image_frag_spv',
                         'canvas_glyph_frag_spv', 'canvas_sdf_frag_spv',
-                        'canvas_output_vert_spv', 'canvas_output_frag_spv']
+                        'canvas_output_vert_spv', 'canvas_output_frag_spv',
+                        'canvas_tile_raster_comp_spv', 'canvas_vector_frag_spv']
 endif
 if opt_scene
   flux_sources += files('src/scene/scene.c')
@@ -233,15 +259,32 @@ if opt_scene
     command : [glslang, '-V', '--target-env', 'vulkan1.3',
                scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
+  scene_vector_vert_spv = custom_target('scene_vector.vert.spv',
+    input   : 'src/scene/shaders/scene_vector.vert',
+    depend_files : scene_shader_deps,
+    output  : 'scene_vector.vert.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+               scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
+  )
+  scene_vector_frag_spv = custom_target('scene_vector.frag.spv',
+    input   : 'src/scene/shaders/scene_vector.frag',
+    depend_files : scene_shader_deps,
+    output  : 'scene_vector.frag.spv',
+    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+               scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
+  )
   flux_extra_inputs += [scene_unlit_vert_spv, scene_unlit_frag_spv,
                         scene_phong_vert_spv, scene_phong_frag_spv,
-                        scene_unlit_skin_vert_spv, scene_phong_skin_vert_spv]
+                        scene_unlit_skin_vert_spv, scene_phong_skin_vert_spv,
+                        scene_vector_vert_spv, scene_vector_frag_spv]
   flux_shader_spvs += [scene_unlit_vert_spv, scene_unlit_frag_spv,
                        scene_phong_vert_spv, scene_phong_frag_spv,
-                       scene_unlit_skin_vert_spv, scene_phong_skin_vert_spv]
+                       scene_unlit_skin_vert_spv, scene_phong_skin_vert_spv,
+                       scene_vector_vert_spv, scene_vector_frag_spv]
   flux_shader_names += ['scene_unlit_vert_spv', 'scene_unlit_frag_spv',
                         'scene_phong_vert_spv', 'scene_phong_frag_spv',
-                        'scene_unlit_skin_vert_spv', 'scene_phong_skin_vert_spv']
+                        'scene_unlit_skin_vert_spv', 'scene_phong_skin_vert_spv',
+                        'scene_vector_vert_spv', 'scene_vector_frag_spv']
 endif
 if opt_compute
   flux_sources += files('src/compute/compute.c')
@@ -366,10 +409,16 @@ install_headers(
   'include/flux/flux.h',
   'include/flux/core.h',
   'include/flux/math.h',
+  'include/flux/curve.h',
+  'include/flux/sdf.h',
   'include/flux/vulkan.h',
   'include/flux/dmabuf.h',
   subdir : 'flux',
 )
+
+# The analytic distance field is defined once for GLSL consumers too
+# (ADR-0118); Prism's materials include it rather than keeping private copies.
+install_headers('include/flux/shaders/flux_sdf.glsl', subdir : 'flux/shaders')
 if opt_canvas
   install_headers('include/flux/canvas.h', subdir : 'flux')
   install_headers('include/flux/canvas_helpers.h', subdir : 'flux')
