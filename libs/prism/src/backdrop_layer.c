@@ -143,7 +143,35 @@ typedef struct backdrop_layer_slot {
     flux_buffer *stats;
     bool stats_submitted;
     uint32_t stats_group_count;
+    /* Backdrop layer cache (INV-COMP-04) */
+    uint64_t last_desc_hash;
+    uint32_t last_input_handle;
+    uint32_t last_blurred_handle;
 } backdrop_layer_slot;
+
+static inline uint64_t prism_fnv1a64(const void *data, size_t len, uint64_t h) {
+    const uint8_t *p = (const uint8_t *)data;
+    for (size_t i = 0; i < len; ++i) {
+        h ^= (uint64_t)p[i];
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+static uint64_t prism_hash_backdrop_layer_desc(const prism_backdrop_layer_desc *desc) {
+    uint64_t h = 14695981039346656037ull;
+    h = prism_fnv1a64(&desc->refraction,
+                      offsetof(prism_backdrop_layer_desc, ambient_fresnel) + sizeof(float) -
+                          offsetof(prism_backdrop_layer_desc, refraction),
+                      h);
+    h = prism_fnv1a64(&desc->frost_count, sizeof(desc->frost_count), h);
+    if (desc->frost && desc->frost_count > 0)
+        h = prism_fnv1a64(desc->frost, sizeof(prism_base_material) * desc->frost_count, h);
+    h = prism_fnv1a64(&desc->group_count, sizeof(desc->group_count), h);
+    if (desc->groups && desc->group_count > 0)
+        h = prism_fnv1a64(desc->groups, sizeof(prism_liquid_glass_group) * desc->group_count, h);
+    return h;
+}
 
 struct prism_backdrop_layer_filter {
     atomic_uint ref_count;
@@ -551,6 +579,20 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     uint32_t image_height = flux_image_height(input);
     backdrop_layer_slot *slot = &filter->slots[index];
 
+    uint32_t in_handle = flux_image_bindless_handle(input);
+    uint32_t blur_handle = flux_image_bindless_handle(blurred);
+    uint64_t desc_hash = prism_hash_backdrop_layer_desc(desc);
+
+    if (slot->initialized && slot->last_desc_hash == desc_hash &&
+        slot->last_input_handle == in_handle && slot->last_blurred_handle == blur_handle) {
+        /* Material Backdrop Boundary Cache hit (ADR-0123 / INV-COMP-04):
+         * When backdrop input textures and material parameters are unchanged across frames,
+         * skip the clear, stats, frost, and glass compute dispatches entirely and reuse
+         * the persistent slot output image. */
+        *out = slot->output;
+        return FLUX_OK;
+    }
+
     /* Current footprints: frost rects first, glass bodies after — the same
      * order the dispatches run in, so the merged clear set covers exactly
      * what this submission will write. */
@@ -843,6 +885,9 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     slot->initialized = true;
     slot->stats_submitted = true;
     slot->stats_group_count = desc->group_count;
+    slot->last_desc_hash = desc_hash;
+    slot->last_input_handle = in_handle;
+    slot->last_blurred_handle = blur_handle;
     *out = slot->output;
     return FLUX_OK;
 }

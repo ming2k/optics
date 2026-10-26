@@ -64,6 +64,7 @@ flux_sources = files(
   'src/math/arena.c',
   'src/curve/curve.c',
   'src/sdf/sdf.c',
+  'src/vault/tess_earcut.c',
 )
 if have_dmabuf
   flux_sources += files('src/core/dmabuf.c')
@@ -90,6 +91,7 @@ flux_shader_names = []
 if opt_canvas
   flux_sources += files(
     'src/canvas/canvas.c',
+    'src/canvas/canvas_dispatch.c',
     'src/canvas/path.c',
     'src/canvas/paint.c',
     'src/canvas/geometry_tess.c',
@@ -183,11 +185,12 @@ if opt_canvas
   )
   canvas_vector_frag_spv = custom_target('canvas_vector.frag.spv',
     input   : 'src/canvas/shaders/canvas_vector.frag',
-    depend_files : 'src/canvas/shaders/canvas_color.glsl',
-
+    depend_files : ['src/canvas/shaders/canvas_color.glsl',
+                    'include/flux/shaders/flux_vector_eval.glsl'],
     output  : 'canvas_vector.frag.spv',
     command : [glslang, '-V', '--target-env', 'vulkan1.3',
                '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+               '-I' + meson.current_source_dir() / 'include/flux/shaders',
                '@INPUT@', '-o', '@OUTPUT@'],
   )
   flux_extra_inputs += [canvas_solid_vert_spv, canvas_solid_frag_spv,
@@ -214,9 +217,11 @@ if opt_scene
     glslang = find_program('glslangValidator', required : true)
   endif
   scene_shader_deps = ['src/scene/shaders/scene_color.glsl',
-                       'src/canvas/shaders/canvas_color.glsl']
+                       'src/canvas/shaders/canvas_color.glsl',
+                       'include/flux/shaders/flux_vector_eval.glsl']
   scene_shader_inc = ['-I' + meson.current_source_dir() / 'src/canvas/shaders',
-                      '-I' + meson.current_source_dir() / 'src/scene/shaders']
+                      '-I' + meson.current_source_dir() / 'src/scene/shaders',
+                      '-I' + meson.current_source_dir() / 'include/flux/shaders']
   scene_unlit_vert_spv = custom_target('scene_unlit.vert.spv',
     input   : 'src/scene/shaders/scene_unlit.vert',
     depend_files : scene_shader_deps,
@@ -418,7 +423,10 @@ install_headers(
 
 # The analytic distance field is defined once for GLSL consumers too
 # (ADR-0118); Prism's materials include it rather than keeping private copies.
-install_headers('include/flux/shaders/flux_sdf.glsl', subdir : 'flux/shaders')
+install_headers('include/flux/shaders/flux_sdf.glsl',
+                'include/flux/shaders/flux_vector_eval.glsl',
+                subdir : 'flux/shaders')
+install_headers('include/flux/vault/tess_earcut.h', subdir : 'flux/vault')
 if opt_canvas
   install_headers('include/flux/canvas.h', subdir : 'flux')
   install_headers('include/flux/canvas_helpers.h', subdir : 'flux')

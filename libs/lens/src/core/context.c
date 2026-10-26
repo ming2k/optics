@@ -360,6 +360,78 @@ bool lens_frame_needs_repaint(const lens *ui) {
     return false;
 }
 
+static flux_rect rect_union_bounds(flux_rect a, flux_rect b) {
+    if (a.w <= 0.0f || a.h <= 0.0f)
+        return b;
+    if (b.w <= 0.0f || b.h <= 0.0f)
+        return a;
+    float x0 = fminf(a.x, b.x);
+    float y0 = fminf(a.y, b.y);
+    float x1 = fmaxf(a.x + a.w, b.x + b.w);
+    float y1 = fmaxf(a.y + a.h, b.y + b.h);
+    return (flux_rect){x0, y0, x1 - x0, y1 - y0};
+}
+
+static flux_rect rect_intersect_bounds(flux_rect a, flux_rect b) {
+    float x = fmaxf(a.x, b.x);
+    float y = fmaxf(a.y, b.y);
+    float r = fminf(a.x + a.w, b.x + b.w);
+    float btm = fminf(a.y + a.h, b.y + b.h);
+    if (r <= x || btm <= y)
+        return (flux_rect){0, 0, 0, 0};
+    return (flux_rect){x, y, r - x, btm - y};
+}
+
+static flux_rect node_damage_bounds(const lens_node *n) {
+    flux_rect d = {0, 0, 0, 0};
+    if (!n)
+        return d;
+    if (n->subtree_changed || n->visual_revision != n->presented_revision) {
+        if (n->final_rect.w > 0.0f && n->final_rect.h > 0.0f)
+            d = rect_union_bounds(d, n->final_rect);
+        if (n->has_render_rect && n->render_rect.w > 0.0f && n->render_rect.h > 0.0f)
+            d = rect_union_bounds(d, n->render_rect);
+        for (const lens_node *c = n->first_child; c; c = c->next_sibling) {
+            flux_rect cd = node_damage_bounds(c);
+            d = rect_union_bounds(d, cd);
+        }
+    }
+    return d;
+}
+
+flux_rect lens_damage_rect(const lens *ui) {
+    if (!ui || !lens_frame_needs_repaint(ui))
+        return (flux_rect){0, 0, 0, 0};
+
+    flux_rect d = {0, 0, 0, 0};
+    if (ui->root)
+        d = rect_union_bounds(d, node_damage_bounds(ui->root));
+
+    for (uint32_t b = 0; b < (uint32_t)LENS_BAND_COUNT; b++) {
+        for (uint32_t i = 0; i < ui->band_counts[b]; i++) {
+            if (ui->bands[b][i])
+                d = rect_union_bounds(d, node_damage_bounds(ui->bands[b][i]));
+        }
+    }
+
+    if (ui->caret_rect.w > 0.0f && ui->caret_rect.h > 0.0f)
+        d = rect_union_bounds(d, ui->caret_rect);
+
+    if (ui->tooltip.active || ui->prev_tooltip_active)
+        d = rect_union_bounds(d, ui->tooltip.anchor);
+
+    if (d.w <= 0.0f && ui->root)
+        d = ui->root->final_rect;
+
+    /* Constrain damage to the visible layout viewport */
+    if (ui->input.display_size.x > 0.0f && ui->input.display_size.y > 0.0f) {
+        flux_rect viewport = {0, 0, ui->input.display_size.x, ui->input.display_size.y};
+        d = rect_intersect_bounds(d, viewport);
+    }
+
+    return d;
+}
+
 void lens_set_reduced_motion(lens *ui, bool reduced) {
     if (ui)
         ui->reduced_motion = reduced;

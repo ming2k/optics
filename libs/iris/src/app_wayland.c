@@ -38,9 +38,13 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "cursor-shape-v1-client-protocol.h"
+#include "display_pacer.h"
 #include "fractional-scale-v1-client-protocol.h"
+#include "frame_mailbox.h"
+#include "presentation-time-client-protocol.h"
 #include "xdg-activation-v1-client-protocol.h"
 #include <linux/input-event-codes.h> /* BTN_LEFT / BTN_RIGHT / BTN_MIDDLE — Linux-only, this file only */
+#include <semaphore.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -125,6 +129,8 @@ typedef struct wp_platform {
     struct wl_display *display;
     struct wl_registry *registry;
     struct wl_compositor *compositor;
+    struct wl_subcompositor *subcompositor;
+    uint32_t subcompositor_name;
     struct xdg_wm_base *wm_base;
     struct xdg_activation_v1 *activation;
     uint32_t activation_name;
@@ -281,6 +287,37 @@ typedef struct wp_platform {
      * pump_events poll set. The colour-scheme watcher's pump thread posts
      * through it; the loop drains the queue on this thread. */
     int wakeup_fd;
+
+    /* --- Display pacing (ADR-0122) ---------------------------------------
+     * Presentation is paced by the display, not by a client timer. Two
+     * compositor signals drive the loop:
+     *
+     *   wl_surface.frame        — the grant to draw the next frame. Requested
+     *                             before each commit; the callback is what the
+     *                             frame loop waits for instead of sleeping on
+     *                             a hardcoded 60 Hz period.
+     *   wp_presentation_feedback— the compositor's own report of when the
+     *                             frame reached the display (latency / dropped
+     *                             frames) and the real refresh interval, which
+     *                             is how 120/144 Hz is learned rather than
+     *                             assumed.
+     *
+     * `refresh_ns` stays 0 until one of those two sources reports a value;
+     * the pacer then falls back to its "refresh rate not learned yet" period
+     * rather than a hardcoded 60 Hz target. */
+    struct wp_presentation *presentation;
+    struct wl_callback *frame_cb; /* outstanding wl_surface.frame, or NULL  */
+    bool frame_cb_pending;        /* requested, not yet fired              */
+    bool frame_cb_fired;          /* fired this iteration                  */
+    int64_t frame_cb_time_ns;     /* compositor timestamp of that callback */
+    int64_t refresh_ns;           /* learned display period; 0 = unknown   */
+
+    /* Decoupled dual-thread presentation engine (ADR-0124) */
+    iris_frame_mailbox mailbox;
+    pthread_t present_thread;
+    sem_t present_sem;
+    _Atomic(bool) presenter_running;
+    bool has_presenter_thread;
 
     wp_accum acc;
 } wp_platform;
@@ -2559,13 +2596,20 @@ static void out_geometry(void *d, struct wl_output *o, int32_t x, int32_t y, int
     (void)md;
     (void)tr;
 }
-static void out_mode(void *d, struct wl_output *o, uint32_t f, int32_t w, int32_t h, int32_t r) {
-    (void)d;
+static void out_mode(void *d, struct wl_output *o, uint32_t flags, int32_t w, int32_t h,
+                     int32_t r) {
     (void)o;
-    (void)f;
     (void)w;
     (void)h;
-    (void)r;
+    /* ADR-0122: the display's *current* mode carries its refresh rate in mHz
+     * (flags == WL_OUTPUT_MODE_CURRENT). Learning it here is what stops the
+     * frame loop from clamping a 120/144 Hz panel to an assumed 60 Hz. Mode
+     * changes (the user switching refresh rate) re-enter through this same
+     * event, so the period stays current. */
+    if (!(flags & WL_OUTPUT_MODE_CURRENT) || r <= 0)
+        return;
+    wp_platform *pl = d;
+    pl->refresh_ns = 1000000000000LL / (int64_t)r; /* (1e9 ns * 1000) / mHz */
 }
 static void out_scale(void *data, struct wl_output *o, int32_t scale) {
     wp_platform *pl = data;
@@ -2731,6 +2775,16 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
     } else if (strcmp(iface, xdg_activation_v1_interface.name) == 0) {
         pl->activation = wl_registry_bind(reg, name, &xdg_activation_v1_interface, 1);
         pl->activation_name = name;
+    } else if (strcmp(iface, wp_presentation_interface.name) == 0) {
+        /* presentation-time (stable). Optional: without it the loop still
+         * paces from wl_surface.frame, and the refresh rate comes from
+         * wl_output.mode instead (ADR-0122). */
+        pl->presentation = wl_registry_bind(reg, name, &wp_presentation_interface, 1);
+    } else if (strcmp(iface, wl_subcompositor_interface.name) == 0) {
+        /* wl_subcompositor (core Wayland): enables hardware subsurface overlay
+         * plane composition between host canvas and UI chrome (ADR-0123). */
+        pl->subcompositor = wl_registry_bind(reg, name, &wl_subcompositor_interface, 1);
+        pl->subcompositor_name = name;
     }
 }
 
@@ -2756,6 +2810,10 @@ static void reg_remove(void *d, struct wl_registry *r, uint32_t name) {
     if (pl->activation && name == pl->activation_name) {
         xdg_activation_v1_destroy(pl->activation);
         pl->activation = NULL;
+    }
+    if (pl->subcompositor && name == pl->subcompositor_name) {
+        wl_subcompositor_destroy(pl->subcompositor);
+        pl->subcompositor = NULL;
     }
 }
 static const struct wl_registry_listener registry_listener = {
@@ -3016,6 +3074,81 @@ static long long now_ns(void) {
     return (long long)t.tv_sec * 1000000000LL + (long long)t.tv_nsec;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Display pacing (ADR-0122)                                          */
+/* ------------------------------------------------------------------ */
+
+/* wl_surface.frame — the compositor granting us the next frame. This is the
+ * clock the whole loop runs on: we do not decide when to draw, the display
+ * does. `time` is the compositor's frame timestamp in the same CLOCK_MONOTONIC
+ * domain, and is what animations are evaluated against (INV-PACE-04). */
+static void frame_cb_done(void *data, struct wl_callback *cb, uint32_t time) {
+    wp_platform *pl = data;
+    pl->frame_cb_fired = true;
+    pl->frame_cb_pending = false;
+    pl->frame_cb_time_ns = (int64_t)time * 1000000LL;
+    if (pl->frame_cb == cb)
+        pl->frame_cb = NULL;
+    wl_callback_destroy(cb);
+}
+static const struct wl_callback_listener frame_cb_listener = {.done = frame_cb_done};
+
+/* wp_presentation_feedback — what actually happened to a frame after we
+ * handed it over. Two uses: learn the real refresh interval (so 120/144 Hz
+ * displays are not clamped to 60 Hz, INV-PACE-02), and expose dropped frames.
+ * Only the presented/discarded lifecycle matters here; the timestamps are
+ * currently fed to the pacer's refresh discovery only. */
+static void feedback_presented(void *data, struct wp_presentation_feedback *fb, uint32_t tv_sec_hi,
+                               uint32_t tv_sec_lo, uint32_t tv_nsec, uint32_t refresh,
+                               uint32_t seq_hi, uint32_t seq_lo, uint32_t flags) {
+    (void)tv_sec_hi;
+    (void)tv_sec_lo;
+    (void)tv_nsec;
+    (void)seq_hi;
+    (void)seq_lo;
+    (void)flags;
+    wp_platform *pl = data;
+    if (refresh > 0)
+        pl->refresh_ns = (int64_t)refresh;
+    wp_presentation_feedback_destroy(fb);
+}
+static void feedback_discarded(void *data, struct wp_presentation_feedback *fb) {
+    (void)data;
+    wp_presentation_feedback_destroy(fb);
+}
+static const struct wp_presentation_feedback_listener feedback_listener = {
+    .presented = feedback_presented,
+    .discarded = feedback_discarded,
+};
+
+/* Subscribe to the next display grant. Must be called before the commit it
+ * is meant to pace: the compositor answers a wl_surface.frame request only
+ * once the surface has been committed, so a request with no following commit
+ * would never fire and the pulse train would stall. */
+static void wp_request_pulse(wp_platform *pl) {
+    if (pl->frame_cb_pending || !pl->surface)
+        return;
+    struct wl_callback *cb = wl_surface_frame(pl->surface);
+    wl_callback_add_listener(cb, &frame_cb_listener, pl);
+    pl->frame_cb = cb;
+    pl->frame_cb_pending = true;
+    if (pl->presentation) {
+        struct wp_presentation_feedback *fb =
+            wp_presentation_feedback(pl->presentation, pl->surface);
+        wp_presentation_feedback_add_listener(fb, &feedback_listener, pl);
+    }
+}
+
+/* Drop an outstanding grant (quiescence, teardown). The compositor will simply
+ * never answer it; no protocol error. */
+static void wp_cancel_pulse(wp_platform *pl) {
+    if (pl->frame_cb) {
+        wl_callback_destroy(pl->frame_cb);
+        pl->frame_cb = NULL;
+    }
+    pl->frame_cb_pending = false;
+}
+
 /* True if the input accumulator holds genuine user activity (pointer motion,
  * buttons, scroll, keys, or text/IME) since the last check. Frame-callback and
  * buffer-release traffic from our own present does NOT touch the accumulator,
@@ -3122,6 +3255,105 @@ static void im_frame_update(wp_platform *pl) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Decoupled Presentation Engine (ADR-0124)                          */
+/* ------------------------------------------------------------------ */
+
+typedef struct wp_present_context {
+    wp_platform *pl;
+    flux_device *device;
+    flux_surface *surface;
+    flux_canvas *canvas;
+    flux_surface *ui_surface;
+    flux_canvas *ui_canvas;
+    struct wl_surface *ui_wl_surface;
+    const iris_app_config *cfg;
+} wp_present_context;
+
+static void *wp_presenter_thread_main(void *arg) {
+    wp_present_context *ctx = arg;
+    wp_platform *pl = ctx->pl;
+
+    while (atomic_load_explicit(&pl->presenter_running, memory_order_acquire)) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_nsec += 40000000; /* 40ms timeout */
+        if (ts.tv_nsec >= 1000000000) {
+            ts.tv_sec += 1;
+            ts.tv_nsec -= 1000000000;
+        }
+        (void)sem_timedwait(&pl->present_sem, &ts);
+
+        if (!atomic_load_explicit(&pl->presenter_running, memory_order_acquire))
+            break;
+
+        iris_frame_packet *pkt = iris_mailbox_claim(&pl->mailbox);
+        if (!pkt)
+            continue;
+
+        if (pkt->snapshot) {
+            flux_frame *frame = NULL;
+            flux_surface *target_surface =
+                (ctx->ui_surface != ctx->surface) ? ctx->ui_surface : ctx->surface;
+            flux_canvas *target_canvas =
+                (ctx->ui_canvas != ctx->canvas) ? ctx->ui_canvas : ctx->canvas;
+
+            flux_result r = flux_surface_begin_frame(target_surface, NULL, &frame);
+            if (r == FLUX_OK) {
+                flux_color transparent_clear = flux_color_rgba(0, 0, 0, 0);
+                flux_color theme_clear = lens_get_theme(pl->ui).color_bg;
+                flux_color *pass_clear = (ctx->ui_surface != ctx->surface)
+                                             ? &transparent_clear
+                                             : (ctx->cfg->no_clear ? NULL : &theme_clear);
+
+                bool partial =
+                    (pkt->damage_rect.w > 0.0f && pkt->damage_rect.h > 0.0f && !pkt->force_paint);
+                int32_t dmg_x = 0, dmg_y = 0;
+                uint32_t dmg_w = 0, dmg_h = 0;
+                if (partial) {
+                    float s = pkt->scale;
+                    dmg_x = (int32_t)floorf(pkt->damage_rect.x * s);
+                    dmg_y = (int32_t)floorf(pkt->damage_rect.y * s);
+                    dmg_w = (uint32_t)ceilf((pkt->damage_rect.x + pkt->damage_rect.w) * s) -
+                            (uint32_t)dmg_x;
+                    dmg_h = (uint32_t)ceilf((pkt->damage_rect.y + pkt->damage_rect.h) * s) -
+                            (uint32_t)dmg_y;
+                }
+
+                flux_canvas_pass_desc pass_desc = {
+                    .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                    .frame = frame,
+                    .clear_color = pass_clear,
+                    .render_offset_x = partial ? dmg_x : 0,
+                    .render_offset_y = partial ? dmg_y : 0,
+                    .render_width = partial ? dmg_w : 0,
+                    .render_height = partial ? dmg_h : 0,
+                };
+
+                bool drew = false;
+                if (flux_canvas_begin(target_canvas, &pass_desc) == FLUX_OK) {
+                    drew = (lens_snapshot_submit(pkt->snapshot, target_canvas) == FLUX_OK);
+                    (void)flux_canvas_end(target_canvas);
+                }
+
+                if (drew && flux_frame_submit(frame) == FLUX_OK) {
+                    struct wl_surface *target_wl =
+                        ctx->ui_wl_surface ? ctx->ui_wl_surface : pl->surface;
+                    if (partial)
+                        wl_surface_damage_buffer(target_wl, dmg_x, dmg_y, (int32_t)dmg_w,
+                                                 (int32_t)dmg_h);
+                    else
+                        wl_surface_damage_buffer(target_wl, 0, 0, INT32_MAX, INT32_MAX);
+                    (void)flux_frame_present(frame);
+                }
+            }
+        }
+
+        iris_mailbox_recycle(&pl->mailbox, pkt);
+    }
+    return NULL;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Run                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -3134,6 +3366,11 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     flux_surface *surface = NULL;
     flux_canvas *canvas = NULL;
     lens *ui = NULL;
+    struct wl_surface *ui_wl_surface = NULL;
+    struct wl_subsurface *ui_wl_subsurface = NULL;
+    VkSurfaceKHR ui_vk_surface = VK_NULL_HANDLE;
+    flux_surface *ui_surface = NULL;
+    flux_canvas *ui_canvas = NULL;
     bool host_started = false;
     int rc = 1; /* pessimistic; set to 0 only on success */
 
@@ -3327,6 +3564,48 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         goto fail;
     }
 
+    /* Hardware subsurface composition (ADR-0123): when the host application
+     * draws custom canvas content (cfg->paint / cfg->prepare), allocate a
+     * dedicated Wayland subsurface with premultiplied alpha for Lens UI chrome.
+     * This decouples the UI layer from the dynamic host canvas, allowing the
+     * desktop compositor to blend them via hardware overlay planes. */
+    if ((cfg->paint || cfg->prepare) && pl.subcompositor) {
+        ui_wl_surface = wl_compositor_create_surface(pl.compositor);
+        if (ui_wl_surface) {
+            ui_wl_subsurface =
+                wl_subcompositor_get_subsurface(pl.subcompositor, ui_wl_surface, pl.surface);
+            if (ui_wl_subsurface) {
+                wl_subsurface_set_position(ui_wl_subsurface, 0, 0);
+                wl_subsurface_set_desync(ui_wl_subsurface);
+                wl_surface_set_buffer_scale(ui_wl_surface, pl.buffer_scale);
+                wl_surface_commit(ui_wl_surface);
+
+                ui_vk_surface = wp_create_vk_surface(device, pl.display, ui_wl_surface);
+                if (ui_vk_surface) {
+                    flux_surface_desc ui_sdesc = {
+                        .type = FLUX_TYPE_SURFACE_DESC,
+                        .vk_surface_khr = ui_vk_surface,
+                        .width = (uint32_t)(pl.width * pl.buffer_scale),
+                        .height = (uint32_t)(pl.height * pl.buffer_scale),
+                        .vsync = false,
+                    };
+                    if (flux_surface_create(device, &ui_sdesc, &ui_surface) == FLUX_OK) {
+                        flux_canvas_desc ui_cdesc = {
+                            .type = FLUX_TYPE_CANVAS_DESC,
+                            .surface = ui_surface,
+                        };
+                        (void)flux_canvas_create(&ui_cdesc, &ui_canvas);
+                    }
+                }
+            }
+        }
+    }
+
+    if (!ui_canvas) {
+        ui_canvas = canvas;
+        ui_surface = surface;
+    }
+
     if (lens_create(&(lens_desc){.device = device,
                                  .theme = cfg->dark
                                               ? lens_theme_dark()
@@ -3348,46 +3627,76 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     }
     host_started = true;
 
+    wp_present_context pctx = {
+        .pl = &pl,
+        .device = device,
+        .surface = surface,
+        .canvas = canvas,
+        .ui_surface = ui_surface,
+        .ui_canvas = ui_canvas,
+        .ui_wl_surface = ui_wl_surface,
+        .cfg = cfg,
+    };
+
+    /* Decoupled Presentation Engine (ADR-0124): for pure UI applications without
+     * custom immediate canvas painting, launch the dedicated presentation worker
+     * thread to asynchronously consume immutable scene snapshots. */
+    if (!cfg->paint && !cfg->prepare) {
+        iris_mailbox_init(&pl.mailbox);
+        sem_init(&pl.present_sem, 0, 0);
+        atomic_init(&pl.presenter_running, true);
+        if (pthread_create(&pl.present_thread, NULL, wp_presenter_thread_main, &pctx) == 0)
+            pl.has_presenter_thread = true;
+    }
+
     /* --- Frame loop --------------------------------------------------
-     * The surface presents without vsync (non-blocking, see flux_surface_desc
-     * above): a FIFO/vsync present blocks the main thread in
-     * vkAcquireNextImageKHR until the compositor releases an image, and while
-     * blocked there the loop can neither pump input nor advance time-based UI —
-     * the window appears frozen and "only updates on input". Instead we present
-     * immediately and pace the loop ourselves: we sleep inside pump_events'
-     * poll() until the next frame is due (or until real input wakes us early).
+     * Presentation is paced by the display, not by this loop (ADR-0122).
      *
-     * The rate is adaptive. Right after user input we run at ~60 Hz so hover /
-     * scroll / drag stay smooth. When nothing is happening we go further than
-     * a low idle rate: lens_frame_needs_repaint() tells us whether the frame
-     * just built would change a single pixel, and if not we skip the whole
-     * acquire/paint/present cycle; and when nothing time-driven is pending
-     * (no animation, no focused caret) we stop scheduling frames entirely and
-     * sleep in poll() until the next input / wakeup / a11y event. A focused
-     * text field keeps a low-frequency deadline alive for the caret blink.
+     * The surface still presents non-blocking (Mailbox, see flux_surface_desc
+     * above) so that acquiring an image can never freeze input handling — but
+     * the loop no longer *times* anything itself. It subscribes to the
+     * compositor's frame grant (wl_surface.frame, armed in wp_request_pulse
+     * before each commit) and draws when that grant arrives. The display's
+     * refresh is the cadence: 120/144 Hz panels are followed rather than
+     * clamped to an assumed 60 Hz, and the client clock can no longer beat
+     * against the compositor's latch (the old micro-stutter).
      *
-     * Hosts with a paint callback (cfg->paint) opt out of all of this: their
-     * content is opaque to lens, so they keep the old always-render pacing
-     * (~60 Hz after input, ~4 Hz idle). */
-    const long long ACTIVE_PERIOD_NS = 16666667LL; /* ~60 Hz when active    */
-    const long long IDLE_PERIOD_NS = 250000000LL;  /* ~4 Hz when idle: just  */
-                                                   /* enough for the caret   */
-                                                   /* blink (500ms period).  */
-    const long long INPUT_GRACE_NS = 400000000LL;  /* stay fast 400ms after  */
+     * iris_pacer (display_pacer.h) is the single authority for the cadence and
+     * owns the whole decision: paint, skip, or quiesce — plus the poll budget.
+     * Two properties are structural, not incidental:
+     *
+     *   - A zero-render skip (iris_request_frame_skip_render) advances the
+     *     cadence exactly like a paint. The pulse train, not an arithmetic
+     *     deadline derived from the last *paint*, is the schedule, so the
+     *     deadline can never land in the past and spin a core.
+     *   - Animations are evaluated against the compositor's pulse timestamp
+     *     (`sim_ns`), not against the wall clock when the frame was built.
+     *
+     * A lens-only host reaches full quiescence (no pending frame at all, the
+     * loop blocking in poll()); a host with cfg->paint keeps at least the low
+     * idle tick so its cfg->build can observe state it owns. */
+    iris_pacer pacer;
+    iris_pacer_init(&pacer);
 
-    struct timespec prev;
-    clock_gettime(CLOCK_MONOTONIC, &prev);
     int frame_no = 0;
-
-    long long next_deadline = now_ns();
-    bool frame_scheduled = true; /* the first frame must always paint */
+    /* Hosts with a canvas callback own opaque content: only they can say
+     * whether it moved, so they never reach full quiescence (the pacer keeps
+     * at least the low idle tick running cfg->build). Constant for the run. */
+    const bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
     /* Sticky until a frame containing the latest lens build is actually
      * presented. Layout/draw hashes compare consecutive builds; without this
      * host-side latch an acquire timeout could let the next identical build
      * look clean and permanently skip content that never reached screen. */
     bool surface_needs_paint = true;
-    long long last_input_ns = next_deadline;
-    long long last_render_ns = next_deadline - ACTIVE_PERIOD_NS;
+    /* No frame pending: block in poll() until something external happens.
+     * Seeded false so the first iteration always runs the build. */
+    bool quiesced = false;
+    /* Poll budget for the next iteration (ns). 0 = "no deadline, use the cap".
+     * iris_pacer_tick guarantees this is `>= 1` whenever it is not quiescing,
+     * which is what makes a 0 ms poll — and the 100% CPU spin it caused —
+     * unreachable. */
+    long long wait_ns = 0;
+    long long last_sim_ns = 0;
     double prev_cx = pl.acc.cx, prev_cy = pl.acc.cy;
 
     pl.ui = ui;
@@ -3430,69 +3739,62 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         pl.a11y_fd = iris_a11y__fd();
 
     while (pl.running) {
-        /* Sleep (inside poll) until the next frame is due, waking early on any
-         * Wayland / wakeup / a11y event. Gating the render on a deadline is what
-         * lets poll() actually block: presenting every iteration would make the
-         * compositor flood us with frame-callback events so poll() never sleeps
-         * and the loop spins at 100% CPU. With no frame scheduled (fully idle:
-         * no animation, no focused caret) there is no deadline at all — poll
-         * blocks until an event; the 200ms cap only keeps the sd-bus fd's
-         * poll mask fresh. */
-        long long t = now_ns();
-        long long budget_ns = frame_scheduled ? next_deadline - t : 0;
-        bool woke_on_event;
-        if (!frame_scheduled) {
-            woke_on_event = pump_events(&pl, 200);
-        } else if (budget_ns > 0) {
-            int budget_ms = (int)(budget_ns / 1000000LL);
-            if (budget_ms > 200)
-                budget_ms = 200;
-            woke_on_event = pump_events(&pl, budget_ms);
-        } else {
-            woke_on_event = pump_events(&pl, 0);
+        /* --- 1. Sleep until the display grants a frame, or something -----
+         * external needs us (input, a wakeup-seam callback, an a11y event).
+         * The budget comes straight from the pacer; it is never re-derived
+         * here from render timestamps, and never 0 while a frame is pending.
+         * The cap keeps the sd-bus fd's poll mask fresh while we wait on a
+         * pulse that arrives on the display fd anyway. */
+        const int POLL_CAP_MS = 200;
+        int timeout_ms;
+        if (quiesced)
+            timeout_ms = POLL_CAP_MS;
+        else if (wait_ns <= 0)
+            /* A frame is already due (this is the seeded first iteration, or
+             * a decision taken after a wake): drain and draw now instead of
+             * introducing a poll's worth of latency on startup. */
+            timeout_ms = 0;
+        else {
+            long long ms = wait_ns / 1000000LL;
+            if (ms < 1)
+                ms = 1; /* hard floor: poll(0) here is the spin we removed */
+            if (ms > POLL_CAP_MS)
+                ms = POLL_CAP_MS;
+            timeout_ms = (int)ms;
         }
+        bool woke_on_event = pump_events(&pl, timeout_ms);
 
-        /* Real user input wakes us out of the idle rate: pull the next render
-         * forward (but never sooner than one active period after the last one,
-         * so a burst of motion events can't exceed ~60 Hz) and mark the moment
-         * so we stay at the active rate through the grace window. */
-        if (acc_has_user_input(&pl, &prev_cx, &prev_cy)) {
-            last_input_ns = now_ns();
-            long long earliest = last_render_ns + ACTIVE_PERIOD_NS;
-            if (!frame_scheduled || next_deadline > earliest)
-                next_deadline = earliest;
-            frame_scheduled = true;
-        } else if (woke_on_event && !frame_scheduled) {
-            /* A non-input event (wakeup-posted callback such as a theme
-             * change, a11y, configure/scale) while fully idle: run one
-             * frame so lens sees the new state; whether it paints is
-             * decided by the repaint query below. */
-            next_deadline = now_ns();
-            frame_scheduled = true;
-        }
+        /* --- 2. Classify what woke us ---------------------------------- */
+        bool pulse_fired = pl.frame_cb_fired;
+        long long pulse_time = pl.frame_cb_time_ns;
+        pl.frame_cb_fired = false;
 
-        /* Not time to draw yet — keep draining events and sleeping. */
-        if (!frame_scheduled || now_ns() < next_deadline)
+        long long now = now_ns();
+        bool input_active = acc_has_user_input(&pl, &prev_cx, &prev_cy);
+
+        /* --- 3. Anything to do this iteration? -------------------------
+         * Fully quiesced with no wake reason: no build, no GPU, straight back
+         * to poll(). A non-input event (theme change, a11y, configure/scale)
+         * runs one build so lens/host see the new state. */
+        if (quiesced && !input_active && !pulse_fired && !woke_on_event) {
+            iris_pace_inputs idle_in = {
+                .now_ns = now,
+                .refresh_ns = pl.refresh_ns,
+                .have_pulse_source = true,
+                .has_custom_paint = has_custom_paint,
+                .pulse_pending = pl.frame_cb_pending,
+            };
+            iris_pace_decision idle_d = iris_pacer_tick(&pacer, &idle_in);
+            quiesced = idle_d.action == IRIS_PACE_QUIESCE;
+            wait_ns = idle_d.wait_timeout_ns;
+            if (quiesced)
+                wp_cancel_pulse(&pl);
             continue;
+        }
 
-        /* Render this iteration. A tentative deadline is scheduled up front
-         * (no catch-up bursts) so the error `continue`s in the present path
-         * still retry; it is refined — or dropped entirely — after lens_end,
-         * once the repaint query and animation state are known. A host
-         * animation request made by the previous frame also keeps this
-         * iteration at the active cadence. */
-        t = now_ns();
+        /* --- 4. Sample the host's per-frame declarations --------------- */
         bool host_animating = pl.animation_frame_requested;
         pl.animation_frame_requested = false;
-        long long period = (t - last_input_ns < INPUT_GRACE_NS || host_animating) ? ACTIVE_PERIOD_NS
-                                                                                  : IDLE_PERIOD_NS;
-        next_deadline = t + period;
-        frame_scheduled = true;
-        /* last_render_ns anchors the "earliest active frame after input"
-         * throttle. It is refreshed only when a frame is actually rendered
-         * (below, after a successful present) so a run of skipped frames
-         * does not silently march the anchor forward. */
-        long long render_anchor_ns = t;
 
         /* Scale change (e.g. surface dragged to a HiDPI output): apply
          * the new buffer scale, resize the swapchain in device pixels,
@@ -3505,22 +3807,48 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             wp_emit_scale((float)pl.buffer_scale);
             wl_surface_set_buffer_scale(pl.surface, pl.buffer_scale);
             wl_surface_commit(pl.surface);
+            if (ui_wl_surface) {
+                wl_surface_set_buffer_scale(ui_wl_surface, pl.buffer_scale);
+                wl_surface_commit(ui_wl_surface);
+            }
             lens_set_scale(ui, (float)pl.buffer_scale);
             pl.resized = true;
         }
         if (pl.resized) {
             (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
                                       (uint32_t)(pl.height * pl.buffer_scale));
+            if (ui_surface && ui_surface != surface) {
+                (void)flux_surface_resize(ui_surface, (uint32_t)(pl.width * pl.buffer_scale),
+                                          (uint32_t)(pl.height * pl.buffer_scale));
+            }
             pl.resized = false;
             resized_this_frame = true;
         }
 
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        float dt = (float)(now.tv_sec - prev.tv_sec) + (float)(now.tv_nsec - prev.tv_nsec) * 1e-9f;
-        if (dt <= 0.0f)
-            dt = 1.0f / 60.0f;
-        prev = now;
+        /* --- 5. Simulation clock (INV-PACE-04) -------------------------
+         * Time-based UI advances on the compositor's pulse timestamp when a
+         * grant was delivered, not on the wall clock at build time. That is
+         * what makes an eased value land where the display will actually show
+         * it, instead of one frame early or late depending on how long the
+         * build happened to take. */
+        long long sim_ns = pulse_fired ? pulse_time : now;
+        if (sim_ns <= 0)
+            sim_ns = now;
+        /* Fallback step for the first frame and for a pulse that did not
+         * advance: one display period, so an animation started at startup is
+         * not implicitly assumed to run at 60 Hz on a 120 Hz panel
+         * (INV-PACE-02). */
+        float dt =
+            (float)((double)(pl.refresh_ns > 0 ? pl.refresh_ns : IRIS_PACE_DEFAULT_REFRESH_NS) *
+                    1e-9);
+        if (last_sim_ns > 0 && sim_ns > last_sim_ns) {
+            dt = (float)((double)(sim_ns - last_sim_ns) * 1e-9);
+            /* A long stall (window hidden, compositor pause) must not fast
+             * -forward an animation in one jump; clamp like the old loop. */
+            if (dt > 0.25f)
+                dt = 0.25f;
+        }
+        last_sim_ns = sim_ns;
 
         lens_input in;
 
@@ -3551,55 +3879,191 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * see im_frame_update). */
         im_frame_update(&pl);
 
-        /* Static-frame skip: when lens reports no damage, the host has no
-         * paint callback, no host animation is in flight, and no resize /
-         * scale just happened, the frame just built is pixel-identical to
-         * what is on screen — skip the whole begin_frame → canvas → present
-         * cycle (no swapchain image acquired, nothing committed).
-         *
-         * Hosts with a paint callback can opt into the same skip per frame
-         * via iris_paint_mark_static(): their content is opaque to lens, so
-         * only they know whether it moved. The declaration is consumed here
-         * and must be re-issued every frame, so a stale flag can never skip
-         * a frame the host wanted painted; lens chrome damage, host
-         * animation, and resizes always force a paint regardless. */
-        /* A static declaration is the host's final word for the frame's
-         * canvas content — but per the iris_paint_mark_static contract, a
-         * following iris_request_animation_frame outranks it: a host that
-         * asks for another frame is announcing its content is about to
-         * change, so the skip must never eat the request. The request is
-         * sampled and cleared above (host_animating) exactly like win32
-         * and cocoa; the scheduling branch below re-arms the active
-         * cadence off the same flag. It only covers the host's own
-         * pixels: lens chrome damage still forces a paint, or a hover
-         * highlight would freeze mid-transition while the host scene is
-         * static. Resizes and the not-yet-presented latch force a paint
-         * too. */
+        /* --- 6. Pace ---------------------------------------------------
+         * The pacer decides paint / skip / quiesce and the next budget. The
+         * paint/skip precedence is unchanged from the previous loop; only the
+         * schedule moved into the pacer. Note that iris_request_frame_skip_render
+         * is the more specific promise and outranks a stale animation request,
+         * while chrome damage, a resize, and the not-yet-presented latch still
+         * force a real paint because they change what is on screen. */
         bool chrome_damaged = lens_frame_needs_repaint(ui);
-        /* Zero-render skip (iris_request_frame_skip_render): the host
-         * promises this frame's canvas content is unchanged while still
-         * streaming at the media cadence. Force-paint conditions mirror
-         * the static path EXCEPT host_animating: the very request that
-         * arms the next active deadline is sampled here as host_animating
-         * from last frame, so letting it veto skips would deadlock the
-         * pattern (every skip follows a request). The skip declaration is
-         * the more specific promise — it wins over the prior request;
-         * chrome damage, resize, and not-yet-presented surfaces still
-         * force a real paint below because they change what is on screen,
-         * which the declaration cannot know about. */
-        bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
         bool surface_forced = resized_this_frame || surface_needs_paint;
-        bool host_skip_render =
-            has_custom_paint && pl.frame_skip_render && !surface_forced && !chrome_damaged;
+
+        iris_pace_inputs pace_in = {
+            .now_ns = now,
+            .pulse_time_ns = pulse_time,
+            .refresh_ns = pl.refresh_ns,
+            .pulse_fired = pulse_fired,
+            .pulse_pending = pl.frame_cb_pending,
+            .have_pulse_source = true,
+            .input_active = input_active,
+            .host_animating = host_animating,
+            .host_skip_render = pl.frame_skip_render,
+            .host_static = pl.paint_static,
+            .has_custom_paint = has_custom_paint,
+            .chrome_damaged = chrome_damaged,
+            .caret_visible = lens_caret_rect(ui).w > 0.0f,
+            .surface_needs_paint = surface_forced,
+            .lens_animating = lens_anim_pending(ui),
+        };
+        /* The declarations are consumed here and must be re-issued every
+         * frame, so a stale flag can never skip a frame the host wanted
+         * painted. */
         pl.frame_skip_render = false;
-        bool host_canvas_static = has_custom_paint && pl.paint_static && !host_animating &&
-                                  !resized_this_frame && !surface_needs_paint && !chrome_damaged;
         pl.paint_static = false;
-        bool must_paint = !host_canvas_static && !host_skip_render &&
-                          (has_custom_paint || chrome_damaged || host_animating ||
-                           resized_this_frame || surface_needs_paint);
-        if (must_paint) {
+
+        iris_pace_decision d = iris_pacer_tick(&pacer, &pace_in);
+        quiesced = d.action == IRIS_PACE_QUIESCE;
+        wait_ns = d.wait_timeout_ns;
+
+        /* --- 7. Act ---------------------------------------------------- */
+        if (d.action == IRIS_PACE_PAINT) {
             surface_needs_paint = true;
+
+            if (pl.has_presenter_thread) {
+                /* Decoupled Presentation Engine (ADR-0124): hand off immutable snapshot
+                 * to the dedicated presentation worker thread via lockless mailbox. */
+                lens_scene_snapshot *snapshot = nullptr;
+                if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
+                    iris_frame_packet *pkt = iris_mailbox_acquire(&pl.mailbox);
+                    if (pkt) {
+                        pkt->snapshot = snapshot;
+                        pkt->damage_rect = lens_damage_rect(ui);
+                        pkt->force_paint = surface_forced;
+                        pkt->has_custom_paint = false;
+                        pkt->scale = (float)pl.buffer_scale;
+                        pkt->width = pl.width;
+                        pkt->height = pl.height;
+                        iris_mailbox_publish(&pl.mailbox, pkt);
+                        sem_post(&pl.present_sem);
+                    }
+                    lens_snapshot_release(snapshot);
+                }
+                if (d.request_pulse) {
+                    wp_request_pulse(&pl);
+                    wl_surface_commit(pl.surface);
+                }
+                continue;
+            }
+
+            if (ui_surface != surface) {
+                /* ==============================================================
+                 * Dual-Plane Subsurface Composition (ADR-0123)
+                 * ============================================================== */
+                bool host_canvas_static = has_custom_paint && pl.paint_static && !host_animating &&
+                                          !resized_this_frame && !surface_needs_paint;
+                bool host_skip_render = has_custom_paint && pl.frame_skip_render &&
+                                        !resized_this_frame && !surface_needs_paint;
+                bool must_paint_host = has_custom_paint && !host_canvas_static && !host_skip_render;
+                bool must_paint_ui = chrome_damaged || resized_this_frame || surface_needs_paint;
+
+                /* 1. Host Canvas Layer (Base Surface) */
+                if (must_paint_host) {
+                    flux_frame *host_frame = NULL;
+                    flux_result hr = flux_surface_begin_frame(surface, NULL, &host_frame);
+                    if (hr == FLUX_OK) {
+                        lens_theme th = lens_get_theme(ui);
+                        flux_color clear = th.color_bg;
+                        flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
+                        if (cfg->prepare)
+                            cfg->prepare(host_frame, canvas, device, (float)pl.buffer_scale,
+                                         cfg->user);
+                        if (flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                          .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                          .frame = host_frame,
+                                                          .clear_color = pass_clear}) == FLUX_OK) {
+                            if (cfg->paint)
+                                cfg->paint(canvas, device, (float)pl.buffer_scale, cfg->user);
+                            (void)flux_canvas_end(canvas);
+                        }
+                        if (flux_frame_submit(host_frame) == FLUX_OK) {
+                            wl_surface_damage_buffer(pl.surface, 0, 0, INT32_MAX, INT32_MAX);
+                            (void)flux_frame_present(host_frame);
+                        }
+                    }
+                }
+
+                /* 2. Lens UI Layer (Subsurface Plane with Premultiplied Alpha) */
+                if (must_paint_ui) {
+                    flux_frame *ui_frame = NULL;
+                    flux_result ur = flux_surface_begin_frame(ui_surface, NULL, &ui_frame);
+                    if (ur == FLUX_OK) {
+                        flux_rect dmg = lens_damage_rect(ui);
+                        bool partial_paint = false;
+                        int32_t dmg_x = 0, dmg_y = 0;
+                        uint32_t dmg_w = 0, dmg_h = 0;
+                        flux_surface_info ui_info;
+                        flux_surface_get_info(ui_surface, &ui_info);
+
+                        if (!resized_this_frame && dmg.w > 0.0f && dmg.h > 0.0f &&
+                            ui_info.width > 0 && ui_info.height > 0) {
+                            float s = (float)pl.buffer_scale;
+                            int32_t x0 = (int32_t)floorf(dmg.x * s);
+                            int32_t y0 = (int32_t)floorf(dmg.y * s);
+                            int32_t x1 = (int32_t)ceilf((dmg.x + dmg.w) * s);
+                            int32_t y1 = (int32_t)ceilf((dmg.y + dmg.h) * s);
+                            if (x0 < 0)
+                                x0 = 0;
+                            if (y0 < 0)
+                                y0 = 0;
+                            if (x1 > (int32_t)ui_info.width)
+                                x1 = (int32_t)ui_info.width;
+                            if (y1 > (int32_t)ui_info.height)
+                                y1 = (int32_t)ui_info.height;
+                            if (x1 > x0 && y1 > y0) {
+                                dmg_x = x0;
+                                dmg_y = y0;
+                                dmg_w = (uint32_t)(x1 - x0);
+                                dmg_h = (uint32_t)(y1 - y0);
+                                partial_paint = true;
+                            }
+                        }
+
+                        /* Clear color for UI subsurface is transparent (alpha = 0) */
+                        flux_color transparent_clear = flux_color_rgba(0, 0, 0, 0);
+                        flux_canvas_pass_desc ui_pass_desc = {
+                            .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                            .frame = ui_frame,
+                            .clear_color = &transparent_clear,
+                            .render_offset_x = partial_paint ? dmg_x : 0,
+                            .render_offset_y = partial_paint ? dmg_y : 0,
+                            .render_width = partial_paint ? dmg_w : 0,
+                            .render_height = partial_paint ? dmg_h : 0,
+                        };
+
+                        bool drew = false;
+                        lens_scene_snapshot *snapshot = nullptr;
+                        if (flux_canvas_begin(ui_canvas, &ui_pass_desc) == FLUX_OK) {
+                            if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
+                                drew = lens_snapshot_submit(snapshot, ui_canvas) == FLUX_OK;
+                            }
+                            if (flux_canvas_end(ui_canvas) != FLUX_OK)
+                                drew = false;
+                        }
+                        if (drew && flux_frame_submit(ui_frame) == FLUX_OK) {
+                            if (partial_paint)
+                                wl_surface_damage_buffer(ui_wl_surface, dmg_x, dmg_y,
+                                                         (int32_t)dmg_w, (int32_t)dmg_h);
+                            else
+                                wl_surface_damage_buffer(ui_wl_surface, 0, 0, INT32_MAX, INT32_MAX);
+                            flux_result pr = flux_frame_present(ui_frame);
+                            if (pr == FLUX_OK) {
+                                (void)lens_snapshot_activate(ui, snapshot);
+                                surface_needs_paint = false;
+                            }
+                        }
+                        lens_snapshot_release(snapshot);
+                    }
+                }
+
+                if (d.request_pulse) {
+                    wp_request_pulse(&pl);
+                    wl_surface_commit(pl.surface);
+                }
+                continue;
+            }
+
+            /* Single Surface Pass (for pure UI applications or fallback) */
             flux_frame *frame = NULL;
             flux_result r = flux_surface_begin_frame(surface, NULL, &frame);
             if (r == FLUX_ERROR_SURFACE_LOST) {
@@ -3634,10 +4098,52 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
             bool drew = false;
             lens_scene_snapshot *snapshot = nullptr;
-            if (flux_canvas_begin(canvas,
-                                  &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                           .frame = frame,
-                                                           .clear_color = pass_clear}) == FLUX_OK) {
+
+            /* Partial damage calculation (ADR-0123): for hosts without opaque
+             * canvas content, constrain the renderArea and clear to the dirty
+             * bounding box rather than clearing and drawing the entire window. */
+            flux_rect dmg = {0, 0, 0, 0};
+            bool partial_paint = false;
+            int32_t dmg_x = 0, dmg_y = 0;
+            uint32_t dmg_w = 0, dmg_h = 0;
+
+            if (!surface_forced && !has_custom_paint) {
+                dmg = lens_damage_rect(ui);
+                if (dmg.w > 0.0f && dmg.h > 0.0f && info.width > 0 && info.height > 0) {
+                    float s = (float)pl.buffer_scale;
+                    int32_t x0 = (int32_t)floorf(dmg.x * s);
+                    int32_t y0 = (int32_t)floorf(dmg.y * s);
+                    int32_t x1 = (int32_t)ceilf((dmg.x + dmg.w) * s);
+                    int32_t y1 = (int32_t)ceilf((dmg.y + dmg.h) * s);
+                    if (x0 < 0)
+                        x0 = 0;
+                    if (y0 < 0)
+                        y0 = 0;
+                    if (x1 > (int32_t)info.width)
+                        x1 = (int32_t)info.width;
+                    if (y1 > (int32_t)info.height)
+                        y1 = (int32_t)info.height;
+                    if (x1 > x0 && y1 > y0) {
+                        dmg_x = x0;
+                        dmg_y = y0;
+                        dmg_w = (uint32_t)(x1 - x0);
+                        dmg_h = (uint32_t)(y1 - y0);
+                        partial_paint = true;
+                    }
+                }
+            }
+
+            flux_canvas_pass_desc pass_desc = {
+                .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                .frame = frame,
+                .clear_color = pass_clear,
+                .render_offset_x = partial_paint ? dmg_x : 0,
+                .render_offset_y = partial_paint ? dmg_y : 0,
+                .render_width = partial_paint ? dmg_w : 0,
+                .render_height = partial_paint ? dmg_h : 0,
+            };
+
+            if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {
                 if (cfg->paint)
                     cfg->paint(canvas, device, (float)pl.buffer_scale, cfg->user);
                 if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
@@ -3655,11 +4161,27 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                 lens_snapshot_release(snapshot);
                 goto fail;
             }
+            /* Arm the grant before the commit it is meant to pace: the
+             * compositor only answers wl_surface.frame once the surface has
+             * been committed, and flux commits inside flux_frame_present.
+             * By this point every abort path above is behind us, so a
+             * subscription can never be stranded without its commit. */
+            if (d.request_pulse)
+                wp_request_pulse(&pl);
+            /* Attach incremental damage to the upcoming commit (ADR-0123). */
+            if (partial_paint)
+                wl_surface_damage_buffer(pl.surface, dmg_x, dmg_y, (int32_t)dmg_w, (int32_t)dmg_h);
+            else
+                wl_surface_damage_buffer(pl.surface, 0, 0, INT32_MAX, INT32_MAX);
             r = flux_frame_present(frame);
-            if (r == FLUX_ERROR_SURFACE_LOST)
+            if (r == FLUX_ERROR_SURFACE_LOST) {
+                /* No commit reached the compositor, so the grant armed above
+                 * will never be answered: drop it or the loop would wait for
+                 * a pulse forever. */
+                wp_cancel_pulse(&pl);
                 (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
                                           (uint32_t)(pl.height * pl.buffer_scale));
-            else if (r != FLUX_OK) {
+            } else if (r != FLUX_OK) {
                 lens_snapshot_release(snapshot);
                 goto fail;
             } else if (drew) {
@@ -3669,58 +4191,31 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                     goto fail;
                 }
                 surface_needs_paint = false;
-                last_render_ns = render_anchor_ns;
             }
             lens_snapshot_release(snapshot);
 
             if (++frame_no == 1)
                 fprintf(stderr, "first frame presented: %dx%d logical, %ux%u device (scale=%d)\n",
                         pl.width, pl.height, info.width, info.height, pl.buffer_scale);
+        } else if (d.request_pulse && !pl.frame_cb_pending) {
+            /* Render-less cycle that must nevertheless keep the display
+             * cadence alive (zero-render skip / static host): arm the next
+             * grant and commit so the compositor answers it. The commit
+             * carries no new buffer — the previously presented frame stays on
+             * screen — but it is what keeps the pulse train running, which is
+             * precisely what "keep the cadence, skip the GPU" means. No
+             * swapchain image is acquired and no pixels are touched. */
+            wp_request_pulse(&pl);
+            wl_surface_commit(pl.surface);
         }
 
-        /* Refine the tentative deadline now that the repaint query and the
-         * post-build animation state are known. Stay at the active rate
-         * while input is warm or an eased value / host animation is still
-         * in flight; keep a low cadence for the caret blink while a text
-         * field is focused; otherwise stop scheduling frames entirely —
-         * the loop sleeps in poll() until the next event. Hosts with a
-         * paint callback keep the always-render pacing unless they declared
-         * this frame static: a static declaration is the host's promise
-         * that nothing moved, so unscheduling is exactly as safe as for a
-         * host without canvas content. A zero-render skip declaration
-         * (iris_request_frame_skip_render) also keeps the active pacing —
-         * it suppresses only this frame's begin→clear→paint→present, not
-         * the cadence: hosts stream media-cadence content (e.g. 30 fps
-         * visualizers) by declaring skip on in-between frames while a fresh
-         * request keeps the active deadline armed. */
-        if (has_custom_paint && !host_canvas_static) {
-            if (pl.animation_frame_requested)
-                next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
-            frame_scheduled = true;
-        } else if (has_custom_paint) {
-            /* Static-declaring host: keep the low idle tick so build/paint
-             * keep running (~4 Hz) and the host can observe state changes
-             * and resume animating on their own; only the GPU work skips.
-             * The request flag was already cleared into host_animating
-             * above, so a host that asked for another frame during build
-             * never reaches this skip branch. */
-            next_deadline = t + IDLE_PERIOD_NS;
-            frame_scheduled = true;
-        } else if (t - last_input_ns < INPUT_GRACE_NS || pl.animation_frame_requested ||
-                   lens_anim_pending(ui)) {
-            next_deadline = t + ACTIVE_PERIOD_NS;
-            frame_scheduled = true;
-        } else if (lens_caret_rect(ui).w > 0.0f) {
-            next_deadline = t + IDLE_PERIOD_NS;
-            frame_scheduled = true;
-        } else {
-            frame_scheduled = false;
-            /* Fully idle (no caret, no animation, no scheduled paint):
-             * the text engine's high-water scratch from any earlier
-             * one-off huge paste can go home (ADR-0072 item 5). Cheap
-             * and null-safe; the next shape reallocates what it needs.
-             * Skipped on the caret tick so an active text field never
-             * pays a re-shape of its own content. */
+        /* Fully quiescent now: release the pulse subscription and let the
+         * next iteration block in poll() until real input wakes it. The text
+         * engine's high-water scratch from an earlier one-off huge paste can
+         * also go home (ADR-0072 item 5) — cheap and null-safe; the next
+         * shape reallocates what it needs. */
+        if (quiesced) {
+            wp_cancel_pulse(&pl);
             lens_text_compact(ui);
         }
     }
@@ -3743,6 +4238,16 @@ fail:
      * from escaping every return path. */
     g_active_pl = NULL;
     tablet_host_bridge.user = NULL;
+
+    /* Stop decoupled presenter thread before teardown (ADR-0124, INV-THREAD-04) */
+    if (pl.has_presenter_thread) {
+        atomic_store_explicit(&pl.presenter_running, false, memory_order_release);
+        sem_post(&pl.present_sem);
+        pthread_join(pl.present_thread, NULL);
+        sem_destroy(&pl.present_sem);
+        iris_mailbox_destroy(&pl.mailbox);
+        pl.has_presenter_thread = false;
+    }
 
     /* GPU side first: let in-flight work finish before tearing down objects.
      * flux/lens calls are guarded so an early failure (before a resource
@@ -3778,6 +4283,16 @@ fail:
         close(pl.repeat_fd);
         pl.repeat_fd = -1;
     }
+    if (ui_canvas && ui_canvas != canvas)
+        flux_canvas_release(ui_canvas);
+    if (ui_surface && ui_surface != surface)
+        flux_surface_release(ui_surface);
+    if (ui_vk_surface)
+        wp_destroy_vk_surface(device, ui_vk_surface);
+    if (ui_wl_subsurface)
+        wl_subsurface_destroy(ui_wl_subsurface);
+    if (ui_wl_surface)
+        wl_surface_destroy(ui_wl_surface);
     if (canvas)
         flux_canvas_release(canvas);
     if (surface)
@@ -3848,6 +4363,12 @@ fail:
         xdg_surface_destroy(pl.xdg_surface);
     if (pl.fractional_scale_obj)
         wp_fractional_scale_v1_destroy(pl.fractional_scale_obj);
+    /* Display pacing (ADR-0122): drop any grant we are still waiting on
+     * before the surface goes away, and release the presentation-time proxy.
+     * An unanswered wl_surface.frame is simply never answered. */
+    wp_cancel_pulse(&pl);
+    if (pl.presentation)
+        wp_presentation_destroy(pl.presentation);
     if (pl.surface)
         wl_surface_destroy(pl.surface);
     for (int i = 0; i < pl.n_outputs; i++)
@@ -3885,6 +4406,8 @@ fail:
         wp_seat_release(pl.seat);
     if (pl.wm_base)
         xdg_wm_base_destroy(pl.wm_base);
+    if (pl.subcompositor)
+        wl_subcompositor_destroy(pl.subcompositor);
     if (pl.compositor)
         wl_compositor_destroy(pl.compositor);
     if (pl.registry)

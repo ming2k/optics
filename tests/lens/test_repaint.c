@@ -131,10 +131,43 @@ static void test_place_open_close_repaints(void) {
     lens_release(ui);
 }
 
+static void test_damage_rect_bounds(void) {
+    lens *ui = NULL;
+    flux_canvas *canvas = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+
+    build_frame(ui, 0.5f);
+    flux_rect dmg1 = lens_damage_rect(ui);
+    CHECK(dmg1.w > 0.0f && dmg1.h > 0.0f);
+    render_frame(ui, canvas);
+
+    build_frame(ui, 0.5f);
+    render_frame(ui, canvas);
+    build_frame(ui, 0.5f);
+    CHECK(!lens_frame_needs_repaint(ui));
+    flux_rect clean = lens_damage_rect(ui);
+    CHECK(clean.w == 0.0f && clean.h == 0.0f);
+    render_frame(ui, canvas);
+
+    /* Mutate leaf */
+    build_frame(ui, 1.25f);
+    CHECK(lens_frame_needs_repaint(ui));
+    flux_rect dirty = lens_damage_rect(ui);
+    CHECK(dirty.w > 0.0f && dirty.h > 0.0f);
+    CHECK(dirty.x >= 0.0f && dirty.y >= 0.0f);
+    CHECK(dirty.x + dirty.w <= 400.0f);
+    CHECK(dirty.y + dirty.h <= 200.0f);
+
+    flux_canvas_release(canvas);
+    lens_release(ui);
+}
+
 int main(void) {
     test_null_safety();
     test_first_frames_repaint_then_settle();
     test_leaf_change_repaints();
     test_place_open_close_repaints();
+    test_damage_rect_bounds();
     return TEST_REPORT();
 }

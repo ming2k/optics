@@ -29,6 +29,15 @@ iris_sources = files(
   'src/a11y_util.c',
   'src/platform_text.c',
   'src/uri.c',
+  # The frame-cadence state machine (ADR-0122). Platform-neutral and pure:
+  # each backend feeds it its own VSync source (wl_surface.frame, the macOS
+  # display link, the Win32 waitable swapchain) and it returns the poll
+  # budget plus the paint/skip/quiesce decision. Keeping it out of the
+  # backend files is what makes the no-spin guarantee testable headlessly.
+  'src/display_pacer.c',
+  # The lockless triple-buffered snapshot exchange mailbox (ADR-0124).
+  # Decouples the UI thread from the compositor presentation thread.
+  'src/frame_mailbox.c',
 )
 
 iris_c_args = ['-DIRIS_BUILDING=1']
@@ -102,6 +111,12 @@ if host_system == 'linux'
       wl.find_protocol('fractional-scale', state : 'staging', version : 1),
       wl.find_protocol('primary-selection', state : 'unstable', version : 1),
       wl.find_protocol('xdg-activation', state : 'staging', version : 1),
+      # presentation-time (stable): the compositor's own report of when a
+      # frame actually reached the display, plus the real refresh interval.
+      # This is one of the two clocks ADR-0122 paces from (the other being
+      # wl_surface.frame); it is what lets iris learn 120/144 Hz instead of
+      # assuming 60 Hz.
+      wl.find_protocol('presentation-time'),
       # Pen/tablet input (tablet_wayland.c): pressure, eraser end, barrel
       # buttons. Compositors without tablets simply don't advertise the
       # global; the bridge stays inert.

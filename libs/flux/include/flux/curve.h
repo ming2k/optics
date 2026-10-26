@@ -46,6 +46,13 @@ typedef struct flux_curve_seg {
     flux_point p2;
 } flux_curve_seg;
 
+/* Standard 2D line segment in physical device space (ADR-0121).
+ * Exactly 16 bytes for direct zero-copy GPU BDA / SSBO transport. */
+typedef struct flux_segment {
+    float x0, y0;
+    float x1, y1;
+} flux_segment;
+
 /* Construct a reduced segment. `p1` is ignored for FLUX_CURVE_LINE. */
 FLUX_API flux_curve_seg flux_curve_seg_make(flux_curve_op op, flux_point p0, flux_point p1,
                                             flux_point p2);

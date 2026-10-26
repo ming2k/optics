@@ -12,6 +12,7 @@
  */
 
 #include "canvas_color.glsl"
+#include "flux_vector_eval.glsl"
 
 struct GpuSegment {
     float x0, y0;
@@ -94,43 +95,11 @@ void main() {
 
     for (uint i = 0u; i < pc.seg_count; ++i) {
         GpuSegment s = pc.segs.segs[i];
-        float y0 = s.y0;
-        float y1 = s.y1;
-        float x0 = s.x0;
-        float x1 = s.x1;
-
-        if (y0 == y1)
-            continue;
-
-        float ymin = min(y0, y1);
-        float ymax = max(y0, y1);
-
-        // Ray casting in +X direction
-        if (ymin <= p.y && p.y < ymax) {
-            float t = (p.y - y0) / (y1 - y0);
-            float x_int = mix(x0, x1, t);
-            if (x_int > p.x) {
-                winding += (y1 > y0) ? 1 : -1;
-            }
-        }
-
-        // Distance to line segment in physical pixel space
-        vec2 pa = p - vec2(x0, y0);
-        vec2 ba = vec2(x1 - x0, y1 - y0);
-        float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-        vec2 diff = pa - ba * h;
-        float d2 = dot(diff, diff);
-        if (d2 < min_dist_sq)
-            min_dist_sq = d2;
+        flux_vector_eval_segment(p, vec2(s.x0, s.y0), vec2(s.x1, s.y1), winding, min_dist_sq);
     }
 
-    bool inside = (pc.fill_rule == 1u) ? ((winding & 1) != 0) : (winding != 0);
-
-    float dist = sqrt(min_dist_sq);
-    float signed_dist = inside ? dist : -dist;
-
     // In 2D physical pixel space, exactly 1 pixel width = 1.0!
-    float coverage = clamp(signed_dist + 0.5, 0.0, 1.0);
+    float coverage = flux_vector_eval_coverage(winding, min_dist_sq, pc.fill_rule, 1.0);
 
     if (coverage <= 0.0)
         discard;

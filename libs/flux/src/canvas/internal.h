@@ -757,6 +757,7 @@ void emit_tri(flux_canvas_vertex *verts, uint32_t *count, uint32_t cap, flux_mat
 
 void canvas_fill_rect_internal(flux_canvas *c, flux_rect r, const canvas_paint *paint);
 void canvas_fill_path_internal(flux_canvas *c, const flux_path *p, const canvas_paint *paint);
+void canvas_tess_fill_path(flux_canvas *c, const flux_path *p, const canvas_paint *paint);
 void canvas_stroke_path_internal(flux_canvas *c, const flux_path *p, const canvas_paint *paint);
 
 #endif /* FLUX_CANVAS_INTERNAL_H */

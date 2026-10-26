@@ -54,6 +54,13 @@ test_sdf = executable('test_sdf',
 )
 test('sdf', test_sdf, suite : 'unit')
 
+# Algorithm Vault (ADR-0121): pure ear-clipping tessellation asset tests
+test_vault_tess = executable('test_vault_tess',
+  'test_vault_tess.c',
+  dependencies : [test_helpers_dep],
+)
+test('vault_tess', test_vault_tess, suite : 'unit')
+
 # Coverage acceptance harness self-verification (ADR-0119 S0). Verifies the
 # yardstick, not a rasterizer: area identity, cross-route convergence, the
 # self-intersection scoping limit, and the INV-COV-02 level assertion.

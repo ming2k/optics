@@ -620,48 +620,16 @@ void tess_cache_store_and_transform(flux_canvas *c, const flux_path *p, const ca
     }
 }
 
-void canvas_fill_path_internal(flux_canvas *c, const flux_path *p, const canvas_paint *paint) {
-    if (!c || !c->recording || !p || !paint)
+/*
+ * Legacy fallback tessellator (ADR-0005, ADR-0011, ADR-0121).
+ * Preserved as an offline geometric asset in the Algorithm Vault for targets
+ * without analytic coverage backends. Modern paths route through canvas_dispatch.c.
+ */
+void canvas_tess_fill_path(flux_canvas *c, const flux_path *p, const canvas_paint *paint) {
+    if (!c || !c->recording || !p || !paint || p->count == 0)
         return;
-    if (p->count == 0)
-        return;
-    /* Scratch is allocated once at canvas create (which fails without it), so in
-     * production this never fires; a test fixture can build a canvas by hand,
-     * and guarding once here keeps every use below unconditional — including the
-     * coverage route's transform and the tessellator's pointer arithmetic. */
     if (!c->scratch_pts || !c->scratch_contours || !c->scratch_reflex)
         return;
-
-    /* Analytic coverage (ADR-0119, stage S2): a backend that can rasterize
-     * contours directly takes the geometry as-is, for EITHER fill rule — winding
-     * is accumulated from sorted crossings, so even-odd needs no stencil
-     * attachment and no second pass, which retires a limitation this function
-     * used to diagnose and drop.
-     *
-     * SRC_OVER only, and any paint kind the backend can evaluate: coverage
-     * answers *where* a pixel is painted, so gradients get it too. The backend
-     * refuses a brush it cannot evaluate and the draw falls through to the
-     * triangle path, which is why images, glyphs and strokes — and non-SRC_OVER
-     * blends — still need it.
-     * `c->backend` is a plain struct pointer in some test fixtures, so both it
-     * and the scratch it implies are checked before use. */
-    if (c->backend && c->backend->submit_cover && paint->blend == FLUX_BLEND_SRC_OVER) {
-        flux_mat3x2 covex = c->states[c->state_top].transform;
-        float cov_scale = flux_canvas_mat3x2_pixel_scale(covex);
-        flatten_multi covfm =
-            flatten_path_to_contours(p, cov_scale, c->scratch_pts, FLUX_CANVAS_PATH_SCRATCH_CAP,
-                                     c->scratch_contours, FLUX_CANVAS_MAX_CONTOURS);
-        if (covfm.contour_count > 0 && covfm.point_count >= 3) {
-            /* Geometry crosses the seam in PHYSICAL PIXELS. */
-            for (uint32_t ci = 0; ci < covfm.point_count; ++ci)
-                c->scratch_pts[ci] = flux_mat3x2_transform_point(covex, c->scratch_pts[ci]);
-            flux_recti sc = c->states[c->state_top].scissor;
-            if (c->backend->submit_cover(c->backend, c, c->scratch_pts, c->scratch_contours,
-                                         covfm.contour_count, paint->fill_rule, paint,
-                                         sc) == FLUX_OK)
-                return;
-        }
-    }
 
     /* EVEN_ODD needs the stencil path even for simple inputs: the
      * ear-clip + hole-bridging pipeline computes nonzero winding, not

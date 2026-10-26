@@ -591,6 +591,42 @@ int main(void) {
         EXPECT(flux_frame_present(frame) == FLUX_OK);
     }
 
+    /* --- Material Backdrop Boundary Cache hit (ADR-0123 / INV-COMP-04) --- */
+    {
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        prism_base_material frost = {
+            .bounds = {16.0f, 16.0f, 32.0f, 32.0f},
+            .corner_radius = 4.0f,
+            .opacity = 1.0f,
+            .tint_color = 0xFFFFFFu,
+            .tint_strength = 0.0f,
+        };
+        flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+        bd.input = target;
+        bd.sigma = 4.0f;
+        flux_image *blurred = nullptr;
+        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+
+        prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
+        ld.input = target;
+        ld.blurred_input = blurred;
+        ld.frost = &frost;
+        ld.frost_count = 1u;
+        flux_image *out1 = nullptr;
+        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out1) == FLUX_OK);
+        EXPECT(out1 != nullptr);
+
+        /* Second application with identical inputs on the same slot:
+         * must hit cache, returning the exact same persistent image */
+        flux_image *out2 = nullptr;
+        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out2) == FLUX_OK);
+        EXPECT(out2 == out1);
+
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+    }
+
     prism_backdrop_layer_filter_release(layer_filter);
     flux_blur_filter_release(blur_filter);
     flux_canvas_release(canvas);

@@ -72,3 +72,26 @@ exe_event = executable('test_event',
   dependencies        : [lens_dep, m_dep],
 )
 test('test_event', exe_event)
+
+# test_display_pacer pins the ADR-0122 cadence contract: display-driven
+# pacing, no client-hardcoded period, and the INV-PACE-03 no-spin guarantee
+# (a zero-render skip can never produce a non-positive poll budget).
+# display_pacer.c is compiled directly: it is internal, with hidden
+# visibility, and deliberately free of platform dependencies so the whole
+# policy is testable headlessly.
+exe_pacer = executable('test_display_pacer',
+  ['test_display_pacer.c', '../../libs/iris/src/display_pacer.c'],
+  include_directories : [iris_inc, src_inc],
+  dependencies        : [lens_dep, m_dep],
+)
+test('test_display_pacer', exe_pacer)
+
+# test_frame_mailbox pins the ADR-0124 lockless triple-buffered snapshot
+# handoff contract: wait-free atomic exchange, monotonic sequence ordering,
+# fast-producer superseding, and multithreaded producer-consumer integrity.
+exe_mailbox = executable('test_frame_mailbox',
+  ['test_frame_mailbox.c', '../../libs/iris/src/frame_mailbox.c'],
+  include_directories : [iris_inc, src_inc],
+  dependencies        : [lens_dep, m_dep],
+)
+test('test_frame_mailbox', exe_mailbox)

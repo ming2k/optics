@@ -64,6 +64,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 #include "a11y_prefs_internal.h"
+#include "display_pacer.h"
 #include "platform_input.h"
 #include "platform_internal.h"
 #include "platform_text.h"
@@ -152,6 +153,7 @@ static_assert(sizeof((cp_accum *)0)->preedit == sizeof((lens_input *)0)->preedit
     bool animation_frame_requested; /* host asked for active-rate follow-up */
     bool paint_static;              /* host declared this frame's canvas static */
     bool frame_skip_render;         /* host asked to skip rendering but keep the active cadence */
+    int64_t refresh_ns;             /* learned display period; 0 = unknown   */
     bool theme_watching;
     bool a11y_prefs_watching;
     bool a11y_running;
@@ -1382,6 +1384,28 @@ static long long now_ns(void) {
     return (long long)t.tv_sec * 1000000000LL + (long long)t.tv_nsec;
 }
 
+/* Query display refresh rate via Cocoa / CoreGraphics (ADR-0122). */
+static int64_t cocoa_query_refresh_ns(NSWindow *window) {
+    NSScreen *screen = window ? [window screen] : [NSScreen mainScreen];
+    if (!screen)
+        screen = [NSScreen mainScreen];
+    if (screen) {
+        NSDictionary *desc = [screen deviceDescription];
+        NSNumber *screen_num = [desc objectForKey:@"NSScreenNumber"];
+        if (screen_num) {
+            CGDirectDisplayID display_id = (CGDirectDisplayID)[screen_num unsignedIntValue];
+            CGDisplayModeRef mode = CGDisplayCopyDisplayMode(display_id);
+            if (mode) {
+                double hz = CGDisplayModeGetRefreshRate(mode);
+                CGDisplayModeRelease(mode);
+                if (hz > 1.0)
+                    return 1000000000LL / (int64_t)(hz + 0.5);
+            }
+        }
+    }
+    return IRIS_PACE_DEFAULT_REFRESH_NS;
+}
+
 /* True if the input accumulator holds genuine user activity (pointer motion,
  * buttons, scroll, keys, or text/IME) since the last check. Same contract as
  * app_wayland.c's acc_has_user_input; `*pcx`/`*pcy` are updated in place. */
@@ -1672,32 +1696,40 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         host_started = true;
 
         /* --- Frame loop ----------------------------------------------
-         * Same pacing policy as app_wayland.c (see the long comment
-         * there): non-blocking present + self-paced deadlines. Active
-         * ~60 Hz right after input or while an animation is in flight;
-         * ~4 Hz idle while a caret blinks; fully unscheduled (blocking
-         * wait with no deadline) when nothing time-driven is pending.
-         * Hosts with cfg->paint keep the always-render pacing. The only
-         * mechanical difference: the wait primitive is
-         * nextEventMatchingMask:untilDate: with an NSDate deadline
-         * instead of poll(2). */
-        const long long ACTIVE_PERIOD_NS = 16666667LL; /* ~60 Hz when active */
-        const long long IDLE_PERIOD_NS = 250000000LL;  /* ~4 Hz when idle:
-                                                        * caret blink pace */
-        const long long INPUT_GRACE_NS = 400000000LL;  /* stay fast 400ms   */
+         * Presentation is paced by the display pacer (display_pacer.h, ADR-0122),
+         * not by ad-hoc client timer arithmetic.
+         *
+         * The surface presents non-blocking (Mailbox / Immediate) so acquiring an
+         * image never freezes input handling. The cadence state machine
+         * (iris_pacer) owns the whole decision: paint, skip, or quiesce — plus
+         * the poll budget:
+         *
+         *   - The display refresh rate is queried dynamically from Cocoa /
+         *     NSScreen (cocoa_query_refresh_ns), unlocking 120 Hz ProMotion
+         *     displays rather than clamping to 60 Hz (INV-PACE-02).
+         *   - Zero-render skips (iris_request_frame_skip_render) advance the
+         *     scheduling baseline cleanly, eliminating the 100% CPU spin bug
+         *     (INV-PACE-03).
+         *   - Time-based UI advances on the simulation clock rather than render
+         *     timestamps (INV-PACE-04).
+         *
+         * A lens-only host reaches full quiescence (quiesced = true, blocking in
+         * nextEventMatchingMask with distantFuture); a host with cfg->paint keeps
+         * the low idle tick alive so its cfg->build can observe state changes. */
+        iris_pacer pacer;
+        iris_pacer_init(&pacer);
+        pl->refresh_ns = cocoa_query_refresh_ns(pl->window);
+        iris_pacer_set_refresh(&pacer, pl->refresh_ns);
 
-        struct timespec prev;
-        clock_gettime(CLOCK_MONOTONIC, &prev);
         int frame_no = 0;
-
-        long long next_deadline = now_ns();
-        bool frame_scheduled = true; /* the first frame must always paint */
         /* Sticky until a frame containing the latest lens build is actually
          * presented — see app_wayland.c for the full rationale. */
         bool surface_needs_paint = true;
-        long long last_input_ns = next_deadline;
-        long long last_render_ns = next_deadline - ACTIVE_PERIOD_NS;
+        bool quiesced = false;
+        long long wait_ns = 0;
+        long long last_sim_ns = 0;
         double prev_cx = pl->acc.cx, prev_cy = pl->acc.cy;
+        const bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
 
         pl->ui = ui;
 
@@ -1732,19 +1764,17 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
 
         while (pl->running) {
             @autoreleasepool {
-                /* Wait until the next frame is due, waking early on any
-                 * event. With no frame scheduled (fully idle) there is no
-                 * deadline at all — the wait blocks until an event; unlike
-                 * Wayland there is no a11y bus fd whose poll mask needs
-                 * refreshing, so no 200 ms cap is needed. */
-                long long t = now_ns();
+                /* Wait until the next frame deadline, or wake immediately on incoming
+                 * events. The poll budget is governed by iris_pacer (ADR-0122) and is
+                 * `>= 1 ns` whenever active, preventing busy polling. */
                 NSDate *until;
-                if (!frame_scheduled)
+                if (quiesced) {
                     until = [NSDate distantFuture];
-                else if (next_deadline > t)
-                    until = [NSDate dateWithTimeIntervalSinceNow:(double)(next_deadline - t) / 1e9];
-                else
+                } else if (wait_ns <= 0) {
                     until = nil; /* overdue: poll without blocking */
+                } else {
+                    until = [NSDate dateWithTimeIntervalSinceNow:(double)wait_ns * 1e-9];
+                }
 
                 NSEvent *event = [NSApp nextEventMatchingMask:NSEventMaskAny
                                                     untilDate:until
@@ -1774,39 +1804,26 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                 }
                 [NSApp updateWindows];
 
-                /* Real user input wakes us out of the idle rate: pull the
-                 * next render forward (never sooner than one active period
-                 * after the last) and stay at the active rate through the
-                 * grace window. */
-                if (acc_has_user_input(pl, &prev_cx, &prev_cy)) {
-                    last_input_ns = now_ns();
-                    long long earliest = last_render_ns + ACTIVE_PERIOD_NS;
-                    if (!frame_scheduled || next_deadline > earliest)
-                        next_deadline = earliest;
-                    frame_scheduled = true;
-                } else if (woke_on_event && !frame_scheduled) {
-                    /* A non-input event (wakeup-posted callback such as a
-                     * theme change, resize, backing-scale change) while
-                     * fully idle: run one frame so lens sees the new state;
-                     * the repaint query below decides whether it paints. */
-                    next_deadline = now_ns();
-                    frame_scheduled = true;
+                long long now = now_ns();
+                bool input_active = acc_has_user_input(pl, &prev_cx, &prev_cy);
+
+                /* Quiescent fast-path: when completely idle with no pending events or
+                 * input, evaluate idle pacer tick and sleep until external event. */
+                if (quiesced && !input_active && !woke_on_event) {
+                    iris_pace_inputs idle_in = {
+                        .now_ns = now,
+                        .refresh_ns = pl->refresh_ns,
+                        .have_pulse_source = false,
+                        .has_custom_paint = has_custom_paint,
+                    };
+                    iris_pace_decision idle_d = iris_pacer_tick(&pacer, &idle_in);
+                    quiesced = (idle_d.action == IRIS_PACE_QUIESCE);
+                    wait_ns = idle_d.wait_timeout_ns;
+                    continue;
                 }
 
-                /* Not time to draw yet — keep waiting for events. */
-                if (!frame_scheduled || now_ns() < next_deadline)
-                    continue;
-
-                /* Render this iteration — identical policy to Wayland. */
-                t = now_ns();
                 bool host_animating = pl->animation_frame_requested;
                 pl->animation_frame_requested = false;
-                long long period = (t - last_input_ns < INPUT_GRACE_NS || host_animating)
-                                       ? ACTIVE_PERIOD_NS
-                                       : IDLE_PERIOD_NS;
-                next_deadline = t + period;
-                frame_scheduled = true;
-                last_render_ns = t;
 
                 /* Backing-scale change (window dragged across Retina /
                  * non-Retina displays): tell lens so its replay transform
@@ -1825,13 +1842,18 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     resized_this_frame = true;
                 }
 
-                struct timespec now;
-                clock_gettime(CLOCK_MONOTONIC, &now);
-                float dt =
-                    (float)(now.tv_sec - prev.tv_sec) + (float)(now.tv_nsec - prev.tv_nsec) * 1e-9f;
-                if (dt <= 0.0f)
-                    dt = 1.0f / 60.0f;
-                prev = now;
+                /* Simulation clock (INV-PACE-04): evaluate animation and physics on
+                 * predictable display refresh intervals rather than execution noise. */
+                long long sim_ns = now;
+                float dt = (float)((double)(pl->refresh_ns > 0 ? pl->refresh_ns
+                                                              : IRIS_PACE_DEFAULT_REFRESH_NS) *
+                                   1e-9);
+                if (last_sim_ns > 0 && sim_ns > last_sim_ns) {
+                    dt = (float)((double)(sim_ns - last_sim_ns) * 1e-9);
+                    if (dt > 0.25f)
+                        dt = 0.25f;
+                }
+                last_sim_ns = sim_ns;
 
                 lens_input in;
                 drain_input(pl, &in, dt);
@@ -1853,39 +1875,32 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                 if (cursor_follow_hint(pl))
                     cursor_apply(pl);
 
-                /* IME candidate window position is pull-based on macOS (the
-                 * input context calls firstRectForCharacterRange: when it
-                 * needs the anchor), so there is nothing per-frame to do
-                 * here — unlike zwp_text_input_v3_set_cursor_rectangle. */
-
-                /* Static-frame skip: identical to app_wayland.c. Hosts with
-                 * a paint callback opt in per frame via
-                 * iris_paint_mark_static(); the declaration is consumed here
-                 * and must be re-issued every frame. It only covers the
-                 * host's own pixels — lens chrome damage still forces a
-                 * paint, or a hover highlight would freeze mid-transition
-                 * while the host scene is static.
-                 *
-                 * Zero-render skip: iris_request_frame_skip_render() makes
-                 * the same unchanged-content promise while a fresh request
-                 * keeps the active cadence armed (media-cadence streaming).
-                 * The prior-frame request does NOT veto it on Wayland, and
-                 * likewise does not here; chrome damage and resizes still
-                 * force a real paint below. */
-                bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
+                /* Cadence evaluation via iris_pacer (ADR-0122). */
                 bool chrome_damaged = lens_frame_needs_repaint(ui);
                 bool surface_forced = resized_this_frame || surface_needs_paint;
-                bool host_skip_render = has_custom_paint && pl->frame_skip_render &&
-                                        !surface_forced && !chrome_damaged;
+
+                iris_pace_inputs pace_in = {
+                    .now_ns = now,
+                    .refresh_ns = pl->refresh_ns,
+                    .have_pulse_source = false,
+                    .input_active = input_active,
+                    .host_animating = host_animating,
+                    .host_skip_render = pl->frame_skip_render,
+                    .host_static = pl->paint_static,
+                    .has_custom_paint = has_custom_paint,
+                    .chrome_damaged = chrome_damaged,
+                    .caret_visible = (lens_caret_rect(ui).w > 0.0f),
+                    .surface_needs_paint = surface_forced,
+                    .lens_animating = lens_anim_pending(ui),
+                };
                 pl->frame_skip_render = false;
-                bool host_canvas_static = has_custom_paint && pl->paint_static &&
-                                          !host_animating && !resized_this_frame &&
-                                          !surface_needs_paint && !chrome_damaged;
                 pl->paint_static = false;
-                bool must_paint = !host_canvas_static && !host_skip_render &&
-                                  (has_custom_paint || chrome_damaged || host_animating ||
-                                   resized_this_frame || surface_needs_paint);
-                if (must_paint) {
+
+                iris_pace_decision d = iris_pacer_tick(&pacer, &pace_in);
+                quiesced = (d.action == IRIS_PACE_QUIESCE);
+                wait_ns = d.wait_timeout_ns;
+
+                if (d.action == IRIS_PACE_PAINT) {
                     surface_needs_paint = true;
                     flux_frame *frame = NULL;
                     flux_result r = flux_surface_begin_frame(surface, NULL, &frame);
@@ -1896,9 +1911,6 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     }
                     if (r == FLUX_ERROR_INVALID_STATE)
                         continue;
-                    /* Acquire timeout (display asleep or surface occluded):
-                     * not an error — skip this frame and retry on the next
-                     * deadline instead of exiting the loop. */
                     if (r == FLUX_ERROR_TIMEOUT)
                         continue;
                     if (r != FLUX_OK)
@@ -1918,7 +1930,52 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
                     bool drew = false;
                     lens_scene_snapshot *snapshot = nullptr;
-                    if (flux_canvas_begin_frame(canvas, frame, pass_clear) == FLUX_OK) {
+
+                    /* Partial damage calculation (ADR-0123): for hosts without opaque
+                     * canvas content, constrain the renderArea and clear to the dirty
+                     * bounding box rather than clearing and drawing the entire window. */
+                    flux_rect dmg = {0, 0, 0, 0};
+                    bool partial_paint = false;
+                    int32_t dmg_x = 0, dmg_y = 0;
+                    uint32_t dmg_w = 0, dmg_h = 0;
+
+                    if (!surface_forced && !has_custom_paint) {
+                        dmg = lens_damage_rect(ui);
+                        if (dmg.w > 0.0f && dmg.h > 0.0f && info.width > 0 && info.height > 0) {
+                            float s = pl->scale;
+                            int32_t x0 = (int32_t)floorf(dmg.x * s);
+                            int32_t y0 = (int32_t)floorf(dmg.y * s);
+                            int32_t x1 = (int32_t)ceilf((dmg.x + dmg.w) * s);
+                            int32_t y1 = (int32_t)ceilf((dmg.y + dmg.h) * s);
+                            if (x0 < 0)
+                                x0 = 0;
+                            if (y0 < 0)
+                                y0 = 0;
+                            if (x1 > (int32_t)info.width)
+                                x1 = (int32_t)info.width;
+                            if (y1 > (int32_t)info.height)
+                                y1 = (int32_t)info.height;
+                            if (x1 > x0 && y1 > y0) {
+                                dmg_x = x0;
+                                dmg_y = y0;
+                                dmg_w = (uint32_t)(x1 - x0);
+                                dmg_h = (uint32_t)(y1 - y0);
+                                partial_paint = true;
+                            }
+                        }
+                    }
+
+                    flux_canvas_pass_desc pass_desc = {
+                        .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                        .frame = frame,
+                        .clear_color = pass_clear,
+                        .render_offset_x = partial_paint ? dmg_x : 0,
+                        .render_offset_y = partial_paint ? dmg_y : 0,
+                        .render_width = partial_paint ? dmg_w : 0,
+                        .render_height = partial_paint ? dmg_h : 0,
+                    };
+
+                    if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {
                         if (cfg->paint)
                             cfg->paint(canvas, device, pl->scale, cfg->user);
                         if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
@@ -1960,36 +2017,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                                 pl->width, pl->height, info.width, info.height, (double)pl->scale);
                 }
 
-                /* Refine the tentative deadline — same rules as Wayland:
-                 * active rate while input is warm or an animation is in
-                 * flight; low cadence for the caret blink; otherwise stop
-                 * scheduling frames entirely and block on the next event.
-                 * A host paint callback keeps the always-render pacing
-                 * unless it declared this frame static. */
-                if (has_custom_paint && !host_canvas_static) {
-                    if (pl->animation_frame_requested)
-                        next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
-                    frame_scheduled = true;
-                } else if (has_custom_paint) {
-                    /* Static-declaring host: keep the low idle tick so
-                     * build/paint keep running and the host can resume
-                     * animating on its own; only the GPU work skips. */
-                    next_deadline = t + IDLE_PERIOD_NS;
-                    frame_scheduled = true;
-                } else if (t - last_input_ns < INPUT_GRACE_NS || pl->animation_frame_requested ||
-                           lens_anim_pending(ui)) {
-                    next_deadline = t + ACTIVE_PERIOD_NS;
-                    frame_scheduled = true;
-                } else if (lens_caret_rect(ui).w > 0.0f) {
-                    next_deadline = t + IDLE_PERIOD_NS;
-                    frame_scheduled = true;
-                } else {
-                    frame_scheduled = false;
-                    /* Fully idle: release the text engine's high-water
-                     * scratch (ADR-0072 item 5). Mirrors the Wayland
-                     * backend's idle branch — the frame-pacing policy is
-                     * ported line-by-line across backends (ADR-0056
-                     * item 2). */
+                if (quiesced) {
                     lens_text_compact(ui);
                 }
             } /* @autoreleasepool (loop iteration) */

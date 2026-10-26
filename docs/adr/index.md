@@ -62,7 +62,7 @@ silent fallback. Its primitives have landed.
 | 0027 | [Lens retained store — open-addressing id→node map with ENTERING/STABLE/LEAVING GC](0027-lens-retained-store.md) | Accepted |
 | 0028 | [Lens two-phase flexbox layout (measure / arrange)](0028-lens-flexbox-layout.md) | Accepted (amended by [0060](0060-lens-single-tree-placement-and-z-bands.md)) |
 | 0029 | [Lens interaction model — prev-frame geometry, one-frame hit-test latency](0029-lens-interaction-model.md) | Accepted (amended 2026-08-10) |
-| 0030 | [Lens damage / redraw tracking — deferred, full-tree repaint today](0030-lens-damage-tracking.md) | Accepted (Decision 3 superseded by implementation; see status note) |
+| 0030 | [Lens damage / redraw tracking — deferred, full-tree repaint today](0030-lens-damage-tracking.md) | Accepted (Decision 3 formally superseded by [0123](0123-layered-compositing-subsurfaces-and-damage-tracking.md)) |
 | 0031 | [Lens symbol namespaces — public `lens_*`, internal `lensi_*`](0031-lens-symbol-namespaces.md) | Accepted |
 | 0032 | [Lens theme token system — sized struct with ABI guard](0032-lens-theme-tokens.md) | Accepted |
 | 0033 | [Lens text seam — draw and shape through flux-text, no in-tree font engine](0033-lens-text-seam.md) | Accepted |
@@ -88,7 +88,7 @@ silent fallback. Its primitives have landed.
 | 0053 | [Shader embedding — C23 #embed with generated-header fallback](0053-shader-embed-fallback.md) | Accepted |
 | 0054 | [Font discovery as a platform layer (fontconfig / DirectWrite / CoreText)](0054-font-discovery-platform-layer.md) | Accepted |
 | 0055 | [Callback-driven watch APIs + the backend wakeup seam](0055-watch-apis-and-wakeup-seam.md) | Accepted |
-| 0056 | [Win32 + Cocoa backends and the MoltenVK baseline](0056-win32-cocoa-backends-and-moltenvk.md) | Accepted |
+| 0056 | [Win32 + Cocoa backends and the MoltenVK baseline](0056-win32-cocoa-backends-and-moltenvk.md) | Accepted (Decision 2 superseded by [0122](0122-compositor-driven-presentation-pacing.md)) |
 | 0057 | [Paste drain and caret rect for app-owned editing surfaces](0057-paste-drain-and-caret-rect-for-app-surfaces.md) | Accepted |
 | 0058 | [Lens widget state bitflags and per-instance styles](0058-lens-widget-state-and-instance-styles.md) | Accepted (amended by ADR-0061) |
 | 0059 | [Lens widget skins — emission as a replaceable function](0059-lens-widget-skins.md) | Accepted (extended by ADR-0061) |
@@ -154,3 +154,7 @@ silent fallback. Its primitives have landed.
 | 0118 | [Coverage strategy placement — closed-form distance fields as a peer of the curve kernel](0118-coverage-strategy-placement-distance-fields-and-curve-kernel.md) | Accepted |
 | 0119 | [Coverage-seam migration — staged plan, acceptance harness first](0119-coverage-seam-migration-staged-plan.md) | Accepted as a plan (no implementation claimed) |
 | 0120 | [GPU analytic coverage — tile-compute plan for a modern 2D rasterizer](0120-gpu-analytic-coverage-tile-compute-plan.md) | Accepted as a plan (no implementation claimed) |
+| 0121 | [Algorithm vault and unified analytic vector infrastructure](0121-algorithm-vault-and-unified-analytic-vector-infrastructure.md) | Accepted |
+| 0122 | [Compositor-driven presentation pacing and hardware-locked display synchronization](0122-compositor-driven-presentation-pacing.md) | Accepted (landed across Wayland, Win32, Cocoa — supersedes client-timer pacing in [0056](0056-win32-cocoa-backends-and-moltenvk.md)) |
+| 0123 | [Multi-layer compositing, hardware subsurfaces, and incremental damage presentation](0123-layered-compositing-subsurfaces-and-damage-tracking.md) | Accepted (landed across Wayland, Win32, Cocoa — supersedes full-tree repaint in [0030](0030-lens-damage-tracking.md)) |
+| 0124 | [Decoupled dual-thread UI and presentation engine](0124-dual-thread-ui-and-presentation-pipeline.md) | Accepted (landed on Wayland; Win32/Cocoa dispatch pending) |

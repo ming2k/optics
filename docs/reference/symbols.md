@@ -456,6 +456,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_has_duplicate_ids` | True if the same widget id was linked more than once under one parent in the frame just built. |
 | `lens_anim_pending` | True if an eased value (hover/active fade, …) was still in transit during the frame just built. |
 | `lens_frame_needs_repaint` | True if the frame just built would paint anything different from what is already on screen: base-tree or placed-subtree damage (geometry, draw lists, lifecycle), an appearing/disappearing transient node or tooltip, an eased value still in transit, or a focused text caret that needs its blink clock. |
+| `lens_damage_rect` | Bounding box of damaged visual regions this frame in UI logical units (ADR-0123). |
 | `lens_set_reduced_motion` | Accessibility reduced-motion switch. |
 | `lens_reduced_motion` |  |
 | `lens_push_id` | ================================================================== |

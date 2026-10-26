@@ -193,7 +193,7 @@ static void run_fill(flux_point *poly, uint32_t n) {
     dummy.count = 1;       /* defeat the empty-path early-return */
     dummy.segments = &g_dummy_seg;
     canvas_paint paint = (canvas_paint){.color = 0xFF000000u};
-    canvas_fill_path_internal(&c, &dummy, &paint);
+    canvas_tess_fill_path(&c, &dummy, &paint);
 }
 
 static void run_fill_scripted(void) {
@@ -203,7 +203,7 @@ static void run_fill_scripted(void) {
     dummy.count = 1;
     dummy.segments = &g_dummy_seg;
     canvas_paint paint = (canvas_paint){.color = 0xFF000000u};
-    canvas_fill_path_internal(&c, &dummy, &paint);
+    canvas_tess_fill_path(&c, &dummy, &paint);
 }
 
 /* Append a circle contour to the multi-contour script. `ccw` selects

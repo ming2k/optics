@@ -38,14 +38,18 @@ static void build(lens *ui, const lens_input *in, void *user) {
     (void)in;
     double tb = now_s() - d->start;
     /* A trivial, non-animating tree: any chrome damage here is zero after
-     * the first frame, so the paint callback alone decides the cadence. */
-    lens_begin(ui, NULL);
+     * the first frame, so the paint callback alone decides the cadence.
+     *
+     * Note: iris already brackets this callback with lens_begin/lens_end —
+     * a build must only *emit* widgets. Calling lens_begin again here would
+     * reset the frame mid-build and wipe the lens_input iris just filled in
+     * (observed as `chrome_damaged` staying true forever, which made the
+     * static declaration below unobservable). */
     lens_column_begin(ui, NULL);
     lens_label(ui, &(lens_label_opts){.text = "paint_static demo: watch stderr counters"});
     lens_label(ui,
                &(lens_label_opts){.text = "phase toggles every 2s; close the window to finish"});
     lens_close(ui);
-    lens_end(ui);
     d->build_calls++;
     /* The static declaration belongs in build, not paint: build runs on
      * every scheduled frame (including skipped ones), so the declaration
@@ -70,12 +74,18 @@ static void paint(flux_canvas *canvas, flux_device *device, float scale, void *u
     (void)canvas;
     (void)device;
     (void)scale;
-    double t = now_s() - d->start;
-    (void)t;
-    /* Animate: keep the active cadence alive. The static declaration is
-     * made from build (see above); during animated phases this callback
-     * actually draws (a cheap solid would go here). */
-    iris_request_animation_frame();
+    /* Animate: keep the active cadence alive. The static declaration is made
+     * from build (see above); during animated phases this callback actually
+     * draws (a cheap solid would go here).
+     *
+     * The request is phase-gated on purpose. iris_request_animation_frame()
+     * says "my content is about to change", which by contract outranks the
+     * static declaration — a paint callback that always requests would
+     * therefore keep the window permanently animated and the static phase
+     * could never be observed at all. */
+    double tb = now_s() - d->start;
+    if (((int)(tb / 2.0) % 2) == 0)
+        iris_request_animation_frame();
     d->frames_animated++;
     d->frames_in_flight++;
 }
@@ -89,7 +99,10 @@ int main(void) {
     demo_state d;
     memset(&d, 0, sizeof d);
     d.start = now_s();
-    d.last_report = d.start;
+    /* Report cadence is measured in *elapsed* seconds, so the baseline is 0,
+     * not the absolute start timestamp: comparing elapsed time against an
+     * absolute clock never fires (the demo silently printed nothing). */
+    d.last_report = 0.0;
 
     iris_app_config cfg = {0};
     cfg.title = "iris paint_static demo";

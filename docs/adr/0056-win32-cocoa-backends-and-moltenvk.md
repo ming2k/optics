@@ -7,7 +7,7 @@ date: 2026-08-08
 
 # ADR-0056: Win32 + Cocoa backends and the MoltenVK baseline
 
-- Status: Accepted
+- Status: Accepted (Decision #2 superseded by [ADR-0122](0122-compositor-driven-presentation-pacing.md))
 - Date: 2026-08-08
 - Scope: iris platform backends (Windows, macOS) and the flux device
   requirements they rely on.

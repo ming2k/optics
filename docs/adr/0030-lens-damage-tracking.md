@@ -7,11 +7,11 @@ date: 2026-07-21
 
 # ADR-0030: Lens damage / redraw tracking — deferred, full-tree repaint today
 
-- Status: Accepted (Decision #3 superseded by implementation — see the
-  status note below and ADR-0017's canvas display lists)
+- Status: Accepted (Decision #3 formally superseded by [ADR-0123](0123-layered-compositing-subsurfaces-and-damage-tracking.md))
 - Date: 2026-07-21
 - Amended: 2026-08-21 — subtree skip IS now delivered, via canvas
-  record/replay rather than a lens-side offscreen cache
+  record/replay rather than a lens-side offscreen cache; whole-frame repaint
+  formally retired by [ADR-0123](0123-layered-compositing-subsurfaces-and-damage-tracking.md)
 - Scope: lens (L2 toolkit). Records the draw-list hashing infrastructure
   and the current "repaint the whole tree" policy.
 

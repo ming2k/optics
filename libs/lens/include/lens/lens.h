@@ -936,6 +936,12 @@ LENS_API bool lens_anim_pending(const lens *ui);
  * the host must still paint the first frame after those itself. */
 LENS_API bool lens_frame_needs_repaint(const lens *ui);
 
+/* Bounding box of damaged visual regions this frame in UI logical units
+ * (ADR-0123). Evaluates dirty nodes across base and placed subtrees, tooltips,
+ * and text carets. Returns {0, 0, 0, 0} when lens_frame_needs_repaint() is
+ * false. Valid between lens_end and the next lens_begin. */
+LENS_API flux_rect lens_damage_rect(const lens *ui);
+
 /* Accessibility reduced-motion switch. When enabled, every eased value in
  * lens resolves to its target within one frame — no fades, slides, or other
  * transitions — and lens_anim_pending stays false. The host owns the policy

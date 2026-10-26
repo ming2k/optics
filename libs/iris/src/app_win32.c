@@ -46,6 +46,7 @@
 #endif
 
 #include "a11y_prefs_internal.h"
+#include "display_pacer.h"
 #include "platform_input.h"
 #include "platform_internal.h"
 #include "platform_text.h"
@@ -163,6 +164,7 @@ typedef struct w32_platform {
     bool animation_frame_requested; /* host asked for active-rate follow-up */
     bool paint_static;              /* host declared this frame's canvas static */
     bool frame_skip_render;         /* host asked to skip rendering but keep the active cadence */
+    int64_t refresh_ns;             /* learned display period; 0 = unknown   */
     bool theme_watching;            /* backend theme watch registered       */
     bool a11y_prefs_watching;       /* backend a11y-pref watch registered   */
     bool a11y_running;              /* a11y bridge initialised (inert stub) */
@@ -1732,6 +1734,24 @@ static long long now_ns(void) {
            (long long)((c.QuadPart % freq) * 1000000000LL / freq);
 }
 
+/* Query display refresh rate via Win32 GDI / Monitor APIs (ADR-0122). */
+static int64_t w32_query_refresh_ns(HWND hwnd) {
+    if (hwnd) {
+        HMONITOR hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFOEXW mi = {.cbSize = sizeof(mi)};
+        if (GetMonitorInfoW(hmon, (LPMONITORINFO)&mi)) {
+            DEVMODEW dm = {.dmSize = sizeof(dm)};
+            if (EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm) &&
+                dm.dmDisplayFrequency > 1)
+                return 1000000000LL / (int64_t)dm.dmDisplayFrequency;
+        }
+    }
+    DEVMODEW dm = {.dmSize = sizeof(dm)};
+    if (EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
+        return 1000000000LL / (int64_t)dm.dmDisplayFrequency;
+    return IRIS_PACE_DEFAULT_REFRESH_NS;
+}
+
 /* True if the input accumulator holds genuine user activity (pointer motion,
  * buttons, scroll, keys, or text/IME) since the last check. Same role as in
  * app_wayland.c: it is what lets the loop drop to a low idle rate when the
@@ -1964,36 +1984,40 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     ShowWindow(pl.hwnd, SW_SHOW);
 
     /* --- Frame loop --------------------------------------------------
-     * Same state machine as app_wayland.c, transplanted onto the Win32
-     * message pump: the surface presents without vsync (non-blocking), so
-     * the loop sleeps inside pump_events' MsgWaitForMultipleObjectsEx until
-     * the next frame is due — or until real input wakes it early. The rate
-     * is adaptive: ~60 Hz right after user input, then lens_frame_needs_repaint()
-     * gates the whole acquire/paint/present cycle, and with nothing
-     * time-driven pending (no animation, no focused caret) the loop stops
-     * scheduling frames and blocks until the next message. A focused text
-     * field keeps a ~4 Hz deadline alive for the caret blink.
+     * Presentation is paced by the display pacer (display_pacer.h, ADR-0122),
+     * not by ad-hoc client timer arithmetic.
      *
-     * Hosts with a paint callback (cfg->paint) opt out of all of this:
-     * their content is opaque to lens, so they keep the always-render
-     * pacing (~60 Hz after input, ~4 Hz idle). */
-    const long long ACTIVE_PERIOD_NS = 16666667LL; /* ~60 Hz when active    */
-    const long long IDLE_PERIOD_NS = 250000000LL;  /* ~4 Hz when idle: just  */
-                                                   /* enough for the caret   */
-                                                   /* blink (500ms period).  */
-    const long long INPUT_GRACE_NS = 400000000LL;  /* stay fast 400ms after  */
+     * The surface presents non-blocking (Mailbox / Immediate) so acquiring an
+     * image never freezes input handling. The cadence state machine
+     * (iris_pacer) owns the whole decision: paint, skip, or quiesce — plus
+     * the poll budget:
+     *
+     *   - The display refresh rate is queried dynamically from Windows GDI /
+     *     EnumDisplaySettings (w32_query_refresh_ns), unlocking 120/144/240 Hz
+     *     displays rather than clamping to 60 Hz (INV-PACE-02).
+     *   - Zero-render skips (iris_request_frame_skip_render) advance the
+     *     scheduling baseline cleanly, eliminating the 100% CPU spin bug
+     *     (INV-PACE-03).
+     *   - Time-based UI advances on the simulation clock rather than render
+     *     timestamps (INV-PACE-04).
+     *
+     * A lens-only host reaches full quiescence (quiesced = true, blocking in
+     * pump_events with INFINITE); a host with cfg->paint keeps the low idle
+     * tick alive so its cfg->build can observe state changes. */
+    iris_pacer pacer;
+    iris_pacer_init(&pacer);
+    pl.refresh_ns = w32_query_refresh_ns(pl.hwnd);
+    iris_pacer_set_refresh(&pacer, pl.refresh_ns);
 
-    long long prev_ns = now_ns();
     int frame_no = 0;
-
-    long long next_deadline = prev_ns;
-    bool frame_scheduled = true; /* the first frame must always paint */
     /* Sticky until a frame containing the latest lens build is actually
      * presented (see app_wayland.c for the acquire-timeout rationale). */
     bool surface_needs_paint = true;
-    long long last_input_ns = next_deadline;
-    long long last_render_ns = next_deadline - ACTIVE_PERIOD_NS;
+    bool quiesced = false;
+    long long wait_ns = 0;
+    long long last_sim_ns = 0;
     double prev_cx = pl.acc.cx, prev_cy = pl.acc.cy;
+    const bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
 
     pl.ui = ui;
 
@@ -2036,58 +2060,46 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             continue;
         }
 
-        /* Sleep (inside the wait) until the next frame is due, waking early
-         * on any message. With no frame scheduled (fully idle) there is no
-         * deadline at all — the wait blocks until an event. */
-        long long t = now_ns();
-        long long budget_ns = frame_scheduled ? next_deadline - t : 0;
-        bool woke_on_event;
-        if (!frame_scheduled) {
-            woke_on_event = pump_events(&pl, INFINITE);
-        } else if (budget_ns > 0) {
-            DWORD budget_ms = (DWORD)(budget_ns / 1000000LL);
-            woke_on_event = pump_events(&pl, budget_ms);
-        } else {
-            woke_on_event = pump_events(&pl, 0);
+        /* Sleep (inside MsgWaitForMultipleObjectsEx) until the next frame
+         * deadline, or wake immediately on incoming messages. The poll budget
+         * is governed by iris_pacer (ADR-0122) and is `>= 1 ns` whenever
+         * active, preventing busy polling. */
+        const DWORD POLL_CAP_MS = 200;
+        DWORD timeout_ms;
+        if (quiesced)
+            timeout_ms = INFINITE;
+        else if (wait_ns <= 0)
+            timeout_ms = 0;
+        else {
+            long long ms = wait_ns / 1000000LL;
+            if (ms < 1)
+                ms = 1;
+            if (ms > POLL_CAP_MS)
+                ms = POLL_CAP_MS;
+            timeout_ms = (DWORD)ms;
         }
+        bool woke_on_event = pump_events(&pl, timeout_ms);
 
-        /* Real user input wakes us out of the idle rate: pull the next render
-         * forward (but never sooner than one active period after the last one,
-         * so a burst of motion events can't exceed ~60 Hz) and mark the moment
-         * so we stay at the active rate through the grace window. */
-        if (acc_has_user_input(&pl, &prev_cx, &prev_cy)) {
-            last_input_ns = now_ns();
-            long long earliest = last_render_ns + ACTIVE_PERIOD_NS;
-            if (!frame_scheduled || next_deadline > earliest)
-                next_deadline = earliest;
-            frame_scheduled = true;
-        } else if (woke_on_event && !frame_scheduled) {
-            /* A non-input event (wakeup-posted callback, theme change,
-             * WM_PAINT, …) while fully idle: run one frame so lens sees the
-             * new state; whether it paints is decided by the repaint query
-             * below. */
-            next_deadline = now_ns();
-            frame_scheduled = true;
-        }
+        long long now = now_ns();
+        bool input_active = acc_has_user_input(&pl, &prev_cx, &prev_cy);
 
-        /* Not time to draw yet — keep draining messages and sleeping. */
-        if (!frame_scheduled || now_ns() < next_deadline)
+        /* Quiescent fast-path: when completely idle with no pending events or
+         * input, evaluate idle pacer tick and sleep until external message. */
+        if (quiesced && !input_active && !woke_on_event) {
+            iris_pace_inputs idle_in = {
+                .now_ns = now,
+                .refresh_ns = pl.refresh_ns,
+                .have_pulse_source = false,
+                .has_custom_paint = has_custom_paint,
+            };
+            iris_pace_decision idle_d = iris_pacer_tick(&pacer, &idle_in);
+            quiesced = (idle_d.action == IRIS_PACE_QUIESCE);
+            wait_ns = idle_d.wait_timeout_ns;
             continue;
+        }
 
-        /* Render this iteration. A tentative deadline is scheduled up front
-         * (no catch-up bursts) so the error `continue`s in the present path
-         * still retry; it is refined — or dropped entirely — after lens_end,
-         * once the repaint query and animation state are known. A host
-         * animation request made by the previous frame also keeps this
-         * iteration at the active cadence. */
-        t = now_ns();
         bool host_animating = pl.animation_frame_requested;
         pl.animation_frame_requested = false;
-        long long period = (t - last_input_ns < INPUT_GRACE_NS || host_animating) ? ACTIVE_PERIOD_NS
-                                                                                  : IDLE_PERIOD_NS;
-        next_deadline = t + period;
-        frame_scheduled = true;
-        last_render_ns = t;
 
         /* DPI change (window dragged to a mixed-DPI monitor): apply the new
          * scale, resize the swapchain in device pixels, and tell lens so its
@@ -2107,11 +2119,18 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             resized_this_frame = true;
         }
 
-        long long now = now_ns();
-        float dt = (float)(now - prev_ns) * 1e-9f;
-        if (dt <= 0.0f)
-            dt = 1.0f / 60.0f;
-        prev_ns = now;
+        /* Simulation clock (INV-PACE-04): evaluate animation and physics on
+         * predictable display refresh intervals rather than execution noise. */
+        long long sim_ns = now;
+        float dt =
+            (float)((double)(pl.refresh_ns > 0 ? pl.refresh_ns : IRIS_PACE_DEFAULT_REFRESH_NS) *
+                    1e-9);
+        if (last_sim_ns > 0 && sim_ns > last_sim_ns) {
+            dt = (float)((double)(sim_ns - last_sim_ns) * 1e-9);
+            if (dt > 0.25f)
+                dt = 0.25f;
+        }
+        last_sim_ns = sim_ns;
 
         lens_input in;
         drain_input(&pl, &in, dt);
@@ -2171,44 +2190,32 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             surface_needs_paint = true;
         }
 
-        /* Static-frame skip: when lens reports no damage, the host has no
-         * paint callback, no host animation is in flight, and no resize /
-         * scale just happened, the frame just built is pixel-identical to
-         * what is on screen — skip the whole begin_frame → canvas → present
-         * cycle (no swapchain image acquired, nothing committed).
-         *
-         * Hosts with a paint callback can opt into the same skip per frame
-         * via iris_paint_mark_static(): only they know whether their opaque
-         * content moved. The declaration is consumed here and must be
-         * re-issued every frame; lens chrome damage, host animation,
-         * resizes, and a forced WM_PAINT always paint regardless. */
-        /* A static declaration is the host's final word for the frame's
-         * canvas content, but it only covers the host's own pixels: lens
-         * chrome damage still forces a paint, or a hover highlight would
-         * freeze mid-transition while the host scene is static. Host
-         * animation, resizes, and a forced WM_PAINT always paint too. */
+        /* Cadence evaluation via iris_pacer (ADR-0122). */
         bool chrome_damaged = lens_frame_needs_repaint(ui);
-        /* Zero-render skip (iris_request_frame_skip_render): the host
-         * promises this frame's canvas content is unchanged while still
-         * streaming at the media cadence. Mirrors the Wayland backend:
-         * the prior-frame animation request does NOT veto a skip (the
-         * request that arms the next active deadline would otherwise
-         * kill every streamed skip), but lens chrome damage, resizes,
-         * a forced WM_PAINT, and a never-yet-presented surface all
-         * change what is on screen and force a real paint below. */
-        bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
-        bool surface_forced = resized_this_frame || surface_needs_paint || pl.force_paint;
-        bool host_skip_render =
-            has_custom_paint && pl.frame_skip_render && !surface_forced && !chrome_damaged;
+        bool surface_forced = resized_this_frame || surface_needs_paint;
+
+        iris_pace_inputs pace_in = {
+            .now_ns = now,
+            .refresh_ns = pl.refresh_ns,
+            .have_pulse_source = false,
+            .input_active = input_active,
+            .host_animating = host_animating,
+            .host_skip_render = pl.frame_skip_render,
+            .host_static = pl.paint_static,
+            .has_custom_paint = has_custom_paint,
+            .chrome_damaged = chrome_damaged,
+            .caret_visible = (lens_caret_rect(ui).w > 0.0f),
+            .surface_needs_paint = surface_forced,
+            .lens_animating = lens_anim_pending(ui),
+        };
         pl.frame_skip_render = false;
-        bool host_canvas_static = has_custom_paint && pl.paint_static && !host_animating &&
-                                  !resized_this_frame && !surface_needs_paint && !chrome_damaged &&
-                                  !pl.force_paint;
         pl.paint_static = false;
-        bool must_paint = !host_canvas_static && !host_skip_render &&
-                          (has_custom_paint || chrome_damaged || host_animating ||
-                           resized_this_frame || surface_needs_paint);
-        if (must_paint) {
+
+        iris_pace_decision d = iris_pacer_tick(&pacer, &pace_in);
+        quiesced = (d.action == IRIS_PACE_QUIESCE);
+        wait_ns = d.wait_timeout_ns;
+
+        if (d.action == IRIS_PACE_PAINT) {
             surface_needs_paint = true;
             flux_frame *frame = NULL;
             flux_result r = flux_surface_begin_frame(surface, NULL, &frame);
@@ -2240,10 +2247,52 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
             bool drew = false;
             lens_scene_snapshot *snapshot = nullptr;
-            if (flux_canvas_begin(canvas,
-                                  &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                           .frame = frame,
-                                                           .clear_color = pass_clear}) == FLUX_OK) {
+
+            /* Partial damage calculation (ADR-0123): for hosts without opaque
+             * canvas content, constrain the renderArea and clear to the dirty
+             * bounding box rather than clearing and drawing the entire window. */
+            flux_rect dmg = {0, 0, 0, 0};
+            bool partial_paint = false;
+            int32_t dmg_x = 0, dmg_y = 0;
+            uint32_t dmg_w = 0, dmg_h = 0;
+
+            if (!surface_forced && !has_custom_paint) {
+                dmg = lens_damage_rect(ui);
+                if (dmg.w > 0.0f && dmg.h > 0.0f && info.width > 0 && info.height > 0) {
+                    float s = pl.scale;
+                    int32_t x0 = (int32_t)floorf(dmg.x * s);
+                    int32_t y0 = (int32_t)floorf(dmg.y * s);
+                    int32_t x1 = (int32_t)ceilf((dmg.x + dmg.w) * s);
+                    int32_t y1 = (int32_t)ceilf((dmg.y + dmg.h) * s);
+                    if (x0 < 0)
+                        x0 = 0;
+                    if (y0 < 0)
+                        y0 = 0;
+                    if (x1 > (int32_t)info.width)
+                        x1 = (int32_t)info.width;
+                    if (y1 > (int32_t)info.height)
+                        y1 = (int32_t)info.height;
+                    if (x1 > x0 && y1 > y0) {
+                        dmg_x = x0;
+                        dmg_y = y0;
+                        dmg_w = (uint32_t)(x1 - x0);
+                        dmg_h = (uint32_t)(y1 - y0);
+                        partial_paint = true;
+                    }
+                }
+            }
+
+            flux_canvas_pass_desc pass_desc = {
+                .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                .frame = frame,
+                .clear_color = pass_clear,
+                .render_offset_x = partial_paint ? dmg_x : 0,
+                .render_offset_y = partial_paint ? dmg_y : 0,
+                .render_width = partial_paint ? dmg_w : 0,
+                .render_height = partial_paint ? dmg_h : 0,
+            };
+
+            if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {
                 if (cfg->paint)
                     cfg->paint(canvas, device, pl.scale, cfg->user);
                 if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
@@ -2284,36 +2333,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                         pl.width, pl.height, info.width, info.height, (double)pl.scale);
         }
 
-        /* Refine the tentative deadline now that the repaint query and the
-         * post-build animation state are known (identical policy to
-         * app_wayland.c: active rate while input is warm or animation is in
-         * flight, idle cadence for a focused caret, otherwise unschedule
-         * and sleep in the message wait until the next event). Hosts with
-         * a paint callback keep the always-render pacing unless they
-         * declared this frame static. */
-        if (has_custom_paint && !host_canvas_static) {
-            if (pl.animation_frame_requested)
-                next_deadline = last_render_ns + ACTIVE_PERIOD_NS;
-            frame_scheduled = true;
-        } else if (has_custom_paint) {
-            /* Static-declaring host: keep the low idle tick so build/paint
-             * keep running and the host can resume animating on its own;
-             * only the GPU work skips. */
-            next_deadline = t + IDLE_PERIOD_NS;
-            frame_scheduled = true;
-        } else if (t - last_input_ns < INPUT_GRACE_NS || pl.animation_frame_requested ||
-                   lens_anim_pending(ui)) {
-            next_deadline = t + ACTIVE_PERIOD_NS;
-            frame_scheduled = true;
-        } else if (lens_caret_rect(ui).w > 0.0f) {
-            next_deadline = t + IDLE_PERIOD_NS;
-            frame_scheduled = true;
-        } else {
-            frame_scheduled = false;
-            /* Fully idle: release the text engine's high-water scratch
-             * (ADR-0072 item 5). Mirrors the Wayland backend's idle
-             * branch — the frame-pacing policy is ported line-by-line
-             * across backends (ADR-0056 item 2). */
+        if (quiesced) {
             lens_text_compact(ui);
         }
     }

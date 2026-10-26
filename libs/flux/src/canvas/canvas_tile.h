@@ -15,14 +15,13 @@
 
 #include "internal.h"
 #include <flux/core.h>
+#include <flux/curve.h>
 
 #define FLUX_TILE_SIZE 16u
 
-/* A single 2D line segment in physical device space, consumable by GPU compute shaders. */
-typedef struct flux_tile_segment {
-    float x0, y0;
-    float x1, y1;
-} flux_tile_segment;
+/* A single 2D line segment in physical device space, consumable by GPU compute shaders (ADR-0121).
+ */
+typedef flux_segment flux_tile_segment;
 
 /* Header block for the segment SSBO, read by GPU coarse binning compute passes. */
 typedef struct flux_tile_segment_header {

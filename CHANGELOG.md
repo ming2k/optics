@@ -13,6 +13,30 @@ either.
 
 ## [Unreleased]
 
+### Changed
+
+- **iris**: Presentation is paced by the display instead of by a client-side timer across all platforms (ADR-0122). The frame loop no longer sleeps out a hardcoded ~60 Hz period and re-derives its next wake-up from the last *paint*; it subscribes to the compositor's `wl_surface.frame` grant on Wayland and dynamic display refresh queries across Windows (`EnumDisplaySettings`) and macOS (`CGDisplayModeGetRefreshRate`). On a 3072×1920 @ 120 Hz panel this is the difference between 60 fps and the panel's actual 120 fps.
+- **iris**: Incremental damage presentation (ADR-0123). Evaluates `lens_damage_rect(ui)` and constrains the Vulkan dynamic rendering `renderArea` (`render_offset_x/y`, `render_width/height`) strictly to dirty bounding boxes. Attached to Wayland via `wl_surface_damage_buffer` and wired into Win32 and Cocoa, eliminating full-screen clear-and-draw overhead on localized UI updates.
+- **iris**: `iris_request_frame_skip_render()` no longer turns a zero-render skip into a busy-spin. The schedule can only move *forward*, and is never recomputed from a render timestamp, so the past-deadline `poll(0)` loop that consumed a full CPU core is structurally unreachable across Wayland, Win32, and Cocoa. A media host declaring one paint in four now runs at the display rate for ~3.5 % of one core.
+- **iris**: Animations are evaluated against the compositor's frame timestamp rather than the wall clock at build time, so an eased value lands on the frame the display actually shows.
+
+### Added
+
+- **lens**: `lens_damage_rect(ui)` — computes the tight bounding box of visual damage across dirty base/placed subtrees, carets, and tooltips in logical UI units, clipped to the layout viewport (ADR-0123).
+- **iris**: `libs/iris/src/display_pacer.{h,c}` — the platform-neutral frame-cadence state machine (ADR-0122). Pure: no clock, no platform headers, no allocation. Each backend feeds it its own VSync source and it answers paint / skip / quiesce plus the poll budget, with a hard `>= 1 ns` budget postcondition while non-quiescent.
+- **iris**: Hardware dual-plane subsurface composition on Wayland (`wl_subcompositor` + `wl_subsurface` with premultiplied alpha), physically isolating dynamic Host Canvas (`cfg->paint`) from static Lens UI chrome, delegating blending directly to display controller hardware planes (ADR-0123).
+- **iris**: `libs/iris/src/frame_mailbox.{h,c}` — lockless triple-buffered snapshot handoff channel (`iris_frame_mailbox`) decoupling the UI event loop from the compositor presentation engine (ADR-0124).
+- **iris**: Dedicated presentation worker thread dispatch on Wayland (`wp_presenter_thread_main`), asynchronously consuming immutable scene snapshots and presenting to Vulkan swapchains without stalling the UI main event pump (`[INV-THREAD-01]`, `[INV-THREAD-03]`).
+- **prism**: Persistent Material Backdrop Boundary caching in `prism_backdrop_layer_filter` (`[INV-COMP-04]`). Skips compute passes (clear, statistics, frost, and glass dispatches) when input textures and material parameters remain unchanged across frames, directly reusing the persistent slot output.
+- **tests**: `test_frame_mailbox` asserts wait-free atomic exchange, monotonic sequence ordering, and concurrent multithreaded producer-consumer integrity.
+- **tests**: `test_display_pacer` pins the cadence contract headlessly (16.5k checks) — display-driven lockstep at 60/120/144 Hz, the skip-render no-spin regression, caret idle alignment, quiescence, and forced-paint precedence.
+- **tests**: `test_repaint` now asserts `lens_damage_rect` cleanliness during quiescent steady state and bounds containment under leaf mutations.
+- **examples**: `frame_skip_demo` is the live acceptance for the skip-render regression: it prints its tick rate and paint/skip counters so a cadence collapse or a busy-spin is visible at a glance.
+
+### Fixed
+
+- **examples**: `paint_static_demo` never printed its counters — it compared elapsed seconds against an absolute start timestamp, so the report condition was never true. It also called `lens_begin`/`lens_end` *inside* its build callback, though iris already brackets the build, which reset the frame mid-build and wiped the input iris had just filled in.
+
 ## [0.0.61] - 2026-10-25
 
 ### Added
