@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.62] - 2026-10-26
+
 ### Changed
 
 - **iris**: Presentation is paced by the display instead of by a client-side timer across all platforms (ADR-0122). The frame loop no longer sleeps out a hardcoded ~60 Hz period and re-derives its next wake-up from the last *paint*; it subscribes to the compositor's `wl_surface.frame` grant on Wayland and dynamic display refresh queries across Windows (`EnumDisplaySettings`) and macOS (`CGDisplayModeGetRefreshRate`). On a 3072×1920 @ 120 Hz panel this is the difference between 60 fps and the panel's actual 120 fps.
