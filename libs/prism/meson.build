@@ -102,7 +102,7 @@ prism_c_args = ['-DPRISM_BUILDING=1', '-DPRISM_SHADER_NO_EMBED=1']
 prism_c_args += cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
 
 spv2h_py = import('python').find_installation('python3')
-spv2h = files('../../tools/spv2h.py')
+spv2h = files('../../tools/build/spv2h.py')
 
 # Headers for fallback (no-#embed)
 liquid_glass_spv_h = custom_target('liquid_glass_spv.h',

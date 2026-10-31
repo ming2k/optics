@@ -19,7 +19,7 @@ jobs:
 
       # Formatting is locked to a major version: output drifts between
       # clang-format releases, so "whatever the runner ships" would flake
-      # on image updates. The pin matches tools/check-format.sh.
+      # on image updates. The pin matches tools/guardrails/formatting.py.
       - name: Install pinned clang-format
         run: |
           sudo install -d /etc/apt/keyrings
@@ -33,7 +33,7 @@ jobs:
             /usr/bin/clang-format-22 100
 
       - name: Format check
-        run: tools/check-format.sh
+        run: ./tools/optics check format
 
   workflow-lint:
     name: workflow lint (actionlint)
@@ -68,14 +68,14 @@ jobs:
       # Material boundary (ADR-0063): flux owns rendering mechanism and must
       # not reference any named material; materials live in prism.
       - name: Material boundary check
-        run: tools/check-material-boundary.sh
+        run: ./tools/optics check boundary
 
       # One release, one version: every library's *_VERSION_* macros
       # must equal meson.project_version(). (flux-scene-graph shipped
       # a hard-coded "0.0.29" string against 0.0.36 headers; anim sat
       # at 0.0.1 for seven months. Both invisible until this check.)
       - name: Version lockstep check
-        run: tools/check-version-lockstep.sh
+        run: ./tools/optics check lockstep
 
       # Static analysis (clang-tidy, clang + compile_commands). Baseline
       # policy: zero warnings; fix, don't silence. Platform TUs that only
@@ -84,23 +84,23 @@ jobs:
         run: |
           CC=clang meson setup build-tidy -Dtests=true -Dexamples=false \
             --buildtype=debug -Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled
-          sh tools/check-tidy.sh build-tidy
+          ./tools/optics check tidy --build-dir build-tidy
 
       # Library stdout guardrail: diagnostics go to stderr, never stdout —
       # a consumer's stdout may be an IPC wire (e.g. the portal prompter).
       - name: No library stdout writes
-        run: tools/check-no-library-stdout.sh
+        run: ./tools/optics check stdout
 
       # Symbol reference freshness: docs/reference/symbols.md is generated
-      # from the installed headers (tools/gen_symbols.py). It drifted
+      # from the installed headers (tools/guardrails/symbols.py). It drifted
       # silently before this check existed (removed symbols lingered,
       # new ones never appeared).
       - name: symbols.md freshness
-        run: python3 tools/gen_symbols.py --check
+        run: ./tools/optics check symbols
 
-      # Documentation governance integrity & zero-drift (Protocol v5.1.0)
-      - name: Documentation governance check
-        run: tools/verify.sh .
+      # Documentation integrity & audience firewall verification (ADR-0125)
+      - name: Documentation integrity check
+        run: ./tools/optics check docs
 
       - name: Install build dependencies
         run: |
@@ -132,7 +132,7 @@ jobs:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
           # Leak detection & diagnostic hardening are ON: the root meson.build
           # registers the default 'sanitizer' test setup (active under any b_sanitize)
-          # that binds LSAN_OPTIONS (tools/lsan.supp), abort behaviors, and timeouts.
+          # that binds LSAN_OPTIONS (tools/config/lsan.supp), abort behaviors, and timeouts.
         run: meson test -C build --no-suite bench --print-errorlogs
 
   clang-build:

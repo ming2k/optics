@@ -1,20 +1,15 @@
 # Developer Documentation
 
-These pages cover maintenance of the Optics monorepo:
+These pages cover the internal engineering, testing, maintenance, and quality standards for the Optics monorepo:
 
-- [Architecture Governance](../governance/index.md) — project governance charter, 5-gate review filter, and domain intake standards.
-- [Design philosophy](../explanation/design-philosophy.md) — foundational architectural principles and layered system model.
-- [Setup](setup.md) — install dependencies and configure a development build.
-- [Testing](testing.md) — run, select, debug, and extend the C and Rust suites.
-- [Manual testing](manual-testing.md) — interactive verification, graphics and material inspection, UI and input checks, and platform matrix runbooks.
-- [Cross-platform](cross-platform.md) — Windows/macOS requirements,
-  verification tooling, and the consistency invariants platform code must keep.
-- [Project layout](project-layout.md) — find the owner of code, tests,
-  examples, bindings, and documentation.
-- [Release](release.md) — prepare and verify a source release.
-- [Animation, opacity, and layer performance know-how](animation-and-layer-performance.md) — premultiplied command opacity invariants, scissor-bounded Vulkan layer passes, stencil synchronization, and GPU glyph batching ([ADR-0109](../adr/0109-premultiplied-command-opacity-scissor-bounded-layers-and-glyph-run-batching.md)).
-- [Architecture implementation review](architecture-review-2026-09-14.md) —
-  inspected implementation gaps, work packages, and verification evidence for ADR-0089–0094.
+- **[Engineering Standards](standards/README.md)** — Repository architecture topology, system invariants, C23 API guidelines, UI component purity, and PR review gates.
+- **[Setup](setup.md)** — Install dependencies, configure the build matrix, and manage toolchains.
+- **[Testing](testing.md)** — Run, select, debug, and extend the C, Rust, and benchmark test suites.
+- **[Manual Testing Runbooks](manual-testing.md)** — Interactive verification, graphics inspection, UI/input checks, and platform matrix runbooks.
+- **[Cross-Platform Invariants](cross-platform.md)** — Linux (Wayland), Windows (Win32), and macOS (Cocoa/MoltenVK) requirements and verification tooling.
+- **[Project Layout](project-layout.md)** — Structural map of libraries, tests, examples, bindings, and documentation assets.
+- **[Release & Versioning](release.md)** — Release checklist, version lockstep, and packaging procedures.
+- **[Animation, Opacity & Layer Performance](animation-and-layer-performance.md)** — Premultiplied command opacity invariants, scissor-bounded layer passes, stencil synchronization, and GPU glyph batching ([ADR-0109](../adr/0109-premultiplied-command-opacity-scissor-bounded-layers-and-glyph-run-batching.md)).
+- **[Architecture Implementation Review](architecture-review-2026-09-14.md)** — Architectural inspection, work packages, and verification evidence for ADR-0089–0094.
 
-User-facing rendering tasks belong in the [tutorials](../tutorials/01-getting-started.md)
-and [how-to guides](../how-to/record-and-present-a-frame.md).
+User-facing rendering tasks belong in the [Tutorials](../tutorials/index.md) and [How-To Guides](../how-to/index.md).

@@ -31,7 +31,7 @@
 #endif
 
 /* meson supplies -DIRIS_BUILDING=1; define it so single-file compile checks
- * (tools/zig-win32-check.sh) don't see dllimport on definitions. */
+ * (tools/ci/zig-win32-check.sh) don't see dllimport on definitions. */
 #ifndef IRIS_BUILDING
 #define IRIS_BUILDING 1
 #endif

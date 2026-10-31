@@ -1,12 +1,12 @@
 glslang = find_program('glslangValidator', required : true)
 
 # C23 #embed bakes SPIR-V into the example binaries; toolchains without it
-# (MSVC cl, Apple Clang) take the tools/spv2h.py generated headers instead
+# (MSVC cl, Apple Clang) take the tools/build/spv2h.py generated headers instead
 # (same arrays, selected per TU via __has_embed). --embed-dir is probed
 # because MSVC rejects unknown options outright.
 examples_embed_dir_arg = cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
 spv2h_py = import('python').find_installation('python3')
-spv2h    = files('../../tools/spv2h.py')
+spv2h    = files('../../tools/build/spv2h.py')
 
 # Headless compute example — built unconditionally.
 fill_comp_spv = custom_target('fill.comp.spv',

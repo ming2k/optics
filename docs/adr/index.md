@@ -131,7 +131,7 @@ silent fallback. Its primitives have landed.
 | 0095 | [Flux public contract convergence](0095-flux-public-contract-convergence.md) | Accepted (supersedes ADR-0087; refines ADR-0091, ADR-0093) |
 | 0096 | [Prism Mica foundation material — screen-anchored wallpaper composite](0096-prism-mica-foundation-material.md) | Accepted |
 | 0097 | [Canonical example taxonomy, legacy pruning, and lifecycle governance](0097-canonical-example-taxonomy-and-governance.md) | Accepted |
-| 0098 | [Developer tooling taxonomy, architecture guardrails, and unified verification](0098-developer-tooling-and-architecture-guardrails.md) | Accepted |
+| 0098 | [Developer tooling taxonomy, architecture guardrails, and unified verification](0098-developer-tooling-and-architecture-guardrails.md) | Superseded by [ADR-0126](0126-developer-tooling-domain-modularization-and-unified-optics-cli.md) |
 | 0099 | [Desktop platform integration — extended function keys, focus activation, and MIME clipboard interop](0099-desktop-integration-fkeys-activation-and-clipboard.md) | Accepted |
 | 0100 | [Liquid Glass dual-rim TIR and screen-space environmental optics](0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md) | Accepted |
 | 0101 | [Physical Sampling Governor and Bounded Material Dispatch](0101-physical-sampling-governor-and-bounded-material-dispatch.md) | Accepted |
@@ -158,3 +158,5 @@ silent fallback. Its primitives have landed.
 | 0122 | [Compositor-driven presentation pacing and hardware-locked display synchronization](0122-compositor-driven-presentation-pacing.md) | Accepted (landed across Wayland, Win32, Cocoa — supersedes client-timer pacing in [0056](0056-win32-cocoa-backends-and-moltenvk.md)) |
 | 0123 | [Multi-layer compositing, hardware subsurfaces, and incremental damage presentation](0123-layered-compositing-subsurfaces-and-damage-tracking.md) | Accepted (landed across Wayland, Win32, Cocoa — supersedes full-tree repaint in [0030](0030-lens-damage-tracking.md)) |
 | 0124 | [Decoupled dual-thread UI and presentation engine](0124-dual-thread-ui-and-presentation-pipeline.md) | Accepted (landed on Wayland; Win32/Cocoa dispatch pending) |
+| 0125 | [DocGov Decoupling, Standards Consolidation, and Documentation Modernization](0125-docgov-decoupling-standards-consolidation-and-documentation-modernization.md) | Accepted |
+| 0126 | [Developer Tooling Domain Modularization and Unified Optics CLI](0126-developer-tooling-domain-modularization-and-unified-optics-cli.md) | Accepted |

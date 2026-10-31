@@ -26,7 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Shader bytecode: C23 #embed, or generated headers (tools/spv2h.py). */
+/* Shader bytecode: C23 #embed, or generated headers (tools/build/spv2h.py). */
 #if defined(__has_embed) && !defined(PRISM_SHADER_NO_EMBED)
 #if __has_embed("liquid_glass.comp.spv") && __has_embed("storage_clear.comp.spv") &&               \
     __has_embed("backdrop_stats.comp.spv") && __has_embed("backdrop_frost.comp.spv") &&            \

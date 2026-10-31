@@ -138,7 +138,7 @@ if san_opts != 'none' and san_opts != ''
   san_env = environment()
 
   if 'address' in san_opts or 'leak' in san_opts
-    san_env.prepend('LSAN_OPTIONS', 'suppressions=' + meson.project_source_root() / 'tools' / 'lsan.supp', separator : ':')
+    san_env.prepend('LSAN_OPTIONS', 'suppressions=' + meson.project_source_root() / 'tools' / 'config' / 'lsan.supp', separator : ':')
   endif
 
   if 'address' in san_opts

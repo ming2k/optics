@@ -9,7 +9,7 @@
  * keyboard events are folded into one lens_input per frame (ADR-0029).
  *
  * NOT YET VERIFIED ON A REAL WINDOWS MACHINE. Everything in this file is
- * compile-checked for x86_64-windows-gnu via tools/zig-win32-check.sh only.
+ * compile-checked for x86_64-windows-gnu via tools/ci/zig-win32-check.sh only.
  * The parts that most need on-hardware validation:
  *   - IMM32 composition/candidate behaviour against real IMEs (MS Pinyin,
  *     Japanese IME, Korean IME): GCS_CURSORPOS units, ATTR target-clause
@@ -40,7 +40,7 @@
 
 /* meson supplies -DIRIS_BUILDING=1 (iris_c_args) so IRIS_API spells
  * dllexport; define it here as well so single-file compile checks
- * (tools/zig-win32-check.sh) don't see dllimport on definitions. */
+ * (tools/ci/zig-win32-check.sh) don't see dllimport on definitions. */
 #ifndef IRIS_BUILDING
 #define IRIS_BUILDING 1
 #endif

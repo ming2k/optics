@@ -13,7 +13,7 @@ negative_knowledge: true
 - Status: Accepted
 - Date: 2026-10-15
 - Scope: `libs/flux` (`core/frame.c`, `include/flux/core.h`, `effect/shaders/effect_backdrop.comp`), `bindings/flux-rs` (`crates/flux`).
-- Amends: [ADR-0013](0013-offscreen-surfaces-and-explicit-frame-slots.md), [ADR-0091](0091-drawing-group-and-effect-semantics.md).
+- Amends: [ADR-0013](0013-offscreen-surface.md), [ADR-0091](0091-drawing-group-and-effect-semantics.md).
 
 ## Context
 

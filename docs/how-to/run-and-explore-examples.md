@@ -167,5 +167,5 @@ These tools run in CI or headless environments without an active GPU or display 
 ## Related Documentation
 
 - [Getting Started Tutorial](../tutorials/01-getting-started.md) — First-time build and basic app bootstrap.
-- [Surface Materials Governance](../governance/materials.md) — Architectural invariants for Prism materials.
-- [UI Components Governance](../governance/components.md) — Invariants for Lens interaction atoms and layout.
+- [Prism Material Reference](../reference/prism.md) — Technical specification for physical materials.
+- [Application Architecture](../explanation/application-architecture.md) — Architectural overview of Lens UI and rendering.

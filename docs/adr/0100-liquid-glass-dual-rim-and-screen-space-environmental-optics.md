@@ -10,7 +10,7 @@ date: 2026-09-18
 - Status: Accepted
 - Date: 2026-09-18
 - Scope: Compute shader (`libs/prism/src/shaders/liquid_glass.comp`), Prism material runtime, and showcase exhibits.
-- Depends on: [ADR-0046](0046-liquid-glass-physical-optics.md), [ADR-0063](0063-liquid-glass-material-library.md), [ADR-0065](0065-per-group-overrides-and-backdrop-stats.md).
+- Depends on: [ADR-0046](0046-liquid-glass-convex-lens-model.md), [ADR-0063](0063-liquid-glass-material-library.md), [ADR-0065](0065-per-group-overrides-and-backdrop-stats.md).
 
 ## Context
 

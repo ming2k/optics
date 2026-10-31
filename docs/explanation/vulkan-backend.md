@@ -207,12 +207,10 @@ ddesc.pipeline_cache_userdata = &cache;
   `vkGetPipelineCacheData`. The library owns `data` for the call.
 
 Leave all three NULL and the cache lives only for the device lifetime
-— the default. The file-backed helper above ships in
-[`examples/flux/pipeline_cache.h`](../../examples/flux/pipeline_cache.h) for
-copy-paste; the env-var cascade
-(`$FLUX_PIPELINE_CACHE`, `$XDG_CACHE_HOME`, `$HOME`) lives in that
-example helper, not in the library. This restores the contract
-ADR-0001 set out: *"the consumer persists; flux provides the in/out
+— the default. The callback signatures and hooks are declared in
+[`libs/flux/include/flux/core.h`](../../libs/flux/include/flux/core.h);
+the consumer persists while flux provides the in/out hooks. This restores
+the contract ADR-0001 set out: *"the consumer persists; flux provides the in/out
 hooks."*
 
 ## GPU memory allocator

@@ -78,7 +78,7 @@ flux_c_args = ['-DFLUX_BUILDING=1'] + flux_c_args_dma
 # C23 #embed bakes each compiled .spv into the binary (renderer.c /
 # effect.c / scene.c). Compilers without #embed (MSVC cl, Apple Clang)
 # take a generated-header path instead — the headers are produced from
-# the same .spv files by tools/spv2h.py further below. --embed-dir is
+# the same .spv files by tools/build/spv2h.py further below. --embed-dir is
 # probed because MSVC rejects unknown options outright.
 flux_embed_dir_arg = cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
 if opt_canvas or opt_scene or opt_effect
@@ -363,7 +363,7 @@ endif
 # script run over the matching .spv.
 if flux_shader_spvs.length() > 0
   spv2h_py = import('python').find_installation('python3')
-  spv2h = files('../../tools/spv2h.py')
+  spv2h = files('../../tools/build/spv2h.py')
   foreach i : range(flux_shader_spvs.length())
     flux_extra_inputs += custom_target(flux_shader_names[i] + '.h',
       input   : flux_shader_spvs[i],
@@ -379,7 +379,7 @@ if flux_shader_spvs.length() > 0
   flux_extra_inputs += custom_target('flux_shader_manifest.h',
     input   : flux_shader_spvs,
     output  : 'flux_shader_manifest.h',
-    command : [spv2h_py, files('../../tools/shader_manifest.py'), '@OUTPUT@', '@INPUT@'],
+    command : [spv2h_py, files('../../tools/build/shader_manifest.py'), '@OUTPUT@', '@INPUT@'],
   )
 endif
 

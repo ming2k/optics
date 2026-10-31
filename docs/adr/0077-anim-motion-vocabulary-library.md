@@ -17,7 +17,7 @@ date: 2026-08-23
 
 The stack has answered "where does animation math live?" three times, the same
 way each time: nowhere in the libraries, clocks stay host-owned
-([ADR-0029](0029-animation-and-effect-policy.md) in Aegis, ADR-0047, ADR-0074).
+([ADR-0029 in Aegis], [ADR-0047](0047-caller-owned-policy-boundary-for-flux-effects.md), [ADR-0074](0074-effect-intake-path.md)).
 The consumer side then proved what that costs: before its ADR-0139, the Aegis
 compositor carried **three hand-rolled springs with divergent integrators and
 three local variants of the reduced-motion rule**, one of which (semi-implicit

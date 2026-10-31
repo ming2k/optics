@@ -60,7 +60,7 @@ tests_embed_dir_arg = cc.get_supported_arguments('--embed-dir=' + core_tests_bui
 # are unique per shader; the array symbol each header defines matches the
 # name the test sources already use (vert_spv / frag_spv / fill_spv).
 spv2h_py = import('python').find_installation('python3')
-spv2h    = files('../../tools/spv2h.py')
+spv2h    = files('../../tools/build/spv2h.py')
 test_triangle_vert_h = custom_target('triangle_vert_spv.h',
   input   : triangle_vert_spv,
   output  : 'triangle_vert_spv.h',

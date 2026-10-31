@@ -1,64 +1,104 @@
 # Optics Developer Tooling & Guardrails
 
-The `tools/` directory hosts the **machine-enforced architecture guardrails, build-time code generators, and toolchain configurations** for the Optics monorepo.
+The `tools/` directory hosts the **machine-enforced architecture guardrails, build-time code generators, CI runners, and toolchain configurations** for the Optics monorepo.
 
-> **Policy (ADR-0098):** `tools/` is strictly governed. It is **not** a dumping ground for ad-hoc scratch scripts or temporary data files. Every utility here must be actively wired into CI pipelines (`.github/workflows/`) or the Meson build system (`meson.build`).
+> **Architecture & Quality Policy:** `tools/` is strictly governed into structured domains. Every utility here is actively consumed by the unified developer CLI (`tools/optics`), GitHub Actions workflows (`.github/workflows/`), or the Meson build system (`meson.build`).
 
 ---
 
-## Unified Verification Gate
+## 1. Unified Developer CLI (`tools/optics`)
 
-Before pushing code or opening a pull request, run the single authoritative gatekeeper:
+All local verification and automatic remediation workflow is consolidated under the unified cross-platform CLI:
 
 ```bash
-# Verify all guardrails in sequence
-./tools/check-all.sh
+# Run all core architecture & quality guardrails in sequence
+./tools/optics check
 
-# Automatically format code and refresh symbol documentation
-./tools/check-all.sh --fix
+# Run a specific guardrail check (format, boundary, lockstep, stdout, symbols, docs, tidy)
+./tools/optics check boundary
+./tools/optics check lockstep
+
+# Run clang-tidy static analysis against library translation units
+./tools/optics check tidy
+
+# Automatically format C sources and synchronize public symbol documentation
+./tools/optics fix
+
+# List available guardrails, domains, and policy mapping
+./tools/optics list
 ```
 
 ---
 
-## Tool Catalog & Taxonomy
+## 2. Tooling Directory Structure & Taxonomy
 
-### 1. Architecture & Quality Guardrails (CI Enforced)
-
-| Tool | Enforced Policy | Description |
-|------|-----------------|-------------|
-| [`check-all.sh`](check-all.sh) | ADR-0098 | Single-entry unified runner across all 6 architecture and quality guardrails. |
-| [`check-material-boundary.sh`](check-material-boundary.sh) | ADR-0063 | Asserts `flux` never references named materials (`prism_`, `liquid_glass`); prevents layer pollution. |
-| [`check-version-lockstep.sh`](check-version-lockstep.sh) | Monorepo lockstep | Asserts all sibling libraries (`flux`, `lens`, `iris`, `prism`, `anim`) share the exact project version. |
-| [`check-no-library-stdout.sh`](check-no-library-stdout.sh) | Library hygiene | Asserts shared library TUs never write to `stdout` (`printf`, `puts`), reserving stdout for IPC wires. |
-| [`check-format.sh`](check-format.sh) | Clang-Format 22.x | Asserts every C source file is byte-identical to root `.clang-format` output (`--fix` to reformat). |
-| [`check-tidy.sh`](check-tidy.sh) | Zero-warning policy | Runs `clang-tidy` against all shipped library translation units; zero-warning baseline. |
-
-### 2. Build Infrastructure & Cross-Compilation
-
-| Tool | Consumed By | Description |
-|------|-------------|-------------|
-| [`spv2h.py`](spv2h.py) | `meson.build` | Converts `.spv` SPIR-V binary files into `.h` C byte arrays for compilers lacking C23 `#embed` (MSVC, Apple Clang per ADR-0053). |
-| [`shader_manifest.py`](shader_manifest.py) | `libs/flux/meson.build` | Generates shader byte-hash manifest headers so `ccache` reliably invalidates cache on shader edits. |
-| [`zig-win32-check.sh`](zig-win32-check.sh) | `.github/workflows/ci-cross.yml` | Cross-compiles Win32 C sources using Zig (`x86_64-windows-gnu`) without requiring a Windows runner. |
-
-### 3. Symbol Tracking & Documentation Governance
-
-| Tool | Consumed By | Description |
-|------|-------------|-------------|
-| [`gen_symbols.py`](gen_symbols.py) | CI & Docs | Extracts all exported C symbols from public headers into `docs/reference/symbols.md` (`--check` fails on drift). |
-| [`verify.sh`](verify.sh) | CI & Governance | Verifies documentation signatures against `.manifest.json` under Documentation Governance Protocol v5.1.0. |
-
-### 4. Toolchain Configuration Files
-
-| File | Consumer | Description |
-|------|----------|-------------|
-| [`abi-supprs.abignore`](abi-supprs.abignore) | `libabigail` (CI) | ABI change suppression rules ensuring semver-compliant shared object compatibility. |
-| [`lsan.supp`](lsan.supp) | ASan / LSan | LeakSanitizer suppression list for known process-lifetime upstream allocations (e.g. fontconfig caches). |
+```text
+tools/
+├── optics                      # Executable CLI launcher
+├── optics.py                   # Pure Python 3 CLI runner (check, fix, list)
+├── README.md                   # Tooling system documentation
+│
+├── guardrails/                 # Domain: Architectural Invariants & Quality Enforcement
+│   ├── boundary.py             # Layer 0 flux isolation check (syntax-aware, ADR-0063)
+│   ├── doc_links.py            # Hyperlinks, Audience Firewall & ADR lineage check (ADR-0125)
+│   ├── formatting.py           # Pinned clang-format 22.x verification and in-place fix
+│   ├── lockstep.py             # Monorepo version lockstep verification (ADR-0098)
+│   ├── stdout_purity.py        # Library diagnostics purity check (syntax-aware)
+│   ├── symbols.py              # Exported public symbols tracker & docs generator
+│   └── tidy.py                 # Clang-tidy static analysis runner (zero-warning policy)
+│
+├── build/                      # Domain: Build System Code Generators (consumed by Meson)
+│   ├── spv2h.py                # SPIR-V to C header byte array generator (ADR-0053)
+│   └── shader_manifest.py      # Shader content-hash manifest generator (ccache tracking)
+│
+├── ci/                         # Domain: CI Runners & Platform Emulation
+│   └── zig-win32-check.sh      # Win32 cross-compilation smoke runner via Zig
+│
+└── config/                     # Domain: Toolchain Configuration & Suppression Lists
+    ├── abi-supprs.abignore     # Libabigail ABI suppression rules
+    └── lsan.supp               # LeakSanitizer suppression list
+```
 
 ---
 
-## Governance Rules
+## 3. Domain Catalog
 
-1. **Deterministic Execution:** All shell scripts must run with `set -euo pipefail` (or `set -eu`), require no exotic dependencies beyond bash/sh and python3 standard library, and exit with code `0` on success and non-zero on failure.
-2. **Fast Feedback:** Guardrail checks must execute in milliseconds to provide instant developer feedback.
-3. **No Unwired Scripts:** Any script not actively executed by `check-all.sh`, `.github/workflows/`, or `meson.build` will be pruned.
+### A. Architecture & Quality Guardrails (`guardrails/`)
+
+| Tool | Enforced Policy | Description |
+|------|-----------------|-------------|
+| [`guardrails/boundary.py`](guardrails/boundary.py) | ADR-0063 | Syntax-aware check asserting `flux` never references named materials (`prism_`, `liquid_glass`). |
+| [`guardrails/lockstep.py`](guardrails/lockstep.py) | Monorepo lockstep | Asserts all sibling libraries and bindings share the exact project version from `meson.build`. |
+| [`guardrails/stdout_purity.py`](guardrails/stdout_purity.py) | Library hygiene | Asserts shared library TUs never write to `stdout` (`printf`), reserving stdout for IPC wires. |
+| [`guardrails/formatting.py`](guardrails/formatting.py) | Clang-Format 22.x | Asserts every C source file is byte-identical to root `.clang-format` output (`--fix` to reformat). |
+| [`guardrails/symbols.py`](guardrails/symbols.py) | ADR-0098 | Extracts exported C symbols from public headers into `docs/reference/symbols.md`. |
+| [`guardrails/doc_links.py`](guardrails/doc_links.py) | ADR-0125 | Verifies documentation hyperlinks, anchor resolution, Audience Firewall, and ADR lineage. |
+| [`guardrails/tidy.py`](guardrails/tidy.py) | Zero-warning policy | Runs `clang-tidy` against all shipped library translation units; zero-warning baseline. |
+
+### B. Build Infrastructure (`build/`)
+
+| Tool | Consumed By | Description |
+|------|-------------|-------------|
+| [`build/spv2h.py`](build/spv2h.py) | `meson.build` | Converts `.spv` SPIR-V binary files into `.h` C byte arrays for compilers lacking C23 `#embed`. |
+| [`build/shader_manifest.py`](build/shader_manifest.py) | `libs/flux/meson.build` | Generates shader byte-hash manifest headers so `ccache` reliably invalidates cache on shader edits. |
+
+### C. CI Infrastructure (`ci/`)
+
+| Tool | Consumed By | Description |
+|------|-------------|-------------|
+| [`ci/zig-win32-check.sh`](ci/zig-win32-check.sh) | `.github/workflows/ci-cross.yml` | Cross-compiles Win32 C sources using Zig (`x86_64-windows-gnu`) without requiring a Windows runner. |
+
+### D. Toolchain Configuration Files (`config/`)
+
+| File | Consumer | Description |
+|------|----------|-------------|
+| [`config/abi-supprs.abignore`](config/abi-supprs.abignore) | `libabigail` (CI) | ABI change suppression rules ensuring semver-compliant shared object compatibility. |
+| [`config/lsan.supp`](config/lsan.supp) | ASan / LSan | LeakSanitizer suppression list for known process-lifetime upstream allocations (e.g. fontconfig caches). |
+
+---
+
+## 4. Governance Rules
+
+1. **Single CLI Entrypoint:** All developer-facing verification and fixes run through `./tools/optics`. No detached wrapper scripts are allowed.
+2. **Domain Encapsulation:** Every file belongs to a domain subdirectory (`guardrails/`, `build/`, `ci/`, `config/`).
+3. **Deterministic & Fast:** Guardrails execute in milliseconds using Python 3 standard library and native compilers, with zero exotic package dependencies.

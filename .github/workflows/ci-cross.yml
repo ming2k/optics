@@ -115,7 +115,7 @@ jobs:
             echo "no Windows-only TUs yet — nothing to check"
             exit 0
           fi
-          echo "$files" | xargs tools/zig-win32-check.sh \
+          echo "$files" | xargs tools/ci/zig-win32-check.sh \
             -Ilibs/flux/include -Ilibs/flux/text/include -Ilibs/flux/text/src \
             -Ilibs/lens/include -Ilibs/iris/include -Ilibs/iris/src \
             -I/usr/include/freetype2 \

@@ -1,13 +1,15 @@
 ---
 id: ADR-0098
 title: "Developer tooling taxonomy, architecture guardrails, and unified verification"
-status: accepted
+status: superseded
 date: 2026-09-15
+superseded_by: ADR-0126
+negative_knowledge: true
 ---
 
 # ADR-0098: Developer tooling taxonomy, architecture guardrails, and unified verification
 
-- Status: Accepted
+- Status: Superseded by [ADR-0126](0126-developer-tooling-domain-modularization-and-unified-optics-cli.md)
 - Date: 2026-09-15
 - Scope: `tools/` directory, CI workflow invocations, and developer pre-commit verification.
 - Depends on: [ADR-0023](0023-unified-monorepo-build.md), [ADR-0063](0063-liquid-glass-material-library.md), [ADR-0097](0097-canonical-example-taxonomy-and-governance.md).

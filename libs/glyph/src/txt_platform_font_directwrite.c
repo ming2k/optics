@@ -2,7 +2,7 @@
  * glyph, implementing txt_platform_font.h over DirectWrite (C COM).
  *
  * Compile-verified with `zig cc` against real MinGW-w64 headers
- * (tools/zig-win32-check.sh), so every lpVtbl call site matches the true
+ * (tools/ci/zig-win32-check.sh), so every lpVtbl call site matches the true
  * SDK vtable signatures. NOT runtime-tested on a Windows machine: the
  * logic is written defensively — every HRESULT is checked, every COM
  * pointer is NULL-guarded, and every AddRef is paired with a Release.

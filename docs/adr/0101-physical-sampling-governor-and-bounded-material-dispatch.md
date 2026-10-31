@@ -10,7 +10,7 @@ date: 2026-09-18
 - Status: Accepted
 - Date: 2026-09-18
 - Scope: `libs/flux` (effect blur, compute dispatch), `libs/prism` (all surface materials: Liquid Glass, Frosted, Acrylic, Mica, and future materials), `examples/showcase` (material gallery).
-- Depends on: [ADR-0008](0008-image-effect-pipeline.md), [ADR-0046](0046-liquid-glass-physical-optics.md), [ADR-0047](0047-caller-owned-policy-boundary-for-flux-effects.md), [ADR-0063](0063-liquid-glass-material-library.md), [ADR-0079](0079-layered-backdrop-material.md), [ADR-0096](0096-prism-mica-foundation-material.md), [ADR-0100](0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md).
+- Depends on: [ADR-0008](0008-image-effect-pipeline.md), [ADR-0046](0046-liquid-glass-convex-lens-model.md), [ADR-0047](0047-caller-owned-policy-boundary-for-flux-effects.md), [ADR-0063](0063-liquid-glass-material-library.md), [ADR-0079](0079-layered-backdrop-material.md), [ADR-0096](0096-prism-mica-foundation-material.md), [ADR-0100](0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md).
 
 ## Context
 

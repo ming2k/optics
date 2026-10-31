@@ -12,7 +12,7 @@ name: abi
 #
 # Suppressible: genuine intentional breaks (pre-1.0, one line in
 # docs/reference/api.md + a minor-version bump) are recorded in
-# tools/abi-supprs.abignore — the suppression file is part of the
+# tools/config/abi-supprs.abignore — the suppression file is part of the
 # review, not a shadow valve.
 
 on:
@@ -99,7 +99,7 @@ jobs:
             fi
             echo "=== $name: $(basename "$ref") vs $(basename "$cur")"
             if ! abidiff --leaf-changes-only \
-                 --suppressions tools/abi-supprs.abignore \
+                 --suppressions tools/config/abi-supprs.abignore \
                  "$ref" "$cur" > /tmp/abidiff-$name.txt; then
               echo "ABI BREAK in $name:"
               cat /tmp/abidiff-$name.txt

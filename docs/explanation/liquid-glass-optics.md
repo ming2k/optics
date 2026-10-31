@@ -116,7 +116,7 @@ Real-time shader algorithms cannot be verified reliably by manual inspection alo
 
 ## 5. Related Architecture Decisions
 
-- [ADR-0046: Liquid Glass physical optics model](../adr/0046-liquid-glass-physical-optics.md)
+- [ADR-0046: Liquid Glass physical optics model](../adr/0046-liquid-glass-convex-lens-model.md)
 - [ADR-0063: Liquid Glass material library](../adr/0063-liquid-glass-material-library.md)
 - [ADR-0096: Prism Mica foundation material](../adr/0096-prism-mica-foundation-material.md)
 - [ADR-0100: Liquid Glass dual-rim TIR and screen-space environmental optics](../adr/0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md)

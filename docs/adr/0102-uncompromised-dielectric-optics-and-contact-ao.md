@@ -13,7 +13,7 @@ negative_knowledge: true
 - Status: Accepted
 - Date: 2026-09-18
 - Scope: `libs/prism` (liquid_glass, acrylic, mica), `libs/lens` (material recipes, theme cascade), `examples/showcase` (material gallery).
-- Depends on: [ADR-0046](0046-liquid-glass-physical-optics.md), [ADR-0063](0063-liquid-glass-material-library.md), [ADR-0065](0065-per-group-overrides-and-backdrop-stats.md), [ADR-0079](0079-layered-backdrop-material.md), [ADR-0096](0096-prism-mica-foundation-material.md), [ADR-0100](0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md), [ADR-0101](0101-physical-sampling-governor-and-bounded-material-dispatch.md).
+- Depends on: [ADR-0046](0046-liquid-glass-convex-lens-model.md), [ADR-0063](0063-liquid-glass-material-library.md), [ADR-0065](0065-per-group-overrides-and-backdrop-stats.md), [ADR-0079](0079-layered-backdrop-material.md), [ADR-0096](0096-prism-mica-foundation-material.md), [ADR-0100](0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md), [ADR-0101](0101-physical-sampling-governor-and-bounded-material-dispatch.md).
 
 ## Context
 
