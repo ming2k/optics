@@ -13,6 +13,14 @@ either.
 
 ## [Unreleased]
 
+## [0.0.64] - 2026-10-31
+
+### Added
+
+- **flux**: `flux_frame_begin_desc.non_blocking` for non-blocking swapchain/fence acquisition (`begin_frame_nonblocking` in Rust bindings).
+- **flux**: Queue priority negotiation fallback when `VK_ERROR_NOT_PERMITTED_EXT` is returned on unprivileged hosts.
+- **iris**: Wayland presentation worker thread priority elevation (`SCHED_RR`/nice) and adaptive timeout calculation.
+
 ## [0.0.63] - 2026-10-31
 
 ## [0.0.62] - 2026-10-26
