@@ -13,6 +13,16 @@ either.
 
 ## [Unreleased]
 
+## [0.0.66] - 2026-10-31
+
+### Added
+
+- **lens**: Added DataGrid, Menu/Menubar, and TreeView compound patterns (`lens_datagrid`, `lens_menu`, `lens_tree_view`, `lens_menubar`).
+- **lens**: Added undo/redo history ring buffer with action coalescing and caret tracking to `lens_textedit`.
+- **lens**: Added `submitted` (on Enter in single-line edit) and `tabbed` flags to `lens_response`.
+- **lens**: Added `pointer_cursor` option to `lens_selectable_opts` and `lens_set_cursor_hint`.
+- **bindings**: Exposed new patterns, `textedit_ex`, `textfield_ex`, and cursor hint helpers in `lens-rs`.
+
 ## [0.0.65] - 2026-10-31
 
 ### Changed
