@@ -157,6 +157,7 @@ silent fallback. Its primitives have landed.
 | 0121 | [Algorithm vault and unified analytic vector infrastructure](0121-algorithm-vault-and-unified-analytic-vector-infrastructure.md) | Accepted |
 | 0122 | [Compositor-driven presentation pacing and hardware-locked display synchronization](0122-compositor-driven-presentation-pacing.md) | Accepted (landed across Wayland, Win32, Cocoa — supersedes client-timer pacing in [0056](0056-win32-cocoa-backends-and-moltenvk.md)) |
 | 0123 | [Multi-layer compositing, hardware subsurfaces, and incremental damage presentation](0123-layered-compositing-subsurfaces-and-damage-tracking.md) | Accepted (landed across Wayland, Win32, Cocoa — supersedes full-tree repaint in [0030](0030-lens-damage-tracking.md)) |
-| 0124 | [Decoupled dual-thread UI and presentation engine](0124-dual-thread-ui-and-presentation-pipeline.md) | Accepted (landed on Wayland; Win32/Cocoa dispatch pending) |
+| 0124 | [Decoupled dual-thread UI and presentation engine](0124-dual-thread-ui-and-presentation-pipeline.md) | Accepted (landed across Wayland, Win32, Cocoa) |
 | 0125 | [DocGov Decoupling, Standards Consolidation, and Documentation Modernization](0125-docgov-decoupling-standards-consolidation-and-documentation-modernization.md) | Accepted |
 | 0126 | [Developer Tooling Domain Modularization and Unified Optics CLI](0126-developer-tooling-domain-modularization-and-unified-optics-cli.md) | Accepted |
+| 0127 | [Decoupled Host Canvas Recording and Hardware-Locked Presentation Pacing](0127-decoupled-host-canvas-recording-and-pull-driven-presentation-pacing.md) | Accepted |

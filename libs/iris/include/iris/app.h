@@ -127,6 +127,21 @@ typedef void (*iris_build_fn)(lens *ui, const lens_input *in, void *user);
  * captures it in the same closure context. */
 typedef void (*iris_paint_fn)(flux_canvas *canvas, flux_device *device, float scale, void *user);
 
+/* Per-frame decoupled host canvas recording callback (optional, ADR-0127).
+ *
+ * Runs on the UI / main thread outside any open Vulkan frame. The host records
+ * vector geometry, glyph runs, and brushes into `enc` using the immutable
+ * display list recording model (ADR-0088).
+ *
+ * The recorded commands are compiled into an immutable flux_display_list and
+ * transferred via the lockless frame mailbox to the presentation worker thread,
+ * executing completely decoupled from the UI thread without Vulkan swapchain
+ * stalls or thread affinity violations (INV-THREAD-01, INV-THREAD-03).
+ *
+ * When both `record` and `build` are provided, iris runs in fully decoupled
+ * dual-thread mode across all platforms (Wayland, Win32, Cocoa). */
+typedef void (*iris_record_fn)(flux_encoder *enc, float scale, void *user);
+
 /* Per-frame prepare callback (optional).
  *
  * Runs after iris acquires the frame and before iris begins the primary
@@ -177,8 +192,9 @@ typedef struct iris_app_opts {
     iris_start_fn start;     /* resource setup before first frame (optional) */
     iris_stop_fn stop;       /* resource teardown before iris GPU teardown (optional) */
     iris_build_fn build;     /* per-frame build callback (may be nullptr) */
+    iris_record_fn record;   /* decoupled host canvas recorder (optional, ADR-0127) */
     iris_prepare_fn prepare; /* pre-canvas frame compute/render pass (optional) */
-    iris_paint_fn paint;     /* per-frame canvas paint (may be nullptr)   */
+    iris_paint_fn paint;     /* legacy per-frame canvas paint (may be nullptr)   */
     void *user;              /* opaque pointer passed to callbacks */
 } iris_app_opts;
 

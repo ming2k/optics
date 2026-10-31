@@ -119,6 +119,25 @@ impl PaintHost {
 /// code should use [`PaintHost`], which also exposes the device.
 pub type PaintCanvas = PaintHost;
 
+/// Borrowed handles passed to [`Application::run_with_record`] for decoupled host canvas recording (ADR-0127).
+pub struct RecordHost {
+    encoder: *mut sys::flux_encoder,
+    scale: f32,
+}
+
+impl RecordHost {
+    /// Borrowed encoder command recorder for this frame.
+    pub fn encoder(&mut self) -> flux::Encoder {
+        // SAFETY: iris handed us a live `flux_encoder*` for the duration of the record callback.
+        unsafe { flux::Encoder::borrow_raw(self.encoder) }
+    }
+
+    /// Current display scale factor.
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+}
+
 /// A thin wrapper over the raw pointers iris hands to the optional start
 /// callback: the lens context and the flux device iris owns for this app.
 /// The callback runs once — after iris has created its device, canvas and
@@ -318,6 +337,7 @@ impl Application {
             None::<fn(StopHost)>,
             build,
             paint,
+            None::<fn(RecordHost)>,
         )
     }
 
@@ -335,7 +355,14 @@ impl Application {
         P: FnMut(PaintHost) + 'static,
         S: FnMut(StartHost) -> bool,
     {
-        Self::run_impl(config, Some(start), None::<fn(StopHost)>, build, paint)
+        Self::run_impl(
+            config,
+            Some(start),
+            None::<fn(StopHost)>,
+            build,
+            paint,
+            None::<fn(RecordHost)>,
+        )
     }
 
     /// The full lifecycle form (ADR-0045): `start` runs after iris's
@@ -356,21 +383,54 @@ impl Application {
         S: FnMut(StartHost) -> bool,
         T: FnMut(StopHost),
     {
-        Self::run_impl(config, start, stop, build, paint)
+        Self::run_impl(
+            config,
+            start,
+            stop,
+            build,
+            paint,
+            None::<fn(RecordHost)>,
+        )
     }
 
-    fn run_impl<B, P, S, T>(
+    /// Run an application with a decoupled vector recording callback (ADR-0127).
+    ///
+    /// The `record` closure records vector drawing into a CPU-bound [`flux::Encoder`].
+    /// The resulting immutable display list is submitted directly by the presentation
+    /// worker thread without stalls on the UI thread.
+    pub fn run_with_record<B, R>(
+        config: Config,
+        build: B,
+        record: Option<R>,
+    ) -> Result<(), RunError>
+    where
+        B: FnMut(&mut Frame<'_>, &Input),
+        R: FnMut(RecordHost) + 'static,
+    {
+        Self::run_impl(
+            config,
+            None::<fn(StartHost) -> bool>,
+            None::<fn(StopHost)>,
+            build,
+            None::<fn(PaintHost)>,
+            record,
+        )
+    }
+
+    fn run_impl<B, P, S, T, R>(
         config: Config,
         start: Option<S>,
         stop: Option<T>,
         build: B,
         paint: Option<P>,
+        record: Option<R>,
     ) -> Result<(), RunError>
     where
         B: FnMut(&mut Frame<'_>, &Input),
         P: FnMut(PaintHost) + 'static,
         S: FnMut(StartHost) -> bool,
         T: FnMut(StopHost),
+        R: FnMut(RecordHost) + 'static,
     {
         // Box the closures so they have a stable address to pass through the
         // C trampoline. Each gets its own box; both share the `user` pointer
@@ -379,6 +439,7 @@ impl Application {
         let paint_box: Option<Box<P>> = paint.map(Box::new);
         let start_box: Option<Box<S>> = start.map(Box::new);
         let stop_box: Option<Box<T>> = stop.map(Box::new);
+        let record_box: Option<Box<R>> = record.map(Box::new);
 
         // SAFETY: the trampolines cast `user` back to the right box type and
         // call it. The boxes outlive `iris_app_run` (held by `run_state`
@@ -388,9 +449,10 @@ impl Application {
             paint: paint_box,
             start: start_box,
             stop: stop_box,
+            record: record_box,
         };
 
-        extern "C" fn build_trampoline<B, P, S, T>(
+        extern "C" fn build_trampoline<B, P, S, T, R>(
             ui: *mut sys::lens,
             in_: *const sys::lens_input,
             user: *mut std::os::raw::c_void,
@@ -399,9 +461,10 @@ impl Application {
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
+            R: FnMut(RecordHost),
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T, R>) };
                 // The shared native seam aliases these handles to the same
                 // generated types across the Iris and Lens bindings.
                 let mut frame = unsafe { Frame::from_raw(ui) };
@@ -412,7 +475,7 @@ impl Application {
             }));
         }
 
-        extern "C" fn paint_trampoline<B, P, S, T>(
+        extern "C" fn paint_trampoline<B, P, S, T, R>(
             canvas: *mut sys::flux_canvas,
             device: *mut sys::flux_device,
             scale: f32,
@@ -422,9 +485,10 @@ impl Application {
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
+            R: FnMut(RecordHost),
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T, R>) };
                 if let Some(p) = run.paint.as_mut() {
                     p(PaintHost {
                         canvas,
@@ -435,7 +499,29 @@ impl Application {
             }));
         }
 
-        extern "C" fn start_trampoline<B, P, S, T>(
+        extern "C" fn record_trampoline<B, P, S, T, R>(
+            enc: *mut sys::flux_encoder,
+            scale: f32,
+            user: *mut std::os::raw::c_void,
+        ) where
+            B: FnMut(&mut Frame<'_>, &Input),
+            P: FnMut(PaintHost),
+            S: FnMut(StartHost) -> bool,
+            T: FnMut(StopHost),
+            R: FnMut(RecordHost),
+        {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T, R>) };
+                if let Some(r) = run.record.as_mut() {
+                    r(RecordHost {
+                        encoder: enc,
+                        scale,
+                    });
+                }
+            }));
+        }
+
+        extern "C" fn start_trampoline<B, P, S, T, R>(
             ui: *mut sys::lens,
             device: *mut sys::flux_device,
             user: *mut std::os::raw::c_void,
@@ -445,9 +531,10 @@ impl Application {
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
+            R: FnMut(RecordHost),
         {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T, R>) };
                 match run.start.as_mut() {
                     Some(s) => s(StartHost { ui, device }),
                     None => true,
@@ -456,7 +543,7 @@ impl Application {
             .unwrap_or(false)
         }
 
-        extern "C" fn stop_trampoline<B, P, S, T>(
+        extern "C" fn stop_trampoline<B, P, S, T, R>(
             ui: *mut sys::lens,
             device: *mut sys::flux_device,
             user: *mut std::os::raw::c_void,
@@ -465,34 +552,35 @@ impl Application {
             P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
+            R: FnMut(RecordHost),
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T, R>) };
                 if let Some(t) = run.stop.as_mut() {
                     t(StartHost { ui, device });
                 }
             }));
         }
 
-        // Monomorphise the trampolines for the actual (B, P, S, T) tuple.
-        // When `paint`/`start`/`stop` are `None` we still need *a* fn
-        // pointer of each type to satisfy the C signature; passing NULL lets
-        // the C side skip the call entirely, so those branches are pure
-        // no-ops — and a NULL paint keeps the backend's idle frame-skip
-        // engaged.
+        // Monomorphise the trampolines for the actual (B, P, S, T, R) tuple.
         let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
         let paint_fn: sys::iris_paint_fn = if run_state.paint.is_some() {
-            Some(paint_trampoline::<B, P, S, T>)
+            Some(paint_trampoline::<B, P, S, T, R>)
+        } else {
+            None
+        };
+        let record_fn: sys::iris_record_fn = if run_state.record.is_some() {
+            Some(record_trampoline::<B, P, S, T, R>)
         } else {
             None
         };
         let start_fn: sys::iris_start_fn = if run_state.start.is_some() {
-            Some(start_trampoline::<B, P, S, T>)
+            Some(start_trampoline::<B, P, S, T, R>)
         } else {
             None
         };
         let stop_fn: sys::iris_stop_fn = if run_state.stop.is_some() {
-            Some(stop_trampoline::<B, P, S, T>)
+            Some(stop_trampoline::<B, P, S, T, R>)
         } else {
             None
         };
@@ -508,7 +596,8 @@ impl Application {
             on_event: None,
             start: start_fn,
             stop: stop_fn,
-            build: Some(build_trampoline::<B, P, S, T>),
+            build: Some(build_trampoline::<B, P, S, T, R>),
+            record: record_fn,
             prepare: None,
             paint: paint_fn,
             user: user_ptr,
@@ -526,17 +615,19 @@ impl Application {
 /// and `T` so each trampoline can cast the opaque `user` pointer back to a
 /// type that knows the concrete closure shapes. When a slot is `None` the
 /// matching trampoline is never installed.
-struct RunState<B, P, S, T>
+struct RunState<B, P, S, T, R>
 where
     B: FnMut(&mut Frame<'_>, &Input),
     P: FnMut(PaintHost),
     S: FnMut(StartHost) -> bool,
     T: FnMut(StopHost),
+    R: FnMut(RecordHost),
 {
     build: Box<B>,
     paint: Option<Box<P>>,
     start: Option<Box<S>>,
     stop: Option<Box<T>>,
+    record: Option<Box<R>>,
 }
 
 /// System colour-scheme preference (queried at startup).

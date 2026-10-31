@@ -65,6 +65,7 @@
 
 #include "a11y_prefs_internal.h"
 #include "display_pacer.h"
+#include "frame_mailbox.h"
 #include "platform_input.h"
 #include "platform_internal.h"
 #include "platform_text.h"
@@ -83,7 +84,10 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_metal.h> /* vkCreateMetalSurfaceEXT (MoltenVK) */
 
+#include <dispatch/dispatch.h>
 #include <float.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -166,6 +170,13 @@ static_assert(sizeof((cp_accum *)0)->preedit == sizeof((lens_input *)0)->preedit
     /* Drag-and-drop state (ADR-0086) */
     iris_dnd_source drag_source;
     bool drag_active;
+
+    /* Decoupled Presentation Engine (ADR-0124) */
+    iris_frame_mailbox mailbox;
+    pthread_t present_thread;
+    dispatch_semaphore_t present_sem;
+    _Atomic(bool) presenter_running;
+    bool has_presenter_thread;
 
     cp_accum acc;
 }
@@ -1240,11 +1251,24 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
     cocoa_emit_focus(false);
 }
 
+- (void)windowDidChangeScreen:(NSNotification *)notification {
+    (void)notification;
+    IrisPlatform *pl = _platform;
+    if (!pl || !pl->window)
+        return;
+    pl->refresh_ns = cocoa_query_refresh_ns(pl->window);
+    CGFloat f = [pl->window backingScaleFactor];
+    if (f > 0.0)
+        pl->pending_scale = (float)f;
+    [pl->view irisUpdateMetalLayer];
+}
+
 - (void)windowDidChangeBackingProperties:(NSNotification *)notification {
     (void)notification;
     IrisPlatform *pl = _platform;
     if (!pl || !pl->window)
         return;
+    pl->refresh_ns = cocoa_query_refresh_ns(pl->window);
     CGFloat f = [pl->window backingScaleFactor];
     if (f > 0.0)
         pl->pending_scale = (float)f;
@@ -1384,12 +1408,18 @@ static long long now_ns(void) {
     return (long long)t.tv_sec * 1000000000LL + (long long)t.tv_nsec;
 }
 
-/* Query display refresh rate via Cocoa / CoreGraphics (ADR-0122). */
+/* Query display refresh rate via Cocoa / CoreGraphics / ProMotion (ADR-0122). */
 static int64_t cocoa_query_refresh_ns(NSWindow *window) {
     NSScreen *screen = window ? [window screen] : [NSScreen mainScreen];
     if (!screen)
         screen = [NSScreen mainScreen];
     if (screen) {
+        /* ProMotion / 120 Hz displays report through maximumFramesPerSecond on macOS 12+ */
+        if ([screen respondsToSelector:@selector(maximumFramesPerSecond)]) {
+            NSInteger max_fps = [screen maximumFramesPerSecond];
+            if (max_fps > 1)
+                return 1000000000LL / (int64_t)max_fps;
+        }
         NSDictionary *desc = [screen deviceDescription];
         NSNumber *screen_num = [desc objectForKey:@"NSScreenNumber"];
         if (screen_num) {
@@ -1513,6 +1543,110 @@ static void view_physical_size(IrisPlatform *pl, uint32_t *out_w, uint32_t *out_
 /* ------------------------------------------------------------------ */
 /*  Run                                                                */
 /* ------------------------------------------------------------------ */
+
+typedef struct cocoa_present_context {
+    IrisPlatform *pl;
+    flux_surface *surface;
+    flux_canvas *canvas;
+    const iris_app_config *cfg;
+} cocoa_present_context;
+
+static void *cocoa_presenter_thread_main(void *arg) {
+    cocoa_present_context *ctx = (cocoa_present_context *)arg;
+    IrisPlatform *pl = ctx->pl;
+
+    (void)pthread_setname_np("iris-presenter");
+
+    while (atomic_load_explicit(&pl->presenter_running, memory_order_acquire)) {
+        int64_t wait_timeout_ns =
+            (pl->refresh_ns > 0) ? (int64_t)(pl->refresh_ns * 1.5) : 40000000LL;
+        if (wait_timeout_ns < 10000000LL)
+            wait_timeout_ns = 10000000LL;
+        if (wait_timeout_ns > 50000000LL)
+            wait_timeout_ns = 50000000LL;
+
+        dispatch_time_t timeout =
+            dispatch_time(DISPATCH_TIME_NOW, wait_timeout_ns);
+        (void)dispatch_semaphore_wait(pl->present_sem, timeout);
+
+        if (!atomic_load_explicit(&pl->presenter_running, memory_order_acquire))
+            break;
+
+        iris_frame_packet *pkt = iris_mailbox_claim(&pl->mailbox);
+        if (!pkt)
+            continue;
+
+        if (pkt->snapshot) {
+            uint32_t target_w = (uint32_t)ceilf(pkt->width * pkt->scale);
+            uint32_t target_h = (uint32_t)ceilf(pkt->height * pkt->scale);
+            flux_surface_info sinfo;
+            flux_surface_get_info(ctx->surface, &sinfo);
+            if (target_w > 0 && target_h > 0 &&
+                (sinfo.width != target_w || sinfo.height != target_h)) {
+                (void)flux_surface_resize(ctx->surface, target_w, target_h);
+            }
+
+            flux_frame *frame = nullptr;
+            flux_result r = flux_surface_begin_frame(ctx->surface, nullptr, &frame);
+            if (r == FLUX_ERROR_SURFACE_LOST && target_w > 0 && target_h > 0) {
+                if (flux_surface_resize(ctx->surface, target_w, target_h) == FLUX_OK) {
+                    r = flux_surface_begin_frame(ctx->surface, nullptr, &frame);
+                }
+            }
+            if (r == FLUX_OK) {
+                flux_color theme_clear = pkt->clear_color;
+                flux_color *pass_clear = pkt->has_clear ? &theme_clear : nullptr;
+
+                bool partial =
+                    (pkt->damage_rect.w > 0.0f && pkt->damage_rect.h > 0.0f && !pkt->force_paint);
+                int32_t dmg_x = 0, dmg_y = 0;
+                uint32_t dmg_w = 0, dmg_h = 0;
+                if (partial) {
+                    float s = pkt->scale;
+                    dmg_x = (int32_t)floorf(pkt->damage_rect.x * s);
+                    dmg_y = (int32_t)floorf(pkt->damage_rect.y * s);
+                    dmg_w = (uint32_t)ceilf((pkt->damage_rect.x + pkt->damage_rect.w) * s) -
+                            (uint32_t)dmg_x;
+                    dmg_h = (uint32_t)ceilf((pkt->damage_rect.y + pkt->damage_rect.h) * s) -
+                            (uint32_t)dmg_y;
+                }
+
+                flux_canvas_pass_desc pass_desc = {
+                    .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                    .frame = frame,
+                    .clear_color = pass_clear,
+                    .render_offset_x = partial ? dmg_x : 0,
+                    .render_offset_y = partial ? dmg_y : 0,
+                    .render_width = partial ? dmg_w : 0,
+                    .render_height = partial ? dmg_h : 0,
+                };
+
+                bool drew = false;
+                if (flux_canvas_begin(ctx->canvas, &pass_desc) == FLUX_OK) {
+                    if (pkt->host_list) {
+                        (void)flux_canvas_submit_display_list(ctx->canvas, pkt->host_list);
+                        drew = true;
+                    }
+                    if (pkt->snapshot) {
+                        drew = (lens_snapshot_submit(pkt->snapshot, ctx->canvas) == FLUX_OK) ||
+                               drew;
+                    }
+                    (void)flux_canvas_end(ctx->canvas);
+                }
+
+                if (drew && flux_frame_submit(frame) == FLUX_OK) {
+                    flux_result pr = flux_frame_present(frame);
+                    if (pr == FLUX_ERROR_SURFACE_LOST && target_w > 0 && target_h > 0) {
+                        (void)flux_surface_resize(ctx->surface, target_w, target_h);
+                    }
+                }
+            }
+        }
+
+        iris_mailbox_recycle(&pl->mailbox, pkt);
+    }
+    return nullptr;
+}
 
 int iris_app_run_cocoa(const iris_app_config *cfg) {
     /* All resources declared up front (and every ObjC strong local nil-
@@ -1695,6 +1829,26 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         }
         host_started = true;
 
+        cocoa_present_context pctx = {
+            .pl = pl,
+            .surface = surface,
+            .canvas = canvas,
+            .cfg = cfg,
+        };
+
+        /* Decoupled Presentation Engine (ADR-0124): for pure UI applications without
+         * custom immediate canvas painting, launch the dedicated presentation worker
+         * thread to asynchronously consume immutable scene snapshots. */
+        if (!cfg->paint && !cfg->prepare) {
+            iris_mailbox_init(&pl->mailbox);
+            pl->present_sem = dispatch_semaphore_create(0);
+            atomic_init(&pl->presenter_running, true);
+            if (pthread_create(&pl->present_thread, NULL, cocoa_presenter_thread_main, &pctx) == 0)
+                pl->has_presenter_thread = true;
+            else
+                iris_mailbox_destroy(&pl->mailbox);
+        }
+
         /* --- Frame loop ----------------------------------------------
          * Presentation is paced by the display pacer (display_pacer.h, ADR-0122),
          * not by ad-hoc client timer arithmetic.
@@ -1729,7 +1883,8 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         long long wait_ns = 0;
         long long last_sim_ns = 0;
         double prev_cx = pl->acc.cx, prev_cy = pl->acc.cy;
-        const bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
+        const bool has_custom_paint =
+        (cfg->paint != NULL || cfg->prepare != NULL || cfg->record != NULL);
 
         pl->ui = ui;
 
@@ -1836,8 +1991,10 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     pl->resized = true;
                 }
                 if (pl->resized) {
-                    view_physical_size(pl, &phys_w, &phys_h);
-                    (void)flux_surface_resize(surface, phys_w, phys_h);
+                    if (!pl->has_presenter_thread) {
+                        view_physical_size(pl, &phys_w, &phys_h);
+                        (void)flux_surface_resize(surface, phys_w, phys_h);
+                    }
                     pl->resized = false;
                     resized_this_frame = true;
                 }
@@ -1902,6 +2059,61 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
 
                 if (d.action == IRIS_PACE_PAINT) {
                     surface_needs_paint = true;
+
+                    if (pl->has_presenter_thread) {
+                        /* Decoupled Presentation Engine (ADR-0124 & ADR-0127): hand off immutable snapshot
+                         * and optional host recorded display list to dedicated presentation worker thread. */
+                        flux_display_list *host_list = nullptr;
+                        if (cfg->record) {
+                            flux_encoder *enc = nullptr;
+                            if (flux_encoder_create(&(flux_encoder_desc){}, &enc) == FLUX_OK) {
+                                cfg->record(enc, pl->scale, cfg->user);
+                                (void)flux_encoder_finish(enc, &host_list);
+                                flux_encoder_destroy(enc);
+                            }
+                        }
+
+                        lens_scene_snapshot *snapshot = nullptr;
+                        if (lens_snapshot_create(ui, &snapshot) == FLUX_OK ||
+                            host_list != nullptr) {
+                            iris_frame_packet *pkt = iris_mailbox_acquire(&pl->mailbox);
+                            if (pkt) {
+                                pkt->snapshot = snapshot;
+                                pkt->host_list = host_list;
+                                pkt->damage_rect = lens_damage_rect(ui);
+                                pkt->force_paint = surface_forced;
+                                pkt->has_custom_paint = false;
+                                lens_theme th = lens_get_theme(ui);
+                                pkt->clear_color = th.color_bg;
+                                pkt->has_clear = !cfg->no_clear;
+                                pkt->scale = pl->scale;
+                                pkt->width = pl->width;
+                                pkt->height = pl->height;
+                                iris_mailbox_publish(&pl->mailbox, pkt);
+                                dispatch_semaphore_signal(pl->present_sem);
+                                if (snapshot && lens_snapshot_activate(ui, snapshot) == FLUX_OK) {
+                                    surface_needs_paint = false;
+                                }
+                                if (++frame_no == 1) {
+                                    fprintf(
+                                        stderr,
+                                        "first frame presented: %dx%d logical, %ux%u device (scale=%.2f)\n",
+                                        pl->width, pl->height,
+                                        (uint32_t)lroundf((float)pl->width * pl->scale),
+                                        (uint32_t)lroundf((float)pl->height * pl->scale),
+                                        pl->scale);
+                                }
+                            }
+                            if (snapshot) {
+                                lens_snapshot_release(snapshot);
+                            }
+                            if (host_list) {
+                                flux_display_list_release(host_list);
+                            }
+                        }
+                        continue;
+                    }
+
                     flux_frame *frame = NULL;
                     flux_result r = flux_surface_begin_frame(surface, NULL, &frame);
                     if (r == FLUX_ERROR_SURFACE_LOST) {
@@ -2037,6 +2249,15 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         /* Stop publishing this platform to the context-free APIs — any host
          * call after this returns is a no-op rather than a use-after-free. */
         g_active_pl = nil;
+
+        /* Stop decoupled presenter thread before teardown (ADR-0124, INV-THREAD-04) */
+        if (pl->has_presenter_thread) {
+            atomic_store_explicit(&pl->presenter_running, false, memory_order_release);
+            dispatch_semaphore_signal(pl->present_sem);
+            pthread_join(pl->present_thread, NULL);
+            iris_mailbox_destroy(&pl->mailbox);
+            pl->has_presenter_thread = false;
+        }
 
         /* GPU side first: let in-flight work finish before tearing down. */
         if (device)

@@ -47,6 +47,7 @@
 
 #include "a11y_prefs_internal.h"
 #include "display_pacer.h"
+#include "frame_mailbox.h"
 #include "platform_input.h"
 #include "platform_internal.h"
 #include "platform_text.h"
@@ -69,6 +70,7 @@
  * reverse order by accident; zig cc's bundled MinGW headers do not. */
 #include <windows.h>
 #include <windowsx.h>
+#include <dwmapi.h>
 #include <imm.h>
 #include <ole2.h>
 #include <shellapi.h>
@@ -82,6 +84,7 @@
 #include <vulkan/vulkan_win32.h>
 
 #include <math.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -191,8 +194,17 @@ typedef struct w32_platform {
     iris_dnd_source drag_source;
     bool drag_active;
 
+    /* Decoupled Presentation Engine (ADR-0124) */
+    iris_frame_mailbox mailbox;
+    HANDLE present_thread;
+    HANDLE present_event;
+    _Atomic(bool) presenter_running;
+    bool has_presenter_thread;
+
     w32_accum acc;
 } w32_platform;
+
+static int64_t w32_query_refresh_ns(HWND hwnd);
 
 /* iris_set_cursor / iris_window_* are public, context-free APIs; they reach
  * the active app's platform through this single static pointer. Set at the
@@ -1459,6 +1471,24 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             w32_emit_focus(false);
         break;
 
+    case WM_DISPLAYCHANGE: {
+        if (!pl)
+            break;
+        pl->refresh_ns = w32_query_refresh_ns(hwnd);
+        pl->force_paint = true;
+        return 0;
+    }
+
+    case WM_WINDOWPOSCHANGED: {
+        if (pl) {
+            int64_t new_refresh = w32_query_refresh_ns(hwnd);
+            if (new_refresh > 0 && new_refresh != pl->refresh_ns) {
+                pl->refresh_ns = new_refresh;
+            }
+        }
+        break;
+    }
+
     case WM_DPICHANGED: {
         if (!pl)
             break;
@@ -1466,6 +1496,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
          * rect (physical) keeps the logical size across the move. WM_SIZE
          * follows and folds the new client size into the frame loop. */
         pl->pending_scale = (float)HIWORD(wParam) / 96.0f;
+        pl->refresh_ns = w32_query_refresh_ns(hwnd);
         const RECT *suggested = (const RECT *)lParam;
         SetWindowPos(hwnd, NULL, suggested->left, suggested->top,
                      suggested->right - suggested->left, suggested->bottom - suggested->top,
@@ -1734,9 +1765,15 @@ static long long now_ns(void) {
            (long long)((c.QuadPart % freq) * 1000000000LL / freq);
 }
 
-/* Query display refresh rate via Win32 GDI / Monitor APIs (ADR-0122). */
+/* Query display refresh rate via DWM composition timing and Win32 Monitor APIs (ADR-0122). */
 static int64_t w32_query_refresh_ns(HWND hwnd) {
     if (hwnd) {
+        DWM_TIMING_INFO timing = {.cbSize = sizeof(DWM_TIMING_INFO)};
+        if (SUCCEEDED(DwmGetCompositionTimingInfo(hwnd, &timing)) &&
+            timing.rateRefresh.uiDenominator > 0 && timing.rateRefresh.uiNumerator > 0) {
+            return (int64_t)(1000000000ULL * (uint64_t)timing.rateRefresh.uiDenominator /
+                             (uint64_t)timing.rateRefresh.uiNumerator);
+        }
         HMONITOR hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
         MONITORINFOEXW mi = {.cbSize = sizeof(mi)};
         if (GetMonitorInfoW(hmon, (LPMONITORINFO)&mi)) {
@@ -1803,6 +1840,112 @@ static int lens_host_start_drag_win32(const char *text, size_t len, uint32_t act
         .static_text_len = len,
     };
     return iris_dnd_start(&src);
+}
+
+typedef struct w32_present_context {
+    w32_platform *pl;
+    flux_surface *surface;
+    flux_canvas *canvas;
+    const iris_app_config *cfg;
+} w32_present_context;
+
+static DWORD WINAPI win32_presenter_thread_main(LPVOID arg) {
+    w32_present_context *ctx = (w32_present_context *)arg;
+    w32_platform *pl = ctx->pl;
+
+    /* Elevate presentation worker thread priority so display pacing
+     * is not starved by background compilation or user-space compute tasks. */
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+
+    while (atomic_load_explicit(&pl->presenter_running, memory_order_acquire)) {
+        DWORD wait_ms = (pl->refresh_ns > 0) ? (DWORD)((pl->refresh_ns * 15) / 10000000) : 40;
+        if (wait_ms < 10)
+            wait_ms = 10;
+        if (wait_ms > 50)
+            wait_ms = 50;
+
+        (void)WaitForSingleObject(pl->present_event, wait_ms);
+
+        if (!atomic_load_explicit(&pl->presenter_running, memory_order_acquire))
+            break;
+
+        iris_frame_packet *pkt = iris_mailbox_claim(&pl->mailbox);
+        if (!pkt)
+            continue;
+
+        if (pkt->snapshot) {
+            uint32_t target_w = (uint32_t)ceilf(pkt->width * pkt->scale);
+            uint32_t target_h = (uint32_t)ceilf(pkt->height * pkt->scale);
+            flux_surface_info sinfo;
+            flux_surface_get_info(ctx->surface, &sinfo);
+            if (target_w > 0 && target_h > 0 &&
+                (sinfo.width != target_w || sinfo.height != target_h)) {
+                (void)flux_surface_resize(ctx->surface, target_w, target_h);
+            }
+
+            flux_frame *frame = nullptr;
+            flux_result r = flux_surface_begin_frame(ctx->surface, nullptr, &frame);
+            if (r == FLUX_ERROR_SURFACE_LOST && target_w > 0 && target_h > 0) {
+                if (flux_surface_resize(ctx->surface, target_w, target_h) == FLUX_OK) {
+                    r = flux_surface_begin_frame(ctx->surface, nullptr, &frame);
+                }
+            }
+            if (r == FLUX_OK) {
+                flux_color theme_clear = pkt->clear_color;
+                flux_color *pass_clear = pkt->has_clear ? &theme_clear : nullptr;
+
+                bool partial =
+                    (pkt->damage_rect.w > 0.0f && pkt->damage_rect.h > 0.0f && !pkt->force_paint);
+                int32_t dmg_x = 0, dmg_y = 0;
+                uint32_t dmg_w = 0, dmg_h = 0;
+                if (partial) {
+                    float s = pkt->scale;
+                    dmg_x = (int32_t)floorf(pkt->damage_rect.x * s);
+                    dmg_y = (int32_t)floorf(pkt->damage_rect.y * s);
+                    dmg_w = (uint32_t)ceilf((pkt->damage_rect.x + pkt->damage_rect.w) * s) -
+                            (uint32_t)dmg_x;
+                    dmg_h = (uint32_t)ceilf((pkt->damage_rect.y + pkt->damage_rect.h) * s) -
+                            (uint32_t)dmg_y;
+                }
+
+                flux_canvas_pass_desc pass_desc = {
+                    .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                    .frame = frame,
+                    .clear_color = pass_clear,
+                    .render_offset_x = partial ? dmg_x : 0,
+                    .render_offset_y = partial ? dmg_y : 0,
+                    .render_width = partial ? dmg_w : 0,
+                    .render_height = partial ? dmg_h : 0,
+                };
+
+                bool drew = false;
+                if (flux_canvas_begin(ctx->canvas, &pass_desc) == FLUX_OK) {
+                    if (pkt->host_list) {
+                        (void)flux_canvas_submit_display_list(ctx->canvas, pkt->host_list);
+                        drew = true;
+                    }
+                    if (pkt->snapshot) {
+                        drew =
+                            (lens_snapshot_submit(pkt->snapshot, ctx->canvas) == FLUX_OK) || drew;
+                    }
+                    (void)flux_canvas_end(ctx->canvas);
+                }
+
+                if (drew && flux_frame_submit(frame) == FLUX_OK) {
+                    flux_result pr = flux_frame_present(frame);
+                    if (pr == FLUX_ERROR_SURFACE_LOST && target_w > 0 && target_h > 0) {
+                        (void)flux_surface_resize(ctx->surface, target_w, target_h);
+                    } else if (pr == FLUX_OK) {
+                        /* Synchronize with hardware DWM VBlank cycle */
+                        (void)DwmFlush();
+                    }
+                }
+            }
+        }
+
+        iris_mailbox_recycle(&pl->mailbox, pkt);
+    }
+    return 0;
 }
 
 int iris_app_run_win32(const iris_app_config *cfg) {
@@ -1981,6 +2124,34 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     }
     host_started = true;
 
+    w32_present_context pctx = {
+        .pl = &pl,
+        .surface = surface,
+        .canvas = canvas,
+        .cfg = cfg,
+    };
+
+    /* Decoupled Presentation Engine (ADR-0124): for pure UI applications without
+     * custom immediate canvas painting, launch the dedicated presentation worker
+     * thread to asynchronously consume immutable scene snapshots. */
+    if (!cfg->paint && !cfg->prepare) {
+        iris_mailbox_init(&pl.mailbox);
+        pl.present_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+        if (pl.present_event) {
+            atomic_init(&pl.presenter_running, true);
+            pl.present_thread = CreateThread(NULL, 0, win32_presenter_thread_main, &pctx, 0, NULL);
+            if (pl.present_thread) {
+                pl.has_presenter_thread = true;
+            } else {
+                CloseHandle(pl.present_event);
+                pl.present_event = NULL;
+                iris_mailbox_destroy(&pl.mailbox);
+            }
+        } else {
+            iris_mailbox_destroy(&pl.mailbox);
+        }
+    }
+
     ShowWindow(pl.hwnd, SW_SHOW);
 
     /* --- Frame loop --------------------------------------------------
@@ -2017,7 +2188,8 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     long long wait_ns = 0;
     long long last_sim_ns = 0;
     double prev_cx = pl.acc.cx, prev_cy = pl.acc.cy;
-    const bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
+    const bool has_custom_paint =
+        (cfg->paint != NULL || cfg->prepare != NULL || cfg->record != NULL);
 
     pl.ui = ui;
 
@@ -2113,8 +2285,10 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             pl.resized = true;
         }
         if (pl.resized) {
-            (void)flux_surface_resize(surface, (uint32_t)lroundf((float)pl.width * pl.scale),
-                                      (uint32_t)lroundf((float)pl.height * pl.scale));
+            if (!pl.has_presenter_thread) {
+                (void)flux_surface_resize(surface, (uint32_t)lroundf((float)pl.width * pl.scale),
+                                          (uint32_t)lroundf((float)pl.height * pl.scale));
+            }
             pl.resized = false;
             resized_this_frame = true;
         }
@@ -2217,6 +2391,59 @@ int iris_app_run_win32(const iris_app_config *cfg) {
 
         if (d.action == IRIS_PACE_PAINT) {
             surface_needs_paint = true;
+
+            if (pl.has_presenter_thread) {
+                /* Decoupled Presentation Engine (ADR-0124 & ADR-0127): hand off immutable snapshot
+                 * and optional host recorded display list to dedicated presentation worker thread.
+                 */
+                flux_display_list *host_list = nullptr;
+                if (cfg->record) {
+                    flux_encoder *enc = nullptr;
+                    if (flux_encoder_create(&(flux_encoder_desc){}, &enc) == FLUX_OK) {
+                        cfg->record(enc, pl.scale, cfg->user);
+                        (void)flux_encoder_finish(enc, &host_list);
+                        flux_encoder_destroy(enc);
+                    }
+                }
+
+                lens_scene_snapshot *snapshot = nullptr;
+                if (lens_snapshot_create(ui, &snapshot) == FLUX_OK || host_list != nullptr) {
+                    iris_frame_packet *pkt = iris_mailbox_acquire(&pl.mailbox);
+                    if (pkt) {
+                        pkt->snapshot = snapshot;
+                        pkt->host_list = host_list;
+                        pkt->damage_rect = lens_damage_rect(ui);
+                        pkt->force_paint = surface_forced;
+                        pkt->has_custom_paint = false;
+                        lens_theme th = lens_get_theme(ui);
+                        pkt->clear_color = th.color_bg;
+                        pkt->has_clear = !cfg->no_clear;
+                        pkt->scale = pl.scale;
+                        pkt->width = pl.width;
+                        pkt->height = pl.height;
+                        iris_mailbox_publish(&pl.mailbox, pkt);
+                        SetEvent(pl.present_event);
+                        if (snapshot && lens_snapshot_activate(ui, snapshot) == FLUX_OK) {
+                            surface_needs_paint = false;
+                        }
+                        if (++frame_no == 1) {
+                            fprintf(
+                                stderr,
+                                "first frame presented: %dx%d logical, %ux%u device (scale=%.2f)\n",
+                                pl.width, pl.height, (uint32_t)lroundf((float)pl.width * pl.scale),
+                                (uint32_t)lroundf((float)pl.height * pl.scale), pl.scale);
+                        }
+                    }
+                    if (snapshot) {
+                        lens_snapshot_release(snapshot);
+                    }
+                    if (host_list) {
+                        flux_display_list_release(host_list);
+                    }
+                }
+                continue;
+            }
+
             flux_frame *frame = NULL;
             flux_result r = flux_surface_begin_frame(surface, NULL, &frame);
             if (r == FLUX_ERROR_SURFACE_LOST) {
@@ -2352,6 +2579,17 @@ fail:
     /* Stop publishing this w32_platform to the context-free APIs — any host
      * call after this returns is a no-op rather than a use-after-free. */
     g_active_pl = NULL;
+
+    /* Stop decoupled presenter thread before teardown (ADR-0124, INV-THREAD-04) */
+    if (pl.has_presenter_thread) {
+        atomic_store_explicit(&pl.presenter_running, false, memory_order_release);
+        SetEvent(pl.present_event);
+        WaitForSingleObject(pl.present_thread, INFINITE);
+        CloseHandle(pl.present_thread);
+        CloseHandle(pl.present_event);
+        iris_mailbox_destroy(&pl.mailbox);
+        pl.has_presenter_thread = false;
+    }
 
     /* GPU side first: let in-flight work finish before tearing down objects. */
     if (device)

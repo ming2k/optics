@@ -152,10 +152,76 @@ static void test_multithreaded_stress(void) {
     iris_mailbox_destroy(&ctx.mb);
 }
 
+static void test_snapshot_handoff_and_activation_lifecycle(void) {
+    iris_frame_mailbox mb;
+    iris_mailbox_init(&mb);
+
+    lens *ui = nullptr;
+    CHECK(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
+    lens_input in = {.display_size = {400, 240}, .dt_seconds = .016f};
+    lens_begin(ui, &in);
+    (void)lens_button(ui, &(lens_button_opts){.label = "action",
+                                              .box = {.id = "btn", .width = 80, .height = 30}});
+    lens_end(ui);
+
+    lens_scene_snapshot *snapshot = nullptr;
+    CHECK(lens_snapshot_create(ui, &snapshot) == FLUX_OK);
+    CHECK(snapshot != nullptr);
+    CHECK(lens_last_presented_generation(ui) == 0);
+
+    flux_encoder *enc = nullptr;
+    flux_display_list *host_list = nullptr;
+    CHECK(flux_encoder_create(&(flux_encoder_desc){}, &enc) == FLUX_OK);
+    flux_encoder_save(enc);
+    flux_encoder_clip_rect(enc, (flux_rect){0, 0, 400, 240});
+    flux_encoder_restore(enc);
+    CHECK(flux_encoder_finish(enc, &host_list) == FLUX_OK);
+    CHECK(host_list != nullptr);
+    flux_encoder_destroy(enc);
+
+    iris_frame_packet *pkt = iris_mailbox_acquire(&mb);
+    CHECK(pkt != nullptr);
+    pkt->snapshot = snapshot;
+    pkt->host_list = host_list;
+    pkt->clear_color = flux_color_rgba(20, 30, 40, 255);
+    pkt->has_clear = true;
+    pkt->scale = 1.5f;
+    pkt->damage_rect = (flux_rect){0, 0, 100, 50};
+    iris_mailbox_publish(&mb, pkt);
+
+    /* UI thread activates snapshot and releases its local creation handles */
+    CHECK(lens_snapshot_activate(ui, snapshot) == FLUX_OK);
+    CHECK(lens_last_presented_generation(ui) == lens_snapshot_generation(snapshot));
+    lens_snapshot_release(snapshot);
+    flux_display_list_release(host_list);
+
+    /* Presenter thread claims published frame packet */
+    iris_frame_packet *claimed = iris_mailbox_claim(&mb);
+    CHECK(claimed != nullptr);
+    CHECK(claimed->snapshot != nullptr);
+    CHECK(claimed->host_list != nullptr);
+    CHECK(claimed->has_clear == true);
+    CHECK(claimed->scale == 1.5f);
+    CHECK(claimed->clear_color == flux_color_rgba(20, 30, 40, 255));
+
+    /* Presenter recycles consumed packet back to channel */
+    iris_mailbox_recycle(&mb, claimed);
+
+    /* UI thread acquires next packet: recycled snapshot and host_list are automatically cleaned */
+    iris_frame_packet *next_pkt = iris_mailbox_acquire(&mb);
+    CHECK(next_pkt != nullptr);
+    CHECK(next_pkt->snapshot == nullptr);
+    CHECK(next_pkt->host_list == nullptr);
+
+    lens_release(ui);
+    iris_mailbox_destroy(&mb);
+}
+
 int main(void) {
     test_init_destroy_clean();
     test_sequential_handshake();
     test_fast_producer_supersede();
+    test_snapshot_handoff_and_activation_lifecycle();
     test_multithreaded_stress();
     return TEST_REPORT();
 }

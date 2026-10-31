@@ -150,7 +150,7 @@ elif host_system == 'windows'
   # System libraries: windowing (user32/gdi32), IME (imm32), COM file
   # dialogs (ole32/shell32/uuid), registry theme query (advapi32).
   cc = meson.get_compiler('c')
-  foreach winlib : ['user32', 'gdi32', 'imm32', 'ole32', 'shell32', 'uuid', 'advapi32']
+  foreach winlib : ['user32', 'gdi32', 'imm32', 'ole32', 'shell32', 'uuid', 'advapi32', 'dwmapi']
     iris_extra_deps += cc.find_library(winlib, required : true)
   endforeach
 

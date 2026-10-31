@@ -3310,19 +3310,33 @@ static void *wp_presenter_thread_main(void *arg) {
             continue;
 
         if (pkt->snapshot) {
-            flux_frame *frame = NULL;
             flux_surface *target_surface =
                 (ctx->ui_surface != ctx->surface) ? ctx->ui_surface : ctx->surface;
             flux_canvas *target_canvas =
                 (ctx->ui_canvas != ctx->canvas) ? ctx->ui_canvas : ctx->canvas;
 
-            flux_result r = flux_surface_begin_frame(target_surface, NULL, &frame);
+            uint32_t target_w = (uint32_t)ceilf(pkt->width * pkt->scale);
+            uint32_t target_h = (uint32_t)ceilf(pkt->height * pkt->scale);
+            flux_surface_info sinfo;
+            flux_surface_get_info(target_surface, &sinfo);
+            if (target_w > 0 && target_h > 0 &&
+                (sinfo.width != target_w || sinfo.height != target_h)) {
+                (void)flux_surface_resize(target_surface, target_w, target_h);
+            }
+
+            flux_frame *frame = nullptr;
+            flux_result r = flux_surface_begin_frame(target_surface, nullptr, &frame);
+            if (r == FLUX_ERROR_SURFACE_LOST && target_w > 0 && target_h > 0) {
+                if (flux_surface_resize(target_surface, target_w, target_h) == FLUX_OK) {
+                    r = flux_surface_begin_frame(target_surface, nullptr, &frame);
+                }
+            }
             if (r == FLUX_OK) {
                 flux_color transparent_clear = flux_color_rgba(0, 0, 0, 0);
-                flux_color theme_clear = lens_get_theme(pl->ui).color_bg;
+                flux_color theme_clear = pkt->clear_color;
                 flux_color *pass_clear = (ctx->ui_surface != ctx->surface)
                                              ? &transparent_clear
-                                             : (ctx->cfg->no_clear ? NULL : &theme_clear);
+                                             : (pkt->has_clear ? &theme_clear : nullptr);
 
                 bool partial =
                     (pkt->damage_rect.w > 0.0f && pkt->damage_rect.h > 0.0f && !pkt->force_paint);
@@ -3350,7 +3364,14 @@ static void *wp_presenter_thread_main(void *arg) {
 
                 bool drew = false;
                 if (flux_canvas_begin(target_canvas, &pass_desc) == FLUX_OK) {
-                    drew = (lens_snapshot_submit(pkt->snapshot, target_canvas) == FLUX_OK);
+                    if (pkt->host_list) {
+                        (void)flux_canvas_submit_display_list(target_canvas, pkt->host_list);
+                        drew = true;
+                    }
+                    if (pkt->snapshot) {
+                        drew =
+                            (lens_snapshot_submit(pkt->snapshot, target_canvas) == FLUX_OK) || drew;
+                    }
                     (void)flux_canvas_end(target_canvas);
                 }
 
@@ -3362,14 +3383,17 @@ static void *wp_presenter_thread_main(void *arg) {
                                                  (int32_t)dmg_h);
                     else
                         wl_surface_damage_buffer(target_wl, 0, 0, INT32_MAX, INT32_MAX);
-                    (void)flux_frame_present(frame);
+                    flux_result pr = flux_frame_present(frame);
+                    if (pr == FLUX_ERROR_SURFACE_LOST && target_w > 0 && target_h > 0) {
+                        (void)flux_surface_resize(target_surface, target_w, target_h);
+                    }
                 }
             }
         }
 
         iris_mailbox_recycle(&pl->mailbox, pkt);
     }
-    return NULL;
+    return nullptr;
 }
 
 /* ------------------------------------------------------------------ */
@@ -3664,7 +3688,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         iris_mailbox_init(&pl.mailbox);
         sem_init(&pl.present_sem, 0, 0);
         atomic_init(&pl.presenter_running, true);
-        if (pthread_create(&pl.present_thread, NULL, wp_presenter_thread_main, &pctx) == 0)
+        if (pthread_create(&pl.present_thread, nullptr, wp_presenter_thread_main, &pctx) == 0)
             pl.has_presenter_thread = true;
     }
 
@@ -3701,7 +3725,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     /* Hosts with a canvas callback own opaque content: only they can say
      * whether it moved, so they never reach full quiescence (the pacer keeps
      * at least the low idle tick running cfg->build). Constant for the run. */
-    const bool has_custom_paint = (cfg->paint != NULL || cfg->prepare != NULL);
+    const bool has_custom_paint =
+        (cfg->paint != NULL || cfg->prepare != NULL || cfg->record != NULL);
     /* Sticky until a frame containing the latest lens build is actually
      * presented. Layout/draw hashes compare consecutive builds; without this
      * host-side latch an acquire timeout could let the next identical build
@@ -3834,11 +3859,16 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             pl.resized = true;
         }
         if (pl.resized) {
-            (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
-                                      (uint32_t)(pl.height * pl.buffer_scale));
-            if (ui_surface && ui_surface != surface) {
-                (void)flux_surface_resize(ui_surface, (uint32_t)(pl.width * pl.buffer_scale),
+            /* In decoupled presenter mode (ADR-0124), swapchain recreation belongs
+             * strictly to the presentation worker thread (INV-THREAD-03). In single-thread
+             * fallback, resize synchronously on the main thread. */
+            if (!pl.has_presenter_thread) {
+                (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
                                           (uint32_t)(pl.height * pl.buffer_scale));
+                if (ui_surface && ui_surface != surface) {
+                    (void)flux_surface_resize(ui_surface, (uint32_t)(pl.width * pl.buffer_scale),
+                                              (uint32_t)(pl.height * pl.buffer_scale));
+                }
             }
             pl.resized = false;
             resized_this_frame = true;
@@ -3940,24 +3970,54 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             surface_needs_paint = true;
 
             if (pl.has_presenter_thread) {
-                /* Decoupled Presentation Engine (ADR-0124): hand off immutable snapshot
-                 * to the dedicated presentation worker thread via lockless mailbox. */
+                /* Decoupled Presentation Engine (ADR-0124 & ADR-0127): hand off immutable snapshot
+                 * and optional host recorded display list to dedicated presentation worker thread.
+                 */
+                flux_display_list *host_list = nullptr;
+                if (cfg->record) {
+                    flux_encoder *enc = nullptr;
+                    if (flux_encoder_create(&(flux_encoder_desc){}, &enc) == FLUX_OK) {
+                        cfg->record(enc, (float)pl.buffer_scale, cfg->user);
+                        (void)flux_encoder_finish(enc, &host_list);
+                        flux_encoder_destroy(enc);
+                    }
+                }
+
                 lens_scene_snapshot *snapshot = nullptr;
-                if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
+                if (lens_snapshot_create(ui, &snapshot) == FLUX_OK || host_list != nullptr) {
                     iris_frame_packet *pkt = iris_mailbox_acquire(&pl.mailbox);
                     if (pkt) {
                         pkt->snapshot = snapshot;
+                        pkt->host_list = host_list;
                         pkt->damage_rect = lens_damage_rect(ui);
                         pkt->force_paint = surface_forced;
                         pkt->has_custom_paint = false;
+                        pkt->has_clear = !cfg->no_clear;
+                        pkt->clear_color = lens_get_theme(ui).color_bg;
                         pkt->scale = (float)pl.buffer_scale;
                         pkt->width = pl.width;
                         pkt->height = pl.height;
                         iris_mailbox_publish(&pl.mailbox, pkt);
                         sem_post(&pl.present_sem);
+                        if (snapshot && lens_snapshot_activate(ui, snapshot) == FLUX_OK) {
+                            surface_needs_paint = false;
+                        }
+                        if (++frame_no == 1) {
+                            fprintf(
+                                stderr,
+                                "first frame presented: %dx%d logical, %ux%u device (scale=%d)\n",
+                                pl.width, pl.height, (uint32_t)(pl.width * pl.buffer_scale),
+                                (uint32_t)(pl.height * pl.buffer_scale), pl.buffer_scale);
+                        }
                     }
-                    lens_snapshot_release(snapshot);
+                    if (snapshot) {
+                        lens_snapshot_release(snapshot);
+                    }
+                    if (host_list) {
+                        flux_display_list_release(host_list);
+                    }
                 }
+
                 if (d.request_pulse) {
                     wp_request_pulse(&pl);
                     wl_surface_commit(pl.surface);
@@ -4262,7 +4322,7 @@ fail:
     if (pl.has_presenter_thread) {
         atomic_store_explicit(&pl.presenter_running, false, memory_order_release);
         sem_post(&pl.present_sem);
-        pthread_join(pl.present_thread, NULL);
+        pthread_join(pl.present_thread, nullptr);
         sem_destroy(&pl.present_sem);
         iris_mailbox_destroy(&pl.mailbox);
         pl.has_presenter_thread = false;

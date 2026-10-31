@@ -24,6 +24,10 @@ void iris_mailbox_destroy(iris_frame_mailbox *mb) {
             lens_snapshot_release(mb->pool[i].snapshot);
             mb->pool[i].snapshot = nullptr;
         }
+        if (mb->pool[i].host_list) {
+            flux_display_list_release(mb->pool[i].host_list);
+            mb->pool[i].host_list = nullptr;
+        }
     }
     mb->spare = nullptr;
     atomic_store_explicit(&mb->ready, nullptr, memory_order_relaxed);
@@ -42,6 +46,10 @@ iris_frame_packet *iris_mailbox_acquire(iris_frame_mailbox *mb) {
             lens_snapshot_release(recycled->snapshot);
             recycled->snapshot = nullptr;
         }
+        if (recycled->host_list) {
+            flux_display_list_release(recycled->host_list);
+            recycled->host_list = nullptr;
+        }
         /* If we already held a spare, stash the spare back or use recycled. */
         if (mb->spare) {
             iris_frame_packet *pick = mb->spare;
@@ -58,6 +66,10 @@ iris_frame_packet *iris_mailbox_acquire(iris_frame_mailbox *mb) {
             lens_snapshot_release(pick->snapshot);
             pick->snapshot = nullptr;
         }
+        if (pick->host_list) {
+            flux_display_list_release(pick->host_list);
+            pick->host_list = nullptr;
+        }
         return pick;
     }
 
@@ -66,6 +78,10 @@ iris_frame_packet *iris_mailbox_acquire(iris_frame_mailbox *mb) {
     if (pick->snapshot) {
         lens_snapshot_release(pick->snapshot);
         pick->snapshot = nullptr;
+    }
+    if (pick->host_list) {
+        flux_display_list_release(pick->host_list);
+        pick->host_list = nullptr;
     }
     return pick;
 }
@@ -77,6 +93,8 @@ void iris_mailbox_publish(iris_frame_mailbox *mb, iris_frame_packet *pkt) {
     pkt->sequence = atomic_fetch_add_explicit(&mb->sequence, 1, memory_order_relaxed) + 1;
     if (pkt->snapshot)
         lens_snapshot_retain(pkt->snapshot);
+    if (pkt->host_list)
+        flux_display_list_retain(pkt->host_list);
 
     /* Atomic handoff to the compositor thread. */
     iris_frame_packet *superseded = atomic_exchange_explicit(&mb->ready, pkt, memory_order_release);
@@ -87,9 +105,19 @@ void iris_mailbox_publish(iris_frame_mailbox *mb, iris_frame_packet *pkt) {
             lens_snapshot_release(superseded->snapshot);
             superseded->snapshot = nullptr;
         }
-        if (mb->spare && mb->spare != superseded && mb->spare->snapshot) {
-            lens_snapshot_release(mb->spare->snapshot);
-            mb->spare->snapshot = nullptr;
+        if (superseded->host_list) {
+            flux_display_list_release(superseded->host_list);
+            superseded->host_list = nullptr;
+        }
+        if (mb->spare && mb->spare != superseded) {
+            if (mb->spare->snapshot) {
+                lens_snapshot_release(mb->spare->snapshot);
+                mb->spare->snapshot = nullptr;
+            }
+            if (mb->spare->host_list) {
+                flux_display_list_release(mb->spare->host_list);
+                mb->spare->host_list = nullptr;
+            }
         }
         mb->spare = superseded;
     }
@@ -111,6 +139,10 @@ void iris_mailbox_recycle(iris_frame_mailbox *mb, iris_frame_packet *pkt) {
         if (stale->snapshot) {
             lens_snapshot_release(stale->snapshot);
             stale->snapshot = nullptr;
+        }
+        if (stale->host_list) {
+            flux_display_list_release(stale->host_list);
+            stale->host_list = nullptr;
         }
     }
 }

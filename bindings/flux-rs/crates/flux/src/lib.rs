@@ -2580,9 +2580,19 @@ unsafe impl Sync for DisplayList {}
 /// Consumed into an immutable [`DisplayList`] via [`Encoder::finish`].
 pub struct Encoder {
     raw: *mut sys::flux_encoder,
+    owned: bool,
 }
 
 impl Encoder {
+    /// Create a borrowed view over a raw `flux_encoder` pointer.
+    ///
+    /// # Safety
+    /// `raw` must point to a live `flux_encoder`. The returned view does not
+    /// destroy the encoder on drop.
+    pub unsafe fn borrow_raw(raw: *mut sys::flux_encoder) -> Encoder {
+        Encoder { raw, owned: false }
+    }
+
     /// Create a new command encoder with the default budget (64 MiB).
     pub fn new() -> Result<Self, Error> {
         Self::with_limits(0, 0)
@@ -2597,7 +2607,7 @@ impl Encoder {
         };
         let mut raw = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_encoder_create(&desc, &mut raw) })?;
-        Ok(Self { raw })
+        Ok(Self { raw, owned: true })
     }
 
     /// Retain a published child under the current transform and clip.
@@ -2666,7 +2676,9 @@ impl Encoder {
     pub fn finish(mut self) -> Result<DisplayList, Error> {
         let mut dl = std::ptr::null_mut();
         let res = Error::check(unsafe { sys::flux_encoder_finish(self.raw, &mut dl) });
-        unsafe { sys::flux_encoder_destroy(self.raw) };
+        if self.owned {
+            unsafe { sys::flux_encoder_destroy(self.raw) };
+        }
         self.raw = std::ptr::null_mut();
         res?;
         Ok(unsafe { DisplayList::from_raw(dl) })
@@ -2675,7 +2687,7 @@ impl Encoder {
 
 impl Drop for Encoder {
     fn drop(&mut self) {
-        if !self.raw.is_null() {
+        if self.owned && !self.raw.is_null() {
             unsafe { sys::flux_encoder_destroy(self.raw) };
         }
     }

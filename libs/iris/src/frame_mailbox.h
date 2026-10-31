@@ -24,10 +24,13 @@
 
 typedef struct iris_frame_packet {
     lens_scene_snapshot *snapshot; /* retained reference */
+    flux_display_list *host_list;  /* optional retained host recorded content (ADR-0127) */
     uint64_t sequence;
     flux_rect damage_rect;
     bool force_paint;
     bool has_custom_paint;
+    bool has_clear;
+    flux_color clear_color;
     float scale;
     int32_t width;
     int32_t height;

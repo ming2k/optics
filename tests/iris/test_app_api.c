@@ -23,6 +23,12 @@ static void host_stop(lens *ui, flux_device *device, void *user) {
     (void)user;
 }
 
+static void host_record(flux_encoder *enc, float scale, void *user) {
+    (void)enc;
+    (void)scale;
+    (void)user;
+}
+
 int main(void) {
     /* Lifecycle callbacks are part of the public, designated-init API.
      * Do not run this config headlessly; assigning it catches declaration
@@ -31,10 +37,12 @@ int main(void) {
     iris_app_config lifecycle_config = {
         .start = host_start,
         .stop = host_stop,
+        .record = host_record,
         .user = &user,
     };
     CHECK(lifecycle_config.start != NULL);
     CHECK(lifecycle_config.stop != NULL);
+    CHECK(lifecycle_config.record != NULL);
 
     /* iris_app_run: NULL config is rejected before any backend work. */
     CHECK(iris_app_run(NULL) != 0);
