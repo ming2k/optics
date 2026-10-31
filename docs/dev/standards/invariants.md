@@ -21,7 +21,7 @@ Every architectural and operational rule maps deterministically into one of four
 | :--- | :--- | :--- | :--- |
 | **System Invariant** | Non-negotiable structural red-lines with cross-boundary blast radius (e.g., library boundaries, material isolation, zero-alloc loop, C23 purity). Max ~15 across the repo. | Formally ratified in ADRs (`[INV-ARCH-*]`, `[INV-CORE-*]`) | 1. Linker/library dependency firewalls<br>2. Dedicated check command (`tools/optics check <target>`)<br>3. Compiler attributes (`[[nodiscard]]`, `static_assert`) |
 | **Domain Contract** | State-machine transitions, function signatures, and memory lifecycles within a single library or module. | **NO global `INV-` tag**.<br>Expressed as named structs / enums. | 1. Typed enums & struct layouts<br>2. Assertion guards (`assert`)<br>3. Unit/integration tests |
-| **Design Specification** | Layout padding, font scales, spring stiffness constants, color palette tokens. | **NO `INV-` tag**.<br>Expressed as design tokens / constants. | 1. Constant definitions (`lens_style`)<br>2. Snapshot or golden pixel tests |
+| **Design Specification** | Layout padding, font scales, spring stiffness constants, color palette tokens. | **NO `INV-` tag**.<br>Expressed as design tokens / constants. | 1. Constant definitions (e.g. style tokens / metrics)<br>2. Snapshot or golden pixel tests |
 | **Implementation Note** | Transient workarounds, compiler bug workarounds, localized edge-case guards. | **NO `INV-` tag**.<br>Standard code comments. | Direct regression unit test |
 
 ---
@@ -46,7 +46,7 @@ The following canonical invariants are mechanically enforced in Optics:
 | `[INV-ARCH-STDOUT]` | Stdout Purity | Shared library TUs must never write to `stdout` (`printf`, `puts`). | `tools/optics check stdout` (`tools/guardrails/stdout_purity.py`) |
 | `[INV-ARCH-VERSION]` | Monorepo Version Lockstep | All sibling libraries (`flux`, `lens`, `iris`, etc.) share the exact version. | `tools/optics check lockstep` (`tools/guardrails/lockstep.py`) |
 | `[INV-ARCH-FORMAT]` | Pure C23 Formatting | Every C source file conforms strictly to `.clang-format` (Clang-Format 22.x). | `tools/optics check format` (`tools/guardrails/formatting.py`) |
-| `[INV-ARCH-ARENA]` | Zero Heap Alloc Frame Walk | UI frame traversal (`lens_begin` ➔ `lens_end`) uses only the Frame Arena. | Arena memory tracking & integration tests |
+| `[INV-ARCH-ARENA]` | Zero Heap Alloc Frame Walk | Hot frame traversal, layout passes, and render walks use only per-frame arena memory. | Arena memory tracking & integration tests |
 | `[INV-ARCH-OPTS]` | Single Opts Descriptor | Every public entry point accepts a single `const *opts` descriptor struct. | Static analysis & symbol generator `tools/guardrails/symbols.py` |
 | `[INV-ARCH-SYMBOLS]` | Public Symbol Parity | `docs/reference/symbols.md` is strictly synchronized with header exports. | `tools/optics check symbols` (`tools/guardrails/symbols.py`) |
 | `[INV-DOC-FIREWALL]` | Audience Firewall | Public documentation must never link to internal developer docs (`docs/dev/**`). | `tools/optics check docs` (`tools/guardrails/doc_links.py`) |

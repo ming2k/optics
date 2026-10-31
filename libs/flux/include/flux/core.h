@@ -1198,7 +1198,8 @@ FLUX_API uint32_t flux_surface_last_slot(const flux_surface *s);
 typedef struct flux_frame_begin_desc {
     flux_struct_type type; /* FLUX_TYPE_FRAME_BEGIN_DESC */
     const void *next;
-    uint64_t timeout_ns; /* 0 = FLUX_DEFAULT_FRAME_TIMEOUT_NS (2s) */
+    uint64_t timeout_ns; /* 0 = FLUX_DEFAULT_FRAME_TIMEOUT_NS (2s) unless non_blocking is true */
+    bool non_blocking; /* true = return FLUX_ERROR_TIMEOUT immediately if acquire/fence not ready */
 } flux_frame_begin_desc;
 
 /* Default fence/acquire timeout for frame begin, image upload, and one-shot

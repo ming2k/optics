@@ -40,11 +40,10 @@ Any pull request that introduces or modifies developer-visible or integrator-fac
 
 | Modified Surface | Required Documentation Synchronization |
 | :--- | :--- |
-| Public C API headers (`libs/*/include/**/*.h`) | `docs/reference/api.md` & `tools/guardrails/symbols.py` |
-| UI widgets or layout behaviors (`libs/lens`) | `docs/dev/standards/components.md`, `docs/how-to/` |
-| Physical material BRDFs or shaders (`libs/prism`) | `docs/dev/standards/materials.md`, `docs/reference/prism.md` |
-| OS platform integrations (`libs/iris`) | `docs/dev/standards/backends.md` |
+| Public C API headers (`libs/*/include/**/*.h`) | `docs/reference/api.md` & symbol index (`./tools/optics check symbols`) |
 | Major architectural restructuring or clean breaks | New or amended ADR in `docs/adr/` |
+| Developer-facing or integrator-facing guides | Corresponding task recipes in `docs/how-to/` or `docs/tutorials/` |
+| Conceptual systems or engine foundations | Corresponding deep dives in `docs/explanation/` or `docs/reference/` |
 
 ---
 

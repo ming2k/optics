@@ -6,7 +6,7 @@ This document establishes the mandatory conventions and invariants for all C and
 
 ## 1. The Single Opts Descriptor Paradigm
 
-Every public functional entry point for building widgets, issuing draw commands, configuring containers, or launching platform applications must follow this exact signature pattern:
+Every public functional entry point across all libraries in Optics must follow this exact signature pattern:
 
 ```c
 // Mandatory Signature Pattern:
@@ -18,9 +18,10 @@ Every public functional entry point for building widgets, issuing draw commands,
 2. **C23 Compound Literals**: Callers pass options using modern C23 compound literal syntax (`{}` for zero initialization, `nullptr` for null pointers):
    ```c
    // Terse, idiomatic C23 invocation:
-   if (lens_button(ui, &(lens_button_opts){.label = "Save"}).clicked) {
-       handle_save();
-   }
+   flux_canvas_draw_rect(canvas, &(flux_canvas_draw_rect_opts){
+       .bounds = {0.0f, 0.0f, 100.0f, 100.0f},
+       .color = {1.0f, 1.0f, 1.0f, 1.0f},
+   });
    ```
 3. **C23 Language Baseline**:
    - **Pointers**: Always use native `nullptr` (never `NULL` or `0`).
@@ -28,18 +29,8 @@ Every public functional entry point for building widgets, issuing draw commands,
    - **Typed Enums**: Explicit fixed underlying types `typedef enum name : uint32_t { ... }`.
    - **Attributes**: Standard C23 `[[nodiscard]]`, `[[reproducible]]`, `[[unsequenced]]`.
    - **Static Assertions**: Standard C23 `static_assert(cond, msg)`.
-4. **Struct Embedding**:
-   - Widget options structs in `lens` must embed `lens_box box;` as their first field:
-     ```c
-     typedef struct lens_button_opts {
-         lens_box box;
-         const char *label;
-         lens_button_variant variant;
-         // ...
-     } lens_button_opts;
-     ```
-5. **Structured Return**:
-   - Interactive widgets must return a comprehensive `lens_response` rather than a bare `bool`, exposing `.clicked`, `.hovered`, `.pressed`, `.focused`, `.changed`, `.rect`, and `.state`.
+4. **Structured Return**:
+   - Public entry points return explicit structured types (e.g. status structs, response handles, or result descriptors) rather than bare error codes or out-parameters, providing clear contextual outcome state.
 
 ---
 
@@ -48,20 +39,20 @@ Every public functional entry point for building widgets, issuing draw commands,
 | Anti-Pattern | Description | Correct Alternative |
 | :--- | :--- | :--- |
 | **`_ex` Suffix** | Creating a terse scalar version and an `_ex` descriptor version. | **Single canonical descriptor function.** |
-| **`_wrapped` / `_sized` Suffix** | Adding functions based on parameter combinations. | **Control via `.wrap`, `.size` in the `_opts` struct.** |
-| **`_primary` / `_subtle` Suffix** | Encoding visual hierarchy into the function symbol. | **Pass `.variant = LENS_BUTTON_PRIMARY` in `_opts`.** |
-| **`_vertical` Suffix** | Encoding layout orientation into the function symbol. | **Pass `.axis = LENS_COLUMN` in `_opts`.** |
-| **Floating State Modifiers** | Functions modifying the "next" or "previous" widget (e.g. `next_disabled(true)`). | **Explicitly pass `.box = {.disabled = true}` on that widget.** |
-| **Callback Data Pulling** | Forcing callbacks like `cell_fn(row, col)` for core layout. | **Direct loops in the caller emitting standard widgets.** |
+| **`_wrapped` / `_sized` Suffix** | Adding functions based on parameter combinations. | **Control via fields in the `_opts` struct.** |
+| **`_primary` / `_subtle` Suffix** | Encoding visual hierarchy or operational flavors into the function symbol. | **Pass `.variant` or mode flag in `_opts`.** |
+| **`_vertical` Suffix** | Encoding layout or processing orientation into the function symbol. | **Pass `.axis` or orientation enum in `_opts`.** |
+| **Floating State Modifiers** | Functions modifying the "next" or "previous" item implicitly (e.g. `next_disabled(true)`). | **Explicitly pass configuration fields in that item's `_opts`.** |
+| **Callback Data Pulling** | Forcing intrusive callbacks for basic data iteration. | **Direct loops in the caller emitting standard descriptors.** |
 
 ---
 
 ## 3. Memory & Lifetime Contracts
 
-1. **Per-Frame Arena Borrowing**:
-   - Strings, geometry vertices, and dynamic arrays passed to C entry points are copied into the per-frame arena (`ui->arena` / `frame->arena`) during the build phase.
-   - Callers are free to pass stack-allocated, reused, or scratch buffers without lifetime concerns across frames.
-2. **Zero Heap Allocation during Frames**:
-   - No widget, layout pass, skin dispatch, or draw emission may invoke libc `malloc`/`calloc`/`realloc`/`free` during `lens_begin` ➔ `lens_end`.
-3. **Retained Store State**:
-   - Widget state spanning multiple frames (cursor position, scroll offsets, drag state, animation timers) must be requested via `lens_node_state(n, sizeof(State))`, keyed by the node's stable 64-bit ID.
+1. **Arena & Transient Allocation Borrowing**:
+   - Strings, geometry vertices, and dynamic arrays passed to C entry points are copied or borrowed into transient/frame arenas during execution.
+   - Callers are free to pass stack-allocated, reused, or scratch buffers without lifetime concerns across frame boundaries.
+2. **Zero Heap Allocation in Hot Paths**:
+   - No hot path, frame loop, layout pass, or draw command emission may invoke libc `malloc`/`calloc`/`realloc`/`free`.
+3. **Explicit State Ownership**:
+   - Multi-frame or persistent state must be explicitly managed through caller-held state objects, retained stores, or stable context handles rather than hidden module-static variables.

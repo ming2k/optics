@@ -52,7 +52,7 @@ All software in Optics adheres to four non-negotiable architectural mandates:
    - Every public functional entry point accepts **exactly one** typed descriptor struct pointer (`const module_<item>_opts *opts`) and returns a uniform status or response object.
    - Dual API tiers (`_ex`), parameter-derived suffixes (`_wrapped`, `_primary`, `_vertical`), and floating state modifiers are strictly forbidden.
 3. **Strict Layered Separation**:
-   - Spatial overlay escape (`Place`) $\neq$ Viewport translation (`Scroll`) $\neq$ Geometric layout flow (`Row`/`Column`/`Grid`) $\neq$ Data interaction atoms (`Button`/`Textedit`/etc.).
+   - Architectural dependencies flow strictly inward from higher layers to lower layers (`Layer 3: UI & Shell` ➔ `Layer 2: Scene & Motion` ➔ `Layer 1: Typography` ➔ `Layer 0: Rendering Foundation`). Lower layers must never depend on, reference, or leak abstractions from higher layers.
 4. **Zero-Baggage Deprecation Policy**:
    - When a design is superseded by an orthogonal primitive, the obsolete API is completely excised. No shims, deprecated aliases, or compatibility redirects are retained in the core library.
 
@@ -69,8 +69,8 @@ All software in Optics adheres to four non-negotiable architectural mandates:
 - **Headless CPU Software Fallback**: `libs/flux` provides `<flux/canvas_cpu.h>` for GPU-free execution, headless rendering, pixel testing, and continuous integration.
 
 ### 3.3 Zero Heap Allocation during Frame Walk (ADR-0024)
-- **Red-Line**: UI layout passes, widget reconciliation, and draw command emission during `lens_begin` ➔ `lens_end` must never invoke libc `malloc`, `calloc`, `realloc`, or `free`.
-- **Enforcement**: All temporary allocations borrow strictly from the per-frame arena (`ui->arena`), reset at frame boundaries. Multi-frame state is keyed in the retained store (`lens_node_state`).
+- **Red-Line**: Hot-path frame traversal, scene evaluation, layout passes, and draw command emission must never invoke libc `malloc`, `calloc`, `realloc`, or `free`.
+- **Enforcement**: All temporary allocations borrow strictly from per-frame / transient arenas, reset at frame boundaries. Multi-frame state is keyed in caller handles or designated retained stores.
 
 ### 3.4 Library Stdout Hygiene
 - **Red-Line**: Shared library translation units under `libs/` must never write to `stdout` (`printf`, `puts`). Standard output is strictly reserved for application CLI or IPC wires. Diagnostic messages use `stderr`.
@@ -80,10 +80,10 @@ All software in Optics adheres to four non-negotiable architectural mandates:
 
 ## 4. The 5-Gate Review Matrix
 
-Every PR proposing a new API, primitive, or component must pass through the 5-Gate Filter:
+Every PR proposing a new public API, core primitive, or subsystem capability must pass through the 5-Gate Filter:
 
 ```text
-[ Proposal ] ──▶ [ Gate 1: Irreducibility ] ──▶ [ Gate 2: Data Orthogonality ]
+[ Proposal ] ──▶ [ Gate 1: Irreducibility ] ──▶ [ Gate 2: Orthogonality ]
                         │                              │
                      Pass?                          Pass?
                         ▼                              ▼
@@ -94,8 +94,8 @@ Every PR proposing a new API, primitive, or component must pass through the 5-Ga
                  [ Gate 5: Zero-Alloc Execution ] ──▶ [ Merge into Core ]
 ```
 
-1. **Gate 1: Irreducibility**: Can this be built by nesting existing primitives in userland? (If YES ➔ Reject from core).
-2. **Gate 2: Data Orthogonality**: Does this introduce an unrepresented fundamental interaction type (0D pulse, 0D boolean, 1D scalar, 1D/2D string)? (If NO ➔ Merge into existing primitive's `.variant` or `.appearance`).
-3. **Gate 3: Layer Purity**: Does it belong exclusively to Overlay, Viewport, Layout, or Atom? (If NO ➔ Reject cross-layer hybrid).
-4. **Gate 4: API Compliance**: Does it adhere to the Single Opts Descriptor paradigm? (If NO ➔ Reject `_ex` or fragmented suffixes).
-5. **Gate 5: Zero-Alloc Execution**: Does the render walk run with zero heap allocation (`malloc`), using only the frame arena? (If NO ➔ Reject).
+1. **Gate 1: Irreducibility**: Can this functionality be composed from existing primitives in userland or client applications? (If YES ➔ Reject from core).
+2. **Gate 2: Orthogonality**: Does this introduce a genuinely new, orthogonal capability or fundamental model rather than a redundant convenience wrapper? (If NO ➔ Reject or configure via existing options).
+3. **Gate 3: Layer Purity**: Does the proposed API or module strictly adhere to its architectural layer without creating reverse dependencies or blurring cross-layer boundaries? (If NO ➔ Reject cross-layer hybrid).
+4. **Gate 4: API Compliance**: Does it adhere to the Single Opts Descriptor paradigm and repository C23 conventions? (If NO ➔ Reject non-standard signatures).
+5. **Gate 5: Zero-Alloc Execution**: Does the hot path or frame walk execute with zero heap allocation (`malloc`), using only transient/frame arena storage? (If NO ➔ Reject).

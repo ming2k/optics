@@ -44,7 +44,9 @@
 #include "presentation-time-client-protocol.h"
 #include "xdg-activation-v1-client-protocol.h"
 #include <linux/input-event-codes.h> /* BTN_LEFT / BTN_RIGHT / BTN_MIDDLE — Linux-only, this file only */
+#include <sched.h>
 #include <semaphore.h>
+#include <sys/resource.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -3273,10 +3275,27 @@ static void *wp_presenter_thread_main(void *arg) {
     wp_present_context *ctx = arg;
     wp_platform *pl = ctx->pl;
 
+#if defined(__linux__)
+    /* Name thread for diagnostic observability */
+    (void)pthread_setname_np(pthread_self(), "iris-presenter");
+    /* Elevate presentation worker to realtime or high priority so display pacing
+     * is not starved by background compilation or user-space compute tasks. */
+    struct sched_param sp = {.sched_priority = 10};
+    if (pthread_setschedparam(pthread_self(), SCHED_RR, &sp) != 0) {
+        (void)setpriority(PRIO_PROCESS, 0, -10);
+    }
+#endif
+
     while (atomic_load_explicit(&pl->presenter_running, memory_order_acquire)) {
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_nsec += 40000000; /* 40ms timeout */
+        long long wait_timeout_ns =
+            (pl->refresh_ns > 0) ? (long long)(pl->refresh_ns * 1.5) : 40000000LL;
+        if (wait_timeout_ns < 10000000LL)
+            wait_timeout_ns = 10000000LL;
+        if (wait_timeout_ns > 50000000LL)
+            wait_timeout_ns = 50000000LL;
+        ts.tv_nsec += (long)wait_timeout_ns;
         if (ts.tv_nsec >= 1000000000) {
             ts.tv_sec += 1;
             ts.tv_nsec -= 1000000000;

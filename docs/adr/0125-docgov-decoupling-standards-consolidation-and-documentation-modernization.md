@@ -51,15 +51,11 @@ Optics historically adopted an external documentation governance framework (`doc
 ### 1. Complete Decoupling from `docgov` and Unification into `docs/dev/standards/`
 - Delete `.docgov.yml` and `.docgov.lock`.
 - Completely abolish the external and over-nested `docs/governance/` directory.
-- Re-home all engineering, architectural, and domain specifications directly into `docs/dev/standards/`:
+- Re-home all engineering and architectural specifications directly into `docs/dev/standards/`:
   - `docs/dev/standards/README.md`: Central catalog and governance charter.
   - `docs/dev/standards/architecture.md`: 7-library topology, 5-Gate Review Matrix, and system red-lines.
   - `docs/dev/standards/invariants.md`: Admissibility matrix and core invariants catalog.
   - `docs/dev/standards/api-design.md`: Single Opts Descriptor paradigm and C23 standards.
-  - `docs/dev/standards/components.md`: Lens UI component intake and 4-layer spatial purity.
-  - `docs/dev/standards/materials.md`: Prism physical surface optics and material boundaries.
-  - `docs/dev/standards/effects.md`: Image effect operators and GPU memory bounds.
-  - `docs/dev/standards/backends.md`: Iris platform windowing, event pump, and display pacing.
   - `docs/dev/standards/adr.md`: ADR 3-question qualification test and template.
   - `docs/dev/standards/rfc.md`: RFC cross-boundary deliberation protocol.
   - `docs/dev/standards/taxonomy.md`: Diátaxis layout, audience firewall, and root whitelist.

@@ -15,6 +15,6 @@ Choose a section based on what you are trying to do:
 - **[Explanation & Architecture](explanation/index.md)** — Deep conceptual foundations: Value-Semantic Rendering (VSR), Liquid Glass optics, analytic curve coverage, and Vulkan backend design.
 - **[Architecture Decision Records](adr/index.md)** — Ratified architectural ledger (ADR-0001 through ADR-0125) detailing structural contracts and negative knowledge.
 - **[Developer & Contributor Documentation](dev/index.md)** — Build configuration, automated testing runbooks, manual verification suites, and release hygiene.
-- **[Engineering Standards](dev/standards/README.md)** — System invariants, C23 API guidelines, UI component purity, material boundaries, and PR verification gates.
+- **[Engineering Standards](dev/standards/README.md)** — Repository architecture topology, system invariants, C23 API guidelines, and PR verification gates.
 
 The current source tree and root `meson.build` are authoritative when a historical ADR describes an older layout.

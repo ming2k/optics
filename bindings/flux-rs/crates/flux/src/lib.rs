@@ -1717,9 +1717,26 @@ impl Surface {
     /// Acquire the next frame. Returns the backend result so callers can handle
     /// `SURFACE_LOST` / out-of-date by resizing.
     pub fn begin_frame(&self) -> Result<Frame<'_>, Error> {
+        self.begin_frame_opts(0, false)
+    }
+
+    /// Acquire the next frame with an explicit timeout in nanoseconds.
+    pub fn begin_frame_timeout(&self, timeout_ns: u64) -> Result<Frame<'_>, Error> {
+        self.begin_frame_opts(timeout_ns, false)
+    }
+
+    /// Acquire the next frame non-blockingly. Returns `Error::Timeout` immediately
+    /// if the fence has not retired or a swapchain image is not ready, without
+    /// blocking the calling thread.
+    pub fn begin_frame_nonblocking(&self) -> Result<Frame<'_>, Error> {
+        self.begin_frame_opts(0, true)
+    }
+
+    fn begin_frame_opts(&self, timeout_ns: u64, non_blocking: bool) -> Result<Frame<'_>, Error> {
         let desc = sys::flux_frame_begin_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_FRAME_BEGIN_DESC,
-            timeout_ns: 0,
+            timeout_ns,
+            non_blocking,
             ..unsafe { std::mem::zeroed() }
         };
         let mut out: *mut sys::flux_frame = std::ptr::null_mut();
@@ -4269,6 +4286,35 @@ pub const DMABUF_SYNC_DEVICE_EXTENSIONS: [&std::ffi::CStr; 1] = [c"VK_KHR_extern
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_begin_desc_maps_timeout_and_non_blocking() {
+        let desc_default = sys::flux_frame_begin_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_FRAME_BEGIN_DESC,
+            timeout_ns: 0,
+            non_blocking: false,
+            ..unsafe { std::mem::zeroed() }
+        };
+        assert_eq!(desc_default.timeout_ns, 0);
+        assert!(!desc_default.non_blocking);
+
+        let desc_nb = sys::flux_frame_begin_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_FRAME_BEGIN_DESC,
+            timeout_ns: 0,
+            non_blocking: true,
+            ..unsafe { std::mem::zeroed() }
+        };
+        assert!(desc_nb.non_blocking);
+
+        let desc_timeout = sys::flux_frame_begin_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_FRAME_BEGIN_DESC,
+            timeout_ns: 16_666_667,
+            non_blocking: false,
+            ..unsafe { std::mem::zeroed() }
+        };
+        assert_eq!(desc_timeout.timeout_ns, 16_666_667);
+        assert!(!desc_timeout.non_blocking);
+    }
 
     #[test]
     fn shadow_params_map_to_descriptor_fields() {

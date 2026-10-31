@@ -19,8 +19,8 @@ negative_knowledge: true
 ## Context
 
 `iris` owns the platform event loop and is the sole event pump of the stack
-([ADR-0043](0043-iris-foundations.md), [ADR-0084](0084-iris-tripartite-architecture-and-c23-app-opts.md);
-`docs/dev/standards/backends.md`). Each backend translates native events —
+([ADR-0043](0043-iris-foundations.md), [ADR-0084](0084-iris-tripartite-architecture-and-c23-app-opts.md)).
+Each backend translates native events —
 Wayland `wl_pointer` / `wl_keyboard` / text-input-v3, Win32 `WM_*`, Cocoa
 `NSEvent` — and folds them directly into one `lens_input` per frame
 (`libs/iris/src/app_wayland.c` `wp_accum` → `drain_input`).
@@ -35,11 +35,10 @@ Three structural facts force a decision now:
    that wants `Cmd+W` for itself, a scroll-sensitivity multiplier, pen
    calibration, or a synthetic click for automation must fork a backend.
 
-2. **The governance already names a type that does not exist.** Both
-   `docs/dev/standards/backends.md` and [ADR-0084](0084-iris-tripartite-architecture-and-c23-app-opts.md)
-   describe iris as translating OS events into a uniform `iris_event`
-   snapshot stream. No `iris_event` exists anywhere in the tree; the real
-   fold target is `lens_input`.
+2. **The architectural model already names a type that does not exist.**
+   [ADR-0084](0084-iris-tripartite-architecture-and-c23-app-opts.md) describes iris as
+   translating OS events into a uniform `iris_event` snapshot stream. No
+   `iris_event` exists anywhere in the tree; the real fold target is `lens_input`.
 
 3. **`lens` must stay headless and immediate-mode.** [ADR-0029](0029-lens-interaction-model.md)
    and [ADR-0036](0036-lens-input-clipboard-ime.md) deliberately rejected an
@@ -211,8 +210,8 @@ native OS event
   forking a backend or leaking platform code.
 - Exactly one interception point exists across all three backends, so
   cross-platform parity is enforced by construction, not by review.
-- The governance description of `iris_event` (`docs/dev/standards/backends.md`,
-  [ADR-0084](0084-iris-tripartite-architecture-and-c23-app-opts.md)) becomes
+- The architectural description of `iris_event`
+  ([ADR-0084](0084-iris-tripartite-architecture-and-c23-app-opts.md)) becomes
   code-true, closing a documentation/code drift.
 - `lens` remains headless and unchanged; `flux`, `glyph`, `prism`, `transit`,
   and `vista` are untouched.
@@ -242,8 +241,7 @@ native OS event
   undroppable handling, and `on_event == nullptr` equivalence.
 - `bindings/iris-rs` — `crates/iris/src/lib.rs` safe wrapper over `on_event`;
   `crates/iris-sys` picks up the header via the umbrella include.
-- Docs: `docs/dev/standards/backends.md`,
-  `docs/explanation/application-architecture.md`, `docs/dev/cross-platform.md`
+- Docs: `docs/explanation/application-architecture.md`, `docs/dev/cross-platform.md`
   (three-backend contract), and `docs/explanation/rust-bindings.md`.
 
 ## References
@@ -259,5 +257,4 @@ native OS event
   architecture; names `iris_event`.
 - [ADR-0099](0099-desktop-integration-fkeys-activation-and-clipboard.md) —
   platform capabilities that stay out of the neutral event type.
-- `libs/iris/include/iris/app.h`, `libs/iris/src/app_wayland.c`,
-  `docs/dev/standards/backends.md`.
+- `libs/iris/include/iris/app.h`, `libs/iris/src/app_wayland.c`.

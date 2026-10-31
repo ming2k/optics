@@ -15,10 +15,6 @@ All engineering standards reside flatly in `docs/dev/standards/`:
 | **[`architecture.md`](architecture.md)** | **Monorepo Topology & Boundaries**: Defines the 7-library microkernel architecture, 5-gate review matrix, layer purity, and core system red-lines. |
 | **[`invariants.md`](invariants.md)** | **Invariant Standards & Admissibility**: Codifies true system invariants (mechanisms over exhortations), establishes the constraint classification matrix, and degazettes pseudo-tags. |
 | **[`api-design.md`](api-design.md)** | **API Conventions & C23 Contracts**: Enforces the Single Opts Descriptor paradigm, modern C23 language baseline (`nullptr`, `{}`), and zero-alloc frame loop contracts. |
-| **[`components.md`](components.md)** | **UI Component Governance**: Defines `lens` domain boundaries, the 4-layer spatial purity model, interaction primitives taxonomy, and retained store state machines. |
-| **[`materials.md`](materials.md)** | **Surface Materials Governance**: Architectural invariants for `prism` physical BRDF models, dielectric Liquid Glass optics, and shader register bounds. |
-| **[`effects.md`](effects.md)** | **Image Effects Governance**: Mathematical purity and GPU memory bounds for `libs/flux/effect` and `prism`. |
-| **[`backends.md`](backends.md)** | **Platform & OS Integration (Iris)**: Tripartite model for native OS windowing, event pump, compile-time backend selection, and display pacing. |
 | **[`adr.md`](adr.md)** | **Architectural Decision Records**: The 3-Question Test for ADR qualification, in-place lifecycle (`draft`, `accepted`, `superseded`, `rejected`), frontmatter schema, and template. |
 | **[`rfc.md`](rfc.md)** | **Request for Comments (RFC)**: Deliberation and consensus protocol for cross-cutting, high-reversal-cost subsystem redesigns prior to ADR ratification. |
 | **[`taxonomy.md`](taxonomy.md)** | **Documentation Taxonomy**: Four-quadrant Diátaxis layout, audience boundaries (public user vs contributor internal), and knowledge lifecycle. |

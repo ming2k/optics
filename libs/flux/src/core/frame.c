@@ -393,8 +393,14 @@ flux_result flux_surface_begin_frame(flux_surface *s, const flux_frame_begin_des
             return fr;
     }
 
-    uint64_t timeout =
-        (desc && desc->timeout_ns) ? desc->timeout_ns : FLUX_DEFAULT_FRAME_TIMEOUT_NS;
+    uint64_t timeout = 0;
+    if (desc && desc->non_blocking) {
+        timeout = 0;
+    } else if (desc && desc->timeout_ns) {
+        timeout = desc->timeout_ns;
+    } else {
+        timeout = FLUX_DEFAULT_FRAME_TIMEOUT_NS;
+    }
 
     uint32_t slot = s->current_frame;
     flux_per_frame *pf = &s->frames[slot];

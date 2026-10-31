@@ -751,6 +751,24 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
             return portability_result;
         }
     }
+    /* VK_KHR_global_priority or VK_EXT_global_priority when advertised:
+     * enables requesting VK_QUEUE_GLOBAL_PRIORITY_HIGH_KHR on graphics queue
+     * so GPU hardware scheduler prioritizes UI/presentation rendering under compute load. */
+    bool has_global_priority = false;
+    const char *global_priority_ext = nullptr;
+    if (available && has_extension(available, avail, VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME)) {
+        global_priority_ext = VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME;
+    } else if (available &&
+               has_extension(available, avail, VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME)) {
+        global_priority_ext = VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME;
+    }
+    if (global_priority_ext) {
+        flux_result gp_res =
+            append_device_extension(device_exts, &device_ext_count, global_priority_ext);
+        if (gp_res == FLUX_OK) {
+            has_global_priority = true;
+        }
+    }
     free(available);
     (void)required_device_ext_baseline;
 
@@ -834,9 +852,14 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
 
     /* Queue create infos: graphics; transfer iff dedicated. */
     float prio = 1.0f;
+    VkDeviceQueueGlobalPriorityCreateInfoKHR global_prio_ci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_KHR,
+        .globalPriority = VK_QUEUE_GLOBAL_PRIORITY_HIGH_KHR,
+    };
     VkDeviceQueueCreateInfo qcis[2] = {
         {
             .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .pNext = has_global_priority ? &global_prio_ci : nullptr,
             .queueFamilyIndex = d->graphics_family,
             .queueCount = 1,
             .pQueuePriorities = &prio,
@@ -863,6 +886,13 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
     };
 
     VkResult vr = vkCreateDevice(d->physical_device, &dci, nullptr, &d->device);
+    if ((vr == VK_ERROR_NOT_PERMITTED_KHR || vr == VK_ERROR_NOT_PERMITTED_EXT) &&
+        has_global_priority) {
+        /* High priority was refused by the kernel/driver (unprivileged or no CAP_SYS_NICE);
+         * fall back cleanly to default queue priority. */
+        qcis[0].pNext = nullptr;
+        vr = vkCreateDevice(d->physical_device, &dci, nullptr, &d->device);
+    }
     if (vr != VK_SUCCESS) {
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkCreateDevice failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;

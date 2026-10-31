@@ -2,7 +2,7 @@
 
 These pages cover the internal engineering, testing, maintenance, and quality standards for the Optics monorepo:
 
-- **[Engineering Standards](standards/README.md)** — Repository architecture topology, system invariants, C23 API guidelines, UI component purity, and PR review gates.
+- **[Engineering Standards](standards/README.md)** — Repository architecture topology, system invariants, C23 API guidelines, and PR review gates.
 - **[Setup](setup.md)** — Install dependencies, configure the build matrix, and manage toolchains.
 - **[Testing](testing.md)** — Run, select, debug, and extend the C, Rust, and benchmark test suites.
 - **[Manual Testing Runbooks](manual-testing.md)** — Interactive verification, graphics inspection, UI/input checks, and platform matrix runbooks.
