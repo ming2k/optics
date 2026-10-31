@@ -510,6 +510,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_textedit_get_caret` |  |
 | `lens_textedit_set_selection` |  |
 | `lens_textedit_get_selection` |  |
+| `lens_set_cursor_hint` |  |
 | `lens_get_response` | ================================================================== |
 | `lens_get_cursor_hint` |  |
 | `lens_focused` |  |

@@ -132,6 +132,16 @@ pub enum CursorHint {
 }
 
 impl CursorHint {
+    pub fn raw(&self) -> sys::lens_cursor_hint {
+        match self {
+            Self::Pointer => sys::lens_cursor_hint::LENS_CURSOR_POINTER,
+            Self::Text => sys::lens_cursor_hint::LENS_CURSOR_TEXT,
+            Self::ResizeNs => sys::lens_cursor_hint::LENS_CURSOR_RESIZE_NS,
+            Self::ResizeEw => sys::lens_cursor_hint::LENS_CURSOR_RESIZE_EW,
+            Self::Default => sys::lens_cursor_hint::LENS_CURSOR_DEFAULT,
+        }
+    }
+
     pub(crate) fn from_raw(raw: sys::lens_cursor_hint) -> Self {
         match raw {
             sys::lens_cursor_hint::LENS_CURSOR_POINTER => Self::Pointer,
@@ -417,6 +427,8 @@ pub struct Response {
     pub focused: bool,
     pub focus_visible: bool,
     pub changed: bool,
+    pub submitted: bool,
+    pub tabbed: bool,
     pub id: u64,
     pub state: u32,
 }
@@ -433,6 +445,8 @@ impl Response {
             focus_visible: (r.state & (sys::lens_widget_state::LENS_STATE_FOCUS_VISIBLE as u32))
                 != 0,
             changed: r.changed,
+            submitted: r.submitted,
+            tabbed: r.tabbed,
             id: r.id,
             state: r.state,
         }

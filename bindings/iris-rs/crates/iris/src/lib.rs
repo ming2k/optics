@@ -45,7 +45,10 @@ pub use iris_sys as sys;
 
 pub use lens::key;
 pub use lens::mods;
-pub use lens::patterns::{self, SegmentedControl, SegmentedItem};
+pub use lens::patterns::{
+    self, DataGrid, DataGridAction, DataGridCol, MenuItem, MenubarItem, SegmentedControl,
+    SegmentedItem, SortDir, TreeAction, TreeItem, TreeView, menubar, popup_menu,
+};
 pub use lens::{
     Align, Band, Color, CursorHint, DndDropInfo, Frame, Icon, Input, LayoutOpts, MouseButton,
     PlaceMode, PlaceOpts, Rect, Response, Style, TextBuf, Theme, Ui,

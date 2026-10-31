@@ -463,6 +463,104 @@ static void test_ctrl_arrow_word_navigation(void) {
     lens_release(ui);
 }
 
+static void test_textedit_undo_redo(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    char buf[64] = {0};
+
+    focus_field(ui, "tf", buf, sizeof buf);
+
+    /* 1. Type "hello" */
+    lens_input in = IN0;
+    strncpy(in.text_utf8, "hello", sizeof in.text_utf8 - 1);
+    lens_begin(ui, &in);
+    bool changed =
+        lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf})
+            .changed;
+    test_end(ui);
+    CHECK(changed);
+    CHECK(strcmp(buf, "hello") == 0);
+
+    /* 2. Undo with Ctrl+Z */
+    in = IN0;
+    in.mods = LENS_MOD_CTRL;
+    in.key_count = 1;
+    in.keys[0] = (lens_key_event){.key = 'z', .pressed = true};
+    lens_begin(ui, &in);
+    changed =
+        lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf})
+            .changed;
+    test_end(ui);
+    CHECK(changed);
+    CHECK(strcmp(buf, "") == 0);
+
+    /* 3. Redo with Ctrl+Y */
+    in = IN0;
+    in.mods = LENS_MOD_CTRL;
+    in.key_count = 1;
+    in.keys[0] = (lens_key_event){.key = 'y', .pressed = true};
+    lens_begin(ui, &in);
+    changed =
+        lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf})
+            .changed;
+    test_end(ui);
+    CHECK(changed);
+    CHECK(strcmp(buf, "hello") == 0);
+
+    /* 4. Undo with Ctrl+Z again */
+    in = IN0;
+    in.mods = LENS_MOD_CTRL;
+    in.key_count = 1;
+    in.keys[0] = (lens_key_event){.key = 'z', .pressed = true};
+    lens_begin(ui, &in);
+    changed =
+        lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf})
+            .changed;
+    test_end(ui);
+    CHECK(changed);
+    CHECK(strcmp(buf, "") == 0);
+
+    /* 5. Redo with Ctrl+Shift+Z */
+    in = IN0;
+    in.mods = LENS_MOD_CTRL | LENS_MOD_SHIFT;
+    in.key_count = 1;
+    in.keys[0] = (lens_key_event){.key = 'z', .pressed = true};
+    lens_begin(ui, &in);
+    changed =
+        lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf})
+            .changed;
+    test_end(ui);
+    CHECK(changed);
+    CHECK(strcmp(buf, "hello") == 0);
+
+    /* 6. Backspace removes 'o' */
+    in = IN0;
+    in.key_count = 1;
+    in.keys[0] = (lens_key_event){.key = LENS_KEY_BACKSPACE, .pressed = true};
+    lens_begin(ui, &in);
+    changed =
+        lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf})
+            .changed;
+    test_end(ui);
+    CHECK(changed);
+    CHECK(strcmp(buf, "hell") == 0);
+
+    /* Undo backspace restores 'hello' */
+    in = IN0;
+    in.mods = LENS_MOD_CTRL;
+    in.key_count = 1;
+    in.keys[0] = (lens_key_event){.key = 'z', .pressed = true};
+    lens_begin(ui, &in);
+    changed =
+        lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf})
+            .changed;
+    test_end(ui);
+    CHECK(changed);
+    CHECK(strcmp(buf, "hello") == 0);
+
+    lens_release(ui);
+}
+
 int main(void) {
     test_insert_ascii();
     test_backspace_and_delete();
@@ -475,5 +573,6 @@ int main(void) {
     test_textedit_ime_preedit_and_commit();
     test_double_click_selects_word();
     test_ctrl_arrow_word_navigation();
+    test_textedit_undo_redo();
     return TEST_REPORT();
 }

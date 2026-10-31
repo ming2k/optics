@@ -121,6 +121,127 @@ typedef struct lens_split_opts {
 LENS_API bool lens_split_handle_v(lens *ui, const char *id_str, float *split_offset,
                                   const lens_split_opts *opts);
 
+/* ================================================================== */
+/*  DataGrid Pattern (ADR-Pattern-005)                                */
+/* ================================================================== */
+
+typedef enum lens_sort_dir : uint32_t {
+    LENS_SORT_NONE = 0,
+    LENS_SORT_ASC = 1,
+    LENS_SORT_DESC = 2,
+} lens_sort_dir;
+
+typedef struct lens_datagrid_col {
+    const char *title;
+    float width;        /* Column width in pixels (0.0 = default 120.0f) */
+    float min_width;    /* Minimum constraint (0.0 = 40.0f) */
+    lens_sort_dir sort; /* Current sort state */
+    bool sortable;      /* Header click triggers sort */
+    bool resizable;     /* Divider handle is draggable */
+    lens_align align;   /* Cell text alignment */
+} lens_datagrid_col;
+
+typedef enum lens_datagrid_action_kind : uint32_t {
+    LENS_DATAGRID_ACTION_NONE = 0,
+    LENS_DATAGRID_ACTION_ROW_CLICKED,
+    LENS_DATAGRID_ACTION_ROW_DOUBLE_CLICKED,
+    LENS_DATAGRID_ACTION_SORT_CHANGED,
+    LENS_DATAGRID_ACTION_COL_RESIZED,
+} lens_datagrid_action_kind;
+
+typedef struct lens_datagrid_action {
+    lens_datagrid_action_kind kind;
+    uint32_t row_index;
+    uint32_t col_index;
+    lens_sort_dir sort_dir;
+} lens_datagrid_action;
+
+typedef struct lens_datagrid_opts {
+    float height;        /* Total container height (0.0 = auto/fill) */
+    float header_height; /* Header row height (0.0 = default 32.0f) */
+    float row_height;    /* Body row height (0.0 = default 28.0f) */
+    bool striped;        /* Alternating zebra background */
+} lens_datagrid_opts;
+
+/* Render an interactive data grid with virtualized rows, column resizing,
+ * and header sorting. `cols` is in-out: drag-resizing modifies `.width` in place.
+ * `cell_texts` is a 2D flattened array (row-major: cell_texts[row * col_count + col]).
+ * `selected_row` is in-out active row index. */
+LENS_API lens_datagrid_action lens_datagrid(lens *ui, const char *id_str, lens_datagrid_col *cols,
+                                            uint32_t col_count, const char *const *cell_texts,
+                                            uint32_t row_count, uint32_t *selected_row,
+                                            const lens_datagrid_opts *opts);
+
+/* ================================================================== */
+/*  Tree View Pattern (ADR-Pattern-006)                               */
+/* ================================================================== */
+
+typedef struct lens_tree_item {
+    const char *label;
+    lens_icon_id icon; /* 0 or LENS_ICON_INVALID = none */
+    uint32_t depth;    /* Indentation level (0 = root) */
+    bool is_leaf;      /* True if leaf (no expansion chevron) */
+    bool expanded;     /* In-out: subtree expanded */
+    bool selected;     /* True if row is selected */
+    const char *badge; /* Optional trailing metadata string (NULL if none) */
+} lens_tree_item;
+
+typedef enum lens_tree_action_kind : uint32_t {
+    LENS_TREE_ACTION_NONE = 0,
+    LENS_TREE_ACTION_SELECT,
+    LENS_TREE_ACTION_TOGGLE,
+    LENS_TREE_ACTION_ACTIVATE,
+} lens_tree_action_kind;
+
+typedef struct lens_tree_action {
+    lens_tree_action_kind kind;
+    uint32_t index; /* Item index in caller's array */
+} lens_tree_action;
+
+typedef struct lens_tree_opts {
+    float height;           /* Container height (0.0 = auto/fill) */
+    float row_height;       /* Row height (0.0 = default 26.0f) */
+    float indent_per_level; /* Indent in pixels per depth (0.0 = default 16.0f) */
+} lens_tree_opts;
+
+LENS_API lens_tree_action lens_tree_view(lens *ui, const char *id_str, lens_tree_item *items,
+                                         uint32_t item_count, const lens_tree_opts *opts);
+
+/* ================================================================== */
+/*  Cascading Menu & MenuBar Pattern (ADR-Pattern-007)                */
+/* ================================================================== */
+
+typedef struct lens_menu_item {
+    const char *label;
+    lens_icon_id icon;
+    const char *shortcut; /* Trailing shortcut label, e.g. "Ctrl+S" (NULL if none) */
+    bool disabled;
+    bool is_separator;
+} lens_menu_item;
+
+typedef struct lens_menu_opts {
+    float width;       /* Menu width (0.0 = default 180.0f) */
+    float item_height; /* Menu item height (0.0 = default 28.0f) */
+} lens_menu_opts;
+
+/* Render an anchored popup menu in LENS_BAND_POPUP with auto-flip and transient dismissal.
+ * Returns activated item index, or -1 if no item was activated this frame. */
+LENS_API int32_t lens_popup_menu(lens *ui, const char *menu_id, flux_rect anchor_rect,
+                                 const lens_menu_item *items, uint32_t item_count,
+                                 const lens_menu_opts *opts);
+
+typedef struct lens_menubar_item {
+    const char *title;
+    const char *menu_id;
+} lens_menubar_item;
+
+/* Render a horizontal menu bar.
+ * When an item is clicked, its corresponding menu_id is opened/toggled in LENS_BAND_POPUP.
+ * Returns index of currently open menu (or -1 if all closed).
+ * `out_anchor` receives the bounding rectangle of the active menubar item for popup placement. */
+LENS_API int32_t lens_menubar(lens *ui, const char *id_str, const lens_menubar_item *items,
+                              uint32_t item_count, flux_rect *out_anchor);
+
 #ifdef __cplusplus
 }
 #endif

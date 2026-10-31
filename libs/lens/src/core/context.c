@@ -631,6 +631,10 @@ lens_response lens_get_response(const lens *ui) {
 lens_cursor_hint lens_get_cursor_hint(const lens *ui) {
     return ui ? ui->cursor_hint : LENS_CURSOR_DEFAULT;
 }
+void lens_set_cursor_hint(lens *ui, lens_cursor_hint hint) {
+    if (ui)
+        ui->cursor_hint = hint;
+}
 
 lens_node *lens_root(lens *ui) {
     return ui ? ui->root : NULL;

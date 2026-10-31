@@ -261,6 +261,8 @@ typedef struct lens_response {
     bool middle_clicked; /* middle press + release inside */
     bool changed;        /* value mutated this frame */
     bool focused;
+    bool submitted; /* textedit: Return pressed on single-line input */
+    bool tabbed;    /* textedit: Tab pressed when accept_tab enabled */
     uint32_t state; /* lens_widget_state bits (ADR-0058) */
 } lens_response;
 
@@ -1182,6 +1184,8 @@ typedef struct lens_selectable_opts {
     bool selected;
     lens_icon_id icon;
     float icon_size; /* 0 = fall back to style / theme icon_size */
+    bool
+        pointer_cursor; /* true = show web hand pointer, false (default) = standard desktop arrow */
 } lens_selectable_opts;
 
 LENS_API lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts);
@@ -1211,6 +1215,8 @@ typedef struct lens_textedit_opts {
     bool password;
     bool select_all_on_focus;
     bool readonly;
+    bool accept_tab;      /* intercept Tab: sets r.tabbed, consumes Tab key */
+    bool submit_on_enter; /* single-line: Return sets r.submitted, consumes Return key */
 } lens_textedit_opts;
 
 LENS_API void lens_consume_key(lens *ui, int32_t key);
@@ -1221,6 +1227,7 @@ LENS_API void lens_textedit_set_selection(lens *ui, const char *label, uint32_t 
                                           uint32_t sel_end);
 LENS_API bool lens_textedit_get_selection(const lens *ui, const char *label, uint32_t *sel_start,
                                           uint32_t *sel_end);
+LENS_API void lens_set_cursor_hint(lens *ui, lens_cursor_hint hint);
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 static_assert(offsetof(lens_layout_opts, box) == 0, "lens_layout_opts.box must be at offset 0");

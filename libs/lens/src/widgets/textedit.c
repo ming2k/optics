@@ -178,6 +178,31 @@ static inline uint64_t textedit_now_ms(void) {
 /*  State & persistent tracking                                       */
 /* ------------------------------------------------------------------ */
 
+#define LENS_TEXTEDIT_UNDO_MAX 32
+#define LENS_TEXTEDIT_UNDO_POOL_SIZE 4096
+
+typedef struct lens_undo_record {
+    uint32_t pos;
+    uint32_t del_len;
+    uint32_t ins_len;
+    uint32_t del_offset;
+    uint32_t ins_offset;
+    uint32_t cursor_before;
+    uint32_t sel_before;
+    uint32_t cursor_after;
+    uint32_t sel_after;
+    uint64_t timestamp_ms;
+    bool can_coalesce;
+} lens_undo_record;
+
+typedef struct lens_undo_stack {
+    lens_undo_record records[LENS_TEXTEDIT_UNDO_MAX];
+    char pool[LENS_TEXTEDIT_UNDO_POOL_SIZE];
+    uint32_t pool_head;
+    uint32_t count;
+    uint32_t index;
+} lens_undo_stack;
+
 typedef struct lens_textedit_state {
     uint32_t cursor;
     uint32_t sel_anchor;
@@ -193,6 +218,8 @@ typedef struct lens_textedit_state {
     bool line_select_mode;
     uint32_t sel_pivot_lo;
     uint32_t sel_pivot_hi;
+
+    lens_undo_stack undo;
 } lens_textedit_state;
 
 static inline bool sel_active(const lens_textedit_state *ts) {
@@ -229,6 +256,139 @@ static bool insert_text(char *buf, size_t *len, size_t cap, size_t pos, const ch
     memmove(buf + pos + ins_len, buf + pos, *len - pos + 1);
     memcpy(buf + pos, ins, ins_len);
     *len += ins_len;
+    return true;
+}
+
+static void undo_record_edit(lens_textedit_state *ts, const char *buf, size_t pos, size_t del_len,
+                             const char *ins_text, size_t ins_len, uint32_t cursor_before,
+                             uint32_t sel_before, uint32_t cursor_after, uint32_t sel_after,
+                             uint64_t now_ms, bool typing) {
+    if (ts->undo.index < ts->undo.count) {
+        ts->undo.count = ts->undo.index;
+    }
+
+    if (typing && ts->undo.index > 0) {
+        lens_undo_record *top = &ts->undo.records[ts->undo.index - 1];
+        if (top->can_coalesce && (now_ms - top->timestamp_ms < 1000) && del_len == 0 &&
+            ins_len == 1 && ins_text && ins_text[0] != ' ' && ins_text[0] != '\n' &&
+            ins_text[0] != '\t' && pos == top->pos + top->ins_len &&
+            top->ins_offset + top->ins_len == ts->undo.pool_head &&
+            ts->undo.pool_head < LENS_TEXTEDIT_UNDO_POOL_SIZE) {
+            ts->undo.pool[ts->undo.pool_head++] = ins_text[0];
+            top->ins_len++;
+            top->cursor_after = cursor_after;
+            top->sel_after = sel_after;
+            top->timestamp_ms = now_ms;
+            return;
+        }
+    }
+
+    if (ts->undo.pool_head + del_len + ins_len > LENS_TEXTEDIT_UNDO_POOL_SIZE) {
+        ts->undo.pool_head = 0;
+        ts->undo.count = 0;
+        ts->undo.index = 0;
+    }
+
+    if (ts->undo.index >= LENS_TEXTEDIT_UNDO_MAX) {
+        memmove(&ts->undo.records[0], &ts->undo.records[1],
+                (LENS_TEXTEDIT_UNDO_MAX - 1) * sizeof(lens_undo_record));
+        ts->undo.index = LENS_TEXTEDIT_UNDO_MAX - 1;
+        ts->undo.count = LENS_TEXTEDIT_UNDO_MAX - 1;
+    }
+
+    lens_undo_record *r = &ts->undo.records[ts->undo.index];
+    r->pos = (uint32_t)pos;
+    r->del_len = (uint32_t)del_len;
+    r->ins_len = (uint32_t)ins_len;
+    r->cursor_before = cursor_before;
+    r->sel_before = sel_before;
+    r->cursor_after = cursor_after;
+    r->sel_after = sel_after;
+    r->timestamp_ms = now_ms;
+    r->can_coalesce = typing && (del_len == 0) && (ins_len == 1) && ins_text &&
+                      (ins_text[0] != ' ') && (ins_text[0] != '\n') && (ins_text[0] != '\t');
+
+    r->del_offset = ts->undo.pool_head;
+    if (del_len > 0) {
+        memcpy(&ts->undo.pool[ts->undo.pool_head], buf + pos, del_len);
+        ts->undo.pool_head += (uint32_t)del_len;
+    }
+
+    r->ins_offset = ts->undo.pool_head;
+    if (ins_len > 0 && ins_text) {
+        memcpy(&ts->undo.pool[ts->undo.pool_head], ins_text, ins_len);
+        ts->undo.pool_head += (uint32_t)ins_len;
+    }
+
+    ts->undo.index++;
+    ts->undo.count = ts->undo.index;
+}
+
+static bool undo_apply(lens_textedit_state *ts, char *buf, size_t *len, size_t buf_cap) {
+    if (ts->undo.index == 0)
+        return false;
+
+    ts->undo.index--;
+    const lens_undo_record *r = &ts->undo.records[ts->undo.index];
+    if (r->pos + r->ins_len > *len)
+        return false;
+
+    if (*len - r->ins_len + r->del_len >= buf_cap)
+        return false;
+
+    delete_range(buf, len, r->pos, r->pos + r->ins_len);
+    if (r->del_len > 0) {
+        insert_text(buf, len, buf_cap, r->pos, &ts->undo.pool[r->del_offset], r->del_len);
+    }
+    ts->cursor = r->cursor_before;
+    ts->sel_anchor = r->sel_before;
+    return true;
+}
+
+static bool redo_apply(lens_textedit_state *ts, char *buf, size_t *len, size_t buf_cap) {
+    if (ts->undo.index >= ts->undo.count)
+        return false;
+
+    const lens_undo_record *r = &ts->undo.records[ts->undo.index];
+    ts->undo.index++;
+    if (r->pos + r->del_len > *len)
+        return false;
+
+    if (*len - r->del_len + r->ins_len >= buf_cap)
+        return false;
+
+    delete_range(buf, len, r->pos, r->pos + r->del_len);
+    if (r->ins_len > 0) {
+        insert_text(buf, len, buf_cap, r->pos, &ts->undo.pool[r->ins_offset], r->ins_len);
+    }
+    ts->cursor = r->cursor_after;
+    ts->sel_anchor = r->sel_after;
+    return true;
+}
+
+static bool textedit_replace_range(lens_textedit_state *ts, char *buf, size_t *len, size_t buf_cap,
+                                   size_t lo, size_t hi, const char *ins, size_t ins_len,
+                                   uint32_t cursor_after, uint32_t sel_after, uint64_t now_ms,
+                                   bool typing) {
+    uint32_t cursor_before = ts->cursor;
+    uint32_t sel_before = ts->sel_anchor;
+    size_t del_len = (hi > lo) ? (hi - lo) : 0;
+
+    if (*len - del_len + ins_len >= buf_cap)
+        return false;
+
+    undo_record_edit(ts, buf, lo, del_len, ins, ins_len, cursor_before, sel_before, cursor_after,
+                     sel_after, now_ms, typing);
+
+    if (del_len > 0) {
+        delete_range(buf, len, lo, hi);
+    }
+    if (ins_len > 0 && ins) {
+        insert_text(buf, len, buf_cap, lo, ins, ins_len);
+    }
+
+    ts->cursor = cursor_after;
+    ts->sel_anchor = sel_after;
     return true;
 }
 
@@ -543,9 +703,13 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     }
 
     bool changed = false;
+    bool submitted = false;
+    bool tabbed = false;
 
     /* Single-line vs Multi-line interaction handling */
     if (!disabled && r.focused && buf && buf_cap > 1 && !opts->readonly) {
+        uint64_t now_ms = textedit_now_ms();
+
         /* IME delete_surrounding_text: applied BEFORE the commit string per
          * the text-input-v3 protocol, so freshly committed text lands in
          * the right place relative to the IME's expected context window. */
@@ -557,24 +721,21 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
             if (hi > len)
                 hi = (uint32_t)len;
             if (hi > lo) {
-                delete_range(buf, &len, lo, hi);
-                ts->cursor = lo;
-                sel_clear(ts);
-                changed = true;
+                if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, NULL, 0, lo, UINT32_MAX,
+                                           now_ms, false)) {
+                    changed = true;
+                }
             }
         }
 
         /* Direct character input / IME committed text */
         if (ui->input.text_utf8[0] != '\0') {
             size_t in_len = strlen(ui->input.text_utf8);
-            if (sel_active(ts)) {
-                uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
-                delete_range(buf, &len, lo, hi);
-                ts->cursor = lo;
-                sel_clear(ts);
-            }
-            if (insert_text(buf, &len, buf_cap, ts->cursor, ui->input.text_utf8, in_len)) {
-                ts->cursor += (uint32_t)in_len;
+            uint32_t lo = sel_active(ts) ? sel_lo(ts) : ts->cursor;
+            uint32_t hi = sel_active(ts) ? sel_hi(ts) : ts->cursor;
+            uint32_t new_cursor = lo + (uint32_t)in_len;
+            if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, ui->input.text_utf8, in_len,
+                                       new_cursor, UINT32_MAX, now_ms, true)) {
                 changed = true;
             }
         }
@@ -587,7 +748,10 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
             if (!k.pressed)
                 continue;
 
-            if (k.key == LENS_KEY_LEFT) {
+            if (k.key == LENS_KEY_TAB && opts->accept_tab) {
+                tabbed = true;
+                lens_consume_key(ui, LENS_KEY_TAB);
+            } else if (k.key == LENS_KEY_LEFT) {
                 if (shift && ts->sel_anchor == UINT32_MAX)
                     ts->sel_anchor = ts->cursor;
                 if (!shift && sel_active(ts)) {
@@ -677,42 +841,44 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
             } else if (k.key == LENS_KEY_BACKSPACE) {
                 if (sel_active(ts)) {
                     uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
-                    delete_range(buf, &len, lo, hi);
-                    ts->cursor = lo;
-                    sel_clear(ts);
-                    changed = true;
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, NULL, 0, lo,
+                                               UINT32_MAX, now_ms, false)) {
+                        changed = true;
+                    }
                 } else if (ts->cursor > 0) {
                     size_t prev = (ctrl ? prev_word_boundary(buf, ts->cursor)
                                         : prev_char_boundary(buf, ts->cursor));
-                    delete_range(buf, &len, prev, ts->cursor);
-                    ts->cursor = (uint32_t)prev;
-                    changed = true;
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, prev, ts->cursor, NULL, 0,
+                                               (uint32_t)prev, UINT32_MAX, now_ms, true)) {
+                        changed = true;
+                    }
                 }
             } else if (k.key == LENS_KEY_DELETE) {
                 if (sel_active(ts)) {
                     uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
-                    delete_range(buf, &len, lo, hi);
-                    ts->cursor = lo;
-                    sel_clear(ts);
-                    changed = true;
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, NULL, 0, lo,
+                                               UINT32_MAX, now_ms, false)) {
+                        changed = true;
+                    }
                 } else if (ts->cursor < len) {
                     size_t next = (ctrl ? next_word_boundary(buf, len, ts->cursor)
                                         : next_char_boundary(buf, len, ts->cursor));
-                    delete_range(buf, &len, ts->cursor, next);
-                    changed = true;
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, ts->cursor, next, NULL, 0,
+                                               ts->cursor, UINT32_MAX, now_ms, false)) {
+                        changed = true;
+                    }
                 }
             } else if (k.key == LENS_KEY_RETURN) {
                 if (multiline) {
-                    if (sel_active(ts)) {
-                        uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
-                        delete_range(buf, &len, lo, hi);
-                        ts->cursor = lo;
-                        sel_clear(ts);
-                    }
-                    if (insert_text(buf, &len, buf_cap, ts->cursor, "\n", 1)) {
-                        ts->cursor++;
+                    uint32_t lo = sel_active(ts) ? sel_lo(ts) : ts->cursor;
+                    uint32_t hi = sel_active(ts) ? sel_hi(ts) : ts->cursor;
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, "\n", 1, lo + 1,
+                                               UINT32_MAX, now_ms, false)) {
                         changed = true;
                     }
+                } else {
+                    submitted = true;
+                    lens_consume_key(ui, LENS_KEY_RETURN);
                 }
             } else if (ctrl && (k.key == 'a' || k.key == 'A')) {
                 ts->sel_anchor = 0;
@@ -726,13 +892,26 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
                 if (sel_active(ts)) {
                     uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
                     lens_copy(ui, buf + lo, hi - lo);
-                    delete_range(buf, &len, lo, hi);
-                    ts->cursor = lo;
-                    sel_clear(ts);
-                    changed = true;
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, NULL, 0, lo,
+                                               UINT32_MAX, now_ms, false)) {
+                        changed = true;
+                    }
                 }
             } else if (ctrl && (k.key == 'v' || k.key == 'V')) {
                 lens_request_paste(ui);
+            } else if (ctrl && (k.key == 'z' || k.key == 'Z')) {
+                if (shift) {
+                    if (redo_apply(ts, buf, &len, buf_cap))
+                        changed = true;
+                } else {
+                    if (undo_apply(ts, buf, &len, buf_cap))
+                        changed = true;
+                }
+                lens_consume_key(ui, k.key);
+            } else if (ctrl && (k.key == 'y' || k.key == 'Y')) {
+                if (redo_apply(ts, buf, &len, buf_cap))
+                    changed = true;
+                lens_consume_key(ui, k.key);
             }
         }
 
@@ -740,14 +919,11 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
         uint32_t paste_len = 0;
         const char *paste = lensi_take_paste(ui, &paste_len);
         if (paste && paste_len > 0) {
-            if (sel_active(ts)) {
-                uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
-                delete_range(buf, &len, lo, hi);
-                ts->cursor = lo;
-                sel_clear(ts);
-            }
-            if (insert_text(buf, &len, buf_cap, ts->cursor, paste, paste_len)) {
-                ts->cursor += (uint32_t)paste_len;
+            uint32_t lo = sel_active(ts) ? sel_lo(ts) : ts->cursor;
+            uint32_t hi = sel_active(ts) ? sel_hi(ts) : ts->cursor;
+            uint32_t new_cursor = lo + paste_len;
+            if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, paste, paste_len, new_cursor,
+                                       UINT32_MAX, now_ms, false)) {
                 changed = true;
             }
         }
@@ -893,6 +1069,8 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
                          sem_flags);
 
     r.changed = changed;
+    r.submitted = submitted;
+    r.tabbed = tabbed;
     ui->last_response = r;
     return r;
 }

@@ -49,8 +49,12 @@ lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts) {
                          (opts->selected ? LENS_A11Y_CHECKED : 0);
     lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, sem_flags);
 
-    if (!disabled)
+    if (!disabled) {
         n->hover_t = r.hovered ? 1.0f : 0.0f;
+        if (r.hovered && !opts->pointer_cursor) {
+            ui->cursor_hint = LENS_CURSOR_DEFAULT;
+        }
+    }
 
     lensi_skin_emit(ui, n,
                     &(lens_widget_record){

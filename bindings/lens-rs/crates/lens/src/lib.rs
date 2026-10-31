@@ -1371,6 +1371,43 @@ impl<'frame> Frame<'frame> {
         unsafe { sys::lens_textedit(self.ui, &opts).changed }
     }
 
+    pub fn textedit_ex(
+        &mut self,
+        label: &str,
+        buf: &mut TextBuf,
+        multiline: bool,
+        accept_tab: bool,
+        select_all_on_focus: bool,
+    ) -> Response {
+        let c = cstr(label);
+        let opts = sys::lens_textedit_opts {
+            box_: sys::lens_box {
+                id: c.as_ptr(),
+                ..Default::default()
+            },
+            buf: buf.as_mut_ptr(),
+            cap: buf.cap(),
+            multiline,
+            accept_tab,
+            select_all_on_focus,
+            ..Default::default()
+        };
+        Response::from_raw(unsafe { sys::lens_textedit(self.ui, &opts) })
+    }
+
+    pub fn textfield_ex(
+        &mut self,
+        label: &str,
+        buf: &mut TextBuf,
+        accept_tab: bool,
+    ) -> Response {
+        self.textedit_ex(label, buf, false, accept_tab, true)
+    }
+
+    pub fn set_cursor_hint(&mut self, hint: CursorHint) {
+        unsafe { sys::lens_set_cursor_hint(self.ui, hint.raw()) };
+    }
+
     pub fn textedit_set_caret(&mut self, label: &str, caret: u32) {
         let c = cstr(label);
         unsafe { sys::lens_textedit_set_caret(self.ui, c.as_ptr(), caret) };

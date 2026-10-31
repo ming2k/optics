@@ -172,3 +172,53 @@ fn headless_frame_drives_wrap_and_stack_containers() {
         });
     });
 }
+
+#[test]
+fn patterns_datagrid_tree_and_menu() {
+    let mut ui = lens::Ui::headless().unwrap();
+    let input = lens::Input::default();
+
+    let mut cols = vec![
+        lens::patterns::DataGridCol::new("ID").width(60.0),
+        lens::patterns::DataGridCol::new("Name").width(120.0),
+    ];
+    let cells = ["1", "Item A", "2", "Item B"];
+    let mut selected_row = 0;
+
+    let mut tree_items = vec![
+        lens::patterns::TreeItem::new("Root").expanded(true),
+        lens::patterns::TreeItem::new("Child 1").depth(1).leaf(true),
+        lens::patterns::TreeItem::new("Child 2").depth(1).leaf(true),
+    ];
+
+    let menubar_items = vec![
+        lens::patterns::MenubarItem::new("File", "file_menu"),
+        lens::patterns::MenubarItem::new("Help", "help_menu"),
+    ];
+
+    ui.frame(&input, |f| {
+        // DataGrid
+        lens::patterns::DataGrid::new("test_grid").show(
+            f,
+            &mut cols,
+            &cells,
+            2,
+            &mut selected_row,
+        );
+
+        // TreeView
+        lens::patterns::TreeView::new("test_tree").show(f, &mut tree_items);
+
+        // Menubar
+        let (_open_menu, anchor) = lens::patterns::menubar(f, "test_mb", &menubar_items);
+
+        if let Some(anchor_rect) = anchor {
+            let menu_items = vec![
+                lens::patterns::MenuItem::new("New"),
+                lens::patterns::MenuItem::separator(),
+                lens::patterns::MenuItem::new("Exit"),
+            ];
+            lens::patterns::popup_menu(f, "file_menu", anchor_rect, &menu_items);
+        }
+    });
+}
