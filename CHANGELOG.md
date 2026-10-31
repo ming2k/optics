@@ -13,6 +13,18 @@ either.
 
 ## [Unreleased]
 
+## [0.0.65] - 2026-10-31
+
+### Changed
+
+- **iris**: Replaced synchronous swapchain canvas drawing with decoupled host canvas recording (`iris_record_fn` accepting `flux_encoder *`), eliminating Vulkan commands on the UI thread (ADR-0127).
+- **iris**: Dual-thread UI and presentation architecture (ADR-0124) landed across Win32 and Cocoa with presentation worker threads and lockless `iris_frame_mailbox`.
+- **iris**: Presentation pacing locked to hardware DWM VBlank (`DwmFlush`) on Win32, and ProMotion 120Hz dynamic refresh rate query on Cocoa (ADR-0127).
+
+### Added
+
+- **flux**: `Encoder::borrow_raw` in Rust bindings to support wrapping unowned `flux_encoder` handles.
+
 ## [0.0.64] - 2026-10-31
 
 ### Added
