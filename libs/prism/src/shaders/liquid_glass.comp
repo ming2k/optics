@@ -233,12 +233,6 @@ void main()
         return;
     }
 
-    /* Outward rim normal from the SDF gradient. Wide taps keep the normal
-     * stable through smooth-union necks. */
-    float dx = glass_sdf(p + vec2(1.5, 0.0)) - glass_sdf(p - vec2(1.5, 0.0));
-    float dy = glass_sdf(p + vec2(0.0, 1.5)) - glass_sdf(p - vec2(0.0, 1.5));
-    vec2 rim_normal = normalize(vec2(dx, dy) + vec2(1e-6));
-
     /* Rim parameter: 1 at the silhouette, 0 where the lens flattens out.
      * Band width scales with the body like the rest of the geometry.
      * Clamped so small bodies (e.g. pills/chips) maintain an undistorted flat center. */
@@ -250,6 +244,18 @@ void main()
      * The interior stays at exactly 0 — no centre distortion. */
     float lens = min(u * inversesqrt(1.0 - u * u + 0.02), 3.0) * (1.0 / 3.0);
 
+    /* Outward rim normal from the SDF gradient.
+     * In the flat interior (u == 0, d <= -edge) where lens bend and specular
+     * rims are zero, evaluating 4 SDF gradient taps is entirely redundant:
+     * bend offsets are lens-scaled (zero when u == 0) and the rim block below
+     * is gated on u > 0, so the fallback normal is never read. */
+    vec2 rim_normal = vec2(0.0, 1.0);
+    if (u > 0.0) {
+        float dx = glass_sdf(p + vec2(1.5, 0.0)) - glass_sdf(p - vec2(1.5, 0.0));
+        float dy = glass_sdf(p + vec2(0.0, 1.5)) - glass_sdf(p - vec2(0.0, 1.5));
+        rim_normal = normalize(vec2(dx, dy) + vec2(1e-6));
+    }
+
     vec2 inv_extent = 1.0 / vec2(pc.width, pc.height);
     vec2 uv = p * inv_extent;
     vec2 normal_uv = rim_normal * inv_extent;
@@ -257,16 +263,21 @@ void main()
     /* Lensing: sample the sharp backdrop inward along the rim normal —
      * a magnifier, strongest at the silhouette. Dispersion separates the
      * red/blue bend, so fringes live only inside the rim band. Both scale
-     * with the body like the rim band. */
+     * with the body like the rim band. In the flat interior (lens == 0),
+     * all three channels sample uv directly without chromatic dispersion. */
     float refraction = pc.refraction * size_scale;
     float chromatic = pc.chromatic_aberration * size_scale;
     float bend_g = refraction * lens;
     float bend_r = (refraction + chromatic) * lens;
     float bend_b = max(refraction - chromatic, 0.0) * lens;
     vec3 refracted;
-    refracted.r = sample_image(pc.input_handle, uv - normal_uv * bend_r).r;
-    refracted.g = sample_image(pc.input_handle, uv - normal_uv * bend_g).g;
-    refracted.b = sample_image(pc.input_handle, uv - normal_uv * bend_b).b;
+    if (lens > 0.0001) {
+        refracted.r = sample_image(pc.input_handle, uv - normal_uv * bend_r).r;
+        refracted.g = sample_image(pc.input_handle, uv - normal_uv * bend_g).g;
+        refracted.b = sample_image(pc.input_handle, uv - normal_uv * bend_b).b;
+    } else {
+        refracted = sample_image(pc.input_handle, uv).rgb;
+    }
     vec3 frost = sample_image(pc.blurred_handle, uv - normal_uv * bend_g * 0.5).rgb;
 
     /* Scatter: mostly clear body; soft scattering grows through the rim.
@@ -332,44 +343,33 @@ void main()
 
     vec2 key_dir = normalize(light_direction() + vec2(1e-6));
 
-    /* Physical 3D Meniscus Illumination Architecture:
-     * 1) Overhead Ambient Key Illumination (Top Edge & Both Top Corners):
-     *    Every point along the upper curved meniscus catches overhead illumination. */
-    float top_facing = max(-rim_normal.y, 0.0);
-    float key_align = max(dot(rim_normal, key_dir), 0.0);
-    float top_rim = pow(top_facing, 1.25) * (0.65 + 0.35 * pow(key_align, 1.25));
+    /* 3D Meniscus Illumination and Contact AO:
+     * Concentrated at the rim band (u > 0). In the flat interior (u == 0,
+     * including small bodies where d may still exceed -5.0), specular
+     * highlights and contact creases attenuate to 0.0 — and the fallback
+     * rim_normal is never read. */
+    if (u > 0.0) {
+        float top_facing = max(-rim_normal.y, 0.0);
+        float key_align = max(dot(rim_normal, key_dir), 0.0);
+        float top_rim = pow(top_facing, 1.25) * (0.65 + 0.35 * pow(key_align, 1.25));
 
-    /* 2) Bottom TIR Caustic Field (Bottom Edge & Both Bottom Corners):
-     *    Light refracted into the medium reflects internally at the opposite lower wall. */
-    float bot_facing = max(rim_normal.y, 0.0);
-    float away_align = max(dot(rim_normal, -key_dir), 0.0);
-    float bot_rim = pow(bot_facing, 1.25) * (0.55 + 0.35 * pow(away_align, 1.25));
+        float bot_facing = max(rim_normal.y, 0.0);
+        float away_align = max(dot(rim_normal, -key_dir), 0.0);
+        float bot_rim = pow(bot_facing, 1.25) * (0.55 + 0.35 * pow(away_align, 1.25));
 
-    /* 3) Continuous 360° Meniscus Fresnel Baseline:
-     *    In real dielectric glass, ambient room light reflects off the curved 3D
-     *    meniscus around the entire perimeter. The ambient_fresnel parameter scales
-     *    the isotropic environmental radiance ring. */
-    float line = exp(-(d + 0.65) * (d + 0.65) / 2.00);
-    float tir_line = exp(-(d + 0.80) * (d + 0.80) / 2.00);
-    float ambient_rim = (0.28 + 0.32 * max(ambient_fresnel, 0.0)) * line;
+        float line = exp(-(d + 0.65) * (d + 0.65) / 2.00);
+        float tir_line = exp(-(d + 0.80) * (d + 0.80) / 2.00);
+        float ambient_rim = (0.28 + 0.32 * max(ambient_fresnel, 0.0)) * line;
 
-    float total_spec = ambient_rim + top_rim * line + bot_rim * tir_line;
+        float total_spec = ambient_rim + top_rim * line + bot_rim * tir_line;
 
-    /* 4) Environmental Chromatic Radiance Gathering (SS-IBL, ADR-0100):
-     *    Specular highlights reflect the ambient scene radiance rather than
-     *    artificial flat white, preserving a pure specular core while harmonizing
-     *    with local warm and cool scene tones. */
-    vec3 spec_tint = mix(vec3(1.0), max(frost, vec3(0.12)) * 1.35, 0.28);
-    colour += spec_tint * (pc.rim_light * total_spec);
+        vec3 spec_tint = mix(vec3(1.0), max(frost, vec3(0.12)) * 1.35, 0.28);
+        colour += spec_tint * (pc.rim_light * total_spec);
 
-    /* 5) Contact Ambient Occlusion (CAO):
-     * Microscopic sub-pixel contact boundary where the dielectric lens meets the
-     * underlying surface. Produces a razor-sharp 1.5px contact crease that grounds
-     * the transparent glass even over pure white (1.0) backdrops without muddying
-     * the interior body. */
-    float contact_alpha = clamp(contact_ao, 0.0, 1.0);
-    float contact_absorb = contact_alpha * 0.45 * exp(-d * d / 1.20);
-    colour *= 1.0 - contact_absorb;
+        float contact_alpha = clamp(contact_ao, 0.0, 1.0);
+        float contact_absorb = contact_alpha * 0.45 * exp(-d * d / 1.20);
+        colour *= 1.0 - contact_absorb;
+    }
 
     /* Sub-LSB dither: smooth studio gradients band visibly in rgba8.
      * 16F outputs keep full float precision instead. */

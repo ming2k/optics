@@ -334,16 +334,16 @@ static const char *required_device_ext_baseline[] = {
     nullptr,
 };
 
-static int score_device(VkPhysicalDevice pd) {
+static int score_device(VkPhysicalDevice pd, bool prefer_integrated) {
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(pd, &props);
     if (props.apiVersion < VK_API_VERSION_1_3)
         return -1;
     switch (props.deviceType) {
     case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
-        return 1000;
+        return prefer_integrated ? 500 : 1000;
     case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-        return 500;
+        return prefer_integrated ? 1000 : 500;
     case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
         return 200;
     case VK_PHYSICAL_DEVICE_TYPE_CPU:
@@ -351,6 +351,18 @@ static int score_device(VkPhysicalDevice pd) {
     default:
         return 0;
     }
+}
+
+/* FLUX_GPU_PREFERENCE=integrated|low-power biases generic (non-DRM-pinned)
+ * device selection toward the integrated GPU. It is a *preference*, never a
+ * strict constraint: a candidate must still satisfy every requirement in the
+ * descriptor, and it is deliberately ignored when a DRM node is pinned, where
+ * ADR-0049 makes the physical-GPU identity the binding contract. */
+static bool gpu_preference_prefers_integrated(void) {
+    const char *pref = getenv("FLUX_GPU_PREFERENCE");
+    if (!pref)
+        return false;
+    return strcmp(pref, "integrated") == 0 || strcmp(pref, "low-power") == 0;
 }
 
 static bool device_meets_requirements(VkPhysicalDevice pd, const flux_device_desc *desc,
@@ -487,12 +499,15 @@ static flux_result pick_physical_device(flux_device *d, const flux_device_desc *
 
     VkPhysicalDevice best = VK_NULL_HANDLE;
     int best_score = -1;
+    /* The env preference is a generic-app default; a pinned DRM node is a
+     * strict contract (ADR-0049) and must not be re-biased by it. */
+    bool prefer_integrated = drm_node == nullptr && gpu_preference_prefers_integrated();
     for (uint32_t i = 0; i < count; ++i) {
         if (!device_matches_drm_node(pds[i], drm_node))
             continue;
         if (!device_meets_requirements(pds[i], desc, required_features))
             continue;
-        int s = score_device(pds[i]);
+        int s = score_device(pds[i], prefer_integrated);
         if (s > best_score) {
             best_score = s;
             best = pds[i];

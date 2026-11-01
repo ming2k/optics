@@ -56,7 +56,11 @@ contract as `DrmNode` and `Device::new_for_drm_node`.
 
 - Direct-display hosts can bind Flux to the physical GPU selected for KMS.
 - Generic and nested applications retain the existing score-based default by
-  omitting the extension.
+  omitting the extension. Those same paths may additionally bias the default
+  toward the integrated GPU via `FLUX_GPU_PREFERENCE=integrated|low-power`;
+  the preference is **ignored whenever a DRM node is pinned**, because the
+  pinned identity is the binding contract and must never be re-biased by
+  process-global policy.
 - Linux hosts requesting strict affinity require
   `VK_EXT_physical_device_drm`; absence is a hard, actionable failure.
 - Intentional multi-GPU rendering requires a separately designed copy and
