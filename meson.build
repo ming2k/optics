@@ -1,5 +1,5 @@
 project('optics', ['c'],
-  version : '0.0.66',
+  version : '0.0.67',
   license : 'MIT',
   meson_version : '>=1.8.0',
   default_options : [

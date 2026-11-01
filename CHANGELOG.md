@@ -13,6 +13,16 @@ either.
 
 ## [Unreleased]
 
+## [0.0.67] - 2026-11-01
+
+### Added
+
+- **flux**: `FLUX_GPU_PREFERENCE=integrated|low-power` biases generic device selection toward the integrated GPU; ignored when a DRM node is pinned (ADR-0049 keeps pinned identity the binding contract).
+
+### Changed
+
+- **prism**: Liquid Glass shader skips SDF gradient taps, chromatic refraction, and rim/contact-AO shading in the flat interior where those terms are provably zero — faster on all backends, visually identical.
+
 ## [0.0.66] - 2026-10-31
 
 ### Added
