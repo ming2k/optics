@@ -167,6 +167,17 @@ test_canvas_path = executable('test_canvas_path',
 )
 test('canvas_path', test_canvas_path, suite : 'unit')
 
+# Structured error slot (ADR-0002 diagnostics): a message composed with
+# FLUX_FAILF must outlive the producing frame, because flux_error_info
+# borrows it and the caller reads it after the producer returned. result.c
+# is compiled in so the internal slot is reachable from a normal link.
+test_error_info = executable('test_error_info',
+  'test_error_info.c',
+  '../../../libs/flux/src/core/result.c',
+  dependencies : [test_helpers_dep],
+)
+test('error_info', test_error_info, suite : 'unit')
+
 # The tessellator test compiles geometry_tess.c in directly so it
 # can call signed_area / ear_clip_contour — those symbols have
 # hidden visibility in libflux.so and aren't reachable from a

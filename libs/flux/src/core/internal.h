@@ -14,9 +14,26 @@
 
 /* Set the structured error info for this thread. Pass __func__ /
  * __FILE__ / __LINE__ at the call site. message and backend_code may
- * be NULL / 0. Defined in src/core/result.c. */
+ * be NULL / 0.
+ *
+ * The message pointer is *borrowed* for the lifetime of the thread-local
+ * slot: it must be a string literal or otherwise outlive the next failure.
+ * Anything formatted must go through FLUX_FAILF, which renders into the
+ * slot's own buffer instead of a caller stack frame — a `char buf[192]`
+ * handed to flux_set_last_error dangles the moment the function returns,
+ * and the slot is exactly what flux_get_last_error is read from later.
+ *
+ * Defined in src/core/result.c. */
 void flux_set_last_error(flux_result code, const char *function, const char *file, int line,
                          const char *message, int32_t backend_code);
+
+/* Not exported: gnu_symbol_visibility is hidden, so this stays internal. */
+void flux_set_last_errorf(flux_result code, const char *function, const char *file, int line,
+                          int32_t backend_code, const char *fmt, ...)
+#if defined(__GNUC__) || defined(__clang__)
+    __attribute__((format(printf, 6, 7)))
+#endif
+    ;
 
 #define FLUX_FAIL(code, msg)                                                                       \
     do {                                                                                           \
@@ -26,6 +43,13 @@ void flux_set_last_error(flux_result code, const char *function, const char *fil
 #define FLUX_FAIL_VK(code, msg, vk)                                                                \
     do {                                                                                           \
         flux_set_last_error((code), __func__, __FILE__, __LINE__, (msg), (int32_t)(vk));           \
+    } while (0)
+
+/* FLUX_FAIL for a composed message. Use whenever the diagnostic needs
+ * values spliced in; the text is copied into the error slot, not borrowed. */
+#define FLUX_FAILF(code, ...)                                                                      \
+    do {                                                                                           \
+        flux_set_last_errorf((code), __func__, __FILE__, __LINE__, 0, __VA_ARGS__);                \
     } while (0)
 
 /* ------------------------------------------------------------------ */
