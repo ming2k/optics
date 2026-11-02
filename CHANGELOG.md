@@ -13,6 +13,21 @@ either.
 
 ## [Unreleased]
 
+## [0.0.69] - 2026-11-03
+
+### Added
+
+- **flux**: Unified observation plane (`flux/observe.h`, `flux/observe_sites.h`) and resource ledger (`flux_observe_ledger`) to track host allocations, image/buffer leaks, and bindless slot occupancy bitmaps (ADR-0129, ADR-0131).
+- **flux**: Pass labels on the frame pass seam (`flux_frame_pass_label_begin`/`flux_frame_pass_label_end`) with safe no-op semantics on CPU canvases (ADR-0133).
+- **flux**: Zero-overhead C23 Tracy profiler telemetry facade (`flux/profile.h`, ADR-0138).
+- **prism**: Footprint-sized material slabs and batch body dispatch for Frosted Glass, Acrylic, and Mica (`prism_material_output`, ADR-0139, ADR-0140).
+- **prism**: Caller-declared backdrop layer revisions to optimize cached output reuse (ADR-0137).
+- **optics**: Mechanical leak coverage gate and verification tooling (`tools/guardrails/leaks.py`, ADR-0130).
+
+### Changed
+
+- **flux**: Host allocation contract requires explicit caller attribution with owner and resource kind (`flux_device_alloc`, ADR-0135).
+
 ## [0.0.68] - 2026-11-02
 
 ### Added
