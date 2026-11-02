@@ -13,6 +13,20 @@ either.
 
 ## [Unreleased]
 
+## [0.0.68] - 2026-11-02
+
+### Added
+
+- **lens-rs**: `Ui::damage_rect` exposes the frame's dirty region, so an input-driven host can scissor-clip to it instead of repainting the full output.
+
+### Changed
+
+- **flux**: Transient effect pools are bounded by total resident bytes (`EFFECT_POOL_BUDGET_BYTES`, 256 MiB per pool) instead of a fixed 16-entry count, which admitted 1.4 GiB at 3072x1920 RGBA16F. A four-entry progress floor keeps a single 4K shadow or blur admissible on an otherwise empty pool. Refusal now reports the budget, resident size, and requested key rather than returning a bare error.
+
+### Fixed
+
+- **flux**: `flux_error_info.message` stayed readable only until the producer returned when the diagnostic was composed with `snprintf` into local storage, contradicting the documented "valid until the next non-OK return" contract. Formatted diagnostics now render into the error slot's own thread-local buffer (`FLUX_FAILF`); the internal `flux_set_last_errorf` is hidden-visibility, so there is no ABI change.
+
 ## [0.0.67] - 2026-11-01
 
 ### Added
