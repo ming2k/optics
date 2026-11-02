@@ -184,13 +184,42 @@ typedef struct output_entry {
     struct output_entry *next;
 } output_entry;
 
-/* Pool growth bound. The pools historically grew unbounded — every distinct
- * (format,w,h) key observed lived until device teardown — which was fine for
- * fixed-size blurs but turns a size-sweeping animation (resizes, reveals)
- * into one pooled image per visited size. LRU-evict above this many entries;
- * flux_image_release parks the resources on the device retire queue, so
- * eviction at lease time is safe with batches still in flight. */
-#define EFFECT_POOL_CAP 16
+/* Pool growth bound.
+ *
+ * The pools historically grew unbounded — every distinct (format,w,h) key
+ * observed lived until device teardown — which was fine for fixed-size blurs
+ * but turns a size-sweeping animation (resizes, reveals) into one pooled image
+ * per visited size.
+ *
+ * Bounding the pool by *entry count* is the wrong dimension: at 3072x1920 an
+ * RGBA16F transient is 45 MiB, so 16 intermediates plus 16 outputs is 1.4 GiB
+ * of resident image memory for a desktop with two glass bodies on it. On a
+ * small display the same entry count is a few MiB. The budget must be the
+ * thing that actually hurts — bytes.
+ *
+ * EFFECT_POOL_BUDGET_BYTES is the per-pool ceiling on the summed byte size of
+ * every resident transient. EFFECT_POOL_MIN_ENTRIES guarantees progress: an
+ * entry larger than a quarter of the budget must still be admissible when the
+ * pool is otherwise empty, or a single full-resolution blur could never run.
+ * Eviction is LRU over unleased entries and parks the resources on the device
+ * retire queue, so eviction at lease time is safe with batches still in
+ * flight. */
+#define EFFECT_POOL_BUDGET_BYTES (256ull * 1024ull * 1024ull)
+/* The floor is exactly what one operation needs at once: `flux_effect_shadow`
+ * leases two intermediates and one output, `flux_effect_blur` one and one. Any
+ * less would make a single 4K shadow impossible. Per pool, the working ceiling
+ * is therefore `max(EFFECT_POOL_BUDGET_BYTES, 4 * transient_bytes(w, h, fmt))` —
+ * at 3840x2160 RGBA16F that is 4 x 66 MiB = 264 MiB, marginally above the
+ * nominal budget. Stated as a formula rather than a number because it is the
+ * floor, not the budget, that binds on a 4K display. */
+#define EFFECT_POOL_MIN_ENTRIES 4u
+
+/* Bytes one pooled transient of this key occupies, assuming the 4-byte-per-
+ * channel floor. 16F keys double it via the format's own component size. */
+static uint64_t transient_bytes(uint32_t w, uint32_t h, flux_format fmt) {
+    uint64_t bpp = (fmt == FLUX_FORMAT_RGBA16_SFLOAT) ? 8ull : 4ull;
+    return (uint64_t)w * (uint64_t)h * bpp;
+}
 
 typedef struct effect_state {
     flux_platform_mutex lock;
@@ -206,7 +235,78 @@ typedef struct effect_state {
     uint64_t pool_serial;
     uint32_t intermediate_count;
     uint32_t output_count;
+    /* Summed byte size of every resident entry in each pool. */
+    uint64_t intermediate_bytes;
+    uint64_t output_bytes;
 } effect_state;
+
+/* Whether a pool may take one more entry of `bytes`: under the byte budget, or
+ * below the minimum entry count. */
+static bool pool_has_room(uint64_t resident_bytes, uint32_t resident_count, uint64_t bytes) {
+    if (resident_count < EFFECT_POOL_MIN_ENTRIES)
+        return true;
+    return resident_bytes <= EFFECT_POOL_BUDGET_BYTES &&
+           bytes <= EFFECT_POOL_BUDGET_BYTES - resident_bytes;
+}
+
+/* Evict the least-recently-used *unleased* entry from the intermediate pool.
+ * Returns false when every entry is in flight. */
+static bool evict_lru_intermediate(flux_device *d, effect_state *st) {
+    intermediate_entry **prev_target = nullptr;
+    intermediate_entry *lru = nullptr;
+    for (intermediate_entry *e = st->intermediates, **prev = &st->intermediates; e;
+         prev = &e->next, e = e->next) {
+        if (!e->leased && (!lru || e->last_used_serial < lru->last_used_serial)) {
+            lru = e;
+            prev_target = prev;
+        }
+    }
+    if (!lru)
+        return false;
+    *prev_target = lru->next;
+    st->intermediate_bytes -= transient_bytes(lru->width, lru->height, lru->format);
+    st->intermediate_count -= 1;
+    /* Parks the resources on the device retire queue, so an in-flight batch
+     * that still samples this image stays valid. */
+    flux_image_release(lru->image);
+    flux_internal_free(d, lru);
+    return true;
+}
+
+/* Output-pool counterpart of `evict_lru_intermediate`. */
+static bool evict_lru_output(flux_device *d, effect_state *st) {
+    output_entry **prev_target = nullptr;
+    output_entry *lru = nullptr;
+    for (output_entry *o = st->outputs, **prev = &st->outputs; o; prev = &o->next, o = o->next) {
+        if (!o->leased && (!lru || o->last_used_serial < lru->last_used_serial)) {
+            lru = o;
+            prev_target = prev;
+        }
+    }
+    if (!lru)
+        return false;
+    *prev_target = lru->next;
+    st->output_bytes -= transient_bytes(lru->width, lru->height, lru->format);
+    st->output_count -= 1;
+    flux_image_release(lru->image);
+    flux_internal_free(d, lru);
+    return true;
+}
+
+/* Evict LRU unleased entries until an entry of `incoming` bytes fits inside the
+ * pool's byte budget. Returns false when it still cannot fit — every candidate
+ * is leased — in which case the caller refuses the operation rather than grow
+ * past the budget. */
+static bool pool_make_room(flux_device *d, effect_state *st, bool intermediates,
+                           uint64_t incoming) {
+    while (!pool_has_room(intermediates ? st->intermediate_bytes : st->output_bytes,
+                          intermediates ? st->intermediate_count : st->output_count, incoming)) {
+        bool evicted = intermediates ? evict_lru_intermediate(d, st) : evict_lru_output(d, st);
+        if (!evicted)
+            return false;
+    }
+    return true;
+}
 
 typedef struct blur_filter_slot {
     uint32_t width;
@@ -323,20 +423,17 @@ static effect_state *effect_state_get_or_init(flux_device *d) {
 /*  Transient acquisition                                             */
 /* ------------------------------------------------------------------ */
 
-/* Look up or allocate the intermediate for this key. Returned image
- * is owned by the pool and lives until reset. Above EFFECT_POOL_CAP
- * distinct keys the least-recently-used unleased entry is evicted —
- * released through the device retire queue, so in-flight batches that
- * still sample it stay safe. */
+/* Look up or allocate the intermediate for this key. Returned image is owned
+ * by the pool and lives until reset. The pool admits a new key only while its
+ * summed byte size stays inside EFFECT_POOL_BUDGET_BYTES; above that the
+ * least-recently-used unleased entry is evicted — released through the device
+ * retire queue, so in-flight batches that still sample it stay safe. */
 static flux_result acquire_intermediate(flux_device *d, effect_state *st, uint32_t w, uint32_t h,
                                         flux_format fmt, flux_image **out,
                                         intermediate_entry **out_lease) {
     st->pool_serial++;
     uint64_t now = st->pool_serial;
-    intermediate_entry **lru_prev = nullptr;
-    intermediate_entry *lru = nullptr;
-    for (intermediate_entry *e = st->intermediates, **prev = &st->intermediates; e;
-         prev = &e->next, e = e->next) {
+    for (intermediate_entry *e = st->intermediates; e; e = e->next) {
         if (!e->leased && e->width == w && e->height == h && e->format == fmt) {
             e->leased = true;
             e->last_used_serial = now;
@@ -344,16 +441,16 @@ static flux_result acquire_intermediate(flux_device *d, effect_state *st, uint32
             *out_lease = e;
             return FLUX_OK;
         }
-        if (!e->leased && (!lru || e->last_used_serial < lru->last_used_serial)) {
-            lru = e;
-            lru_prev = prev;
-        }
     }
-    if (st->intermediate_count >= EFFECT_POOL_CAP && lru) {
-        *lru_prev = lru->next;
-        flux_image_release(lru->image);
-        flux_internal_free(d, lru);
-        st->intermediate_count--;
+    uint64_t bytes = transient_bytes(w, h, fmt);
+    if (!pool_make_room(d, st, true, bytes)) {
+        FLUX_FAILF(FLUX_ERROR_OUT_OF_MEMORY,
+                   "intermediate pool at its %llu MiB budget: %u entries / %llu MiB resident, "
+                   "requesting %ux%u (%llu MiB), every evictable entry in flight",
+                   (unsigned long long)(EFFECT_POOL_BUDGET_BYTES >> 20), st->intermediate_count,
+                   (unsigned long long)(st->intermediate_bytes >> 20), w, h,
+                   (unsigned long long)(bytes >> 20));
+        return FLUX_ERROR_OUT_OF_MEMORY;
     }
     flux_image *img = nullptr;
     flux_result r = flux_image_create_compute_writable(d, w, h, fmt, &img);
@@ -374,20 +471,19 @@ static flux_result acquire_intermediate(flux_device *d, effect_state *st, uint32
     e->next = st->intermediates;
     st->intermediates = e;
     st->intermediate_count++;
+    st->intermediate_bytes += bytes;
     *out = img;
     *out_lease = e;
     return FLUX_OK;
 }
 
-/* Lease a same-key output, growing the pool to the epoch high-water mark;
- * bounded and LRU-evicted above EFFECT_POOL_CAP like the intermediates. */
+/* Lease a same-key output, growing the pool while it fits the byte budget;
+ * evicted LRU-first like the intermediates. */
 static flux_result acquire_output(flux_device *d, effect_state *st, uint32_t w, uint32_t h,
                                   flux_format fmt, flux_image **out, output_entry **out_lease) {
     st->pool_serial++;
     uint64_t now = st->pool_serial;
-    output_entry **lru_prev = nullptr;
-    output_entry *lru = nullptr;
-    for (output_entry *o = st->outputs, **prev = &st->outputs; o; prev = &o->next, o = o->next) {
+    for (output_entry *o = st->outputs; o; o = o->next) {
         if (!o->leased && o->width == w && o->height == h && o->format == fmt) {
             o->leased = true;
             o->last_used_serial = now;
@@ -395,16 +491,16 @@ static flux_result acquire_output(flux_device *d, effect_state *st, uint32_t w, 
             *out_lease = o;
             return FLUX_OK;
         }
-        if (!o->leased && (!lru || o->last_used_serial < lru->last_used_serial)) {
-            lru = o;
-            lru_prev = prev;
-        }
     }
-    if (st->output_count >= EFFECT_POOL_CAP && lru) {
-        *lru_prev = lru->next;
-        flux_image_release(lru->image);
-        flux_internal_free(d, lru);
-        st->output_count--;
+    uint64_t bytes = transient_bytes(w, h, fmt);
+    if (!pool_make_room(d, st, false, bytes)) {
+        FLUX_FAILF(FLUX_ERROR_OUT_OF_MEMORY,
+                   "output pool at its %llu MiB budget: %u entries / %llu MiB resident, "
+                   "requesting %ux%u (%llu MiB), every evictable entry in flight",
+                   (unsigned long long)(EFFECT_POOL_BUDGET_BYTES >> 20), st->output_count,
+                   (unsigned long long)(st->output_bytes >> 20), w, h,
+                   (unsigned long long)(bytes >> 20));
+        return FLUX_ERROR_OUT_OF_MEMORY;
     }
     flux_image *img = nullptr;
     flux_result r = flux_image_create_compute_writable(d, w, h, fmt, &img);
@@ -425,6 +521,7 @@ static flux_result acquire_output(flux_device *d, effect_state *st, uint32_t w, 
     o->next = st->outputs;
     st->outputs = o;
     st->output_count++;
+    st->output_bytes += bytes;
     *out = img;
     *out_lease = o;
     return FLUX_OK;

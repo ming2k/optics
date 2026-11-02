@@ -321,6 +321,13 @@ if opt_effect
   )
   test('effect_blur', test_effect_blur, suite : 'integration')
 
+  # ADR-0205: the transient pool is bounded by bytes, not entry count.
+  test_effect_pool = executable('test_effect_pool',
+    'test_effect_pool.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('effect_pool', test_effect_pool, suite : 'integration')
+
   # ADR-0074: drop-shadow operator.
   test_effect_shadow = executable('test_effect_shadow',
     'test_effect_shadow.c',
