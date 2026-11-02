@@ -20,6 +20,44 @@
 #include "../../../libs/lens/src/internal.h"
 #include "../../../libs/lens/src/render/icon_mask.h"
 #include "test_helpers.h"
+
+/* This test compiles lens's icon_mask.c directly, and that TU now allocates
+ * through the lens funnel (ADR-0135), which lives in context.c and is hidden in
+ * the shared library. Provide the same funnel here so the direct-compiled TU
+ * links: same owner/kind attribution, same device-less fallback. */
+void *lensi_alloc(lens *ui, size_t bytes);
+void lensi_free(lens *ui, void *ptr);
+void *lensi_alloc(lens *ui, size_t bytes) {
+    if (!ui->device)
+        return calloc(1, bytes);
+    void *p = nullptr;
+    if (flux_device_alloc(ui->device,
+                          &(flux_device_alloc_opts){
+                              .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
+                              .bytes = bytes,
+                              .owner = "lens/core",
+                              .kind = "host",
+                              .scope = FLUX_SCOPE_CONTEXT,
+                          },
+                          &p) != FLUX_OK)
+        return nullptr;
+    return p;
+}
+void lensi_free(lens *ui, void *ptr) {
+    if (!ptr)
+        return;
+    if (!ui->device) {
+        free(ptr);
+        return;
+    }
+    flux_device_free(ui->device, &(flux_device_free_opts){
+                                     .type = FLUX_TYPE_DEVICE_FREE_OPTS,
+                                     .ptr = ptr,
+                                     .owner = "lens/core",
+                                     .kind = "host",
+                                     .scope = FLUX_SCOPE_CONTEXT,
+                                 });
+}
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <lens/icon.h>

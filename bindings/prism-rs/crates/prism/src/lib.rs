@@ -275,12 +275,16 @@ impl LiquidGlassFilter {
             ambient_fresnel: params.ambient_fresnel,
             ..Default::default()
         };
-        let mut raw = std::ptr::null_mut();
+        let mut out = sys::prism_material_output::default();
         check(unsafe {
-            sys::prism_liquid_glass_filter_apply(self.raw, frame.as_raw(), &desc, &mut raw)
+            sys::prism_liquid_glass_filter_apply(self.raw, frame.as_raw(), &desc, &mut out)
         })?;
         Ok(LiquidGlassImage {
-            raw,
+            raw: out.image,
+            origin_x: out.origin_x,
+            origin_y: out.origin_y,
+            width: out.width,
+            height: out.height,
             _filter: PhantomData,
         })
     }
@@ -310,8 +314,18 @@ impl Drop for LiquidGlassFilter {
     }
 }
 
+/// Borrowed output of a [`LiquidGlassFilter`] application.
+///
+/// The image is a *slab*: it is sized to the union of the bodies' footprints, not
+/// to the input capture, and [`origin`](Self::origin) says where it belongs in
+/// capture pixels. [`draw`](Self::draw) honours that automatically; drawing the
+/// raw image at the capture origin would smear every body to the wrong place.
 pub struct LiquidGlassImage<'filter> {
     raw: *mut sys::flux_image,
+    origin_x: f32,
+    origin_y: f32,
+    width: u32,
+    height: u32,
     _filter: PhantomData<&'filter mut LiquidGlassFilter>,
 }
 
@@ -354,12 +368,24 @@ fn draw_image_rect(canvas: &flux::CanvasCommands<'_>, image: *mut flux_sys::flux
 }
 
 impl LiquidGlassImage<'_> {
-    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>, x: f32, y: f32, width: f32, height: f32) {
+    /// Where the slab belongs in capture pixels.
+    pub fn origin(&self) -> (f32, f32) {
+        (self.origin_x, self.origin_y)
+    }
+
+    /// The slab's extent in capture pixels (its image's own extent).
+    pub fn extent(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// Draw the material at its placement. This is the only correct way to
+    /// composite it: the slab's origin is part of the output contract.
+    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>) {
         let destination = sys::flux_rect {
-            x,
-            y,
-            w: width,
-            h: height,
+            x: self.origin_x,
+            y: self.origin_y,
+            w: self.width as f32,
+            h: self.height as f32,
         };
         draw_image_rect(canvas, self.raw, destination);
     }
@@ -497,12 +523,16 @@ impl BackdropLayerFilter {
             contact_ao: params.contact_ao,
             ambient_fresnel: params.ambient_fresnel,
         };
-        let mut raw = std::ptr::null_mut();
+        let mut out = sys::prism_material_output::default();
         check(unsafe {
-            sys::prism_backdrop_layer_filter_apply(self.raw, frame.as_raw(), &desc, &mut raw)
+            sys::prism_backdrop_layer_filter_apply(self.raw, frame.as_raw(), &desc, &mut out)
         })?;
         Ok(BackdropLayerImage {
-            raw,
+            raw: out.image,
+            origin_x: out.origin_x,
+            origin_y: out.origin_y,
+            width: out.width,
+            height: out.height,
             _filter: PhantomData,
         })
     }
@@ -552,20 +582,38 @@ impl Drop for BackdropLayerFilter {
 /// Borrowed output of a [`BackdropLayerFilter`] application: the complete
 /// frost + glass stack, transparent outside every frost rect and glass
 /// silhouette. Draw it over the sharp desktop to complete the composite.
+/// Borrowed output of a [`BackdropLayerFilter`] application: the complete
+/// frost + glass stack. Like every prism material output it is a slab sized to
+/// the layer's footprints; [`draw`](Self::draw) places it correctly.
 pub struct BackdropLayerImage<'filter> {
     raw: *mut sys::flux_image,
+    origin_x: f32,
+    origin_y: f32,
+    width: u32,
+    height: u32,
     _filter: PhantomData<&'filter mut BackdropLayerFilter>,
 }
 
 impl BackdropLayerImage<'_> {
-    /// Draw the leased output into `canvas` at `(x, y)`, `width`x`height`
-    /// logical px (the canvas transform applies).
-    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>, x: f32, y: f32, width: f32, height: f32) {
+    /// Where the slab belongs in capture pixels.
+    pub fn origin(&self) -> (f32, f32) {
+        (self.origin_x, self.origin_y)
+    }
+
+    /// The slab's extent in capture pixels.
+    pub fn extent(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// Draw the layer at its placement. The slab's origin is part of the output
+    /// contract, so there is no free-form destination: a material cannot be
+    /// stretched independently of where it was produced.
+    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>) {
         let destination = sys::flux_rect {
-            x,
-            y,
-            w: width,
-            h: height,
+            x: self.origin_x,
+            y: self.origin_y,
+            w: self.width as f32,
+            h: self.height as f32,
         };
         draw_image_rect(canvas, self.raw, destination);
     }
@@ -684,12 +732,16 @@ impl FrostedFilter {
             noise_intensity: params.noise_intensity,
             ..Default::default()
         };
-        let mut raw = std::ptr::null_mut();
+        let mut out = sys::prism_material_output::default();
         check(unsafe {
-            sys::prism_frosted_filter_apply(self.raw, frame.as_raw(), &desc, &mut raw)
+            sys::prism_frosted_filter_apply(self.raw, frame.as_raw(), &desc, &mut out)
         })?;
         Ok(FrostedImage {
-            raw,
+            raw: out.image,
+            origin_x: out.origin_x,
+            origin_y: out.origin_y,
+            width: out.width,
+            height: out.height,
             _filter: PhantomData,
         })
     }
@@ -701,20 +753,35 @@ impl Drop for FrostedFilter {
     }
 }
 
+/// Borrowed output of a [`FrostedFilter`] application. A slab sized to the
+/// material's footprints; [`draw`](Self::draw) places it correctly.
 pub struct FrostedImage<'filter> {
     raw: *mut sys::flux_image,
+    origin_x: f32,
+    origin_y: f32,
+    width: u32,
+    height: u32,
     _filter: PhantomData<&'filter mut FrostedFilter>,
 }
 
 impl FrostedImage<'_> {
-    /// Draw the leased output into `canvas` at `(x, y)`, `width`x`height`
-    /// logical px (the canvas transform applies).
-    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>, x: f32, y: f32, width: f32, height: f32) {
+    /// Where the slab belongs in capture pixels.
+    pub fn origin(&self) -> (f32, f32) {
+        (self.origin_x, self.origin_y)
+    }
+
+    /// The slab's extent in capture pixels.
+    pub fn extent(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// Draw the material at its placement.
+    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>) {
         let destination = sys::flux_rect {
-            x,
-            y,
-            w: width,
-            h: height,
+            x: self.origin_x,
+            y: self.origin_y,
+            w: self.width as f32,
+            h: self.height as f32,
         };
         draw_image_rect(canvas, self.raw, destination);
     }
@@ -842,12 +909,16 @@ impl AcrylicFilter {
             border_alpha: params.border_alpha,
             ..Default::default()
         };
-        let mut raw = std::ptr::null_mut();
+        let mut out = sys::prism_material_output::default();
         check(unsafe {
-            sys::prism_acrylic_filter_apply(self.raw, frame.as_raw(), &desc, &mut raw)
+            sys::prism_acrylic_filter_apply(self.raw, frame.as_raw(), &desc, &mut out)
         })?;
         Ok(AcrylicImage {
-            raw,
+            raw: out.image,
+            origin_x: out.origin_x,
+            origin_y: out.origin_y,
+            width: out.width,
+            height: out.height,
             _filter: PhantomData,
         })
     }
@@ -859,20 +930,35 @@ impl Drop for AcrylicFilter {
     }
 }
 
+/// Borrowed output of a [`AcrylicFilter`] application. A slab sized to the
+/// material's footprints; [`draw`](Self::draw) places it correctly.
 pub struct AcrylicImage<'filter> {
     raw: *mut sys::flux_image,
+    origin_x: f32,
+    origin_y: f32,
+    width: u32,
+    height: u32,
     _filter: PhantomData<&'filter mut AcrylicFilter>,
 }
 
 impl AcrylicImage<'_> {
-    /// Draw the leased output into `canvas` at `(x, y)`, `width`x`height`
-    /// logical px (the canvas transform applies).
-    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>, x: f32, y: f32, width: f32, height: f32) {
+    /// Where the slab belongs in capture pixels.
+    pub fn origin(&self) -> (f32, f32) {
+        (self.origin_x, self.origin_y)
+    }
+
+    /// The slab's extent in capture pixels.
+    pub fn extent(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// Draw the material at its placement.
+    pub fn draw(&self, canvas: &flux::CanvasCommands<'_>) {
         let destination = sys::flux_rect {
-            x,
-            y,
-            w: width,
-            h: height,
+            x: self.origin_x,
+            y: self.origin_y,
+            w: self.width as f32,
+            h: self.height as f32,
         };
         draw_image_rect(canvas, self.raw, destination);
     }

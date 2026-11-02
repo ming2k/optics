@@ -3,6 +3,7 @@
  * scratch-pages, etc.
  */
 #include <flux/math.h>
+#include <flux/profile.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -10,19 +11,16 @@ static void *libc_alloc(size_t n, void *u) {
     (void)u;
     return malloc(n);
 }
-static void *libc_realloc(void *p, size_t o, size_t n, void *u) {
-    (void)o;
-    (void)u;
-    return realloc(p, n);
-}
 static void libc_free(void *p, void *u) {
     (void)u;
     free(p);
 }
 
+/* `realloc` is not part of flux_allocator (ADR-0135): no library called it, so
+ * its semantics were undefined by construction. The arena is a bump allocator
+ * and never grows; it allocates once and frees once. */
 static const flux_allocator libc_allocator = {
     .alloc = libc_alloc,
-    .realloc = libc_realloc,
     .free = libc_free,
     .user = nullptr,
 };
@@ -69,6 +67,8 @@ void *flux_arena_alloc_aligned(flux_arena *a, size_t bytes, size_t align) {
 }
 
 void flux_arena_reset(flux_arena *a) {
-    if (a)
+    if (a) {
+        FLUX_PROFILE_PLOT("flux.arena_used_bytes", (double)a->used);
         a->used = 0;
+    }
 }

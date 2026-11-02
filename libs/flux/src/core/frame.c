@@ -549,6 +549,7 @@ acquired:
         .state = FLUX_FRAME_STATE_RECORDING,
     };
     s->frame_active = true;
+    atomic_fetch_add_explicit(&s->device->recording_frames, 1u, memory_order_acq_rel);
     *out = &s->frame_slot;
     return FLUX_OK;
 }
@@ -713,6 +714,12 @@ void flux_frame_begin_pass(flux_frame *f, const flux_pass_desc *desc) {
         ri.pStencilAttachment = &stencil;
     }
 
+    /* Pass-scope debug label (ADR-0133). flux_frame_begin_pass/end_pass is the
+     * one seam every backend routes through — Vulkan canvas, tile-compute
+     * coverage, scene — so labelling here covers all of them, and the CPU
+     * backend simply never reaches this function. Off unless
+     * FLUX_OBSERVE_PASS_LABELS is requested and attribution is compiled in. */
+    flux_vk_cmd_begin_label(s->device, pf->cmd, desc && desc->label ? desc->label : "pass");
     vkCmdBeginRendering(pf->cmd, &ri);
     f->pass_active = true;
 }
@@ -722,6 +729,7 @@ void flux_frame_end_pass(flux_frame *f) {
         return;
     flux_per_frame *pf = &f->surface->frames[f->slot];
     vkCmdEndRendering(pf->cmd);
+    flux_vk_cmd_end_label(f->surface->device, pf->cmd);
     f->pass_active = false;
 }
 
@@ -767,10 +775,23 @@ static bool restore_signalled_fence(flux_surface *s, flux_per_frame *pf) {
     return vkCreateFence(s->device->device, &fci, nullptr, &pf->in_flight) == VK_SUCCESS;
 }
 
+/* Leave the RECORDING state, keeping the device's recording-frame count honest.
+ *
+ * Called from every transition out of RECORDING so the counter can never drift:
+ * a leaked count would make retire tags permanently conservative again (the
+ * pre-existing behaviour), and a double decrement would let a release be tagged
+ * with the current serial while a frame still references it. */
+static void flux_frame_leave_recording(flux_frame *f) {
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
+        return;
+    atomic_fetch_sub_explicit(&f->surface->device->recording_frames, 1u, memory_order_acq_rel);
+}
+
 static flux_result frame_submit_failure(flux_frame *f, VkResult vr, const char *message) {
     flux_surface *s = f->surface;
     flux_per_frame *pf = &s->frames[f->slot];
     bool restored = restore_signalled_fence(s, pf);
+    flux_frame_leave_recording(f);
     f->state = FLUX_FRAME_STATE_INVALID;
     s->frame_active = false;
     if (!s->offscreen)
@@ -795,6 +816,7 @@ flux_result flux_frame_submit(flux_frame *f) {
     bool foreign_acquire_recorded = false;
     VkResult vr = foreign_images_record_acquire(s, pf, &foreign_acquire_recorded);
     if (vr != VK_SUCCESS) {
+        flux_frame_leave_recording(f);
         f->state = FLUX_FRAME_STATE_INVALID;
         s->frame_active = false;
         if (!s->offscreen)
@@ -844,6 +866,7 @@ flux_result flux_frame_submit(flux_frame *f) {
 
     vr = vkEndCommandBuffer(pf->cmd);
     if (vr != VK_SUCCESS) {
+        flux_frame_leave_recording(f);
         f->state = FLUX_FRAME_STATE_INVALID;
         s->frame_active = false;
         if (!s->offscreen)
@@ -911,6 +934,7 @@ flux_result flux_frame_submit(flux_frame *f) {
                                                  : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         s->image_foreign_owned[s->current_image] = s->offscreen_exportable;
         s->image_sync_exported[s->current_image] = false;
+        flux_frame_leave_recording(f);
         f->state = FLUX_FRAME_STATE_SUBMITTED;
         return FLUX_OK;
     }
@@ -970,6 +994,7 @@ flux_result flux_frame_submit(flux_frame *f) {
         s->last_readback_region = readback_region;
     }
     s->image_layouts[s->current_image] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    flux_frame_leave_recording(f);
     f->state = FLUX_FRAME_STATE_SUBMITTED;
     return FLUX_OK;
 }
@@ -977,6 +1002,7 @@ flux_result flux_frame_submit(flux_frame *f) {
 flux_result flux_frame_present(flux_frame *f) {
     if (!f || !f->surface || f->state != FLUX_FRAME_STATE_SUBMITTED)
         return FLUX_ERROR_INVALID_STATE;
+    FLUX_PROFILE_ZONE(z_present, "flux.frame_present");
     flux_surface *s = f->surface;
 
     if (s->offscreen) {
@@ -985,6 +1011,12 @@ flux_result flux_frame_present(flux_frame *f) {
         s->current_frame = (s->current_frame + 1u) % s->frames_in_flight;
         s->frame_active = false;
         f->state = FLUX_FRAME_STATE_PRESENTED;
+        /* ADR-0129 decision 4: the frame boundary is the only drain point
+         * that can be enforced continuously without stalling, so it is
+         * checked here in every build. The check is a read of the ledger's
+         * atomics and a no-op when nothing frame-lifetime is live. */
+        (void)flux_observe_frame_drain_check(f->surface->device);
+        FLUX_PROFILE_ZONE_END(z_present);
         return FLUX_OK;
     }
 
@@ -1003,13 +1035,18 @@ flux_result flux_frame_present(flux_frame *f) {
         .pSwapchains = &s->swapchain,
         .pImageIndices = &s->current_image,
     };
+    FLUX_PROFILE_ZONE(z_vk_present, "flux.vkQueuePresent");
     flux_platform_mutex_lock(&s->device->queue_lock);
     VkResult vr = vkQueuePresentKHR(s->device->graphics_queue, &pi);
     flux_platform_mutex_unlock(&s->device->queue_lock);
+    FLUX_PROFILE_ZONE_END(z_vk_present);
 
     s->current_frame = (s->current_frame + 1u) % s->frames_in_flight;
     s->frame_active = false;
     f->state = FLUX_FRAME_STATE_PRESENTED;
+    (void)flux_observe_frame_drain_check(s->device);
+    FLUX_PROFILE_FRAME("flux.present");
+    FLUX_PROFILE_ZONE_END(z_present);
 
     if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR)
         return FLUX_ERROR_SURFACE_LOST;

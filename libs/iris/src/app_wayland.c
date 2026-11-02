@@ -41,6 +41,7 @@
 #include "display_pacer.h"
 #include "fractional-scale-v1-client-protocol.h"
 #include "frame_mailbox.h"
+#include "iris_fd_observe.h"
 #include "presentation-time-client-protocol.h"
 #include "xdg-activation-v1-client-protocol.h"
 #include <linux/input-event-codes.h> /* BTN_LEFT / BTN_RIGHT / BTN_MIDDLE — Linux-only, this file only */
@@ -1270,19 +1271,22 @@ static void kb_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_
                       uint32_t size) {
     (void)k;
     wp_platform *pl = data;
+    /* The compositor hands us a keymap fd: adopted here, closed on every
+     * path below, counted so a leak of it is attributable. */
+    iris_fd_open_record(fd, "fd_keymap");
     if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) {
-        close(fd);
+        iris_fd_close_record(fd, "fd_keymap");
         return;
     }
     char *map = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (map == MAP_FAILED) {
-        close(fd);
+        iris_fd_close_record(fd, "fd_keymap");
         return;
     }
     struct xkb_keymap *km = xkb_keymap_new_from_string(pl->xkb_ctx, map, XKB_KEYMAP_FORMAT_TEXT_V1,
                                                        XKB_KEYMAP_COMPILE_NO_FLAGS);
     munmap(map, size);
-    close(fd);
+    iris_fd_close_record(fd, "fd_keymap");
     if (!km)
         return;
     struct xkb_state *st = xkb_state_new(km);
@@ -1794,7 +1798,7 @@ static void *paste_reader_main(void *arg) {
     wp_paste_job *job = arg;
     size_t len = 0;
     char *text = read_offer_fd(job->fd, (int)job->timeout_ms, &len);
-    close(job->fd);
+    iris_fd_close_record(job->fd, "fd_pipe_read");
     if (text && job->strip_crlf) {
         /* uri-list payloads are CRLF-terminated; the terminator is not
          * part of the dropped text. */
@@ -1904,13 +1908,15 @@ static void ddev_drop(void *d, struct wl_data_device *dev) {
         if (mime && pl->ui && !pl->dnd_job_offer) {
             int fds[2];
             if (pipe(fds) == 0) {
+                iris_fd_open_record(fds[1], "fd_pipe_write");
+                iris_fd_open_record(fds[0], "fd_pipe_read");
                 wl_data_offer_receive(pl->dnd_offer, mime, fds[1]);
-                close(fds[1]);
+                iris_fd_close_record(fds[1], "fd_pipe_write");
                 wl_display_flush(pl->display);
                 started = start_offer_read(pl, fds[0], pl->dnd_offer, WP_DND_READ_TIMEOUT_MS,
                                            true /* uri-list CRLF strip */);
                 if (!started)
-                    close(fds[0]);
+                    iris_fd_close_record(fds[0], "fd_pipe_read");
                 else
                     pl->dnd_job_offer = pl->dnd_offer;
             }
@@ -1938,6 +1944,9 @@ static const struct wl_data_device_listener data_device_listener = {
 static void dsource_send(void *data, struct wl_data_source *src, const char *mime, int32_t fd) {
     wp_platform *pl = data;
     (void)src;
+    /* The compositor hands the destination's pipe write end to us; it is
+     * ours to close on every path (adopted here, released by the wrapper). */
+    iris_fd_open_record(fd, "fd_selection_write");
     const char *p = pl->copy_buf;
     size_t left = pl->copy_len;
 
@@ -1958,7 +1967,7 @@ static void dsource_send(void *data, struct wl_data_source *src, const char *mim
         p += w;
         left -= (size_t)w;
     }
-    close(fd);
+    iris_fd_close_record(fd, "fd_selection_write");
 }
 static void dsource_cancelled(void *data, struct wl_data_source *src) {
     wp_platform *pl = data;
@@ -1998,6 +2007,9 @@ static void drag_source_cleanup(wp_platform *pl) {
 static void drag_source_send(void *data, struct wl_data_source *src, const char *mime, int32_t fd) {
     wp_platform *pl = data;
     (void)src;
+    iris_fd_open_record(fd, "fd_drag_write");
+    /* A host callback that owns the fd still goes through the wrapper so the
+     * row balances; ownership of the descriptor itself is unchanged. */
     if (pl->drag_info.callbacks.provide_data) {
         pl->drag_info.callbacks.provide_data(mime, fd, pl->drag_info.callbacks.user);
     } else if (pl->drag_text_buf && pl->drag_text_len) {
@@ -2009,7 +2021,7 @@ static void drag_source_send(void *data, struct wl_data_source *src, const char 
             if (n > 0 && (size_t)n < sizeof(uri)) {
                 ssize_t w = write(fd, uri, (size_t)n);
                 (void)w;
-                close(fd);
+                iris_fd_close_record(fd, "fd_drag_write");
                 return;
             }
         }
@@ -2020,9 +2032,9 @@ static void drag_source_send(void *data, struct wl_data_source *src, const char 
             p += w;
             left -= (size_t)w;
         }
-        close(fd);
+        iris_fd_close_record(fd, "fd_drag_write");
     } else {
-        close(fd);
+        iris_fd_close_record(fd, "fd_drag_write");
     }
 }
 
@@ -2222,7 +2234,7 @@ static void psource_send(void *data, struct zwp_primary_selection_source_v1 *src
         p += w;
         left -= (size_t)w;
     }
-    close(fd);
+    iris_fd_close_record(fd, "fd_primary_write");
 }
 static void psource_cancelled(void *data, struct zwp_primary_selection_source_v1 *src) {
     wp_platform *pl = data;
@@ -2261,12 +2273,14 @@ static void primsel_paste(wp_platform *pl) {
                         m->text_plain && !m->text_utf8)
                            ? "text/plain"
                            : "text/plain;charset=utf-8";
+    iris_fd_open_record(fds[1], "fd_pipe_write");
+    iris_fd_open_record(fds[0], "fd_pipe_read");
     zwp_primary_selection_offer_v1_receive(pl->primsel_offer, mime, fds[1]);
-    close(fds[1]);
+    iris_fd_close_record(fds[1], "fd_pipe_write");
     wl_display_flush(pl->display);
 
     if (!start_offer_read(pl, fds[0], NULL, WP_PASTE_TIMEOUT_MS, false))
-        close(fds[0]);
+        iris_fd_close_record(fds[0], "fd_pipe_read");
 }
 
 /* lens_clipboard.set_text — advertise `utf8` as the system selection, and
@@ -2337,12 +2351,14 @@ static void clip_request_text(void *user) {
     const char *mime = offer_pick_mime(m);
     if (!mime)
         mime = "text/plain;charset=utf-8";
+    iris_fd_open_record(fds[1], "fd_pipe_write");
+    iris_fd_open_record(fds[0], "fd_pipe_read");
     wl_data_offer_receive(pl->selection_offer, mime, fds[1]);
-    close(fds[1]);
+    iris_fd_close_record(fds[1], "fd_pipe_write");
     wl_display_flush(pl->display);
 
     if (!start_offer_read(pl, fds[0], NULL, WP_PASTE_TIMEOUT_MS, false))
-        close(fds[0]);
+        iris_fd_close_record(fds[0], "fd_pipe_read");
 }
 
 static int lens_host_start_drag(const char *text, size_t len, uint32_t actions, void *user) {
@@ -3445,6 +3461,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
 
     /* --- Wayland connection + globals ---------------------------- */
     pl.display = wl_display_connect(NULL);
+    if (pl.display)
+        iris_fd_open_record(wl_display_get_fd(pl.display), "fd_display");
     if (!pl.display) {
         fprintf(stderr, "no Wayland display (is a compositor running?)\n");
         /* Unpublish before the stack frame dies: the globals must never
@@ -3461,8 +3479,10 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
      * early return above so that path cannot leak the fd or leave a kick
      * registered against stack memory. */
     pl.wakeup_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    if (pl.wakeup_fd >= 0)
+    if (pl.wakeup_fd >= 0) {
+        iris_fd_open_record(pl.wakeup_fd, "fd_wakeup");
         iris_platform_wakeup_set_kick(wp_wakeup_kick, &pl);
+    }
 
     pl.xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     if (!pl.xkb_ctx) {
@@ -3489,6 +3509,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     /* Key-repeat timer: armed per held key from the compositor's
      * repeat_info; pump_events polls it alongside the display fd. */
     pl.repeat_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    iris_fd_open_record(pl.repeat_fd, "fd_repeat");
 
     pl.registry = wl_display_get_registry(pl.display);
     wl_registry_add_listener(pl.registry, &registry_listener, &pl);
@@ -3525,6 +3546,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
 
     /* --- xdg-shell window --------------------------------------- */
     pl.surface = wl_compositor_create_surface(pl.compositor);
+    iris_wl_acquire("wl_surface");
     wl_surface_add_listener(pl.surface, &surface_listener, &pl);
     pl.xdg_surface = xdg_wm_base_get_xdg_surface(pl.wm_base, pl.surface);
     xdg_surface_add_listener(pl.xdg_surface, &xdg_surface_listener, &pl);
@@ -3615,6 +3637,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     if ((cfg->paint || cfg->prepare) && pl.subcompositor) {
         ui_wl_surface = wl_compositor_create_surface(pl.compositor);
         if (ui_wl_surface) {
+            iris_wl_acquire("wl_surface");
             ui_wl_subsurface =
                 wl_subcompositor_get_subsurface(pl.subcompositor, ui_wl_surface, pl.surface);
             if (ui_wl_subsurface) {
@@ -4353,13 +4376,13 @@ fail:
     if (pl.wakeup_fd >= 0) {
         iris_platform_wakeup_set_kick(NULL, NULL);
         iris_platform_wakeup_drain();
-        close(pl.wakeup_fd);
+        iris_fd_close_record(pl.wakeup_fd, "fd_wakeup");
         pl.wakeup_fd = -1;
     }
     /* Key-repeat timer: disarmed by the loop exit already (no key events
      * arrive anymore); just close the fd. */
     if (pl.repeat_fd >= 0) {
-        close(pl.repeat_fd);
+        iris_fd_close_record(pl.repeat_fd, "fd_repeat");
         pl.repeat_fd = -1;
     }
     if (ui_canvas && ui_canvas != canvas)
@@ -4370,8 +4393,10 @@ fail:
         wp_destroy_vk_surface(device, ui_vk_surface);
     if (ui_wl_subsurface)
         wl_subsurface_destroy(ui_wl_subsurface);
-    if (ui_wl_surface)
+    if (ui_wl_surface) {
         wl_surface_destroy(ui_wl_surface);
+        iris_wl_release("wl_surface");
+    }
     if (canvas)
         flux_canvas_release(canvas);
     if (surface)
@@ -4448,8 +4473,10 @@ fail:
     wp_cancel_pulse(&pl);
     if (pl.presentation)
         wp_presentation_destroy(pl.presentation);
-    if (pl.surface)
+    if (pl.surface) {
         wl_surface_destroy(pl.surface);
+        iris_wl_release("wl_surface");
+    }
     for (int i = 0; i < pl.n_outputs; i++)
         if (pl.outputs[i].wl)
             wl_output_destroy(pl.outputs[i].wl);
@@ -4493,7 +4520,17 @@ fail:
         wl_registry_destroy(pl.registry);
     if (pl.display) {
         wl_display_roundtrip(pl.display); /* let the compositor process destroys */
+        /* wl_display_disconnect closes the fd it owns; record the release
+         * first so the row balances rather than leaking a permanent +1. */
+        iris_fd_release_record("fd_display"); /* wl_display_disconnect owns the fd */
         wl_display_disconnect(pl.display);
     }
+
+    /* Process-scope drain point (ADR-0129). Every fd and protocol object
+     * this backend minted has been through the wrappers by now, so this
+     * report is where an fd or wl_* leak becomes a named row instead of a
+     * prose comment about "or it leaks". Emitted last: the device is already
+     * gone, and the process ledger is the only ledger that survives it. */
+    flux_observe_report_emit_process();
     return rc;
 }

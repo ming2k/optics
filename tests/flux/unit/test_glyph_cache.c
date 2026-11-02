@@ -30,7 +30,7 @@ static int count = 0;
 
 /* Insert keys (1, 0, 0, 0)..(1, N-1, 0, 0) and look them back up. */
 static void test_basic_insert_lookup(void) {
-    glyph_cache *c = glyph_cache_new(16, 256);
+    glyph_cache *c = glyph_cache_new(nullptr, 16, 256);
     CHECK(c != NULL);
 
     for (uint32_t i = 0; i < 32; i++) {
@@ -72,7 +72,7 @@ static void test_basic_insert_lookup(void) {
  * cap/2 entries and every insert past that evicts one. */
 static void test_eviction_at_cap(void) {
     const uint32_t cap = 64; /* init_cap == max_cap */
-    glyph_cache *c = glyph_cache_new(cap, cap);
+    glyph_cache *c = glyph_cache_new(nullptr, cap, cap);
     CHECK(c != NULL);
 
     /* Fill to the 50 % load trigger. No eviction yet. */
@@ -117,7 +117,7 @@ static void test_eviction_at_cap(void) {
 /* LRU recency is updated on lookup, not just insertion. */
 static void test_lru_recency_on_lookup(void) {
     const uint32_t cap = 16; /* init_cap == max_cap; fills to cap/2 = 8 */
-    glyph_cache *c = glyph_cache_new(cap, cap);
+    glyph_cache *c = glyph_cache_new(nullptr, cap, cap);
     CHECK(c != NULL);
 
     /* Fill to the 50 % load trigger. */
@@ -148,7 +148,7 @@ static void test_invalidate_decrements_count(void) {
      * load-factor trigger without evicting; that lets us fill it to
      * a known count and then exercise invalidate explicitly. */
     const uint32_t max = 64;
-    glyph_cache *c = glyph_cache_new(16, max);
+    glyph_cache *c = glyph_cache_new(nullptr, 16, max);
     CHECK(c != NULL);
 
     /* Insert 16 entries (fits comfortably under max_cap/2 = 32). */
@@ -190,7 +190,7 @@ static void test_invalidate_decrements_count(void) {
 static void test_clear_resets_count(void) {
     /* init_cap < max_cap so a grow has happened by the time we clear;
      * verifies clear() does not depend on table size. */
-    glyph_cache *c = glyph_cache_new(16, 256);
+    glyph_cache *c = glyph_cache_new(nullptr, 16, 256);
     CHECK(c != NULL);
 
     for (uint32_t i = 0; i < 24; i++) {
@@ -232,7 +232,7 @@ static bool invalidate_even(glyph_entry *e, void *p) {
 static void test_visit_with_invalidate_even(void) {
     /* Use a wide max_cap so the table never saturates during this test
      * — we are checking iteration + invalidate, not eviction. */
-    glyph_cache *c = glyph_cache_new(16, 256);
+    glyph_cache *c = glyph_cache_new(nullptr, 16, 256);
     CHECK(c != NULL);
     for (uint32_t i = 0; i < 16; i++) {
         CHECK(glyph_cache_put(c, 1, i, 0, 0) != NULL);
@@ -261,9 +261,9 @@ static void test_visit_with_invalidate_even(void) {
 
 /* Invalid args are null-safe, never crash. */
 static void test_null_safety(void) {
-    CHECK(glyph_cache_new(0, 0) == NULL);   /* zero max_cap */
-    CHECK(glyph_cache_new(16, 24) == NULL); /* non-power-of-two max */
-    CHECK(glyph_cache_new(16, 0) == NULL);
+    CHECK(glyph_cache_new(nullptr, 0, 0) == NULL);   /* zero max_cap */
+    CHECK(glyph_cache_new(nullptr, 16, 24) == NULL); /* non-power-of-two max */
+    CHECK(glyph_cache_new(nullptr, 16, 0) == NULL);
 
     glyph_cache_destroy(NULL);
     glyph_cache_clear(NULL);
@@ -277,7 +277,7 @@ static void test_null_safety(void) {
     CHECK(glyph_cache_put(NULL, 0, 0, 0, 0) == NULL);
 
     /* Negative init_cap clamps to MIN_CAP, then succeeds. */
-    glyph_cache *c = glyph_cache_new(2, 16);
+    glyph_cache *c = glyph_cache_new(nullptr, 2, 16);
     CHECK(c != NULL);
     glyph_cache_destroy(c);
 }
@@ -328,7 +328,7 @@ static bool ring_consistent(const glyph_cache *c) {
  *     (checked every 512 inserts; O(live) per check). */
 static void test_production_scale_saturation(void) {
     const uint32_t init_cap = 256, max_cap = 16384;
-    glyph_cache *c = glyph_cache_new(init_cap, max_cap);
+    glyph_cache *c = glyph_cache_new(nullptr, init_cap, max_cap);
     CHECK(c != NULL);
 
     /* Fill past saturation: 4x the live ceiling in distinct keys. */
@@ -371,7 +371,7 @@ static void test_production_scale_saturation(void) {
  * tombstones must stay a small fraction of cap. */
 static void test_saturation_tombstones_stay_bounded(void) {
     const uint32_t cap = 256; /* init == max */
-    glyph_cache *c = glyph_cache_new(cap, cap);
+    glyph_cache *c = glyph_cache_new(nullptr, cap, cap);
     CHECK(c != NULL);
 
     for (uint32_t i = 0; i < cap * 8; i++)
@@ -411,7 +411,7 @@ static void test_saturation_tombstones_stay_bounded(void) {
 /* clear() empties the ring as well as the table; a subsequent insert
  * must not reference any stale indices. */
 static void test_clear_resets_ring(void) {
-    glyph_cache *c = glyph_cache_new(16, 64);
+    glyph_cache *c = glyph_cache_new(nullptr, 16, 64);
     CHECK(c != NULL);
     for (uint32_t i = 0; i < 24; i++)
         CHECK(glyph_cache_put(c, 1, i, 0, 0) != NULL);

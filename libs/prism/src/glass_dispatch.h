@@ -20,6 +20,7 @@
 #include <flux/compute.h>
 #include <flux/vulkan.h>
 
+#include "prism_material_frame.h"
 #include "regions.h"
 
 #include <math.h>
@@ -27,18 +28,77 @@
 #include <stdint.h>
 #include <string.h>
 
-/* Push-constant block — must match liquid_glass.comp exactly. The budget is
- * exactly 160 bytes. */
+/* Push-constant block — must match liquid_glass.comp exactly.
+ *
+ * Per-BODY state lives in the body table (prism_material_frame.h), not here: the
+ * block is a hard 160 bytes and this material previously consumed all of them
+ * with one body's parameters, which is why cost used to scale linearly with
+ * body count. What remains is genuinely per-DISPATCH: the sources, the output,
+ * the region inside that output, the body list for this region, and the
+ * dispatch-wide optical policy. That frees the room for region batches and
+ * multi-region slabs without touching the budget. */
 typedef struct liquid_glass_push {
     uint32_t input_handle;
     uint32_t blurred_handle;
     uint32_t sampler_handle;
     uint32_t output_handle;
+    /* Output image extent and this dispatch's region inside it. */
     uint32_t width;
     uint32_t height;
     uint32_t origin_x;
     uint32_t origin_y;
-    float shape0[4];
+    uint32_t region_width;
+    uint32_t region_height;
+    /* This slab's origin in capture space. The slab is sized to the material's
+     * footprints, so output coordinate 0 is capture coordinate slab_origin:
+     * capture = output + slab_origin. */
+    float slab_origin_x;
+    float slab_origin_y;
+    float capture_width;
+    float capture_height;
+    /* Address of the body table (rows of prism_glass_body_row) and of this
+     * region's body-id list. Split lo/hi: flux devices do not guarantee
+     * shaderInt64. */
+    uint32_t bodies_address_lo;
+    uint32_t bodies_address_hi;
+    uint32_t ids_address_lo;
+    uint32_t ids_address_hi;
+    uint32_t id_count;
+    uint32_t reserved0;
+    /* Dispatch-wide optical policy (prism_glass_policy). */
+    float refraction;
+    float chromatic_aberration;
+    float saturation;
+    float brightness;
+    float edge_width;
+    float rim_light;
+    float opacity;
+    float size_reference;
+    float size_scale_min;
+    float tint_strength;
+    float frost_strength;
+    float policy_curvature;
+    float contact_ao;
+    float ambient_fresnel;
+    float light_x;
+    float light_y;
+} liquid_glass_push;
+
+static_assert(sizeof(liquid_glass_push) == 144,
+              "liquid_glass_push exceeds the 160-byte push budget flux guarantees");
+static_assert(offsetof(liquid_glass_push, slab_origin_x) == 40,
+              "liquid_glass_push capture offset no longer matches its shader block");
+static_assert(offsetof(liquid_glass_push, refraction) == 80,
+              "liquid_glass_push policy no longer matches its shader block");
+
+/* One row of the body table — must match `GlassBody` in liquid_glass.comp.
+ *
+ * Per-body optical character, resolved against the dispatch policy on the host
+ * so the shader does no inheritance logic. `*_strength` values are already the
+ * effective (override-or-inherit) values, already clamped, already multiplied by
+ * the dispatch-wide opacity for `opacity`. */
+typedef struct prism_glass_body_row {
+    float shape0[4]; /* bounds x, y, w, h */
     float shape1[4];
     float focus_shape[4];
     float radius0;
@@ -46,25 +106,56 @@ typedef struct liquid_glass_push {
     float focus_radius;
     float blend_radius;
     float opacity;
-    float refraction;
-    float chromatic_aberration;
-    float saturation;
-    float brightness;
-    float edge_width;
-    float rim_light;
     float shadow_alpha;
-    uint32_t light_dir;
-    uint32_t group_extent;
-    uint32_t tint_color_shape_count;
-    uint32_t shadow_params;
-    uint32_t size_params;
-    uint32_t strength_params;
-    uint32_t focus_curvature;
-    uint32_t optics_params;
-} liquid_glass_push;
+    float shadow_blur;
+    float shadow_offset_y;
+    float tint_strength;
+    float frost_strength;
+    float saturation;
+    float curvature;
+    float contact_ao;
+    float ambient_fresnel;
+    float size_reference;
+    float size_scale_min;
+    float light_x;
+    float light_y;
+    uint32_t tint_color; /* 0xRRGGBB (top byte free) */
+    uint32_t shape_count;
+    uint32_t has_focus; /* 1 when focus_strength > 0 */
+    uint32_t reserved;
+    /* Pad to PRISM_BODY_STRIDE. The shader's GlassBody pads identically: the row
+     * stride is one number shared by both sides, and a mismatch reads the wrong
+     * row. Asserted below on both the payload and the total. */
+    uint32_t pad0[2];  /* payload 136 -> 144, matching glslang's 16-alignment */
+    uint32_t pad1[28]; /* 112 more -> 256 == PRISM_BODY_STRIDE */
+} prism_glass_body_row;
 
-static_assert(sizeof(liquid_glass_push) == 160,
-              "liquid_glass_push no longer matches its shader block");
+static_assert(offsetof(prism_glass_body_row, pad0) == 136,
+              "prism_glass_body_row payload changed; re-pad the shader's GlassBody");
+static_assert(offsetof(prism_glass_body_row, pad1) == 144,
+              "the shader 16-aligns GlassBody's payload to 144; keep the C row in step");
+static_assert(sizeof(prism_glass_body_row) == PRISM_BODY_STRIDE,
+              "prism_glass_body_row must be exactly PRISM_BODY_STRIDE bytes: the shader's "
+              "GlassBody array stride is its sizeof, so the two must agree");
+
+/* Bounds of a body's footprint in capture pixels, in output space, clipped to
+ * the output slab. */
+static inline liquid_glass_region prism_glass_output_region(liquid_glass_region capture_region,
+                                                            uint32_t slab_x, uint32_t slab_y,
+                                                            uint32_t slab_w, uint32_t slab_h) {
+    liquid_glass_region out = capture_region;
+    /* Capture region is already clipped to the capture, and the slab covers every
+     * footprint, so this only guards degenerate slabs. */
+    if (out.x < slab_x)
+        out.x = slab_x;
+    if (out.y < slab_y)
+        out.y = slab_y;
+    if (out.x + out.width > slab_x + slab_w)
+        out.width = slab_x + slab_w - out.x;
+    if (out.y + out.height > slab_y + slab_h)
+        out.height = slab_y + slab_h - out.y;
+    return out;
+}
 
 #define PRISM_GLASS_WG 16u
 
@@ -134,19 +225,11 @@ typedef struct prism_glass_policy {
     float ambient_fresnel;
 } prism_glass_policy;
 
-/* Record one glass-group dispatch. `input`/`blurred` are what the lens
- * samples — the sharp capture and its blur for the standalone material, the
- * layered image (frost already applied) and the blur for the layered one.
- * `output` is the persistent storage image the material composites into;
- * `region` its clipped dispatch footprint. The caller owns every barrier:
- * before the first group after a write, and between groups. */
-static inline void prism_glass_record_group(VkCommandBuffer command,
-                                            flux_compute_pipeline *pipeline, flux_device *device,
-                                            const flux_image *input, const flux_image *blurred,
-                                            flux_image *output, uint32_t image_width,
-                                            uint32_t image_height, liquid_glass_region region,
-                                            const prism_liquid_glass_group *group,
-                                            const prism_glass_policy *policy) {
+/* Flatten one caller group into a body-table row. Every inherit/override and
+ * every clamp happens HERE, on the host, so the shader reads effective values and
+ * carries no inheritance logic (which was a per-pixel branch before). */
+static inline prism_glass_body_row prism_glass_make_row(const prism_liquid_glass_group *group,
+                                                        const prism_glass_policy *policy) {
     float saturation = liquid_glass_group_or_desc(group->saturation, policy->saturation);
     float tint_strength = liquid_glass_group_or_desc(group->tint_strength, policy->tint_strength);
     float frost_strength =
@@ -166,64 +249,114 @@ static inline void prism_glass_record_group(VkCommandBuffer command,
         ambient_fresnel = 0.50f;
     ambient_fresnel = fminf(fmaxf(ambient_fresnel, 0.0f), 1.0f);
 
+    /* Capacity guard: the row carries exactly two SDF slots (shape0/shape1). This
+     * must never fire in practice — validation clamps shape_count to
+     * LIQUID_GLASS_MAX_SHAPES — but a capacity raise in regions.h without a
+     * matching row raise must fail the build, not silently truncate geometry. */
+    _Static_assert(LIQUID_GLASS_MAX_SHAPES <= 2u,
+                   "the body row carries two SDF slots; raise the row before raising "
+                   "LIQUID_GLASS_MAX_SHAPES");
+
+    prism_glass_body_row row = {};
+    prism_glass_copy_shape(row.shape0, group->shapes[0]);
+    if (group->shape_count == 2u)
+        prism_glass_copy_shape(row.shape1, group->shapes[1]);
+    if (focus_strength > 0.0f) {
+        prism_glass_copy_shape(row.focus_shape, group->focus);
+        row.has_focus = 1u;
+    }
+    row.radius0 = fmaxf(group->shapes[0].corner_radius, 0.0f);
+    row.radius1 = (group->shape_count == 2u ? fmaxf(group->shapes[1].corner_radius, 0.0f) : 0.0f);
+    row.focus_radius = fmaxf(group->focus.corner_radius, 0.0f);
+    row.blend_radius = fmaxf(group->blend_radius, 0.0f);
+    row.opacity = fminf(fmaxf(group->opacity * policy->opacity, 0.0f), 1.0f);
+    row.shadow_alpha = fminf(fmaxf(group->shadow_alpha, 0.0f), 1.0f);
+    row.shadow_blur = fmaxf(group->shadow_blur, 0.0f);
+    row.shadow_offset_y = group->shadow_offset_y;
+    row.tint_strength = fmaxf(tint_strength, 0.0f);
+    row.frost_strength = fmaxf(frost_strength, 0.0f);
+    row.saturation = fmaxf(saturation, 0.0f);
+    row.curvature = curvature;
+    row.contact_ao = contact_ao;
+    row.ambient_fresnel = ambient_fresnel;
+    row.size_reference = size_reference;
+    row.size_scale_min = size_scale_min;
+    row.light_x = policy->light_x;
+    row.light_y = policy->light_y;
+    row.tint_color = group->tint_color & 0x00FFFFFFu;
+    row.shape_count = group->shape_count;
+    return row;
+}
+
+/* Record one BATCHED glass dispatch: one region, its body ids, the dispatch-wide
+ * policy.
+ *
+ * Replaces the old one-body-per-dispatch recorder. The two things that were
+ * per-body before — the parameter block and the barrier between bodies — are
+ * gone: the parameters live in the body table and the bodies in a region are
+ * evaluated in one dispatch, so their source-over order is the shader's loop
+ * order and needs no image barrier. Regions are disjoint, so no dispatch observes
+ * another's writes and the whole N-1 barrier chain disappears.
+ *
+ * `copy` describes what the lens samples (the sharp capture or the frost sheet)
+ * and where those texels sit in capture space; `slab` is the output image, whose
+ * extent is the slab's, not the capture's. */
+typedef struct prism_glass_copy {
+    const flux_image *sharp;
+    const flux_image *blurred;
+    float capture_width;
+    float capture_height;
+    /* This slab's origin in capture space (capture = output + origin). */
+    float slab_origin_x;
+    float slab_origin_y;
+} prism_glass_copy;
+
+static inline void prism_glass_record_batch(VkCommandBuffer command,
+                                            flux_compute_pipeline *pipeline, flux_device *device,
+                                            const prism_glass_copy *copy, flux_image *output,
+                                            uint32_t slab_width, uint32_t slab_height,
+                                            const prism_region_batch *batch,
+                                            const prism_glass_policy *policy,
+                                            uint64_t bodies_address, uint64_t ids_address) {
     liquid_glass_push push = {
-        .input_handle = flux_image_bindless_handle(input),
-        .blurred_handle = flux_image_bindless_handle(blurred),
+        .input_handle = flux_image_bindless_handle(copy->sharp),
+        .blurred_handle = flux_image_bindless_handle(copy->blurred),
         .sampler_handle = flux_device_default_sampler_handle(device),
         .output_handle = flux_image_bindless_storage_handle(output),
-        .width = image_width,
-        .height = image_height,
-        .origin_x = region.x,
-        .origin_y = region.y,
-        .radius0 = fmaxf(group->shapes[0].corner_radius, 0.0f),
-        .radius1 = (group->shape_count == 2u ? fmaxf(group->shapes[1].corner_radius, 0.0f) : 0.0f),
-        .focus_radius = fmaxf(group->focus.corner_radius, 0.0f),
-        .blend_radius = fmaxf(group->blend_radius, 0.0f),
-        .opacity = fminf(fmaxf(group->opacity * policy->opacity, 0.0f), 1.0f),
+        .width = slab_width,
+        .height = slab_height,
+        .origin_x = batch->x,
+        .origin_y = batch->y,
+        .region_width = batch->width,
+        .region_height = batch->height,
+        .slab_origin_x = copy->slab_origin_x,
+        .slab_origin_y = copy->slab_origin_y,
+        .capture_width = copy->capture_width,
+        .capture_height = copy->capture_height,
+        .bodies_address_lo = prism_address_lo(bodies_address),
+        .bodies_address_hi = prism_address_hi(bodies_address),
+        .ids_address_lo = prism_address_lo(ids_address),
+        .ids_address_hi = prism_address_hi(ids_address),
+        .id_count = batch->id_count,
         .refraction = fmaxf(policy->refraction, 0.0f),
         .chromatic_aberration = fmaxf(policy->chromatic_aberration, 0.0f),
-        .saturation = fmaxf(saturation, 0.0f),
+        .saturation = fmaxf(policy->saturation, 0.0f),
         .brightness = fmaxf(policy->brightness, 0.0f),
         .edge_width = fmaxf(policy->edge_width, 1.0f),
         .rim_light = fmaxf(policy->rim_light, 0.0f),
-        .shadow_alpha = fminf(fmaxf(group->shadow_alpha, 0.0f), 1.0f),
-        .light_dir = (uint32_t)prism_glass_f32_to_f16(policy->light_x) |
-                     ((uint32_t)prism_glass_f32_to_f16(policy->light_y) << 16u),
-        .group_extent = (region.width & 0xFFFFu) | ((region.height & 0xFFFFu) << 16u),
-        .tint_color_shape_count = (group->tint_color & 0x00FFFFFFu) | (group->shape_count << 24u),
-        .shadow_params = (uint32_t)prism_glass_f32_to_f16(fmaxf(group->shadow_blur, 0.0f)) |
-                         ((uint32_t)prism_glass_f32_to_f16(group->shadow_offset_y) << 16u),
-        .size_params = (uint32_t)prism_glass_f32_to_f16(size_reference) |
-                       ((uint32_t)prism_glass_f32_to_f16(size_scale_min) << 16u),
-        .strength_params = (uint32_t)prism_glass_f32_to_f16(fmaxf(tint_strength, 0.0f)) |
-                           ((uint32_t)prism_glass_f32_to_f16(fmaxf(frost_strength, 0.0f)) << 16u),
-        .focus_curvature = (uint32_t)prism_glass_f32_to_f16(focus_strength) |
-                           ((uint32_t)prism_glass_f32_to_f16(curvature) << 16u),
-        .optics_params = (uint32_t)prism_glass_f32_to_f16(contact_ao) |
-                         ((uint32_t)prism_glass_f32_to_f16(ambient_fresnel) << 16u),
+        .opacity = fminf(fmaxf(policy->opacity, 0.0f), 1.0f),
+        .size_reference = fmaxf(policy->size_reference, 0.0f),
+        .size_scale_min = fminf(fmaxf(policy->size_scale_min, 0.0f), 1.0f),
+        .tint_strength = policy->tint_strength,
+        .frost_strength = policy->frost_strength,
+        .policy_curvature = policy->curvature,
+        .contact_ao = policy->contact_ao,
+        .ambient_fresnel = policy->ambient_fresnel,
+        .light_x = policy->light_x,
+        .light_y = policy->light_y,
     };
-    prism_glass_copy_shape(push.shape0, group->shapes[0]);
-    if (group->shape_count == 2u)
-        prism_glass_copy_shape(push.shape1, group->shapes[1]);
-    else
-        memset(push.shape1, 0, sizeof(push.shape1));
-    if (focus_strength > 0.0f)
-        prism_glass_copy_shape(push.focus_shape, group->focus);
-    else
-        memset(push.focus_shape, 0, sizeof(push.focus_shape));
-
-    /* Capacity guard: the push-constant block carries exactly two SDF
-     * slots (shape0/shape1). This must never fire in practice — the
-     * validation layer already clamps shape_count to
-     * LIQUID_GLASS_MAX_SHAPES — but a capacity raise in regions.h
-     * without a matching shader-slot raise must fail loudly here, not
-     * silently truncate geometry. */
-    _Static_assert(LIQUID_GLASS_MAX_SHAPES <= 2u,
-                   "dispatch pushes two SDF slots; raise the push-constant "
-                   "block before raising LIQUID_GLASS_MAX_SHAPES");
-
-    uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-    uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+    uint32_t gx = (batch->width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+    uint32_t gy = (batch->height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
     flux_compute_dispatch(command, pipeline, &push, sizeof(push), gx, gy, 1u);
 }
 

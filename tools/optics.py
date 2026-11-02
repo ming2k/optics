@@ -5,7 +5,7 @@ Provides single-entry architecture governance, verification, and automated remed
 for the Optics monorepo (ADR-0098, ADR-0125).
 
 Usage:
-  ./tools/optics check [name]  # Run all guardrails or a specific one (format, boundary, lockstep, stdout, symbols, docs, tidy)
+  ./tools/optics check [name]  # Run all guardrails or a specific one (format, boundary, lockstep, stdout, symbols, leaks, docs, tidy)
   ./tools/optics fix           # Auto-format C sources and regenerate symbols.md
   ./tools/optics list          # List available guardrails, domains, and policy mapping
 """
@@ -69,6 +69,19 @@ def run_symbols(repo_root: Path, fix: bool, **kwargs) -> tuple[bool, str, str]:
     return run_symbols_check(repo_root, check_only=not fix)
 
 
+def run_leaks(repo_root: Path, fix: bool, **kwargs) -> tuple[bool, str, str]:
+    from tools.guardrails.leaks import check_leaks
+    errors = check_leaks(repo_root)
+    if errors:
+        err = (
+            "error: leak coverage is incomplete (ADR-0130, INV-ARCH-LEDGER):\n"
+            + "\n".join(f"  {e}" for e in errors)
+            + "\n"
+        )
+        return False, "", err
+    return True, "leak coverage verified (every public kind has a lane or a reasoned exemption)", ""
+
+
 def run_doc_links(repo_root: Path, fix: bool, **kwargs) -> tuple[bool, str, str]:
     from tools.guardrails.doc_links import check_documentation
     problems = check_documentation(str(repo_root))
@@ -119,6 +132,13 @@ QUALITY_GUARDRAILS = [
         "policy": "ADR-0098, docs/reference/symbols.md",
         "runner": run_symbols,
         "supports_fix": True,
+    },
+    {
+        "id": "leaks",
+        "name": "Resource leak coverage & attribution symbols",
+        "policy": "ADR-0130, INV-ARCH-LEDGER",
+        "runner": run_leaks,
+        "supports_fix": False,
     },
     {
         "id": "docs",
@@ -227,7 +247,7 @@ def main() -> int:
         "target",
         nargs="?",
         default="all",
-        help="Specific guardrail (format, boundary, lockstep, stdout, symbols, docs, tidy; default: all)",
+        help="Specific guardrail (format, boundary, lockstep, stdout, symbols, leaks, docs, tidy; default: all)",
     )
     p_check.add_argument("--fix", action="store_true", help="Auto-fix format and symbol parity")
     p_check.add_argument("--build-dir", default=None, help="Build directory for tidy/compile checks")

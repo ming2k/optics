@@ -9,6 +9,7 @@
  *   <flux/math.h>     always available
  *   <flux/curve.h>    always available (analytic curve kernel, ADR-0115)
  *   <flux/sdf.h>      always available (analytic distance fields, ADR-0118)
+ *   <flux/observe.h>  always available (allocation ledger, ADR-0129)
  *   <flux/vulkan.h>   raw Vulkan handle accessors
  *   <flux/dmabuf.h>   iff built on Linux (FLUX_HAVE_DMABUF; core-level,
  *                     independent of the canvas module)
@@ -27,6 +28,8 @@
 #include <flux/core.h>
 #include <flux/curve.h>
 #include <flux/math.h>
+#include <flux/observe.h>
+#include <flux/profile.h>
 #include <flux/sdf.h>
 
 #if defined(FLUX_HAVE_DMABUF)

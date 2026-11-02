@@ -113,7 +113,7 @@ PRISM_API void prism_mica_filter_release(prism_mica_filter *filter);
 PRISM_NODISCARD PRISM_API flux_result prism_mica_filter_apply(prism_mica_filter *filter,
                                                               flux_frame *frame,
                                                               const prism_mica_desc *desc,
-                                                              flux_image **out);
+                                                              prism_material_output *out);
 
 #ifdef __cplusplus
 }

@@ -240,12 +240,10 @@ flux_result flux_image_create(flux_device *d, const flux_image_desc *desc, flux_
         flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &im->image, &im->alloc);
     if (r != FLUX_OK)
         goto fail;
-    {
-        char name[80];
-        snprintf(name, sizeof(name), "flux_image %ux%u fmt=%d", desc->width, desc->height,
-                 (int)desc->format);
-        flux_vk_set_name(d, VK_OBJECT_TYPE_IMAGE, (uint64_t)im->image, name);
-    }
+    /* Ledger-derived per-instance name (ADR-0132): unique, and rendered into
+     * storage that outlives the call. */
+    flux_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_IMAGE, (uint64_t)im->image, FLUX_SCOPE_DEVICE,
+                                 "vk_image", "flux/core");
     VkResult vr;
 
     if (desc->initial_data) {
@@ -292,6 +290,8 @@ flux_result flux_image_create(flux_device *d, const flux_image_desc *desc, flux_
         goto fail;
 
     *out = im;
+    FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "vk_image", "flux/core", 0,
+                         FLUX_SITE_VK_IMAGE);
     return FLUX_OK;
 
 fail:
@@ -512,6 +512,7 @@ void flux_image_release(flux_image *im) {
         flux_buffer_release(im->color_params);
     if (im->icc)
         flux_icc_profile_release(im->icc);
+    FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", 0);
     bool weak = im->device_weak;
     flux_internal_free(d, im);
     if (!weak)
@@ -700,6 +701,8 @@ flux_result flux_image_create_compute_writable(flux_device *d, uint32_t width, u
         goto fail;
 
     *out = im;
+    FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "vk_image", "flux/core", 0,
+                         FLUX_SITE_VK_IMAGE);
     return FLUX_OK;
 
 fail:
@@ -889,6 +892,8 @@ flux_result flux_image_create_render_target(flux_device *d, uint32_t width, uint
         goto fail;
 
     *out = im;
+    FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "vk_image", "flux/core", 0,
+                         FLUX_SITE_VK_IMAGE);
     return FLUX_OK;
 
 fail:

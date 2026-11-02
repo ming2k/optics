@@ -87,6 +87,7 @@ typedef enum prism_struct_type {
     PRISM_TYPE_ACRYLIC_DESC = 3,
     PRISM_TYPE_BACKDROP_LAYER_DESC = 4,
     PRISM_TYPE_MICA_DESC = 5,
+    PRISM_TYPE_BACKDROP_LAYER_REVISION = 6,
     /* Append only. Never repurpose. */
 } prism_struct_type;
 /* Quality and accessibility degradation hint. */
@@ -95,6 +96,41 @@ typedef enum prism_material_quality {
     PRISM_QUALITY_LOW_POWER = 1,
     PRISM_QUALITY_OPAQUE_FALLBACK = 2,
 } prism_material_quality;
+
+/*
+ * A material's output: a slab-sized image plus where it belongs.
+ *
+ * A prism material only paints inside its own footprints, so its output image is
+ * sized to those footprints (quantised up a size ladder), NOT to the input
+ * capture. That is what keeps a 48-px glass titlebar from allocating three 33 MiB
+ * RGBA16F images on a 4K window, and it makes a window resize reuse the same
+ * image instead of re-creating one per pixel step.
+ *
+ * The cost is that `image` no longer covers the input extent, so the caller must
+ * place it rather than blit it edge-to-edge:
+ *
+ *     flux_canvas_draw_image(canvas, out.image,
+ *                            (flux_rect){out.origin_x, out.origin_y,
+ *                                        (float)flux_image_width(out.image),
+ *                                        (float)flux_image_height(out.image)},
+ *                            nullptr);
+ *
+ * The dimensions above are capture pixels; both are whole numbers. `image` is
+ * borrowed: it stays valid until the same filter is applied again on the same
+ * frame slot, the filter is released, or the required slab extent changes. Do not
+ * release it.
+ *
+ * Everything outside the material's footprints inside the slab is transparent,
+ * so drawing the whole slab is always correct — the extra area contributes
+ * nothing.
+ */
+typedef struct prism_material_output {
+    flux_image *image;
+    float origin_x; /* slab top-left, capture pixels */
+    float origin_y;
+    uint32_t width; /* slab extent, capture pixels (== the image's extent) */
+    uint32_t height;
+} prism_material_output;
 
 #ifdef __cplusplus
 }

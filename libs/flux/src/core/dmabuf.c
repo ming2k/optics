@@ -66,16 +66,24 @@ static bool format_modifier_supports_sampling(flux_device *d, VkFormat format, u
     if (list.drmFormatModifierCount == 0)
         return false;
 
-    VkDrmFormatModifierPropertiesEXT stack_mods[64];
+    VkDrmFormatModifierPropertiesEXT stack_mods[64] = {};
     VkDrmFormatModifierPropertiesEXT *mods = stack_mods;
-    if (list.drmFormatModifierCount > 64u) {
-        mods = flux_internal_alloc(d, sizeof(*mods) * list.drmFormatModifierCount);
+    /* Capacity of `mods`. The second query below reports the real count again,
+     * and a driver is allowed to report more than the first query asked for;
+     * iterating that larger count would read past the array. Pin the loop bound
+     * to what was actually allocated. */
+    const uint32_t capacity = list.drmFormatModifierCount;
+    if (capacity > 64u) {
+        mods = flux_internal_alloc(d, sizeof(*mods) * capacity);
         if (!mods)
             return false;
     }
 
     list.pDrmFormatModifierProperties = mods;
+    list.drmFormatModifierCount = capacity;
     vkGetPhysicalDeviceFormatProperties2(d->physical_device, format, &props);
+    if (list.drmFormatModifierCount > capacity)
+        list.drmFormatModifierCount = capacity;
 
     bool supported = false;
     for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {

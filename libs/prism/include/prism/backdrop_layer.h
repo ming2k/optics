@@ -31,7 +31,11 @@
  * the output of flux_blur_filter_apply for the same capture. All three
  * images share one extent. Glass statistics are submitted for the glass
  * groups exactly as the liquid-glass filter does, and are read back with
- * prism_liquid_glass_filter_stats on the same slot cadence.
+ * prism_backdrop_layer_filter_stats on the same slot cadence.
+ *
+ * Output caching: chain a `prism_backdrop_layer_revision` through
+ * `desc->next` to let the filter reuse a frame slot's previous output; see
+ * prism_backdrop_layer_filter_apply for the exact contract.
  *
  * Threading: filters are not thread-safe per device. Serialize calls per
  * device, as you would for any other flux recording API.
@@ -51,11 +55,13 @@ extern "C" {
  * Represents a non-distorting foundation plate (e.g. frosted blur sheet,
  * tinted acrylic, or protective scrim) in capture-image pixel coordinates.
  *
- * The plate writes an OPAQUE pixel: the (optionally tinted) blurred backdrop
- * resolved over the sharp capture underneath, gated by analytic rounded-rect
- * coverage and the plate's opacity. Opacity therefore blends base-vs-sharp,
- * never base-vs-transparent — a partial-coverage base plate still reads as a
- * true background colour to the optical glass lens above it.
+ * The plate paints the (optionally tinted) blurred backdrop, gated by analytic
+ * rounded-rect coverage, source-over into the layer. It composes with the
+ * background underneath it: a partial-opacity or partial-coverage plate blends
+ * rather than replaces, so plates stack in array order — the first plate paints
+ * over the resolved sharp-capture background and each later plate paints over
+ * the plates before it. Outside every plate's silhouette the layer holds the
+ * sharp capture at alpha 1, so the lens above always reads a true background.
  *
  * `tint_color`/`tint_strength` blend a wash INTO the base material so veils
  * and scheme-adaptive scrims live beneath the glass instead of being
@@ -81,6 +87,44 @@ typedef prism_base_material prism_backdrop_frost;
 #define PRISM_BACKDROP_MAX_BASE_MATERIALS 16u
 #define PRISM_BACKDROP_MAX_FROST_RECTS PRISM_BACKDROP_MAX_BASE_MATERIALS
 #define PRISM_BACKDROP_MAX_GLASS_GROUPS 64u
+
+/*
+ * Backdrop revision extension (`next` chain entry).
+ *
+ * The layer filter caches its persistent output per frame slot: when the
+ * descriptor and the two source images are unchanged the material reuses the
+ * image it produced last time for this slot instead of re-running every
+ * compute pass (ADR-0123 / INV-COMP-04). The *only* honest way to know the
+ * sources are unchanged is for the caller to say so, because:
+ *
+ *   - `input` is normally one long-lived capture target, so its handle does
+ *     not change when the captured content does;
+ *   - `blurred_input` is a pooled `flux_blur_filter` output, and the pool
+ *     hands the same image (same handle) back every frame;
+ *   - the descriptor carries pointers (`groups`, `frost`, `shapes`), so a
+ *     byte-wise comparison of it is neither stable nor meaningful.
+ *
+ * So the cache is keyed on a caller-supplied revision instead of on handles.
+ * Bump `revision` whenever anything the material samples or draws changes ---
+ * any frame in which the backdrop was repainted, the blur was re-run, a plate
+ * or body moved, or a material parameter changed. Leaving it constant across a
+ * repaint is the one way to freeze stale content in the output; the filter
+ * cannot detect it for you. A revision of 0 means "no caching information"
+ * and disables the cache, which is the safe default for callers that do not
+ * opt in.
+ *
+ * Layers are per device and per frame slots, so a revision only has to be
+ * unique within one device's stream. A monotonically increasing frame counter
+ * is the simplest correct choice.
+ */
+typedef struct prism_backdrop_layer_revision {
+    prism_struct_type type; /* PRISM_TYPE_BACKDROP_LAYER_REVISION */
+    const void *next;
+    uint64_t revision; /* 0 disables output caching; else caller-tracked content id */
+} prism_backdrop_layer_revision;
+
+#define PRISM_BACKDROP_LAYER_REVISION_INIT                                                         \
+    {.type = PRISM_TYPE_BACKDROP_LAYER_REVISION, .next = nullptr, .revision = 0}
 
 /*
  * Optical Glass Layer (高光与折射透镜层 policy):
@@ -187,14 +231,39 @@ prism_backdrop_layer_filter_retain(prism_backdrop_layer_filter *filter);
  * flux_device_wait_idle): release destroys the filter's compute pipelines
  * inline. */
 PRISM_API void prism_backdrop_layer_filter_release(prism_backdrop_layer_filter *filter);
-/* Requires a recording frame with no active pass. The returned image is
- * borrowed from the filter and remains valid until the same slot is
- * applied again, the filter is released, or its input extent changes. Do
- * not release it. The output is transparent outside the union of every
- * frost rect and glass silhouette (including shadow falloff). */
-PRISM_NODISCARD PRISM_API flux_result
-prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filter, flux_frame *frame,
-                                  const prism_backdrop_layer_desc *desc, flux_image **out);
+/* Compose the layer. Requires a recording frame with no active pass.
+ *
+ * Output caching (ADR-0123 / INV-COMP-04). The filter keeps one persistent
+ * output image per frame slot. To reuse it, chain a
+ * `prism_backdrop_layer_revision` through `desc->next` and bump its
+ * `revision` whenever anything this submission samples or draws has changed.
+ * A repeat call with the same revision on the same slot skips every compute
+ * pass and returns the previous image. With no revision extension (or
+ * `revision == 0`) every call re-renders, which is the safe default.
+ *
+ * There is deliberately no automatic invalidation. `input` is normally one
+ * long-lived capture target and `blurred_input` a pooled blur output, so both
+ * keep their image handles across repaints; a handle comparison would silently
+ * freeze stale backdrop content behind the glass. Only the caller knows when
+ * the backdrop was repainted.
+ *
+ * Base-material plates are composited in array order: the first plate paints
+ * over the resolved backdrop and each later plate paints over the plates before
+ * it. Pixels outside every plate are the sharp capture with alpha 1, so the lens
+ * above always samples a true background.
+ *
+ * The returned output is a slab sized to the union of the layer's footprints
+ * (plates and bodies), not to the input capture; `out->origin_x/origin_y` say
+ * where it belongs in capture pixels (see prism_material_output). It is
+ * transparent outside the union of every plate and glass silhouette (including
+ * shadow falloff), so drawing the whole slab is always correct.
+ *
+ * The image is borrowed from the filter and remains valid until the same slot is
+ * applied again, the filter is released, or the required slab extent changes. Do
+ * not release it. */
+PRISM_NODISCARD PRISM_API flux_result prism_backdrop_layer_filter_apply(
+    prism_backdrop_layer_filter *filter, flux_frame *frame, const prism_backdrop_layer_desc *desc,
+    prism_material_output *out);
 
 /* Reads the glass statistics this frame slot last submitted (see
  * prism_liquid_glass_filter_stats; group i of the stats aligns with group

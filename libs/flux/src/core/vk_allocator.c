@@ -211,11 +211,11 @@ static flux_vk_block *block_create(flux_device *d, uint32_t memory_type, VkDevic
         free(b);
         return NULL;
     }
-    char name[80];
-    snprintf(name, sizeof(name), "flux pool block #%u (%s mt=%u %llu MiB)",
-             d->mem_allocator.block_seq++, is_image_pool ? "image" : "buffer", memory_type,
-             (unsigned long long)(size >> 20));
-    flux_vk_set_name(d, VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)b->memory, name);
+    /* Ledger-derived per-instance name (ADR-0132). The block sequence number is
+     * no longer formatted into a temporary: it lives in the ledger row, which
+     * owns the string the driver receives. */
+    flux_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)b->memory,
+                                 FLUX_SCOPE_DEVICE, "vk_memory", "flux/core");
     return b;
 }
 
@@ -278,17 +278,12 @@ void flux_vk_allocator_destroy(flux_device *d) {
     if (!a->lock_initialized)
         return;
 
-    /* Diagnostic: if there are live allocations at device teardown,
-     * we're about to leak GPU memory or free still-bound resources.
-     * Log and proceed; the per-block free will recover the memory. */
-    if (a->live_allocations > 0 && d->log) {
-        char buf[256];
-        snprintf(buf, sizeof(buf),
-                 "flux_vk_allocator: %u live allocations at teardown "
-                 "(possible resource leak — bytes_in_use=%llu)",
-                 a->live_allocations, (unsigned long long)a->bytes_in_use);
-        d->log(FLUX_LOG_WARN, "flux", 0, "%s", buf, d->log_user);
-    }
+    /* No ad-hoc leak warning here any more. The observation plane owns
+     * leak attribution (ADR-0129 decision 3): a bare "possible resource
+     * leak" byte total cannot name the resource, the owner, or the creation
+     * site, and it fires from a place where the device is already being
+     * torn down. flux_device_release emits the structured report before
+     * vkDestroyDevice instead. */
 
     for (flux_vk_block *b = a->blocks; b;) {
         flux_vk_block *next = b->next;
@@ -377,10 +372,8 @@ static flux_result do_dedicated(flux_device *d, VkDeviceSize size, uint32_t memo
     out->size = size;
     out->mapped = mapped;
     out->block = NULL;
-    char name[80];
-    snprintf(name, sizeof(name), "flux dedicated %llu KiB (mt=%u)",
-             (unsigned long long)(size >> 10), memory_type);
-    flux_vk_set_name(d, VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)mem, name);
+    flux_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)mem, FLUX_SCOPE_DEVICE,
+                                 "vk_memory", "flux/core");
     return FLUX_OK;
 }
 
@@ -453,6 +446,8 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
             a->bytes_in_use += size;
             a->bytes_reserved += size;
             a->live_allocations++;
+            FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "vk_memory",
+                                 "flux/core", size, FLUX_SITE_VK_MEMORY);
         }
         flux_platform_mutex_unlock(&a->lock);
         return r;
@@ -537,6 +532,8 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
     a->bytes_in_use += size;
     a->live_allocations++;
     flux_platform_mutex_unlock(&a->lock);
+    FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "vk_memory", "flux/core",
+                         (uint64_t)size, FLUX_SITE_VK_MEMORY);
     return FLUX_OK;
 }
 
@@ -552,6 +549,7 @@ void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc) {
     if (!d || !alloc || !alloc->memory)
         return;
     flux_vk_allocator *a = &d->mem_allocator;
+    const uint64_t ledger_bytes = (uint64_t)alloc->size;
     flux_platform_mutex_lock(&a->lock);
 
     flux_vk_block *freed_block = NULL;
@@ -624,6 +622,12 @@ void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc) {
     }
 
     *alloc = (flux_vk_alloc){0};
+    /* Accounted here, at the point the driver memory is actually returned.
+     * This is the single chokepoint for VkDeviceMemory, so every path —
+     * retired zombies, one-shot staging, reclaimed blocks — lands in one
+     * row. A retired-but-not-yet-destroyed object still shows as live, which
+     * is the truth: the memory is still held. */
+    FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_memory", "flux/core", ledger_bytes);
 
     /* Auto-reclaim: if the block that just freed an allocation is now
      * empty, and there are other blocks of the same key, reclaim it.
@@ -692,6 +696,8 @@ void flux_vk_allocator_note_external(flux_device *d, VkDeviceSize bytes) {
     a->bytes_reserved += bytes;
     a->live_allocations++;
     flux_platform_mutex_unlock(&a->lock);
+    FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "vk_memory_external",
+                         "flux/core", (uint64_t)bytes, FLUX_SITE_VK_MEMORY);
 }
 
 void flux_vk_allocator_unnote_external(flux_device *d, VkDeviceSize bytes) {
@@ -709,6 +715,7 @@ void flux_vk_allocator_unnote_external(flux_device *d, VkDeviceSize bytes) {
     a->bytes_reserved -= bytes;
     a->live_allocations--;
     flux_platform_mutex_unlock(&a->lock);
+    FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_memory_external", "flux/core", (uint64_t)bytes);
 }
 
 void flux_device_memory_stats(flux_device *d, flux_memory_stats *out) {

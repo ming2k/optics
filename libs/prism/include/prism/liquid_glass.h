@@ -197,14 +197,27 @@ prism_liquid_glass_filter_retain(prism_liquid_glass_filter *filter);
  * flux_device_wait_idle): release destroys the filter's compute pipelines
  * inline. */
 PRISM_API void prism_liquid_glass_filter_release(prism_liquid_glass_filter *filter);
-/* Requires a recording frame with no active pass
+/* Paint every body into the material's output slab.
+ *
+ * Requires a recording frame with no active pass
  * (flux_frame_get_state(frame) == FLUX_FRAME_STATE_RECORDING and
- * !flux_frame_has_active_pass(frame)). The returned image is borrowed from
- * the filter and remains valid until the same slot is applied again, the
- * filter is released, or its input extent changes. Do not release it. */
+ * !flux_frame_has_active_pass(frame)).
+ *
+ * The output is sized to the union of the bodies' footprints, NOT to the input
+ * capture, and `out->origin_x/origin_y` say where it belongs in capture pixels
+ * (see prism_material_output). Draw it at that placement; everything inside the
+ * slab but outside the bodies is transparent, so drawing the whole slab is
+ * always correct.
+ *
+ * Bodies are evaluated in caller order, and one dispatch covers each coalesced
+ * region, so cost tracks coverage rather than body count.
+ *
+ * The returned image is borrowed from the filter and remains valid until the
+ * same slot is applied again, the filter is released, or the required slab
+ * extent changes. Do not release it. */
 PRISM_NODISCARD PRISM_API flux_result
 prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, flux_frame *frame,
-                                const prism_liquid_glass_desc *desc, flux_image **out);
+                                const prism_liquid_glass_desc *desc, prism_material_output *out);
 
 /* Per-group backdrop statistics, reduced on the GPU by
  * prism_liquid_glass_filter_apply: the mean Rec.709 luminance of the

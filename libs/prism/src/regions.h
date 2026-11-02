@@ -148,6 +148,24 @@ static inline bool liquid_glass_regions_overlap(liquid_glass_region a, liquid_gl
     return (uint64_t)a.x < br && (uint64_t)b.x < ar && (uint64_t)a.y < bb && (uint64_t)b.y < ab;
 }
 
+/* True when `region` shares at least one pixel with any of `earlier[0..count)`.
+ *
+ * Used to decide whether a material dispatch needs an ordering barrier against
+ * the dispatches already recorded. Vulkan's image barriers cover a whole
+ * subresource, so the only alternative to "always barrier" is "prove the two
+ * dispatches write disjoint memory". This is that proof, computed exactly:
+ * dispatch footprints are conservative pixel bounds on everything a group
+ * writes (including its shadow falloff), so a negative answer is sound. */
+static inline bool liquid_glass_region_overlaps_any(liquid_glass_region region,
+                                                    const liquid_glass_region *earlier,
+                                                    uint32_t count) {
+    for (uint32_t i = 0; i < count; ++i) {
+        if (liquid_glass_regions_overlap(region, earlier[i]))
+            return true;
+    }
+    return false;
+}
+
 static inline liquid_glass_region liquid_glass_region_union(liquid_glass_region a,
                                                             liquid_glass_region b) {
     uint32_t x0 = a.x < b.x ? a.x : b.x;
@@ -187,27 +205,46 @@ static inline bool liquid_glass_add_clear_region(liquid_glass_region region,
     return true;
 }
 
+/* True when `region` is a non-degenerate rectangle fully inside the image. */
+static inline bool liquid_glass_region_is_dispatchable(liquid_glass_region region,
+                                                       uint32_t image_width,
+                                                       uint32_t image_height) {
+    return region.width != 0u && region.height != 0u && region.x < image_width &&
+           region.y < image_height && region.width <= image_width - region.x &&
+           region.height <= image_height - region.y;
+}
+
 /* Build the clear work for one frame slot. A newly allocated slot is cleared
  * exactly once over its complete extent. Reused slots clear previous AND
  * current footprints: previous removes pixels left by moved/shrunk/disappeared
  * groups, while current makes every overlapping group start from transparent.
  * All clears happen before any liquid dispatch, so a later group's clear can
- * never erase an earlier group's freshly written pixels. */
+ * never erase an earlier group's freshly written pixels.
+ *
+ * Overflow policy: `capacity` is the number of disjoint rectangles the caller
+ * can dispatch, NOT a limit on how many footprints the material may carry.
+ * Because `liquid_glass_add_clear_region` merges transitively, the coalesced
+ * set can never exceed the input count, so there is always a valid answer that
+ * fits — but the coalesced set can exceed `capacity` when the footprints are
+ * pairwise disjoint (a 16-plate + 64-body layer at rest has 80 distinct
+ * footprints, while a 64-body animation needs up to 128). Collapsing to the
+ * full image in that case clears strictly more than required (correct, just
+ * more expensive) and keeps the call succeeding: a legal descriptor must never
+ * be rejected, and a rejected slot would fail on every later frame too, since
+ * `slot->previous` stays at the state that caused the overflow. */
 static inline bool
 liquid_glass_build_clear_regions(bool initialized, uint32_t image_width, uint32_t image_height,
                                  const liquid_glass_region *previous, uint32_t previous_count,
                                  const liquid_glass_region *current, uint32_t current_count,
                                  liquid_glass_region *out, uint32_t capacity, uint32_t *out_count) {
-    if (!out || !out_count || image_width == 0u || image_height == 0u ||
-        previous_count > LIQUID_GLASS_MAX_GROUPS || current_count > LIQUID_GLASS_MAX_GROUPS ||
+    if (!out || !out_count || image_width == 0u || image_height == 0u || capacity == 0u ||
         (previous_count > 0u && !previous) || (current_count > 0u && !current))
         return false;
 
     *out_count = 0u;
+    const liquid_glass_region whole = (liquid_glass_region){0u, 0u, image_width, image_height};
     if (!initialized) {
-        if (capacity == 0u)
-            return false;
-        out[0] = (liquid_glass_region){0u, 0u, image_width, image_height};
+        out[0] = whole;
         *out_count = 1u;
         return true;
     }
@@ -217,12 +254,15 @@ liquid_glass_build_clear_regions(bool initialized, uint32_t image_width, uint32_
     for (uint32_t list = 0; list < 2u; ++list) {
         for (uint32_t i = 0; i < counts[list]; ++i) {
             liquid_glass_region region = lists[list][i];
-            if (region.width == 0u || region.height == 0u || region.x >= image_width ||
-                region.y >= image_height || region.width > image_width - region.x ||
-                region.height > image_height - region.y)
+            if (!liquid_glass_region_is_dispatchable(region, image_width, image_height))
                 return false;
-            if (!liquid_glass_add_clear_region(region, out, capacity, out_count))
-                return false;
+            if (!liquid_glass_add_clear_region(region, out, capacity, out_count)) {
+                /* Coalesced set outgrew the dispatch budget: fall back to one
+                 * full-image clear, which is a superset of every footprint. */
+                out[0] = whole;
+                *out_count = 1u;
+                return true;
+            }
         }
     }
     return true;

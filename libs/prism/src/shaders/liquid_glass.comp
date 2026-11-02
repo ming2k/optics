@@ -4,6 +4,8 @@
 
 #include "flux_sdf.glsl"
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
 
 /*
  * Analytic liquid-glass compositor — convex-lens model.
@@ -44,10 +46,55 @@ layout(push_constant) uniform PC {
     uint blurred_handle;
     uint sampler_handle;
     uint output_handle;
-    uint width;
+    uint width;          /* output slab extent */
     uint height;
-    uint origin_x;
+    uint origin_x;       /* this dispatch's region inside the slab */
     uint origin_y;
+    uint region_width;
+    uint region_height;
+    float slab_origin_x; /* this slab's origin in capture space */
+    float slab_origin_y;
+    float capture_width;
+    float capture_height;
+    uint bodies_address_lo; /* body table, rows of GlassBody */
+    uint bodies_address_hi;
+    uint ids_address_lo;    /* this region's body ids, in source-over order */
+    uint ids_address_hi;
+    uint id_count;
+    uint reserved0;
+    /* Dispatch-wide optical policy. */
+    float refraction;
+    float chromatic_aberration;
+    float saturation;
+    float brightness;
+    float edge_width;
+    float rim_light;
+    float opacity;
+    float size_reference;
+    float size_scale_min;
+    float tint_strength;
+    float frost_strength;
+    float policy_curvature;
+    float contact_ao;
+    float ambient_fresnel;
+    float light_x;
+    float light_y;
+} pc;
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+/* Per-body parameters. One row per caller group, written by the host with every
+ * inherit/override and clamp already resolved, so the shader carries no
+ * inheritance logic and the push block stays per-dispatch.
+ *
+ * The table is read through a device address because flux devices do not
+ * guarantee shaderInt64; the address arrives as two u32 words. */
+layout(buffer_reference, std430) buffer BodyIds {
+    uint ids[];
+};
+
+
+struct GlassBody {
     vec4 shape0;
     vec4 shape1;
     vec4 focus_shape;
@@ -56,70 +103,52 @@ layout(push_constant) uniform PC {
     float focus_radius;
     float blend_radius;
     float opacity;
-    float refraction;
-    float chromatic_aberration;
-    float saturation;
-    float brightness;
-    float edge_width;
-    float rim_light;
     float shadow_alpha;
-    uint light_dir;
-    uint group_extent;
-    uint tint_color_shape_count;
-    uint shadow_params;
-    uint size_params;
-    uint strength_params;
-    uint focus_curvature;
-    uint optics_params;
-} pc;
+    float shadow_blur;
+    float shadow_offset_y;
+    float tint_strength;
+    float frost_strength;
+    float saturation;
+    float curvature;
+    float contact_ao;
+    float ambient_fresnel;
+    float size_reference;
+    float size_scale_min;
+    float light_x;
+    float light_y;
+    uint tint_color;
+    uint shape_count;
+    uint has_focus;
+    uint reserved;
+    /* Pad to PRISM_BODY_STRIDE (256 bytes) so the shader's array stride and the
+     * host's row stride are the same number. They are two sides of one contract:
+     * the host writes row i at i * 256 and the shader indexes bodies[i] with its
+     * own ArrayStride, so a mismatch silently reads the wrong row (or garbage
+     * halfway through the second body). 132 payload + 31 words = 256. */
+    uint pad0[2]; /* payload 136 -> 144: glslang 16-aligns the struct */
+    vec4 pad1[7]; /* 112 more -> 256 = PRISM_BODY_STRIDE */
+};
 
-layout(local_size_x = 16, local_size_y = 16) in;
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer BodyTable {
+    GlassBody bodies[];
+};
 
-/* Packed push slots: 24-bit 0xRRGGBB tint with shape_count in the top
- * byte, and half2x16 packed parameters. */
-uint tint_color()
+
+GlassBody body_at(uint index)
 {
-    return pc.tint_color_shape_count & 0x00FFFFFFu;
+    return BodyTable(uvec2(pc.bodies_address_lo, pc.bodies_address_hi)).bodies[index];
 }
 
-uint shape_count()
+/* `ids_address` already points at THIS batch's first id: the host offsets the
+ * table address by the batch's position, so the shader indexes from 0. */
+uint body_id(uint index)
 {
-    return pc.tint_color_shape_count >> 24;
+    return BodyIds(uvec2(pc.ids_address_lo, pc.ids_address_hi)).ids[index];
 }
 
-vec2 light_direction()
+uvec2 region_extent()
 {
-    return unpackHalf2x16(pc.light_dir);
-}
-
-uvec2 group_extent()
-{
-    return uvec2(pc.group_extent & 0xFFFFu, pc.group_extent >> 16);
-}
-
-vec2 shadow_params()
-{
-    return unpackHalf2x16(pc.shadow_params);
-}
-
-vec2 size_params()
-{
-    return unpackHalf2x16(pc.size_params);
-}
-
-vec2 strength_params()
-{
-    return unpackHalf2x16(pc.strength_params);
-}
-
-vec2 focus_curvature()
-{
-    return unpackHalf2x16(pc.focus_curvature);
-}
-
-vec2 optics_params()
-{
-    return unpackHalf2x16(pc.optics_params);
+    return uvec2(pc.region_width, pc.region_height);
 }
 
 vec4 sample_image(uint handle, vec2 uv)
@@ -133,9 +162,14 @@ vec4 sample_image(uint handle, vec2 uv)
     );
 }
 
-/* Groups share one persistent premultiplied output. Preserve material already
- * written by lower groups when a later body's translucent shadow or AA fringe
- * reaches it. The dispatches are ordered by storage read/write barriers. */
+/* Bodies in a region composite source-over into one persistent premultiplied
+ * output, in id order — which is the caller's group order. Preserve material
+ * already written by an earlier body when a later one's translucent shadow or AA
+ * fringe reaches it.
+ *
+ * No barrier is needed between bodies any more: they are one dispatch and their
+ * order is this loop. Dispatches are disjoint regions, so they never observe each
+ * other's writes either. */
 void store_source_over(uvec2 pixel, vec4 source)
 {
     vec4 destination = imageLoad(
@@ -166,25 +200,26 @@ float smooth_union(float a, float b, float radius)
     return mix(b, a, h) - radius * h * (1.0 - h);
 }
 
-float glass_sdf(vec2 p)
+float glass_sdf(vec2 p, GlassBody b)
 {
-    float cur = focus_curvature().y;
-    float d = squircle_sdf(p, pc.shape0, pc.radius0, cur);
-    if (shape_count() > 1u) {
-        d = smooth_union(d, squircle_sdf(p, pc.shape1, pc.radius1, cur), pc.blend_radius);
+    float cur = b.curvature;
+    float d = squircle_sdf(p, b.shape0, b.radius0, cur);
+    if (b.shape_count > 1u) {
+        d = smooth_union(d, squircle_sdf(p, b.shape1, b.radius1, cur), b.blend_radius);
     }
     return d;
 }
 
-float focus_field(vec2 p)
+float focus_field(vec2 p, GlassBody b)
 {
-    float f_strength = focus_curvature().x;
-    if (f_strength <= 0.0) return 0.0;
-    float cur = focus_curvature().y;
-    float d = squircle_sdf(p, pc.focus_shape, pc.focus_radius, cur);
-    float small_side = min(pc.focus_shape.z, pc.focus_shape.w);
+    if (b.has_focus == 0u) return 0.0;
+    float d = squircle_sdf(p, b.focus_shape, b.focus_radius, b.curvature);
+    float small_side = min(b.focus_shape.z, b.focus_shape.w);
     float feather = clamp(small_side * 0.28, 14.0, 36.0);
-    return (1.0 - smoothstep(-feather, feather, d)) * clamp(f_strength, 0.0, 1.0);
+    /* has_focus is 1 only when the host resolved focus_strength > 0, so the
+     * strength itself rides opacity-times-focus elsewhere; 1.0 here means "the
+     * caller armed it". */
+    return 1.0 - smoothstep(-feather, feather, d);
 }
 
 vec3 adjust_saturation(vec3 colour, float saturation)
@@ -193,17 +228,37 @@ vec3 adjust_saturation(vec3 colour, float saturation)
     return mix(vec3(luminance), colour, saturation);
 }
 
+void shade_body(uvec2 pixel, vec2 p, vec2 uv, GlassBody b);
+
 void main()
 {
     uvec2 local = gl_GlobalInvocationID.xy;
-    uvec2 g_extent = group_extent();
-    if (local.x >= g_extent.x || local.y >= g_extent.y) return;
+    uvec2 r_extent = region_extent();
+    if (local.x >= r_extent.x || local.y >= r_extent.y) return;
     uvec2 pixel = local + uvec2(pc.origin_x, pc.origin_y);
     if (pixel.x >= pc.width || pixel.y >= pc.height) return;
 
-    vec2 p = vec2(pixel) + 0.5;
-    float d = glass_sdf(p);
-    float focus = focus_field(p);
+    /* Capture-space position for this output pixel. The slab is sized to the
+     * material's footprints, so output coordinate 0 is capture coordinate
+     * slab_origin: capture = output + slab_origin. */
+    vec2 p = vec2(pixel) + vec2(0.5) + vec2(pc.slab_origin_x, pc.slab_origin_y);
+    vec2 capture_extent = vec2(pc.capture_width, pc.capture_height);
+    vec2 uv = p / max(capture_extent, vec2(1.0));
+
+    /* Bodies are composited in id order = caller order. */
+    for (uint slot = 0u; slot < pc.id_count; ++slot) {
+        GlassBody b = body_at(body_id(slot));
+        shade_body(pixel, p, uv, b);
+    }
+}
+
+/* Shade one body at one pixel and composite it into the persistent output.
+ * Called per body id in caller order; `uv` is the capture-space UV and `p` the
+ * capture-space pixel centre, both computed once per pixel by the caller. */
+void shade_body(uvec2 pixel, vec2 p, vec2 uv, GlassBody b)
+{
+    float d = glass_sdf(p, b);
+    float focus = focus_field(p, b);
     /* One physical pixel of analytic antialiasing; coverage is also the
      * body's output alpha, preventing blur from leaking beyond corners. */
     float coverage = 1.0 - smoothstep(-0.75, 0.75, d);
@@ -211,22 +266,21 @@ void main()
     /* Drop shadow: the same SDF shifted down by the light offset, with a
      * soft falloff. It grounds the body and is what separates the glass
      * from uniform bright content. Fades with the body's opacity. */
-    float body_min = min(pc.shape0.z, pc.shape0.w);
-    vec2 size_ref_min = size_params();
+    float body_min = min(b.shape0.z, b.shape0.w);
+    vec2 size_ref_min = vec2(b.size_reference, b.size_scale_min);
     float size_scale = 1.0;
     if (size_ref_min.x > 0.0) {
         size_scale = clamp(body_min / size_ref_min.x, size_ref_min.y, 1.0);
     }
     
-    vec2 shadow_p = shadow_params();
-    float shadow_blur = shadow_p.x;
-    float shadow_offset_y = shadow_p.y;
+    float shadow_blur = b.shadow_blur;
+    float shadow_offset_y = b.shadow_offset_y;
     float shadow = 0.0;
-    if (pc.shadow_alpha > 0.0) {
-        float sd = glass_sdf(p - vec2(0.0, shadow_offset_y));
-        shadow = (1.0 - smoothstep(0.0, shadow_blur * 2.0, max(sd, 0.0))) * pc.shadow_alpha;
+    if (b.shadow_alpha > 0.0) {
+        float sd = glass_sdf(p - vec2(0.0, shadow_offset_y), b);
+        shadow = (1.0 - smoothstep(0.0, shadow_blur * 2.0, max(sd, 0.0))) * b.shadow_alpha;
     }
-    shadow *= clamp(pc.opacity, 0.0, 1.0);
+    shadow *= clamp(b.opacity, 0.0, 1.0);
     if (coverage <= 0.0) {
         if (shadow <= 0.002) return;
         store_source_over(pixel, vec4(0.0, 0.0, 0.0, shadow));
@@ -251,13 +305,12 @@ void main()
      * is gated on u > 0, so the fallback normal is never read. */
     vec2 rim_normal = vec2(0.0, 1.0);
     if (u > 0.0) {
-        float dx = glass_sdf(p + vec2(1.5, 0.0)) - glass_sdf(p - vec2(1.5, 0.0));
-        float dy = glass_sdf(p + vec2(0.0, 1.5)) - glass_sdf(p - vec2(0.0, 1.5));
+        float dx = glass_sdf(p + vec2(1.5, 0.0), b) - glass_sdf(p - vec2(1.5, 0.0), b);
+        float dy = glass_sdf(p + vec2(0.0, 1.5), b) - glass_sdf(p - vec2(0.0, 1.5), b);
         rim_normal = normalize(vec2(dx, dy) + vec2(1e-6));
     }
 
-    vec2 inv_extent = 1.0 / vec2(pc.width, pc.height);
-    vec2 uv = p * inv_extent;
+    vec2 inv_extent = 1.0 / max(vec2(pc.capture_width, pc.capture_height), vec2(1.0));
     vec2 normal_uv = rim_normal * inv_extent;
 
     /* Lensing: sample the sharp backdrop inward along the rim normal —
@@ -285,7 +338,7 @@ void main()
      * keeps the classic profile (capped at 1.0), so a per-group strength
      * raise fogs the body without over-frosting the silhouette, where
      * refraction legibility lives. */
-    vec2 strengths = strength_params();
+    vec2 strengths = vec2(b.tint_strength, b.frost_strength);
     float tint_strength = strengths.x;
     float frost_strength = strengths.y;
     float interior_frost = frost_strength <= 1.0
@@ -295,7 +348,7 @@ void main()
         clamp(interior_frost + 0.20 * u * u * min(frost_strength, 1.0), 0.0, 1.0);
     frost_amount *= 1.0 - 0.35 * focus;
     vec3 colour = mix(refracted, frost, frost_amount);
-    colour = adjust_saturation(colour, max(pc.saturation, 0.0));
+    colour = adjust_saturation(colour, max(b.saturation, 0.0));
 
     /* Physical dielectric optics:
      * 1) Ambient reflectance floor: over dark content, the dielectric surface
@@ -304,7 +357,7 @@ void main()
      * 2) Volumetric transmission: light passing through the glass experiences
      *    natural optical attenuation (~15-18%) and tint absorption along its optical
      *    thickness, without artificial dirty smoke plate darkening. */
-    vec2 optics = optics_params();
+    vec2 optics = vec2(b.contact_ao, b.ambient_fresnel);
     float contact_ao = optics.x;
     float ambient_fresnel = optics.y;
 
@@ -312,8 +365,8 @@ void main()
     float dark_ratio = 1.0 - smoothstep(0.15, 0.65, backdrop_luma);
     float tint_profile = (0.65 + 0.35 * (1.0 - u)) * tint_strength * (1.0 - 0.25 * focus);
 
-    vec3 tint_rgb = vec3((tint_color() >> 16) & 0xFFu, (tint_color() >> 8) & 0xFFu,
-                         tint_color() & 0xFFu) / 255.0;
+    vec3 tint_rgb = vec3((b.tint_color >> 16) & 0xFFu, (b.tint_color >> 8) & 0xFFu,
+                         b.tint_color & 0xFFu) / 255.0;
 
     // Ambient reflection floor on dark backgrounds (~10% pearl):
     vec3 refl_floor = vec3(1.0) * tint_rgb * (0.10 * dark_ratio * tint_profile);
@@ -329,7 +382,7 @@ void main()
      * directional gain preserves the scene's own hue. There is deliberately
      * no additive white wash or edge ring to read as a nested material. */
     if (focus > 0.0) {
-        vec2 focus_uv = clamp((p - pc.focus_shape.xy) / max(pc.focus_shape.zw, vec2(1.0)), vec2(0.0), vec2(1.0));
+        vec2 focus_uv = clamp((p - b.focus_shape.xy) / max(b.focus_shape.zw, vec2(1.0)), vec2(0.0), vec2(1.0));
         float focus_key = clamp(1.05 - dot(focus_uv, vec2(0.35, 0.65)), 0.0, 1.0);
         float focus_luminance = dot(colour, vec3(0.2126, 0.7152, 0.0722));
         colour = mix(vec3(focus_luminance), colour, 1.0 + 0.08 * focus);
@@ -341,7 +394,7 @@ void main()
      * Ambient light reflects off the curved meniscus surface as clean specular rims
      * with zero ghosting or duplicate offset imagery. */
 
-    vec2 key_dir = normalize(light_direction() + vec2(1e-6));
+    vec2 key_dir = normalize(vec2(b.light_x, b.light_y) + vec2(1e-6));
 
     /* 3D Meniscus Illumination and Contact AO:
      * Concentrated at the rim band (u > 0). In the flat interior (u == 0,
@@ -380,7 +433,6 @@ void main()
 
     /* Body alpha, then shadow composited underneath the AA fringe and any
      * semi-transparent body. */
-    float alpha = coverage * clamp(pc.opacity, 0.0, 1.0);
+    float alpha = coverage * clamp(b.opacity, 0.0, 1.0);
     alpha = alpha + shadow * (1.0 - alpha);
-    store_source_over(pixel, vec4(colour * alpha, alpha));
-}
+    store_source_over(pixel, vec4(colour * alpha, alpha));}

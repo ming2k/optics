@@ -40,6 +40,15 @@ add_project_arguments(
   language : 'c',
 )
 
+opt_tracy = get_option('tracy')
+if opt_tracy
+  add_languages('cpp', required : true, native : false)
+  tracy_dep = dependency('tracy', fallback : ['tracy', 'tracy_dep'], required : true)
+  add_project_arguments('-DOPTICS_PROFILER_TRACY=1', language : 'c')
+else
+  tracy_dep = declare_dependency()
+endif
+
 subdir('libs/flux')
 
 opt_glyph = get_option('glyph')
@@ -171,4 +180,5 @@ if get_option('tests')
   subdir('tests/transit')
   subdir('tests/lens')
   subdir('tests/iris')
+  subdir('tests/optics')
 endif

@@ -15,6 +15,8 @@
  *   - the frame-slot filter: per-slot output, footprint clearing, dispatch
  */
 
+#include "prism_observe.h"
+#include <flux/profile.h>
 #include <prism/liquid_glass.h>
 
 #include <flux/compute.h>
@@ -121,11 +123,18 @@ static flux_format prism_output_format(const flux_image *input) {
 }
 
 typedef struct liquid_glass_filter_slot {
+    /* Slab extent: sized to the material's footprints on the size ladder, not to
+     * the capture. See prism_material_frame.h. */
     uint32_t width;
     uint32_t height;
     flux_format format; /* of `output` */
     flux_image *output;
     bool initialized;
+    /* Where this slab sits in capture space. */
+    uint32_t slab_x;
+    uint32_t slab_y;
+    uint32_t capture_width;
+    uint32_t capture_height;
     uint32_t previous_count;
     liquid_glass_region previous[LIQUID_GLASS_MAX_GROUPS];
     /* Per-slot backdrop statistics: one HOST_VISIBLE storage buffer written
@@ -143,6 +152,12 @@ struct prism_liquid_glass_filter {
     flux_compute_pipeline *glass_pipelines[2]; /* lazily built on first apply */
     flux_compute_pipeline *clear_pipelines[2];
     flux_compute_pipeline *stats_pipeline;
+    /* Per-body parameters and per-region body id lists, both host-visible and
+     * addressed by device address. Not per slot: a filter slot is owned by one
+     * frame at a time (its fence has signalled before the slot is reused), and
+     * the table is fully written before the submission that reads it. */
+    prism_body_table bodies;
+    prism_body_ids ids;
     liquid_glass_filter_slot slots[FLUX_MAX_FRAMES_IN_FLIGHT];
 };
 
@@ -268,8 +283,17 @@ flux_result prism_liquid_glass_filter_create(flux_device *device, prism_liquid_g
     if (!device || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;
-    prism_liquid_glass_filter *filter = calloc(1, sizeof(*filter));
-    if (!filter)
+    /* Caller's allocator, attributed to prism (ADR-0135). */
+    prism_liquid_glass_filter *filter = nullptr;
+    if (flux_device_alloc(device,
+                          &(flux_device_alloc_opts){
+                              .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
+                              .bytes = sizeof(*filter),
+                              .owner = PRISM_OBSERVE_OWNER,
+                              .kind = PRISM_OBSERVE_KIND_LIQUID_GLASS,
+                              .scope = FLUX_SCOPE_DEVICE,
+                          },
+                          (void **)&filter) != FLUX_OK)
         return FLUX_ERROR_OUT_OF_MEMORY;
     atomic_init(&filter->ref_count, 1u);
     filter->device = flux_device_retain(device);
@@ -305,7 +329,15 @@ void prism_liquid_glass_filter_release(prism_liquid_glass_filter *filter) {
     }
     if (filter->stats_pipeline)
         flux_compute_pipeline_release(filter->stats_pipeline);
-    free(filter);
+    prism_body_table_release(&filter->bodies);
+    prism_body_ids_release(&filter->ids);
+    flux_device_free(device, &(flux_device_free_opts){
+                                 .type = FLUX_TYPE_DEVICE_FREE_OPTS,
+                                 .ptr = filter,
+                                 .owner = PRISM_OBSERVE_OWNER,
+                                 .kind = PRISM_OBSERVE_KIND_LIQUID_GLASS,
+                                 .scope = FLUX_SCOPE_DEVICE,
+                             });
     flux_device_release(device);
 }
 
@@ -323,11 +355,18 @@ static flux_result liquid_glass_ensure_stats_buffer(prism_liquid_glass_filter *f
     return flux_buffer_create(filter->device, &bdesc, &slot->stats);
 }
 
+/* Ensure the slot's slab can hold `footprint`: an image whose extent is the
+ * footprint quantised up the size ladder, never the capture. Re-allocation only
+ * happens when the quantised extent actually changes, so a resize sweep that
+ * walks a few pixels per frame reuses the image instead of churning one per
+ * step. */
 static flux_result liquid_glass_ensure_slot(prism_liquid_glass_filter *filter, uint32_t index,
-                                            const flux_image *input, bool need_stats) {
+                                            const flux_image *input, uint32_t footprint_w,
+                                            uint32_t footprint_h, bool need_stats) {
     liquid_glass_filter_slot *slot = &filter->slots[index];
-    uint32_t width = flux_image_width(input);
-    uint32_t height = flux_image_height(input);
+    uint32_t width = 0u;
+    uint32_t height = 0u;
+    prism_slab_for_footprint(footprint_w, footprint_h, &width, &height);
     flux_format format = prism_output_format(input);
     if (slot->output && slot->width == width && slot->height == height && slot->format == format)
         return need_stats ? liquid_glass_ensure_stats_buffer(filter, slot) : FLUX_OK;
@@ -442,10 +481,11 @@ static void record_storage_clear_regions(prism_liquid_glass_filter *filter, VkCo
 }
 
 flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, flux_frame *frame,
-                                            const prism_liquid_glass_desc *desc, flux_image **out) {
+                                            const prism_liquid_glass_desc *desc,
+                                            prism_material_output *out) {
     if (!filter || !frame || !desc || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = nullptr;
+    *out = (prism_material_output){0};
     if (!valid_liquid_glass_desc(desc))
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (flux_frame_get_state(frame) != FLUX_FRAME_STATE_RECORDING ||
@@ -473,16 +513,19 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
     uint32_t index = flux_frame_index(frame);
     if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
         return FLUX_ERROR_OUT_OF_RANGE;
-    flux_result result = liquid_glass_ensure_slot(filter, index, input, desc->group_count > 0u);
-    if (result != FLUX_OK)
-        return result;
 
-    uint32_t image_width = flux_image_width(input);
-    uint32_t image_height = flux_image_height(input);
+    FLUX_PROFILE_ZONE(z_glass, "prism.liquid_glass_apply");
+
+    const uint32_t capture_width = flux_image_width(input);
+    const uint32_t capture_height = flux_image_height(input);
     liquid_glass_filter_slot *slot = &filter->slots[index];
+
+    /* 1. Footprints, in capture space. */
     liquid_glass_region current[LIQUID_GLASS_MAX_GROUPS];
-    uint32_t current_group_indices[LIQUID_GLASS_MAX_GROUPS];
+    uint32_t current_body_ids[LIQUID_GLASS_MAX_GROUPS];
     uint32_t current_count = 0u;
+    uint32_t footprint_x0 = UINT32_MAX, footprint_y0 = UINT32_MAX;
+    uint32_t footprint_x1 = 0u, footprint_y1 = 0u;
     for (uint32_t i = 0; i < desc->group_count; ++i) {
         const prism_liquid_glass_group *group = &desc->groups[i];
         /* The body's shadow reaches its downward offset plus the falloff. */
@@ -490,22 +533,119 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
                                                               2.0f * fmaxf(group->shadow_blur, 0.0f)
                                                         : 0.0f;
         liquid_glass_region region;
-        if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, image_width, image_height,
+        if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, capture_width, capture_height,
                                                 &region))
             continue;
         current[current_count] = region;
-        current_group_indices[current_count] = i;
+        current_body_ids[current_count] = i;
         ++current_count;
+        if (region.x < footprint_x0)
+            footprint_x0 = region.x;
+        if (region.y < footprint_y0)
+            footprint_y0 = region.y;
+        if (region.x + region.width > footprint_x1)
+            footprint_x1 = region.x + region.width;
+        if (region.y + region.height > footprint_y1)
+            footprint_y1 = region.y + region.height;
     }
 
+    /* 2. Slab extent from those footprints. An empty submission keeps a minimal
+     * slab: it still has to exist to be returned and cleared. */
+    uint32_t footprint_w = 1u;
+    uint32_t footprint_h = 1u;
+    if (current_count > 0u) {
+        footprint_w = footprint_x1 - footprint_x0;
+        footprint_h = footprint_y1 - footprint_y0;
+    }
+    flux_result result = liquid_glass_ensure_slot(filter, index, input, footprint_w, footprint_h,
+                                                  desc->group_count > 0u);
+    if (result != FLUX_OK)
+        return result;
+
+    /* The slab covers every footprint by construction, so its origin IS the
+     * footprint origin and the capture-to-slab offset is its negation. Regions
+     * are stored in slab space from here on, including the ones kept for the
+     * next submission's clear. */
+    const uint32_t slab_x = current_count > 0u ? footprint_x0 : 0u;
+    const uint32_t slab_y = current_count > 0u ? footprint_y0 : 0u;
+    for (uint32_t i = 0; i < current_count; ++i) {
+        current[i].x -= slab_x;
+        current[i].y -= slab_y;
+    }
+    slot->slab_x = slab_x;
+    slot->slab_y = slab_y;
+    slot->capture_width = capture_width;
+    slot->capture_height = capture_height;
+
+    /* 3. Clear previous + current footprints (slab space) to transparent. */
     liquid_glass_region clear_regions[LIQUID_GLASS_MAX_CLEAR_REGIONS];
     uint32_t clear_count = 0u;
     if (!liquid_glass_build_clear_regions(
-            slot->initialized, image_width, image_height, slot->previous, slot->previous_count,
+            slot->initialized, slot->width, slot->height, slot->previous, slot->previous_count,
             current, current_count, clear_regions, LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count))
         return FLUX_ERROR_INVALID_STATE;
 
-    result = liquid_glass_ensure_pipelines(filter, is16f, clear_count > 0u, current_count > 0u,
+    /**
+     * 4. Coalesce into disjoint dispatch regions, and for each region record the
+     * bodies that reach it, in caller order.
+     *
+     * Coalescing is what makes batching correct as well as cheap: two bodies that
+     * share a pixel necessarily coalesce into the same rectangle, so their
+     * source-over order becomes id order inside one dispatch. Disjoint regions
+     * never write each other's pixels, so no barrier is needed between them —
+     * which removes the per-body barrier chain that used to make cost linear in
+     * body count.
+     */
+    prism_region_batch batches[PRISM_MAX_BATCHES];
+    uint32_t batch_ids[PRISM_MAX_BODIES];
+    uint32_t batch_ids_used = 0u;
+    liquid_glass_region merged[PRISM_MAX_BATCHES];
+    uint32_t merged_count = 0u;
+    for (uint32_t i = 0; i < current_count; ++i) {
+        if (!liquid_glass_add_clear_region(current[i], merged, PRISM_MAX_BATCHES, &merged_count)) {
+            /* Cannot coalesce into the budget: one region covering the slab. Every
+             * body lands in it, which is correct (the shader intersects each body
+             * with its own SDF anyway) and is still a single dispatch. */
+            merged[0] = (liquid_glass_region){0u, 0u, slot->width, slot->height};
+            merged_count = 1u;
+            break;
+        }
+    }
+    /* Each body's footprint belongs to exactly one merged region: merging is
+     * transitive over overlap, so a footprint touching two regions would have
+     * fused them. That makes the assignment total, the id array bounded by the
+     * body count (no per-region capacity guessing), and the per-region id runs
+     * trivially contiguous. */
+    uint32_t body_owner[LIQUID_GLASS_MAX_GROUPS];
+    for (uint32_t i = 0; i < current_count; ++i) {
+        body_owner[i] = UINT32_MAX;
+        for (uint32_t r = 0; r < merged_count; ++r) {
+            if (liquid_glass_regions_overlap(current[i], merged[r])) {
+                body_owner[i] = r;
+                break;
+            }
+        }
+    }
+    uint32_t batch_count = 0u;
+    for (uint32_t r = 0; r < merged_count; ++r) {
+        uint32_t first = batch_ids_used;
+        /* Caller order inside the region = the source-over order the material
+         * requires, and it is exactly the order the shader's loop walks. */
+        for (uint32_t i = 0; i < current_count; ++i) {
+            if (body_owner[i] == r)
+                batch_ids[batch_ids_used++] = current_body_ids[i];
+        }
+        batches[batch_count++] = (prism_region_batch){
+            .x = merged[r].x,
+            .y = merged[r].y,
+            .width = merged[r].width,
+            .height = merged[r].height,
+            .ids_first = first,
+            .id_count = batch_ids_used - first,
+        };
+    }
+
+    result = liquid_glass_ensure_pipelines(filter, is16f, clear_count > 0u, batch_count > 0u,
                                            desc->group_count > 0u);
     if (result != FLUX_OK)
         return result;
@@ -517,33 +657,31 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
             barrier_reuse_to_compute_write(command, output_image);
         record_storage_clear_regions(filter, command, slot->output, clear_regions, clear_count,
                                      is16f);
-        if (current_count > 0u)
+        if (batch_count > 0u)
             barrier_compute_write_to_read_write(command, output_image);
     }
 
-    /* Backdrop statistics: one 16x16 workgroup per group reduces the
-     * primary body's backdrop into (mean luminance, high-frequency energy)
-     * for the frame-lagged CPU read. Off-screen bodies reduce an empty
-     * rect, which the shader reports as zeros. Runs before the glass
-     * dispatches; it shares only their sampled inputs. */
+    /* 5. Backdrop statistics: one workgroup per body reduces the primary body's
+     * backdrop into (mean luminance, high-frequency energy). Reduction windows are
+     * capture-space rectangles, so this reads the capture, not the slab. */
     if (desc->group_count > 0u) {
         uint64_t stats_address = flux_buffer_device_address(slot->stats);
         for (uint32_t i = 0; i < desc->group_count; ++i) {
             liquid_glass_region rect =
-                liquid_glass_group_stats_bounds(&desc->groups[i], image_width, image_height);
+                liquid_glass_group_stats_bounds(&desc->groups[i], capture_width, capture_height);
             backdrop_stats_push spush = {
                 .input_handle = flux_image_bindless_handle(input),
                 .blurred_handle = flux_image_bindless_handle(blurred),
                 .sampler_handle = flux_device_default_sampler_handle(filter->device),
-                .width = image_width,
-                .height = image_height,
+                .width = capture_width,
+                .height = capture_height,
                 .rect_x = rect.x,
                 .rect_y = rect.y,
                 .rect_width = rect.width,
                 .rect_height = rect.height,
                 .group_index = i,
-                .stats_address_lo = (uint32_t)(stats_address & 0xFFFFFFFFu),
-                .stats_address_hi = (uint32_t)(stats_address >> 32u),
+                .stats_address_lo = prism_address_lo(stats_address),
+                .stats_address_hi = prism_address_hi(stats_address),
             };
             flux_compute_dispatch(command, filter->stats_pipeline, &spush, sizeof(spush), 1u, 1u,
                                   1u);
@@ -551,7 +689,8 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
         barrier_stats_write_to_compute(command, flux_buffer_vk_buffer(slot->stats));
     }
 
-    bool dispatched = false;
+    /* 6. Upload the body table and the per-region id lists, then one dispatch per
+     * region. */
     const prism_glass_policy policy = {
         .refraction = desc->refraction,
         .chromatic_aberration = desc->chromatic_aberration,
@@ -570,19 +709,47 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
         .contact_ao = desc->contact_ao,
         .ambient_fresnel = desc->ambient_fresnel,
     };
-    for (uint32_t i = 0; i < current_count; ++i) {
-        const prism_liquid_glass_group *group = &desc->groups[current_group_indices[i]];
-        liquid_glass_region region = current[i];
-        if (dispatched)
-            barrier_compute_write_to_read_write(command, output_image);
-        prism_glass_record_group(command, filter->glass_pipelines[is16f ? 1 : 0], filter->device,
-                                 input, blurred, slot->output, image_width, image_height, region,
-                                 group, &policy);
-        dispatched = true;
+    bool dispatched = false;
+    if (batch_count > 0u) {
+        uint32_t rows = desc->group_count;
+        for (uint32_t i = 0; i < rows; ++i) {
+            void *row = prism_body_table_row(filter->device, &filter->bodies, rows, i);
+            if (!row)
+                return FLUX_ERROR_OUT_OF_MEMORY;
+            *(prism_glass_body_row *)row = prism_glass_make_row(&desc->groups[i], &policy);
+        }
+        uint32_t *ids = prism_body_ids_slot(filter->device, &filter->ids, batch_ids_used);
+        if (!ids)
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        for (uint32_t i = 0; i < batch_ids_used; ++i)
+            ids[i] = batch_ids[i];
+
+        const prism_glass_copy copy = {
+            .sharp = input,
+            .blurred = blurred,
+            .capture_width = (float)capture_width,
+            .capture_height = (float)capture_height,
+            .slab_origin_x = (float)slab_x,
+            .slab_origin_y = (float)slab_y,
+        };
+        for (uint32_t r = 0; r < batch_count; ++r) {
+            if (!liquid_glass_region_is_dispatchable(
+                    (liquid_glass_region){batches[r].x, batches[r].y, batches[r].width,
+                                          batches[r].height},
+                    slot->width, slot->height))
+                continue;
+            /* The id list for this batch starts at its ids_first slot; the shader
+             * indexes from the list base, so pass the base plus the offset. */
+            prism_glass_record_batch(command, filter->glass_pipelines[is16f ? 1 : 0],
+                                     filter->device, &copy, slot->output, slot->width, slot->height,
+                                     &batches[r], &policy, filter->bodies.address,
+                                     filter->ids.address + batches[r].ids_first * sizeof(uint32_t));
+            dispatched = true;
+        }
     }
-    /* Both the transparent region clear and liquid material are compute
-     * storage writes. Make the persistent output visible to its following
-     * Canvas sample, including a clear-only apply after all groups disappear. */
+    /* The material writes storage; make the persistent output visible to its
+     * following Canvas sample, including a clear-only apply after every body
+     * disappeared. */
     if (clear_count > 0u || dispatched)
         barrier_compute_write_to_read(command, output_image);
 
@@ -594,7 +761,14 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
     /* A zero-group apply submits no stats; the frame-lagged read then
      * honestly reports zero groups for this slot's last submission. */
     slot->stats_group_count = desc->group_count;
-    *out = slot->output;
+    *out = (prism_material_output){
+        .image = slot->output,
+        .origin_x = (float)slab_x,
+        .origin_y = (float)slab_y,
+        .width = slot->width,
+        .height = slot->height,
+    };
+    FLUX_PROFILE_ZONE_END(z_glass);
     return FLUX_OK;
 }
 

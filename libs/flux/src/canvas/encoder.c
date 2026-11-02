@@ -178,6 +178,20 @@ flux_result flux_encoder_create(const flux_encoder_desc *desc, flux_encoder **ou
     return FLUX_OK;
 }
 
+/* An encoder is a frame-lifetime recorder: it is created, records one
+ * frame's commands, and is destroyed before the frame ends. It is the one
+ * resource in the stack whose lifetime genuinely coincides with a frame, so it
+ * is the FLUX_LIFETIME_FRAME kind that `flux_observe_frame_drain_check`
+ * enforces at the frame boundary (ADR-0129 decision 4).
+ *
+ * Device-free by design: an encoder may exist before any device (CPU canvas,
+ * headless recording), so its row lives in a device ledger only when one is
+ * reachable. Recording has no device argument, hence the row is declared with
+ * a nullptr device and lands in the process ledger, whose drain point is
+ * process exit — which would be the wrong drain point for a per-frame object.
+ * Instead the encoder takes the device from its own canvas-bound creation path
+ * when there is one; the flux_canvas_reserve path below passes it explicitly. */
+
 void flux_encoder_destroy(flux_encoder *enc) {
     if (!enc)
         return;

@@ -241,6 +241,7 @@ void lensi_scroll_clamp(lens *ui) {
 void lensi_layout_solve(lens *ui) {
     if (!ui->root)
         return;
+    FLUX_PROFILE_ZONE(z, "lens.layout_solve");
     (void)measure(ui->root);
     flux_rect display = {0, 0, ui->input.display_size.x, ui->input.display_size.y};
     if (display.w <= 0)
@@ -249,4 +250,5 @@ void lensi_layout_solve(lens *ui) {
         display.h = ui->root->measured.y;
     lensi_arrange_node(ui->root, display);
     lensi_scroll_clamp(ui);
+    FLUX_PROFILE_ZONE_END(z);
 }

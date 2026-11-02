@@ -54,6 +54,8 @@ flux_sources = files(
   'src/core/target.c',
   'src/core/graphics_pipeline.c',
   'src/core/vk_allocator.c',
+  'src/core/observe.c',
+  'src/core/profile.c',
   'src/core/icc.c',
   'src/canvas/image.c',
   'src/math/vec.c',
@@ -74,6 +76,16 @@ endif
 flux_extra_inputs = []
 
 flux_c_args = ['-DFLUX_BUILDING=1'] + flux_c_args_dma
+
+# Observation-plane attribution (ADR-0129). Off by default so a release
+# build carries no name/site machinery; ON is what makes FLUX_OBSERVE_NAMES,
+# FLUX_OBSERVE_PASS_LABELS and FLUX_OBSERVE_SITES cost anything. The absence
+# of the symbols in a default build is verified by ./tools/optics check
+# leaks, so "debug only" is a checked property rather than a promise.
+opt_observe_attribution = get_option('observe_attribution')
+if opt_observe_attribution
+  flux_c_args += '-DFLUX_OBSERVE_ATTRIBUTION=1'
+endif
 
 # C23 #embed bakes each compiled .spv into the binary (renderer.c /
 # effect.c / scene.c). Compilers without #embed (MSVC cl, Apple Clang)
@@ -403,7 +415,7 @@ flux_lib = library('flux',
   flux_extra_inputs,
   include_directories   : flux_inc,
   c_args                : flux_c_args,
-  dependencies          : [vulkan_dep, threads_dep, m_dep],
+  dependencies          : [vulkan_dep, threads_dep, m_dep, tracy_dep],
   gnu_symbol_visibility : 'hidden',
   soversion             : optics_soname,
   version               : meson.project_version(),
@@ -417,6 +429,8 @@ install_headers(
   'include/flux/curve.h',
   'include/flux/sdf.h',
   'include/flux/vulkan.h',
+  'include/flux/observe.h',
+  'include/flux/profile.h',
   'include/flux/dmabuf.h',
   subdir : 'flux',
 )
@@ -466,7 +480,7 @@ flux_dep = declare_dependency(
   link_with             : flux_lib,
   include_directories   : flux_inc,
   compile_args          : flux_public_defines,
-  dependencies          : [vulkan_dep],
+  dependencies          : [vulkan_dep, tracy_dep],
 )
 
 pkg.generate(

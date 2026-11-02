@@ -82,7 +82,7 @@ PRISM_API void prism_frosted_filter_release(prism_frosted_filter *filter);
 PRISM_NODISCARD PRISM_API flux_result prism_frosted_filter_apply(prism_frosted_filter *filter,
                                                                  flux_frame *frame,
                                                                  const prism_frosted_desc *desc,
-                                                                 flux_image **out);
+                                                                 prism_material_output *out);
 
 #ifdef __cplusplus
 }

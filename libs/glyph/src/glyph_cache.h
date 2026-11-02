@@ -42,6 +42,7 @@
 #ifndef FLUX_GLYPH_CACHE_H
 #define FLUX_GLYPH_CACHE_H
 
+#include <flux/core.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -97,7 +98,10 @@ typedef struct glyph_cache glyph_cache;
  * at which put() starts evicting; it must be a power of two.
  *
  * Returns NULL on allocation failure or invalid arguments. */
-glyph_cache *glyph_cache_new(uint32_t init_cap, uint32_t max_cap);
+/* `device` may be NULL (measure-only glyph_ctx), in which case the cache falls
+ * back to libc — a device-less context has no ledger and no caller allocator to
+ * honour (ADR-0135). */
+glyph_cache *glyph_cache_new(flux_device *device, uint32_t init_cap, uint32_t max_cap);
 void glyph_cache_destroy(glyph_cache *c);
 
 /* Lookup. Returns NULL on miss. On hit, bumps the entry's LRU tick so

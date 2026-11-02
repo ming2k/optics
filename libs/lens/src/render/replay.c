@@ -26,6 +26,13 @@ typedef struct snapshot_node {
 
 struct lens_scene_snapshot {
     atomic_uint ref_count;
+    /* Retained device, for allocation attribution and ledger settlement
+     * (ADR-0135). Deliberately NOT a `lens *`: a snapshot's last release can
+     * happen after `lens_release` (a host may hold a reference), so reaching
+     * back through the context would be a use-after-free. The device is
+     * refcounted and outlives the context, which is exactly the lifetime the
+     * snapshot needs. */
+    flux_device *device;
     uint64_t generation;
     flux_display_list *display_list;
     bool has_damage;
@@ -613,10 +620,11 @@ flux_result lens_snapshot_create(lens *ui, lens_scene_snapshot **out_snapshot) {
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (ui->building || !ui->generation)
         return FLUX_ERROR_INVALID_STATE;
-    lens_scene_snapshot *s = calloc(1, sizeof(*s));
+    lens_scene_snapshot *s = lensi_alloc_by_device(ui->device, sizeof(*s));
     if (!s)
         return FLUX_ERROR_OUT_OF_MEMORY;
     atomic_init(&s->ref_count, 1u);
+    s->device = flux_device_retain(ui->device);
     s->owner_identity = ui->identity;
     s->overlay_head = SIZE_MAX;
     s->has_damage = lens_frame_needs_repaint(ui);
@@ -650,11 +658,18 @@ void lens_snapshot_release(lens_scene_snapshot *snapshot) {
     if (snapshot->display_list)
         flux_display_list_release(snapshot->display_list);
     for (size_t i = 0; i < snapshot->node_count; i++) {
-        free((void *)snapshot->nodes[i].semantics.name);
-        free((void *)snapshot->nodes[i].semantics.value);
+        free((void *)snapshot->nodes[i].semantics.name);  // RAW_ALLOC_OK(paired-platform)
+        free((void *)snapshot->nodes[i].semantics.value); // RAW_ALLOC_OK(paired-platform)
     }
-    free(snapshot->nodes);
-    free(snapshot);
+    /* Order matters and is easy to get wrong: `snapshot` itself is about to be
+     * freed, so its `device` field must be read into a local BEFORE the free,
+     * and the device reference dropped AFTER — releasing it first left the
+     * subsequent free reading a freed pointer, which is what this crash was. */
+    flux_device *device = snapshot->device;
+    lensi_free_by_device(device, snapshot->nodes);
+    lensi_free_by_device(device, snapshot);
+    if (device)
+        flux_device_release(device);
 }
 
 uint64_t lens_snapshot_generation(const lens_scene_snapshot *snapshot) {
@@ -715,12 +730,12 @@ static flux_result capture_node(lens *ui, lens_scene_snapshot *s, lens_node *n, 
         s->overlay_head = s->node_count - 1;
     }
     if (n->semantics.name) {
-        entry->semantics.name = strdup(n->semantics.name);
+        entry->semantics.name = strdup(n->semantics.name); // RAW_ALLOC_OK(paired-platform)
         if (!entry->semantics.name)
             return FLUX_ERROR_OUT_OF_MEMORY;
     }
     if (n->semantics.value) {
-        entry->semantics.value = strdup(n->semantics.value);
+        entry->semantics.value = strdup(n->semantics.value); // RAW_ALLOC_OK(paired-platform)
         if (!entry->semantics.value)
             return FLUX_ERROR_OUT_OF_MEMORY;
     }
@@ -745,7 +760,7 @@ static flux_result capture_node(lens *ui, lens_scene_snapshot *s, lens_node *n, 
 static flux_result capture_metadata(lens *ui, lens_scene_snapshot *snapshot) {
     if (!ui->root)
         return FLUX_OK;
-    snapshot->nodes = calloc(ui->store.count, sizeof(*snapshot->nodes));
+    snapshot->nodes = lensi_alloc_by_device(ui->device, ui->store.count * sizeof(*snapshot->nodes));
     if (!snapshot->nodes)
         return FLUX_ERROR_OUT_OF_MEMORY;
     return capture_node(ui, snapshot, ui->root, (flux_rect){-1e6f, -1e6f, 2e6f, 2e6f}, 0,

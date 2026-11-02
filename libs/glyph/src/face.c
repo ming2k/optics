@@ -104,7 +104,7 @@ bool txt_ensure_face_loaded(glyph_ctx *t, int slot_idx, int face_idx, uint32_t r
         return true;
     }
     if (!face_load(t, slot_idx, face_idx, req_px)) {
-        free(f->path);
+        free(f->path); // RAW_ALLOC_OK(paired-platform)
         f->path = NULL;
         if (f->charset) {
             txtp_charset_free(f->charset);
@@ -162,7 +162,8 @@ static int txt_load_patch_face(glyph_ctx *t, int slot_idx, uint32_t cp) {
         int newcap = slot->cap ? slot->cap * 2 : MAX_FACES_PER_SLOT;
         if (newcap > MAX_TOTAL_FACES)
             newcap = MAX_TOTAL_FACES;
-        txt_face *nf = realloc(slot->faces, (size_t)newcap * sizeof *nf);
+        txt_face *nf = txt_realloc(t, slot->faces, (size_t)slot->cap * sizeof *nf,
+                                   (size_t)newcap * sizeof *nf, "faces");
         if (!nf) {
             txtp_font_match_clear(&m);
             return -1;
@@ -193,7 +194,7 @@ static int txt_load_patch_face(glyph_ctx *t, int slot_idx, uint32_t cp) {
                  "charset patch face (%s) for U+%04X failed to load; "
                  "glyph will render as .notdef",
                  f->path ? f->path : "<unknown>", (unsigned)cp);
-        free(f->path);
+        free(f->path); // RAW_ALLOC_OK(paired-platform)
         f->path = NULL;
         if (f->charset) {
             txtp_charset_free(f->charset);
@@ -249,8 +250,8 @@ bool txt_init_slot_faces(glyph_ctx *t, int slot_idx, float weight, bool italic,
     /* Free any prior heap array (re-init path) and pre-allocate the
      * primary chain. Patch faces grow this array later via
      * txt_load_patch_face, up to MAX_TOTAL_FACES. */
-    free(slot->faces);
-    slot->faces = calloc(MAX_FACES_PER_SLOT, sizeof *slot->faces);
+    txt_free(t, slot->faces, "faces");
+    slot->faces = txt_alloc(t, (size_t)MAX_FACES_PER_SLOT * sizeof *slot->faces, "faces");
     if (!slot->faces) {
         txtp_font_list_free(list);
         return false;
@@ -321,7 +322,9 @@ bool txt_init_slot_faces(glyph_ctx *t, int slot_idx, float weight, bool italic,
 /* ------------------------------------------------------------------ */
 
 glyph_ctx *txt_engine_init(flux_device *dev) {
-    glyph_ctx *t = calloc(1, sizeof *t);
+    /* The context itself precedes any device association, so it takes a plain
+     * zeroed allocation; everything it owns afterwards goes through txt_alloc. */
+    glyph_ctx *t = calloc(1, sizeof *t); // RAW_ALLOC_OK(paired-platform)
     if (!t) {
         txt_logf(t, FLUX_LOG_ERROR, "out of memory");
         return NULL;
@@ -330,6 +333,7 @@ glyph_ctx *txt_engine_init(flux_device *dev) {
      * nearest sampler are released at shutdown and must never see a dead
      * device. flux_device_retain is NULL-safe. */
     t->dev = flux_device_retain(dev);
+    txt_observe_acquire(t, "context", 0);
 
     if (FT_Init_FreeType(&t->ft) != 0) {
         txt_logf(t, FLUX_LOG_ERROR, "FT_Init_FreeType failed");
@@ -358,7 +362,7 @@ glyph_ctx *txt_engine_init(flux_device *dev) {
      * GLYPH_HASH_CAP. Sized to start small (grows on demand up to the
      * cap); eviction only fires when the working set genuinely exceeds
      * the cap, which is rare even for long CJK sessions. */
-    t->cache = glyph_cache_new(GLYPH_HASH_INIT, GLYPH_HASH_CAP);
+    t->cache = glyph_cache_new(t->dev, GLYPH_HASH_INIT, GLYPH_HASH_CAP);
     if (!t->cache) {
         txt_logf(t, FLUX_LOG_ERROR, "glyph cache alloc failed");
         goto fail;
@@ -408,14 +412,21 @@ fail:
 void txt_engine_shutdown(glyph_ctx *t) {
     if (!t)
         return;
+    /* Context-scope drain point (ADR-0129). Emitted before the device
+     * reference is dropped, so the row is still nameable and the device
+     * ledger still exists to receive it. */
+    txt_observe_release(t, "context", 0);
     txt_atlas_destroy(t);
     glyph_cache_destroy(t->cache);
     t->cache = NULL;
     txt_layout_cache_reset(t);
-    free(t->layout_buf);
-    free(t->atlas_upload_scratch);
-    free(t->runs_buf);
-    free(t->run_levels_buf);
+    /* Already freed by the callees above on most paths; these are the belt-and-
+     * braces frees for a context that never reached them. Routed through the
+     * funnel so they match the allocation. */
+    txt_free(t, t->layout_buf, "layout");
+    txt_free(t, t->atlas_upload_scratch, "atlas_scratch");
+    txt_free(t, t->runs_buf, "run_buf");
+    txt_free(t, t->run_levels_buf, "run_levels_buf");
     txt_itemize_release_scratch(t);
     if (t->nearest_sampler)
         flux_sampler_release(t->nearest_sampler);
@@ -447,9 +458,9 @@ void txt_engine_shutdown(glyph_ctx *t) {
                 FT_Done_Face(f->face);
             if (f->charset)
                 txtp_charset_free(f->charset);
-            free(f->path);
+            free(f->path); // RAW_ALLOC_OK(paired-platform)
         }
-        free(slot->faces);
+        txt_free(t, slot->faces, "faces");
         slot->faces = NULL;
         slot->count = slot->cap = 0;
     }
@@ -458,7 +469,7 @@ void txt_engine_shutdown(glyph_ctx *t) {
     /* Released last: the atlas image and sampler releases above dereference
      * the device (retire queue / bindless heap), so it must outlive them. */
     flux_device_release(t->dev);
-    free(t);
+    free(t); // RAW_ALLOC_OK(paired-platform)
 }
 
 /* ------------------------------------------------------------------ */
@@ -479,7 +490,7 @@ flux_result glyph_create(const glyph_desc *desc, glyph_ctx **out) {
     if (t) {
         t->has_backend = true;
     } else {
-        t = calloc(1, sizeof *t);
+        t = calloc(1, sizeof *t); // RAW_ALLOC_OK(paired-platform)
         if (!t)
             return FLUX_ERROR_OUT_OF_MEMORY;
         t->dev = flux_device_retain(dev);

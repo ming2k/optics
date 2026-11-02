@@ -272,6 +272,8 @@ flux_result flux_graphics_pipeline_create(flux_device *d, const flux_graphics_pi
     }
 
     *out = p;
+    FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "vk_pipeline", "flux/core", 0,
+                         FLUX_SITE_VK_PIPELINE);
     return FLUX_OK;
 
 fail:
@@ -302,6 +304,7 @@ void flux_graphics_pipeline_release(flux_graphics_pipeline *p) {
     flux_device *pd = p->device;
     if (p->layout)
         vkDestroyPipelineLayout(pd->device, p->layout, nullptr);
+    FLUX_OBSERVE_RELEASE(pd, FLUX_SCOPE_DEVICE, "vk_pipeline", "flux/core", 0);
     flux_internal_free(pd, p);
     flux_device_release(pd);
 }

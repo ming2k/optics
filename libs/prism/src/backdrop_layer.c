@@ -11,6 +11,7 @@
  * layer image instead of the sharp capture).
  */
 
+#include "prism_observe.h"
 #include <prism/backdrop_layer.h>
 
 #include <flux/compute.h>
@@ -97,7 +98,7 @@ typedef struct backdrop_stats_push {
 
 /* Push-constant block — must match backdrop_frost.comp exactly. Eight
  * uint scalars lead the block so std430's 16-byte alignment places the
- * bounds vec4 at byte 32 on both sides. */
+ * bounds vec4 at byte 32 on both sides; `mode`/`reserved` close it. */
 typedef struct backdrop_frost_push {
     uint32_t input_handle;
     uint32_t blurred_handle;
@@ -114,13 +115,28 @@ typedef struct backdrop_frost_push {
     float tint_strength;
     uint32_t region_width;
     uint32_t region_height;
+    uint32_t mode; /* backdrop_frost_mode */
+    uint32_t reserved;
+    /* This slab's origin in capture space and the capture's extent: the plate
+     * samples the capture, but the slab is sized to the layer's footprints, so a
+     * slab pixel's capture UV needs both. */
+    float slab_origin_x;
+    float slab_origin_y;
+    float capture_width;
+    float capture_height;
 } backdrop_frost_push;
+
+/* backdrop_frost.comp modes (keep in lockstep with the shader defines). */
+typedef enum backdrop_frost_mode : uint32_t {
+    BACKDROP_FROST_MODE_BASE = 0u,  /* resolve the opaque background */
+    BACKDROP_FROST_MODE_PLATE = 1u, /* source-over one plate inside its coverage */
+} backdrop_frost_mode;
 
 static_assert(sizeof(storage_clear_push) == 28,
               "storage_clear_push no longer matches its shader block");
 static_assert(sizeof(backdrop_stats_push) == 48,
               "backdrop_stats_push no longer matches its shader block");
-static_assert(sizeof(backdrop_frost_push) == 72,
+static_assert(sizeof(backdrop_frost_push) == 96,
               "backdrop_frost_push no longer matches its shader block");
 
 #define PRISM_STATS_BYTES_LAYER (PRISM_BACKDROP_MAX_GLASS_GROUPS * 2u * sizeof(float))
@@ -143,34 +159,34 @@ typedef struct backdrop_layer_slot {
     flux_buffer *stats;
     bool stats_submitted;
     uint32_t stats_group_count;
-    /* Backdrop layer cache (INV-COMP-04) */
-    uint64_t last_desc_hash;
-    uint32_t last_input_handle;
-    uint32_t last_blurred_handle;
+    /* Where this slab sits in capture space (0,0 while the layer is still
+     * capture-sized; see prism_material_frame.h for the migration). */
+    uint32_t slab_x;
+    uint32_t slab_y;
+    /* Backdrop layer cache (ADR-0123 / INV-COMP-04). `cached_revision` is the
+     * caller-supplied prism_backdrop_layer_revision the current `output`
+     * contents belong to; 0 means the slot holds nothing cacheable. */
+    uint64_t cached_revision;
 } backdrop_layer_slot;
 
-static inline uint64_t prism_fnv1a64(const void *data, size_t len, uint64_t h) {
-    const uint8_t *p = (const uint8_t *)data;
-    for (size_t i = 0; i < len; ++i) {
-        h ^= (uint64_t)p[i];
-        h *= 1099511628211ull;
+/* Resolve the caller's content revision from the descriptor's `next` chain.
+ * Returns FLUX_OK with *out_revision = 0 when the caller did not opt in, which
+ * disables caching rather than guessing that the sources are static. */
+static flux_result layer_resolve_revision(const prism_backdrop_layer_desc *desc,
+                                          uint64_t *out_revision) {
+    *out_revision = 0u;
+    for (const prism_backdrop_layer_revision *ext = desc->next; ext; ext = ext->next) {
+        /* The chain is type-tagged so a caller can skip an extension it does
+         * not understand; prism only tolerates tags it defines. Unlike flux's
+         * effect extensions, an unknown tag is an error rather than silently
+         * ignored: a revision the material cannot read would otherwise make a
+         * cache-enabled call behave like a cache-disabled one, and the caller
+         * would never learn its caching assumption was dropped. */
+        if (ext->type != PRISM_TYPE_BACKDROP_LAYER_REVISION)
+            return FLUX_ERROR_INVALID_ARGUMENT;
+        *out_revision = ext->revision;
     }
-    return h;
-}
-
-static uint64_t prism_hash_backdrop_layer_desc(const prism_backdrop_layer_desc *desc) {
-    uint64_t h = 14695981039346656037ull;
-    h = prism_fnv1a64(&desc->refraction,
-                      offsetof(prism_backdrop_layer_desc, ambient_fresnel) + sizeof(float) -
-                          offsetof(prism_backdrop_layer_desc, refraction),
-                      h);
-    h = prism_fnv1a64(&desc->frost_count, sizeof(desc->frost_count), h);
-    if (desc->frost && desc->frost_count > 0)
-        h = prism_fnv1a64(desc->frost, sizeof(prism_base_material) * desc->frost_count, h);
-    h = prism_fnv1a64(&desc->group_count, sizeof(desc->group_count), h);
-    if (desc->groups && desc->group_count > 0)
-        h = prism_fnv1a64(desc->groups, sizeof(prism_liquid_glass_group) * desc->group_count, h);
-    return h;
+    return FLUX_OK;
 }
 
 struct prism_backdrop_layer_filter {
@@ -180,6 +196,9 @@ struct prism_backdrop_layer_filter {
     flux_compute_pipeline *clear_pipelines[2];
     flux_compute_pipeline *frost_pipelines[2];
     flux_compute_pipeline *stats_pipeline;
+    /* Per-body parameters and per-region body ids (see prism_material_frame.h). */
+    prism_body_table bodies;
+    prism_body_ids ids;
     backdrop_layer_slot slots[FLUX_MAX_FRAMES_IN_FLIGHT];
 };
 
@@ -331,16 +350,28 @@ static flux_result layer_ensure_stats_buffer(prism_backdrop_layer_filter *filter
     return flux_buffer_create(filter->device, &bdesc, &slot->stats);
 }
 
+/* Ensure the layer's slabs can hold `footprint_w` x `footprint_h` capture pixels.
+ * Both the output and the frost scratch are slab-sized on the same size ladder as
+ * every other prism material, so a 48-px chrome strip does not allocate three
+ * capture-sized RGBA16F images. Re-allocation happens only when the quantised
+ * extent changes, which also makes a resize sweep reuse the same images. */
 static flux_result layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32_t index,
-                                     const flux_image *input, bool need_stats, bool need_scratch) {
+                                     const flux_image *input, uint32_t footprint_w,
+                                     uint32_t footprint_h, bool need_stats, bool need_scratch) {
     backdrop_layer_slot *slot = &filter->slots[index];
-    uint32_t width = flux_image_width(input);
-    uint32_t height = flux_image_height(input);
+    uint32_t width = 0u;
+    uint32_t height = 0u;
+    prism_slab_for_footprint(footprint_w, footprint_h, &width, &height);
     flux_format format = prism_layer_output_format(input);
+    const uint32_t cap_w = flux_image_width(input);
+    const uint32_t cap_h = flux_image_height(input);
     if (slot->output && slot->width == width && slot->height == height && slot->format == format) {
-        if (need_scratch && !slot->scratch) {
-            flux_result r = flux_image_create_compute_writable(filter->device, width, height,
-                                                               format, &slot->scratch);
+        if (need_scratch && (!slot->scratch || flux_image_width(slot->scratch) != cap_w ||
+                             flux_image_height(slot->scratch) != cap_h)) {
+            if (slot->scratch)
+                flux_image_release(slot->scratch);
+            flux_result r = flux_image_create_compute_writable(filter->device, cap_w, cap_h, format,
+                                                               &slot->scratch);
             if (r != FLUX_OK)
                 return r;
         }
@@ -358,7 +389,7 @@ static flux_result layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32
     if (r != FLUX_OK)
         return r;
     if (need_scratch) {
-        r = flux_image_create_compute_writable(filter->device, width, height, format,
+        r = flux_image_create_compute_writable(filter->device, cap_w, cap_h, format,
                                                &slot->scratch);
         if (r != FLUX_OK)
             return r;
@@ -430,9 +461,117 @@ static flux_result layer_ensure_pipelines(prism_backdrop_layer_filter *filter, b
 }
 
 /* ------------------------------------------------------------------ */
-/*  Validation and dispatch footprints                               */
+/*  Base-material pass recording                                     */
 /* ------------------------------------------------------------------ */
 
+/* Record the two-stage base-material composite into `dst`:
+ *
+ *   1. one BASE dispatch per merged region, resolving the opaque background;
+ *   2. one PLATE dispatch per (region, plate), in caller array order.
+ *
+ * Regions are disjoint by construction (`liquid_glass_add_clear_region`
+ * merges transitively), so the BASE passes can never overwrite a plate and
+ * need no ordering barrier between them. Plates within a region are ordered
+ * by a single write→read/write barrier per (region, plate) boundary — the
+ * same idiom the glass pass uses, because each plate reads the pixels the
+ * previous one wrote.
+ *
+ * The caller publishes the finished image afterwards with the appropriate
+ * barrier; this helper only records commands. */
+static void layer_record_base_material(
+    VkCommandBuffer command, const prism_backdrop_layer_filter *filter, const flux_image *input,
+    const flux_image *blurred, flux_image *dst, uint32_t slab_width, uint32_t slab_height,
+    uint32_t slab_x, uint32_t slab_y, uint32_t capture_width, uint32_t capture_height,
+    const prism_backdrop_layer_desc *desc, const liquid_glass_region *plate_regions,
+    uint32_t plate_region_count, bool is16f) {
+    flux_compute_pipeline *pipeline = filter->frost_pipelines[is16f ? 1 : 0];
+    VkImage dst_image = flux_image_vk_image(dst);
+    uint32_t dst_storage_handle = flux_image_bindless_storage_handle(dst);
+    uint32_t input_handle = flux_image_bindless_handle(input);
+    uint32_t blurred_handle = flux_image_bindless_handle(blurred);
+    uint32_t sampler_handle = flux_device_default_sampler_handle(filter->device);
+
+    /* Stage 1 — resolve the background over the WHOLE slab, not just the plate
+     * footprints.
+     *
+     * This image is the optical lens's sample source, and a lens taps up to
+     * `refraction` pixels away from its own silhouette. If the background were
+     * only resolved where a plate sits, every tap that landed past a plate would
+     * read a cleared (transparent, premultiplied-zero) pixel and the body would
+     * darken along its rim — the exact "transparent hole" failure the opaque-base
+     * stage exists to prevent. Covering the slab makes every tap land on a true
+     * background colour.
+     *
+     * Cheap by construction: the slab is already the union of the layer's
+     * footprints, so this is one dispatch over at most the footprint bounding box,
+     * never the capture. */
+    const uint32_t gx_full = (slab_width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+    const uint32_t gy_full = (slab_height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+    backdrop_frost_push base = {
+        .input_handle = input_handle,
+        .blurred_handle = blurred_handle,
+        .sampler_handle = sampler_handle,
+        .output_handle = dst_storage_handle,
+        .width = slab_width,
+        .height = slab_height,
+        .region_width = slab_width,
+        .region_height = slab_height,
+        .mode = BACKDROP_FROST_MODE_BASE,
+        .slab_origin_x = (float)slab_x,
+        .slab_origin_y = (float)slab_y,
+        .capture_width = (float)capture_width,
+        .capture_height = (float)capture_height,
+    };
+    flux_compute_dispatch(command, pipeline, &base, sizeof(base), gx_full, gy_full, 1u);
+
+    /* Base and plates write overlapping pixels (each plate reads back what the
+     * base wrote), so the base must be visible to the first plate's imageLoad.
+     * One barrier per destination, not per plate. */
+    if (plate_region_count > 0u)
+        layer_barrier_compute_write_to_read_write(command, dst_image);
+
+    /* Stage 2 — plates, in caller order, source-over inside their own coverage. */
+    for (uint32_t r = 0; r < plate_region_count; ++r) {
+        const liquid_glass_region region = plate_regions[r];
+        if (!liquid_glass_region_is_dispatchable(region, slab_width, slab_height))
+            continue;
+        const uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+        const uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+        for (uint32_t f = 0; f < desc->frost_count; ++f) {
+            const prism_base_material *plate = &desc->frost[f];
+            backdrop_frost_push push = {
+                .input_handle = input_handle,
+                .blurred_handle = blurred_handle,
+                .sampler_handle = sampler_handle,
+                .output_handle = dst_storage_handle,
+                .width = slab_width,
+                .height = slab_height,
+                .origin_x = region.x,
+                .origin_y = region.y,
+                .bounds = {plate->bounds.x, plate->bounds.y, plate->bounds.w, plate->bounds.h},
+                .corner_radius = fmaxf(plate->corner_radius, 0.0f),
+                .opacity = fminf(fmaxf(plate->opacity, 0.0f), 1.0f),
+                .tint_color = plate->tint_color & 0x00FFFFFFu,
+                .tint_strength = fminf(fmaxf(plate->tint_strength, 0.0f), 1.0f),
+                .region_width = region.width,
+                .region_height = region.height,
+                .mode = BACKDROP_FROST_MODE_PLATE,
+                .slab_origin_x = (float)slab_x,
+                .slab_origin_y = (float)slab_y,
+                .capture_width = (float)capture_width,
+                .capture_height = (float)capture_height,
+            };
+            flux_compute_dispatch(command, pipeline, &push, sizeof(push), gx, gy, 1u);
+            /* Each plate is read back by the next one. */
+            if (f + 1u < desc->frost_count || r + 1u < plate_region_count)
+                layer_barrier_compute_write_to_read_write(command, dst_image);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Validation and dispatch footprints                               */
+/* ------------------------------------------------------------------ */
 static bool valid_backdrop_layer_desc(const prism_backdrop_layer_desc *desc) {
     if (desc->type != PRISM_TYPE_BACKDROP_LAYER_DESC || !desc->input || !desc->blurred_input)
         return false;
@@ -496,8 +635,17 @@ flux_result prism_backdrop_layer_filter_create(flux_device *device,
     if (!device || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;
-    prism_backdrop_layer_filter *filter = calloc(1, sizeof(*filter));
-    if (!filter)
+    /* Caller's allocator, attributed to prism (ADR-0135). */
+    prism_backdrop_layer_filter *filter = nullptr;
+    if (flux_device_alloc(device,
+                          &(flux_device_alloc_opts){
+                              .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
+                              .bytes = sizeof(*filter),
+                              .owner = PRISM_OBSERVE_OWNER,
+                              .kind = PRISM_OBSERVE_KIND_BACKDROP_LAYER,
+                              .scope = FLUX_SCOPE_DEVICE,
+                          },
+                          (void **)&filter) != FLUX_OK)
         return FLUX_ERROR_OUT_OF_MEMORY;
     atomic_init(&filter->ref_count, 1u);
     filter->device = flux_device_retain(device);
@@ -536,16 +684,25 @@ void prism_backdrop_layer_filter_release(prism_backdrop_layer_filter *filter) {
     }
     if (filter->stats_pipeline)
         flux_compute_pipeline_release(filter->stats_pipeline);
-    free(filter);
+    prism_body_table_release(&filter->bodies);
+    prism_body_ids_release(&filter->ids);
+    flux_device_free(device, &(flux_device_free_opts){
+                                 .type = FLUX_TYPE_DEVICE_FREE_OPTS,
+                                 .ptr = filter,
+                                 .owner = PRISM_OBSERVE_OWNER,
+                                 .kind = PRISM_OBSERVE_KIND_BACKDROP_LAYER,
+                                 .scope = FLUX_SCOPE_DEVICE,
+                             });
     flux_device_release(device);
 }
 
 flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filter,
                                               flux_frame *frame,
                                               const prism_backdrop_layer_desc *desc,
-                                              flux_image **out) {
+                                              prism_material_output *out) {
     if (!filter || !frame || !desc || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = (prism_material_output){0};
     if (!valid_backdrop_layer_desc(desc))
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (flux_frame_get_state(frame) != FLUX_FRAME_STATE_RECORDING ||
@@ -570,39 +727,31 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
         return FLUX_ERROR_OUT_OF_RANGE;
     const bool need_scratch = (desc->frost_count > 0u && desc->group_count > 0u);
-    flux_result result =
-        layer_ensure_slot(filter, index, input, desc->group_count > 0u, need_scratch);
-    if (result != FLUX_OK)
-        return result;
 
-    uint32_t image_width = flux_image_width(input);
-    uint32_t image_height = flux_image_height(input);
-    backdrop_layer_slot *slot = &filter->slots[index];
+    const uint32_t capture_width = flux_image_width(input);
+    const uint32_t capture_height = flux_image_height(input);
 
-    uint32_t in_handle = flux_image_bindless_handle(input);
-    uint32_t blur_handle = flux_image_bindless_handle(blurred);
-    uint64_t desc_hash = prism_hash_backdrop_layer_desc(desc);
-
-    if (slot->initialized && slot->last_desc_hash == desc_hash &&
-        slot->last_input_handle == in_handle && slot->last_blurred_handle == blur_handle) {
-        /* Material Backdrop Boundary Cache hit (ADR-0123 / INV-COMP-04):
-         * When backdrop input textures and material parameters are unchanged across frames,
-         * skip the clear, stats, frost, and glass compute dispatches entirely and reuse
-         * the persistent slot output image. */
-        *out = slot->output;
-        return FLUX_OK;
-    }
-
-    /* Current footprints: frost rects first, glass bodies after — the same
-     * order the dispatches run in, so the merged clear set covers exactly
-     * what this submission will write. */
+    /* 1. Footprints in capture space: plates first, then bodies — the same order
+     * the passes run in, so the merged clear set covers exactly what this
+     * submission writes. */
     liquid_glass_region current[PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS];
     uint32_t current_count = 0u;
+    uint32_t footprint_x0 = UINT32_MAX, footprint_y0 = UINT32_MAX;
+    uint32_t footprint_x1 = 0u, footprint_y1 = 0u;
     for (uint32_t i = 0; i < desc->frost_count; ++i) {
         liquid_glass_region region;
-        if (!backdrop_frost_dispatch_bounds(&desc->frost[i], image_width, image_height, &region))
+        if (!backdrop_frost_dispatch_bounds(&desc->frost[i], capture_width, capture_height,
+                                            &region))
             continue;
         current[current_count++] = region;
+        if (region.x < footprint_x0)
+            footprint_x0 = region.x;
+        if (region.y < footprint_y0)
+            footprint_y0 = region.y;
+        if (region.x + region.width > footprint_x1)
+            footprint_x1 = region.x + region.width;
+        if (region.y + region.height > footprint_y1)
+            footprint_y1 = region.y + region.height;
     }
     uint32_t current_group_indices[PRISM_BACKDROP_MAX_GLASS_GROUPS];
     uint32_t current_group_count = 0u;
@@ -612,11 +761,69 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
                                                               2.0f * fmaxf(group->shadow_blur, 0.0f)
                                                         : 0.0f;
         liquid_glass_region region;
-        if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, image_width, image_height,
+        if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, capture_width, capture_height,
                                                 &region))
             continue;
         current[current_count++] = region;
         current_group_indices[current_group_count++] = i;
+        if (region.x < footprint_x0)
+            footprint_x0 = region.x;
+        if (region.y < footprint_y0)
+            footprint_y0 = region.y;
+        if (region.x + region.width > footprint_x1)
+            footprint_x1 = region.x + region.width;
+        if (region.y + region.height > footprint_y1)
+            footprint_y1 = region.y + region.height;
+    }
+
+    uint32_t footprint_w = 1u;
+    uint32_t footprint_h = 1u;
+    if (current_count > 0u) {
+        footprint_w = footprint_x1 - footprint_x0;
+        footprint_h = footprint_y1 - footprint_y0;
+    }
+    flux_result result = layer_ensure_slot(filter, index, input, footprint_w, footprint_h,
+                                           desc->group_count > 0u, need_scratch);
+    if (result != FLUX_OK)
+        return result;
+
+    backdrop_layer_slot *slot = &filter->slots[index];
+
+    /* The slab covers every footprint, so its origin IS the footprint origin and
+     * regions are stored in slab space from here on (including the ones kept for
+     * the next submission's clear). */
+    const uint32_t image_width = slot->width;
+    const uint32_t image_height = slot->height;
+    const uint32_t slab_x = current_count > 0u ? footprint_x0 : 0u;
+    const uint32_t slab_y = current_count > 0u ? footprint_y0 : 0u;
+    for (uint32_t i = 0; i < current_count; ++i) {
+        current[i].x -= slab_x;
+        current[i].y -= slab_y;
+    }
+    slot->slab_x = slab_x;
+    slot->slab_y = slab_y;
+
+    uint64_t revision = 0u;
+    result = layer_resolve_revision(desc, &revision);
+    if (result != FLUX_OK)
+        return result;
+
+    if (revision != 0u && slot->initialized && slot->cached_revision == revision) {
+        /* Material Backdrop Boundary cache hit (ADR-0123 / INV-COMP-04): the
+         * caller declared this submission's sources and parameters identical to
+         * the ones that produced the current slot output, so the clear, stats,
+         * base-material and glass passes are skipped and the persistent image
+         * is reused. The key is the caller's revision, not image handles: a
+         * capture target and a pooled blur output keep their handles across
+         * repaints, so a handle test would freeze stale content. */
+        *out = (prism_material_output){
+            .image = slot->output,
+            .origin_x = (float)slot->slab_x,
+            .origin_y = (float)slot->slab_y,
+            .width = slot->width,
+            .height = slot->height,
+        };
+        return FLUX_OK;
     }
 
     const uint32_t clear_capacity =
@@ -689,13 +896,13 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         uint64_t stats_address = flux_buffer_device_address(slot->stats);
         for (uint32_t i = 0; i < desc->group_count; ++i) {
             liquid_glass_region rect =
-                liquid_glass_group_stats_bounds(&desc->groups[i], image_width, image_height);
+                liquid_glass_group_stats_bounds(&desc->groups[i], capture_width, capture_height);
             backdrop_stats_push spush = {
                 .input_handle = flux_image_bindless_handle(input),
                 .blurred_handle = flux_image_bindless_handle(blurred),
                 .sampler_handle = flux_device_default_sampler_handle(filter->device),
-                .width = image_width,
-                .height = image_height,
+                .width = capture_width,
+                .height = capture_height,
                 .rect_x = rect.x,
                 .rect_y = rect.y,
                 .rect_width = rect.width,
@@ -710,127 +917,80 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         layer_barrier_stats_write_to_compute(command, flux_buffer_vk_buffer(slot->stats));
     }
 
-    /* 3. Frost/base layer.
-     * When frost rects exist:
-     *   - If glass bodies also exist (need_scratch), render the opaque sharp base + frost
-     *     into slot->scratch so the glass lens samples the frosted backdrop without in-place
-     * hazard.
-     *   - In slot->output, render the frost rects.
-     * When NO frost rects exist (desc->frost_count == 0):
-     *   Skip Step 3 completely. The glass pass samples `input` directly and writes to slot->output.
+    /* 3. Base-material layer.
+     *
+     * The layer is a COMPLETE opaque background carrying base plates, and it
+     * is composed in two stages over each merged footprint region:
+     *
+     *   BASE  — resolve the sharp capture, alpha 1, once per region. The
+     *           optical lens above samples this image wherever its bend taps,
+     *           so pixels between and outside plates must already hold a true
+     *           background colour (never a cleared hole and never a
+     *           premultiplied fragment).
+     *   PLATE — one source-over dispatch per (region, plate), in caller array
+     *           order, writing only inside that plate's analytic coverage.
+     *
+     * Splitting the stages is what makes multiple plates composable: a single
+     * unconditional "write opaque pixel" pass per plate made the last plate in
+     * the array erase every earlier plate inside the shared region.
+     *
+     * Two destinations exist because the glass pass must not sample the image
+     * it writes:
+     *   - slot->scratch (opaque base + plates) is what the lens samples when
+     *     glass bodies are present;
+     *   - slot->output receives the same composite when there is no glass, so
+     *     a layer with plates only still produces the finished material.
+     * When the descriptor carries no plates the stage is skipped entirely: the
+     * lens samples the sharp capture directly.
      */
     if (desc->frost_count > 0u && current_count > 0u) {
-        /* Merge all current footprints into disjoint dispatch regions. */
-        liquid_glass_region
-            dispatch_regions[PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS];
+        /* Plate footprints are the leading run of `current` (plates are appended
+         * before bodies). The base stage resolves the whole slab and paints only
+         * these. */
+        liquid_glass_region plate_regions[PRISM_BACKDROP_MAX_FROST_RECTS];
+        uint32_t plate_count = 0u;
+        for (uint32_t i = 0; i < desc->frost_count; ++i) {
+            liquid_glass_region region;
+            if (!backdrop_frost_dispatch_bounds(&desc->frost[i], capture_width, capture_height,
+                                                &region))
+                continue;
+            /* `current` is in slab space; translate this plate the same way. */
+            region.x -= slab_x;
+            region.y -= slab_y;
+            plate_regions[plate_count++] = region;
+        }
+        /* Merge all current footprints into disjoint dispatch regions. Same
+         * overflow policy as liquid_glass_build_clear_regions: a footprint set
+         * that cannot coalesce into the dispatch budget degrades to one
+         * full-image region rather than failing a legal descriptor. */
+        const uint32_t dispatch_capacity =
+            PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS;
+        liquid_glass_region dispatch_regions[dispatch_capacity];
         uint32_t dispatch_count = 0u;
         for (uint32_t i = 0; i < current_count; ++i) {
-            liquid_glass_region region = current[i];
-            if (!liquid_glass_add_clear_region(region, dispatch_regions,
-                                               PRISM_BACKDROP_MAX_FROST_RECTS +
-                                                   PRISM_BACKDROP_MAX_GLASS_GROUPS,
+            if (!liquid_glass_add_clear_region(current[i], dispatch_regions, dispatch_capacity,
                                                &dispatch_count)) {
-                return FLUX_ERROR_INVALID_STATE;
+                dispatch_regions[0] = (liquid_glass_region){0u, 0u, image_width, image_height};
+                dispatch_count = 1u;
+                break;
             }
         }
 
-        if (need_scratch && slot->scratch) {
+        const bool draw_scratch = need_scratch && slot->scratch;
+        if (draw_scratch) {
             VkImage scratch_image = flux_image_vk_image(slot->scratch);
-            bool any_scratch_dispatched = false;
-            for (uint32_t r = 0; r < dispatch_count; ++r) {
-                liquid_glass_region region = dispatch_regions[r];
-                if (any_scratch_dispatched)
-                    layer_barrier_compute_write_to_read_write(command, scratch_image);
-                bool region_frost_dispatched = false;
-                for (uint32_t f = 0; f < desc->frost_count; ++f) {
-                    const prism_backdrop_frost *frost = &desc->frost[f];
-                    backdrop_frost_push push = {
-                        .input_handle = flux_image_bindless_handle(input),
-                        .blurred_handle = flux_image_bindless_handle(blurred),
-                        .sampler_handle = flux_device_default_sampler_handle(filter->device),
-                        .output_handle = flux_image_bindless_storage_handle(slot->scratch),
-                        .width = image_width,
-                        .height = image_height,
-                        .origin_x = region.x,
-                        .origin_y = region.y,
-                        .bounds = {frost->bounds.x, frost->bounds.y, frost->bounds.w,
-                                   frost->bounds.h},
-                        .corner_radius = fmaxf(frost->corner_radius, 0.0f),
-                        .opacity = fminf(fmaxf(frost->opacity, 0.0f), 1.0f),
-                        .tint_color = frost->tint_color & 0x00FFFFFFu,
-                        .tint_strength = fminf(fmaxf(frost->tint_strength, 0.0f), 1.0f),
-                        .region_width = region.width,
-                        .region_height = region.height,
-                    };
-                    uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                    uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                    flux_compute_dispatch(command, filter->frost_pipelines[is16f ? 1 : 0], &push,
-                                          sizeof(push), gx, gy, 1u);
-                    any_scratch_dispatched = true;
-                    region_frost_dispatched = true;
-                }
-                if (!region_frost_dispatched) {
-                    backdrop_frost_push push = {
-                        .input_handle = flux_image_bindless_handle(input),
-                        .blurred_handle = flux_image_bindless_handle(blurred),
-                        .sampler_handle = flux_device_default_sampler_handle(filter->device),
-                        .output_handle = flux_image_bindless_storage_handle(slot->scratch),
-                        .width = image_width,
-                        .height = image_height,
-                        .origin_x = region.x,
-                        .origin_y = region.y,
-                        .bounds = {0.0f, 0.0f, 0.0f, 0.0f},
-                        .corner_radius = 0.0f,
-                        .opacity = 0.0f,
-                        .tint_color = 0xFFFFFFu,
-                        .tint_strength = 0.0f,
-                        .region_width = region.width,
-                        .region_height = region.height,
-                    };
-                    uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                    uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                    flux_compute_dispatch(command, filter->frost_pipelines[is16f ? 1 : 0], &push,
-                                          sizeof(push), gx, gy, 1u);
-                    any_scratch_dispatched = true;
-                }
-            }
-            if (any_scratch_dispatched)
-                layer_barrier_compute_write_to_sampled_and_storage(command, scratch_image);
+            layer_record_base_material(command, filter, input, blurred, slot->scratch,
+                                       capture_width, capture_height, 0, 0, capture_width,
+                                       capture_height, desc, plate_regions, plate_count, is16f);
+            layer_barrier_compute_write_to_sampled_and_storage(command, scratch_image);
         }
-
-        /* Render frost rects into slot->output */
-        bool any_output_dispatched = false;
-        for (uint32_t r = 0; r < dispatch_count; ++r) {
-            liquid_glass_region region = dispatch_regions[r];
-            for (uint32_t f = 0; f < desc->frost_count; ++f) {
-                if (any_output_dispatched)
-                    layer_barrier_compute_write_to_read_write(command, output_image);
-                const prism_backdrop_frost *frost = &desc->frost[f];
-                backdrop_frost_push push = {
-                    .input_handle = flux_image_bindless_handle(input),
-                    .blurred_handle = flux_image_bindless_handle(blurred),
-                    .sampler_handle = flux_device_default_sampler_handle(filter->device),
-                    .output_handle = flux_image_bindless_storage_handle(slot->output),
-                    .width = image_width,
-                    .height = image_height,
-                    .origin_x = region.x,
-                    .origin_y = region.y,
-                    .bounds = {frost->bounds.x, frost->bounds.y, frost->bounds.w, frost->bounds.h},
-                    .corner_radius = fmaxf(frost->corner_radius, 0.0f),
-                    .opacity = fminf(fmaxf(frost->opacity, 0.0f), 1.0f),
-                    .tint_color = frost->tint_color & 0x00FFFFFFu,
-                    .tint_strength = fminf(fmaxf(frost->tint_strength, 0.0f), 1.0f),
-                    .region_width = region.width,
-                    .region_height = region.height,
-                };
-                uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                flux_compute_dispatch(command, filter->frost_pipelines[is16f ? 1 : 0], &push,
-                                      sizeof(push), gx, gy, 1u);
-                any_output_dispatched = true;
-            }
-        }
-        if (any_output_dispatched && current_group_count > 0u)
+        /* The output always carries the finished plate composite. When glass bodies
+         * also exist, the glass pass reads the plates from slot->scratch and blends
+         * on top of slot->output. */
+        layer_record_base_material(command, filter, input, blurred, slot->output, image_width,
+                                   image_height, slab_x, slab_y, capture_width, capture_height,
+                                   desc, plate_regions, plate_count, is16f);
+        if (current_group_count > 0u)
             layer_barrier_compute_write_to_read_write(command, output_image);
     }
 
@@ -840,6 +1000,9 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
      * In both cases, input != slot->output, guaranteeing zero in-place cross-workgroup race
      * hazards. */
     const flux_image *glass_input = (need_scratch && slot->scratch) ? slot->scratch : input;
+    /* `draw_scratch` in step 3 and `glass_input` here must agree: the lens may
+     * only sample the scratch when the plate composite was actually written
+     * into it. */
     const prism_glass_policy policy = {
         .refraction = desc->refraction,
         .chromatic_aberration = desc->chromatic_aberration,
@@ -858,22 +1021,111 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         .contact_ao = desc->contact_ao,
         .ambient_fresnel = desc->ambient_fresnel,
     };
+    /* Batched glass: coalesce the body footprints into disjoint regions and
+     * evaluate each region's bodies in one dispatch, in caller order.
+     *
+     * This is what removes both the per-body dispatch and the per-body barrier.
+     * Bodies that share pixels necessarily coalesce into one region, so their
+     * source-over order is the shader's loop order; disjoint regions never write
+     * each other's pixels, so no image barrier is required. See liquid_glass.c
+     * for the same construction and the reasoning about the Vulkan memory model. */
+    prism_region_batch glass_batches[PRISM_MAX_BATCHES];
+    uint32_t glass_batch_ids[PRISM_MAX_BODIES];
+    uint32_t glass_batch_ids_used = 0u;
+    liquid_glass_region glass_merged[PRISM_MAX_BATCHES];
+    uint32_t glass_merged_count = 0u;
+    /* Body footprints in capture space for this submission. */
+    liquid_glass_region glass_regions[PRISM_BACKDROP_MAX_GLASS_GROUPS];
+    uint32_t glass_region_body[PRISM_BACKDROP_MAX_GLASS_GROUPS];
+    uint32_t glass_region_count = 0u;
     bool glass_dispatched = false;
     for (uint32_t i = 0; i < current_group_count; ++i) {
         const prism_liquid_glass_group *group = &desc->groups[current_group_indices[i]];
-        liquid_glass_region region;
         float shadow_reach = group->shadow_alpha > 0.0f ? fmaxf(group->shadow_offset_y, 0.0f) +
                                                               2.0f * fmaxf(group->shadow_blur, 0.0f)
                                                         : 0.0f;
-        if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, image_width, image_height,
+        liquid_glass_region region;
+        if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, capture_width, capture_height,
                                                 &region))
             continue;
-        if (glass_dispatched)
-            layer_barrier_compute_write_to_read_write(command, output_image);
-        prism_glass_record_group(command, filter->glass_pipelines[is16f ? 1 : 0], filter->device,
-                                 glass_input, blurred, slot->output, image_width, image_height,
-                                 region, group, &policy);
-        glass_dispatched = true;
+        region.x -= slab_x;
+        region.y -= slab_y;
+        glass_regions[glass_region_count] = region;
+        glass_region_body[glass_region_count] = i;
+        ++glass_region_count;
+    }
+    if (glass_region_count > 0u) {
+        for (uint32_t i = 0; i < glass_region_count; ++i) {
+            if (!liquid_glass_add_clear_region(glass_regions[i], glass_merged, PRISM_MAX_BATCHES,
+                                               &glass_merged_count)) {
+                glass_merged[0] = (liquid_glass_region){0u, 0u, image_width, image_height};
+                glass_merged_count = 1u;
+                break;
+            }
+        }
+        uint32_t glass_owner[PRISM_BACKDROP_MAX_GLASS_GROUPS];
+        for (uint32_t i = 0; i < glass_region_count; ++i) {
+            glass_owner[i] = UINT32_MAX;
+            for (uint32_t r = 0; r < glass_merged_count; ++r) {
+                if (liquid_glass_regions_overlap(glass_regions[i], glass_merged[r])) {
+                    glass_owner[i] = r;
+                    break;
+                }
+            }
+        }
+        uint32_t glass_batch_count = 0u;
+        for (uint32_t r = 0; r < glass_merged_count; ++r) {
+            uint32_t first = glass_batch_ids_used;
+            for (uint32_t i = 0; i < glass_region_count; ++i) {
+                if (glass_owner[i] == r)
+                    glass_batch_ids[glass_batch_ids_used++] =
+                        current_group_indices[glass_region_body[i]];
+            }
+            glass_batches[glass_batch_count++] = (prism_region_batch){
+                .x = glass_merged[r].x,
+                .y = glass_merged[r].y,
+                .width = glass_merged[r].width,
+                .height = glass_merged[r].height,
+                .ids_first = first,
+                .id_count = glass_batch_ids_used - first,
+            };
+        }
+
+        uint32_t rows = desc->group_count;
+        for (uint32_t i = 0; i < rows; ++i) {
+            void *row = prism_body_table_row(filter->device, &filter->bodies, rows, i);
+            if (!row)
+                return FLUX_ERROR_OUT_OF_MEMORY;
+            *(prism_glass_body_row *)row = prism_glass_make_row(&desc->groups[i], &policy);
+        }
+        uint32_t *ids = prism_body_ids_slot(filter->device, &filter->ids, glass_batch_ids_used);
+        if (!ids)
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        for (uint32_t i = 0; i < glass_batch_ids_used; ++i)
+            ids[i] = glass_batch_ids[i];
+        /* `ids_first` is a slot index into this filter's id table; make it the
+         * absolute offset every later use expects. */
+        for (uint32_t r = 0; r < glass_batch_count; ++r)
+            glass_batches[r].ids_first = glass_batches[r].ids_first;
+
+        const prism_glass_copy copy = {
+            .sharp = glass_input,
+            .blurred = blurred,
+            .capture_width = (float)capture_width,
+            .capture_height = (float)capture_height,
+            .slab_origin_x = (float)slab_x,
+            .slab_origin_y = (float)slab_y,
+        };
+        for (uint32_t r = 0; r < glass_batch_count; ++r) {
+            if (!liquid_glass_region_is_dispatchable(glass_merged[r], image_width, image_height))
+                continue;
+            prism_glass_record_batch(command, filter->glass_pipelines[is16f ? 1 : 0],
+                                     filter->device, &copy, slot->output, image_width, image_height,
+                                     &glass_batches[r], &policy, filter->bodies.address,
+                                     filter->ids.address +
+                                         glass_batches[r].ids_first * sizeof(uint32_t));
+            glass_dispatched = true;
+        }
     }
 
     /* 5. Publish the persistent output to following stages. */
@@ -885,10 +1137,14 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     slot->initialized = true;
     slot->stats_submitted = true;
     slot->stats_group_count = desc->group_count;
-    slot->last_desc_hash = desc_hash;
-    slot->last_input_handle = in_handle;
-    slot->last_blurred_handle = blur_handle;
-    *out = slot->output;
+    slot->cached_revision = revision;
+    *out = (prism_material_output){
+        .image = slot->output,
+        .origin_x = (float)slab_x,
+        .origin_y = (float)slab_y,
+        .width = slot->width,
+        .height = slot->height,
+    };
     return FLUX_OK;
 }
 

@@ -27,8 +27,10 @@ static int hex_val(unsigned char c) {
 
 /* Write one byte, bounds-checked. Returns false when out is full. */
 static bool push(char *out, size_t cap, size_t *n, char c) {
-    if (*n + 1 >= cap) /* keep room for the NUL */
+    if (*n + 1 >= cap) {
+        out[*n] = '\0';
         return false;
+    }
     out[(*n)++] = c;
     return true;
 }

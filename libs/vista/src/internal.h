@@ -6,6 +6,7 @@
 #ifndef VISTA_INTERNAL_H
 #define VISTA_INTERNAL_H
 
+#include <flux/observe.h>
 #include <vista/vista.h>
 
 #include <stdbool.h>
@@ -127,6 +128,10 @@ struct vista_animation {
 
 struct vista_scene {
     int32_t refcount;
+    /* Retained device, so the scene can settle its own ledger row at release
+     * (ADR-0134). Without it a leaked scene was reported as the flux objects
+     * it holds, pointing the reader at flux instead of vista. */
+    flux_device *device;
     vista_primitive *prims; /* flat list across all meshes */
     uint32_t prim_count;
     vista_node *nodes;

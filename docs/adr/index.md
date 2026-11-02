@@ -118,7 +118,7 @@ silent fallback. Its primitives have landed.
 | 0083 | [Flux orthogonal shape-paint model and full C23 baseline](0083-flux-orthogonal-shape-paint-model-and-c23-baseline.md) | Accepted |
 | 0084 | [Iris tripartite architecture and C23 app-opts descriptor](0084-iris-tripartite-architecture-and-c23-app-opts.md) | Accepted |
 | 0085 | [Lens borrowed-string registry — always-on debug borrow checker](0085-lens-borrowed-string-registry.md) | Accepted |
-| 0085 | [Lens box model orthogonality, legacy layout cleanup, and C23 baseline](0085-lens-box-model-orthogonality-legacy-layout-cleanup-and-c23-baseline.md) | Accepted |
+| 0128 | [Lens box model orthogonality, legacy layout cleanup, and C23 baseline](0128-lens-box-model-orthogonality-legacy-layout-cleanup-and-c23-baseline.md) | Accepted (renumbered from the duplicate 0085) |
 | 0086 | [Cross-platform drag-and-drop subsystem](0086-cross-platform-drag-and-drop-subsystem.md) | Accepted |
 | 0087 | [Flux architecture consistency, lifecycle contracts, and orthogonal refactoring](0087-flux-architecture-consistency-lifecycle-and-orthogonal-refactoring.md) | Accepted (amended in part by [0089](0089-rendering-program-and-execution-plan.md)) |
 | 0088 | [Optics clean-break architecture — immutable display lists, orthogonal brushes, and transient graphs](0088-optics-clean-break-architecture-display-lists-orthogonal-brushes-and-transient-graphs.md) | Superseded by [ADR-0089](0089-rendering-program-and-execution-plan.md) through [ADR-0094](0094-lens-scene-snapshots-and-invalidation.md) |
@@ -161,3 +161,16 @@ silent fallback. Its primitives have landed.
 | 0125 | [DocGov Decoupling, Standards Consolidation, and Documentation Modernization](0125-docgov-decoupling-standards-consolidation-and-documentation-modernization.md) | Accepted |
 | 0126 | [Developer Tooling Domain Modularization and Unified Optics CLI](0126-developer-tooling-domain-modularization-and-unified-optics-cli.md) | Accepted |
 | 0127 | [Decoupled Host Canvas Recording and Hardware-Locked Presentation Pacing](0127-decoupled-host-canvas-recording-and-pull-driven-presentation-pacing.md) | Accepted |
+| 0128 | [Lens box model orthogonality, legacy layout cleanup, and C23 baseline](0128-lens-box-model-orthogonality-legacy-layout-cleanup-and-c23-baseline.md) | Accepted (renumbered from the duplicate 0085) |
+| 0129 | [The observation plane — one allocation ledger, scope tags, and the end of ad-hoc leak triage](0129-observation-plane-and-resource-ledger.md) | Accepted |
+| 0130 | [Leak coverage is a mechanical gate — no resource kind ships without a drain assertion](0130-leak-coverage-mechanical-gate.md) | Accepted |
+| 0131 | [Bindless slots carry an occupancy bitmap — a double release is an error, not a silent alias](0131-bindless-slot-occupancy-bitmap.md) | Accepted |
+| 0132 | [Debug names are ledger-derived per-instance handles, not stack-buffer snprintf](0132-ledger-derived-debug-names.md) | Accepted |
+| 0133 | [Pass labels ride the frame pass seam; the CPU backend is a no-op, not a special case](0133-pass-labels-on-the-frame-pass-seam.md) | Accepted |
+| 0134 | [Material and scene ownership is attributed to its own library, not to flux](0134-material-and-scene-attribution.md) | Accepted |
+| 0135 | [Host allocation is attributed — flux_device_alloc carries owner and kind, and the contract is finally tested](0135-host-allocation-attribution-and-contract.md) | Accepted (breaks the allocator ABI intentionally) |
+| 0136 | [Device-less by design — the process icon registry and its parser, with a closed marker vocabulary](0136-device-less-by-design.md) | Accepted |
+| 0137 | [Caller-declared content revisions for prism backdrop-layer output caching](0137-caller-declared-backdrop-layer-revisions.md) | Accepted |
+| 0138 | [Unified Tracy profiler telemetry and zero-overhead C23 instrumentation facade](0138-unified-tracy-profiler-telemetry-and-c23-facade.md) | Accepted |
+| 0139 | [Footprint-sized material slabs, batched body dispatch, and the prism_material_output contract](0139-footprint-sized-material-slabs-and-batched-dispatch.md) | Accepted |
+| 0140 | [Prism slab convergence — migrating Frosted, Acrylic, and Mica to footprint-quantized slabs](0140-prism-slab-convergence-frosted-acrylic-mica.md) | Accepted |

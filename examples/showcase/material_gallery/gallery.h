@@ -79,10 +79,12 @@ typedef struct gallery_app {
     prism_mica_filter *mica_filter;
 
     /* Frame outputs */
-    flux_image *glass_out;
-    flux_image *frost_out;
-    flux_image *acrylic_out;
-    flux_image *mica_out;
+    /* Material outputs carry their own placement: a prism material paints only
+     * inside its footprints, so its image is slab-sized, not capture-sized. */
+    prism_material_output glass_out;
+    prism_material_output frost_out;
+    prism_material_output acrylic_out;
+    prism_material_output mica_out;
 
     uint32_t width_px;
     uint32_t height_px;

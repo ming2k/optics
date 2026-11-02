@@ -49,6 +49,8 @@ The following canonical invariants are mechanically enforced in Optics:
 | `[INV-ARCH-ARENA]` | Zero Heap Alloc Frame Walk | Hot frame traversal, layout passes, and render walks use only per-frame arena memory. | Arena memory tracking & integration tests |
 | `[INV-ARCH-OPTS]` | Single Opts Descriptor | Every public entry point accepts a single `const *opts` descriptor struct. | Static analysis & symbol generator `tools/guardrails/symbols.py` |
 | `[INV-ARCH-SYMBOLS]` | Public Symbol Parity | `docs/reference/symbols.md` is strictly synchronized with header exports. | `tools/optics check symbols` (`tools/guardrails/symbols.py`) |
+| `[INV-ARCH-LEDGER]` | Leak Coverage Completeness (ADR-0130) | Every public resource kind has a declared ledger scope and a leak lane, or a reviewed exemption with a written reason. | `tools/optics check leaks` (`tools/guardrails/leaks.py`) + `tests/optics/test_leaks_guardrail.py` |
+| `[INV-ARCH-SCOPEDRAIN]` | Scope Drain Point (ADR-0129) | A scope's live count returns to zero at its declared drain point; frame-lifetime kinds are asserted at the frame boundary. | `flux_observe_frame_drain_check` in `flux_frame_present`/`abandon` + `tests/flux/integration/test_resource_leak.c` |
 | `[INV-DOC-FIREWALL]` | Audience Firewall | Public documentation must never link to internal developer docs (`docs/dev/**`). | `tools/optics check docs` (`tools/guardrails/doc_links.py`) |
 | `[INV-DOC-ROOT]` | Clean Root Whitelist | Only canonical markdown files exist at repository root. | `tools/optics check docs` (`tools/guardrails/doc_links.py`) |
 

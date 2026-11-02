@@ -5,8 +5,10 @@
 #define FLUX_CORE_INTERNAL_H
 
 #include <flux/core.h>
-#include <flux/math.h>   /* flux_mat4 (flux_frame scene caches) */
-#include <flux/vulkan.h> /* flux_bindless_handle */
+#include <flux/math.h>    /* flux_mat4 (flux_frame scene caches) */
+#include <flux/observe.h> /* flux_scope, flux_observe_opts (ADR-0129) */
+#include <flux/profile.h> /* profiler telemetry facade (ADR-0138) */
+#include <flux/vulkan.h>  /* flux_bindless_handle */
 #include <stdatomic.h>
 #include <vulkan/vulkan.h>
 
@@ -51,6 +53,109 @@ void flux_set_last_errorf(flux_result code, const char *function, const char *fi
     do {                                                                                           \
         flux_set_last_errorf((code), __func__, __FILE__, __LINE__, 0, __VA_ARGS__);                \
     } while (0)
+
+/* ------------------------------------------------------------------ */
+/*  Observation plane (observe.c, ADR-0129)                           */
+/*                                                                    */
+/*  Fixed-capacity, allocation-free ledger. Rows are interned once by  */
+/*  pointer identity of the (scope, kind, owner) triple; every later   */
+/*  acquire/release is one atomic on an already-resolved row, so the   */
+/*  frame path never hashes and never takes a lock.                   */
+/*                                                                    */
+/*  Capacity is a hard bound with an overflow counter, never silent    */
+/*  truncation: a report whose `overflowed_kinds` is non-zero is       */
+/*  incomplete and says so.                                           */
+/* ------------------------------------------------------------------ */
+
+#define FLUX_OBSERVE_MAX_ROWS 48u
+#define FLUX_OBSERVE_NAME_BYTES 64u
+/* Live named instances tracked per kind. A toolbar of 32 materials or a 32-deep
+ * image pool is well inside this; beyond it the report says so instead of
+ * silently reusing a name. */
+#define FLUX_OBSERVE_NAME_RING 32u
+
+typedef struct flux_observe_row {
+    const char *kind;  /* interned literal */
+    const char *owner; /* interned literal */
+    /* Precomputed content hash of (scope, kind, owner). Rows must be
+     * resolvable from a *different link unit* than the one that interned
+     * them — a test binary, a host, a Rust binding — so identity cannot be
+     * pointer comparison of string literals. The hash is compared first and
+     * strcmp confirms only on a hit, which keeps the scan integer-only in
+     * the common (miss) case. */
+    uint64_t key_hash;
+    const char *site; /* first acquire; literal or NULL */
+    flux_scope scope;
+    flux_observe_lifetime lifetime; /* drain point (FLUX_LIFETIME_*) */
+    /* Live named instances for this kind (ADR-0132), oldest first. Each slot
+     * owns its name buffer, so the pointer handed to the driver for instance N
+     * is not overwritten by instance N+1: with a single shared buffer, two
+     * objects created back to back would give the driver the same address
+     * twice, which is safe only because drivers copy synchronously — the exact
+     * assumption this design refuses to make.
+     *
+     * Bounded, with the overflow counted rather than hidden: past
+     * FLUX_OBSERVE_NAME_RING live instances, the oldest name is recycled and
+     * `name_overflow` says how often. */
+    struct {
+        uint32_t id;
+        char name[40];
+    } names[FLUX_OBSERVE_NAME_RING];
+    uint32_t name_top;
+    uint32_t name_overflow;
+    atomic_uint_fast64_t live;
+    atomic_uint_fast64_t peak;
+    atomic_uint_fast64_t acquire_total;
+    atomic_uint_fast64_t release_total;
+    atomic_uint_fast64_t bytes_live;
+    atomic_uint_fast64_t bytes_peak;
+} flux_observe_row;
+
+typedef struct flux_observe_state {
+    flux_platform_mutex lock; /* serialises row interning only */
+    bool lock_initialized;
+    /* Release-published row count. Reporters read it without the interning
+     * lock, so it must be atomic: a plain uint32_t here was a data race
+     * between an acquire on one thread and a report on another, and it could
+     * expose a half-initialised row whose kind/owner pointers were still
+     * NULL (dereferenced by strcmp). */
+    atomic_uint row_count;
+    atomic_uint_fast64_t overflowed_kinds;
+    atomic_uint_fast64_t unmatched_releases;
+    uint32_t capabilities; /* OR of flux_observe_capability */
+    /* Per-device instance ids (ADR-0132). Monotonic; never reused, so a name
+     * never refers to two different objects in one capture. */
+    atomic_uint next_instance;
+    flux_log_fn log;
+    void *log_user;
+    flux_observe_row rows[FLUX_OBSERVE_MAX_ROWS];
+} flux_observe_state;
+
+flux_result flux_observe_init(flux_device *d, const flux_observe_opts *opts);
+void flux_observe_destroy(flux_device *d);
+
+/* Object naming (ADR-0132).
+ *
+ * The name is derived from the ledger ("<kind>#<instance>") and rendered into
+ * the device-owned ledger row, then handed to the driver. Two properties this
+ * buys over the previous per-call-site `char buf[N]` + `snprintf`:
+ *
+ *   - the pointer cannot dangle: the row outlives every object of its kind and
+ *     the ledger is torn down after the device;
+ *   - the name is unique per live instance, which is the only thing a capture
+ *     can use ("flux_image#7", not the seventh "flux_image 512x512").
+ *
+ * Returns the name that was set, or nullptr when naming is compiled out or the
+ * capability is off. Callers do not branch on it: handing the result back to
+ * flux_vk_set_name would defeat the storage guarantee, so this calls the
+ * driver itself. */
+const char *flux_observe_name_object(flux_device *d, flux_scope scope, const char *kind,
+                                     const char *owner);
+
+/* Instance id of the row's newest name-ring entry; 0 when naming is off. Ids
+ * start at 1 so 0 stays unambiguous. */
+uint32_t flux_observe_instance_of(flux_device *d, flux_scope scope, const char *kind,
+                                  const char *owner);
 
 /* ------------------------------------------------------------------ */
 /*  Device                                                            */
@@ -200,6 +305,14 @@ typedef struct flux_bindless_pool {
     uint32_t capacity;
     uint32_t free_top;    /* count of indices currently free */
     uint32_t *free_stack; /* indices available for allocation */
+    /* Occupancy bitmap, one bit per slot, 1 = live (ADR-0131). The free
+     * stack alone cannot detect a duplicated release: pushing an already
+     * free slot leaves the stack non-full, so the old guard passed and the
+     * heap then handed the same index to two resources. Capacity bits at
+     * default sizes is 3 KiB per device; the alternatives are either a
+     * shader-visible ABI break (generational handles) or silent aliasing. */
+    uint64_t *allocated;
+    uint32_t live; /* popcount of `allocated`; counted under the heap lock */
 } flux_bindless_pool;
 
 typedef struct flux_bindless_heap {
@@ -307,6 +420,12 @@ typedef struct flux_upload_pending {
 struct flux_device {
     atomic_uint ref_count;
 
+    /* Observation plane (ADR-0129). Declared first among the non-atomic
+     * state because teardown reporting reads it before anything else is
+     * torn down, and because a ledger row must stay readable while the
+     * subsystems it describes are already gone. */
+    flux_observe_state observe;
+
     /* Caller-supplied policy */
     flux_allocator allocator;
     flux_log_fn log;
@@ -336,6 +455,13 @@ struct flux_device {
      * (ADR-0069); gates vkSetHdrMetadataEXT on HDR swapchains. */
     bool has_hdr_metadata;
     PFN_vkSetDebugUtilsObjectNameEXT pfn_set_name;
+    PFN_vkCmdBeginDebugUtilsLabelEXT pfn_cmd_begin_label; /* NULL unless debug_utils */
+    PFN_vkCmdEndDebugUtilsLabelEXT pfn_cmd_end_label;
+    /* How many labels actually reached the driver (ADR-0133). Without this a
+     * label implementation is unverifiable short of parsing a capture file, and
+     * a pass-label feature nobody can verify is the same "declared, never
+     * observed" failure this ADR family keeps removing. */
+    atomic_uint_fast64_t labels_emitted;
     PFN_vkSetHdrMetadataEXT pfn_set_hdr_metadata; /* NULL unless has_hdr_metadata */
 
     VkPhysicalDevice physical_device;
@@ -398,6 +524,15 @@ struct flux_device {
      * batch that could reference them. */
     atomic_uint_fast64_t submit_serial;    /* graphics-queue batch counter */
     atomic_uint_fast64_t completed_serial; /* highest batch proven done    */
+    /* Frames currently in RECORDING state, across every surface on this device.
+     *
+     * A resource released while a frame records may still be referenced by
+     * commands already recorded into that frame's command buffer, so its retire
+     * tag has to cover that frame's submission. With no recording frame nothing
+     * can still reference it and the tag can be the current serial — which lets
+     * flux_device_reclaim_retired make released GPU memory reclaimable the moment
+     * the queue is idle, instead of after a subsequent submission. */
+    atomic_uint recording_frames;
     flux_platform_mutex retire_lock;
     bool retire_lock_initialized;
     flux_retire_zombie *retire_head; /* FIFO; tags are non-decreasing */
@@ -687,6 +822,19 @@ void flux_vk_wait_idle(flux_device *d);
  * No-op when the extension is unavailable. Names show up in RenderDoc
  * captures and validation messages. */
 void flux_vk_set_name(flux_device *d, VkObjectType type, uint64_t handle, const char *name);
+
+/* Command-buffer section labels (ADR-0133). No-ops unless
+ * FLUX_OBSERVE_PASS_LABELS is both requested and compiled in, and always
+ * no-ops when VK_EXT_debug_utils is unavailable. Never used on a CPU backend
+ * that has no command buffer. */
+void flux_vk_cmd_begin_label(flux_device *d, VkCommandBuffer cmd, const char *label);
+void flux_vk_cmd_end_label(flux_device *d, VkCommandBuffer cmd);
+
+/* Ledger-derived naming (ADR-0132). The only sanctioned way to name an object:
+ * the string lives in the ledger row, so the driver can never receive a
+ * pointer to dead stack. */
+void flux_vk_set_name_from_ledger(flux_device *d, VkObjectType type, uint64_t handle,
+                                  flux_scope scope, const char *kind, const char *owner);
 /* Destroy every zombie whose tag is covered by completed_serial. */
 void flux_device_sweep_retire(flux_device *d);
 /* Unconditionally destroy all parked zombies (device teardown, after the

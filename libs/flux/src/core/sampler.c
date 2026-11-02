@@ -102,6 +102,8 @@ flux_result flux_sampler_create(flux_device *d, const flux_sampler_desc *desc, f
     }
 
     *out = s;
+    FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "vk_sampler", "flux/core", 0,
+                         FLUX_SITE_VK_SAMPLER);
     return FLUX_OK;
 }
 
@@ -125,6 +127,7 @@ void flux_sampler_release(flux_sampler *s) {
      * violation. Park both on the device retire queue, same contract as
      * flux_image_release / flux_buffer_release. */
     flux_device_retire_sampler(d, s->sampler, s->bindless);
+    FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_sampler", "flux/core", 0);
     flux_internal_free(d, s);
     flux_device_release(d);
 }

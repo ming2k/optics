@@ -79,18 +79,18 @@ lens_icon_id lens_icon_register_svg(const char *svg_text) {
         return LENS_ICON_INVALID;
 
     if (res.cmd_count == 0 || res.cmd_count > LENSI_ICON_MAX_CMDS) {
-        free(res.cmds);
-        free(res.runs);
+        free(res.cmds); // RAW_ALLOC_OK(process-registry)
+        free(res.runs); // RAW_ALLOC_OK(process-registry)
         return LENS_ICON_INVALID;
     }
 
     if (g_runtime_count == g_runtime_cap) {
         uint32_t cap = g_runtime_cap ? g_runtime_cap * 2u : 8u;
-        lensi_runtime_icon *grown =
-            (lensi_runtime_icon *)realloc(g_runtime_icons, cap * sizeof *grown);
+        lensi_runtime_icon *grown = (lensi_runtime_icon *)realloc( // RAW_ALLOC_OK(process-registry)
+            g_runtime_icons, cap * sizeof *grown);                 // RAW_ALLOC_OK(process-registry)
         if (!grown) {
-            free(res.cmds);
-            free(res.runs);
+            free(res.cmds); // RAW_ALLOC_OK(process-registry)
+            free(res.runs); // RAW_ALLOC_OK(process-registry)
             return LENS_ICON_INVALID;
         }
         g_runtime_icons = grown;

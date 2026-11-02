@@ -70,7 +70,7 @@ static bool atlas_page_create(glyph_ctx *t, uint8_t page) {
 }
 
 bool txt_atlas_init(glyph_ctx *t) {
-    t->atlas_pixels = calloc((size_t)ATLAS_W * ATLAS_H, 1);
+    t->atlas_pixels = txt_alloc(t, (size_t)ATLAS_W * ATLAS_H, "atlas");
     if (!t->atlas_pixels)
         return false;
 
@@ -97,7 +97,7 @@ void txt_atlas_destroy(glyph_ctx *t) {
     t->atlas = NULL;
     t->atlas_page_count = 0;
     t->atlas_page = 0;
-    free(t->atlas_pixels);
+    txt_free(t, t->atlas_pixels, "atlas");
     t->atlas_pixels = NULL;
 }
 
@@ -181,8 +181,8 @@ static void atlas_upload_rect(glyph_ctx *t, uint8_t page, uint32_t x, uint32_t y
          * so the scratch buffer is retained on the context and reused
          * across flushes rather than paying malloc/free per flush. */
         if (!t->atlas_upload_scratch || t->atlas_upload_scratch_cap < upload_bytes) {
-            free(t->atlas_upload_scratch);
-            t->atlas_upload_scratch = malloc(upload_bytes);
+            txt_free(t, t->atlas_upload_scratch, "atlas_scratch");
+            t->atlas_upload_scratch = txt_alloc(t, upload_bytes, "atlas_scratch");
             if (!t->atlas_upload_scratch) {
                 t->atlas_upload_scratch_cap = 0;
                 return;

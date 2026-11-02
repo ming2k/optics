@@ -19,6 +19,8 @@
 #include <flux/vulkan.h>
 #include <prism/prism.h>
 
+#include "../material_test_helpers.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -57,14 +59,14 @@ static uint32_t render_liquid_glass_frame(flux_surface *surface, flux_canvas *ca
     glass_desc.groups = groups;
     glass_desc.group_count = group_count;
     glass_desc.refraction = 0.0f;
-    flux_image *glass = nullptr;
+    prism_material_output glass = {0};
     EXPECT(prism_liquid_glass_filter_apply(glass_filter, frame, &glass_desc, &glass) == FLUX_OK);
 
     flux_color black = flux_color_rgba(0, 0, 0, 255);
     EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                               .frame = frame,
                                                               .clear_color = &black}) == FLUX_OK);
-    flux_canvas_draw_image(canvas, glass, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+    test_draw_material(canvas, glass);
     EXPECT(flux_canvas_end(canvas) == FLUX_OK);
     EXPECT(flux_frame_submit(frame) == FLUX_OK);
     EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -139,16 +141,16 @@ int main(void) {
         gd.groups = &body;
         gd.group_count = 1;
         gd.refraction = 6.0f;
-        flux_image *glass = nullptr;
+        prism_material_output glass = {0};
         EXPECT(prism_liquid_glass_filter_apply(glass_filter, frame, &gd, &glass) == FLUX_OK);
-        EXPECT(glass != nullptr);
+        EXPECT(glass.image != nullptr);
 
         EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
         flux_canvas_draw_image(canvas, target, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_canvas_draw_image(canvas, glass, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        test_draw_material(canvas, glass);
         EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -282,6 +284,65 @@ int main(void) {
         }
         EXPECT(cleared_reused_slot);
         prism_liquid_glass_filter_release(persistent_filter);
+    }
+
+    /* --- overlapping bodies composite immediately (ordering barrier gate) ---
+     *
+     * Groups source-over into one persistent image, and the renderer skips the
+     * ordering barrier when a body's footprint is disjoint from every earlier
+     * one (Vulkan never conflicts on disjoint stores, and image barriers cover
+     * the whole subresource, so "no barrier" is only sound when the footprints
+     * provably do not intersect). Overlapping bodies must therefore keep it.
+     *
+     * The discriminator is RGB, which tracks the body's opacity: a body's
+     * premultiplied contribution is `colour * (coverage * opacity)`, so a 25%
+     * body lands far darker than a 100% one (measured 45 vs 93 on the red
+     * channel against this fixture). Render the shared pixel twice — once with a
+     * lone 25%-opacity body, once with that body followed by a full-opacity body
+     * at the identical footprint. Source-over of a full-opacity source over
+     * anything is that source, so the stacked pixel must match the solid body,
+     * not the faint one. If the second body's read of the destination raced the
+     * first body's store, the composite is undefined.
+     *
+     * Note on what this gate can and cannot catch: it asserts the material
+     * semantics (later body wins), which is what the mandatory barrier exists to
+     * guarantee. Whether a *specific* GPU actually reorders in the absence of
+     * the barrier is not observable from here — the deterministic half of this
+     * decision (`liquid_glass_region_overlaps_any`) is unit-tested separately in
+     * tests/prism/unit/test_liquid_glass_regions.c. */
+    {
+        prism_liquid_glass_group faint = PRISM_LIQUID_GLASS_GROUP_INIT;
+        prism_liquid_glass_group solid = PRISM_LIQUID_GLASS_GROUP_INIT;
+        /* Identical footprints: maximum overlap, so the barrier is mandatory. */
+        prism_liquid_glass_shape faint_shape[1] = {
+            {.bounds = {24.0f, 28.0f, 16.0f, 8.0f}, .corner_radius = 3.0f}};
+        prism_liquid_glass_shape solid_shape[1] = {
+            {.bounds = {24.0f, 28.0f, 16.0f, 8.0f}, .corner_radius = 3.0f}};
+        faint.shapes = faint_shape;
+        faint.shape_count = 1;
+        faint.opacity = 0.25f;
+        solid.shapes = solid_shape;
+        solid.shape_count = 1;
+        solid.opacity = 1.0f;
+
+        prism_liquid_glass_group stack[2] = {faint, solid};
+
+        uint32_t faint_red = 0u;
+        uint32_t solid_red = 0u;
+        uint32_t stacked_red = 0u;
+        for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
+            render_liquid_glass_frame(s, canvas, target, blur_filter, glass_filter, &faint, 1u, px);
+            faint_red = px[(32u * W + 32u) * 4u];
+            render_liquid_glass_frame(s, canvas, target, blur_filter, glass_filter, &solid, 1u, px);
+            solid_red = px[(32u * W + 32u) * 4u];
+            render_liquid_glass_frame(s, canvas, target, blur_filter, glass_filter, stack, 2u, px);
+            stacked_red = px[(32u * W + 32u) * 4u];
+        }
+        /* The two references must be separated before the stacked value can
+         * mean anything. */
+        EXPECT(solid_red > faint_red + 30u);
+        /* Full-opacity over faint == full-opacity: the later body wins. */
+        EXPECT(stacked_red + 4u >= solid_red && stacked_red <= solid_red + 4u);
     }
 
     flux_device_wait_idle(d);

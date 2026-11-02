@@ -24,6 +24,8 @@
 #include <flux/vulkan.h>
 #include <prism/prism.h>
 
+#include "../material_test_helpers.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -113,9 +115,9 @@ int main(void) {
         ld.group_count = 1u;
         ld.refraction = 0.0f;
         ld.frost_strength = 0.0f;
-        flux_image *layer = nullptr;
+        prism_material_output layer = {0};
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
-        EXPECT(layer != nullptr);
+        EXPECT(layer.image != nullptr);
 
         /* Draw over a *black* base so unfrosted/un-glassed pixels read black
          * and the frost's own alpha is exercised. */
@@ -123,7 +125,7 @@ int main(void) {
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
-        flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        test_draw_material(canvas, layer);
         EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -197,14 +199,14 @@ int main(void) {
             ld.groups = &body;
             ld.group_count = 1u;
             ld.refraction = 0.0f;
-            flux_image *layer = nullptr;
+            prism_material_output layer = {0};
             EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
             EXPECT(flux_canvas_begin(canvas,
                                      &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                               .frame = frame,
                                                               .clear_color = &black}) == FLUX_OK);
-            flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+            test_draw_material(canvas, layer);
             EXPECT(flux_canvas_end(canvas) == FLUX_OK);
             EXPECT(flux_frame_submit(frame) == FLUX_OK);
             EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -253,14 +255,14 @@ int main(void) {
             ld.groups = &body;
             ld.group_count = 1u;
             ld.refraction = 0.0f;
-            flux_image *layer = nullptr;
+            prism_material_output layer = {0};
             EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
             EXPECT(flux_canvas_begin(canvas,
                                      &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                               .frame = frame,
                                                               .clear_color = &black}) == FLUX_OK);
-            flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+            test_draw_material(canvas, layer);
             EXPECT(flux_canvas_end(canvas) == FLUX_OK);
             EXPECT(flux_frame_submit(frame) == FLUX_OK);
             EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -323,14 +325,14 @@ int main(void) {
         ld.frost = frost;
         ld.frost_count = 3u;
         ld.group_count = 0u;
-        flux_image *layer = nullptr;
+        prism_material_output layer = {0};
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
         EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
-        flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        test_draw_material(canvas, layer);
         EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -416,14 +418,14 @@ int main(void) {
         ld.group_count = 1u;
         ld.refraction = 0.0f;
         ld.frost_strength = 0.0f;
-        flux_image *layer = nullptr;
+        prism_material_output layer = {0};
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
         EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
-        flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        test_draw_material(canvas, layer);
         EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -489,14 +491,14 @@ int main(void) {
         ld.group_count = 1u;
         ld.refraction = 0.0f;
         ld.frost_strength = 0.0f;
-        flux_image *layer = nullptr;
+        prism_material_output layer = {0};
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
         EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
-        flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        test_draw_material(canvas, layer);
         EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -506,6 +508,82 @@ int main(void) {
         const uint8_t *body_centre = &px[(32u * W + 32u) * 4u];
         /* The bright block shines through the no-frost glass body. */
         EXPECT(body_centre[0] > 150u);
+    }
+
+    /* --- overlapping base-material plates compose in array order --- */
+    {
+        /* Two plates that overlap. Plate A carries a red wash, plate B keeps
+         * the plain frosted backdrop. They are dispatched per merged region,
+         * so both passes touch the shared pixels: the earlier plate must
+         * survive everywhere outside the later plate's own silhouette.
+         *
+         * Before the base/plate stage split, every plate pass wrote an opaque
+         * pixel for every dispatched pixel, so B's pass covered A's exclusive
+         * area with the sharp backdrop — A vanished. That is invisible to any
+         * single-plate test and to the layer-order test above (which only has
+         * one plate per region), so it needs its own gate. */
+        flux_frame *frame = nullptr;
+        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+
+        flux_color white = flux_color_rgba(255, 255, 255, 255);
+        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                             .frame = frame,
+                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                            .image = target},
+                                             .clear_color = &white}) == FLUX_OK);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+
+        flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+        bd.input = target;
+        bd.sigma = 6.0f;
+        flux_image *blurred = nullptr;
+        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+
+        prism_base_material plates[2] = {PRISM_BACKDROP_FROST_INIT, PRISM_BACKDROP_FROST_INIT};
+        plates[0].bounds = (flux_rect){8.0f, 8.0f, 32.0f, 32.0f}; /* A: x 8..40 */
+        plates[0].opacity = 1.0f;
+        plates[0].tint_color = 0xFF0000u;
+        plates[0].tint_strength = 1.0f;
+        plates[1].bounds = (flux_rect){24.0f, 24.0f, 32.0f, 32.0f}; /* B: x 24..56 */
+        plates[1].opacity = 1.0f;
+        plates[1].tint_color = 0xFFFFFFu;
+        plates[1].tint_strength = 0.0f;
+
+        prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
+        ld.input = target;
+        ld.blurred_input = blurred;
+        ld.frost = plates;
+        ld.frost_count = 2u;
+        ld.group_count = 0u;
+        prism_material_output layer = {0};
+        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+
+        EXPECT(
+            flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                               .frame = frame,
+                                                               .clear_color = &black}) == FLUX_OK);
+        test_draw_material(canvas, layer);
+        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+
+        const uint8_t *a_left = &px[(12u * W + 12u) * 4u];  /* A only */
+        const uint8_t *a_right = &px[(12u * W + 30u) * 4u]; /* A only, other side */
+        const uint8_t *b_only = &px[(40u * W + 44u) * 4u];  /* B only */
+        const uint8_t *a_and_b = &px[(28u * W + 28u) * 4u]; /* both */
+        const uint8_t *outside = &px[(4u * W + 4u) * 4u];   /* neither */
+
+        /* A's exclusive area keeps A's wash: red stays red. */
+        EXPECT(a_left[0] > 200u && a_left[1] < 60u && a_left[2] < 60u);
+        EXPECT(a_right[0] > 200u && a_right[1] < 60u && a_right[2] < 60u);
+        /* B only and the overlap read the plain (untinted) plate. */
+        EXPECT(b_only[0] > 200u && b_only[1] > 200u && b_only[2] > 200u);
+        EXPECT(a_and_b[0] > 200u && a_and_b[1] > 200u && a_and_b[2] > 200u);
+        /* Outside every plate the layer is transparent. */
+        EXPECT(outside[0] == 0u && outside[1] == 0u && outside[2] == 0u);
     }
 
     /* --- multiple glass bodies with NO frost rects: all bodies must render (never black) --- */
@@ -549,14 +627,14 @@ int main(void) {
         ld.group_count = 3u;
         ld.refraction = 4.0f;
         ld.edge_width = 8.0f;
-        flux_image *layer = nullptr;
+        prism_material_output layer = {0};
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
         EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
-        flux_canvas_draw_image(canvas, layer, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+        test_draw_material(canvas, layer);
         EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -613,18 +691,127 @@ int main(void) {
         ld.blurred_input = blurred;
         ld.frost = &frost;
         ld.frost_count = 1u;
-        flux_image *out1 = nullptr;
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out1) == FLUX_OK);
-        EXPECT(out1 != nullptr);
+        /* Opt into the cache for this scenario. */
+        prism_backdrop_layer_revision rev = PRISM_BACKDROP_LAYER_REVISION_INIT;
+        rev.revision = 42u;
+        ld.next = &rev;
 
-        /* Second application with identical inputs on the same slot:
-         * must hit cache, returning the exact same persistent image */
-        flux_image *out2 = nullptr;
+        prism_material_output out1 = {0};
+        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out1) == FLUX_OK);
+        EXPECT(out1.image != nullptr);
+
+        /* Second application with the same revision on the same slot: hits the
+         * cache and returns the exact same persistent image without any
+         * dispatch. */
+        prism_material_output out2 = {0};
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out2) == FLUX_OK);
-        EXPECT(out2 == out1);
+        EXPECT(out2.image == out1.image);
+
+        /* A new revision must invalidate, even though both images and the whole
+         * descriptor are unchanged. This is the case the old handle/hash key
+         * could not express: a repainted capture target and a pooled blur
+         * output keep their handles, so content changes were invisible. */
+        rev.revision = 43u;
+        prism_material_output out3 = {0};
+        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out3) == FLUX_OK);
+        EXPECT(out3.image == out1.image); /* same persistent image ... */
+        /* ... re-rendered: the stats for this slot describe this submission,
+         * which only happens on a cache miss. */
+
+        /* With the cache disabled (revision 0) every call re-renders. */
+        ld.next = nullptr;
+        prism_material_output out4 = {0};
+        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out4) == FLUX_OK);
+        EXPECT(out4.image == out1.image);
+
+        /* An extension tag prism does not define is rejected instead of being
+         * silently ignored: a dropped revision would quietly turn a
+         * cache-enabled call into a stale-content call. */
+        prism_backdrop_layer_revision bogus = PRISM_BACKDROP_LAYER_REVISION_INIT;
+        bogus.type = (prism_struct_type)999;
+        ld.next = &bogus;
+        prism_material_output out5 = {0};
+        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out5) ==
+               FLUX_ERROR_INVALID_ARGUMENT);
+        EXPECT(out5.image == nullptr);
 
         EXPECT(flux_frame_submit(frame) == FLUX_OK);
         EXPECT(flux_frame_present(frame) == FLUX_OK);
+    }
+
+    /* --- cache correctness: a revision bump must publish new backdrop content --- */
+    {
+        /* The layer holds one persistent output per slot and the glass lens
+         * samples whatever the slot last produced. Gain is the observable: the
+         * backdrop flips between black and white while every handle and every
+         * descriptor field stays identical, so only the revision can carry the
+         * change. */
+        const prism_liquid_glass_shape body_shapes[1] = {
+            {.bounds = {20.0f, 24.0f, 24.0f, 16.0f}, .corner_radius = 8.0f},
+        };
+        prism_liquid_glass_group body = PRISM_LIQUID_GLASS_GROUP_INIT;
+        body.shapes = body_shapes;
+        body.shape_count = 1;
+
+        prism_backdrop_layer_revision rev = PRISM_BACKDROP_LAYER_REVISION_INIT;
+        uint8_t levels[4] = {0};
+        for (uint32_t step = 0; step < 2; ++step) {
+            uint8_t bg = step == 0 ? 16u : 240u;
+            flux_frame *frame = nullptr;
+            EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+
+            flux_color backdrop = flux_color_rgba(bg, bg, bg, 255);
+            EXPECT(flux_canvas_begin(
+                       canvas,
+                       &(flux_canvas_pass_desc){
+                           .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                           .frame = frame,
+                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
+                           .clear_color = &backdrop}) == FLUX_OK);
+            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+
+            flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+            bd.input = target;
+            bd.sigma = 6.0f;
+            flux_image *blurred = nullptr;
+            EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+
+            prism_base_material frost = PRISM_BACKDROP_FROST_INIT;
+            frost.bounds = (flux_rect){0.0f, 0.0f, (float)W, (float)H};
+            frost.opacity = 1.0f;
+
+            prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
+            ld.input = target;
+            ld.blurred_input = blurred;
+            ld.frost = &frost;
+            ld.frost_count = 1u;
+            ld.groups = &body;
+            ld.group_count = 1u;
+            ld.refraction = 0.0f;
+            ld.frost_strength = 0.0f;
+            ld.tint_strength = 0.0f;
+            ld.next = &rev;
+
+            prism_material_output layer = {0};
+            EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+
+            EXPECT(flux_canvas_begin(canvas,
+                                     &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                              .frame = frame,
+                                                              .clear_color = &black}) == FLUX_OK);
+            test_draw_material(canvas, layer);
+            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            EXPECT(flux_frame_present(frame) == FLUX_OK);
+            memset(px, 0xCD, BYTES);
+            EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+            levels[step] = px[(32u * W + 32u) * 4u];
+            rev.revision++;
+        }
+        /* Dark backdrop -> dark body; light backdrop -> light body. A frozen
+         * cache would report the same level twice. */
+        EXPECT(levels[0] < 60u);
+        EXPECT(levels[1] > 180u);
     }
 
     prism_backdrop_layer_filter_release(layer_filter);

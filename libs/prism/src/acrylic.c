@@ -2,6 +2,8 @@
  * Acrylic material implementation.
  */
 
+#include "prism_material_frame.h"
+#include "prism_observe.h"
 #include <prism/acrylic.h>
 
 #include <flux/compute.h>
@@ -73,6 +75,10 @@ typedef struct acrylic_push {
     uint32_t tint_color;
     uint32_t group_width;
     uint32_t group_height;
+    float slab_origin_x;
+    float slab_origin_y;
+    float capture_width;
+    float capture_height;
 } acrylic_push;
 
 typedef struct storage_clear_push {
@@ -85,7 +91,7 @@ typedef struct storage_clear_push {
     uint32_t region_height;
 } storage_clear_push;
 
-static_assert(sizeof(acrylic_push) == 100, "acrylic_push size mismatch");
+static_assert(sizeof(acrylic_push) == 116, "acrylic_push size mismatch");
 static_assert(sizeof(storage_clear_push) == 28, "storage_clear_push size mismatch");
 
 #define PRISM_WG 16u
@@ -101,6 +107,10 @@ typedef struct acrylic_filter_slot {
     flux_format format;
     flux_image *output;
     bool initialized;
+    uint32_t slab_x;
+    uint32_t slab_y;
+    uint32_t capture_width;
+    uint32_t capture_height;
     uint32_t previous_count;
     acrylic_region previous[ACRYLIC_MAX_GROUPS];
 } acrylic_filter_slot;
@@ -194,8 +204,17 @@ flux_result prism_acrylic_filter_create(flux_device *device, prism_acrylic_filte
     if (!device || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;
-    prism_acrylic_filter *filter = calloc(1, sizeof(*filter));
-    if (!filter)
+    /* Caller's allocator, attributed to prism (ADR-0135). */
+    prism_acrylic_filter *filter = nullptr;
+    if (flux_device_alloc(device,
+                          &(flux_device_alloc_opts){
+                              .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
+                              .bytes = sizeof(*filter),
+                              .owner = PRISM_OBSERVE_OWNER,
+                              .kind = PRISM_OBSERVE_KIND_ACRYLIC,
+                              .scope = FLUX_SCOPE_DEVICE,
+                          },
+                          (void **)&filter) != FLUX_OK)
         return FLUX_ERROR_OUT_OF_MEMORY;
     atomic_init(&filter->ref_count, 1u);
     filter->device = flux_device_retain(device);
@@ -225,15 +244,23 @@ void prism_acrylic_filter_release(prism_acrylic_filter *filter) {
         if (filter->clear_pipelines[i])
             flux_compute_pipeline_release(filter->clear_pipelines[i]);
     }
-    free(filter);
+    flux_device_free(device, &(flux_device_free_opts){
+                                 .type = FLUX_TYPE_DEVICE_FREE_OPTS,
+                                 .ptr = filter,
+                                 .owner = PRISM_OBSERVE_OWNER,
+                                 .kind = PRISM_OBSERVE_KIND_ACRYLIC,
+                                 .scope = FLUX_SCOPE_DEVICE,
+                             });
     flux_device_release(device);
 }
 
 static flux_result acrylic_ensure_slot(prism_acrylic_filter *filter, uint32_t index,
-                                       const flux_image *input) {
+                                       const flux_image *input, uint32_t footprint_w,
+                                       uint32_t footprint_h) {
     acrylic_filter_slot *slot = &filter->slots[index];
-    uint32_t width = flux_image_width(input);
-    uint32_t height = flux_image_height(input);
+    uint32_t width = 0u;
+    uint32_t height = 0u;
+    prism_slab_for_footprint(footprint_w, footprint_h, &width, &height);
     flux_format format = prism_output_format(input);
     if (slot->output && slot->width == width && slot->height == height && slot->format == format)
         return FLUX_OK;
@@ -306,7 +333,7 @@ static bool acrylic_group_dispatch_bounds(const prism_acrylic_group *group, uint
 }
 
 flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame *frame,
-                                       const prism_acrylic_desc *desc, flux_image **out) {
+                                       const prism_acrylic_desc *desc, prism_material_output *out) {
     if (!filter || !frame || !desc || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (desc->type != PRISM_TYPE_ACRYLIC_DESC)
@@ -318,7 +345,7 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
     if (desc->group_count > 0 && !desc->groups)
         return FLUX_ERROR_INVALID_ARGUMENT;
 
-    *out = nullptr;
+    *out = (prism_material_output){0};
     if (flux_frame_get_state(frame) != FLUX_FRAME_STATE_RECORDING ||
         flux_frame_has_active_pass(frame))
         return FLUX_ERROR_INVALID_STATE;
@@ -326,11 +353,54 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
         flux_image_bindless_handle(desc->blurred_input) == FLUX_BINDLESS_INVALID)
         return FLUX_ERROR_UNSUPPORTED;
 
+    const uint32_t capture_width = flux_image_width(desc->input);
+    const uint32_t capture_height = flux_image_height(desc->input);
+
+    uint32_t current_count = 0;
+    acrylic_region current_regions[ACRYLIC_MAX_GROUPS];
+    uint32_t footprint_x0 = UINT32_MAX, footprint_y0 = UINT32_MAX;
+    uint32_t footprint_x1 = 0u, footprint_y1 = 0u;
+
+    for (uint32_t i = 0; i < desc->group_count; ++i) {
+        acrylic_region reg;
+        if (acrylic_group_dispatch_bounds(&desc->groups[i], capture_width, capture_height, &reg)) {
+            current_regions[current_count++] = reg;
+            if (reg.x < footprint_x0)
+                footprint_x0 = reg.x;
+            if (reg.y < footprint_y0)
+                footprint_y0 = reg.y;
+            if (reg.x + reg.width > footprint_x1)
+                footprint_x1 = reg.x + reg.width;
+            if (reg.y + reg.height > footprint_y1)
+                footprint_y1 = reg.y + reg.height;
+        }
+    }
+
+    uint32_t footprint_w = 1u;
+    uint32_t footprint_h = 1u;
+    if (current_count > 0u) {
+        footprint_w = footprint_x1 - footprint_x0;
+        footprint_h = footprint_y1 - footprint_y0;
+    }
+
     uint32_t slot_index = flux_frame_index(frame);
-    flux_result r = acrylic_ensure_slot(filter, slot_index, desc->input);
+    flux_result r = acrylic_ensure_slot(filter, slot_index, desc->input, footprint_w, footprint_h);
     if (r != FLUX_OK)
         return r;
     acrylic_filter_slot *slot = &filter->slots[slot_index];
+
+    const uint32_t slab_x = current_count > 0u ? footprint_x0 : 0u;
+    const uint32_t slab_y = current_count > 0u ? footprint_y0 : 0u;
+    bool slab_moved = slot->initialized && (slot->slab_x != slab_x || slot->slab_y != slab_y);
+
+    for (uint32_t i = 0; i < current_count; ++i) {
+        current_regions[i].x -= slab_x;
+        current_regions[i].y -= slab_y;
+    }
+    slot->slab_x = slab_x;
+    slot->slab_y = slab_y;
+    slot->capture_width = capture_width;
+    slot->capture_height = capture_height;
 
     bool is16f = slot->format == FLUX_FORMAT_RGBA16_SFLOAT;
     r = acrylic_ensure_pipelines(filter, is16f, true, desc->group_count > 0);
@@ -343,18 +413,9 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
     barrier_reuse_to_compute_write(cmd, out_vk);
 
     const int cls = is16f ? 1 : 0;
-    uint32_t current_count = 0;
-    acrylic_region current_regions[ACRYLIC_MAX_GROUPS];
 
-    for (uint32_t i = 0; i < desc->group_count; ++i) {
-        acrylic_region reg;
-        if (acrylic_group_dispatch_bounds(&desc->groups[i], slot->width, slot->height, &reg)) {
-            current_regions[current_count++] = reg;
-        }
-    }
-
-    // Clear previous footprints or initialize full output on first use
-    if (!slot->initialized) {
+    // Clear previous footprints or initialize full output on first use or slab movement
+    if (!slot->initialized || slab_moved) {
         if (filter->clear_pipelines[cls]) {
             storage_clear_push pc = {
                 .output_handle = flux_image_bindless_storage_handle(slot->output),
@@ -408,7 +469,7 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
         for (uint32_t i = 0; i < desc->group_count; ++i) {
             const prism_acrylic_group *g = &desc->groups[i];
             acrylic_region reg;
-            if (!acrylic_group_dispatch_bounds(g, slot->width, slot->height, &reg))
+            if (!acrylic_group_dispatch_bounds(g, capture_width, capture_height, &reg))
                 continue;
 
             acrylic_push pc = {
@@ -418,8 +479,8 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
                 .output_handle = flux_image_bindless_storage_handle(slot->output),
                 .width = slot->width,
                 .height = slot->height,
-                .origin_x = reg.x,
-                .origin_y = reg.y,
+                .origin_x = reg.x - slab_x,
+                .origin_y = reg.y - slab_y,
                 .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w,
                            g->shape.bounds.h},
                 .corner_radius = g->shape.corner_radius,
@@ -437,6 +498,10 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
                 .tint_color = g->tint_color,
                 .group_width = reg.width,
                 .group_height = reg.height,
+                .slab_origin_x = (float)slot->slab_x,
+                .slab_origin_y = (float)slot->slab_y,
+                .capture_width = (float)slot->capture_width,
+                .capture_height = (float)slot->capture_height,
             };
 
             uint32_t gx = (reg.width + PRISM_WG - 1) / PRISM_WG;
@@ -454,6 +519,13 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
     slot->previous_count = current_count;
     memcpy(slot->previous, current_regions, current_count * sizeof(acrylic_region));
 
-    *out = slot->output;
+    *out = (prism_material_output){
+        .image = slot->output,
+        .origin_x = (float)slot->slab_x,
+        .origin_y = (float)slot->slab_y,
+        .width = slot->width,
+        .height = slot->height,
+    };
+    return FLUX_OK;
     return FLUX_OK;
 }

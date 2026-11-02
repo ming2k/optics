@@ -13,7 +13,7 @@ negative_knowledge: true
 - Status: Accepted
 - Date: 2026-09-18
 - Scope: `libs/lens` (`lens.h`, `internal.h`, `solve.c`, `tree.c`, `node.c`), `bindings/lens-rs`.
-- Depends on: [ADR-0028](0028-lens-flexbox-layout.md), [ADR-0060](0060-lens-single-tree-placement-and-z-bands.md), [ADR-0081](0081-lens-unified-fluent-flex-containers-and-component-orthogonality.md), [ADR-0085](0085-lens-box-model-orthogonality-legacy-layout-cleanup-and-c23-baseline.md).
+- Depends on: [ADR-0028](0028-lens-flexbox-layout.md), [ADR-0060](0060-lens-single-tree-placement-and-z-bands.md), [ADR-0081](0081-lens-unified-fluent-flex-containers-and-component-orthogonality.md), [ADR-0128](0128-lens-box-model-orthogonality-legacy-layout-cleanup-and-c23-baseline.md).
 
 ## Context
 

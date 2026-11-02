@@ -487,7 +487,9 @@ flux_result canvas_tile_rasterize(const flux_tile_segment *segs, uint32_t seg_co
                 else
                     hi = mid;
             }
-            float best = bp[0];
+            /* Nearest entry of the sorted `bp` table. Every branch assigns, so
+             * there is no "initial guess" value to seed. */
+            float best;
             if (lo >= nu)
                 best = bp[nu - 1];
             else if (lo == 0)

@@ -12,6 +12,11 @@ date: 2026-01-01
 Accepted (implemented: libs/lens/src/core/borrow.c,
 tests/lens/test_borrow_check.c)
 
+ADR-0129 generalises this debug-only borrow registry into the
+repository-wide resource observation plane and retires the local
+`borrow.c` diagnostics in favour of it. This record stays authoritative
+for the lens string-borrow contract itself.
+
 ## Context
 
 lens widgets take caller-owned strings by borrow — `box.id`, `label`,

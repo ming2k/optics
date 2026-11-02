@@ -99,7 +99,8 @@ typedef struct svg_cmd_buf {
 static void cmd_buf_push(svg_cmd_buf *b, lens_icon_cmd cmd) {
     if (b->count == b->cap) {
         uint32_t ncap = b->cap ? b->cap * 2u : 64u;
-        lens_icon_cmd *p = (lens_icon_cmd *)realloc(b->data, ncap * sizeof *p);
+        lens_icon_cmd *p =
+            (lens_icon_cmd *)realloc(b->data, ncap * sizeof *p); // RAW_ALLOC_OK(no-device)
         if (!p)
             return;
         b->data = p;
@@ -117,7 +118,8 @@ typedef struct svg_shape_buf {
 static void shape_buf_push(svg_shape_buf *b, lensi_svg_shape shape) {
     if (b->count == b->cap) {
         uint32_t ncap = b->cap ? b->cap * 2u : 16u;
-        lensi_svg_shape *p = (lensi_svg_shape *)realloc(b->data, ncap * sizeof *p);
+        lensi_svg_shape *p =
+            (lensi_svg_shape *)realloc(b->data, ncap * sizeof *p); // RAW_ALLOC_OK(no-device)
         if (!p)
             return;
         b->data = p;
@@ -1071,11 +1073,11 @@ static void parse_element(svg_parser *ctx, const char *elem, size_t elen) {
     if (strncmp(elem, "path", 4) == 0) {
         const char *attr = find_attr(elem, "d");
         if (attr) {
-            char *d = (char *)malloc(elen + 1);
+            char *d = (char *)malloc(elen + 1); // RAW_ALLOC_OK(no-device)
             if (d) {
                 get_attr_val(attr, d, elen + 1);
                 parse_path_d(ctx, d, st.transform);
-                free(d);
+                free(d); // RAW_ALLOC_OK(no-device)
             }
         }
     } else if (strncmp(elem, "circle", 6) == 0) {
@@ -1149,11 +1151,11 @@ static void parse_element(svg_parser *ctx, const char *elem, size_t elen) {
         bool closed = (strncmp(elem, "polygon", 7) == 0);
         const char *attr = find_attr(elem, "points");
         if (attr) {
-            char *pts = (char *)malloc(elen + 1);
+            char *pts = (char *)malloc(elen + 1); // RAW_ALLOC_OK(no-device)
             if (pts) {
                 get_attr_val(attr, pts, elen + 1);
                 emit_polyline(ctx, pts, closed, st.transform);
-                free(pts);
+                free(pts); // RAW_ALLOC_OK(no-device)
             }
         }
     }
@@ -1222,19 +1224,19 @@ bool lensi_svg_parse(const char *svg_text, lensi_svg_result *out) {
             break;
 
         size_t len = (size_t)(tag_end - tag_start - 1);
-        char *tag_buf = (char *)malloc(len + 1);
+        char *tag_buf = (char *)malloc(len + 1); // RAW_ALLOC_OK(no-device)
         if (tag_buf) {
             memcpy(tag_buf, tag_start + 1, len);
             tag_buf[len] = '\0';
             parse_element(&ctx, tag_buf, len);
-            free(tag_buf);
+            free(tag_buf); // RAW_ALLOC_OK(no-device)
         }
         p = tag_end + 1;
     }
 
     if (ctx.cmds.count == 0) {
-        free(ctx.cmds.data);
-        free(ctx.shapes.data);
+        free(ctx.cmds.data);   // RAW_ALLOC_OK(no-device)
+        free(ctx.shapes.data); // RAW_ALLOC_OK(no-device)
         return false;
     }
 
@@ -1299,7 +1301,7 @@ bool lensi_svg_parse(const char *svg_text, lensi_svg_result *out) {
     lens_icon_run *runs = nullptr;
     uint32_t run_count = 0;
     if (ctx.shapes.count > 0) {
-        runs = (lens_icon_run *)malloc(ctx.shapes.count * sizeof *runs);
+        runs = (lens_icon_run *)malloc(ctx.shapes.count * sizeof *runs); // RAW_ALLOC_OK(no-device)
         if (runs) {
             for (uint32_t i = 0; i < ctx.shapes.count; ++i) {
                 lensi_svg_shape s = ctx.shapes.data[i];
@@ -1328,14 +1330,14 @@ bool lensi_svg_parse(const char *svg_text, lensi_svg_result *out) {
                 }
             }
             if (can_collapse) {
-                free(runs);
+                free(runs); // RAW_ALLOC_OK(no-device)
                 runs = nullptr;
                 run_count = 0;
             }
         }
     }
 
-    free(ctx.shapes.data);
+    free(ctx.shapes.data); // RAW_ALLOC_OK(no-device)
 
     out->cmds = ctx.cmds.data;
     out->cmd_count = ctx.cmds.count;

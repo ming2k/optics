@@ -70,7 +70,7 @@ void lensi_icon_mask_pool_init(lens *ui) {
     ui->icon_masks.tick = 0;
     ui->icon_masks.count = 0;
     ui->icon_masks.sampler = nullptr;
-    ui->icon_masks.entries = calloc(ui->icon_masks.cap, sizeof(lensi_icon_mask));
+    ui->icon_masks.entries = lensi_alloc(ui, ui->icon_masks.cap * sizeof(lensi_icon_mask));
     if (!ui->icon_masks.entries)
         ui->icon_masks.cap = 0; /* baking degrades to the live-vector fallback */
 }
@@ -80,12 +80,12 @@ void lensi_icon_mask_pool_destroy(lens *ui) {
         return;
     for (uint32_t i = 0; i < ui->icon_masks.count; ++i) {
         lensi_icon_mask *m = &ui->icon_masks.entries[i];
-        free(m->host);
+        lensi_free(ui, m->host);
         if (m->image)
             flux_image_release(m->image);
         *m = (lensi_icon_mask){0};
     }
-    free(ui->icon_masks.entries);
+    lensi_free(ui, ui->icon_masks.entries);
     ui->icon_masks.entries = nullptr;
     ui->icon_masks.count = 0;
     ui->icon_masks.cap = 0;
@@ -252,7 +252,7 @@ static lensi_icon_mask *pool_open(lens *ui) {
             victim = i;
     }
     lensi_icon_mask *m = &ui->icon_masks.entries[victim];
-    free(m->host);
+    lensi_free(ui, m->host);
     if (m->image)
         flux_image_release(m->image);
     *m = (lensi_icon_mask){0};
@@ -367,7 +367,7 @@ lensi_icon_mask *lensi_icon_mask_acquire(lens *ui, int32_t icon_id, uint32_t dev
      * retaining them in RAM allows the same compiled display list to replay into
      * both GPU canvases and CPU canvases (headless snapshots, offscreen export)
      * without branching at the call site or baking twice. */
-    uint8_t *host_plane = malloc((size_t)w * h);
+    uint8_t *host_plane = lensi_alloc(ui, (size_t)w * h);
     if (!host_plane) {
         ui->icon_masks.count--;
         flux_canvas_release(canvas);
@@ -385,7 +385,7 @@ lensi_icon_mask *lensi_icon_mask_acquire(lens *ui, int32_t icon_id, uint32_t dev
         id.height = h;
         id.format = FLUX_FORMAT_R8_UNORM;
         if (flux_image_create(ui->device, &id, &img) != FLUX_OK) {
-            free(host_plane);
+            lensi_free(ui, host_plane);
             ui->icon_masks.count--;
             flux_canvas_release(canvas);
             return nullptr;
@@ -393,7 +393,7 @@ lensi_icon_mask *lensi_icon_mask_acquire(lens *ui, int32_t icon_id, uint32_t dev
         flux_result up = flux_image_update_region(img, 0, 0, w, h, host_plane, (size_t)w * h);
         if (up != FLUX_OK) {
             flux_image_release(img);
-            free(host_plane);
+            lensi_free(ui, host_plane);
             ui->icon_masks.count--;
             flux_canvas_release(canvas);
             return nullptr;

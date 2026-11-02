@@ -112,10 +112,10 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
     (void)flux_blur_filter_apply(app->blur_filter, frame, &bd, &blurred);
 
     /* ===== STEP 3: APPLY MATERIALS ACCORDING TO VIEW MODE ===== */
-    app->glass_out = nullptr;
-    app->frost_out = nullptr;
-    app->acrylic_out = nullptr;
-    app->mica_out = nullptr;
+    app->glass_out = (prism_material_output){0};
+    app->frost_out = (prism_material_output){0};
+    app->acrylic_out = (prism_material_output){0};
+    app->mica_out = (prism_material_output){0};
 
     float sidebar_w = (app->view == VIEW_GRID) ? 0.0f : 140.0f * scale;
     gallery_layout layout = {
@@ -162,14 +162,19 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         flux_canvas_draw_image(canvas, app->capture, (flux_rect){0, 0, W, H}, nullptr);
 
     /* 2. Composite active material layers */
-    if (app->glass_out)
-        flux_canvas_draw_image(canvas, app->glass_out, (flux_rect){0, 0, W, H}, nullptr);
-    if (app->frost_out)
-        flux_canvas_draw_image(canvas, app->frost_out, (flux_rect){0, 0, W, H}, nullptr);
-    if (app->acrylic_out)
-        flux_canvas_draw_image(canvas, app->acrylic_out, (flux_rect){0, 0, W, H}, nullptr);
-    if (app->mica_out)
-        flux_canvas_draw_image(canvas, app->mica_out, (flux_rect){0, 0, W, H}, nullptr);
+    /* Each material draws at its own placement. Everything inside a slab but
+     * outside the material's footprints is transparent, so drawing the slab is
+     * always correct. */
+    const prism_material_output *outs[] = {&app->glass_out, &app->frost_out, &app->acrylic_out,
+                                           &app->mica_out};
+    for (size_t i = 0; i < sizeof(outs) / sizeof(outs[0]); ++i) {
+        if (!outs[i]->image)
+            continue;
+        flux_canvas_draw_image(canvas, outs[i]->image,
+                               (flux_rect){outs[i]->origin_x, outs[i]->origin_y,
+                                           (float)outs[i]->width, (float)outs[i]->height},
+                               nullptr);
+    }
 }
 
 int main(int argc, char **argv) {

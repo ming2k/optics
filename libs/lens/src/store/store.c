@@ -219,6 +219,7 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
 /* Visit each live node once. Deletion shifts only its probe cluster and
  * cannot fail; surviving nodes are never temporarily unreachable. */
 void lensi_store_reap(lens *ui) {
+    FLUX_PROFILE_ZONE(z, "lens.store_reap");
     lens_store *s = &ui->store;
     uint32_t cursor = s->live_head;
     while (cursor != LENSI_STORE_LINK_NONE) {
@@ -270,4 +271,5 @@ void lensi_store_reap(lens *ui) {
         ui->focused_id = 0;
         ui->focus_visible = false;
     }
+    FLUX_PROFILE_ZONE_END(z);
 }

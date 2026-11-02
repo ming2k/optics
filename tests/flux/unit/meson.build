@@ -9,6 +9,23 @@ test_smoke = executable('test_smoke',
 )
 test('smoke', test_smoke, suite : 'unit')
 
+# Observation-plane ledger (ADR-0129): unconditional counting, peak
+# surviving drain, unmatched-release rejection, bounded interning that
+# reports its own truncation, and the report's structured return shape.
+test_observe = executable('test_observe',
+  'test_observe.c',
+  dependencies : [test_helpers_dep],
+)
+test('observe', test_observe, suite : 'unit')
+
+# Profiler telemetry facade (ADR-0138): zero-overhead macros,
+# query API descriptor compliance, and active/passive telemetry states.
+test_profile = executable('test_profile',
+  'test_profile.c',
+  dependencies : [test_helpers_dep],
+)
+test('profile', test_profile, suite : 'unit')
+
 # One versioning scheme across every library: macros round-trip through
 # the runtime accessors, packed numbers agree, and the version_string()
 # output is derived from the macros (a hard-coded literal like the
@@ -247,8 +264,12 @@ test('scene_camera', test_scene_camera, suite : 'unit')
 # in CHANGELOG-TEXT.md. The atlas half drives the shelf packer's page
 # state machine, which needs the FreeType headers text_internal.h
 # includes (no FreeType calls execute on these paths).
+# The cache TU now carries allocation attribution, so it links flux for the
+# allocator entry points even though the test only exercises the hash table
+# (ADR-0135).
 test_glyph_cache = executable('test_glyph_cache',
   'test_glyph_cache.c',
+  dependencies : [flux_dep],
 )
 test('glyph_cache', test_glyph_cache, suite : 'unit')
 

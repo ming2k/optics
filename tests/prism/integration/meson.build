@@ -48,3 +48,12 @@ test('prism_golden', test_prism_golden,
   suite : 'integration',
   env : ['PRISM_GOLDEN_SRC=' + meson.project_source_root() / 'tests' / 'prism' / 'golden'],
 )
+
+# Prism material accounting (ADR-0134): each filter has its own ledger row, so
+# a material leak is attributed to prism instead of surfacing as a flux-owned
+# vk_image. Exact deltas, warm-up iteration, no slack constants.
+test_prism_material_leak = executable('test_prism_material_leak',
+  'test_prism_material_leak.c',
+  dependencies : [test_helpers_dep, prism_dep],
+)
+test('prism_material_leak', test_prism_material_leak, suite : 'integration')

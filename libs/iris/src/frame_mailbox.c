@@ -4,6 +4,7 @@
  * Compositor thread. See frame_mailbox.h for interface contracts. */
 
 #include "frame_mailbox.h"
+#include <flux/profile.h>
 #include <string.h>
 
 void iris_mailbox_init(iris_frame_mailbox *mb) {
@@ -11,7 +12,8 @@ void iris_mailbox_init(iris_frame_mailbox *mb) {
         return;
     memset(mb, 0, sizeof *mb);
     mb->spare = &mb->pool[0];
-    atomic_init(&mb->recycle, &mb->pool[1]);
+    mb->spare2 = &mb->pool[1];
+    atomic_init(&mb->recycle, &mb->pool[2]);
     atomic_init(&mb->ready, nullptr);
     atomic_init(&mb->sequence, 0);
 }
@@ -30,6 +32,7 @@ void iris_mailbox_destroy(iris_frame_mailbox *mb) {
         }
     }
     mb->spare = nullptr;
+    mb->spare2 = nullptr;
     atomic_store_explicit(&mb->ready, nullptr, memory_order_relaxed);
     atomic_store_explicit(&mb->recycle, nullptr, memory_order_relaxed);
 }
@@ -38,59 +41,70 @@ iris_frame_packet *iris_mailbox_acquire(iris_frame_mailbox *mb) {
     if (!mb)
         return nullptr;
 
-    /* Check if the compositor thread returned a consumed packet. */
-    iris_frame_packet *recycled =
-        atomic_exchange_explicit(&mb->recycle, nullptr, memory_order_acquire);
-    if (recycled) {
-        if (recycled->snapshot) {
-            lens_snapshot_release(recycled->snapshot);
-            recycled->snapshot = nullptr;
+    while (true) {
+        /* Check if the compositor thread returned a consumed packet. */
+        iris_frame_packet *recycled =
+            atomic_exchange_explicit(&mb->recycle, nullptr, memory_order_acquire);
+        if (recycled) {
+            if (recycled->snapshot) {
+                lens_snapshot_release(recycled->snapshot);
+                recycled->snapshot = nullptr;
+            }
+            if (recycled->host_list) {
+                flux_display_list_release(recycled->host_list);
+                recycled->host_list = nullptr;
+            }
+            if (!mb->spare) {
+                mb->spare = recycled;
+            } else if (!mb->spare2) {
+                mb->spare2 = recycled;
+            } else {
+                return recycled;
+            }
         }
-        if (recycled->host_list) {
-            flux_display_list_release(recycled->host_list);
-            recycled->host_list = nullptr;
-        }
-        /* If we already held a spare, stash the spare back or use recycled. */
+
         if (mb->spare) {
             iris_frame_packet *pick = mb->spare;
-            mb->spare = recycled;
+            mb->spare = nullptr;
+            if (pick->snapshot) {
+                lens_snapshot_release(pick->snapshot);
+                pick->snapshot = nullptr;
+            }
+            if (pick->host_list) {
+                flux_display_list_release(pick->host_list);
+                pick->host_list = nullptr;
+            }
             return pick;
         }
-        return recycled;
-    }
 
-    if (mb->spare) {
-        iris_frame_packet *pick = mb->spare;
-        mb->spare = nullptr;
-        if (pick->snapshot) {
-            lens_snapshot_release(pick->snapshot);
-            pick->snapshot = nullptr;
+        if (mb->spare2) {
+            iris_frame_packet *pick = mb->spare2;
+            mb->spare2 = nullptr;
+            if (pick->snapshot) {
+                lens_snapshot_release(pick->snapshot);
+                pick->snapshot = nullptr;
+            }
+            if (pick->host_list) {
+                flux_display_list_release(pick->host_list);
+                pick->host_list = nullptr;
+            }
+            return pick;
         }
-        if (pick->host_list) {
-            flux_display_list_release(pick->host_list);
-            pick->host_list = nullptr;
-        }
-        return pick;
-    }
 
-    /* Fallback to pool[2] if neither spare nor recycle were populated yet */
-    iris_frame_packet *pick = &mb->pool[2];
-    if (pick->snapshot) {
-        lens_snapshot_release(pick->snapshot);
-        pick->snapshot = nullptr;
+        /* All 3 buffers in flight: yield momentarily to let compositor recycle. */
+#if defined(__x86_64__) || defined(_M_X64)
+        __builtin_ia32_pause();
+#endif
     }
-    if (pick->host_list) {
-        flux_display_list_release(pick->host_list);
-        pick->host_list = nullptr;
-    }
-    return pick;
 }
 
 void iris_mailbox_publish(iris_frame_mailbox *mb, iris_frame_packet *pkt) {
     if (!mb || !pkt)
         return;
 
+    FLUX_PROFILE_ZONE(z, "iris.mailbox_publish");
     pkt->sequence = atomic_fetch_add_explicit(&mb->sequence, 1, memory_order_relaxed) + 1;
+    FLUX_PROFILE_PLOT_INT("iris.mailbox_seq", (int64_t)pkt->sequence);
     if (pkt->snapshot)
         lens_snapshot_retain(pkt->snapshot);
     if (pkt->host_list)
@@ -99,8 +113,6 @@ void iris_mailbox_publish(iris_frame_mailbox *mb, iris_frame_packet *pkt) {
     /* Atomic handoff to the compositor thread. */
     iris_frame_packet *superseded = atomic_exchange_explicit(&mb->ready, pkt, memory_order_release);
     if (superseded) {
-        /* A previously published packet was not consumed by the compositor before
-         * this newer packet arrived. Release its snapshot and retain it as our spare. */
         if (superseded->snapshot) {
             lens_snapshot_release(superseded->snapshot);
             superseded->snapshot = nullptr;
@@ -109,24 +121,22 @@ void iris_mailbox_publish(iris_frame_mailbox *mb, iris_frame_packet *pkt) {
             flux_display_list_release(superseded->host_list);
             superseded->host_list = nullptr;
         }
-        if (mb->spare && mb->spare != superseded) {
-            if (mb->spare->snapshot) {
-                lens_snapshot_release(mb->spare->snapshot);
-                mb->spare->snapshot = nullptr;
-            }
-            if (mb->spare->host_list) {
-                flux_display_list_release(mb->spare->host_list);
-                mb->spare->host_list = nullptr;
-            }
+        if (!mb->spare) {
+            mb->spare = superseded;
+        } else if (!mb->spare2) {
+            mb->spare2 = superseded;
         }
-        mb->spare = superseded;
     }
+    FLUX_PROFILE_ZONE_END(z);
 }
 
 iris_frame_packet *iris_mailbox_claim(iris_frame_mailbox *mb) {
     if (!mb)
         return nullptr;
-    return atomic_exchange_explicit(&mb->ready, nullptr, memory_order_acquire);
+    FLUX_PROFILE_ZONE(z, "iris.mailbox_claim");
+    iris_frame_packet *pkt = atomic_exchange_explicit(&mb->ready, nullptr, memory_order_acquire);
+    FLUX_PROFILE_ZONE_END(z);
+    return pkt;
 }
 
 void iris_mailbox_recycle(iris_frame_mailbox *mb, iris_frame_packet *pkt) {

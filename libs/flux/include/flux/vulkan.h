@@ -384,6 +384,11 @@ typedef struct flux_pass_desc {
      * governs both the clear rectangle and the rasterizer scissor. */
     int32_t render_offset_x;
     int32_t render_offset_y;
+    /* Optional debug label for this pass (ADR-0133). Only consumed when
+     * FLUX_OBSERVE_PASS_LABELS is requested; nullptr falls back to "pass".
+     * Must be a literal or outlive the recording call, since it lands in a
+     * command buffer that is submitted after this returns. */
+    const char *label;
 } flux_pass_desc;
 
 #define FLUX_PASS_DESC_INIT {.type = FLUX_TYPE_PASS_DESC}

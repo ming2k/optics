@@ -6,14 +6,33 @@
 #extension GL_EXT_nonuniform_qualifier : require
 
 /*
- * Frost layer pass of the layered backdrop compositor
+ * Base-material pass of the layered backdrop compositor
  * (prism/backdrop_layer.h).
  *
- * Writes one frosted rectangle: the blurred backdrop, source-over into the
- * persistent transparent layer image, gated by an analytic rounded-rect
- * SDF coverage. This is the sheet the glass pass above it refracts — the
- * whole point of the layered material is that glass samples *this* image
- * rather than looking past it into the sharp backdrop.
+ * Two modes, both dispatched per merged footprint region:
+ *
+ *   BACKDROP_FROST_MODE_BASE
+ *     Resolve the opaque background for the region: the sharp capture,
+ *     alpha 1. This is the plate the material presents outside every
+ *     frost rect, and the surface the optical lens above refracts when a
+ *     bend tap lands between plates. It runs exactly once per region,
+ *     before any plate.
+ *
+ *   BACKDROP_FROST_MODE_PLATE
+ *     Composite one base-material plate over whatever is already there:
+ *     the (optionally tinted) blurred backdrop, source-over, gated by the
+ *     analytic rounded-rect coverage. Pixels outside the plate's coverage
+ *     are left untouched, so plates stack in array order and a later
+ *     plate never erases an earlier one outside its own silhouette.
+ *
+ * Before this split the pass wrote an opaque pixel for every dispatched
+ * pixel regardless of coverage, so the *last* plate in the array painted
+ * the sharp backdrop over every earlier plate inside the shared dispatch
+ * region — two overlapping plates could not coexist, and a plate anywhere
+ * in the array could be punched out by another one's rectangular
+ * footprint. Writing only inside coverage makes the layer order the
+ * header documents (`base materials paint before every glass group`) hold
+ * per pixel as well as per pass.
  *
  * Storage layout (rgba8 / rgba16f) follows the input class, exactly like
  * the other prism materials.
@@ -27,8 +46,11 @@ layout(set = 0, binding = 1, rgba8) uniform image2D u_storage[];
 #endif
 layout(set = 0, binding = 2) uniform sampler u_samplers[];
 
+#define BACKDROP_FROST_MODE_BASE  0u
+#define BACKDROP_FROST_MODE_PLATE 1u
+
 layout(push_constant) uniform PC {
-    uint input_handle; /* sharp capture: the opaque base under the frost */
+    uint input_handle; /* sharp capture: the opaque base under the plate */
     uint blurred_handle;
     uint sampler_handle;
     uint output_handle;
@@ -36,13 +58,19 @@ layout(push_constant) uniform PC {
     uint height;
     uint origin_x;
     uint origin_y;
-    vec4 bounds;
+    vec4 bounds;       /* plate rect (x, y, w, h), capture-image pixels */
     float corner_radius;
-    float opacity;
-    uint tint_color;
-    float tint_strength;
+    float opacity;     /* plate opacity [0, 1]; blends plate vs what is under it */
+    uint tint_color;   /* 0xRRGGBB wash blended into the plate */
+    float tint_strength; /* [0, 1]; 0 keeps the blurred backdrop */
     uint region_width;
     uint region_height;
+    uint mode;         /* BACKDROP_FROST_MODE_* */
+    uint reserved;
+    float slab_origin_x; /* this slab's origin in capture space */
+    float slab_origin_y;
+    float capture_width;
+    float capture_height;
 } pc;
 
 layout(local_size_x = 16, local_size_y = 16) in;
@@ -66,6 +94,17 @@ vec3 unpack_rgb(uint c)
     );
 }
 
+vec4 sample_rgb(uint handle, vec2 uv)
+{
+    return texture(
+        sampler2D(
+            u_sampled[nonuniformEXT(handle & 0x0FFFFFFFu)],
+            u_samplers[nonuniformEXT(pc.sampler_handle & 0x0FFFFFFFu)]
+        ),
+        clamp(uv, vec2(0.0), vec2(1.0))
+    );
+}
+
 void main()
 {
     uvec2 local = gl_GlobalInvocationID.xy;
@@ -74,54 +113,43 @@ void main()
     uvec2 pixel = local + uvec2(pc.origin_x, pc.origin_y);
     if (pixel.x >= pc.width || pixel.y >= pc.height) return;
 
-    vec2 p = vec2(pixel) + vec2(0.5);
-    vec2 uv = p / vec2(float(pc.width), float(pc.height));
+    /* The slab is sized to the layer's footprints, so output coordinate 0 is
+     * capture coordinate slab_origin (capture = output + slab_origin) and the
+     * sampling UV is against the capture's extent. */
+    vec2 p = vec2(pixel) + vec2(0.5) + vec2(pc.slab_origin_x, pc.slab_origin_y);
+    vec2 uv = p / max(vec2(pc.capture_width, pc.capture_height), vec2(1.0));
 
-    float d = rounded_rect_sdf(p, pc.bounds, pc.corner_radius);
-    float coverage = clamp(0.5 - d, 0.0, 1.0) * clamp(pc.opacity, 0.0, 1.0);
+    int handle = int(pc.output_handle & 0x0FFFFFFFu);
 
-    vec3 sharp = texture(
-        sampler2D(
-            u_sampled[nonuniformEXT(pc.input_handle & 0x0FFFFFFFu)],
-            u_samplers[nonuniformEXT(pc.sampler_handle & 0x0FFFFFFFu)]
-        ),
-        clamp(uv, vec2(0.0), vec2(1.0))
-    ).rgb;
 
-    /* The layer image is a COMPLETE opaque background, not a floating
-     * sheet: every dispatched pixel writes the sharp capture by default,
-     * and the frost rect blends its (optionally tinted) frosted body over
-     * that base inside its coverage. This is what makes the image a valid
-     * lens input for the glass pass — a lens may sample anywhere its bend
-     * reaches, including outside every frost rect, and always reads a true
-     * background colour with alpha 1. No premultiplied half-brightness
-     * fragments, no transparent holes for the lens to fall into.
-     *
-     * The dispatch footprint covers each frost rect's padded bounds plus
-     * every glass body's footprint (the host builds it), so the pass writes
-     * exactly the pixels the layer needs and leaves the rest of the image
-     * untouched for footprint clearing. */
-    vec3 colour = sharp;
-    if (coverage > 0.001) {
-        vec3 blurred = texture(
-            sampler2D(
-                u_sampled[nonuniformEXT(pc.blurred_handle & 0x0FFFFFFFu)],
-                u_samplers[nonuniformEXT(pc.sampler_handle & 0x0FFFFFFFu)]
-            ),
-            clamp(uv, vec2(0.0), vec2(1.0))
-        ).rgb;
-        /* Caller tint: a wash composited INTO the frost (luminance-opposing
-         * veils, scheme-adaptive scrims) so the glass above refracts the
-         * washed frost rather than being painted over by a chrome-layer
-         * wash. Applied before the coverage mix so the tint never widens
-         * the rect's silhouette. */
-        vec3 body = mix(blurred, unpack_rgb(pc.tint_color),
-                        clamp(pc.tint_strength, 0.0, 1.0));
-        colour = mix(sharp, body, coverage);
+    if (pc.mode == BACKDROP_FROST_MODE_BASE) {
+        /* The region's background: the sharp capture, opaque. This is what
+         * makes the layer a valid lens input — a lens may tap anywhere its
+         * bend reaches, including between and outside plates, and must read
+         * a true background colour rather than a premultiplied fragment or
+         * a cleared hole. */
+        imageStore(u_storage[handle], ivec2(pixel), vec4(sample_rgb(pc.input_handle, uv).rgb, 1.0));
+        return;
     }
-    imageStore(
-        u_storage[nonuniformEXT(pc.output_handle & 0x0FFFFFFFu)],
-        ivec2(pixel),
-        vec4(colour, 1.0)
-    );
+
+    float coverage = clamp(0.5 - rounded_rect_sdf(p, pc.bounds, pc.corner_radius), 0.0, 1.0) *
+                     clamp(pc.opacity, 0.0, 1.0);
+    /* Outside this plate's silhouette: leave the pixels already written by
+     * the base pass and by earlier plates alone. */
+    if (coverage <= 0.0) return;
+
+    /* Caller tint: a wash composited INTO the plate (luminance-opposing
+     * veils, scheme-adaptive scrims) so the glass above refracts the washed
+     * plate rather than being painted over by a chrome-layer wash. Applied
+     * before the coverage mix so the tint never widens the silhouette. */
+    vec3 body = mix(sample_rgb(pc.blurred_handle, uv).rgb, unpack_rgb(pc.tint_color),
+                    clamp(pc.tint_strength, 0.0, 1.0));
+
+    /* Source-over into the persistent layer. `coverage` is the plate's own
+     * alpha, so a partial-coverage plate blends with the background it sits
+     * on instead of replacing it — and, at a silhouette edge, with the
+     * plate beneath it. */
+    vec4 destination = imageLoad(u_storage[handle], ivec2(pixel));
+    vec4 source = vec4(body * coverage, coverage);
+    imageStore(u_storage[handle], ivec2(pixel), source + destination * (1.0 - coverage));
 }

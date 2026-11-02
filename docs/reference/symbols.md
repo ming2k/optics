@@ -42,6 +42,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_device_get_drm_identity` | Returns the DRM primary/render identities of the selected Vulkan physical device. |
 | `flux_device_release` |  |
 | `flux_device_wait_idle` |  |
+| `flux_device_alloc` | Returned memory is zeroed, matching the previous contract. |
 | `flux_device_free` |  |
 | `flux_device_memory_budget` |  |
 | `flux_device_memory_stats` | Sample live allocator counters. |
@@ -296,6 +297,12 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_dmabuf_supported` | Whether the logical device has the complete dma-buf import capability. |
 | `flux_dmabuf_sync_supported` | Whether acquire_sync_fd can be imported through VK_KHR_external_semaphore_fd. |
 | `flux_dmabuf_format_modifiers` | Enumerate the single-plane DRM format modifiers a buffer of `format` may use to be both sampleable by this device and importable as external memory, i.e. |
+
+### `flux/profile.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_profile_query` | Query profiler runtime state. |
 
 ### `flux/scene.h`
 
@@ -635,7 +642,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `prism_liquid_glass_filter_create` |  |
 | `prism_liquid_glass_filter_retain` |  |
 | `prism_liquid_glass_filter_release` | Release only after every submission that references the filter's outputs has completed (its frame-slot fence has signalled, or after flux_device_wait_idle): release destroys the filter's compute pipelines inline. |
-| `prism_liquid_glass_filter_apply` | Requires a recording frame with no active pass (flux_frame_get_state(frame) == FLUX_FRAME_STATE_RECORDING and !flux_frame_has_active_pass(frame)). |
+| `prism_liquid_glass_filter_apply` | Paint every body into the material's output slab. |
 | `prism_liquid_glass_filter_stats` | Reads the stats this frame slot last submitted (FLUX_MAX_FRAMES_IN_FLIGHT frames ago): begin_frame has waited that slot's fence, so the mapped buffer is stable while `frame` records. |
 
 ### `prism/frosted.h`
@@ -671,7 +678,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `prism_backdrop_layer_filter_create` |  |
 | `prism_backdrop_layer_filter_retain` |  |
 | `prism_backdrop_layer_filter_release` | Release only after every submission that references the filter's outputs has completed (its frame-slot fence has signalled, or after flux_device_wait_idle): release destroys the filter's compute pipelines inline. |
-| `prism_backdrop_layer_filter_apply` | Requires a recording frame with no active pass. |
+| `prism_backdrop_layer_filter_apply` | Compose the layer. |
 | `prism_backdrop_layer_filter_stats` | Reads the glass statistics this frame slot last submitted (see prism_liquid_glass_filter_stats; group i of the stats aligns with group i of that submission's glass array). |
 
 ## transit — motion vocabulary

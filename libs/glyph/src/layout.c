@@ -118,7 +118,8 @@ static bool layout_reserve(glyph_ctx *t, int need) {
     int cap = t->layout_cap ? t->layout_cap * 2 : 64;
     if (cap < need)
         cap = need;
-    txt_placed_glyph *p = realloc(t->layout_buf, (size_t)cap * sizeof *p);
+    txt_placed_glyph *p = txt_realloc(t, t->layout_buf, (size_t)t->layout_cap * sizeof *p,
+                                      (size_t)cap * sizeof *p, "layout");
     if (!p)
         return false;
     t->layout_buf = p;
@@ -215,9 +216,9 @@ static txt_layout_entry *layout_cache_lookup(glyph_ctx *t, uint32_t hash, const 
  * stay behind as a tombstone so probe chains through the slot remain
  * intact until the next rehash. */
 static void layout_entry_evict(glyph_ctx *t, txt_layout_entry *e) {
-    free(e->utf8);
+    txt_free(t, e->utf8, "layout_key");
     e->utf8 = NULL;
-    free(e->glyphs);
+    txt_free(t, e->glyphs, "layout_glyphs");
     e->glyphs = NULL;
     e->live = false;
     t->layout_entries_live--;
@@ -229,7 +230,7 @@ static void layout_entry_evict(glyph_ctx *t, txt_layout_entry *e) {
  * not re-hashed. Returns true on success; on allocation failure the
  * table is left untouched. */
 static bool layout_cache_rehash(glyph_ctx *t, uint32_t new_cap) {
-    txt_layout_entry *fresh = calloc(new_cap, sizeof *fresh);
+    txt_layout_entry *fresh = txt_alloc(t, (size_t)new_cap * sizeof *fresh, "layout_cache");
     if (!fresh)
         return false;
     uint32_t mask = new_cap - 1u;
@@ -243,7 +244,7 @@ static bool layout_cache_rehash(glyph_ctx *t, uint32_t new_cap) {
         fresh[idx] = *old;
         fresh[idx].occupied = true;
     }
-    free(t->layout_entries);
+    txt_free(t, t->layout_entries, "layout_cache");
     t->layout_entries = fresh;
     t->layout_entries_cap = new_cap;
     t->layout_entries_tomb = 0;
@@ -291,7 +292,8 @@ static txt_layout_entry *layout_cache_insert(glyph_ctx *t, uint32_t hash, const 
                                              const txt_text_layout *layout) {
     /* Lazy allocation: a measure-only or never-drawn context pays nothing. */
     if (!t->layout_entries) {
-        t->layout_entries = calloc(TXT_LAYOUT_CACHE_INIT, sizeof *t->layout_entries);
+        t->layout_entries =
+            txt_alloc(t, (size_t)TXT_LAYOUT_CACHE_INIT * sizeof *t->layout_entries, "layout_cache");
         if (!t->layout_entries)
             return NULL;
         t->layout_entries_cap = TXT_LAYOUT_CACHE_INIT;
@@ -316,11 +318,12 @@ static txt_layout_entry *layout_cache_insert(glyph_ctx *t, uint32_t hash, const 
             continue;
         }
         /* Empty slot or reusable tombstone. */
-        char *utf8_copy = malloc(len);
-        txt_placed_glyph *glyphs_copy = malloc((size_t)layout->count * sizeof *glyphs_copy);
+        char *utf8_copy = txt_alloc(t, len, "layout_key");
+        txt_placed_glyph *glyphs_copy =
+            txt_alloc(t, (size_t)layout->count * sizeof *glyphs_copy, "layout_glyphs");
         if (!utf8_copy || !glyphs_copy) {
-            free(utf8_copy);
-            free(glyphs_copy);
+            txt_free(t, utf8_copy, "layout_key");
+            txt_free(t, glyphs_copy, "layout_glyphs");
             return NULL;
         }
         memcpy(utf8_copy, utf8, len);
@@ -358,10 +361,10 @@ void txt_layout_cache_reset(glyph_ctx *t) {
         txt_layout_entry *e = &t->layout_entries[i];
         if (!e->occupied)
             continue;
-        free(e->utf8);
-        free(e->glyphs);
+        txt_free(t, e->utf8, "layout_key");
+        txt_free(t, e->glyphs, "layout_glyphs");
     }
-    free(t->layout_entries);
+    txt_free(t, t->layout_entries, "layout_cache");
     t->layout_entries = NULL;
     t->layout_entries_cap = 0;
     t->layout_entries_live = 0;
@@ -853,6 +856,8 @@ static flux_result text_draw_impl(glyph_ctx *t, flux_canvas *canvas, flux_encode
     if (!t || (!canvas && !encoder) || !t->has_backend || !t->atlas_pixels || !utf8 || len == 0)
         return FLUX_ERROR_UNSUPPORTED;
 
+    FLUX_PROFILE_ZONE(z_draw, "glyph.draw");
+
     float size_px, weight;
     bool italic;
     glyph_family family;
@@ -885,11 +890,15 @@ static flux_result text_draw_impl(glyph_ctx *t, flux_canvas *canvas, flux_encode
         for (size_t i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
             flux_result result = draw_layout_pass(t, canvas, encoder, &L, x, y, offsets[i].x,
                                                   offsets[i].y, outline_color);
-            if (result != FLUX_OK)
+            if (result != FLUX_OK) {
+                FLUX_PROFILE_ZONE_END(z_draw);
                 return result;
+            }
         }
     }
-    return draw_layout_pass(t, canvas, encoder, &L, x, y, 0.0f, 0.0f, color);
+    flux_result ret = draw_layout_pass(t, canvas, encoder, &L, x, y, 0.0f, 0.0f, color);
+    FLUX_PROFILE_ZONE_END(z_draw);
+    return ret;
 }
 
 void glyph_draw(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
@@ -1119,12 +1128,12 @@ void glyph_compact(glyph_ctx *t) {
      * idle path. */
     if (!t)
         return;
-    free(t->layout_buf);
+    txt_free(t, t->layout_buf, "layout");
     t->layout_buf = NULL;
     t->layout_cap = 0;
-    free(t->runs_buf);
+    txt_free(t, t->runs_buf, "run_buf");
     t->runs_buf = NULL;
-    free(t->run_levels_buf);
+    txt_free(t, t->run_levels_buf, "run_levels_buf");
     t->run_levels_buf = NULL;
     t->runs_cap = 0;
     txt_itemize_release_scratch(t);

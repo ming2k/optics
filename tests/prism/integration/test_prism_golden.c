@@ -39,6 +39,8 @@
 #include <flux/vulkan.h>
 #include <prism/prism.h>
 
+#include "../material_test_helpers.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -173,15 +175,15 @@ static void render_golden_scene(flux_surface *s, flux_canvas *canvas, flux_image
     gd.groups = &body;
     gd.group_count = 1u;
     gd.refraction = 0.0f;
-    flux_image *out = nullptr;
+    prism_material_output out = {0};
     EXPECT(prism_liquid_glass_filter_apply(glass, frame, &gd, &out) == FLUX_OK);
-    EXPECT(out != nullptr);
+    EXPECT(out.image != nullptr);
 
     flux_color black = flux_color_rgba(0, 0, 0, 255);
     EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                               .frame = frame,
                                                               .clear_color = &black}) == FLUX_OK);
-    flux_canvas_draw_image(canvas, out, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+    test_draw_material(canvas, out);
     EXPECT(flux_canvas_end(canvas) == FLUX_OK);
     EXPECT(flux_frame_submit(frame) == FLUX_OK);
     EXPECT(flux_frame_present(frame) == FLUX_OK);

@@ -8,6 +8,8 @@
 #ifndef LENSI_INTERNAL_H
 #define LENSI_INTERNAL_H
 
+#include <flux/observe.h>
+#include <flux/profile.h>
 #include <glyph/glyph.h>
 #include <lens/icon.h>
 #include <lens/lens.h>
@@ -656,6 +658,8 @@ static inline float lensi_font_px(const lens *ui, float token_px) {
 /* allocator (persistent store) — honours the device's flux_allocator,
  * or libc malloc when headless. */
 void *lensi_alloc(lens *ui, size_t bytes);
+void *lensi_alloc_by_device(flux_device *d, size_t bytes);
+void lensi_free_by_device(flux_device *d, void *ptr);
 void lensi_free(lens *ui, void *ptr);
 
 /* overflow (drawlist.c) — the single writer for ui->overflow. Debug builds

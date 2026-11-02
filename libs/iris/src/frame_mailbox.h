@@ -41,6 +41,7 @@ typedef struct iris_frame_mailbox {
     _Atomic(iris_frame_packet *) recycle; /* returned by compositor, reused by UI   */
     iris_frame_packet pool[3];            /* triple buffer backing store            */
     iris_frame_packet *spare;             /* UI thread's local spare buffer         */
+    iris_frame_packet *spare2;            /* UI thread's secondary spare buffer     */
     _Atomic(uint64_t) sequence;
 } iris_frame_mailbox;
 

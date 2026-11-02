@@ -12,6 +12,8 @@
 #ifndef FLUX_TEXT_INTERNAL_H
 #define FLUX_TEXT_INTERNAL_H
 
+#include <flux/observe.h>
+#include <flux/profile.h>
 #include <glyph/glyph.h>
 
 #include <flux/vulkan.h>
@@ -361,6 +363,95 @@ struct glyph_ctx {
     uint32_t layout_entries_tomb; /* occupied-but-evicted slots           */
     uint32_t layout_cache_tick;   /* bumped once per layout build         */
 };
+
+/* ------------------------------------------------------------------ */
+/*  Scope accounting (ADR-0129)                                       */
+/*                                                                    */
+/*  glyph has no allocation funnel: seventeen call sites across six   */
+/*  TUs reach libc directly, and FreeType/HarfBuzz/fontconfig allocate*/
+/*  behind their own APIs where no chokepoint exists at all. Rather   */
+/*  than wrap every site (which cannot cover the third-party ones),   */
+/*  the ledger counts the *resources* the context owns: its own       */
+/*  lifetime (one row) plus the atlas pages it mints, which are the   */
+/*  only glyph-held GPU objects. A glyph-sector leak is therefore     */
+/*  attributable to the context or to a specific atlas page even      */
+/*  though the individual mallocs are invisible.                      */
+/*                                                                    */
+/*  Uses the device ledger when the context has one (a measure-only   */
+/*  glyph_ctx has none, and counting is device-scoped by definition). */
+/*                                                                    */
+/*  The counted unit is the context itself, not its atlas pages: the  */
+/*  pages ARE flux images and are already rows in FLUX_SCOPE_DEVICE.  */
+/*  Counting them twice would make a single leak look like two and    */
+/*  teach readers to distrust the totals. */
+/* ------------------------------------------------------------------ */
+
+/* Allocation funnels for glyph internals (ADR-0135).
+ *
+ * Every glyph-owned buffer goes through these so the consumer's allocator is
+ * honoured and the memory is attributed to glyph/core. `t->dev` may be NULL for
+ * a measure-only context, where libc is the only answer.
+ *
+ * `kind` names the buffer class so a leak report says which one: "atlas",
+ * "run_buf", "bidi_buf", "layout_cache", "scratch". */
+static inline void *txt_alloc(glyph_ctx *t, size_t bytes, const char *kind) {
+    if (!t || !t->dev)
+        return calloc(1, bytes);
+    void *p = nullptr;
+    if (flux_device_alloc(t->dev,
+                          &(flux_device_alloc_opts){
+                              .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
+                              .bytes = bytes,
+                              .owner = "glyph/core",
+                              .kind = kind,
+                              .scope = FLUX_SCOPE_CONTEXT,
+                          },
+                          &p) != FLUX_OK)
+        return NULL;
+    return p;
+}
+
+static inline void txt_free(glyph_ctx *t, void *p, const char *kind) {
+    if (!p)
+        return;
+    if (!t || !t->dev) {
+        free(p);
+        return;
+    }
+    flux_device_free(t->dev, &(flux_device_free_opts){
+                                 .type = FLUX_TYPE_DEVICE_FREE_OPTS,
+                                 .ptr = p,
+                                 .owner = "glyph/core",
+                                 .kind = kind,
+                                 .scope = FLUX_SCOPE_CONTEXT,
+                             });
+}
+
+/* Growth without realloc: allocate, copy the common prefix, free the old. The
+ * ledger therefore sees a balanced pair rather than a silent pointer swap
+ * (ADR-0135 deleted flux_allocator.realloc for exactly this reason). */
+static inline void *txt_realloc(glyph_ctx *t, void *old, size_t old_bytes, size_t new_bytes,
+                                const char *kind) {
+    void *fresh = txt_alloc(t, new_bytes, kind);
+    if (!fresh)
+        return NULL;
+    if (old) {
+        memcpy(fresh, old, old_bytes < new_bytes ? old_bytes : new_bytes);
+        txt_free(t, old, kind);
+    }
+    return fresh;
+}
+
+static inline void txt_observe_acquire(glyph_ctx *t, const char *kind, uint64_t bytes) {
+    if (t && t->dev)
+        FLUX_OBSERVE_ACQUIRE(t->dev, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, kind, "glyph/core",
+                             bytes, FLUX_SITE_NONE);
+}
+
+static inline void txt_observe_release(glyph_ctx *t, const char *kind, uint64_t bytes) {
+    if (t && t->dev)
+        FLUX_OBSERVE_RELEASE(t->dev, FLUX_SCOPE_CONTEXT, kind, "glyph/core", bytes);
+}
 
 /* ------------------------------------------------------------------ */
 /*  Small shared helpers                                               */

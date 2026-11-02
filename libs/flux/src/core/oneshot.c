@@ -322,9 +322,11 @@ flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferU
     sb->capacity = size;
     sb->usage = usage;
     sb->next = NULL;
-    char name[64];
-    snprintf(name, sizeof(name), "flux staging %llu KiB", (unsigned long long)(size >> 10));
-    flux_vk_set_name(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)sb->buffer, name);
+    /* Ledger-derived name (ADR-0132). Staging buffers are pooled and reused,
+     * so the per-instance name is what makes one distinguishable from another
+     * in a capture; the size is already in the ledger's byte column. */
+    flux_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)sb->buffer, FLUX_SCOPE_DEVICE,
+                                 "vk_staging", "flux/core");
     *out = sb;
     return FLUX_OK;
 }

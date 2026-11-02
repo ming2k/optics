@@ -266,6 +266,7 @@ VISTA_API flux_result vista_scene_data_build(flux_device *device, vista_scene_da
         return FLUX_ERROR_OUT_OF_MEMORY;
     }
     sc->refcount = 1;
+    sc->device = flux_device_retain(device);
     flux_result r = sg_data_build(device, data, sc);
     /* sg_data_build consumed `data` either way; on failure it released
      * whatever it uploaded and left `sc` safe to free. */
@@ -274,6 +275,10 @@ VISTA_API flux_result vista_scene_data_build(flux_device *device, vista_scene_da
         return r;
     }
     *out = sc;
+    /* Context-scope row (ADR-0134): a scene outlives frames and dies with the
+     * app's asset set. */
+    FLUX_OBSERVE_ACQUIRE(sc->device, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, "scene",
+                         "vista/scene", 0, FLUX_SITE_NONE);
     return FLUX_OK;
 }
 
@@ -301,6 +306,9 @@ VISTA_API void vista_scene_release(vista_scene *scene) {
     for (uint32_t i = 0; i < scene->material_count; ++i)
         flux_material_release(scene->materials[i]);
     flux_material_release(scene->fallback_material);
+    FLUX_OBSERVE_RELEASE(scene->device, FLUX_SCOPE_CONTEXT, "scene", "vista/scene", 0);
+    if (scene->device)
+        flux_device_release(scene->device);
     free(scene->materials);
     free(scene->prims);
     free(scene->nodes);

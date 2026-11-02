@@ -10,6 +10,7 @@
  */
 #include "test_helpers.h"
 #include <flux/flux.h>
+#include <flux/observe.h>
 #include <flux/vulkan.h>
 
 #include <string.h>
@@ -90,11 +91,67 @@ int main(void) {
     }
     EXPECT(released == CHURN_FRAMES);
 
-    /* Release-without-frame: zombies parked after the last submission
-     * must be destroyed by device teardown (drain path). */
+    /* Release-without-frame: zombies parked with NO recording frame must
+     * be reclaimed immediately by wait_idle (ADR-0139, recording_frames). */
     flux_image *stray = make_cover(d, 0xFF112233u);
     EXPECT(stray != nullptr);
     flux_image_release(stray);
+    flux_device_wait_idle(d);
+
+    flux_observe_counters c = {};
+    EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", &c) ==
+           FLUX_OK);
+    /* At this point only the surface's swapchain/offscreen images remain live. */
+    uint64_t baseline_live = c.live;
+
+    /* Regression test: recording_frames counter integrity across aborted frames.
+     *
+     * Case A: flux_surface_resize during recording must decrement recording_frames
+     * so wait_idle remains a functional reclamation point. */
+    {
+        flux_frame *rec_frame = nullptr;
+        EXPECT(flux_surface_begin_frame(surface, nullptr, &rec_frame) == FLUX_OK);
+
+        flux_image *zombie_a = make_cover(d, 0xAABBCCDDu);
+        EXPECT(zombie_a != nullptr);
+        flux_image_release(zombie_a);
+
+        /* Abort the recording frame by resizing the surface. */
+        EXPECT(flux_surface_resize(surface, SURF_W * 2, SURF_H * 2) == FLUX_OK);
+
+        /* If recording_frames leaked, zombie_a would be tagged (submit_serial + 1)
+         * and wait_idle would not reclaim it. */
+        flux_device_wait_idle(d);
+        EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", &c) ==
+               FLUX_OK);
+        EXPECT(c.live == baseline_live);
+    }
+
+    /* Case B: releasing a surface while a frame is recording must not leak
+     * recording_frames either. */
+    {
+        flux_surface *surf_b = nullptr;
+        flux_surface_desc desc = FLUX_SURFACE_DESC_INIT;
+        desc.width = SURF_W;
+        desc.height = SURF_H;
+        EXPECT(flux_surface_create(d, &desc, &surf_b) == FLUX_OK);
+
+        flux_frame *rec_b = nullptr;
+        EXPECT(flux_surface_begin_frame(surf_b, nullptr, &rec_b) == FLUX_OK);
+
+        flux_surface_release(surf_b);
+
+        /* Device must have 0 recording frames now. Releasing an image and
+         * calling wait_idle must reclaim it immediately. */
+        flux_image *zombie_b = make_cover(d, 0x11223344u);
+        EXPECT(zombie_b != nullptr);
+        flux_image_release(zombie_b);
+        flux_device_wait_idle(d);
+
+        EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", &c) ==
+               FLUX_OK);
+        EXPECT(c.live == baseline_live);
+    }
 
     flux_canvas_release(canvas);
     flux_surface_release(surface);

@@ -42,6 +42,9 @@
 /* ------------------------------------------------------------------ */
 
 struct glyph_cache {
+    /* Owning device, for allocation attribution (ADR-0135). NULL for a
+     * measure-only context. */
+    flux_device *device;
     glyph_entry *slots;
     uint32_t cap;
     uint32_t live_count; /* entries that hold a valid glyph     */
@@ -131,20 +134,58 @@ static uint32_t round_pow2(uint32_t v, uint32_t lo, uint32_t hi) {
     return p;
 }
 
-glyph_cache *glyph_cache_new(uint32_t init_cap, uint32_t max_cap) {
+/* Every allocation in this file goes through the caller's allocator when there
+ * is a device, so a host's custom flux_allocator sees glyph's memory and the
+ * ledger attributes it to glyph/core rather than to flux (ADR-0135). A
+ * device-less cache (measure-only context) has neither, and libc is correct. */
+static void *gc_alloc(flux_device *d, size_t bytes) {
+    if (!d)
+        return calloc(1, bytes); // RAW_ALLOC_OK(no-device)
+    void *p = nullptr;
+    if (flux_device_alloc(d,
+                          &(flux_device_alloc_opts){
+                              .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
+                              .bytes = bytes,
+                              .owner = "glyph/core",
+                              .kind = "cache",
+                              .scope = FLUX_SCOPE_CONTEXT,
+                          },
+                          &p) != FLUX_OK)
+        return NULL;
+    return p;
+}
+
+static void gc_free(flux_device *d, void *p) {
+    if (!p)
+        return;
+    if (!d) {
+        free(p); // RAW_ALLOC_OK(no-device)
+        return;
+    }
+    flux_device_free(d, &(flux_device_free_opts){
+                            .type = FLUX_TYPE_DEVICE_FREE_OPTS,
+                            .ptr = p,
+                            .owner = "glyph/core",
+                            .kind = "cache",
+                            .scope = FLUX_SCOPE_CONTEXT,
+                        });
+}
+
+glyph_cache *glyph_cache_new(flux_device *device, uint32_t init_cap, uint32_t max_cap) {
     /* max_cap must be a power of two (mask arithmetic relies on it). */
     if (max_cap == 0 || (max_cap & (max_cap - 1)) != 0)
         return NULL;
 
     uint32_t cap = round_pow2(init_cap, MIN_CAP, max_cap);
 
-    glyph_cache *c = calloc(1, sizeof *c);
+    glyph_cache *c = gc_alloc(device, sizeof *c);
     if (!c)
         return NULL;
+    c->device = device;
 
-    c->slots = calloc(cap, sizeof *c->slots);
+    c->slots = gc_alloc(device, (size_t)cap * sizeof *c->slots);
     if (!c->slots) {
-        free(c);
+        gc_free(device, c);
         return NULL;
     }
     c->cap = cap;
@@ -159,8 +200,9 @@ glyph_cache *glyph_cache_new(uint32_t init_cap, uint32_t max_cap) {
 void glyph_cache_destroy(glyph_cache *c) {
     if (!c)
         return;
-    free(c->slots);
-    free(c);
+    flux_device *d = c->device;
+    gc_free(d, c->slots);
+    gc_free(d, c);
 }
 
 /* ------------------------------------------------------------------ */
@@ -173,7 +215,7 @@ void glyph_cache_destroy(glyph_cache *c) {
  * true on success; on failure the cache is left untouched (caller can
  * proceed against the old table). */
 static bool rehash(glyph_cache *c, uint32_t new_cap) {
-    glyph_entry *new_slots = calloc(new_cap, sizeof *new_slots);
+    glyph_entry *new_slots = gc_alloc(c->device, (size_t)new_cap * sizeof *new_slots);
     if (!new_slots)
         return false;
 
@@ -228,7 +270,7 @@ static bool rehash(glyph_cache *c, uint32_t new_cap) {
         cursor = next;
     }
 
-    free(c->slots);
+    gc_free(c->device, c->slots);
     c->slots = new_slots;
     c->cap = new_cap;
     c->tomb_count = 0;

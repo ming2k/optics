@@ -3,6 +3,17 @@ option('scene',    type : 'boolean', value : true,  description : 'Build the flu
 option('compute',  type : 'boolean', value : true,  description : 'Build the flux compute module')
 option('effect',   type : 'boolean', value : true,  description : 'Build the flux image effect module')
 
+# Observation-plane attribution (ADR-0129, ADR-0130). Off by default: a
+# release build must not carry the name/site machinery at all, and
+# 'debug-only' is enforced mechanically by ./tools/optics check leaks.
+option('observe_attribution', type : 'boolean', value : false,
+       description : 'Compile object-name and creation-site attribution into the ledger')
+
+# Tracy profiler instrumentation (ADR-0138). Off by default: a release
+# build carries no Tracy runtime or C++ dependencies.
+option('tracy', type : 'boolean', value : false,
+       description : 'Compile Tracy profiler instrumentation into the libraries (ADR-0138)')
+
 option('glyph',    type : 'boolean', value : true,  description : 'Build the glyph text shaping library (ADR-0106)')
 option('vista',    type : 'boolean', value : true,  description : 'Build the vista 3D scene-graph library (ADR-0106)')
 option('prism',    type : 'boolean', value : true,  description : 'Build the prism material library (liquid glass)')

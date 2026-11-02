@@ -36,12 +36,24 @@ void *flux_internal_alloc(flux_device *d, size_t bytes) {
     } else {
         p = calloc(1, bytes);
     }
+    /* The single host-side chokepoint (ADR-0129). Counting here rather than
+     * at each resource constructor is what makes coverage total: a new
+     * resource type cannot be added without crossing this line.
+     *
+     * Bytes are deliberately not tracked for this kind: free() does not
+     * receive a size, so a byte counter here would drift monotonically and
+     * manufacture a fake leak. Byte-domain accounting lives on
+     * VkDeviceMemory, which does know its size at both ends. */
+    if (p)
+        FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "host", "flux/core", 0,
+                             FLUX_SITE_HOST_ALLOC);
     return p;
 }
 
 void flux_internal_free(flux_device *d, void *ptr) {
     if (!ptr)
         return;
+    FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "host", "flux/core", 0);
     if (d && d->allocator.free)
         d->allocator.free(ptr, d->allocator.user);
     else
@@ -142,6 +154,7 @@ static bool feature_bundle_supported(const VkExtensionProperties *available, uin
 typedef struct flux_device_config {
     const flux_device_drm_node_desc *drm_node;
     const flux_device_features_desc *features;
+    const flux_observe_opts *observe;
 } flux_device_config;
 
 static flux_result parse_device_extensions(const flux_device_desc *desc,
@@ -163,6 +176,12 @@ static flux_result parse_device_extensions(const flux_device_desc *desc,
                 return FLUX_ERROR_INVALID_ARGUMENT;
             }
             config->features = (const void *)extension;
+        } else if (extension->type == FLUX_TYPE_OBSERVE_OPTS) {
+            if (config->observe) {
+                FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "duplicate observe-opts extension");
+                return FLUX_ERROR_INVALID_ARGUMENT;
+            }
+            config->observe = (const void *)extension;
         }
         /* Unknown tagged extensions are ignored for forward compatibility,
          * matching the other public descriptor-chain parsers. */
@@ -919,6 +938,10 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
     if (d->has_debug_utils) {
         d->pfn_set_name = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(
             d->device, "vkSetDebugUtilsObjectNameEXT");
+        d->pfn_cmd_begin_label = (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            d->device, "vkCmdBeginDebugUtilsLabelEXT");
+        d->pfn_cmd_end_label = (PFN_vkCmdEndDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            d->device, "vkCmdEndDebugUtilsLabelEXT");
     }
     if (d->has_hdr_metadata) {
         d->pfn_set_hdr_metadata =
@@ -1041,6 +1064,11 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
     d->pipeline_cache_userdata = desc->pipeline_cache_userdata;
     d->frames_in_flight = desc->frames_in_flight ? desc->frames_in_flight : 2;
     d->headless = desc->headless;
+    /* The ledger must exist before any counted resource can be created, so
+     * it is initialised here rather than at the end of bringup (ADR-0129). */
+    r = flux_observe_init(d, config.observe);
+    if (r != FLUX_OK)
+        goto fail;
 
     /* The per-surface frame slot array is fixed at
      * FLUX_MAX_FRAMES_IN_FLIGHT entries; values above are silently
@@ -1131,6 +1159,7 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
     d->upload_pending_lock_initialized = true;
     d->upload_pending_head = nullptr;
     atomic_init(&d->submit_serial, 0u);
+    atomic_init(&d->labels_emitted, 0u);
     atomic_init(&d->completed_serial, 0u);
     d->retire_head = nullptr;
     d->retire_tail = &d->retire_head;
@@ -1156,6 +1185,7 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
 
 fail:
     /* Tear down partial state. */
+    flux_observe_destroy(d);
     flux_dmabuf_acquire_semaphore_pool_destroy(d);
     flux_bindless_heap_destroy(d);
     flux_vk_allocator_destroy(d);
@@ -1324,6 +1354,14 @@ void flux_device_release(flux_device *d) {
         flux_platform_mutex_destroy(&d->pipeline_cache_lock);
         d->pipeline_cache_lock_initialized = false;
     }
+    /* ADR-0129 decision 3: drain reporting runs here — after the retire
+     * queue has drained (so in-flight objects are not misreported as
+     * leaked) and before vkDestroyDevice (after which the object names
+     * injected through VK_EXT_debug_utils are unrecoverable). */
+    flux_observe_report_emit(d, FLUX_SCOPE_DEVICE);
+    flux_observe_report_emit(d, FLUX_SCOPE_CONTEXT);
+    flux_observe_report_emit(d, FLUX_SCOPE_PROCESS);
+    flux_observe_destroy(d);
     if (d->queue_lock_initialized) {
         flux_platform_mutex_destroy(&d->queue_lock);
         d->queue_lock_initialized = false;
@@ -1347,6 +1385,63 @@ void flux_device_release(flux_device *d) {
     if (d->instance)
         vkDestroyInstance(d->instance, nullptr);
     free(d);
+}
+
+/* Name an object from the ledger (ADR-0132). Renders into device-owned
+ * storage and calls the driver in one step, so no caller can hand the driver a
+ * stack buffer: the previous shape was
+ *
+ *     char name[80];
+ *     snprintf(name, sizeof(name), ...);
+ *     flux_vk_set_name(d, type, handle, name);   // name dies on return
+ *
+ * which relies on the driver copying the string. That is not a contract.
+ */
+void flux_vk_set_name_from_ledger(flux_device *d, VkObjectType type, uint64_t handle,
+                                  flux_scope scope, const char *kind, const char *owner) {
+    const char *name = flux_observe_name_object(d, scope, kind, owner);
+    if (!name)
+        return;
+    flux_vk_set_name(d, type, handle, name);
+}
+
+/* Command-buffer section labels (ADR-0133).
+ *
+ * A label is what turns "this draw was slow" into "the backdrop material's
+ * second plate was slow". It is the only diagnostic here that annotates the
+ * *recording*, not the object, so it covers passes the ledger cannot see.
+ *
+ * Cost when off: one branch. Cost when on: one driver call per pass, which is
+ * negligible against the pass itself. The CPU canvas backend has no command
+ * buffer and never reaches these. */
+void flux_vk_cmd_begin_label(flux_device *d, VkCommandBuffer cmd, const char *label) {
+    if (!d || cmd == VK_NULL_HANDLE || !label)
+        return;
+    if ((d->observe.capabilities & (uint32_t)FLUX_OBSERVE_PASS_LABELS) == 0)
+        return;
+    if (!d->pfn_cmd_begin_label || !d->has_debug_utils)
+        return;
+    VkDebugUtilsLabelEXT li = {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pLabelName = label,
+        .color = {0.25f, 0.5f, 1.0f, 1.0f},
+    };
+    d->pfn_cmd_begin_label(cmd, &li);
+    atomic_fetch_add_explicit(&d->labels_emitted, 1u, memory_order_relaxed);
+}
+
+uint64_t flux_device_labels_emitted(const flux_device *d) {
+    return d ? (uint64_t)atomic_load_explicit(&d->labels_emitted, memory_order_relaxed) : 0u;
+}
+
+void flux_vk_cmd_end_label(flux_device *d, VkCommandBuffer cmd) {
+    if (!d || cmd == VK_NULL_HANDLE)
+        return;
+    if ((d->observe.capabilities & (uint32_t)FLUX_OBSERVE_PASS_LABELS) == 0)
+        return;
+    if (!d->pfn_cmd_end_label || !d->has_debug_utils)
+        return;
+    d->pfn_cmd_end_label(cmd);
 }
 
 void flux_vk_set_name(flux_device *d, VkObjectType type, uint64_t handle, const char *name) {
@@ -1375,16 +1470,25 @@ void flux_vk_wait_idle(flux_device *d) {
 }
 
 void flux_device_wait_idle(const flux_device *d) {
-    if (d && d->device)
+    if (!d)
+        return;
+    if (d->device)
         flux_vk_wait_idle((flux_device *)d);
-    if (d) {
-        /* The whole device is idle, so every graphics batch submitted so
-         * far has completed. The public signature is const; the retire
-         * watermark is bookkeeping, not observable device state. */
-        flux_device *mut = (flux_device *)d;
-        flux_vk_note_graphics_completed(
-            mut, atomic_load_explicit(&mut->submit_serial, memory_order_acquire));
-    }
+    /* The whole device is idle, so every graphics batch submitted so far
+     * has completed. The public signature is const; the retire watermark is
+     * bookkeeping, not observable device state. */
+    flux_device *mut = (flux_device *)d;
+    flux_vk_note_graphics_completed(
+        mut, atomic_load_explicit(&mut->submit_serial, memory_order_acquire));
+    /* An idle device means every parked resource is provably unreferenced,
+     * so drain the retire FIFO here rather than leaving it to the async
+     * sweep. Hosts and tests use this call as the "everything I released is
+     * actually gone" barrier, and before this it was not one: the objects
+     * sat on the FIFO until the next submission advanced the watermark.
+     * That gap is exactly what made leak assertions on live counts
+     * unreliable, and why leak tests previously had to submit empty frames
+     * or accept tolerances (see the note in test_text_atlas_leak.c). */
+    flux_device_drain_retire(mut);
 }
 
 uint64_t flux_vk_note_graphics_submission(flux_device *d) {
@@ -1402,6 +1506,15 @@ void flux_vk_note_graphics_completed(flux_device *d, uint64_t serial) {
     flux_device_sweep_retire(d);
 }
 
+/* True while any surface on this device is between begin_frame and submit.
+ *
+ * A release that happens during recording must assume the recording frame may
+ * already reference the resource, so its retire tag has to cover that frame's
+ * submission. With no recording frame nothing can still reference it. */
+static bool device_has_recording_frame(const flux_device *d) {
+    return atomic_load_explicit(&d->recording_frames, memory_order_acquire) != 0u;
+}
+
 /* Tag `z` one past the current submission serial and append it to the
  * retire FIFO. Tagging under the lock keeps list order non-decreasing
  * even when releases race on different threads. Batches submitted before
@@ -1410,6 +1523,15 @@ void flux_vk_note_graphics_completed(flux_device *d, uint64_t serial) {
  * gets the *next* serial, so tag one past the counter to cover it. Later
  * batches cannot reference the resource — its refcount reached zero, so
  * no live reference remains to be recorded.
+ *
+ * The `+ 1` covers a recording frame only. A device with no frame in
+ * recording state has nothing that could still reference the resource, so the
+ * tag is the current serial and the release becomes reclaimable as soon as every
+ * submission has completed — which is exactly what flux_device_wait_idle
+ * establishes. Without that distinction a host that released its last material
+ * and waited for idle kept the memory until it submitted another (empty) frame,
+ * making wait_idle an unreliable reclamation point. See
+ * flux_device_reclaim_retired.
  *
  * Backpressure: the FIFO holds real GPU memory alive, so it has a hard
  * entry bound (FLUX_RETIRE_MAX_PENDING). The bound is only reachable
@@ -1424,8 +1546,10 @@ void flux_vk_note_graphics_completed(flux_device *d, uint64_t serial) {
 static void zombie_park(flux_device *d, flux_retire_zombie *z) {
     uint32_t pending;
     z->next = nullptr;
+    bool recording = device_has_recording_frame(d);
     flux_platform_mutex_lock(&d->retire_lock);
-    z->retire_after = atomic_load_explicit(&d->submit_serial, memory_order_acquire) + 1u;
+    z->retire_after =
+        atomic_load_explicit(&d->submit_serial, memory_order_acquire) + (recording ? 1u : 0u);
     *d->retire_tail = z;
     d->retire_tail = &z->next;
     d->retire_pending++;
@@ -1484,11 +1608,13 @@ void flux_device_retire_image(flux_device *d, VkImageView view, VkImage image,
             flux_bindless_release(d, bindless_storage);
         if (view)
             vkDestroyImageView(d->device, view, nullptr);
-        if (image)
+        if (image) {
             vkDestroyImage(d->device, image, nullptr);
+            FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", 0);
+        }
         if (alloc && alloc->memory) {
             flux_vk_alloc copy = *alloc;
-            flux_vk_deallocate(d, &copy);
+            flux_vk_deallocate(d, &copy); /* releases its own ledger row */
         }
         if (imported_memory) {
             vkFreeMemory(d->device, imported_memory, nullptr);
@@ -1536,8 +1662,10 @@ void flux_device_retire_sampler(flux_device *d, VkSampler sampler, uint32_t bind
         flux_vk_wait_idle(d);
         if (bindless != FLUX_BINDLESS_INVALID)
             flux_bindless_release(d, bindless);
-        if (sampler)
+        if (sampler) {
             vkDestroySampler(d->device, sampler, nullptr);
+            FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_sampler", "flux/core", 0);
+        }
         return;
     }
     z->sampler = sampler;
@@ -1547,22 +1675,35 @@ void flux_device_retire_sampler(flux_device *d, VkSampler sampler, uint32_t bind
 }
 
 static void zombie_destroy(flux_device *d, flux_retire_zombie *z) {
+    /* The ledger is settled here, not at the release call: a retired object
+     * is no longer owned by the resource but is still allocated, so counting
+     * it out at release time would let the ledger claim the device drained
+     * while the GPU memory is provably still held. That is the difference
+     * between a leak report and a lie (ADR-0129 decision 3). */
     if (z->bindless != FLUX_BINDLESS_INVALID)
         flux_bindless_release(d, z->bindless);
     if (z->bindless_storage != FLUX_BINDLESS_INVALID)
         flux_bindless_release(d, z->bindless_storage);
     if (z->view)
         vkDestroyImageView(d->device, z->view, nullptr);
-    if (z->image)
+    if (z->image) {
         vkDestroyImage(d->device, z->image, nullptr);
-    if (z->buffer)
+        FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", 0);
+    }
+    if (z->buffer) {
         vkDestroyBuffer(d->device, z->buffer, nullptr);
-    if (z->sampler)
+        FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_buffer", "flux/core", 0);
+    }
+    if (z->sampler) {
         vkDestroySampler(d->device, z->sampler, nullptr);
-    if (z->pipeline)
+        FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_sampler", "flux/core", 0);
+    }
+    if (z->pipeline) {
         vkDestroyPipeline(d->device, z->pipeline, nullptr);
+        FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_pipeline", "flux/core", 0);
+    }
     if (z->alloc.memory)
-        flux_vk_deallocate(d, &z->alloc);
+        flux_vk_deallocate(d, &z->alloc); /* releases its own ledger row */
     if (z->imported_memory) {
         vkFreeMemory(d->device, z->imported_memory, nullptr);
         if (z->imported_size)
@@ -1602,12 +1743,65 @@ void flux_device_drain_retire(flux_device *d) {
     sweep_retire_below(d, UINT64_MAX);
 }
 
-void *flux_device_alloc(flux_device *d, size_t bytes) {
-    return flux_internal_alloc(d, bytes);
+/* Device-owned host allocation (ADR-0135).
+ *
+ * The ownership pair is what makes adoption safe: a peer library routing its
+ * memory through here is attributed to itself rather than to flux. Counting
+ * still happens at one chokepoint, but with the caller's (owner, kind, scope)
+ * instead of a hardcoded flux pair.
+ *
+ * flux_internal_alloc stays the funnel for flux's own objects and keeps
+ * reporting owner="flux/core"; this function deliberately does not use it,
+ * because that would re-attribute the caller's memory to flux. */
+flux_result flux_device_alloc(flux_device *d, const flux_device_alloc_opts *opts, void **out) {
+    if (!out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = nullptr;
+    if (!opts || opts->type != FLUX_TYPE_DEVICE_ALLOC_OPTS) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "flux_device_alloc_opts.type mismatch");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    /* Required, not defaulted: an allocation with no owner is exactly the
+     * unattributable row this ADR exists to remove. */
+    if (!opts->owner || !opts->kind) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "flux_device_alloc requires owner and kind");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if ((uint32_t)opts->scope >= (uint32_t)FLUX_SCOPE_COUNT) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "flux_device_alloc: bad scope");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (opts->bytes == 0) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "flux_device_alloc: zero bytes");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+
+    void *p;
+    if (d && d->allocator.alloc) {
+        p = d->allocator.alloc(opts->bytes, d->allocator.user);
+        if (p)
+            memset(p, 0, opts->bytes); /* contract: returned memory is zeroed */
+    } else {
+        p = calloc(1, opts->bytes);
+    }
+    if (!p) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "host allocation failed");
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    FLUX_OBSERVE_ACQUIRE(d, opts->scope, FLUX_LIFETIME_CONTEXT, opts->kind, opts->owner, 0,
+                         FLUX_SITE_NONE);
+    *out = p;
+    return FLUX_OK;
 }
 
-void flux_device_free(flux_device *d, void *ptr) {
-    flux_internal_free(d, ptr);
+void flux_device_free(flux_device *d, const flux_device_free_opts *opts) {
+    if (!opts || opts->type != FLUX_TYPE_DEVICE_FREE_OPTS || !opts->ptr)
+        return;
+    FLUX_OBSERVE_RELEASE(d, opts->scope, opts->kind, opts->owner, 0);
+    if (d && d->allocator.free)
+        d->allocator.free(opts->ptr, d->allocator.user);
+    else
+        free(opts->ptr);
 }
 
 void flux_device_memory_budget(const flux_device *d, flux_memory_budget *out) {
@@ -1700,18 +1894,48 @@ void flux_device_vk_pipeline_cache_unlock(flux_device *d) {
 /*  0..capacity-1 at init. Registration pops; release pushes.         */
 /* ------------------------------------------------------------------ */
 
+static inline bool slot_is_live(const flux_bindless_pool *p, uint32_t slot) {
+    return (p->allocated[slot >> 6] >> (slot & 63u)) & 1u;
+}
+
+static inline void slot_mark(flux_bindless_pool *p, uint32_t slot, bool live) {
+    uint64_t mask = 1ull << (slot & 63u);
+    if (live) {
+        p->allocated[slot >> 6] |= mask;
+        p->live++;
+    } else {
+        p->allocated[slot >> 6] &= ~mask;
+        p->live--;
+    }
+}
+
 static uint32_t slot_alloc(flux_bindless_pool *p) {
     if (p->free_top == 0)
         return FLUX_BINDLESS_INVALID;
-    return p->free_stack[--p->free_top];
+    uint32_t slot = p->free_stack[--p->free_top];
+    /* An allocated bit can only be set here, and slot_free clears it, so a
+     * set bit means internal corruption of the free stack itself (not a
+     * caller double release). Refuse rather than hand out an alias. */
+    if (slot_is_live(p, slot))
+        return FLUX_BINDLESS_INVALID;
+    slot_mark(p, slot, true);
+    return slot;
 }
 
-static void slot_free(flux_bindless_pool *p, uint32_t slot) {
+/* Returns false when `slot` was not live, i.e. the caller released a handle
+ * twice or released a handle it never owned. The free stack is left
+ * untouched: pushing a live-but-already-free slot is what silently aliased
+ * two resources (ADR-0131). */
+static bool slot_free(flux_bindless_pool *p, uint32_t slot) {
     if (slot >= p->capacity)
-        return;
+        return false;
+    if (!slot_is_live(p, slot))
+        return false;
     if (p->free_top >= p->capacity)
-        return; /* double-free guard */
+        return false;
+    slot_mark(p, slot, false);
     p->free_stack[p->free_top++] = slot;
+    return true;
 }
 
 static flux_result init_pool(flux_bindless_pool *p, uint32_t capacity) {
@@ -1719,10 +1943,19 @@ static flux_result init_pool(flux_bindless_pool *p, uint32_t capacity) {
     p->free_stack = calloc(capacity, sizeof(uint32_t));
     if (!p->free_stack)
         return FLUX_ERROR_OUT_OF_MEMORY;
+    /* ceil(capacity / 64) words; calloc zeroes them, so every slot starts
+     * free. */
+    p->allocated = calloc((size_t)(capacity + 63u) / 64u, sizeof(uint64_t));
+    if (!p->allocated) {
+        free(p->free_stack);
+        p->free_stack = nullptr;
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
     /* Push 0..capacity-1 so slot 0 is allocated first. */
     for (uint32_t i = 0; i < capacity; ++i)
         p->free_stack[capacity - 1 - i] = i;
     p->free_top = capacity;
+    p->live = 0;
     return FLUX_OK;
 }
 
@@ -1866,8 +2099,10 @@ void flux_bindless_heap_destroy(flux_device *d) {
         vkDestroyDescriptorPool(d->device, h->pool, nullptr);
     if (h->layout)
         vkDestroyDescriptorSetLayout(d->device, h->layout, nullptr);
-    for (uint32_t i = 0; i < FLUX_BINDLESS_BINDINGS; ++i)
+    for (uint32_t i = 0; i < FLUX_BINDLESS_BINDINGS; ++i) {
         free(h->pools[i].free_stack);
+        free(h->pools[i].allocated);
+    }
     memset(h, 0, sizeof(*h));
 }
 
@@ -1916,6 +2151,8 @@ static flux_result write_image(flux_device *d, uint32_t binding, VkImageView vie
     vkUpdateDescriptorSets(d->device, 1, &w, 0, nullptr);
     flux_platform_mutex_unlock(&d->bindless.lock);
     *out = pack_handle(binding, slot);
+    FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "bindless", "flux/core", 0,
+                         FLUX_SITE_BINDLESS);
     return FLUX_OK;
 }
 
@@ -1943,8 +2180,24 @@ void flux_bindless_release(flux_device *d, flux_bindless_handle h) {
     if (binding >= FLUX_BINDLESS_BINDINGS)
         return;
     flux_platform_mutex_lock(&d->bindless.lock);
-    slot_free(&d->bindless.pools[binding], slot);
+    bool released = slot_free(&d->bindless.pools[binding], slot);
     flux_platform_mutex_unlock(&d->bindless.lock);
+
+    /* ADR-0131: a duplicated release used to push the slot a second time,
+     * after which two registrations popped the same index and one resource
+     * was silently re-pointed at the other. Refuse it loudly instead. */
+    if (!released) {
+        if (d->log) {
+            char buf[160];
+            snprintf(buf, sizeof(buf),
+                     "bindless release refused: binding=%u slot=%u was not live "
+                     "(double release or foreign handle)",
+                     binding, slot);
+            d->log(FLUX_LOG_ERROR, "flux", 0, "%s", buf, d->log_user);
+        }
+        return;
+    }
+    FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "bindless", "flux/core", 0);
     /* Note: the descriptor write is not cleared. PARTIALLY_BOUND +
      * UPDATE_UNUSED_WHILE_PENDING means the stale descriptor is
      * harmless as long as nothing indexes the freed slot. Callers

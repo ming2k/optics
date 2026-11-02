@@ -1493,6 +1493,10 @@ void flux_surface_release(flux_surface *s) {
         return;
 
     surface_wait_quiescent(s);
+    if (s->frame_slot.state == FLUX_FRAME_STATE_RECORDING) {
+        atomic_fetch_sub_explicit(&s->device->recording_frames, 1u, memory_order_acq_rel);
+        s->frame_slot.state = FLUX_FRAME_STATE_INVALID;
+    }
     flux_transient_ring_destroy(&s->transient, s->device);
     for (uint32_t i = 0; i < s->frames_in_flight; ++i)
         destroy_per_frame(s, i);
@@ -1513,6 +1517,9 @@ flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h) {
         return FLUX_ERROR_INVALID_ARGUMENT;
 
     surface_wait_quiescent(s);
+    if (s->frame_slot.state == FLUX_FRAME_STATE_RECORDING) {
+        atomic_fetch_sub_explicit(&s->device->recording_frames, 1u, memory_order_acq_rel);
+    }
     s->frame_active = false;
     s->frame_slot.state = FLUX_FRAME_STATE_INVALID;
     s->needs_recreate = false;

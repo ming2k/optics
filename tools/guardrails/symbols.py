@@ -25,6 +25,7 @@ LIBRARIES = [
             "libs/flux/include/flux/canvas.h",
             "libs/flux/include/flux/canvas_cpu.h",
             "libs/flux/include/flux/dmabuf.h",
+            "libs/flux/include/flux/profile.h",
             "libs/flux/include/flux/scene.h",
             "libs/flux/include/flux/compute.h",
             "libs/flux/include/flux/effect.h",

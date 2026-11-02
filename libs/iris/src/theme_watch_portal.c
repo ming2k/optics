@@ -34,6 +34,7 @@
 #ifdef IRIS_HAVE_PORTAL_WATCH
 
 /* _GNU_SOURCE is provided by the build system (add_project_arguments). */
+#include "iris_fd_observe.h"
 #include "platform_wakeup.h"
 
 #include "a11y_prefs_internal.h"
@@ -207,10 +208,16 @@ static int watch_start(void) {
         g_bus = NULL;
         return -1;
     }
+    /* Process-scope descriptors (ADR-0129). This watcher's stop pipe is
+     * created and destroyed on its own lifecycle, independent of any
+     * flux_device, so it belongs in the process ledger — which is also the
+     * only ledger that outlives every device. */
+    iris_fd_open_record(g_stop_pipe[0], "fd_watch_pipe");
+    iris_fd_open_record(g_stop_pipe[1], "fd_watch_pipe");
 
     if (pthread_create(&g_thread, NULL, watch_thread_main, g_bus) != 0) {
-        close(g_stop_pipe[0]);
-        close(g_stop_pipe[1]);
+        iris_fd_close_record(g_stop_pipe[0], "fd_watch_pipe");
+        iris_fd_close_record(g_stop_pipe[1], "fd_watch_pipe");
         g_stop_pipe[0] = g_stop_pipe[1] = -1;
         sd_bus_unref(g_bus);
         g_bus = NULL;
@@ -233,8 +240,8 @@ static void watch_stop(void) {
     pthread_join(g_thread, NULL);
     g_thread_running = false;
 
-    close(g_stop_pipe[0]);
-    close(g_stop_pipe[1]);
+    iris_fd_close_record(g_stop_pipe[0], "fd_watch_pipe");
+    iris_fd_close_record(g_stop_pipe[1], "fd_watch_pipe");
     g_stop_pipe[0] = g_stop_pipe[1] = -1;
 
     sd_bus_unref(g_bus);

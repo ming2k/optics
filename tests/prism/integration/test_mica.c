@@ -15,6 +15,8 @@
 #include <flux/vulkan.h>
 #include <prism/prism.h>
 
+#include "../material_test_helpers.h"
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,16 +32,16 @@ static uint32_t render_mica_frame(flux_surface *surface, flux_canvas *canvas, fl
     EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
     uint32_t slot = flux_frame_index(frame);
 
-    flux_image *mica_out = nullptr;
+    prism_material_output mica_out = {0};
     EXPECT(prism_mica_filter_apply(mica_filter, frame, desc, &mica_out) == FLUX_OK);
-    EXPECT(mica_out != nullptr);
+    EXPECT(mica_out.image != nullptr);
 
     flux_color clear_col = flux_color_rgba(0, 0, 0, 0);
     EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                               .frame = frame,
                                                               .clear_color = &clear_col}) ==
            FLUX_OK);
-    flux_canvas_draw_image(canvas, mica_out, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
+    test_draw_material(canvas, mica_out);
     EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     EXPECT(flux_frame_submit(frame) == FLUX_OK);

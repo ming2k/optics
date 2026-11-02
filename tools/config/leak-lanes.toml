@@ -1,0 +1,241 @@
+# leak-lanes.toml — one leak lane per public resource kind (ADR-0130).
+#
+# Why this file exists: before it, leak coverage was re-derived by reading
+# test files during review. It could not be enumerated, so "is this kind
+# covered?" had no machine answer and drift was invisible. Here it is a fact:
+# `./tools/optics check leaks` derives the kind inventory from the public
+# headers and fails when a kind has neither a lane below nor a reasoned
+# exemption in leak-exempt.toml.
+#
+# Contract for every entry:
+#   [kind.<symbol>]
+#   scope    = "device" | "context" | "process"   (the ledger scope)
+#   lifetime = "frame" | "context" | "process"    (the drain point)
+#   lane     = path to an existing test source, registered as a meson test
+#
+# A lane must assert an *exact* delta against the ledger. A tolerance constant
+# is rejected in review: the regression that motivated all of this was an
+# off-by-one that a `<= baseline + 2` assertion would have swallowed.
+
+# ---------------------------------------------------------------------------
+# flux — device scope
+# ---------------------------------------------------------------------------
+
+[kind.flux_image]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+[kind.flux_buffer]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+[kind.flux_sampler]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+[kind.flux_target]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+[kind.flux_graphics_pipeline]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+[kind.flux_compute_pipeline]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_soak.c"
+
+[kind.flux_icc_profile]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_resource_leak.c"
+
+[kind.flux_device]
+scope    = "device"
+lifetime = "process"
+lane     = "tests/flux/integration/test_allocator.c"
+
+scope    = "device"
+lifetime = "process"
+lane     = "tests/flux/integration/test_allocator.c"
+
+[kind.flux_surface]
+scope    = "device"
+lifetime = "process"
+lane     = "tests/flux/integration/test_offscreen.c"
+
+scope    = "device"
+lifetime = "process"
+lane     = "tests/flux/integration/test_offscreen.c"
+
+# ---------------------------------------------------------------------------
+# flux — canvas / scene / effect modules
+# ---------------------------------------------------------------------------
+
+[kind.flux_canvas]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_canvas_target_pool.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_canvas_target_pool.c"
+
+[kind.flux_encoder]
+scope    = "device"
+lifetime = "frame"
+lane     = "tests/flux/unit/test_display_list.c"
+
+[kind.flux_display_list]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_sampler.c"
+
+[kind.flux_mesh]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_soak.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_soak.c"
+
+[kind.flux_material]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_soak.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_soak.c"
+
+[kind.flux_blur_filter]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_effect_pool.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_effect_pool.c"
+
+[kind.flux_shadow_filter]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_effect_shadow.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/flux/integration/test_effect_shadow.c"
+
+# ---------------------------------------------------------------------------
+# glyph — context scope. The context is the counted unit; its atlas pages are
+# flux images and therefore already rows in the device scope.
+# ---------------------------------------------------------------------------
+
+[kind.glyph]
+scope    = "context"
+lifetime = "context"
+lane     = "tests/flux/integration/test_text_atlas_leak.c"
+
+scope    = "context"
+lifetime = "context"
+lane     = "tests/flux/integration/test_text_atlas_leak.c"
+
+# ---------------------------------------------------------------------------
+# lens — context scope
+# ---------------------------------------------------------------------------
+
+[kind.lens]
+scope    = "context"
+lifetime = "context"
+lane     = "tests/lens/test_store.c"
+
+[kind.lens_snapshot]
+scope    = "context"
+lifetime = "context"
+lane     = "tests/lens/test_store.c"
+
+scope    = "context"
+lifetime = "context"
+lane     = "tests/lens/test_store.c"
+
+# ---------------------------------------------------------------------------
+# vista — context scope
+# ---------------------------------------------------------------------------
+
+[kind.vista_scene]
+scope    = "context"
+lifetime = "context"
+lane     = "tests/flux/integration/test_scene_mesh.c"
+
+[kind.vista_animation]
+scope    = "context"
+lifetime = "context"
+lane     = "tests/flux/integration/test_scene_mesh.c"
+
+# ---------------------------------------------------------------------------
+# prism — device scope (material filters own GPU state and frame-slot images)
+# ---------------------------------------------------------------------------
+
+[kind.prism_liquid_glass_filter]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/prism/integration/test_prism_material_leak.c""
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/prism/integration/test_liquid_glass.c"
+
+[kind.prism_backdrop_layer_filter]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/prism/integration/test_prism_material_leak.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/prism/integration/test_backdrop_layer.c"
+
+[kind.prism_mica_filter]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/prism/integration/test_prism_material_leak.c"
+
+scope    = "device"
+lifetime = "context"
+lane     = "tests/prism/integration/test_mica.c"
+
+[kind.prism_frosted_filter]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/prism/integration/test_prism_material_leak.c"
+
+[kind.prism_acrylic_filter]
+scope    = "device"
+lifetime = "context"
+lane     = "tests/prism/integration/test_prism_material_leak.c"

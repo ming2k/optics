@@ -274,6 +274,10 @@ typedef enum flux_struct_type {
     FLUX_TYPE_EFFECT_SHADOW_DESC = 40,
     FLUX_TYPE_CPU_TARGET_DESC = 46,
     FLUX_TYPE_MATERIAL_VECTOR_DESC = 47,
+    FLUX_TYPE_OBSERVE_OPTS = 48,
+    FLUX_TYPE_OBSERVE_REPORT_OPTS = 49,
+    FLUX_TYPE_DEVICE_ALLOC_OPTS = 50,
+    FLUX_TYPE_DEVICE_FREE_OPTS = 51,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -289,6 +293,11 @@ static_assert(FLUX_TYPE_CANVAS_ANTIALIAS_DESC == 33,
 static_assert(FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC == 34,
               "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_EFFECT_SHADOW_DESC == 40, "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_OBSERVE_OPTS == 48, "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_OBSERVE_REPORT_OPTS == 49,
+              "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_DEVICE_ALLOC_OPTS == 50, "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_DEVICE_FREE_OPTS == 51, "flux_struct_type: append only — never renumber");
 
 /* ================================================================== */
 /*  C23 Type-Safe Compound Literal Initializer (RFC-0094 / ADR-0087)  */
@@ -315,6 +324,10 @@ static_assert(FLUX_TYPE_EFFECT_SHADOW_DESC == 40, "flux_struct_type: append only
 #define FLUX_TYPE_cpu_target_desc FLUX_TYPE_CPU_TARGET_DESC
 #define FLUX_TYPE_canvas_pass_desc FLUX_TYPE_CANVAS_PASS_DESC
 #define FLUX_TYPE_glyph_run_desc FLUX_TYPE_GLYPH_RUN_DESC
+#define FLUX_TYPE_observe_opts FLUX_TYPE_OBSERVE_OPTS
+#define FLUX_TYPE_observe_report_opts FLUX_TYPE_OBSERVE_REPORT_OPTS
+#define FLUX_TYPE_device_alloc_opts FLUX_TYPE_DEVICE_ALLOC_OPTS
+#define FLUX_TYPE_device_free_opts FLUX_TYPE_DEVICE_FREE_OPTS
 
 typedef struct flux_device_desc flux_DEVICE_DESC;
 typedef struct flux_surface_desc flux_SURFACE_DESC;
@@ -335,12 +348,39 @@ typedef struct flux_canvas_pass_desc flux_CANVAS_PASS_DESC;
 typedef struct flux_glyph_run_desc flux_GLYPH_RUN_DESC;
 
 /* ================================================================== */
+/*  Allocation scope (ADR-0129; declared here because core.h owns the
+    allocation entry points that take it)                              */
+/* ================================================================== */
+
+/* Where an acquisition belongs. The scope decides *when* a non-zero live count
+ * becomes a defect, not how it is counted. */
+typedef enum flux_scope : uint32_t {
+    /* flux GPU and host objects. Drain point: device teardown, after the
+     * retire queue has drained (so in-flight work is never reported). */
+    FLUX_SCOPE_DEVICE = 0,
+    /* Per-context state above flux: lens store, glyph atlas, vista scene,
+     * prism material caches. Drain point: the owning context's release. */
+    FLUX_SCOPE_CONTEXT = 1,
+    /* Process-global OS objects: file descriptors, Wayland protocol objects,
+     * VkSurfaceKHR. Process-global ledger; pass nullptr as the device.
+     * Drain point: process exit. */
+    FLUX_SCOPE_PROCESS = 2,
+    FLUX_SCOPE_COUNT = 3,
+} flux_scope;
+
+/* ================================================================== */
 /*  Allocator & logger (caller-supplied)                              */
 /* ================================================================== */
 
+/* Caller-supplied host allocator.
+ *
+ * `realloc` was removed: no library ever called it, so its semantics were
+ * undefined by construction and it was a trap in a public struct. Growth paths
+ * allocate-copy-free explicitly, which the ledger can observe (ADR-0135).
+ *
+ * zero-init = libc malloc/free. */
 typedef struct flux_allocator {
     void *(*alloc)(size_t bytes, void *user);
-    void *(*realloc)(void *ptr, size_t old_bytes, size_t new_bytes, void *user);
     void (*free)(void *ptr, void *user);
     void *user;
 } flux_allocator;
@@ -701,10 +741,56 @@ FLUX_API void flux_device_release(flux_device *d);
 
 FLUX_API void flux_device_wait_idle(const flux_device *d);
 
-/* Device-owned allocation passthroughs. Use these instead of libc
- * malloc/free in peer code so the caller's allocator is honoured. */
-FLUX_API void *flux_device_alloc(flux_device *d, size_t bytes);
-FLUX_API void flux_device_free(flux_device *d, void *ptr);
+/* ================================================================== */
+/*  Device-owned host allocation (ADR-0135)                           */
+/* ================================================================== */
+
+/* Peer libraries must allocate through here rather than libc, so the
+ * consumer's flux_allocator is honoured and the memory is attributed in the
+ * observation ledger.
+ *
+ * The ownership pair is required, not optional: before it existed, routing a
+ * library through this funnel re-attributed its leaks to "flux/core", which is
+ * the misattribution ADR-0134 removed. `owner` and `kind` must be literals
+ * (they are interned by content, not copied).
+ *
+ * Break-clean note: this replaced the positional
+ * `flux_device_alloc(d, bytes)` intentionally. The old form could not express
+ * ownership, and a `_ex` tier is forbidden by docs/dev/standards/api-design.md. */
+typedef struct flux_device_alloc_opts {
+    flux_struct_type type; /* FLUX_TYPE_DEVICE_ALLOC_OPTS */
+    const void *next;
+    size_t bytes;
+    const char *owner; /* subsystem: "prism/material", "glyph/core", … */
+    const char *kind;  /* resource: "filter_mica", "atlas", "store", … */
+    flux_scope scope;  /* DEVICE for device-bound, CONTEXT for context-bound */
+} flux_device_alloc_opts;
+
+#define FLUX_DEVICE_ALLOC_OPTS_INIT {.type = FLUX_TYPE_DEVICE_ALLOC_OPTS}
+
+/* Returned memory is zeroed, matching the previous contract. On success `out`
+ * receives the pointer; on failure it is set to nullptr and the result says
+ * why. */
+FLUX_NODISCARD FLUX_API flux_result flux_device_alloc(flux_device *d,
+                                                      const flux_device_alloc_opts *opts,
+                                                      void **out);
+
+/* Release. The (owner, kind) pair must match the allocation: the ledger needs
+ * it to close the row, and a mismatch is reported as an unmatched release.
+ * A host may legitimately free from a different call site than it allocated in,
+ * which is why the pair is repeated rather than stored in a hidden header. */
+typedef struct flux_device_free_opts {
+    flux_struct_type type; /* FLUX_TYPE_DEVICE_FREE_OPTS */
+    const void *next;
+    void *ptr; /* nullptr is a no-op */
+    const char *owner;
+    const char *kind;
+    flux_scope scope;
+} flux_device_free_opts;
+
+#define FLUX_DEVICE_FREE_OPTS_INIT {.type = FLUX_TYPE_DEVICE_FREE_OPTS}
+
+FLUX_API void flux_device_free(flux_device *d, const flux_device_free_opts *opts);
 
 #define FLUX_MAX_MEMORY_HEAPS 16
 

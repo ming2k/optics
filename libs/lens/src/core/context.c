@@ -32,17 +32,86 @@ const char *lens_version_string(void) {
         LENS_VERSION_MINOR) "." LENS_STRINGIFY(LENS_VERSION_PATCH);
 }
 
+/* The one lens allocation funnel (ADR-0129, ADR-0135).
+ *
+ * The ledger row is now written by flux_device_alloc itself, with lens's own
+ * (owner, kind) pair — previously this function counted by hand *and* called
+ * the device allocator, so attribution lived in two places. The device-less
+ * fallback keeps plain malloc: a lens context created without a device (CPU-only
+ * layout, unit tests) has no ledger to write to, and that is a legitimate state,
+ * not a violation. */
 void *lensi_alloc(lens *ui, size_t bytes) {
-    return ui->device ? flux_device_alloc(ui->device, bytes) : malloc(bytes);
+    if (!ui->device)
+        return malloc(bytes); // RAW_ALLOC_OK(no-device)
+    void *p = nullptr;
+    if (flux_device_alloc(ui->device,
+                          &(flux_device_alloc_opts){
+                              .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
+                              .bytes = bytes,
+                              .owner = "lens/core",
+                              .kind = "host",
+                              .scope = FLUX_SCOPE_CONTEXT,
+                          },
+                          &p) != FLUX_OK)
+        return nullptr;
+    return p;
+}
+
+/* Device-scoped allocation pair for owners that outlive their lens context
+ * (currently: scene snapshots, whose last release can come from a host after
+ * lens_release). Same attribution as lensi_alloc, but keyed on the device the
+ * memory belongs to rather than on a context that may be gone. */
+void *lensi_alloc_by_device(flux_device *d, size_t bytes) {
+    /* Zeroed on both paths: flux_device_alloc guarantees it, and the device-less
+     * fallback must match, because callers rely on the zeroing (a snapshot
+     * struct's display_list/node_count start life as zero). Returning unzeroed
+     * malloc here was a real bug — it turned a zeroed struct into garbage. */
+    if (!d)
+        return calloc(1, bytes); // RAW_ALLOC_OK(no-device)
+    void *p = nullptr;
+    if (flux_device_alloc(d,
+                          &(flux_device_alloc_opts){
+                              .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
+                              .bytes = bytes,
+                              .owner = "lens/core",
+                              .kind = "snapshot",
+                              .scope = FLUX_SCOPE_CONTEXT,
+                          },
+                          &p) != FLUX_OK)
+        return nullptr;
+    return p;
+}
+
+void lensi_free_by_device(flux_device *d, void *ptr) {
+    if (!ptr)
+        return;
+    if (!d) {
+        free(ptr); // RAW_ALLOC_OK(no-device)
+        return;
+    }
+    flux_device_free(d, &(flux_device_free_opts){
+                            .type = FLUX_TYPE_DEVICE_FREE_OPTS,
+                            .ptr = ptr,
+                            .owner = "lens/core",
+                            .kind = "snapshot",
+                            .scope = FLUX_SCOPE_CONTEXT,
+                        });
 }
 
 void lensi_free(lens *ui, void *ptr) {
     if (!ptr)
         return;
-    if (ui->device)
-        flux_device_free(ui->device, ptr);
-    else
-        free(ptr);
+    if (!ui->device) {
+        free(ptr); // RAW_ALLOC_OK(no-device)
+        return;
+    }
+    flux_device_free(ui->device, &(flux_device_free_opts){
+                                     .type = FLUX_TYPE_DEVICE_FREE_OPTS,
+                                     .ptr = ptr,
+                                     .owner = "lens/core",
+                                     .kind = "host",
+                                     .scope = FLUX_SCOPE_CONTEXT,
+                                 });
 }
 
 static void lensi_theme_normalize(lens_theme *t);
@@ -92,7 +161,7 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = NULL;
 
-    lens *ui = calloc(1, sizeof *ui);
+    lens *ui = calloc(1, sizeof *ui); // RAW_ALLOC_OK(no-device)
     if (!ui)
         return FLUX_ERROR_OUT_OF_MEMORY;
 
@@ -151,7 +220,7 @@ fail_store:
 fail_arena:
     if (ui->device)
         flux_device_release(ui->device);
-    free(ui);
+    free(ui); // RAW_ALLOC_OK(no-device)
     return r;
 }
 
@@ -164,9 +233,15 @@ void lens_release(lens *ui) {
     glyph_release(ui->text); /* null-safe */
     lensi_store_destroy(ui);
     flux_arena_deinit(&ui->arena);
-    if (ui->device)
+    /* Context scope drain point (ADR-0129). Emitted while the device is
+     * still alive so the report can name rows; the device is released
+     * afterwards. A non-zero row here is a lens-owned leak, which is
+     * exactly what had no attribution at all before this point. */
+    if (ui->device) {
+        flux_observe_report_emit(ui->device, FLUX_SCOPE_CONTEXT);
         flux_device_release(ui->device);
-    free(ui);
+    }
+    free(ui); // RAW_ALLOC_OK(no-device)
 }
 
 static void lensi_theme_normalize(lens_theme *t) {
@@ -462,6 +537,17 @@ void lens_pop_style(lens *ui) {
 /* ------------------------------------------------------------------ */
 
 void lens_begin(lens *ui, const lens_input *input) {
+    FLUX_PROFILE_FRAME_START("lens.frame");
+    FLUX_PROFILE_ZONE(z_begin, "lens.begin");
+    /* The UI frame is the ledger's frame-lifetime unit (ADR-0129 decision 4).
+     * lens_begin opens it and lens_end closes it, and the balance is enforced
+     * at the frame boundary by flux_observe_frame_drain_check, which flux's
+     * frame present/abandon paths already call. A lens frame that opens
+     * without closing is the exact regression class that per-frame
+     * enforcement exists to catch within one frame instead of at exit. */
+    if (ui->device)
+        FLUX_OBSERVE_ACQUIRE(ui->device, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_FRAME, "frame",
+                             "lens/core", 0, FLUX_SITE_NONE);
     ui->building = true;
     ui->frame++;
     ui->overflow = false;
@@ -557,12 +643,20 @@ void lens_begin(lens *ui, const lens_input *input) {
         root->pad = 0.0f;
         ui->cont_stack[ui->cont_top++] = root;
     }
+    FLUX_PROFILE_ZONE_END(z_begin);
 }
 
 void lens_end(lens *ui) {
+    FLUX_PROFILE_ZONE(z_end, "lens.end");
     /* close any containers the caller left open */
     while (ui->cont_top > 1)
         lensi_open_container_pop(ui);
+
+    /* Close the frame-lifetime row opened by lens_begin (ADR-0129 decision 4).
+     * Balanced here; an early return or a throw between begin and end leaves
+     * it open, which is precisely what the frame-boundary check reports. */
+    if (ui->device)
+        FLUX_OBSERVE_RELEASE(ui->device, FLUX_SCOPE_CONTEXT, "frame", "lens/core", 0);
 
     lensi_store_reap(ui);    /* phase transitions + GC (ADR-0027) */
     lensi_layout_solve(ui);  /* two-pass measure/arrange, ABS-aware (ADR-0028/0060) */
@@ -600,6 +694,8 @@ void lens_end(lens *ui) {
     /* Advance immutable scene snapshot generation (ADR-0094) */
     ui->generation++;
     ui->building = false;
+    FLUX_PROFILE_ZONE_END(z_end);
+    FLUX_PROFILE_FRAME_END("lens.frame");
 }
 
 void lens_set_focus(lens *ui, lens_id id) {

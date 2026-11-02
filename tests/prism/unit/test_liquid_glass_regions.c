@@ -193,9 +193,98 @@ int main(void) {
                                             current, LIQUID_GLASS_MAX_GROUPS, clear,
                                             LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count));
     EXPECT(clear_count == LIQUID_GLASS_MAX_CLEAR_REGIONS);
+
+    /* A dispatch budget too small for the coalesced set must NOT fail the
+     * call: capacity limits how many rectangles we can dispatch, never which
+     * descriptors are legal. It degrades to one full-image clear, which is a
+     * superset of every footprint and therefore still correct. */
+    memset(clear, 0, sizeof(clear));
+    EXPECT(liquid_glass_build_clear_regions(true, 300u, 2u, previous, LIQUID_GLASS_MAX_GROUPS,
+                                            current, LIQUID_GLASS_MAX_GROUPS, clear,
+                                            LIQUID_GLASS_MAX_CLEAR_REGIONS - 1u, &clear_count));
+    EXPECT(clear_count == 1u);
+    EXPECT(clear[0].x == 0u && clear[0].y == 0u);
+    EXPECT(clear[0].width == 300u && clear[0].height == 2u);
+
+    /* The true overflow floor: a single-region budget always succeeds because
+     * one full-image rectangle is always dispatchable. */
+    memset(clear, 0, sizeof(clear));
+    EXPECT(liquid_glass_build_clear_regions(true, 300u, 2u, previous, LIQUID_GLASS_MAX_GROUPS,
+                                            current, LIQUID_GLASS_MAX_GROUPS, clear, 1u,
+                                            &clear_count));
+    EXPECT(clear_count == 1u);
+    EXPECT(clear[0].width == 300u && clear[0].height == 2u);
+
+    /* A zero budget is a caller bug, not a descriptor problem: there is no
+     * rectangle to write the fallback into. */
     EXPECT(!liquid_glass_build_clear_regions(true, 300u, 2u, previous, LIQUID_GLASS_MAX_GROUPS,
-                                             current, LIQUID_GLASS_MAX_GROUPS, clear,
-                                             LIQUID_GLASS_MAX_CLEAR_REGIONS - 1u, &clear_count));
+                                             current, LIQUID_GLASS_MAX_GROUPS, clear, 0u,
+                                             &clear_count));
+
+    /* Footprints outside the image stay a hard error: they are malformed
+     * geometry, not a capacity shortfall, and silently clipping them would
+     * hide a caller bug in the dispatch bounds. */
+    {
+        liquid_glass_region bad[1] = {{(uint32_t)300, 0u, 4u, 1u}};
+        EXPECT(!liquid_glass_build_clear_regions(true, 300u, 2u, bad, 1u, nullptr, 0u, clear,
+                                                 LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count));
+    }
+
+    /* --- ordering-barrier predicate ---
+     *
+     * `liquid_glass_region_overlaps_any` decides whether a material dispatch
+     * needs an ordering barrier against the dispatches already recorded. Vulkan
+     * has no sub-rectangle image barrier, so the only way to drop N-1
+     * whole-image barriers per frame is to prove the dispatches write disjoint
+     * memory. This predicate is therefore a correctness gate, not an
+     * optimisation detail, and it is the one part of the decision a GPU cannot
+     * exercise: an actual missing barrier is undefined behaviour that current
+     * hardware happens to serialize away, so no pixel test can catch a
+     * regression here. These cases are exact on purpose. */
+    {
+        const liquid_glass_region a = {10u, 10u, 20u, 20u}; /* x 10..30, y 10..30 */
+
+        /* Disjoint on every side, and by exactly one pixel. */
+        liquid_glass_region left[1] = {{0u, 0u, 10u, 40u}};  /* right edge == a.x */
+        liquid_glass_region above[1] = {{0u, 0u, 40u, 10u}}; /* bottom edge == a.y */
+        EXPECT(!liquid_glass_region_overlaps_any(a, left, 1u));
+        EXPECT(!liquid_glass_region_overlaps_any(a, above, 1u));
+        /* Symmetry: adjacency is not overlap in either direction. */
+        EXPECT(!liquid_glass_regions_overlap(left[0], a));
+        EXPECT(!liquid_glass_regions_overlap(a, left[0]));
+
+        /* A single shared pixel is overlap. */
+        liquid_glass_region touching[1] = {{29u, 29u, 5u, 5u}}; /* overlaps at (29,29) */
+        EXPECT(liquid_glass_region_overlaps_any(a, touching, 1u));
+
+        /* Containment in both directions. */
+        liquid_glass_region inside[1] = {{15u, 15u, 2u, 2u}};
+        liquid_glass_region around[1] = {{0u, 0u, 64u, 64u}};
+        EXPECT(liquid_glass_region_overlaps_any(a, inside, 1u));
+        EXPECT(liquid_glass_region_overlaps_any(a, around, 1u));
+        EXPECT(liquid_glass_region_overlaps_any(inside[0], &a, 1u));
+
+        /* Identical rectangles (the stacked-card case) overlap. */
+        liquid_glass_region same[1] = {a};
+        EXPECT(liquid_glass_region_overlaps_any(a, same, 1u));
+
+        /* One match anywhere in the list is enough; an empty list never
+         * matches (the first dispatch of a frame needs no barrier). */
+        liquid_glass_region many[4] = {
+            {0u, 0u, 4u, 4u}, {100u, 100u, 4u, 4u}, {12u, 12u, 1u, 1u}, {200u, 200u, 4u, 4u}};
+        EXPECT(liquid_glass_region_overlaps_any(a, many, 4u));
+        EXPECT(liquid_glass_region_overlaps_any(a, many, 3u));
+        EXPECT(!liquid_glass_region_overlaps_any(a, many, 2u)); /* first two are far away */
+        EXPECT(!liquid_glass_region_overlaps_any(a, many, 0u));
+
+        /* A row of disjoint bodies — the toolbar layout the optimisation
+         * exists for — must never report an overlap. */
+        liquid_glass_region row[8];
+        for (uint32_t i = 0; i < 8u; ++i)
+            row[i] = (liquid_glass_region){i * 32u, 0u, 30u, 40u};
+        for (uint32_t i = 0; i < 8u; ++i)
+            EXPECT(!liquid_glass_region_overlaps_any(row[i], row, i));
+    }
 
     TEST_SUMMARY();
 }

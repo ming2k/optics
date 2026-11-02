@@ -88,21 +88,21 @@ static bool runs_reserve(glyph_ctx *t, int need) {
 
     /* Grow transactionally: two independent realloc calls cannot preserve
      * both old buffers if only one succeeds and moves its allocation. */
-    text_run *r = malloc((size_t)cap * sizeof *r);
+    text_run *r = txt_alloc(t, (size_t)cap * sizeof *r, "run_buf");
     /* int8_t and FriBidiLevel (signed char) are binary-compatible; this
      * buffer is handed to fribidi via a cast at the reorder call. */
-    int8_t *l = malloc((size_t)cap * sizeof *l);
+    int8_t *l = txt_alloc(t, (size_t)cap * sizeof *l, "run_levels_buf");
     if (!r || !l) {
-        free(r);
-        free(l);
+        txt_free(t, r, "run_buf");
+        txt_free(t, l, "run_levels_buf");
         return false;
     }
     if (t->runs_cap > 0) {
         memcpy(r, t->runs_buf, (size_t)t->runs_cap * sizeof *r);
         memcpy(l, t->run_levels_buf, (size_t)t->runs_cap * sizeof *l);
     }
-    free(t->runs_buf);
-    free(t->run_levels_buf);
+    txt_free(t, t->runs_buf, "run_buf");
+    txt_free(t, t->run_levels_buf, "run_levels_buf");
     t->runs_buf = r;
     t->run_levels_buf = l;
     t->runs_cap = cap;
@@ -126,21 +126,21 @@ static bool cp_scratch_reserve(glyph_ctx *t, int need) {
         cap *= 2;
     }
 
-    FriBidiChar *cp = malloc((size_t)cap * sizeof *cp);
-    uint32_t *bo = malloc((size_t)cap * sizeof *bo);
-    FriBidiCharType *bt = malloc((size_t)cap * sizeof *bt);
-    FriBidiLevel *lv = malloc((size_t)cap * sizeof *lv);
+    FriBidiChar *cp = txt_alloc(t, (size_t)cap * sizeof *cp, "bidi_buf");
+    uint32_t *bo = txt_alloc(t, (size_t)cap * sizeof *bo, "bidi_buf");
+    FriBidiCharType *bt = txt_alloc(t, (size_t)cap * sizeof *bt, "bidi_buf");
+    FriBidiLevel *lv = txt_alloc(t, (size_t)cap * sizeof *lv, "bidi_buf");
     if (!cp || !bo || !bt || !lv) {
-        free(cp);
-        free(bo);
-        free(bt);
-        free(lv);
+        txt_free(t, cp, "bidi_buf");
+        txt_free(t, bo, "bidi_buf");
+        txt_free(t, bt, "bidi_buf");
+        txt_free(t, lv, "bidi_buf");
         return false;
     }
-    free(t->cp_buf);
-    free(t->bo_buf);
-    free(t->bt_buf);
-    free(t->lv_buf);
+    txt_free(t, t->cp_buf, "bidi_buf");
+    txt_free(t, t->bo_buf, "bidi_buf");
+    txt_free(t, t->bt_buf, "bidi_buf");
+    txt_free(t, t->lv_buf, "bidi_buf");
     t->cp_buf = cp;
     t->bo_buf = bo;
     t->bt_buf = bt;
@@ -153,10 +153,10 @@ static bool cp_scratch_reserve(glyph_ctx *t, int need) {
 void txt_itemize_release_scratch(glyph_ctx *t) {
     if (!t)
         return;
-    free(t->cp_buf);
-    free(t->bo_buf);
-    free(t->bt_buf);
-    free(t->lv_buf);
+    txt_free(t, t->cp_buf, "bidi_buf");
+    txt_free(t, t->bo_buf, "bidi_buf");
+    txt_free(t, t->bt_buf, "bidi_buf");
+    txt_free(t, t->lv_buf, "bidi_buf");
     t->cp_buf = NULL;
     t->bo_buf = NULL;
     t->bt_buf = NULL;

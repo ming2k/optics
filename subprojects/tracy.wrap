@@ -1,0 +1,11 @@
+[wrap-file]
+directory = tracy-0.14.1
+source_url = https://github.com/wolfpld/tracy/archive/refs/tags/v0.14.1.tar.gz
+source_filename = tracy-0.14.1.tar.gz
+source_hash = bf4af567e9c7524d07f3caa745fad02fb33bd5694f11910750382d1efbb251c1
+source_fallback_url = https://wrapdb.mesonbuild.com/v2/tracy_0.14.1-1/get_source/tracy-0.14.1.tar.gz
+wrapdb_version = 0.14.1-1
+patch_directory = tracy
+
+[provide]
+dependency_names = tracy

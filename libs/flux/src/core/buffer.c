@@ -80,12 +80,8 @@ flux_result flux_buffer_create(flux_device *d, const flux_buffer_desc *desc, flu
     if (r != FLUX_OK)
         goto fail;
 
-    {
-        char name[80];
-        snprintf(name, sizeof(name), "flux_buffer %llu KiB",
-                 (unsigned long long)(desc->size >> 10));
-        flux_vk_set_name(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)b->buffer, name);
-    }
+    flux_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)b->buffer, FLUX_SCOPE_DEVICE,
+                                 "vk_buffer", "flux/core");
 
     if (desc->location == FLUX_BUFFER_HOST_VISIBLE) {
         b->mapped = b->alloc.mapped;
@@ -112,6 +108,8 @@ flux_result flux_buffer_create(flux_device *d, const flux_buffer_desc *desc, flu
     }
 
     *out = b;
+    FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "vk_buffer", "flux/core", 0,
+                         FLUX_SITE_VK_BUFFER);
     return FLUX_OK;
 
 fail:
@@ -144,6 +142,7 @@ void flux_buffer_release(flux_buffer *b) {
      * destroyed once the queue provably passed every batch that could
      * reference them. */
     flux_device_retire_buffer(d, b->buffer, &b->alloc);
+    FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_buffer", "flux/core", 0);
     flux_internal_free(d, b);
     flux_device_release(d);
 }

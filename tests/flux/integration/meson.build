@@ -118,6 +118,35 @@ test_allocator = executable('test_allocator',
 )
 test('allocator', test_allocator, suite : 'integration')
 
+# Resource leak lane (ADR-0130, INV-ARCH-LEDGER): one exact-delta assertion
+# per public resource kind against the observation ledger, no tolerance
+# constants, plus the bindless double-release invariant (ADR-0131) and a
+# positive control that the ledger actually sees a deliberate leak.
+test_resource_leak = executable('test_resource_leak',
+  'test_resource_leak.c',
+  triangle_attr_vert_spv, triangle_frag_spv,
+  dependencies : [test_helpers_dep],
+  c_args       : tests_embed_dir_arg,
+)
+test('resource_leak', test_resource_leak, suite : 'integration')
+# Pass-label emission (ADR-0133). The capability was marked Landed with no
+# assertion that a label ever reached the driver; this counts them.
+test_pass_labels = executable('test_pass_labels',
+  'test_pass_labels.c',
+  dependencies : [test_helpers_dep],
+)
+test('pass_labels', test_pass_labels, suite : 'integration')
+# Hostile-allocator contract test (ADR-0135): the `core.h` rule that peer code
+# must allocate through the device was never verified. This installs an
+# allocator that sees everything and requires prism/lens to pass through it.
+test_hostile_allocator = executable('test_hostile_allocator',
+  'test_hostile_allocator.c',
+  dependencies : [test_helpers_dep, prism_dep, lens_dep],
+)
+test('hostile_allocator', test_hostile_allocator, suite : 'integration')
+
+
+
 # VK_EXT_memory_budget: enabled-when-advertised, per-heap usage/budget
 # must be sane on supporting drivers and zeroed cleanly elsewhere.
 test_memory_budget = executable('test_memory_budget',

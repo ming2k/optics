@@ -103,6 +103,8 @@ flux_result flux_target_create(flux_device *d, const flux_target_desc *desc, flu
     }
 
     *out = t;
+    FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_DEVICE, FLUX_LIFETIME_CONTEXT, "vk_target", "flux/core", 0,
+                         FLUX_SITE_VK_TARGET);
     return FLUX_OK;
 
 fail:
@@ -241,6 +243,7 @@ void flux_target_release(flux_target *t) {
      * slots and no imported memory. */
     flux_device_retire_image(d, t->view, t->image, &t->alloc, VK_NULL_HANDLE, 0,
                              FLUX_BINDLESS_INVALID, FLUX_BINDLESS_INVALID);
+    FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_target", "flux/core", 0);
     flux_internal_free(d, t);
     flux_device_release(d);
 }
