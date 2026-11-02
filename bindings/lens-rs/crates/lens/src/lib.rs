@@ -302,6 +302,21 @@ impl Ui {
         unsafe { sys::lens_anim_pending(self.raw as *const sys::lens) }
     }
 
+    /// Bounding box, in UI-space, of everything the frame just built would
+    /// paint differently from what is already on screen — base-tree and placed
+    /// subtree damage, tooltips, an eased value still in transit, a focused
+    /// text caret's blink cell.
+    ///
+    /// Zero-sized when nothing needs a repaint. Read-only; valid after
+    /// [`Ui::frame`] returns, until the next frame begins. This is the
+    /// per-frame dirty region an input-driven host scissor-clips to, so a
+    /// chrome component that can localize its animation does not have to fall
+    /// back to a full-output repaint.
+    pub fn damage_rect(&self) -> Rect {
+        // SAFETY: raw is a live context; the call only reads state.
+        Rect::from_raw(unsafe { sys::lens_damage_rect(self.raw as *const sys::lens) })
+    }
+
     /// The semantic cursor shape requested by the topmost hovered control on
     /// the most recently built frame (ADR-0044). Defaults to [`CursorHint::Default`].
     pub fn cursor_hint(&self) -> CursorHint {
