@@ -163,11 +163,66 @@ static void test_damage_rect_bounds(void) {
     lens_release(ui);
 }
 
+static void test_placed_band_damage_rect_bounds(void) {
+    lens *ui = NULL;
+    flux_canvas *canvas = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    CHECK(flux_canvas_create_cpu(1920, 1080, 1.0f, &canvas) == FLUX_OK);
+
+    const lens_place_opts chrome = {
+        .box = {.id = "dock"},
+        .band = LENS_BAND_CHROME,
+        .mode = LENS_PLACE_ANCHORED,
+        .rect = {0, 950, 500, 60},
+        .layout = {.box = {.min_width = 500, .min_height = 60}, .pad = 4},
+    };
+
+    /* Build first frame and settle */
+    lens_begin(ui, &IN0);
+    if (lens_place_begin(ui, &chrome)) {
+        lens_label(ui, &(lens_label_opts){.text = "item"});
+        lens_place_end(ui);
+    }
+    test_end(ui);
+    render_frame(ui, canvas);
+
+    for (int i = 0; i < 3; i++) {
+        lens_begin(ui, &IN0);
+        if (lens_place_begin(ui, &chrome)) {
+            lens_label(ui, &(lens_label_opts){.text = "item"});
+            lens_place_end(ui);
+        }
+        test_end(ui);
+        render_frame(ui, canvas);
+    }
+    CHECK(!lens_frame_needs_repaint(ui));
+
+    /* Mutate the placed chrome node label */
+    lens_begin(ui, &IN0);
+    if (lens_place_begin(ui, &chrome)) {
+        lens_label(ui, &(lens_label_opts){.text = "modified"});
+        lens_place_end(ui);
+    }
+    test_end(ui);
+
+    CHECK(lens_frame_needs_repaint(ui));
+    flux_rect dmg = lens_damage_rect(ui);
+    CHECK(dmg.w > 0.0f && dmg.h > 0.0f);
+    /* Damage must be localized to the placed chrome band, NOT the full screen (400x200) */
+    CHECK(dmg.w <= 400.0f);
+    CHECK(dmg.h <= 60.0f);
+    CHECK(dmg.y == 140.0f);
+
+    flux_canvas_release(canvas);
+    lens_release(ui);
+}
+
 int main(void) {
     test_null_safety();
     test_first_frames_repaint_then_settle();
     test_leaf_change_repaints();
     test_place_open_close_repaints();
     test_damage_rect_bounds();
+    test_placed_band_damage_rect_bounds();
     return TEST_REPORT();
 }

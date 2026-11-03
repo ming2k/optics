@@ -495,7 +495,13 @@ flux_rect lens_damage_rect(const lens *ui) {
     if (ui->tooltip.active || ui->prev_tooltip_active)
         d = rect_union_bounds(d, ui->tooltip.anchor);
 
-    if (d.w <= 0.0f && ui->root)
+    for (uint32_t i = 0; i < ui->ghost_count; i++) {
+        if (ui->ghosts[i] && ui->ghosts[i]->root)
+            d = rect_union_bounds(d, ui->ghosts[i]->root->final_rect);
+    }
+
+    if (d.w <= 0.0f && ui->root &&
+        (ui->root->subtree_changed || ui->root->visual_revision != ui->root->presented_revision))
         d = ui->root->final_rect;
 
     /* Constrain damage to the visible layout viewport */

@@ -125,6 +125,12 @@ bool lensi_mark_subtree_changed(lens_node *n) {
 void lensi_mark_dirty(lens *ui) {
     if (ui->root)
         lensi_mark_subtree_changed(ui->root);
+    for (uint32_t b = 0; b < (uint32_t)LENS_BAND_COUNT; b++) {
+        for (uint32_t i = 0; i < ui->band_counts[b]; i++) {
+            if (ui->bands[b][i])
+                lensi_mark_subtree_changed(ui->bands[b][i]);
+        }
+    }
 }
 
 flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, flux_rect clip,
