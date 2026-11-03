@@ -13,6 +13,14 @@ either.
 
 ## [Unreleased]
 
+## [0.0.70] - 2026-11-03
+
+### Added
+
+- **prism**: Material compute pipeline pre-warming entry points across Acrylic, Frosted, Mica, Backdrop, and Liquid Glass (`prism_*_warmup`, ADR-0141).
+- **prism-rs**: Safe descriptors modernized with material warmup options and caller-declared revision caching (ADR-0142).
+- **optics**: Headless performance SLA verification guardrail (`tools/guardrails/bench_sla.py`, ADR-0141).
+
 ## [0.0.69] - 2026-11-03
 
 ### Added
