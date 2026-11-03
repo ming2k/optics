@@ -22,7 +22,7 @@ int main(void) {
      * Shapes are a caller-owned borrowed array (see the group doc). */
     prism_liquid_glass_shape focused_shapes[2] = {
         {.bounds = {10.0f, 20.0f, 100.0f, 60.0f}, .corner_radius = 18.0f},
-        {0},
+        {},
     };
     prism_liquid_glass_group focused = PRISM_LIQUID_GLASS_GROUP_INIT;
     focused.shapes = focused_shapes;
@@ -49,7 +49,7 @@ int main(void) {
     /* Bounds include smooth-union/shadow padding, round outward, and clamp. */
     prism_liquid_glass_shape group_shapes[2] = {
         {.bounds = {10.25f, 20.5f, 30.0f, 10.0f}, .corner_radius = 5.0f},
-        {0},
+        {},
     };
     prism_liquid_glass_group group = PRISM_LIQUID_GLASS_GROUP_INIT;
     group.shapes = group_shapes;
@@ -130,9 +130,9 @@ int main(void) {
     stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
     EXPECT(same_region(stats, (liquid_glass_region){90u, 60u, 10u, 20u}));
 
-    liquid_glass_region previous[LIQUID_GLASS_MAX_GROUPS] = {0};
-    liquid_glass_region current[LIQUID_GLASS_MAX_GROUPS] = {0};
-    liquid_glass_region clear[LIQUID_GLASS_MAX_CLEAR_REGIONS] = {0};
+    liquid_glass_region previous[LIQUID_GLASS_MAX_GROUPS] = {};
+    liquid_glass_region current[LIQUID_GLASS_MAX_GROUPS] = {};
+    liquid_glass_region clear[LIQUID_GLASS_MAX_CLEAR_REGIONS] = {};
     uint32_t clear_count = 0u;
 
     /* A new slot ignores stale bookkeeping and clears its full image once. */

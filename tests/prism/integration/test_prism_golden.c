@@ -220,6 +220,7 @@ int main(void) {
     EXPECT(flux_blur_filter_create(d, &blur) == FLUX_OK);
     prism_liquid_glass_filter *glass = nullptr;
     EXPECT(prism_liquid_glass_filter_create(d, &glass) == FLUX_OK);
+    EXPECT(prism_liquid_glass_filter_warmup(glass, nullptr) == FLUX_OK);
 
     /* Warm every frame slot with identical renders; the last frame's
      * readback is the sample. Slot-state divergence across the 3 slots

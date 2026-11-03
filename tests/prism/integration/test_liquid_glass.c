@@ -104,6 +104,12 @@ int main(void) {
     EXPECT(flux_blur_filter_create(d, &blur_filter) == FLUX_OK);
     prism_liquid_glass_filter *glass_filter = nullptr;
     EXPECT(prism_liquid_glass_filter_create(d, &glass_filter) == FLUX_OK);
+    /* Pipeline pre-warming contract (ADR-0141) */
+    EXPECT(prism_liquid_glass_filter_warmup(nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(prism_liquid_glass_filter_warmup(glass_filter, nullptr) == FLUX_OK);
+    EXPECT(prism_liquid_glass_filter_warmup(
+               glass_filter, &(prism_liquid_glass_warmup_opts){.format = FLUX_FORMAT_RGBA8_UNORM,
+                                                               .stats = true}) == FLUX_OK);
 
     static uint8_t px[BYTES];
 
@@ -170,6 +176,7 @@ int main(void) {
     {
         prism_liquid_glass_filter *persistent_filter = nullptr;
         EXPECT(prism_liquid_glass_filter_create(d, &persistent_filter) == FLUX_OK);
+        EXPECT(prism_liquid_glass_filter_warmup(persistent_filter, nullptr) == FLUX_OK);
         bool seen[TEST_FRAME_SLOTS] = {false};
 
         prism_liquid_glass_shape left_shapes[1] = {

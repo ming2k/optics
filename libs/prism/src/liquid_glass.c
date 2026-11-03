@@ -398,6 +398,14 @@ static flux_result liquid_glass_ensure_pipelines(prism_liquid_glass_filter *filt
                                                  bool need_clear, bool need_glass,
                                                  bool need_stats) {
     const int cls = is16f ? 1 : 0;
+    const bool missing = (need_clear && !filter->clear_pipelines[cls]) ||
+                         (need_glass && !filter->glass_pipelines[cls]) ||
+                         (need_stats && !filter->stats_pipeline);
+    if (!missing)
+        return FLUX_OK;
+
+    FLUX_PROFILE_ZONE(z_compile, "prism.liquid_glass.compile_pipelines");
+
     if (need_clear && !filter->clear_pipelines[cls]) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
         pdesc.spirv = (const uint32_t *)(is16f ? storage_clear_16f_spv : storage_clear_spv);
@@ -407,8 +415,10 @@ static flux_result liquid_glass_ensure_pipelines(prism_liquid_glass_filter *filt
         pdesc.push_constant_bytes = sizeof(storage_clear_push);
         flux_result r =
             flux_compute_pipeline_create(filter->device, &pdesc, &filter->clear_pipelines[cls]);
-        if (r != FLUX_OK)
+        if (r != FLUX_OK) {
+            FLUX_PROFILE_ZONE_END(z_compile);
             return r;
+        }
     }
     if (need_glass && !filter->glass_pipelines[cls]) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
@@ -419,8 +429,10 @@ static flux_result liquid_glass_ensure_pipelines(prism_liquid_glass_filter *filt
         pdesc.push_constant_bytes = sizeof(liquid_glass_push);
         flux_result r =
             flux_compute_pipeline_create(filter->device, &pdesc, &filter->glass_pipelines[cls]);
-        if (r != FLUX_OK)
+        if (r != FLUX_OK) {
+            FLUX_PROFILE_ZONE_END(z_compile);
             return r;
+        }
     }
     if (need_stats && !filter->stats_pipeline) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
@@ -430,10 +442,36 @@ static flux_result liquid_glass_ensure_pipelines(prism_liquid_glass_filter *filt
         pdesc.push_constant_bytes = sizeof(backdrop_stats_push);
         flux_result r =
             flux_compute_pipeline_create(filter->device, &pdesc, &filter->stats_pipeline);
-        if (r != FLUX_OK)
+        if (r != FLUX_OK) {
+            FLUX_PROFILE_ZONE_END(z_compile);
             return r;
+        }
     }
+    FLUX_PROFILE_ZONE_END(z_compile);
     return FLUX_OK;
+}
+
+flux_result prism_liquid_glass_filter_warmup(prism_liquid_glass_filter *filter,
+                                             const prism_liquid_glass_warmup_opts *opts) {
+    if (!filter)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+
+    bool is16f = false;
+    bool stats = true;
+    if (opts) {
+        if (opts->format == FLUX_FORMAT_RGBA16_SFLOAT)
+            is16f = true;
+        stats = opts->stats;
+    }
+
+    /* Pre-allocate body table and id list storage buffers to eliminate driver host-visible buffer
+     * allocation hitch (ADR-0141) */
+    void *dummy_row = prism_body_table_row(filter->device, &filter->bodies, 1u, 0u);
+    uint32_t *dummy_ids = prism_body_ids_slot(filter->device, &filter->ids, 1u);
+    if (!dummy_row || !dummy_ids)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+
+    return liquid_glass_ensure_pipelines(filter, is16f, true, true, stats);
 }
 
 /* ------------------------------------------------------------------ */
@@ -557,8 +595,10 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
         footprint_w = footprint_x1 - footprint_x0;
         footprint_h = footprint_y1 - footprint_y0;
     }
+    FLUX_PROFILE_ZONE(z_slot, "prism.liquid_glass.ensure_slot");
     flux_result result = liquid_glass_ensure_slot(filter, index, input, footprint_w, footprint_h,
                                                   desc->group_count > 0u);
+    FLUX_PROFILE_ZONE_END(z_slot);
     if (result != FLUX_OK)
         return result;
 
@@ -645,18 +685,24 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
         };
     }
 
+    FLUX_PROFILE_ZONE(z_pipe, "prism.liquid_glass.ensure_pipelines");
     result = liquid_glass_ensure_pipelines(filter, is16f, clear_count > 0u, batch_count > 0u,
                                            desc->group_count > 0u);
+    FLUX_PROFILE_ZONE_END(z_pipe);
     if (result != FLUX_OK)
         return result;
+
+    FLUX_PROFILE_ZONE(z_record, "prism.liquid_glass.record");
 
     VkCommandBuffer command = flux_frame_vk_command_buffer(frame);
     VkImage output_image = flux_image_vk_image(slot->output);
     if (clear_count > 0u) {
         if (slot->initialized)
             barrier_reuse_to_compute_write(command, output_image);
+        FLUX_PROFILE_ZONE(z_sub_clear, "prism.liquid_glass.rec_clear");
         record_storage_clear_regions(filter, command, slot->output, clear_regions, clear_count,
                                      is16f);
+        FLUX_PROFILE_ZONE_END(z_sub_clear);
         if (batch_count > 0u)
             barrier_compute_write_to_read_write(command, output_image);
     }
@@ -665,6 +711,7 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
      * backdrop into (mean luminance, high-frequency energy). Reduction windows are
      * capture-space rectangles, so this reads the capture, not the slab. */
     if (desc->group_count > 0u) {
+        FLUX_PROFILE_ZONE(z_sub_stats, "prism.liquid_glass.rec_stats");
         uint64_t stats_address = flux_buffer_device_address(slot->stats);
         for (uint32_t i = 0; i < desc->group_count; ++i) {
             liquid_glass_region rect =
@@ -687,6 +734,7 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
                                   1u);
         }
         barrier_stats_write_to_compute(command, flux_buffer_vk_buffer(slot->stats));
+        FLUX_PROFILE_ZONE_END(z_sub_stats);
     }
 
     /* 6. Upload the body table and the per-region id lists, then one dispatch per
@@ -711,6 +759,7 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
     };
     bool dispatched = false;
     if (batch_count > 0u) {
+        FLUX_PROFILE_ZONE(z_sub_buf, "prism.liquid_glass.rec_buffers");
         uint32_t rows = desc->group_count;
         for (uint32_t i = 0; i < rows; ++i) {
             void *row = prism_body_table_row(filter->device, &filter->bodies, rows, i);
@@ -723,6 +772,7 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
             return FLUX_ERROR_OUT_OF_MEMORY;
         for (uint32_t i = 0; i < batch_ids_used; ++i)
             ids[i] = batch_ids[i];
+        FLUX_PROFILE_ZONE_END(z_sub_buf);
 
         const prism_glass_copy copy = {
             .sharp = input,
@@ -732,6 +782,7 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
             .slab_origin_x = (float)slab_x,
             .slab_origin_y = (float)slab_y,
         };
+        FLUX_PROFILE_ZONE(z_sub_dispatch, "prism.liquid_glass.rec_batch");
         for (uint32_t r = 0; r < batch_count; ++r) {
             if (!liquid_glass_region_is_dispatchable(
                     (liquid_glass_region){batches[r].x, batches[r].y, batches[r].width,
@@ -746,12 +797,15 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
                                      filter->ids.address + batches[r].ids_first * sizeof(uint32_t));
             dispatched = true;
         }
+        FLUX_PROFILE_ZONE_END(z_sub_dispatch);
     }
     /* The material writes storage; make the persistent output visible to its
      * following Canvas sample, including a clear-only apply after every body
      * disappeared. */
     if (clear_count > 0u || dispatched)
         barrier_compute_write_to_read(command, output_image);
+
+    FLUX_PROFILE_ZONE_END(z_record);
 
     if (current_count > 0u)
         memcpy(slot->previous, current, current_count * sizeof(current[0]));

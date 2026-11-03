@@ -97,6 +97,12 @@ def run_tidy_gate(repo_root: Path, fix: bool, **kwargs) -> tuple[bool, str, str]
     return run_tidy(repo_root, build_dir=build_dir)
 
 
+def run_bench_gate(repo_root: Path, fix: bool, **kwargs) -> tuple[bool, str, str]:
+    from tools.guardrails.bench_sla import run_bench_sla
+    build_dir = kwargs.get("build_dir") or "build"
+    return run_bench_sla(repo_root, build_dir=build_dir)
+
+
 QUALITY_GUARDRAILS = [
     {
         "id": "format",
@@ -155,6 +161,13 @@ EXTRA_GUARDRAILS = [
         "name": "Clang-tidy static analysis",
         "policy": "Zero-warning baseline",
         "runner": run_tidy_gate,
+        "supports_fix": False,
+    },
+    {
+        "id": "bench",
+        "name": "Headless performance SLA verification",
+        "policy": "ADR-0138, ADR-0141",
+        "runner": run_bench_gate,
         "supports_fix": False,
     },
 ]
@@ -231,6 +244,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         print(f"{g['id']:<12} {g['name'] + fixable:<50} {g['policy']:<30}")
     print("\nRun './tools/optics check' to verify core quality guardrails.")
     print("Run './tools/optics check tidy' to run clang-tidy static analysis.")
+    print("Run './tools/optics check bench' to run headless performance SLA verification.")
     return 0
 
 
@@ -247,7 +261,7 @@ def main() -> int:
         "target",
         nargs="?",
         default="all",
-        help="Specific guardrail (format, boundary, lockstep, stdout, symbols, leaks, docs, tidy; default: all)",
+        help="Specific guardrail (format, boundary, lockstep, stdout, symbols, leaks, docs, tidy, bench; default: all)",
     )
     p_check.add_argument("--fix", action="store_true", help="Auto-fix format and symbol parity")
     p_check.add_argument("--build-dir", default=None, help="Build directory for tidy/compile checks")

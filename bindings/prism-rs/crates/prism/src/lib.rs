@@ -42,6 +42,24 @@ fn check(rc: sys::flux_result) -> Result<(), Error> {
     }
 }
 
+/// Material filter compute pipeline pre-warming configuration (ADR-0141, ADR-0142).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WarmupOpts {
+    /// Target image format (default: RGBA8 UNORM).
+    pub format: flux::Format,
+    /// Pre-warm stats reduction pipeline when supported.
+    pub stats: bool,
+}
+
+impl Default for WarmupOpts {
+    fn default() -> Self {
+        Self {
+            format: flux::Format::Rgba8Unorm,
+            stats: true,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Liquid Glass
 // -----------------------------------------------------------------------------
@@ -227,6 +245,20 @@ impl LiquidGlassFilter {
         let mut raw = std::ptr::null_mut();
         check(unsafe { sys::prism_liquid_glass_filter_create(device.as_raw(), &mut raw) })?;
         Ok(Self { raw })
+    }
+
+    /// Pre-warm compute pipelines to eliminate first-frame JIT hitches (ADR-0141, ADR-0142).
+    pub fn warmup(&mut self, opts: Option<&WarmupOpts>) -> Result<(), Error> {
+        let raw_opts = opts.map(|o| sys::prism_liquid_glass_warmup_opts {
+            format: o.format.as_raw(),
+            stats: o.stats,
+        });
+        check(unsafe {
+            sys::prism_liquid_glass_filter_warmup(
+                self.raw,
+                raw_opts.as_ref().map_or(std::ptr::null(), |r| r),
+            )
+        })
     }
 
     pub fn apply<'filter>(
@@ -449,6 +481,20 @@ impl BaseMaterial {
 /// Backward-compatible alias for existing call sites.
 pub type BackdropFrost = BaseMaterial;
 
+/// Execution descriptor for [`BackdropLayerFilter::apply`] adhering to `[INV-ARCH-OPTS]` (ADR-0142).
+pub struct BackdropLayerApplyOpts<'a, 'frame> {
+    pub frame: &'a flux::Frame<'frame>,
+    pub input: &'a flux::Image,
+    pub blurred: &'a flux::BlurredImage<'a>,
+    pub frost: &'a [BackdropFrost],
+    pub groups: &'a [LiquidGlassGroup],
+    pub params: LiquidGlassParams,
+    /// Caller-declared content revision tag (ADR-0137). When `Some(rev)` with
+    /// non-zero `rev` is supplied and matches this frame slot's previous revision,
+    /// compute passes are elided and the cached slot output is returned directly.
+    pub revision: Option<u64>,
+}
+
 /// Reusable layered backdrop compositor: frosted rectangles carrying
 /// analytic liquid-glass bodies, composed in one ordered dispatch into one
 /// persistent transparent output. The glass lens samples the frosted image,
@@ -468,30 +514,47 @@ impl BackdropLayerFilter {
         Ok(Self { raw })
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Pre-warm compute pipelines to eliminate first-frame JIT hitches (ADR-0141, ADR-0142).
+    pub fn warmup(&mut self, opts: Option<&WarmupOpts>) -> Result<(), Error> {
+        let raw_opts = opts.map(|o| sys::prism_backdrop_layer_warmup_opts {
+            format: o.format.as_raw(),
+            stats: o.stats,
+        });
+        check(unsafe {
+            sys::prism_backdrop_layer_filter_warmup(
+                self.raw,
+                raw_opts.as_ref().map_or(std::ptr::null(), |r| r),
+            )
+        })
+    }
+
     /// Frost the backdrop, then refract the glass groups through it —
     /// one call replacing a manual frost+blur+glass chain.
-    pub fn apply<'filter>(
+    pub fn apply<'filter, 'frame>(
         &'filter mut self,
-        frame: &flux::Frame<'_>,
-        input: &flux::Image,
-        blurred: &flux::BlurredImage<'_>,
-        frost: &[BackdropFrost],
-        groups: &[LiquidGlassGroup],
-        params: LiquidGlassParams,
+        opts: &BackdropLayerApplyOpts<'_, 'frame>,
     ) -> Result<BackdropLayerImage<'filter>, Error> {
         let raw_frost: Vec<sys::prism_backdrop_frost> =
-            frost.iter().map(BackdropFrost::as_raw).collect();
-        let raw_groups: Vec<RawGroup> = groups.iter().map(LiquidGlassGroup::as_raw).collect();
+            opts.frost.iter().map(BackdropFrost::as_raw).collect();
+        let raw_groups: Vec<RawGroup> = opts.groups.iter().map(LiquidGlassGroup::as_raw).collect();
         let group_ptrs: Vec<sys::prism_liquid_glass_group> = raw_groups
             .iter()
             .map(|g| unsafe { std::ptr::read(&g.group) })
             .collect();
+        let rev_ext = sys::prism_backdrop_layer_revision {
+            type_: sys::prism_struct_type::PRISM_TYPE_BACKDROP_LAYER_REVISION,
+            next: std::ptr::null(),
+            revision: opts.revision.unwrap_or(0),
+        };
         let desc = sys::prism_backdrop_layer_desc {
             type_: sys::prism_struct_type::PRISM_TYPE_BACKDROP_LAYER_DESC,
-            next: std::ptr::null(),
-            input: input.as_raw(),
-            blurred_input: blurred.as_raw(),
+            next: if opts.revision.is_some() {
+                (&raw const rev_ext).cast()
+            } else {
+                std::ptr::null()
+            },
+            input: opts.input.as_raw(),
+            blurred_input: opts.blurred.as_raw(),
             frost: if raw_frost.is_empty() {
                 std::ptr::null()
             } else {
@@ -504,28 +567,28 @@ impl BackdropLayerFilter {
                 group_ptrs.as_ptr()
             },
             group_count: u32::try_from(group_ptrs.len()).unwrap_or(u32::MAX),
-            refraction: params.refraction,
-            chromatic_aberration: params.chromatic_aberration,
-            saturation: params.saturation,
-            brightness: params.brightness,
-            edge_width: params.edge_width,
-            rim_light: params.rim_light,
+            refraction: opts.params.refraction,
+            chromatic_aberration: opts.params.chromatic_aberration,
+            saturation: opts.params.saturation,
+            brightness: opts.params.brightness,
+            edge_width: opts.params.edge_width,
+            rim_light: opts.params.rim_light,
             light_direction: sys::flux_point {
-                x: params.light_direction.0,
-                y: params.light_direction.1,
+                x: opts.params.light_direction.0,
+                y: opts.params.light_direction.1,
             },
-            opacity: params.opacity,
-            size_reference: params.size_reference,
-            size_scale_min: params.size_scale_min,
-            tint_strength: params.tint_strength,
-            frost_strength: params.frost_strength,
-            curvature: params.curvature,
-            contact_ao: params.contact_ao,
-            ambient_fresnel: params.ambient_fresnel,
+            opacity: opts.params.opacity,
+            size_reference: opts.params.size_reference,
+            size_scale_min: opts.params.size_scale_min,
+            tint_strength: opts.params.tint_strength,
+            frost_strength: opts.params.frost_strength,
+            curvature: opts.params.curvature,
+            contact_ao: opts.params.contact_ao,
+            ambient_fresnel: opts.params.ambient_fresnel,
         };
         let mut out = sys::prism_material_output::default();
         check(unsafe {
-            sys::prism_backdrop_layer_filter_apply(self.raw, frame.as_raw(), &desc, &mut out)
+            sys::prism_backdrop_layer_filter_apply(self.raw, opts.frame.as_raw(), &desc, &mut out)
         })?;
         Ok(BackdropLayerImage {
             raw: out.image,
@@ -535,21 +598,6 @@ impl BackdropLayerFilter {
             height: out.height,
             _filter: PhantomData,
         })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    /// Compose Base Material Layer (foundation plates) beneath Optical Glass Layer (groups) —
-    /// clean layered multi-pass architecture in one dispatch.
-    pub fn apply_layered<'filter>(
-        &'filter mut self,
-        frame: &flux::Frame<'_>,
-        input: &flux::Image,
-        blurred: &flux::BlurredImage<'_>,
-        base_materials: &[BaseMaterial],
-        groups: &[LiquidGlassGroup],
-        params: LiquidGlassParams,
-    ) -> Result<BackdropLayerImage<'filter>, Error> {
-        self.apply(frame, input, blurred, base_materials, groups, params)
     }
 
     /// Glass statistics of this frame slot's previous submission; see
@@ -702,6 +750,19 @@ impl FrostedFilter {
         let mut raw = std::ptr::null_mut();
         check(unsafe { sys::prism_frosted_filter_create(device.as_raw(), &mut raw) })?;
         Ok(Self { raw })
+    }
+
+    /// Pre-warm compute pipelines to eliminate first-frame JIT hitches (ADR-0141, ADR-0142).
+    pub fn warmup(&mut self, opts: Option<&WarmupOpts>) -> Result<(), Error> {
+        let raw_opts = opts.map(|o| sys::prism_frosted_warmup_opts {
+            format: o.format.as_raw(),
+        });
+        check(unsafe {
+            sys::prism_frosted_filter_warmup(
+                self.raw,
+                raw_opts.as_ref().map_or(std::ptr::null(), |r| r),
+            )
+        })
     }
 
     /// Blur-and-tint `input` per `groups`; returns the leased output
@@ -878,6 +939,19 @@ impl AcrylicFilter {
         let mut raw = std::ptr::null_mut();
         check(unsafe { sys::prism_acrylic_filter_create(device.as_raw(), &mut raw) })?;
         Ok(Self { raw })
+    }
+
+    /// Pre-warm compute pipelines to eliminate first-frame JIT hitches (ADR-0141, ADR-0142).
+    pub fn warmup(&mut self, opts: Option<&WarmupOpts>) -> Result<(), Error> {
+        let raw_opts = opts.map(|o| sys::prism_acrylic_warmup_opts {
+            format: o.format.as_raw(),
+        });
+        check(unsafe {
+            sys::prism_acrylic_filter_warmup(
+                self.raw,
+                raw_opts.as_ref().map_or(std::ptr::null(), |r| r),
+            )
+        })
     }
 
     /// Render the acrylic material for `groups` from `input`.

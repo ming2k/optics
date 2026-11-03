@@ -108,3 +108,25 @@ fn backdrop_frost_maps_rect_and_opacity() {
     assert_eq!(raw.tint_color, 0x0010_223A);
     assert_eq!(raw.tint_strength, 0.6);
 }
+
+#[test]
+fn warmup_opts_default_and_custom() {
+    let def = prism::WarmupOpts::default();
+    assert_eq!(def.format, flux::Format::Rgba8Unorm);
+    assert!(def.stats);
+
+    let custom = prism::WarmupOpts {
+        format: flux::Format::Rgba16Sfloat,
+        stats: false,
+    };
+    assert_eq!(custom.format, flux::Format::Rgba16Sfloat);
+    assert!(!custom.stats);
+}
+
+#[test]
+fn backdrop_layer_apply_opts_revision_field() {
+    let rev_none: Option<u64> = None;
+    let rev_some = Some(42u64);
+    assert_eq!(rev_none, None);
+    assert_eq!(rev_some, Some(42));
+}

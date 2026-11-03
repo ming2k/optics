@@ -103,8 +103,17 @@ typedef struct prism_mica_desc {
 
 typedef struct prism_mica_filter prism_mica_filter;
 
+/* Options descriptor for prism_mica_filter_warmup (ADR-0141). */
+typedef struct prism_mica_warmup_opts {
+    flux_format format; /* Target image format (default 0 -> FLUX_FORMAT_RGBA8_UNORM) */
+} prism_mica_warmup_opts;
+
 PRISM_NODISCARD PRISM_API flux_result prism_mica_filter_create(flux_device *device,
                                                                prism_mica_filter **out);
+
+/* Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). */
+PRISM_NODISCARD PRISM_API flux_result prism_mica_filter_warmup(prism_mica_filter *filter,
+                                                               const prism_mica_warmup_opts *opts);
 
 PRISM_NODISCARD PRISM_API prism_mica_filter *prism_mica_filter_retain(prism_mica_filter *filter);
 

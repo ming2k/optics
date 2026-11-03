@@ -270,6 +270,15 @@ static void test_spring_advance_substep(void) {
     CHECK(isfinite(v1));
     CHECK(v1 > 0.0f && v1 < 100.0f);
 
+    /* Verify equivalent manual stepping matches substep result exactly */
+    transit_spring_advance(&s2, 100.0f, p, 0.016f, false);
+    transit_spring_advance(&s2, 100.0f, p, 0.016f, false);
+    transit_spring_advance(&s2, 100.0f, p, 0.016f, false);
+    transit_spring_advance(&s2, 100.0f, p, 0.002f, false);
+    CHECK_NEAR(v1, s2.value, 1e-6);
+    CHECK_NEAR(s1.value, s2.value, 1e-6);
+    CHECK_NEAR(s1.velocity, s2.velocity, 1e-6);
+
     /* Reduced motion snaps to target in one step */
     transit_spring s_red = transit_spring_at(0.0f);
     float v_red = transit_spring_advance_substep(&s_red, 50.0f, p, 0.050f, 0.016f, true);
@@ -281,12 +290,12 @@ static void test_spring_advance_substep(void) {
 /* ---- NULL safety ---------------------------------------------------------- */
 
 static void test_null_safety(void) {
-    CHECK(transit_spring_advance(NULL, 1.0f, transit_spring_snappy(), 0.016f, false) == 1.0f);
-    CHECK(transit_spring_settled(NULL, 0.0f, 0.0f, 0.0f) == false);
-    CHECK(transit_hysteresis_step(NULL, true, 0.0f, 0.0f, 0.0f, 0.0f, 0.016f, false) == false);
-    CHECK(transit_smoother_step(NULL, 1.0f, 0.05f, 4.0f, 0.05f, 0.016f, false) == 1.0f);
-    /* NULL is safe in the reduced-motion branch too. */
-    CHECK(transit_smoother_step(NULL, 1.0f, 0.05f, 4.0f, 0.05f, 0.016f, true) == 1.0f);
+    CHECK(transit_spring_advance(nullptr, 1.0f, transit_spring_snappy(), 0.016f, false) == 1.0f);
+    CHECK(transit_spring_settled(nullptr, 0.0f, 0.0f, 0.0f) == false);
+    CHECK(transit_hysteresis_step(nullptr, true, 0.0f, 0.0f, 0.0f, 0.0f, 0.016f, false) == false);
+    CHECK(transit_smoother_step(nullptr, 1.0f, 0.05f, 4.0f, 0.05f, 0.016f, false) == 1.0f);
+    /* nullptr is safe in the reduced-motion branch too. */
+    CHECK(transit_smoother_step(nullptr, 1.0f, 0.05f, 4.0f, 0.05f, 0.016f, true) == 1.0f);
 }
 
 int main(void) {

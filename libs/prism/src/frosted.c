@@ -7,6 +7,7 @@
 #include <prism/frosted.h>
 
 #include <flux/compute.h>
+#include <flux/profile.h>
 #include <flux/vulkan.h>
 
 #include <math.h>
@@ -278,6 +279,13 @@ static flux_result frosted_ensure_slot(prism_frosted_filter *filter, uint32_t in
 static flux_result frosted_ensure_pipelines(prism_frosted_filter *filter, bool is16f,
                                             bool need_clear, bool need_frosted) {
     const int cls = is16f ? 1 : 0;
+    const bool missing = (need_clear && !filter->clear_pipelines[cls]) ||
+                         (need_frosted && !filter->frosted_pipelines[cls]);
+    if (!missing)
+        return FLUX_OK;
+
+    FLUX_PROFILE_ZONE(z_compile, "prism.frosted.compile_pipelines");
+
     if (need_clear && !filter->clear_pipelines[cls]) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
         pdesc.spirv = (const uint32_t *)(is16f ? storage_clear_16f_spv : storage_clear_spv);
@@ -287,8 +295,10 @@ static flux_result frosted_ensure_pipelines(prism_frosted_filter *filter, bool i
         pdesc.push_constant_bytes = sizeof(storage_clear_push);
         flux_result r =
             flux_compute_pipeline_create(filter->device, &pdesc, &filter->clear_pipelines[cls]);
-        if (r != FLUX_OK)
+        if (r != FLUX_OK) {
+            FLUX_PROFILE_ZONE_END(z_compile);
             return r;
+        }
     }
     if (need_frosted && !filter->frosted_pipelines[cls]) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
@@ -299,10 +309,27 @@ static flux_result frosted_ensure_pipelines(prism_frosted_filter *filter, bool i
         pdesc.push_constant_bytes = sizeof(frosted_push);
         flux_result r =
             flux_compute_pipeline_create(filter->device, &pdesc, &filter->frosted_pipelines[cls]);
-        if (r != FLUX_OK)
+        if (r != FLUX_OK) {
+            FLUX_PROFILE_ZONE_END(z_compile);
             return r;
+        }
     }
+    FLUX_PROFILE_ZONE_END(z_compile);
     return FLUX_OK;
+}
+
+flux_result prism_frosted_filter_warmup(prism_frosted_filter *filter,
+                                        const prism_frosted_warmup_opts *opts) {
+    if (!filter)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+
+    bool is16f = false;
+    if (opts) {
+        if (opts->format == FLUX_FORMAT_RGBA16_SFLOAT)
+            is16f = true;
+    }
+
+    return frosted_ensure_pipelines(filter, is16f, true, true);
 }
 
 static bool frosted_group_dispatch_bounds(const prism_frosted_group *group, uint32_t image_width,
@@ -353,6 +380,8 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
 
     const uint32_t capture_width = flux_image_width(desc->input);
     const uint32_t capture_height = flux_image_height(desc->input);
+
+    FLUX_PROFILE_ZONE(z_frosted, "prism.frosted.apply");
 
     uint32_t current_count = 0;
     frosted_region current_regions[FROSTED_MAX_GROUPS];
@@ -521,6 +550,6 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
         .width = slot->width,
         .height = slot->height,
     };
-    return FLUX_OK;
+    FLUX_PROFILE_ZONE_END(z_frosted);
     return FLUX_OK;
 }

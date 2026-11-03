@@ -157,7 +157,7 @@ static inline void w_chad_tag(icc_writer *w, const char sig[4], const double m[9
 static inline size_t icc_build_profile(uint8_t *out, const char class_[4], const char pcs[4],
                                        const uint8_t *data, size_t data_size,
                                        const icc_tag_def *defs, uint32_t tag_count) {
-    icc_writer h = {0};
+    icc_writer h = {};
     w_header_full(&h, class_, pcs);
     w_u32(&h, tag_count);
     size_t base = h.len + (size_t)tag_count * 12;
@@ -189,11 +189,11 @@ static const double ICC_SRGB_D50[9] = {
  * appends a 'chad' chromatic adaptation tag (row-major doubles). */
 static inline uint32_t icc_build_matrix_tags_ex(uint8_t *data, icc_tag_def *defs, int trc_kind,
                                                 const double *chad, size_t *out_len) {
-    icc_writer t = {0};
+    icc_writer t = {};
     w_xyz_tag(&t, "rXYZ", ICC_SRGB_D50[0], ICC_SRGB_D50[1], ICC_SRGB_D50[2]);
     w_xyz_tag(&t, "gXYZ", ICC_SRGB_D50[3], ICC_SRGB_D50[4], ICC_SRGB_D50[5]);
     w_xyz_tag(&t, "bXYZ", ICC_SRGB_D50[6], ICC_SRGB_D50[7], ICC_SRGB_D50[8]);
-    static const char trc_sigs[3][4] = {"rTRC", "gTRC", "bTRC"};
+    static const char *const trc_sigs[3] = {"rTRC", "gTRC", "bTRC"};
     static const uint16_t ident[2] = {0, 65535};
     for (int i = 0; i < 3; ++i) {
         if (trc_kind == 0)
@@ -243,7 +243,7 @@ static const double ICC_CHAD_BRADFORD_D65_D50[9] = {
  * parameters so the parser's in/out validation is exercisable. */
 static inline size_t icc_build_mab_identity(uint8_t *data, icc_tag_def *def, uint8_t in_ch,
                                             uint8_t out_ch) {
-    icc_writer t = {0};
+    icc_writer t = {};
     w_tag_begin(&t, "A2B0");
     w_tag_sig(&t, "mAB ");
     w_u32(&t, 0);
@@ -278,7 +278,7 @@ static inline size_t icc_build_mab_identity(uint8_t *data, icc_tag_def *def, uin
  * version (byte 8 < 4 for v2). */
 static inline size_t icc_build_mft2_constant_lab(uint8_t *data, icc_tag_def *def, double L,
                                                  double a, double b, bool v2) {
-    icc_writer t = {0};
+    icc_writer t = {};
     w_tag_begin(&t, "A2B0");
     w_tag_sig(&t, "mft2");
     w_u32(&t, 0);
@@ -317,7 +317,7 @@ static inline size_t icc_build_mft2_constant_lab(uint8_t *data, icc_tag_def *def
 
 /* mft1 A2B0 with identity curves and a constant D50-white CLUT. */
 static inline size_t icc_build_mft1_constant_white(uint8_t *data, icc_tag_def *def) {
-    icc_writer t = {0};
+    icc_writer t = {};
     w_tag_begin(&t, "A2B0");
     w_tag_sig(&t, "mft1");
     w_u32(&t, 0);

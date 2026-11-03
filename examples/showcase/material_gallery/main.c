@@ -21,6 +21,12 @@ static bool on_start(lens *ui, flux_device *device, void *user) {
     if (prism_mica_filter_create(device, &app->mica_filter) != FLUX_OK)
         return false;
 
+    /* Pre-warm material compute pipelines and buffers to eliminate cold-start hitches (ADR-0141) */
+    (void)prism_liquid_glass_filter_warmup(app->glass_filter, nullptr);
+    (void)prism_frosted_filter_warmup(app->frosted_filter, nullptr);
+    (void)prism_acrylic_filter_warmup(app->acrylic_filter, nullptr);
+    (void)prism_mica_filter_warmup(app->mica_filter, nullptr);
+
     return true;
 }
 

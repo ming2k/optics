@@ -96,7 +96,7 @@ static bool settle_frame_slots(flux_device *d, flux_surface *s, flux_canvas *can
 
 int main(void) {
     flux_device *d = test_helpers_make_headless_device();
-    if (!d) {
+    if (d == nullptr) {
         fprintf(stderr, "test_text_atlas_leak: no Vulkan device; skipping\n");
         TEST_SUMMARY();
     }
@@ -156,14 +156,14 @@ int main(void) {
         if (flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &clear}) != FLUX_OK) {
-            flux_frame_submit(frame);
-            flux_frame_present(frame);
+            (void)flux_frame_submit(frame);
+            (void)flux_frame_present(frame);
             break;
         }
         draw_filler(canvas, &dc);
         EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        flux_frame_submit(frame);
-        flux_frame_present(frame);
+        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        EXPECT(flux_frame_present(frame) == FLUX_OK);
 
         glyph_stats after;
         glyph_get_stats(text, &after);

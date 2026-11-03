@@ -63,6 +63,8 @@ int main(void) {
     EXPECT(flux_blur_filter_create(d, &blur_filter) == FLUX_OK);
     prism_backdrop_layer_filter *layer_filter = nullptr;
     EXPECT(prism_backdrop_layer_filter_create(d, &layer_filter) == FLUX_OK);
+    EXPECT(prism_backdrop_layer_filter_warmup(nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(prism_backdrop_layer_filter_warmup(layer_filter, nullptr) == FLUX_OK);
 
     static uint8_t px[BYTES];
     flux_color black = flux_color_rgba(0, 0, 0, 255);

@@ -640,6 +640,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 |--------|-------------|
 | `prism_liquid_glass_max_shapes` | Number of shapes this build supports per glass body (the dispatch pushes one SDF per shape; the shader fuses them pairwise). |
 | `prism_liquid_glass_filter_create` |  |
+| `prism_liquid_glass_filter_warmup` | Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). |
 | `prism_liquid_glass_filter_retain` |  |
 | `prism_liquid_glass_filter_release` | Release only after every submission that references the filter's outputs has completed (its frame-slot fence has signalled, or after flux_device_wait_idle): release destroys the filter's compute pipelines inline. |
 | `prism_liquid_glass_filter_apply` | Paint every body into the material's output slab. |
@@ -650,6 +651,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | Symbol | Description |
 |--------|-------------|
 | `prism_frosted_filter_create` |  |
+| `prism_frosted_filter_warmup` | Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). |
 | `prism_frosted_filter_retain` |  |
 | `prism_frosted_filter_release` |  |
 | `prism_frosted_filter_apply` |  |
@@ -659,6 +661,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | Symbol | Description |
 |--------|-------------|
 | `prism_acrylic_filter_create` |  |
+| `prism_acrylic_filter_warmup` | Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). |
 | `prism_acrylic_filter_retain` |  |
 | `prism_acrylic_filter_release` |  |
 | `prism_acrylic_filter_apply` |  |
@@ -668,6 +671,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | Symbol | Description |
 |--------|-------------|
 | `prism_mica_filter_create` |  |
+| `prism_mica_filter_warmup` | Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). |
 | `prism_mica_filter_release` |  |
 | `prism_mica_filter_apply` |  |
 
@@ -676,6 +680,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | Symbol | Description |
 |--------|-------------|
 | `prism_backdrop_layer_filter_create` |  |
+| `prism_backdrop_layer_filter_warmup` | Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). |
 | `prism_backdrop_layer_filter_retain` |  |
 | `prism_backdrop_layer_filter_release` | Release only after every submission that references the filter's outputs has completed (its frame-slot fence has signalled, or after flux_device_wait_idle): release destroys the filter's compute pipelines inline. |
 | `prism_backdrop_layer_filter_apply` | Compose the layer. |

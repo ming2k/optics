@@ -421,7 +421,7 @@ int main(void) {
                FLUX_ERROR_INVALID_ARGUMENT);
         EXPECT(out == nullptr);
 
-        flux_shadow_filter_retain(filter);
+        EXPECT(flux_shadow_filter_retain(filter) == filter);
         flux_shadow_filter_release(filter);
         flux_shadow_filter_release(filter);
     }

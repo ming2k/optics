@@ -72,6 +72,11 @@ pub enum Format {
 }
 
 impl Format {
+    /// Convert to the underlying C `flux_format` value.
+    pub fn as_raw(self) -> sys::flux_format {
+        self.raw()
+    }
+
     pub(crate) fn raw(self) -> sys::flux_format {
         use sys::flux_format as f;
         match self {

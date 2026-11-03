@@ -211,7 +211,7 @@ fn main() {
         .allowlist_var("PRISM_.*")
         .blocklist_type("flux_.*")
         .raw_line(
-            "pub use flux_sys::{flux_device, flux_frame, flux_image, flux_point, flux_rect, flux_result};",
+            "pub use flux_sys::{flux_device, flux_format, flux_frame, flux_image, flux_point, flux_rect, flux_result};",
         )
         .default_enum_style(bindgen::EnumVariation::Rust {
             non_exhaustive: false,

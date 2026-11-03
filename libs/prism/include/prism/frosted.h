@@ -71,8 +71,17 @@ typedef struct prism_frosted_desc {
 
 typedef struct prism_frosted_filter prism_frosted_filter;
 
+/* Options descriptor for prism_frosted_filter_warmup (ADR-0141). */
+typedef struct prism_frosted_warmup_opts {
+    flux_format format; /* Target image format (default 0 -> FLUX_FORMAT_RGBA8_UNORM) */
+} prism_frosted_warmup_opts;
+
 PRISM_NODISCARD PRISM_API flux_result prism_frosted_filter_create(flux_device *device,
                                                                   prism_frosted_filter **out);
+
+/* Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). */
+PRISM_NODISCARD PRISM_API flux_result
+prism_frosted_filter_warmup(prism_frosted_filter *filter, const prism_frosted_warmup_opts *opts);
 
 PRISM_NODISCARD PRISM_API prism_frosted_filter *
 prism_frosted_filter_retain(prism_frosted_filter *filter);

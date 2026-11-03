@@ -222,8 +222,17 @@ typedef struct prism_backdrop_layer_desc {
 
 typedef struct prism_backdrop_layer_filter prism_backdrop_layer_filter;
 
+/* Options descriptor for prism_backdrop_layer_filter_warmup (ADR-0141). */
+typedef struct prism_backdrop_layer_warmup_opts {
+    flux_format format; /* Target image format (default 0 -> FLUX_FORMAT_RGBA8_UNORM) */
+    bool stats;         /* Pre-warm stats reduction pipeline */
+} prism_backdrop_layer_warmup_opts;
+
 PRISM_NODISCARD PRISM_API flux_result
 prism_backdrop_layer_filter_create(flux_device *device, prism_backdrop_layer_filter **out);
+/* Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). */
+PRISM_NODISCARD PRISM_API flux_result prism_backdrop_layer_filter_warmup(
+    prism_backdrop_layer_filter *filter, const prism_backdrop_layer_warmup_opts *opts);
 PRISM_NODISCARD PRISM_API prism_backdrop_layer_filter *
 prism_backdrop_layer_filter_retain(prism_backdrop_layer_filter *filter);
 /* Release only after every submission that references the filter's outputs

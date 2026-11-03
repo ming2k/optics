@@ -15,6 +15,7 @@
 #include <prism/backdrop_layer.h>
 
 #include <flux/compute.h>
+#include <flux/profile.h>
 #include <flux/vulkan.h>
 
 #include "glass_dispatch.h"
@@ -409,6 +410,15 @@ static flux_result layer_ensure_pipelines(prism_backdrop_layer_filter *filter, b
                                           bool need_clear, bool need_frost, bool need_glass,
                                           bool need_stats) {
     const int cls = is16f ? 1 : 0;
+    const bool missing = (need_clear && !filter->clear_pipelines[cls]) ||
+                         (need_frost && !filter->frost_pipelines[cls]) ||
+                         (need_glass && !filter->glass_pipelines[cls]) ||
+                         (need_stats && !filter->stats_pipeline);
+    if (!missing)
+        return FLUX_OK;
+
+    FLUX_PROFILE_ZONE(z_compile, "prism.backdrop_layer.compile_pipelines");
+
     if (need_clear && !filter->clear_pipelines[cls]) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
         pdesc.spirv = (const uint32_t *)(is16f ? storage_clear_16f_spv : storage_clear_spv);
@@ -418,8 +428,10 @@ static flux_result layer_ensure_pipelines(prism_backdrop_layer_filter *filter, b
         pdesc.push_constant_bytes = sizeof(storage_clear_push);
         flux_result r =
             flux_compute_pipeline_create(filter->device, &pdesc, &filter->clear_pipelines[cls]);
-        if (r != FLUX_OK)
+        if (r != FLUX_OK) {
+            FLUX_PROFILE_ZONE_END(z_compile);
             return r;
+        }
     }
     if (need_frost && !filter->frost_pipelines[cls]) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
@@ -431,8 +443,10 @@ static flux_result layer_ensure_pipelines(prism_backdrop_layer_filter *filter, b
         pdesc.push_constant_bytes = sizeof(backdrop_frost_push);
         flux_result r =
             flux_compute_pipeline_create(filter->device, &pdesc, &filter->frost_pipelines[cls]);
-        if (r != FLUX_OK)
+        if (r != FLUX_OK) {
+            FLUX_PROFILE_ZONE_END(z_compile);
             return r;
+        }
     }
     if (need_glass && !filter->glass_pipelines[cls]) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
@@ -443,8 +457,10 @@ static flux_result layer_ensure_pipelines(prism_backdrop_layer_filter *filter, b
         pdesc.push_constant_bytes = sizeof(liquid_glass_push);
         flux_result r =
             flux_compute_pipeline_create(filter->device, &pdesc, &filter->glass_pipelines[cls]);
-        if (r != FLUX_OK)
+        if (r != FLUX_OK) {
+            FLUX_PROFILE_ZONE_END(z_compile);
             return r;
+        }
     }
     if (need_stats && !filter->stats_pipeline) {
         flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
@@ -454,10 +470,36 @@ static flux_result layer_ensure_pipelines(prism_backdrop_layer_filter *filter, b
         pdesc.push_constant_bytes = sizeof(backdrop_stats_push);
         flux_result r =
             flux_compute_pipeline_create(filter->device, &pdesc, &filter->stats_pipeline);
-        if (r != FLUX_OK)
+        if (r != FLUX_OK) {
+            FLUX_PROFILE_ZONE_END(z_compile);
             return r;
+        }
     }
+    FLUX_PROFILE_ZONE_END(z_compile);
     return FLUX_OK;
+}
+
+flux_result prism_backdrop_layer_filter_warmup(prism_backdrop_layer_filter *filter,
+                                               const prism_backdrop_layer_warmup_opts *opts) {
+    if (!filter)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+
+    bool is16f = false;
+    bool stats = true;
+    if (opts) {
+        if (opts->format == FLUX_FORMAT_RGBA16_SFLOAT)
+            is16f = true;
+        stats = opts->stats;
+    }
+
+    /* Pre-allocate body table and id list storage buffers to eliminate driver host-visible buffer
+     * allocation hitch (ADR-0141) */
+    void *dummy_row = prism_body_table_row(filter->device, &filter->bodies, 1u, 0u);
+    uint32_t *dummy_ids = prism_body_ids_slot(filter->device, &filter->ids, 1u);
+    if (!dummy_row || !dummy_ids)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+
+    return layer_ensure_pipelines(filter, is16f, true, true, true, stats);
 }
 
 /* ------------------------------------------------------------------ */
@@ -730,6 +772,8 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
 
     const uint32_t capture_width = flux_image_width(input);
     const uint32_t capture_height = flux_image_height(input);
+
+    FLUX_PROFILE_ZONE(z_layer, "prism.backdrop_layer.apply");
 
     /* 1. Footprints in capture space: plates first, then bodies — the same order
      * the passes run in, so the merged clear set covers exactly what this
@@ -1145,6 +1189,7 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         .width = slot->width,
         .height = slot->height,
     };
+    FLUX_PROFILE_ZONE_END(z_layer);
     return FLUX_OK;
 }
 

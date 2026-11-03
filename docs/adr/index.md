@@ -174,3 +174,5 @@ silent fallback. Its primitives have landed.
 | 0138 | [Unified Tracy profiler telemetry and zero-overhead C23 instrumentation facade](0138-unified-tracy-profiler-telemetry-and-c23-facade.md) | Accepted |
 | 0139 | [Footprint-sized material slabs, batched body dispatch, and the prism_material_output contract](0139-footprint-sized-material-slabs-and-batched-dispatch.md) | Accepted |
 | 0140 | [Prism slab convergence — migrating Frosted, Acrylic, and Mica to footprint-quantized slabs](0140-prism-slab-convergence-frosted-acrylic-mica.md) | Accepted |
+| 0141 | [Material compute pipeline pre-warming, cold-start hitch elimination, and headless performance governance](0141-material-compute-pipeline-prewarming-and-headless-performance-governance.md) | Accepted |
+| 0142 | [Prism-rs safe descriptor modernization, material warmup options, and caller-declared revision caching](0142-prism-rs-descriptor-modernization-warmup-revision.md) | Accepted |

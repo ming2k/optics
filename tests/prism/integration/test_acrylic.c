@@ -67,6 +67,8 @@ int main(void) {
 
     /* Recreate for rendering tests */
     EXPECT(prism_acrylic_filter_create(d, &filter) == FLUX_OK);
+    EXPECT(prism_acrylic_filter_warmup(nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(prism_acrylic_filter_warmup(filter, nullptr) == FLUX_OK);
 
     flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
     sd.width = W;

@@ -23,8 +23,8 @@ static const lens_input FRAME0 = {
 };
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    lens *ui = NULL;
-    if (lens_create(&(lens_desc){0}, &ui) != FLUX_OK)
+    lens *ui = nullptr;
+    if (lens_create(&(lens_desc){}, &ui) != FLUX_OK)
         return 0;
 
     uint32_t scope_counter = 0;
@@ -45,7 +45,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             uint32_t n = (uint32_t)snprintf(label, sizeof label, "w%u",
                                             (unsigned)(scope_counter++ & 0xFFFF));
             (void)n;
-            lens_button(ui, &(lens_button_opts){.label = label}).clicked;
+            lens_button(ui, &(lens_button_opts){.label = label});
             break;
         }
         case 2: {
@@ -55,7 +55,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             snprintf(clabel, sizeof clabel, "c%u", (unsigned)(cs & 0xFFFF));
             snprintf(wlabel, sizeof wlabel, "w%u", (unsigned)((cs + 1) & 0xFFFF));
             lens_column_begin(ui, &(lens_layout_opts){.box = {.id = clabel}});
-            lens_button(ui, &(lens_button_opts){.label = wlabel}).clicked;
+            lens_button(ui, &(lens_button_opts){.label = wlabel});
             lens_column_end(ui);
             break;
         }

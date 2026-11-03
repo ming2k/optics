@@ -1,7 +1,7 @@
 /* fuzz_text_shape.c — feed arbitrary (and arbitrarily truncated) UTF-8
  * through the measure-only text seam.
  *
- * glyph_create accepts a NULL device ("measure-only"), so the whole
+ * glyph_create accepts a nullptr device ("measure-only"), so the whole
  * measure / caret / selection / visual-order surface is reachable without
  * a Vulkan ICD — no GPU coupling in CI. The input bytes are used three
  * ways:
@@ -20,7 +20,7 @@
  *
  * Real bugs surface as UB / leaks (ASan), runaway loops, or a violated
  * invariant below. The committed seed corpus
- * (corpus/text_shape/*.bin) covers valid multibyte, bidi mixes, lone
+ * (seeds under corpus/text_shape/) covers valid multibyte, bidi mixes, lone
  * continuation bytes, truncated sequences, overlong encodings,
  * embedded NULs, leading combining marks, and long mixed strings. */
 
@@ -35,8 +35,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (size == 0)
         return 0;
 
-    glyph_ctx *t = NULL;
-    if (glyph_create(&(glyph_desc){0}, &t) != FLUX_OK)
+    glyph_ctx *t = nullptr;
+    if (glyph_create(&(glyph_desc){}, &t) != FLUX_OK)
         return 0;
 
     /* Text = the whole input, len sweeps 0..size so every truncation
@@ -45,7 +45,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     float size_px = 8.0f + (float)(data[0] % 24); /* 8..31 px, deterministic */
 
     for (size_t len = 0; len <= size; len++) {
-        glyph_style st = {0};
+        glyph_style st = {};
         st.size_px = size_px;
 
         glyph_metrics m = glyph_measure(t, text, len, &st);

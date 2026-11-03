@@ -34,7 +34,7 @@ static double now_ms(void) {
 
 int main(void) {
     flux_device *d = test_helpers_make_headless_device();
-    if (!d) {
+    if (d == nullptr) {
         fprintf(stderr, "bench_frame_loop: no Vulkan device; skipping\n");
         return 0;
     }
@@ -61,7 +61,7 @@ int main(void) {
         return 0;
     }
 
-    flux_image *targets[TARGETS] = {nullptr};
+    flux_image *targets[TARGETS] = {};
     for (uint32_t i = 0; i < TARGETS; ++i)
         (void)flux_image_create_render_target(d, W / 3, H / 3, tf, &targets[i]);
 
@@ -77,7 +77,7 @@ int main(void) {
         (void)flux_canvas_begin(canvas, &pd);
         flux_canvas_fill_rect_color(canvas, (flux_rect){0, 0, (float)W, (float)H},
                                     flux_color_rgba(64, 64, 77, 255));
-        flux_canvas_end(canvas);
+        (void)flux_canvas_end(canvas);
         (void)flux_frame_submit(f);
         (void)flux_frame_present(f);
     }
@@ -101,7 +101,7 @@ int main(void) {
             flux_canvas_fill_rect_color(canvas,
                                         (flux_rect){0, 0, (float)W / 3 * reveal, (float)H / 3},
                                         flux_color_rgba(204, 153, 102, 230));
-            flux_canvas_end(canvas);
+            (void)flux_canvas_end(canvas);
         }
 
         /* Main composite pass. */
@@ -116,7 +116,7 @@ int main(void) {
             flux_canvas_draw_image(canvas, targets[t],
                                    (flux_rect){(float)(t * 40), 120.0f, (float)W / 3, (float)H / 3},
                                    nullptr);
-        flux_canvas_end(canvas);
+        (void)flux_canvas_end(canvas);
 
         (void)flux_frame_submit(f);
         (void)flux_frame_present(f);
