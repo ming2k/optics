@@ -222,7 +222,7 @@ class LeakGuardrailTests(unittest.TestCase):
         (build / "meson-info" / "intro-buildoptions.json").write_text(
             '[{"name":"observe_attribution","value":false}]'
         )
-        lib = build / "libs" / "flux" / "libflux.so.0.0.71"
+        lib = build / "libs" / "flux" / "libflux.so.0.0.72"
         lib.write_text("")
 
         fake_bin = self.tmp / "bin"
@@ -416,7 +416,7 @@ class LeakGuardrailTests(unittest.TestCase):
         (build / "meson-info" / "intro-buildoptions.json").write_text(
             '[{"name":"observe_attribution","value":true}]'
         )
-        (build / "libs" / "flux" / "libflux.so.0.0.71").write_text("")
+        (build / "libs" / "flux" / "libflux.so.0.0.72").write_text("")
 
         fake_bin = self.tmp / "bin"
         fake_bin.mkdir()

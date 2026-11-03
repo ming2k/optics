@@ -13,6 +13,30 @@ either.
 
 ## [Unreleased]
 
+## [0.0.72] - 2026-11-03
+
+### Added
+
+- **lens**: `lens_damage_rects` reports the frame's damaged area as a bounded rectangle list (ADR-0143). A host that repaints regionally no longer loses localization to a bounding box.
+- **lens-rs**: `Ui::damage_rects` exposes the regional damage list.
+- **iris**: `iris_frame_packet_damage_rect` and `iris_frame_lens_damage_rect` reduce the damage set to the single device-pixel rectangle that a one-rectangle backend (Win32, some Vulkan paths) requires. The collapse lives at the API boundary that forces it, so every consumer able to take the set does.
+- **flux**: `flux_rect_union` is the single, documented lossy projection of a damage set — for the one-rectangle case only.
+
+### Changed
+
+- **lens**: Frame damage is measured over a node's *paint* bounds — the union of its resolved draw commands, with text resolved through `lensi_text_bounds` — instead of its arranged `final_rect`. A stretched leaf no longer reports its column, a one-cell text edit reports the cell, and a centred label reports its glyph run rather than the box corner it does not paint.
+- **lens**: FLOW nodes contribute only their own paint delta to damage; `subtree_changed` and `visual_revision` are consulted only inside an owned ABS subtree.
+- **lens**: A text command carries `text_advance`, the shaped width its widget measured, and both replay and damage tracking position the run from it through one helper (`lensi_text_bounds`). Neither re-shapes: `glyph_measure` outside a frame mutates cache state the next submit depends on, which made a re-measuring damage walk corrupt the following frame.
+- **iris**: `iris_frame_packet` carries `flux_rect damage[LENS_DAMAGE_RECTS_CAPACITY]` and a count instead of one `damage_rect`, so the damage set travels with the snapshot it describes and the presentation thread never re-queries lens.
+
+### Fixed
+
+- **lens**: Disjoint placed bands no longer union into a single nearly-full-output damage rectangle (ADR-0143).
+- **lens**: `lens_damage_rect` is deleted, breaking and with no shim. There is no single-rect producer path; a consumer that needs one collapses the set itself via `flux_rect_union`.
+- **lens**: Centred and vertically-centred text runs are no longer under-reported. Both are encoded as negative sentinels in a draw command's `rel`, which the damage walk previously treated as a plain rectangle: a centred label in a 380 px box reported `{0,0,10,20}` while its glyphs painted at x ≈ 191, leaving stale pixels behind every such edit.
+- **lens**: A damage set that exceeds the 64-rect contract degrades to the full viewport instead of a truncated list or the bounding box of the recorded subset. Both alternatives under-cover, and under-covering strands pixels.
+- **lens**: The damage accumulator no longer reads uninitialized stack memory when a frame produces more regions than the fixed buffer holds. It previously counted rectangles it could not store and handed that larger count to the normalizer; only written entries are read now.
+
 ## [0.0.71] - 2026-11-03
 
 ### Fixed
