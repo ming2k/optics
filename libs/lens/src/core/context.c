@@ -481,21 +481,13 @@ static flux_rect paint_of_cmd(flux_rect box, const lens_draw_cmd *c) {
 }
 
 static flux_rect node_paint_bounds(const lens_node *n) {
-    flux_rect d = {0, 0, 0, 0};
-    if (!n || !n->cmds)
-        return d;
-    for (uint32_t i = 0; i < n->cmd_count; i++) {
-        const lens_draw_cmd *c = &n->cmds[i];
-        if (c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP)
-            continue;
-        d = rect_union_bounds(d, paint_of_cmd(n->final_rect, c));
-    }
-    return d;
+    return lensi_node_paint_bounds(n);
 }
 
 /* The same paint, resolved against `box` instead of the node's current
- * `final_rect`. A node that moved or resized painted at its previous box, and
- * those vacated pixels must be repainted too. */
+ * `final_rect`. Used only while a node's own command list is still alive (the
+ * live walk); a departed node must use its persisted `render_paint_rect`
+ * instead, because its command list is arena memory that has been recycled. */
 static flux_rect node_paint_bounds_at(const lens_node *n, flux_rect box) {
     flux_rect d = {0, 0, 0, 0};
     if (!n || !n->cmds)
@@ -649,10 +641,56 @@ static void damage_walk(const lens *ui, const lens_node *n, bool owned, damage_a
         damage_walk(ui, c, owned, acc);
 }
 
-uint32_t lens_damage_rects(const lens *ui, const lens_damage_opts *opts) {
-    if (!ui || !lens_frame_needs_repaint(ui))
-        return 0;
+/* Nodes that left the child lists still own pixels on screen.
+ *
+ * `lensi_store_reap` keeps a node in the store for LENSI_LEAVE_GRACE_FRAMES and
+ * only then frees it, but it detaches the node from its parent's sibling list
+ * immediately. `damage_walk` traverses `first_child`/`next_sibling`, so it can
+ * never reach such a node — while the geometry the last activated snapshot
+ * recorded for it still describes the pixels that have to be erased. Before
+ * ADR-0143 this was covered by the (grossly over-wide) whole-display fallback;
+ * once damage was localized the omission left the vacated band frozen on screen
+ * until an unrelated full repaint crossed it.
+ *
+ * Only PERSISTENT geometry is read here, never `n->cmds`:
+ *
+ *   - `render_rect` is a value copied out of the snapshot at activation
+ *     (`lens_snapshot_activate`), so it is valid on any later frame.
+ *   - `n->cmds` and the strings they point at live in the per-frame arena
+ *     (`lens_begin` calls `flux_arena_reset`, which only rewinds the cursor and
+ *     recycles immediately). A LEAVING node is never touched, so
+ *     `lensi_node_reset_frame` never clears its `cmds` — the pointer survives
+ *     while the memory behind it is handed to *this* frame's nodes. Deriving
+ *     paint bounds from it reads whatever was allocated there this frame:
+ *     measured, one unrelated label appearing elsewhere moved a departed row's
+ *     reported damage from `{0,65 36x20}` to `{0,73 291x20}`. A stale region,
+ *     not a crash — and precisely the class of bug this walk exists to fix.
+ *   - `c->final_rect` for children is likewise a plain value.
+ *
+ * Because `render_rect` is only ever set by activation, this walk stays silent
+ * for a node whose last frame was built but never presented — one transient
+ * frame's worth of under-report, against damage read out of recycled memory.
+ *
+ * This is a store scan, not a tree walk — no allocation, and it reads the store
+ * array the frame already touches. */
+static void damage_walk_leaving(const lens *ui, damage_accum *acc) {
+    const lens_store *s = &ui->store;
+    for (uint32_t i = s->live_head; i != LENSI_STORE_LINK_NONE; i = s->slots[i].next_live) {
+        const lens_node *n = s->slots[i].node;
+        if (!n || n->phase != LENS_NODE_LEAVING)
+            continue;
+        if (n->has_render_rect && n->render_paint_rect.w > 0.0f && n->render_paint_rect.h > 0.0f)
+            damage_push(acc, ui, n->render_paint_rect);
+        /* Children still hanging off the departed node: a container paints
+         * nothing of its own, so the node's own paint misses a removed panel's
+         * text. Their `paint_bounds` is captured per node by the same snapshot
+         * for exactly this reason. */
+        for (const lens_node *c = n->first_child; c; c = c->next_sibling)
+            damage_push(acc, ui, c->has_render_rect ? c->render_paint_rect : c->final_rect);
+    }
+}
 
+static uint32_t damage_resolve(const lens *ui, const lens_damage_opts *opts) {
     flux_rect *out = opts ? opts->rects : nullptr;
     uint32_t capacity = out ? opts->capacity : 0;
     if (capacity > LENS_DAMAGE_RECTS_CAPACITY)
@@ -665,6 +703,7 @@ uint32_t lens_damage_rects(const lens *ui, const lens_damage_opts *opts) {
     damage_accum acc = {.rects = raw, .capacity = LENS_DAMAGE_RECTS_CAPACITY};
 
     damage_walk(ui, ui->root, false, &acc);
+    damage_walk_leaving(ui, &acc);
 
     if (ui->caret_rect.w > 0.0f && ui->caret_rect.h > 0.0f)
         damage_push(&acc, ui, ui->caret_rect);
@@ -724,6 +763,12 @@ uint32_t lens_damage_rects(const lens *ui, const lens_damage_opts *opts) {
         return cover.w > 0.0f && cover.h > 0.0f ? 1 : 0;
     }
     return count;
+}
+
+uint32_t lens_damage_rects(const lens *ui, const lens_damage_opts *opts) {
+    if (!ui || !lens_frame_needs_repaint(ui))
+        return 0;
+    return damage_resolve(ui, opts);
 }
 
 void lens_set_reduced_motion(lens *ui, bool reduced) {

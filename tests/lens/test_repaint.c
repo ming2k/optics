@@ -7,6 +7,10 @@
 
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
 
+/* Roomier surface for the removed-subtree tests: a departed band must sit in a
+ * region no surviving widget happens to overlap. */
+static const lens_input WIDE_IN = {.display_size = {900, 400}, .dt_seconds = 0.016f};
+
 /* Two placed bands at opposite edges: the shape of a status strip plus a dock.
  * Their union is the whole viewport, which is why they must stay separate. */
 static const lens_place_opts TOP_BAND = {
@@ -591,6 +595,158 @@ static void test_damage_rects_null_safety(void) {
     lens_release(ui);
 }
 
+/* A node removed from a FLOW container leaves pixels no other widget covers.
+ *
+ * The node is detached from its parent's child list immediately but stays in
+ * the store for the leave grace window, so a damage walk over the tree cannot
+ * reach it. Only a store sweep finds it. Regression for the region that stayed
+ * frozen until some unrelated full repaint happened to cover it. */
+static void test_removed_child_repaints_its_vacated_band(void) {
+    lens *ui = NULL;
+    flux_canvas *canvas = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+
+    char tick[32];
+    const flux_rect row_c = {0, 65, 36, 20};
+
+    /* Settle a three-row list. */
+    for (int i = 0; i < 4; i++) {
+        snprintf(tick, sizeof tick, "tick=%d", i);
+        lens_begin(ui, &IN0);
+        lens_label(ui, &(lens_label_opts){.text = tick, .box = {.id = "ticker"}});
+        lens_column_begin(ui, &(lens_layout_opts){.box = {.id = "list", .min_width = 120}});
+        lens_label(ui, &(lens_label_opts){.text = "row-a"});
+        lens_label(ui, &(lens_label_opts){.text = "row-b"});
+        lens_label(ui, &(lens_label_opts){.text = "row-c"});
+        lens_column_end(ui);
+        test_end(ui);
+        render_frame(ui, canvas);
+    }
+
+    /* Drop the trailing row. The ticker changes in the same frame, so the
+     * "no region named" viewport fallback cannot mask an omission here. */
+    lens_begin(ui, &IN0);
+    lens_label(ui, &(lens_label_opts){.text = "tick=9", .box = {.id = "ticker"}});
+    lens_column_begin(ui, &(lens_layout_opts){.box = {.id = "list", .min_width = 120}});
+    lens_label(ui, &(lens_label_opts){.text = "row-a"});
+    lens_label(ui, &(lens_label_opts){.text = "row-b"});
+    lens_column_end(ui);
+    test_end(ui);
+
+    uint32_t count = 0;
+    const flux_rect *rects = damage_rects(ui, &count);
+    CHECK(count > 0);
+
+    /* The vacated band must be covered by at least one reported rect. */
+    bool covered = false;
+    for (uint32_t i = 0; i < count && !covered; i++)
+        covered = rects[i].x <= row_c.x && rects[i].y <= row_c.y &&
+                  rects[i].x + rects[i].w >= row_c.x + row_c.w &&
+                  rects[i].y + rects[i].h >= row_c.y + row_c.h;
+    CHECK(covered);
+
+    /* Localization holds: a couple of small strips, not the whole display the
+     * pre-ADR-0143 fallback would have reported. */
+    CHECK(count <= 4);
+    for (uint32_t i = 0; i < count; i++)
+        CHECK(rects[i].w < 200.0f);
+
+    flux_canvas_release(canvas);
+    lens_release(ui);
+}
+
+/* A removed subtree is erased through its children: the departed container
+ * paints nothing itself, so its own bounds are not where the pixels are. */
+static void test_removed_container_repaints_its_children(void) {
+    lens *ui = NULL;
+    flux_canvas *canvas = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+
+    for (int i = 0; i < 4; i++) {
+        lens_begin(ui, &IN0);
+        lens_label(ui, &(lens_label_opts){.text = "header", .box = {.id = "header"}});
+        lens_column_begin(ui, &(lens_layout_opts){.box = {.id = "panel"}});
+        lens_label(ui, &(lens_label_opts){.text = "inner-text"});
+        lens_column_end(ui);
+        test_end(ui);
+        render_frame(ui, canvas);
+    }
+
+    /* Remove the whole panel; the header changes with it. */
+    lens_begin(ui, &IN0);
+    lens_label(ui, &(lens_label_opts){.text = "header2", .box = {.id = "header"}});
+    test_end(ui);
+
+    uint32_t count = 0;
+    const flux_rect *rects = damage_rects(ui, &count);
+    CHECK(count > 0);
+    /* `inner-text` is laid out below the header, so some rect must reach past
+     * the header's band. */
+    bool below = false;
+    for (uint32_t i = 0; i < count && !below; i++)
+        below = rects[i].y + rects[i].h > 20.0f;
+    CHECK(below);
+
+    flux_canvas_release(canvas);
+    lens_release(ui);
+}
+
+/* The departed region must not depend on what else the frame built.
+ *
+ * A LEAVING node's command list lives in the per-frame arena, which `lens_begin`
+ * rewinds and immediately recycles. Reading damage out of it made the reported
+ * region follow whatever this frame happened to allocate there: measured, one
+ * unrelated label appearing elsewhere moved a departed row's damage from
+ * `{0,65 36x20}` to `{0,73 291x20}`. Damage must come from snapshot-persisted
+ * geometry, and this asserts the invariance directly — same UI history, only
+ * the amount of unrelated content differs.
+ */
+static void test_departed_damage_is_independent_of_unrelated_content(void) {
+    const flux_rect expect = {0, 65, 36, 20};
+    for (int fillers = 0; fillers <= 40; fillers = fillers ? fillers * 8 : 1) {
+        lens *ui = NULL;
+        flux_canvas *canvas = NULL;
+        CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+        CHECK(flux_canvas_create_cpu(900, 400, 1.0f, &canvas) == FLUX_OK);
+
+        for (int i = 0; i < 4; i++) {
+            lens_begin(ui, &WIDE_IN);
+            lens_label(ui, &(lens_label_opts){.text = "ticker", .box = {.id = "ticker"}});
+            lens_column_begin(ui, &(lens_layout_opts){.box = {.id = "list", .min_width = 120}});
+            lens_label(ui, &(lens_label_opts){.text = "row-a"});
+            lens_label(ui, &(lens_label_opts){.text = "row-b"});
+            lens_label(ui, &(lens_label_opts){.text = "row-c"});
+            lens_column_end(ui);
+            test_end(ui);
+            render_frame(ui, canvas);
+        }
+
+        lens_begin(ui, &WIDE_IN);
+        lens_label(ui, &(lens_label_opts){.text = "tick=9", .box = {.id = "ticker"}});
+        lens_column_begin(ui, &(lens_layout_opts){.box = {.id = "list", .min_width = 120}});
+        lens_label(ui, &(lens_label_opts){.text = "row-a"});
+        lens_label(ui, &(lens_label_opts){.text = "row-b"});
+        lens_column_end(ui);
+        for (int i = 0; i < fillers; i++)
+            lens_label(ui, &(lens_label_opts){.text = "the quick brown fox jumps over 0123456789",
+                                              .box = {.id = "filler"}});
+        test_end(ui);
+
+        uint32_t count = 0;
+        const flux_rect *rects = damage_rects(ui, &count);
+        bool found = false;
+        for (uint32_t i = 0; i < count && !found; i++)
+            found = fabsf(rects[i].x - expect.x) < 0.01f && fabsf(rects[i].y - expect.y) < 0.01f &&
+                    fabsf(rects[i].w - expect.w) < 0.01f && fabsf(rects[i].h - expect.h) < 0.01f;
+        CHECK(found);
+
+        flux_canvas_release(canvas);
+        lens_release(ui);
+    }
+}
+
 int main(void) {
     test_null_safety();
     test_first_frames_repaint_then_settle();
@@ -605,5 +761,8 @@ int main(void) {
     test_centered_text_damage_follows_the_glyphs();
     test_overflow_collapses_to_one_bounding_box();
     test_damage_rects_null_safety();
+    test_removed_child_repaints_its_vacated_band();
+    test_removed_container_repaints_its_children();
+    test_departed_damage_is_independent_of_unrelated_content();
     return TEST_REPORT();
 }

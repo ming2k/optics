@@ -43,6 +43,7 @@ tools/
 │   ├── doc_links.py            # Hyperlinks, Audience Firewall & ADR lineage check (ADR-0125)
 │   ├── formatting.py           # Pinned clang-format 22.x verification and in-place fix
 │   ├── lockstep.py             # Monorepo version lockstep verification (ADR-0098)
+│   ├── listeners.py            # Wayland listener-slot contract check (ADR-0145)
 │   ├── stdout_purity.py        # Library diagnostics purity check (syntax-aware)
 │   ├── symbols.py              # Exported public symbols tracker & docs generator
 │   └── tidy.py                 # Clang-tidy static analysis runner (zero-warning policy)
@@ -56,7 +57,8 @@ tools/
 │
 └── config/                     # Domain: Toolchain Configuration & Suppression Lists
     ├── abi-supprs.abignore     # Libabigail ABI suppression rules
-    └── lsan.supp               # LeakSanitizer suppression list
+    ├── lsan.supp               # LeakSanitizer suppression list
+    └── wayland-listeners.toml  # Pinned Wayland event contract (ADR-0145)
 ```
 
 ---
@@ -71,6 +73,7 @@ tools/
 | [`guardrails/lockstep.py`](guardrails/lockstep.py) | Monorepo lockstep | Asserts all sibling libraries and bindings share the exact project version from `meson.build`. |
 | [`guardrails/stdout_purity.py`](guardrails/stdout_purity.py) | Library hygiene | Asserts shared library TUs never write to `stdout` (`printf`), reserving stdout for IPC wires. |
 | [`guardrails/formatting.py`](guardrails/formatting.py) | Clang-Format 22.x | Asserts every C source file is byte-identical to root `.clang-format` output (`--fix` to reformat). |
+| [`guardrails/listeners.py`](guardrails/listeners.py) | INV-ARCH-WLSLOT (ADR-0145) | Asserts every event of every Wayland interface a listener table declares has a slot — libwayland `abort()`s the process on a NULL one. Verdict is a pure function of the repo: it reads the pinned contract in `config/wayland-listeners.toml`, never the host's protocol corpus. |
 | [`guardrails/symbols.py`](guardrails/symbols.py) | ADR-0098 | Extracts exported C symbols from public headers into `docs/reference/symbols.md`. |
 | [`guardrails/doc_links.py`](guardrails/doc_links.py) | ADR-0125 | Verifies documentation hyperlinks, anchor resolution, Audience Firewall, and ADR lineage. |
 | [`guardrails/tidy.py`](guardrails/tidy.py) | Zero-warning policy | Runs `clang-tidy` against all shipped library translation units; zero-warning baseline. |
@@ -94,6 +97,7 @@ tools/
 |------|----------|-------------|
 | [`config/abi-supprs.abignore`](config/abi-supprs.abignore) | `libabigail` (CI) | ABI change suppression rules ensuring semver-compliant shared object compatibility. |
 | [`config/lsan.supp`](config/lsan.supp) | ASan / LSan | LeakSanitizer suppression list for known process-lifetime upstream allocations (e.g. fontconfig caches). |
+| [`config/wayland-listeners.toml`](config/wayland-listeners.toml) | `guardrails/listeners.py` (ADR-0145) | Pinned per-interface Wayland event contract. A reviewed artifact, not a suppression list: it records which events must have slots so the check never depends on the host's `wayland-protocols`. Regenerate with `./tools/optics fix listeners`. |
 
 ---
 
@@ -101,4 +105,4 @@ tools/
 
 1. **Single CLI Entrypoint:** All developer-facing verification and fixes run through `./tools/optics`. No detached wrapper scripts are allowed.
 2. **Domain Encapsulation:** Every file belongs to a domain subdirectory (`guardrails/`, `build/`, `ci/`, `config/`).
-3. **Deterministic & Fast:** Guardrails execute in milliseconds using Python 3 standard library and native compilers, with zero exotic package dependencies.
+3. **Deterministic & Fast:** Guardrails execute in milliseconds using Python 3 standard library and native compilers, with zero exotic package dependencies. **Python floor: 3.11** (`tomllib`) — declared here so the requirement is a documented contract rather than a discovery made on a contributor's first run.

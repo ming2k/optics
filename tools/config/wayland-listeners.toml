@@ -1,0 +1,90 @@
+# wayland-listeners.toml — the pinned event contract for every Wayland
+# listener table in libs/iris (INV-ARCH-WLSLOT).
+#
+# Why pinned instead of read from the installed wayland-protocols at check
+# time: a verdict that depends on the host either fails where the package is
+# absent (macOS, Windows, minimal images) or goes red on unrelated pull
+# requests when a dependency bump adds an event upstream. Pinned, an
+# upstream addition is a one-line diff, reviewed like any other change.
+#
+# An entry lists EVERY event the interface declares, not only those below
+# the version this tree binds: a slot left NULL passes today and aborts the
+# process the moment a bind version rises.
+#
+# Regenerate with:  ./tools/optics fix listeners
+# Review the diff. A new event here means a new slot is required in the C
+# table — libwayland abort()s on an unimplemented event.
+
+corpus = "wayland-protocols 1.49"
+
+[interface.wl_callback]
+events = ["done"]
+
+[interface.wl_data_device]
+events = ["data_offer", "enter", "leave", "motion", "drop", "selection"]
+
+[interface.wl_data_offer]
+events = ["offer", "source_actions", "action"]
+
+[interface.wl_data_source]
+events = ["target", "send", "cancelled", "dnd_drop_performed", "dnd_finished", "action"]
+
+[interface.wl_keyboard]
+events = ["keymap", "enter", "leave", "key", "modifiers", "repeat_info"]
+
+[interface.wl_output]
+events = ["geometry", "mode", "done", "scale", "name", "description"]
+
+[interface.wl_pointer]
+events = ["enter", "leave", "motion", "button", "axis", "frame", "axis_source", "axis_stop", "axis_discrete", "axis_value120", "axis_relative_direction"]
+
+[interface.wl_registry]
+events = ["global", "global_remove"]
+
+[interface.wl_seat]
+events = ["capabilities", "name"]
+
+[interface.wl_surface]
+events = ["enter", "leave", "preferred_buffer_scale", "preferred_buffer_transform"]
+
+[interface.wl_touch]
+events = ["down", "up", "motion", "frame", "cancel", "shape", "orientation"]
+
+[interface.wp_fractional_scale_v1]
+events = ["preferred_scale"]
+
+[interface.wp_presentation_feedback]
+events = ["sync_output", "presented", "discarded"]
+
+[interface.xdg_activation_token_v1]
+events = ["done"]
+
+[interface.xdg_surface]
+events = ["configure"]
+
+[interface.xdg_toplevel]
+events = ["configure", "close", "configure_bounds", "wm_capabilities"]
+
+[interface.xdg_wm_base]
+events = ["ping"]
+
+[interface.zwp_primary_selection_device_v1]
+events = ["data_offer", "selection"]
+
+[interface.zwp_primary_selection_offer_v1]
+events = ["offer"]
+
+[interface.zwp_primary_selection_source_v1]
+events = ["send", "cancelled"]
+
+[interface.zwp_tablet_seat_v2]
+events = ["tablet_added", "tool_added", "pad_added"]
+
+[interface.zwp_tablet_tool_v2]
+events = ["type", "hardware_serial", "hardware_id_wacom", "capability", "done", "removed", "proximity_in", "proximity_out", "down", "up", "motion", "pressure", "distance", "tilt", "rotation", "slider", "wheel", "button", "frame"]
+
+[interface.zwp_text_input_v3]
+events = ["enter", "leave", "preedit_string", "commit_string", "delete_surrounding_text", "done", "action", "language", "preedit_hint"]
+
+[interface.zxdg_exported_v2]
+events = ["handle"]

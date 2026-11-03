@@ -44,6 +44,7 @@ The following canonical invariants are mechanically enforced in Optics:
 | :--- | :--- | :--- | :--- |
 | `[INV-ARCH-MATERIAL]` | Material Isolation (ADR-0063) | `flux` must never reference named materials or `prism_` symbols. | `tools/optics check boundary` (`tools/guardrails/boundary.py`) |
 | `[INV-ARCH-STDOUT]` | Stdout Purity | Shared library TUs must never write to `stdout` (`printf`, `puts`). | `tools/optics check stdout` (`tools/guardrails/stdout_purity.py`) |
+| `[INV-ARCH-WLSLOT]` | Wayland Listener Slots (ADR-0145) | Every event of every interface a `*_listener` table declares has a non-NULL slot; the expected event set is the pinned contract in `tools/config/wayland-listeners.toml`, never the host's protocol corpus. | `tools/optics check listeners` (`tools/guardrails/listeners.py`) + `tests/optics/test_listeners_guardrail.py` |
 | `[INV-ARCH-VERSION]` | Monorepo Version Lockstep | All sibling libraries (`flux`, `lens`, `iris`, etc.) share the exact version. | `tools/optics check lockstep` (`tools/guardrails/lockstep.py`) |
 | `[INV-ARCH-FORMAT]` | Pure C23 Formatting | Every C source file conforms strictly to `.clang-format` (Clang-Format 22.x). | `tools/optics check format` (`tools/guardrails/formatting.py`) |
 | `[INV-ARCH-ARENA]` | Zero Heap Alloc Frame Walk | Hot frame traversal, layout passes, and render walks use only per-frame arena memory. | Arena memory tracking & integration tests |

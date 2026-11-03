@@ -64,6 +64,11 @@ def run_stdout_purity(repo_root: Path, fix: bool, **kwargs) -> tuple[bool, str, 
     return True, "library stdout purity verified", ""
 
 
+def run_listeners(repo_root: Path, fix: bool, **kwargs) -> tuple[bool, str, str]:
+    from tools.guardrails.listeners import run_listener_check
+    return run_listener_check(repo_root, fix=fix)
+
+
 def run_symbols(repo_root: Path, fix: bool, **kwargs) -> tuple[bool, str, str]:
     from tools.guardrails.symbols import run_symbols_check
     return run_symbols_check(repo_root, check_only=not fix)
@@ -131,6 +136,13 @@ QUALITY_GUARDRAILS = [
         "policy": "Library IPC hygiene",
         "runner": run_stdout_purity,
         "supports_fix": False,
+    },
+    {
+        "id": "listeners",
+        "name": "Wayland listener contract (no NULL event slots)",
+        "policy": "INV-ARCH-WLSLOT, ADR-0145",
+        "runner": run_listeners,
+        "supports_fix": True,
     },
     {
         "id": "symbols",
@@ -261,7 +273,7 @@ def main() -> int:
         "target",
         nargs="?",
         default="all",
-        help="Specific guardrail (format, boundary, lockstep, stdout, symbols, leaks, docs, tidy, bench; default: all)",
+        help="Specific guardrail (format, boundary, lockstep, stdout, listeners, symbols, leaks, docs, tidy, bench; default: all)",
     )
     p_check.add_argument("--fix", action="store_true", help="Auto-fix format and symbol parity")
     p_check.add_argument("--build-dir", default=None, help="Build directory for tidy/compile checks")

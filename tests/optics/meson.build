@@ -12,3 +12,12 @@ test(
   suite : 'tooling',
   timeout : 120,
 )
+
+test(
+  'listeners_guardrail',
+  py,
+  args : [files('test_listeners_guardrail.py')],
+  workdir : meson.project_source_root(),
+  suite : 'tooling',
+  timeout : 120,
+)

@@ -1418,6 +1418,32 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
      * to lens on the next frame. */
 }
 
+/* The interface is bound at v1, so the v2-only events below never arrive
+ * today. They are still filled in: libwayland aborts the process when any
+ * event hits a NULL listener slot, so raising the bind version later must not
+ * be the difference between working IME and a crash. */
+static void ti_action(void *data, struct zwp_text_input_v3 *ti, uint32_t action, uint32_t serial) {
+    (void)data;
+    (void)ti;
+    (void)action;
+    (void)serial;
+}
+
+static void ti_language(void *data, struct zwp_text_input_v3 *ti, const char *language) {
+    (void)data;
+    (void)ti;
+    (void)language;
+}
+
+static void ti_preedit_hint(void *data, struct zwp_text_input_v3 *ti, uint32_t start, uint32_t end,
+                            uint32_t hint) {
+    (void)data;
+    (void)ti;
+    (void)start;
+    (void)end;
+    (void)hint;
+}
+
 static const struct zwp_text_input_v3_listener text_input_listener = {
     .enter = ti_enter,
     .leave = ti_leave,
@@ -1425,6 +1451,9 @@ static const struct zwp_text_input_v3_listener text_input_listener = {
     .commit_string = ti_commit,
     .delete_surrounding_text = ti_delete_surrounding,
     .done = ti_done,
+    .action = ti_action,
+    .language = ti_language,
+    .preedit_hint = ti_preedit_hint,
 };
 
 static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t t, uint32_t key,
@@ -1980,10 +2009,31 @@ static void dsource_target(void *d, struct wl_data_source *s, const char *m) {
     (void)s;
     (void)m;
 }
+/* v3 events. A selection source is never a drag source, so these cannot
+ * legitimately arrive — but libwayland aborts the process when ANY event lands
+ * on a NULL listener slot, and the data_device_manager is bound at v3, which
+ * makes them dispatchable. No-op beats a crash on a compositor that answers
+ * loosely. */
+static void dsource_dnd_drop_performed(void *d, struct wl_data_source *s) {
+    (void)d;
+    (void)s;
+}
+static void dsource_dnd_finished(void *d, struct wl_data_source *s) {
+    (void)d;
+    (void)s;
+}
+static void dsource_action(void *d, struct wl_data_source *s, uint32_t action) {
+    (void)d;
+    (void)s;
+    (void)action;
+}
 static const struct wl_data_source_listener data_source_listener = {
     .target = dsource_target,
     .send = dsource_send,
     .cancelled = dsource_cancelled,
+    .dnd_drop_performed = dsource_dnd_drop_performed,
+    .dnd_finished = dsource_dnd_finished,
+    .action = dsource_action,
 };
 
 /* Outgoing Drag-and-Drop source (ADR-0086) */
@@ -3134,7 +3184,20 @@ static void feedback_discarded(void *data, struct wp_presentation_feedback *fb) 
     (void)data;
     wp_presentation_feedback_destroy(fb);
 }
+/* sync_output precedes presented/discarded for every feedback object, and the
+ * compositor sends it unconditionally — even when the client never bound the
+ * matching wl_output. libwayland aborts on the first event whose slot in the
+ * listener table is NULL, so this stub is mandatory, not a refinement: without
+ * it the client dies on its first presented frame. Which output presented is
+ * not needed for pacing; the refresh interval rides on `presented` itself. */
+static void feedback_sync_output(void *data, struct wp_presentation_feedback *fb,
+                                 struct wl_output *output) {
+    (void)data;
+    (void)fb;
+    (void)output;
+}
 static const struct wp_presentation_feedback_listener feedback_listener = {
+    .sync_output = feedback_sync_output,
     .presented = feedback_presented,
     .discarded = feedback_discarded,
 };
@@ -3396,11 +3459,18 @@ static void *wp_presenter_thread_main(void *arg) {
                 if (drew && flux_frame_submit(frame) == FLUX_OK) {
                     struct wl_surface *target_wl =
                         ctx->ui_wl_surface ? ctx->ui_wl_surface : pl->surface;
-                    if (partial)
-                        wl_surface_damage_buffer(target_wl, dmg_x, dmg_y, (int32_t)dmg_w,
-                                                 (int32_t)dmg_h);
-                    else
-                        wl_surface_damage_buffer(target_wl, 0, 0, INT32_MAX, INT32_MAX);
+                    /* Always the full surface: flux paints a swapchain image at
+                     * full extent (ADR-0144), so a narrower damage region here
+                     * would leave the pixels it just repainted outside the
+                     * region unrecomposited on screen. `partial` still tracks
+                     * whether lens could localize — it just cannot be expressed
+                     * to the compositor either. */
+                    (void)partial;
+                    (void)dmg_x;
+                    (void)dmg_y;
+                    (void)dmg_w;
+                    (void)dmg_h;
+                    wl_surface_damage_buffer(target_wl, 0, 0, INT32_MAX, INT32_MAX);
                     flux_result pr = flux_frame_present(frame);
                     if (pr == FLUX_ERROR_SURFACE_LOST && target_w > 0 && target_h > 0) {
                         (void)flux_surface_resize(target_surface, target_w, target_h);
@@ -3644,7 +3714,23 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                 wl_subcompositor_get_subsurface(pl.subcompositor, ui_wl_surface, pl.surface);
             if (ui_wl_subsurface) {
                 wl_subsurface_set_position(ui_wl_subsurface, 0, 0);
-                wl_subsurface_set_desync(ui_wl_subsurface);
+                /* Synchronized, deliberately — not desynced.
+                 *
+                 * A desynced subsurface applies its own commits immediately,
+                 * so in a loop that presents the host and the UI in one
+                 * iteration the compositor performs two compositions: one when
+                 * the parent commits, and again when the subsurface's commit
+                 * lands. The UI layer then updates at twice the base layer's
+                 * rate against a base that has not changed, which reads as
+                 * ultra-fast flicker of the top layer.
+                 *
+                 * Synchronized mode makes the surface commit the transaction
+                 * boundary: the subsurface's cached state is applied when the
+                 * parent commits, so both layers advance exactly once per
+                 * committed frame and are composited together. The loop already
+                 * commits the parent once per iteration (wp_request_pulse ...
+                 * wl_surface_commit), which is the point that applies them. */
+                wl_subsurface_set_sync(ui_wl_subsurface);
                 wl_surface_set_buffer_scale(ui_wl_surface, pl.buffer_scale);
                 wl_surface_commit(ui_wl_surface);
 
@@ -4066,9 +4152,28 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                 bool must_paint_host = has_custom_paint && !host_canvas_static && !host_skip_render;
                 bool must_paint_ui = chrome_damaged || resized_this_frame || surface_needs_paint;
 
+                /* Both layers are recorded first and presented together below.
+                 *
+                 * Presenting one layer inside its own block and the other after
+                 * it means the two presents land in separate commits. A
+                 * desynced UI subsurface latches independently, so it could be
+                 * composited against an older host frame — a persistent
+                 * one-frame offset between the layers. Static content hides it
+                 * (an offset between two identical frames is invisible);
+                 * animated content shows it as flicker at the update rate.
+                 *
+                 * Recording is independent of presentation: flux builds each
+                 * layer's commands on its own surface, and 'present' is the
+                 * commit. Keeping every present in one place, after both
+                 * records, and driving the subsurface in synchronized mode (see
+                 * the subsurface setup) makes the layers advance together. */
+                flux_frame *host_frame = nullptr;
+                flux_frame *ui_frame = nullptr;
+                bool ui_drew = false;
+                lens_scene_snapshot *snapshot = nullptr;
+
                 /* 1. Host Canvas Layer (Base Surface) */
                 if (must_paint_host) {
-                    flux_frame *host_frame = NULL;
                     flux_result hr = flux_surface_begin_frame(surface, NULL, &host_frame);
                     if (hr == FLUX_OK) {
                         lens_theme th = lens_get_theme(ui);
@@ -4085,16 +4190,13 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                                 cfg->paint(canvas, device, (float)pl.buffer_scale, cfg->user);
                             (void)flux_canvas_end(canvas);
                         }
-                        if (flux_frame_submit(host_frame) == FLUX_OK) {
-                            wl_surface_damage_buffer(pl.surface, 0, 0, INT32_MAX, INT32_MAX);
-                            (void)flux_frame_present(host_frame);
-                        }
+                        if (flux_frame_submit(host_frame) != FLUX_OK)
+                            host_frame = nullptr;
                     }
                 }
 
                 /* 2. Lens UI Layer (Subsurface Plane with Premultiplied Alpha) */
                 if (must_paint_ui) {
-                    flux_frame *ui_frame = NULL;
                     flux_result ur = flux_surface_begin_frame(ui_surface, NULL, &ui_frame);
                     if (ur == FLUX_OK) {
                         bool partial_paint = false;
@@ -4130,30 +4232,47 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                             .render_height = partial_paint ? dmg_h : 0,
                         };
 
-                        bool drew = false;
-                        lens_scene_snapshot *snapshot = nullptr;
                         if (flux_canvas_begin(ui_canvas, &ui_pass_desc) == FLUX_OK) {
                             if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
-                                drew = lens_snapshot_submit(snapshot, ui_canvas) == FLUX_OK;
+                                ui_drew = lens_snapshot_submit(snapshot, ui_canvas) == FLUX_OK;
                             }
                             if (flux_canvas_end(ui_canvas) != FLUX_OK)
-                                drew = false;
+                                ui_drew = false;
                         }
-                        if (drew && flux_frame_submit(ui_frame) == FLUX_OK) {
-                            if (partial_paint)
-                                wl_surface_damage_buffer(ui_wl_surface, dmg_x, dmg_y,
-                                                         (int32_t)dmg_w, (int32_t)dmg_h);
-                            else
-                                wl_surface_damage_buffer(ui_wl_surface, 0, 0, INT32_MAX, INT32_MAX);
-                            flux_result pr = flux_frame_present(ui_frame);
-                            if (pr == FLUX_OK) {
-                                (void)lens_snapshot_activate(ui, snapshot);
-                                surface_needs_paint = false;
-                            }
-                        }
-                        lens_snapshot_release(snapshot);
+                        if (!ui_drew || flux_frame_submit(ui_frame) != FLUX_OK)
+                            ui_frame = nullptr;
                     }
                 }
+
+                /* 3. Present both layers so they apply atomically.
+                 *
+                 * The subsurface is parent-synchronized, which inverts the
+                 * commit order that looks natural: a synchronized subsurface's
+                 * commit only *caches* its state, and the parent's commit is
+                 * what applies the cached state of both surfaces and triggers a
+                 * single composition. So the UI commit must come FIRST and the
+                 * base commit LAST. Committing the base first would apply the
+                 * previous frame's chrome alongside this frame's base — the same
+                 * one-frame offset this restructure exists to remove, merely
+                 * flipped.
+                 *
+                 * After the base commit the pair is on screen together and the
+                 * trailing commit in the pulse block below carries nothing new;
+                 * it is still needed there to answer the frame grant. */
+                if (ui_frame) {
+                    /* Full surface: a surface pass is painted at full extent
+                     * (ADR-0144), so damage must cover it. */
+                    wl_surface_damage_buffer(ui_wl_surface, 0, 0, INT32_MAX, INT32_MAX);
+                    if (flux_frame_present(ui_frame) == FLUX_OK) {
+                        (void)lens_snapshot_activate(ui, snapshot);
+                        surface_needs_paint = false;
+                    }
+                }
+                if (host_frame) {
+                    wl_surface_damage_buffer(pl.surface, 0, 0, INT32_MAX, INT32_MAX);
+                    (void)flux_frame_present(host_frame);
+                }
+                lens_snapshot_release(snapshot);
 
                 if (d.request_pulse) {
                     wp_request_pulse(&pl);
@@ -4253,11 +4372,16 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
              * subscription can never be stranded without its commit. */
             if (d.request_pulse)
                 wp_request_pulse(&pl);
-            /* Attach incremental damage to the upcoming commit (ADR-0123). */
-            if (partial_paint)
-                wl_surface_damage_buffer(pl.surface, dmg_x, dmg_y, (int32_t)dmg_w, (int32_t)dmg_h);
-            else
-                wl_surface_damage_buffer(pl.surface, 0, 0, INT32_MAX, INT32_MAX);
+            /* Attach damage to the upcoming commit. Always the full surface:
+             * a surface pass is painted at full extent (ADR-0144), so a
+             * narrower region would leave the pixels repainted outside it
+             * unrecomposited. */
+            (void)partial_paint;
+            (void)dmg_x;
+            (void)dmg_y;
+            (void)dmg_w;
+            (void)dmg_h;
+            wl_surface_damage_buffer(pl.surface, 0, 0, INT32_MAX, INT32_MAX);
             r = flux_frame_present(frame);
             if (r == FLUX_ERROR_SURFACE_LOST) {
                 /* No commit reached the compositor, so the grant armed above

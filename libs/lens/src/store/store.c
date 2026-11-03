@@ -20,8 +20,7 @@ static uint32_t slot_index(lens_id id, uint32_t cap) {
  * per-frame cost for the 300 frames the shrink hysteresis waits.
  * Maintaining the list costs one index store per insert/remove; reap
  * becomes O(live). Slot 0 is a valid index, so the terminator is
- * LENSI_STORE_LINK_NONE, not 0. */
-#define LENSI_STORE_LINK_NONE UINT32_MAX
+ * LENSI_STORE_LINK_NONE (see internal.h), not 0. */
 
 static void live_link(lens_store *s, uint32_t i) {
     s->slots[i].prev_live = s->live_tail;

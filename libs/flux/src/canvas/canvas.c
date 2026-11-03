@@ -216,6 +216,41 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
         .render_height = desc->render_height,
         .skip_stencil = false,
     };
+
+    /* ADR-0144: never partial-paint a swapchain image.
+     *
+     * A damage-rect pass rasterises a sub-rectangle and leaves the rest of the
+     * destination alone. For a caller-owned target image that is sound: it is
+     * one persistent buffer, so successive partial passes accumulate onto the
+     * same pixels. A swapchain is not one buffer — it is a rotation of several
+     * images, and a partial pass advances only the one it acquired.
+     *
+     * Measured on the material gallery before this rule: the same damage rect
+     * reached the five on-screen images 31, 34, 35, 18 and 18 times. Each image
+     * therefore held a different set of patches, and the compositor, cycling
+     * through them, showed a different UI state every frame — the "flicker
+     * between two frames" that regional damage introduced.
+     *
+     * Tracking "this image has had a complete frame" is not enough, which is
+     * why the flag alone was insufficient: after the first full paint every
+     * image qualifies, and from then on each incremental patch lands on one
+     * image and diverges it from the rest. The only way to keep a rotation
+     * consistent without a shared authoritative content buffer is to paint the
+     * full extent into whichever image is acquired, which makes all of them
+     * identical by construction. `render_width == 0` already means full extent
+     * (canvas_pass_render_area).
+     *
+     * The cost is rasterisation, not correctness: an on-screen partial update
+     * now repaints the whole surface. Preserving the ADR-0143 win here needs a
+     * single persistent content image that every acquired image is copied from
+     * whole; that is a separate design, not a flag. */
+    const bool requested_partial = config.render_width > 0 || config.render_height > 0;
+    if (requested_partial && !target && c->surface) {
+        config.render_offset_x = 0;
+        config.render_offset_y = 0;
+        config.render_width = 0;
+        config.render_height = 0;
+    }
     const struct {
         flux_struct_type type;
         const void *next;

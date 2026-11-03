@@ -308,6 +308,15 @@ if opt_canvas
   )
   test('color_management', test_color_management, suite : 'integration')
 
+  # Partial (damage-rect) passes across a rotating image set (ADR-0144): a
+  # sub-rect LOAD pass may only composite onto an image known to hold a complete
+  # frame, and the other slots must not present a stale one.
+  test_partial_paint = executable('test_partial_paint',
+    'test_partial_paint.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('partial_paint', test_partial_paint, suite : 'integration')
+
   # Image retire queue: churn create -> draw -> release every frame so
   # inline destruction of in-flight images (GPU hang on i915) or a
   # missing bindless-slot recycle fails loudly.

@@ -226,6 +226,10 @@ struct lens_node {
      * prev_rect belongs exclusively to the activated interaction snapshot. */
     bool has_render_rect;
     flux_rect render_rect;
+    /* The pixels `render_rect`'s frame actually covered, captured from the
+     * snapshot (ADR-0144). Survives the arena, so a LEAVING node's vacated
+     * region is still known after its command list has been recycled. */
+    flux_rect render_paint_rect;
 
     /* Cached DisplayList for static subtrees (ADR-0094) */
     flux_display_list *cached_dl;
@@ -271,6 +275,11 @@ typedef struct lens_scroll_state {
 /* ------------------------------------------------------------------ */
 /*  Open-addressing store: lens_id -> lens_node* (ADR-0027)               */
 /* ------------------------------------------------------------------ */
+
+/* Live-list terminator (see lens_store). Slot 0 is a valid index, so the
+ * sentinel cannot be 0. Shared with the damage walk, which scans the live list
+ * for nodes that have left the child lists but still own on-screen pixels. */
+#define LENSI_STORE_LINK_NONE UINT32_MAX
 
 typedef struct lens_store_slot {
     lens_id id; /* 0 = empty */
@@ -948,6 +957,44 @@ static inline flux_rect lensi_text_bounds(flux_rect rel_rect, float advance, boo
     if (!(w > 0.0f))
         return rel_rect;
     return (flux_rect){x, rel_rect.y, w, rel_rect.h};
+}
+
+/* The pixels one node's OWN paint covered, resolved against its box exactly as
+ * replay rasterises them (ADR-0143, ADR-0144).
+ *
+ * Deliberately not `final_rect`: a label in a stretch column is laid out across
+ * the column's full width while its glyphs occupy a few dozen pixels.
+ * CLIP_PUSH/CLIP_POP paint nothing themselves and would re-widen every clipped
+ * subtree, so they are skipped. A node with no commands has no own paint.
+ *
+ * Shared by the snapshot capture (which stores the result so it outlives the
+ * per-frame arena) and the live damage walk, so the two cannot disagree.
+ * Requires `n->cmds` to be alive: call only while the node's frame still owns
+ * its arena. */
+static inline flux_rect lensi_node_paint_bounds(const lens_node *n) {
+    if (!n || !n->cmds)
+        return (flux_rect){0, 0, 0, 0};
+    flux_rect d = {0, 0, 0, 0};
+    for (uint32_t i = 0; i < n->cmd_count; i++) {
+        const lens_draw_cmd *c = &n->cmds[i];
+        if (c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP)
+            continue;
+        const flux_rect rel_rect = lensi_offset_rel(n->final_rect, c->rel);
+        const flux_rect paint =
+            c->kind == LENS_DRAW_TEXT
+                ? lensi_text_bounds(rel_rect, c->text_advance, c->rel.w < 0.0f, c->rel.h < 0.0f)
+                : rel_rect;
+        if (d.w <= 0.0f || d.h <= 0.0f) {
+            d = paint;
+        } else if (paint.w > 0.0f && paint.h > 0.0f) {
+            const float x0 = fminf(d.x, paint.x);
+            const float y0 = fminf(d.y, paint.y);
+            const float x1 = fmaxf(d.x + d.w, paint.x + paint.w);
+            const float y1 = fmaxf(d.y + d.h, paint.y + paint.h);
+            d = (flux_rect){x0, y0, x1 - x0, y1 - y0};
+        }
+    }
+    return d;
 }
 
 /* Exponential ease toward `target`. Pass the `ui` so a value still in transit

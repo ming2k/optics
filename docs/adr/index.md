@@ -177,3 +177,6 @@ silent fallback. Its primitives have landed.
 | 0141 | [Material compute pipeline pre-warming, cold-start hitch elimination, and headless performance governance](0141-material-compute-pipeline-prewarming-and-headless-performance-governance.md) | Accepted |
 | 0142 | [Prism-rs safe descriptor modernization, material warmup options, and caller-declared revision caching](0142-prism-rs-descriptor-modernization-warmup-revision.md) | Accepted |
 | 0143 | [Regional frame damage as a rect list, and paint-bounds localization](0143-regional-damage-rect-lists-and-paint-bounds-localization.md) | Accepted |
+| 0144 | [Never partial-paint a swapchain — damage-rect passes and departed subtrees](0144-partial-paint-requires-complete-image.md) | Accepted |
+| 0145 | [Wayland listener slots are a pinned, mechanically verified contract](0145-wayland-listener-slot-contract.md) | Accepted |
+| 0146 | [Composed layers advance in lockstep — synchronized subsurfaces, single present point](0146-composed-layers-advance-in-lockstep.md) | Accepted |

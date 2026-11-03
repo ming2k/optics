@@ -91,6 +91,16 @@ jobs:
       - name: No library stdout writes
         run: ./tools/optics check stdout
 
+      # Wayland listener contract (ADR-0145): libwayland abort()s the whole
+      # process when the compositor sends an event whose slot in the wl_proxy
+      # listener table is NULL. 0.0.72 shipped exactly that in
+      # wp_presentation_feedback (missing sync_output), killing consumers on
+      # the first presented frame. The check is hermetic — it reads the pinned
+      # contract in tools/config/wayland-listeners.toml, not the host's
+      # protocol corpus — so it runs here, before any package is installed.
+      - name: Wayland listener contract
+        run: ./tools/optics check listeners
+
       # Symbol reference freshness: docs/reference/symbols.md is generated
       # from the installed headers (tools/guardrails/symbols.py). It drifted
       # silently before this check existed (removed symbols lingered,

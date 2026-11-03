@@ -15,6 +15,12 @@ typedef struct snapshot_node {
     lens_id id, semantic_parent;
     uint64_t incarnation, visual_revision;
     flux_rect bounds, clip;
+    /* The pixels this node's own draw commands covered, resolved against
+     * `bounds` at capture time (ADR-0144). `bounds` is where layout put the
+     * node — for a stretched label that is the whole column — so it cannot
+     * describe a vacated region. Captured while the command list is still
+     * alive, and kept as a plain value so it survives the per-frame arena. */
+    flux_rect paint_bounds;
     lens_scroll_geometry scroll;
     bool is_scroll;
     lens_semantics semantics;
@@ -706,6 +712,7 @@ static flux_result capture_node(lens *ui, lens_scene_snapshot *s, lens_node *n, 
         .incarnation = n->incarnation,
         .visual_revision = n->visual_revision,
         .bounds = n->final_rect,
+        .paint_bounds = lensi_node_paint_bounds(n),
         .clip = clip,
         .semantic_parent = semantic_parent,
         .band = band,
@@ -794,6 +801,7 @@ flux_result lens_snapshot_activate(lens *ui, lens_scene_snapshot *snapshot) {
             continue;
         n->prev_rect = entry->bounds;
         n->render_rect = entry->bounds;
+        n->render_paint_rect = entry->paint_bounds;
         n->has_render_rect = true;
         n->presented_revision = entry->visual_revision;
         n->presented_index = i;
