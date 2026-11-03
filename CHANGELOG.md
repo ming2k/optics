@@ -13,6 +13,12 @@ either.
 
 ## [Unreleased]
 
+## [0.0.71] - 2026-11-03
+
+### Fixed
+
+- **lens**: Localize damage rect for placed bands and ghosts, and mark all placed bands dirty on layout invalidation.
+
 ## [0.0.70] - 2026-11-03
 
 ### Added
