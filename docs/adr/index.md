@@ -176,3 +176,4 @@ silent fallback. Its primitives have landed.
 | 0140 | [Prism slab convergence — migrating Frosted, Acrylic, and Mica to footprint-quantized slabs](0140-prism-slab-convergence-frosted-acrylic-mica.md) | Accepted |
 | 0141 | [Material compute pipeline pre-warming, cold-start hitch elimination, and headless performance governance](0141-material-compute-pipeline-prewarming-and-headless-performance-governance.md) | Accepted |
 | 0142 | [Prism-rs safe descriptor modernization, material warmup options, and caller-declared revision caching](0142-prism-rs-descriptor-modernization-warmup-revision.md) | Accepted |
+| 0143 | [Regional frame damage as a rect list, and paint-bounds localization](0143-regional-damage-rect-lists-and-paint-bounds-localization.md) | Accepted |

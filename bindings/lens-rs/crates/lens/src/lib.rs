@@ -302,19 +302,53 @@ impl Ui {
         unsafe { sys::lens_anim_pending(self.raw as *const sys::lens) }
     }
 
-    /// Bounding box, in UI-space, of everything the frame just built would
-    /// paint differently from what is already on screen — base-tree and placed
-    /// subtree damage, tooltips, an eased value still in transit, a focused
-    /// text caret's blink cell.
+    /// The damaged area of the frame just built as rectangles in UI-space,
+    /// written into `out`.
     ///
-    /// Zero-sized when nothing needs a repaint. Read-only; valid after
-    /// [`Ui::frame`] returns, until the next frame begins. This is the
-    /// per-frame dirty region an input-driven host scissor-clips to, so a
-    /// chrome component that can localize its animation does not have to fall
-    /// back to a full-output repaint.
-    pub fn damage_rect(&self) -> Rect {
-        // SAFETY: raw is a live context; the call only reads state.
-        Rect::from_raw(unsafe { sys::lens_damage_rect(self.raw as *const sys::lens) })
+    /// Returns the number of rectangles written. Every rectangle is covered and
+    /// none is contained in another, so a host may scissor each one, hand the
+    /// whole list to a per-plane damage hint, or — when its presentation API
+    /// takes a single rectangle — union them itself with `Rect::union` at that
+    /// boundary. There is deliberately no single-rect accessor: collapsing inside
+    /// the producer would merge a status-chip tick and a dock spring into one
+    /// nearly-full-output box before any consumer could use the set.
+    ///
+    /// When the damage needs more rectangles than `out` holds, the answer is a
+    /// single covering rectangle in `out[0]` and the return value is `1`: a
+    /// truncated list would leave stale pixels on screen, while over-covering
+    /// only costs a hint. Pass an empty slice to ask for the count alone, which
+    /// is how a caller sizes its buffer without guessing.
+    pub fn damage_rects(&self, out: &mut [Rect]) -> usize {
+        // The C contract's bound. A stack buffer keeps the query allocation-free;
+        // the slice length decides how much of it the caller actually wants.
+        const CAPACITY: usize = 64;
+        let mut raw = [sys::flux_rect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        }; CAPACITY];
+        let capacity = out.len().min(CAPACITY);
+        let count = unsafe {
+            sys::lens_damage_rects(
+                self.raw as *const sys::lens,
+                &sys::lens_damage_opts {
+                    rects: if capacity == 0 {
+                        std::ptr::null_mut()
+                    } else {
+                        raw.as_mut_ptr()
+                    },
+                    capacity: capacity as u32,
+                },
+            )
+        } as usize;
+        // The count is the true number the damage resolves to, which can exceed
+        // what was written; only initialized slots may be copied out.
+        let written = count.min(capacity);
+        for (slot, source) in out.iter_mut().zip(raw.iter()).take(written) {
+            *slot = Rect::from_raw(*source);
+        }
+        written
     }
 
     /// The semantic cursor shape requested by the topmost hovered control on

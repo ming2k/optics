@@ -63,8 +63,16 @@ enum {
 typedef struct lens_draw_cmd {
     lens_draw_kind kind;
     /* Relative to the node's final_rect. With an explicit positive width,
-     * a negative x anchors the rectangle to the trailing edge. */
+     * a negative x anchors the rectangle to the trailing edge, and a negative
+     * width/height centres the content instead of sizing it. */
     flux_rect rel;
+    /* For `LENS_DRAW_TEXT` only: the shaped advance of the run, recorded by the
+     * widget that measured it. Replay positions the glyphs from it and the damage
+     * walk reports those same pixels from it, so neither re-shapes — shaping is a
+     * frame-scoped operation and running it inside a damage query corrupts the
+     * glyph cache for the next frame. Zero means "not measured", and both
+     * consumers fall back to `rel`. */
+    float text_advance;
     flux_color color;
     flux_color outline_color; /* opt-in foreground contour */
     float radius;
@@ -206,6 +214,14 @@ struct lens_node {
 
     /* damage tracking (per frame) */
     bool subtree_changed;
+    /* True when *this* node's own paint changed (geometry, opacity, hover/active
+     * ease, draw-list hash, or its own linked-child sequence). Narrower than
+     * `subtree_changed`, which additionally rolls up every FLOW descendant.
+     *
+     * `lens_damage_rects` unions `subtree_changed` over ABS/band roots but only
+     * `self_changed` over FLOW interior nodes, so a single edited cell reports
+     * its own cell instead of the enclosing container's full-display rect. */
+    bool self_changed;
     /* Last successfully compiled geometry for visual cache invalidation.
      * prev_rect belongs exclusively to the activated interaction snapshot. */
     bool has_render_rect;
@@ -833,12 +849,14 @@ bool lensi_point_clipped_by_scroll(const lens_node *n, flux_point p);
 void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd);
 flux_result lensi_compile_commands(lens *ui, flux_encoder *encoder, flux_rect box, flux_rect clip,
                                    const lens_draw_cmd *cmds, uint32_t count, float alpha);
-void lensi_mark_dirty(lens *ui); /* per-frame subtree change detection */
-/* Bottom-up change detection rooted at `n` (replay.c). ABS descendants are
- * marked too (single tree, ADR-0060) but do NOT roll up into the parent's
- * subtree_changed: the parent's display-list record contains flow children
- * only, so a placed subtree's damage must not invalidate it — the repaint
- * query consults the band buckets directly (context.c). */
+void lensi_mark_dirty(lens *ui);
+/* per-frame subtree change detection */ /* Bottom-up change detection rooted at `n` (replay.c).
+                                          * ABS descendants are marked too (single tree,
+                                          * ADR-0060) but do NOT roll up into the parent's
+                                          * subtree_changed: the parent's display-list record
+                                          * contains flow children only, so a placed subtree's
+                                          * damage must not invalidate it — the repaint query
+                                          * consults the band buckets directly (context.c). */
 bool lensi_mark_subtree_changed(lens_node *n);
 /* Release the immutable child-list cache owned by this node. */
 void lensi_node_release_cache(lens *ui, lens_node *n);
@@ -879,6 +897,57 @@ size_t lensi_text_caret_visual(lens *ui, const char *utf8, size_t byte, bool for
 
 static inline bool lensi_point_in(flux_point p, flux_rect r) {
     return p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
+}
+
+/* Resolve one draw command's `rel` geometry against the node box it was emitted
+ * in — the single definition of "where does this command paint", shared by
+ * replay (which rasterises it) and damage tracking (which must report exactly
+ * the pixels replay writes). Keeping one implementation is what stops the two
+ * from disagreeing about the bounds of an edited label. */
+static inline flux_rect lensi_offset_rel(flux_rect box, flux_rect rel) {
+    float w = rel.w > 0 ? rel.w : box.w - 2.0f * rel.x;
+    float h = rel.h > 0 ? rel.h : box.h - 2.0f * rel.y;
+    if (w < 0)
+        w = 0;
+    if (h < 0)
+        h = 0;
+    float x = (rel.x < 0.0f && rel.w > 0.0f) ? box.x + box.w + rel.x - w : box.x + rel.x;
+    return (flux_rect){x, box.y + rel.y, w, h};
+}
+
+/* The box a text command paints into, in absolute coordinates, from the advance
+ * its widget recorded.
+ *
+ * A text run is the one command kind whose painted extent is not its `rel`
+ * rectangle: negative `rel` extents centre the run inside the box, and `rel.w ==
+ * 0` leaves it at the left edge but still stops at the advance. A rect taken from
+ * the box corner therefore describes pixels the glyphs never touch and omits the
+ * ones they do — a centred label in a 380px box paints at x ≈ 191 while its
+ * corner-based rect claims x = 0.
+ *
+ * `advance` is the run's shaped width, recorded at emit time. Both replay and the
+ * damage walk read it, so the two cannot disagree and neither re-shapes:
+ * `glyph_measure` outside a frame mutates cache state the next submit depends on.
+ * Falls back to the command rectangle when no advance was recorded. */
+static inline flux_rect lensi_text_bounds(flux_rect rel_rect, float advance, bool centre_w,
+                                          bool centre_h) {
+    (void)centre_h;
+    if (!(advance > 0.0f) || rel_rect.w <= 0.0f || rel_rect.h <= 0.0f)
+        return rel_rect;
+    float x = rel_rect.x;
+    if (centre_w)
+        x = rel_rect.x + (rel_rect.w - advance) * 0.5f;
+    /* Never spill past the box the run was measured against, and never retreat
+     * past its origin: an over-wide advance must not report pixels outside the
+     * widget it belongs to. */
+    if (x < rel_rect.x)
+        x = rel_rect.x;
+    float w = advance;
+    if (x + w > rel_rect.x + rel_rect.w)
+        w = rel_rect.x + rel_rect.w - x;
+    if (!(w > 0.0f))
+        return rel_rect;
+    return (flux_rect){x, rel_rect.y, w, rel_rect.h};
 }
 
 /* Exponential ease toward `target`. Pass the `ui` so a value still in transit

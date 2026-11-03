@@ -457,60 +457,273 @@ static flux_rect rect_intersect_bounds(flux_rect a, flux_rect b) {
     return (flux_rect){x, y, r - x, btm - y};
 }
 
-static flux_rect node_damage_bounds(const lens_node *n) {
+/* Pixels one node's OWN paint covers this frame: the union of its draw commands
+ * resolved against its box, exactly as replay rasterises them.
+ *
+ * Deliberately not `final_rect`. A label in a stretch column is laid out across
+ * the column's full width while its glyphs occupy a few dozen pixels, and the
+ * root's box is the entire display — reporting layout boxes is what turned a
+ * one-cell terminal edit into a whole-output composite. Command geometry is the
+ * only bound that describes what actually changed.
+ *
+ * Two command kinds are ignored: `CLIP_PUSH`/`CLIP_POP` paint nothing themselves,
+ * and including them would re-widen every clipped subtree to its clip rect. A
+ * node with no commands has no own paint and contributes nothing here; its
+ * descendants are visited separately. */
+/* Where one command paints, in absolute coordinates, resolved against `box`. */
+static flux_rect paint_of_cmd(flux_rect box, const lens_draw_cmd *c) {
+    const flux_rect rel_rect = lensi_offset_rel(box, c->rel);
+    if (c->kind != LENS_DRAW_TEXT)
+        return rel_rect;
+    /* Text is positioned from the advance its widget recorded, exactly as replay
+     * positions it. Neither consumer shapes here. */
+    return lensi_text_bounds(rel_rect, c->text_advance, c->rel.w < 0.0f, c->rel.h < 0.0f);
+}
+
+static flux_rect node_paint_bounds(const lens_node *n) {
     flux_rect d = {0, 0, 0, 0};
-    if (!n)
+    if (!n || !n->cmds)
         return d;
-    if (n->subtree_changed || n->visual_revision != n->presented_revision) {
-        if (n->final_rect.w > 0.0f && n->final_rect.h > 0.0f)
-            d = rect_union_bounds(d, n->final_rect);
-        if (n->has_render_rect && n->render_rect.w > 0.0f && n->render_rect.h > 0.0f)
-            d = rect_union_bounds(d, n->render_rect);
-        for (const lens_node *c = n->first_child; c; c = c->next_sibling) {
-            flux_rect cd = node_damage_bounds(c);
-            d = rect_union_bounds(d, cd);
-        }
+    for (uint32_t i = 0; i < n->cmd_count; i++) {
+        const lens_draw_cmd *c = &n->cmds[i];
+        if (c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP)
+            continue;
+        d = rect_union_bounds(d, paint_of_cmd(n->final_rect, c));
     }
     return d;
 }
 
-flux_rect lens_damage_rect(const lens *ui) {
-    if (!ui || !lens_frame_needs_repaint(ui))
-        return (flux_rect){0, 0, 0, 0};
-
+/* The same paint, resolved against `box` instead of the node's current
+ * `final_rect`. A node that moved or resized painted at its previous box, and
+ * those vacated pixels must be repainted too. */
+static flux_rect node_paint_bounds_at(const lens_node *n, flux_rect box) {
     flux_rect d = {0, 0, 0, 0};
-    if (ui->root)
-        d = rect_union_bounds(d, node_damage_bounds(ui->root));
-
-    for (uint32_t b = 0; b < (uint32_t)LENS_BAND_COUNT; b++) {
-        for (uint32_t i = 0; i < ui->band_counts[b]; i++) {
-            if (ui->bands[b][i])
-                d = rect_union_bounds(d, node_damage_bounds(ui->bands[b][i]));
-        }
+    if (!n || !n->cmds)
+        return box;
+    for (uint32_t i = 0; i < n->cmd_count; i++) {
+        const lens_draw_cmd *c = &n->cmds[i];
+        if (c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP)
+            continue;
+        d = rect_union_bounds(d, paint_of_cmd(box, c));
     }
+    return d.w > 0.0f && d.h > 0.0f ? d : box;
+}
+
+/* ---- regional damage ------------------------------------------------------
+ *
+ * lens_damage_rects reports the frame's damage as a bounded rectangle list. The
+ * walk is deliberately not a bounding-box accumulator: a host that repaints
+ * regionally (and a compositor hands the list straight to its per-plane damage
+ * hint) must never see a HUD chip and a Dock spring merged into one nearly
+ * full-output box. A host whose presentation API takes one rectangle collapses
+ * the list with `flux_rect_union` at that boundary — never before.
+ *
+ * Two rules carry the localization:
+ *
+ *   1. An ABS node owns its whole subtree. A placed band is drawn as one body;
+ *      anything inside it that changed changes pixels the band owns.
+ *   2. A FLOW node owns only its own paint delta. Its `subtree_changed` rolls
+ *      up from every flow descendant, and its `final_rect` is the container's
+ *      layout box — for the root that is the entire display. Rolling up here
+ *      would report the display for a single edited label.
+ */
+
+typedef struct damage_accum {
+    /* Fixed capacity: the damage set is bounded by the public contract, so the
+     * walk never allocates. `rects == nullptr` asks for the count only. */
+    flux_rect *rects;
+    uint32_t capacity;
+    uint32_t count;  /* rectangles accepted, including any that did not fit */
+    bool overflowed; /* at least one rectangle did not fit in `rects` */
+} damage_accum;
+
+/* Append a viewport-clipped, pixel-snapped rectangle. */
+static void damage_push(damage_accum *acc, const lens *ui, flux_rect rect) {
+    if (rect.w <= 0.0f || rect.h <= 0.0f)
+        return;
+    if (ui->input.display_size.x > 0.0f && ui->input.display_size.y > 0.0f) {
+        const flux_rect viewport = {0, 0, ui->input.display_size.x, ui->input.display_size.y};
+        rect = rect_intersect_bounds(rect, viewport);
+        if (rect.w <= 0.0f || rect.h <= 0.0f)
+            return;
+    }
+    /* Snap outward to whole logical pixels: the host maps these through its
+     * output scale, and a fractional edge would round in whichever direction
+     * that mapping happened to choose. */
+    const float x1 = ceilf(rect.x + rect.w);
+    const float y1 = ceilf(rect.y + rect.h);
+    rect.x = floorf(rect.x);
+    rect.y = floorf(rect.y);
+    rect.w = x1 - rect.x;
+    rect.h = y1 - rect.y;
+    if (rect.w <= 0.0f || rect.h <= 0.0f)
+        return;
+
+    if (acc->rects && acc->count < acc->capacity)
+        acc->rects[acc->count] = rect;
+    else if (acc->rects)
+        acc->overflowed = true;
+    acc->count++;
+}
+
+/* Drop rectangles fully contained in another, then sort into a stable
+ * top-left-first order. Overlap is *safe* (a scissored repaint is idempotent and
+ * over-covering never leaves stale pixels); this pass exists so repeated or
+ * nested reports of the same region — the common shape of an animation tick —
+ * do not multiply the list a host has to walk.
+ *
+ * Reads `in` and writes `out`, which must not alias: compacting in place would
+ * let a later candidate's containment test run against an already-overwritten
+ * slot, and a candidate wrongly judged "covered" is a damage rectangle silently
+ * dropped from the frame. */
+static uint32_t damage_normalize(const flux_rect *in, uint32_t count, flux_rect *out) {
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        const flux_rect candidate = in[i];
+        bool covered = false;
+        for (uint32_t j = 0; j < count && !covered; j++) {
+            if (i == j)
+                continue;
+            const flux_rect other = in[j];
+            if (other.w <= 0.0f || other.h <= 0.0f)
+                continue;
+            const bool contains = candidate.x >= other.x && candidate.y >= other.y &&
+                                  candidate.x + candidate.w <= other.x + other.w &&
+                                  candidate.y + candidate.h <= other.y + other.h;
+            /* Strict containment, plus equality broken by index so exactly one
+             * of two identical rects survives. */
+            if (contains && (other.w > candidate.w || other.h > candidate.h || j < i))
+                covered = true;
+        }
+        if (!covered)
+            out[kept++] = candidate;
+    }
+    for (uint32_t i = 1; i < kept; i++) {
+        const flux_rect key = out[i];
+        uint32_t j = i;
+        while (j > 0 && (out[j - 1].y > key.y || (out[j - 1].y == key.y && out[j - 1].x > key.x))) {
+            out[j] = out[j - 1];
+            j--;
+        }
+        out[j] = key;
+    }
+    return kept;
+}
+
+/* The single rectangle covering `count` rectangles of `in`, or a zero rect when
+ * the set is empty. */
+static flux_rect damage_bbox(const flux_rect *in, uint32_t count) {
+    flux_rect bbox = {0, 0, 0, 0};
+    for (uint32_t i = 0; i < count; i++)
+        bbox = rect_union_bounds(bbox, in[i]);
+    return bbox;
+}
+
+static void damage_walk(const lens *ui, const lens_node *n, bool owned, damage_accum *acc) {
+    if (!n)
+        return;
+    /* Past an ABS node the whole subtree is owned by that body: its pixels are
+     * the body's pixels, so every changed descendant belongs in the damage. */
+    if (n->place == LENS_PLACE_ABS)
+        owned = true;
+
+    /* An owned body repaints as a unit, so every changed descendant belongs in
+     * the damage; it is reported through its own paint bounds below.
+     *
+     * A FLOW node contributes only its own paint delta. `visual_revision` is
+     * never consulted here: it rolls up from descendants, and the root's own
+     * rect is the entire display, so drift is an owned-body question only. */
+    const bool changed = owned ? (n->subtree_changed || n->visual_revision != n->presented_revision)
+                               : n->self_changed;
+    if (changed) {
+        damage_push(acc, ui, node_paint_bounds(n));
+        /* `render_rect` is what the activated snapshot last drew for this node.
+         * It differs from `final_rect` exactly when the node moved or resized,
+         * and the pixels it vacated still hold the old paint. */
+        if (n->has_render_rect && n->render_rect.w > 0.0f && n->render_rect.h > 0.0f &&
+            (n->render_rect.x != n->final_rect.x || n->render_rect.y != n->final_rect.y ||
+             n->render_rect.w != n->final_rect.w || n->render_rect.h != n->final_rect.h))
+            damage_push(acc, ui, node_paint_bounds_at(n, n->render_rect));
+    }
+    for (const lens_node *c = n->first_child; c; c = c->next_sibling)
+        damage_walk(ui, c, owned, acc);
+}
+
+uint32_t lens_damage_rects(const lens *ui, const lens_damage_opts *opts) {
+    if (!ui || !lens_frame_needs_repaint(ui))
+        return 0;
+
+    flux_rect *out = opts ? opts->rects : nullptr;
+    uint32_t capacity = out ? opts->capacity : 0;
+    if (capacity > LENS_DAMAGE_RECTS_CAPACITY)
+        capacity = LENS_DAMAGE_RECTS_CAPACITY;
+
+    /* Two fixed buffers: raw accumulation and the normalized result. Both are
+     * bounded by the public contract, so the walk never allocates. */
+    flux_rect raw[LENS_DAMAGE_RECTS_CAPACITY];
+    flux_rect normalized[LENS_DAMAGE_RECTS_CAPACITY];
+    damage_accum acc = {.rects = raw, .capacity = LENS_DAMAGE_RECTS_CAPACITY};
+
+    damage_walk(ui, ui->root, false, &acc);
 
     if (ui->caret_rect.w > 0.0f && ui->caret_rect.h > 0.0f)
-        d = rect_union_bounds(d, ui->caret_rect);
-
+        damage_push(&acc, ui, ui->caret_rect);
     if (ui->tooltip.active || ui->prev_tooltip_active)
-        d = rect_union_bounds(d, ui->tooltip.anchor);
-
+        damage_push(&acc, ui, ui->tooltip.anchor);
     for (uint32_t i = 0; i < ui->ghost_count; i++) {
         if (ui->ghosts[i] && ui->ghosts[i]->root)
-            d = rect_union_bounds(d, ui->ghosts[i]->root->final_rect);
+            damage_push(&acc, ui, ui->ghosts[i]->root->final_rect);
     }
 
-    if (d.w <= 0.0f && ui->root &&
-        (ui->root->subtree_changed || ui->root->visual_revision != ui->root->presented_revision))
-        d = ui->root->final_rect;
+    /* Only the entries actually written may be read: `acc.count` includes any
+     * that overflowed. */
+    uint32_t written = acc.count < acc.capacity ? acc.count : acc.capacity;
+    uint32_t count = damage_normalize(raw, written, normalized);
 
-    /* Constrain damage to the visible layout viewport */
-    if (ui->input.display_size.x > 0.0f && ui->input.display_size.y > 0.0f) {
-        flux_rect viewport = {0, 0, ui->input.display_size.x, ui->input.display_size.y};
-        d = rect_intersect_bounds(d, viewport);
+    /* A frame that needs a repaint but names no region falls back to the whole
+     * viewport, as one rectangle, so the failure stays visible in the list instead
+     * of silently becoming "no damage". */
+    if (count == 0) {
+        const flux_rect viewport = {0, 0, ui->input.display_size.x, ui->input.display_size.y};
+        const flux_rect fallback =
+            viewport.w > 0.0f && viewport.h > 0.0f
+                ? viewport
+                : (ui->root ? ui->root->final_rect : (flux_rect){0, 0, 0, 0});
+        if (fallback.w <= 0.0f || fallback.h <= 0.0f)
+            return 0;
+        normalized[0] = rect_intersect_bounds(
+            fallback, (flux_rect){0, 0, ui->input.display_size.x, ui->input.display_size.y});
+        count = normalized[0].w > 0.0f && normalized[0].h > 0.0f ? 1 : 0;
+        if (count == 0)
+            return 0;
     }
 
-    return d;
+    /* Caller's slice limits how much of the set can be delivered. */
+    if (count > capacity) {
+        if (capacity == 0)
+            return count;
+        out[0] = damage_bbox(normalized, count);
+        return out[0].w > 0.0f && out[0].h > 0.0f ? 1 : 0;
+    }
+    if (count)
+        memcpy(out, normalized, count * sizeof *out);
+
+    /* An overflowed accumulation is reported as a one-rect answer *in addition*
+     * to the regions that fit, because the omitted ones are unknown: any list
+     * that excluded them would under-cover, and under-covering leaves stale
+     * pixels on screen. The caller sees one full-viewport rect it can repaint.
+     * Callers that need the true regions raise the bound, which is a compile-time
+     * contract (`LENS_DAMAGE_RECTS_CAPACITY`). */
+    if (acc.overflowed) {
+        if (capacity == 0)
+            return count;
+        const flux_rect viewport = {0, 0, ui->input.display_size.x, ui->input.display_size.y};
+        const flux_rect cover =
+            viewport.w > 0.0f && viewport.h > 0.0f ? viewport : damage_bbox(normalized, count);
+        out[0] = cover;
+        return cover.w > 0.0f && cover.h > 0.0f ? 1 : 0;
+    }
+    return count;
 }
 
 void lens_set_reduced_motion(lens *ui, bool reduced) {

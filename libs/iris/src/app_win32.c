@@ -1894,18 +1894,20 @@ static DWORD WINAPI win32_presenter_thread_main(LPVOID arg) {
                 flux_color theme_clear = pkt->clear_color;
                 flux_color *pass_clear = pkt->has_clear ? &theme_clear : nullptr;
 
+                /* This backend's pass takes one render area, so the packet's
+                 * damage set is collapsed here — the last possible moment, after
+                 * every consumer that could take the set has had its chance. */
+                flux_rect packet_damage = {0, 0, 0, 0};
                 bool partial =
-                    (pkt->damage_rect.w > 0.0f && pkt->damage_rect.h > 0.0f && !pkt->force_paint);
+                    !pkt->force_paint && iris_frame_packet_damage_rect(pkt, pkt->scale, pkt->width,
+                                                                       pkt->height, &packet_damage);
                 int32_t dmg_x = 0, dmg_y = 0;
                 uint32_t dmg_w = 0, dmg_h = 0;
                 if (partial) {
-                    float s = pkt->scale;
-                    dmg_x = (int32_t)floorf(pkt->damage_rect.x * s);
-                    dmg_y = (int32_t)floorf(pkt->damage_rect.y * s);
-                    dmg_w = (uint32_t)ceilf((pkt->damage_rect.x + pkt->damage_rect.w) * s) -
-                            (uint32_t)dmg_x;
-                    dmg_h = (uint32_t)ceilf((pkt->damage_rect.y + pkt->damage_rect.h) * s) -
-                            (uint32_t)dmg_y;
+                    dmg_x = (int32_t)packet_damage.x;
+                    dmg_y = (int32_t)packet_damage.y;
+                    dmg_w = (uint32_t)packet_damage.w;
+                    dmg_h = (uint32_t)packet_damage.h;
                 }
 
                 flux_canvas_pass_desc pass_desc = {
@@ -2412,7 +2414,12 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                     if (pkt) {
                         pkt->snapshot = snapshot;
                         pkt->host_list = host_list;
-                        pkt->damage_rect = lens_damage_rect(ui);
+                        /* Resolve the frame's damage set on the UI thread: the
+                         * presentation thread must not re-query lens, and the set
+                         * has to travel with the snapshot it describes. */
+                        pkt->damage_count = lens_damage_rects(
+                            ui, &(lens_damage_opts){.rects = pkt->damage,
+                                                    .capacity = LENS_DAMAGE_RECTS_CAPACITY});
                         pkt->force_paint = surface_forced;
                         pkt->has_custom_paint = false;
                         lens_theme th = lens_get_theme(ui);
@@ -2484,28 +2491,14 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             uint32_t dmg_w = 0, dmg_h = 0;
 
             if (!surface_forced && !has_custom_paint) {
-                dmg = lens_damage_rect(ui);
-                if (dmg.w > 0.0f && dmg.h > 0.0f && info.width > 0 && info.height > 0) {
-                    float s = pl.scale;
-                    int32_t x0 = (int32_t)floorf(dmg.x * s);
-                    int32_t y0 = (int32_t)floorf(dmg.y * s);
-                    int32_t x1 = (int32_t)ceilf((dmg.x + dmg.w) * s);
-                    int32_t y1 = (int32_t)ceilf((dmg.y + dmg.h) * s);
-                    if (x0 < 0)
-                        x0 = 0;
-                    if (y0 < 0)
-                        y0 = 0;
-                    if (x1 > (int32_t)info.width)
-                        x1 = (int32_t)info.width;
-                    if (y1 > (int32_t)info.height)
-                        y1 = (int32_t)info.height;
-                    if (x1 > x0 && y1 > y0) {
-                        dmg_x = x0;
-                        dmg_y = y0;
-                        dmg_w = (uint32_t)(x1 - x0);
-                        dmg_h = (uint32_t)(y1 - y0);
-                        partial_paint = true;
-                    }
+                /* One scissor for this surface: collapse the damage set here. */
+                if (iris_frame_lens_damage_rect(ui, pl.scale, (int32_t)info.width,
+                                                (int32_t)info.height, &dmg)) {
+                    dmg_x = (int32_t)dmg.x;
+                    dmg_y = (int32_t)dmg.y;
+                    dmg_w = (uint32_t)dmg.w;
+                    dmg_h = (uint32_t)dmg.h;
+                    partial_paint = true;
                 }
             }
 

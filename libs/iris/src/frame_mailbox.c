@@ -5,7 +5,68 @@
 
 #include "frame_mailbox.h"
 #include <flux/profile.h>
+#include <math.h>
 #include <string.h>
+
+/* The one place a damage set becomes a single device-pixel rectangle, for the
+ * backends whose presentation API accepts exactly one.
+ *
+ * `rects` are UI-logical; the result is device pixels, clipped to the surface
+ * because a backend rejects an out-of-bounds area outright and losing the pass
+ * loses the frame's content, not just its scissor. Returns false when the set
+ * covers nothing, which the caller must treat as "paint everything". */
+static bool iris_damage_rect_from(const flux_rect *rects, uint32_t count, float scale,
+                                  int32_t width, int32_t height, flux_rect *out) {
+    if (out)
+        *out = (flux_rect){0, 0, 0, 0};
+    if (!out || !rects || count == 0 || width <= 0 || height <= 0)
+        return false;
+    const float s = scale > 0.0f ? scale : 1.0f;
+    flux_rect covered = {0, 0, 0, 0};
+    for (uint32_t i = 0; i < count; i++) {
+        const flux_rect d = rects[i];
+        const float x0 = floorf(d.x * s);
+        const float y0 = floorf(d.y * s);
+        const float x1 = ceilf((d.x + d.w) * s);
+        const float y1 = ceilf((d.y + d.h) * s);
+        covered = flux_rect_union(covered, (flux_rect){x0, y0, x1 - x0, y1 - y0});
+    }
+    if (covered.w <= 0.0f || covered.h <= 0.0f)
+        return false;
+    const float x0 = covered.x < 0.0f ? 0.0f : covered.x;
+    const float y0 = covered.y < 0.0f ? 0.0f : covered.y;
+    float x1 = covered.x + covered.w;
+    float y1 = covered.y + covered.h;
+    if (x1 > (float)width)
+        x1 = (float)width;
+    if (y1 > (float)height)
+        y1 = (float)height;
+    if (x1 <= x0 || y1 <= y0)
+        return false;
+    *out = (flux_rect){x0, y0, x1 - x0, y1 - y0};
+    return true;
+}
+
+bool iris_frame_packet_damage_rect(const iris_frame_packet *pkt, float scale, int32_t width,
+                                   int32_t height, flux_rect *out) {
+    if (!pkt || pkt->damage_count == 0) {
+        if (out)
+            *out = (flux_rect){0, 0, 0, 0};
+        return false;
+    }
+    const uint32_t count = pkt->damage_count < LENS_DAMAGE_RECTS_CAPACITY
+                               ? pkt->damage_count
+                               : LENS_DAMAGE_RECTS_CAPACITY;
+    return iris_damage_rect_from(pkt->damage, count, scale, width, height, out);
+}
+
+bool iris_frame_lens_damage_rect(const lens *ui, float scale, int32_t width, int32_t height,
+                                 flux_rect *out) {
+    flux_rect rects[LENS_DAMAGE_RECTS_CAPACITY];
+    const uint32_t count = lens_damage_rects(
+        ui, &(lens_damage_opts){.rects = rects, .capacity = LENS_DAMAGE_RECTS_CAPACITY});
+    return iris_damage_rect_from(rects, count, scale, width, height, out);
+}
 
 void iris_mailbox_init(iris_frame_mailbox *mb) {
     if (!mb)

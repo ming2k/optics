@@ -22,6 +22,7 @@ void lensi_skin_label(lens *ui, lens_node *n, const lens_widget_record *rec) {
                                                 .outline_color = rs->outline_color,
                                                 .outline_width = rs->outline_width,
                                                 .text = line->text,
+                                                .text_advance = line->advance,
                                                 .text_size = size,
                                                 .text_weight = rec->content.text_weight});
         }
@@ -48,6 +49,7 @@ void lensi_skin_label(lens *ui, lens_node *n, const lens_widget_record *rec) {
                                         .outline_color = rs->outline_color,
                                         .outline_width = rs->outline_width,
                                         .text = rec->content.label,
+                                        .text_advance = rec->content.text.width,
                                         .text_size = size,
                                         .text_weight = rec->content.text_weight});
 }

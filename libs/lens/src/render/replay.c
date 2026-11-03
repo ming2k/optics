@@ -43,16 +43,9 @@ struct lens_scene_snapshot {
 
 static flux_result capture_metadata(lens *ui, lens_scene_snapshot *snapshot);
 
-static flux_rect offset_rel(flux_rect box, flux_rect rel) {
-    float w = rel.w > 0 ? rel.w : box.w - 2.0f * rel.x;
-    float h = rel.h > 0 ? rel.h : box.h - 2.0f * rel.y;
-    if (w < 0)
-        w = 0;
-    if (h < 0)
-        h = 0;
-    float x = (rel.x < 0.0f && rel.w > 0.0f) ? box.x + box.w + rel.x - w : box.x + rel.x;
-    return (flux_rect){x, box.y + rel.y, w, h};
-}
+/* Resolve one draw command's `rel` geometry against the node box it was emitted
+ * in. The definition lives in `internal.h` so damage tracking reports exactly
+ * the pixels replay writes. */
 
 /* Snap a logical rect to the device-pixel grid so sharp edges (1 px
  * borders, glyph bitmaps) map cleanly to physical pixels.  Keeps the
@@ -84,33 +77,44 @@ void lensi_node_release_cache(lens *ui, lens_node *n) {
 }
 
 bool lensi_mark_subtree_changed(lens_node *n) {
-    bool changed = false;
+    /* `self_changed` is the node's OWN paint delta: lifecycle, geometry,
+     * opacity, eased hover/active, draw-list hash, and its own linked-child
+     * sequence. `subtree_changed` adds every FLOW descendant's delta, because a
+     * container's display list owns its flow children's commands.
+     *
+     * The distinction is what makes regional damage possible: lens_damage_rects
+     * consumes `subtree_changed` at ABS/band roots (a placed body owns its whole
+     * subtree's pixels) but `self_changed` for FLOW interior nodes, so editing one
+     * label inside a stretch column reports that label's rect rather than the
+     * column's — which is the full display. */
+    bool self = false;
     if (n->phase != LENS_NODE_STABLE)
-        changed = true;
+        self = true;
     if (n->has_render_rect) {
         if (n->final_rect.x != n->render_rect.x || n->final_rect.y != n->render_rect.y ||
             n->final_rect.w != n->render_rect.w || n->final_rect.h != n->render_rect.h)
-            changed = true;
+            self = true;
     } else {
         /* First rendered frame with geometry: must paint. */
         if (n->final_rect.w > 0.0f || n->final_rect.h > 0.0f)
-            changed = true;
+            self = true;
     }
     if (n->opacity != n->last_opacity)
-        changed = true;
+        self = true;
     n->last_opacity = n->opacity;
     if (n->hover_t != n->last_hover_t || n->active_t != n->last_active_t)
-        changed = true;
+        self = true;
     if (n->cmd_hash != n->last_cmd_hash)
-        changed = true;
+        self = true;
     /* Child-list churn (removal/reorder/replacement) is invisible to the
      * per-node checks above: untouched children simply vanish from the
      * sibling walk. Compare the linked-child sequence hash instead. */
     if (n->child_hash != n->last_child_hash)
-        changed = true;
+        self = true;
     n->last_hover_t = n->hover_t;
     n->last_active_t = n->active_t;
 
+    bool changed = self;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         bool child_changed = lensi_mark_subtree_changed(c);
         if (c->place != LENS_PLACE_ABS && child_changed)
@@ -118,6 +122,7 @@ bool lensi_mark_subtree_changed(lens_node *n) {
     }
     if (changed)
         n->visual_revision++;
+    n->self_changed = self;
     n->subtree_changed = changed;
     return changed;
 }
@@ -143,7 +148,7 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
     for (uint32_t i = 0; i < cmd_count; i++) {
         size_t arena_mark = ui->arena.used;
         const lens_draw_cmd *c = &cmds[i];
-        flux_rect r = offset_rel(box, c->rel);
+        flux_rect r = lensi_offset_rel(box, c->rel);
         r = snap_rect(r, scale);
 
         bool is_clip_cmd = (c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP);
@@ -405,35 +410,29 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
             break;
         }
         case LENS_DRAW_TEXT: {
+            /* Placement of the glyph run is resolved once, in
+             * `lensi_text_boxes`, because damage tracking must report exactly
+             * these pixels: the centered/edge-aligned sentinels in `rel` mean the
+             * run is not at the command's corner. */
             if (ui->text && c->text && c->text[0]) {
                 const char *end = strstr(c->text, "##");
                 size_t vlen = end ? (size_t)(end - c->text) : strlen(c->text);
                 if (vlen) {
-                    float x = r.x;
-                    float y = r.y;
                     const glyph_style style = {
                         .size_px = c->text_size,
                         .weight = c->text_weight,
                         .color = c->color,
                         .family = (glyph_family)c->text_family,
                     };
-                    if (c->rel.w < 0.0f || c->rel.h < 0.0f) {
-                        glyph_metrics tm = glyph_measure(ui->text, c->text, vlen, &style);
-                        if (c->rel.w < 0.0f) {
-                            x = r.x + (r.w - tm.width) * 0.5f;
-                            if (x < r.x)
-                                x = r.x;
-                        }
-                        if (c->rel.h < 0.0f) {
-                            y = r.y + (r.h - tm.height) * 0.5f;
-                            if (y < r.y)
-                                y = r.y;
-                        }
-                    }
+                    /* Positioned from the advance the widget recorded: replay
+                     * and the damage walk must agree on these pixels without
+                     * either of them re-shaping. */
+                    const flux_rect run =
+                        lensi_text_bounds(r, c->text_advance, c->rel.w < 0.0f, c->rel.h < 0.0f);
                     flux_result result =
                         glyph_record(ui->text, enc,
-                                     &(glyph_record_desc){.x = x,
-                                                          .y = y,
+                                     &(glyph_record_desc){.x = run.x,
+                                                          .y = run.y,
                                                           .utf8 = c->text,
                                                           .len = vlen,
                                                           .style = style,

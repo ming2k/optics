@@ -28,7 +28,9 @@ static void test_sequential_handshake(void) {
     /* UI thread acquires and publishes packet 1 */
     iris_frame_packet *p1 = iris_mailbox_acquire(&mb);
     CHECK(p1 != nullptr);
-    p1->damage_rect = (flux_rect){10, 20, 100, 200};
+    p1->damage[0] = (flux_rect){10, 20, 100, 200};
+    p1->damage[1] = (flux_rect){300, 400, 50, 60};
+    p1->damage_count = 2;
     p1->scale = 2.0f;
     p1->force_paint = true;
     iris_mailbox_publish(&mb, p1);
@@ -39,7 +41,24 @@ static void test_sequential_handshake(void) {
     CHECK(c1->sequence == 1);
     CHECK(c1->scale == 2.0f);
     CHECK(c1->force_paint == true);
-    CHECK(c1->damage_rect.x == 10 && c1->damage_rect.y == 20);
+    /* The damage set travels with the snapshot: the presentation thread must
+     * never re-query lens. */
+    CHECK(c1->damage_count == 2);
+    CHECK(c1->damage[0].x == 10 && c1->damage[0].y == 20);
+    CHECK(c1->damage[1].x == 300 && c1->damage[1].y == 400);
+
+    /* A single-rect backend collapses the set at its own boundary, in device
+     * pixels, covering both disjoint regions. */
+    flux_rect collapsed = {0, 0, 0, 0};
+    CHECK(iris_frame_packet_damage_rect(c1, c1->scale, 1000, 1000, &collapsed));
+    CHECK(collapsed.x == 20.0f && collapsed.y == 40.0f);
+    CHECK(collapsed.x + collapsed.w == 700.0f);
+    CHECK(collapsed.y + collapsed.h == 920.0f);
+
+    /* No damage means "paint everything", never "nothing changed". */
+    flux_rect none = {0, 0, 0, 0};
+    c1->damage_count = 0;
+    CHECK(!iris_frame_packet_damage_rect(c1, c1->scale, 1000, 1000, &none));
 
     /* Second claim before next publish must return NULL */
     CHECK(iris_mailbox_claim(&mb) == nullptr);
@@ -103,7 +122,8 @@ static void *stress_producer_thread(void *arg) {
     for (uint64_t i = 0; i < 5000; i++) {
         iris_frame_packet *p = iris_mailbox_acquire(&ctx->mb);
         p->scale = (float)(i + 1);
-        p->damage_rect = (flux_rect){0, 0, (float)(i % 100), (float)(i % 100)};
+        p->damage[0] = (flux_rect){0, 0, (float)(i % 100), (float)(i % 100)};
+        p->damage_count = 1;
         iris_mailbox_publish(&ctx->mb, p);
         atomic_fetch_add_explicit(&ctx->total_published, 1, memory_order_relaxed);
         if ((i % 64) == 0)
@@ -186,7 +206,8 @@ static void test_snapshot_handoff_and_activation_lifecycle(void) {
     pkt->clear_color = flux_color_rgba(20, 30, 40, 255);
     pkt->has_clear = true;
     pkt->scale = 1.5f;
-    pkt->damage_rect = (flux_rect){0, 0, 100, 50};
+    pkt->damage[0] = (flux_rect){0, 0, 100, 50};
+    pkt->damage_count = 1;
     iris_mailbox_publish(&mb, pkt);
 
     /* UI thread activates snapshot and releases its local creation handles */

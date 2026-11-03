@@ -75,6 +75,30 @@ typedef struct flux_rect {
     float x, y, w, h;
 } flux_rect;
 
+/* The smallest rectangle covering both `a` and `b`. An empty operand
+ * contributes nothing; two empty rectangles union to an empty rectangle.
+ *
+ * This is the one *lossy* projection in the damage vocabulary, and it exists for
+ * exactly one case: a backend whose presentation API accepts a single damage
+ * rectangle (Win32 `DwmFlush`-style regions, most Vulkan `renderArea`s). A
+ * producer that can describe a set must never union before the consumer has had
+ * the chance to use the set — the union of a top strip and a bottom dock is the
+ * whole output. Use `lens_damage_rects` for the set, and this only at the point
+ * where a single-rect API forces the collapse. */
+static inline flux_rect flux_rect_union(flux_rect a, flux_rect b) {
+    if (a.w <= 0.0f || a.h <= 0.0f)
+        return b;
+    if (b.w <= 0.0f || b.h <= 0.0f)
+        return a;
+    float x0 = a.x < b.x ? a.x : b.x;
+    float y0 = a.y < b.y ? a.y : b.y;
+    float ax1 = a.x + a.w, bx1 = b.x + b.w;
+    float ay1 = a.y + a.h, by1 = b.y + b.h;
+    float x1 = ax1 > bx1 ? ax1 : bx1;
+    float y1 = ay1 > by1 ? ay1 : by1;
+    return (flux_rect){x0, y0, x1 - x0, y1 - y0};
+}
+
 /* ================================================================== */
 /*  2D affine matrix (3 rows × 2 cols)                                */
 /* ================================================================== */

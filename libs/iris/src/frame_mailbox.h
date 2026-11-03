@@ -26,7 +26,12 @@ typedef struct iris_frame_packet {
     lens_scene_snapshot *snapshot; /* retained reference */
     flux_display_list *host_list;  /* optional retained host recorded content (ADR-0127) */
     uint64_t sequence;
-    flux_rect damage_rect;
+    /* Damage as a set, not a box: the UI thread resolves the frame's regions and
+     * the presentation thread consumes them without a second query (ADR-0143).
+     * `damage_count == 0` means "everything" — a packet that could not describe
+     * its damage must never be mistaken for "nothing changed". */
+    flux_rect damage[LENS_DAMAGE_RECTS_CAPACITY];
+    uint32_t damage_count;
     bool force_paint;
     bool has_custom_paint;
     bool has_clear;
@@ -35,6 +40,22 @@ typedef struct iris_frame_packet {
     int32_t width;
     int32_t height;
 } iris_frame_packet;
+
+/* The single rectangle a backend accepts, as the union of the packet's damage
+ * set, already scaled to device pixels. `out` receives `{0,0,0,0}` when the
+ * packet carries no damage and `false`; callers then paint the full surface.
+ *
+ * This is the one sanctioned place where a set is collapsed, and it exists
+ * because Win32 and some Vulkan paths take one `renderArea`. Collapsing earlier
+ * would destroy the localization for every backend that can consume the set. */
+[[nodiscard]] bool iris_frame_packet_damage_rect(const iris_frame_packet *pkt, float scale,
+                                                 int32_t width, int32_t height, flux_rect *out);
+
+/* The same collapse for a host that presents lens directly, without the mailbox
+ * (the single-threaded path). Queries the frame's damage set and reduces it; use
+ * this only at the API boundary that accepts one rectangle. */
+[[nodiscard]] bool iris_frame_lens_damage_rect(const lens *ui, float scale, int32_t width,
+                                               int32_t height, flux_rect *out);
 
 typedef struct iris_frame_mailbox {
     _Atomic(iris_frame_packet *) ready;   /* published by UI, claimed by compositor */

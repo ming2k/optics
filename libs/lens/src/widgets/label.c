@@ -99,7 +99,7 @@ static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t st
 }
 
 static void push_line_slice(lens *ui, lens_text_line **lines, int *count, int *cap,
-                            const char *text, size_t len, float x, float y) {
+                            const char *text, size_t len, float x, float y, float advance) {
     if (len == 0)
         return;
     if (*count == *cap) {
@@ -121,7 +121,7 @@ static void push_line_slice(lens *ui, lens_text_line **lines, int *count, int *c
     }
     memcpy(line, text, len);
     line[len] = '\0';
-    (*lines)[*count] = (lens_text_line){.text = line, .x = x, .y = y};
+    (*lines)[*count] = (lens_text_line){.text = line, .x = x, .y = y, .advance = advance};
     (*count)++;
 }
 
@@ -188,8 +188,12 @@ lens_response lens_label(lens *ui, const lens_label_opts *opts) {
                 else
                     line_x = padding + fmaxf(content_width - lm.width, 0.0f);
             }
+            /* The slice is measured once, here, so the emitted slice carries its
+             * own advance rather than making replay measure it again. */
+            const glyph_metrics slice_metrics = measure_slice(ui, text + start, end - start, size);
             push_line_slice(ui, &lines, &line_count, &line_cap, text + start, end - start, line_x,
-                            padding + (float)logical_lines * (line_height + line_gap));
+                            padding + (float)logical_lines * (line_height + line_gap),
+                            slice_metrics.width);
             logical_lines++;
             if (next <= start)
                 break;

@@ -637,6 +637,10 @@ static_assert((uint32_t)LENS_WIDGET_KIND_COUNT <= (uint32_t)LENS_WIDGET_KIND_USE
 typedef struct lens_text_line {
     const char *text;
     float x, y;
+    /* Shaped advance of this slice. Recorded on the emitted text command so the
+     * rasteriser and damage tracking position the run identically without either
+     * re-shaping. */
+    float advance;
 } lens_text_line;
 
 typedef enum lens_button_variant {
@@ -938,11 +942,52 @@ LENS_API bool lens_anim_pending(const lens *ui);
  * the host must still paint the first frame after those itself. */
 LENS_API bool lens_frame_needs_repaint(const lens *ui);
 
-/* Bounding box of damaged visual regions this frame in UI logical units
- * (ADR-0123). Evaluates dirty nodes across base and placed subtrees, tooltips,
- * and text carets. Returns {0, 0, 0, 0} when lens_frame_needs_repaint() is
- * false. Valid between lens_end and the next lens_begin. */
-LENS_API flux_rect lens_damage_rect(const lens *ui);
+/* Describe the damaged area of the frame just built as a bounded list of
+ * rectangles in UI logical units, and return the number written to
+ * `opts->rects`.
+ *
+ * Every rectangle the frame can have changed is covered, and no rectangle is
+ * contained in another: damage is a set, so a host may scissor each one
+ * independently, hand the whole list to a per-plane damage hint, or — when its
+ * presentation API only accepts one rectangle — union them with
+ * `flux_rect_union` at that boundary. This is the *only* damage query. There is
+ * deliberately no single-rect variant: a producer that answers with a box before
+ * the consumer has seen the set destroys the localization irrecoverably, and the
+ * union of two edge bands is the whole output (ADR-0143).
+ *
+ * Localization rules, in the order the walk applies them:
+ *   - a placed ABS subtree (a band root) contributes its whole subtree's
+ *     damage: it owns every pixel it draws;
+ *   - a FLOW interior node contributes only its own paint delta, not its
+ *     descendants' — an edited cell reports its cell, not the column that
+ *     contains it, whose rect is the display;
+ *   - a text run contributes the measured glyph extent, not its command
+ *     rectangle, because negative `rel` extents centre the run inside the box;
+ *   - the caret, the tooltip anchor, and device-space fade ghosts are added
+ *     independently.
+ *
+ * Degradation is always toward covering more, never less. A frame that needs a
+ * repaint but names no region reports the viewport. A frame whose damage exceeds
+ * `LENS_DAMAGE_RECTS_CAPACITY` — a compile-time bound, so the walk allocates
+ * nothing — reports the viewport, because the regions that did not fit have no
+ * coordinates to contribute and any smaller answer would strand their pixels. */
+enum : uint32_t {
+    LENS_DAMAGE_RECTS_CAPACITY = 64,
+};
+
+typedef struct lens_damage_opts {
+    /* Caller-owned buffer. nullptr or `capacity == 0` asks only for the
+     * required count, which is how a host sizes its buffer without a
+     * second contract. */
+    flux_rect *rects;
+    uint32_t capacity;
+} lens_damage_opts;
+
+/* Returns the number of rectangles written. When damage exceeds
+ * `opts->capacity` the answer is one full-viewport rectangle and the count is 1.
+ * When the frame needs no repaint the count is 0. Valid between lens_end and the
+ * next lens_begin. */
+LENS_API uint32_t lens_damage_rects(const lens *ui, const lens_damage_opts *opts);
 
 /* Accessibility reduced-motion switch. When enabled, every eased value in
  * lens resolves to its target within one frame — no fades, slides, or other
