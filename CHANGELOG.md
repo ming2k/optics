@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.74] - 2026-11-04
+
 ### Added
 
 - **flux**: Effects are deferred (ADR-0147). `flux_blur_filter_apply` and
