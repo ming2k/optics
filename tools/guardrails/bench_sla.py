@@ -136,6 +136,13 @@ def run_bench_sla(repo_root: Path, build_dir: str = "build", **kwargs) -> tuple[
     if not b_path.is_dir():
         return False, "", f"Build directory '{build_dir}' not found. Run 'meson setup {build_dir} -Dtracy=true' first."
 
+    ninja_file = b_path / "build.ninja"
+    if ninja_file.is_file() and "DTRACY_ENABLE" not in ninja_file.read_text(encoding="utf-8", errors="ignore"):
+        return False, "", (
+            f"Build directory '{build_dir}' has Tracy profiling disabled (-Dtracy=false).\n"
+            f"Run 'meson configure {build_dir} -Dtracy=true && ninja -C {build_dir}' to enable SLA benchmarking."
+        )
+
     capture_bin, csvexport_bin, err = ensure_tracy_tools(repo_root)
     if err:
         return False, "", f"Tracy headless toolchain setup failed: {err}"

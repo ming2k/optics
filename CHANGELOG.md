@@ -13,6 +13,65 @@ either.
 
 ## [Unreleased]
 
+### Added
+
+- **flux**: Effects are deferred (ADR-0147). `flux_blur_filter_apply` and
+  `flux_shadow_filter_apply` now *register* a pass instead of recording its
+  dispatches: the output handle is returned immediately, the body is built the
+  first time something requires the pixels, and a pass nothing samples is pruned
+  at submit without touching the GPU. Callers no longer need to guard an effect
+  call by hand — an unconditional apply costs nothing when unused.
+- **flux**: `flux_frame_materialize_image(frame, image)` is the documented seam
+  for a consumer that composes a deferred output into its own compute. It
+  requires the producer and flushes it at the caller's pass boundary, and is a
+  no-op for images that are not deferred.
+- **flux**: `flux_frame_plan_stats` reports registered / executed / pruned pass
+  counts per frame, so pruning is observable rather than assumed.
+- **prism**: Liquid Glass, Frosted, Acrylic, Mica, and the layered backdrop
+  materialize their blurred input before recording, so a deferred blur always
+  precedes the material that samples it.
+- **flux**: A distance field owns its analytic derivative (ADR-0148).
+  `flux_sdf_squircle_gradient` and `flux_sdf_squircle_sample` return the field
+  together with a unit normal from one shared evaluation, so a consumer no
+  longer differences four field taps to invent one. The squircle's L4 corner is
+  now multiplication and `sqrt` instead of six `pow()` calls, which takes the
+  per-rim-pixel cost from 6 field evaluations and 36 `pow()` to 2 and 0.
+  `test_prism_golden` moves by at most 2/255.
+- **flux**: `tests/flux/integration/test_sdf_parity.c` dispatches the real
+  `flux_sdf.glsl` on the GPU and compares distance and normal against
+  `<flux/sdf.h>` for both entry points over 6 shapes × 4096 samples. This is the
+  differential pin `[INV-SDF-02]` claimed but did not have: the previous check
+  compared the host against a hand-transcribed copy of the expression, which
+  could not detect shader drift.
+- **docs**: `<flux/sdf.h>` is registered in `tools/guardrails/symbols.py`, so
+  `./tools/optics fix` now lists the seven exported `flux_sdf_*` symbols in
+  `docs/reference/symbols.md`. They were already exported and undocumented.
+
+### Changed
+
+- **flux**: Reusable effects and all five Prism materials defer their dispatches
+  (ADR-0147). `flux_blur_filter_apply`, `flux_shadow_filter_apply`,
+  `prism_liquid_glass_filter_apply`, `prism_frosted_filter_apply`,
+  `prism_acrylic_filter_apply`, `prism_mica_filter_apply` and
+  `prism_backdrop_layer_filter_apply` now *register* a pass: the output handle is
+  returned immediately, the dispatch body is built the first time something
+  requires the pixels, and a pass nothing samples is pruned at submit without
+  touching the GPU.
+- **flux**: New public `flux_frame_register_pass` / `flux_frame_require_pass` in
+  `<flux/vulkan.h>` is the seam for a library that owns compute work
+  (`VkCommandBuffer` in the callback, so it cannot live in `core.h`). Flux copies
+  the caller's parameter block into its own arena, so `<flux/core.h>` callers
+  never see the scheduler and `flux_frame` stays opaque.
+- **flux**: The liquid-glass rim normal is the derivative of the distance that
+  was drawn, not a central difference of it (ADR-0148). The shipped render moves
+  by at most 2/255 against the committed golden — dither-level, not
+  bit-identical, because the normal is now a different expression.
+- **flux**: Sampling a still-deferred effect output from inside a canvas pass is
+  a contract violation and is rejected with `FLUX_ERROR_INVALID_STATE` naming the
+  required sequence, because Vulkan forbids inserting compute inside a render
+  pass. Hosts that composed a blurred image with `flux_canvas_draw_image` must
+  call `flux_frame_materialize_image` before `flux_canvas_begin`.
+
 ## [0.0.73] - 2026-11-04
 
 ### Fixed

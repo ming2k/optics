@@ -201,8 +201,15 @@ def cmd_check(args: argparse.Namespace) -> int:
             valid = ", ".join(g["id"] for g in ALL_GUARDRAILS)
             sys.stderr.write(f"Unknown guardrail target: '{target}'. Valid targets: all, {valid}\n")
             return 1
-    else:
+    elif args.fast:
+        # The fast subset exists because tidy is minutes and bench wants a
+        # built tree; neither is what a pre-commit loop can afford on every
+        # edit. Naming the subset explicitly is the honest form: "all" means
+        # all, and a check that silently runs two thirds of the gate set is
+        # how a project ends up asserting a green tree it never measured.
         selected = QUALITY_GUARDRAILS
+    else:
+        selected = ALL_GUARDRAILS
 
     total = len(selected)
     print(f"{BOLD}=== Optics Architecture & Quality Guardrails ==={RESET}")
@@ -243,6 +250,10 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 def cmd_fix(args: argparse.Namespace) -> int:
     args.fix = True
+    # fix is a formatting/symbol remediation pass, not a verification pass: it
+    # must stay on the fast subset or every `./tools/optics fix` would pay for
+    # clang-tidy and the bench SLA before touching a source file.
+    args.fast = True
     args.target = "all"
     return cmd_check(args)
 
@@ -274,6 +285,11 @@ def main() -> int:
         nargs="?",
         default="all",
         help="Specific guardrail (format, boundary, lockstep, stdout, listeners, symbols, leaks, docs, tidy, bench; default: all)",
+    )
+    p_check.add_argument(
+        "--fast",
+        action="store_true",
+        help="Run only the quick architecture guardrails (skips clang-tidy and the bench SLA)",
     )
     p_check.add_argument("--fix", action="store_true", help="Auto-fix format and symbol parity")
     p_check.add_argument("--build-dir", default=None, help="Build directory for tidy/compile checks")

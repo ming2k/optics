@@ -380,6 +380,102 @@ static bool mica_group_dispatch_bounds(const prism_mica_group *group, uint32_t i
     return true;
 }
 
+/* Everything one mica submission needs to replay its dispatches later
+ * (ADR-0147). The per-group push constants are captured as prepared, so the
+ * replay performs no per-group policy resolution and cannot disagree with what
+ * was already decided here. */
+typedef struct mica_plan {
+    flux_device *device;
+    struct prism_mica_filter *filter;
+    flux_image *wallpaper;
+    flux_image *blurred_wallpaper;
+    flux_image *output;
+    uint32_t output_width;
+    uint32_t output_height;
+    bool is16f;
+    bool clear_full;
+    uint32_t slab_x;
+    uint32_t slab_y;
+    mica_region current[MICA_MAX_GROUPS];
+    uint32_t current_count;
+    mica_region previous[MICA_MAX_GROUPS];
+    uint32_t previous_count;
+    mica_push pushes[MICA_MAX_GROUPS];
+    uint32_t push_count;
+} mica_plan;
+
+static void mica_plan_record(void *raw, VkCommandBuffer cmd) {
+    const mica_plan *p = raw;
+    if (!p || cmd == VK_NULL_HANDLE || !p->filter)
+        return;
+    prism_mica_filter *filter = p->filter;
+    const int cls = p->is16f ? 1 : 0;
+    VkImage out_vk = flux_image_vk_image(p->output);
+
+    barrier_reuse_to_compute_write(cmd, out_vk);
+
+    if (p->clear_full) {
+        storage_clear_push pc = {
+            .output_handle = flux_image_bindless_storage_handle(p->output),
+            .width = p->output_width,
+            .height = p->output_height,
+            .origin_x = 0,
+            .origin_y = 0,
+            .region_width = p->output_width,
+            .region_height = p->output_height,
+        };
+        uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
+        uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
+        flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+        barrier_compute_write_to_read_write(cmd, out_vk);
+    } else {
+        for (uint32_t i = 0; i < p->previous_count; ++i) {
+            const mica_region *prev = &p->previous[i];
+            storage_clear_push pc = {
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = p->output_width,
+                .height = p->output_height,
+                .origin_x = prev->x,
+                .origin_y = prev->y,
+                .region_width = prev->width,
+                .region_height = prev->height,
+            };
+            uint32_t gx = (prev->width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (prev->height + PRISM_WG - 1u) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            barrier_compute_write_to_read_write(cmd, out_vk);
+        }
+        for (uint32_t i = 0; i < p->current_count; ++i) {
+            const mica_region *cur = &p->current[i];
+            storage_clear_push pc = {
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = p->output_width,
+                .height = p->output_height,
+                .origin_x = cur->x,
+                .origin_y = cur->y,
+                .region_width = cur->width,
+                .region_height = cur->height,
+            };
+            uint32_t gx = (cur->width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (cur->height + PRISM_WG - 1u) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            barrier_compute_write_to_read_write(cmd, out_vk);
+        }
+    }
+
+    for (uint32_t i = 0; i < p->push_count; ++i) {
+        const mica_region *bounds = &p->current[i];
+        uint32_t gx = (bounds->width + PRISM_WG - 1u) / PRISM_WG;
+        uint32_t gy = (bounds->height + PRISM_WG - 1u) / PRISM_WG;
+        flux_compute_dispatch(cmd, filter->mica_pipelines[cls], &p->pushes[i], sizeof(mica_push),
+                              gx, gy, 1);
+        if (i + 1 < p->push_count)
+            barrier_compute_write_to_read_write(cmd, out_vk);
+    }
+
+    barrier_compute_write_to_read(cmd, out_vk);
+}
+
 flux_result prism_mica_filter_apply(prism_mica_filter *filter, flux_frame *frame,
                                     const prism_mica_desc *desc, prism_material_output *out) {
     if (!filter || !frame || !desc || !out)
@@ -397,6 +493,14 @@ flux_result prism_mica_filter_apply(prism_mica_filter *filter, flux_frame *frame
     if (flux_frame_get_state(frame) != FLUX_FRAME_STATE_RECORDING ||
         flux_frame_has_active_pass(frame))
         return FLUX_ERROR_INVALID_STATE;
+
+    /* ADR-0147: `blurred_wallpaper` is normally a deferred flux_blur_filter
+     * output; materialize it so its dispatches precede ours. */
+    if (desc->blurred_wallpaper) {
+        flux_result mat = flux_frame_materialize_image(frame, desc->blurred_wallpaper);
+        if (mat != FLUX_OK)
+            return mat;
+    }
 
     const flux_image *ref_input =
         desc->blurred_wallpaper ? desc->blurred_wallpaper : desc->wallpaper;
@@ -455,52 +559,30 @@ flux_result prism_mica_filter_apply(prism_mica_filter *filter, flux_frame *frame
     slot->capture_height = capture_height;
 
     bool is16f = (slot->format == FLUX_FORMAT_RGBA16_SFLOAT);
-    const int cls = is16f ? 1 : 0;
 
     r = mica_ensure_pipelines(filter, is16f, slot->initialized || desc->group_count > 0,
                               desc->group_count > 0);
     if (r != FLUX_OK)
         return r;
 
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
-    VkImage out_vk = flux_image_vk_image(slot->output);
-
-    barrier_reuse_to_compute_write(cmd, out_vk);
-
-    /* Clear prior regions if initialized or slab moved */
-    if (!slot->initialized || slab_moved) {
-        storage_clear_push pc = {
-            .output_handle = flux_image_bindless_storage_handle(slot->output),
-            .width = slot->width,
-            .height = slot->height,
-            .origin_x = 0,
-            .origin_y = 0,
-            .region_width = slot->width,
-            .region_height = slot->height,
-        };
-        uint32_t gx = (slot->width + PRISM_WG - 1u) / PRISM_WG;
-        uint32_t gy = (slot->height + PRISM_WG - 1u) / PRISM_WG;
-        flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-        barrier_compute_write_to_read_write(cmd, out_vk);
-        slot->initialized = true;
-    } else {
-        for (uint32_t p = 0; p < slot->previous_count; ++p) {
-            const mica_region *prev = &slot->previous[p];
-            storage_clear_push pc = {
-                .output_handle = flux_image_bindless_storage_handle(slot->output),
-                .width = slot->width,
-                .height = slot->height,
-                .origin_x = prev->x,
-                .origin_y = prev->y,
-                .region_width = prev->width,
-                .region_height = prev->height,
-            };
-            uint32_t gx = (prev->width + PRISM_WG - 1u) / PRISM_WG;
-            uint32_t gy = (prev->height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-            barrier_compute_write_to_read_write(cmd, out_vk);
-        }
-    }
+    mica_plan plan = {
+        .device = filter->device,
+        .filter = filter,
+        .wallpaper = desc->wallpaper,
+        .blurred_wallpaper = desc->blurred_wallpaper,
+        .output = slot->output,
+        .output_width = slot->width,
+        .output_height = slot->height,
+        .is16f = is16f,
+        .clear_full = !slot->initialized || slab_moved,
+        .slab_x = slab_x,
+        .slab_y = slab_y,
+        .current_count = current_count,
+        .previous_count = (!slot->initialized || slab_moved) ? 0u : slot->previous_count,
+    };
+    memcpy(plan.current, current_regions, current_count * sizeof(mica_region));
+    if (plan.previous_count > 0u)
+        memcpy(plan.previous, slot->previous, plan.previous_count * sizeof(mica_region));
 
     uint32_t wp_handle =
         desc->wallpaper ? flux_image_bindless_handle(desc->wallpaper) : 0xFFFFFFFFu;
@@ -509,11 +591,9 @@ flux_result prism_mica_filter_apply(prism_mica_filter *filter, flux_frame *frame
     uint32_t samp_handle = flux_device_default_sampler_handle(filter->device);
     uint32_t out_handle = flux_image_bindless_storage_handle(slot->output);
 
-    for (uint32_t i = 0; i < desc->group_count; ++i) {
+    for (uint32_t i = 0; i < current_count; ++i) {
         const prism_mica_group *g = &desc->groups[i];
-        mica_region bounds;
-        if (!mica_group_dispatch_bounds(g, capture_width, capture_height, &bounds))
-            continue;
+        const mica_region *bounds = &plan.current[i];
 
         float eff_tint_opacity = (g->tint_opacity >= 0.0f) ? g->tint_opacity : desc->tint_opacity;
         float eff_lum_plate =
@@ -524,15 +604,15 @@ flux_result prism_mica_filter_apply(prism_mica_filter *filter, flux_frame *frame
         float eff_bwidth = (g->border_width >= 0.0f) ? g->border_width : desc->border_width;
         float eff_balpha = (g->border_alpha >= 0.0f) ? g->border_alpha : desc->border_alpha;
 
-        mica_push pc = {
+        plan.pushes[plan.push_count++] = (mica_push){
             .wallpaper_handle = wp_handle,
             .blurred_handle = bl_handle,
             .sampler_handle = samp_handle,
             .output_handle = out_handle,
             .width = slot->width,
             .height = slot->height,
-            .origin_x = bounds.x - slab_x,
-            .origin_y = bounds.y - slab_y,
+            .origin_x = bounds->x,
+            .origin_y = bounds->y,
             .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w, g->shape.bounds.h},
             .corner_radius = g->shape.corner_radius,
             .opacity = g->opacity * desc->opacity,
@@ -546,8 +626,8 @@ flux_result prism_mica_filter_apply(prism_mica_filter *filter, flux_frame *frame
             .shadow_blur = g->shadow_blur,
             .shadow_offset_y = g->shadow_offset_y,
             .tint_color = g->tint_color,
-            .group_width = bounds.width,
-            .group_height = bounds.height,
+            .group_width = bounds->width,
+            .group_height = bounds->height,
             .screen_origin_x = desc->screen_origin_x,
             .screen_origin_y = desc->screen_origin_y,
             .screen_width = desc->screen_width,
@@ -555,21 +635,14 @@ flux_result prism_mica_filter_apply(prism_mica_filter *filter, flux_frame *frame
             .fallback_color = desc->fallback_color,
             .fallback_weight = desc->fallback_weight,
             .is_alt = (desc->kind == PRISM_MICA_ALT) ? 1u : 0u,
-            .slab_origin_x = (float)slot->slab_x,
-            .slab_origin_y = (float)slot->slab_y,
-            .capture_width = (float)slot->capture_width,
-            .capture_height = (float)slot->capture_height,
+            .slab_origin_x = (float)slab_x,
+            .slab_origin_y = (float)slab_y,
+            .capture_width = (float)capture_width,
+            .capture_height = (float)capture_height,
         };
-
-        uint32_t gx = (bounds.width + PRISM_WG - 1u) / PRISM_WG;
-        uint32_t gy = (bounds.height + PRISM_WG - 1u) / PRISM_WG;
-        flux_compute_dispatch(cmd, filter->mica_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-        if (i + 1 < desc->group_count)
-            barrier_compute_write_to_read_write(cmd, out_vk);
     }
 
-    barrier_compute_write_to_read(cmd, out_vk);
-
+    slot->initialized = true;
     slot->previous_count = current_count;
     memcpy(slot->previous, current_regions, current_count * sizeof(mica_region));
 
@@ -580,6 +653,29 @@ flux_result prism_mica_filter_apply(prism_mica_filter *filter, flux_frame *frame
         .width = slot->width,
         .height = slot->height,
     };
+
+    /* Defer the dispatches (ADR-0147). The handle above is valid now; the work
+     * replays only if something requires the output. mica reads the wallpaper as
+     * an input so the plan orders it after any wallpaper-producing pass. */
+    prism_deferred_pass pass = PRISM_DEFERRED_PASS_INIT;
+    pass.output = slot->output;
+    pass.label = "prism.mica";
+    if (desc->wallpaper) {
+        pass.inputs[pass.input_count] = desc->wallpaper;
+        pass.input_count++;
+    }
+    if (desc->blurred_wallpaper && desc->blurred_wallpaper != desc->wallpaper) {
+        pass.inputs[pass.input_count] = desc->blurred_wallpaper;
+        pass.input_count++;
+    }
+    flux_deferred_token *token = nullptr;
+    flux_result reg =
+        prism_deferred_register(frame, &pass, mica_plan_record, &plan, sizeof(plan), &token);
+    if (reg != FLUX_OK) {
+        mica_plan_record(&plan, flux_frame_vk_command_buffer(frame));
+        token = nullptr;
+    }
+    (void)prism_deferred_require(frame, token);
     FLUX_PROFILE_ZONE_END(z_mica);
     return FLUX_OK;
 }

@@ -59,6 +59,97 @@ static void on_build(lens *ui, const lens_input *in, void *user) {
     gallery_ui_build(app, ui, in);
 }
 
+void gallery_emit_output(gallery_app *app, const prism_material_output *out) {
+    if (!app || !out || !out->image)
+        return;
+    if (app->output_count < GALLERY_MAX_OUTPUTS)
+        app->outputs[app->output_count++] = *out;
+}
+
+void gallery_render_frosted(gallery_app *app, flux_frame *frame, flux_image *blurred,
+                            flux_rect bounds, float corner_radius, float saturation) {
+    if (!app || !frame || !blurred)
+        return;
+    lens_material_recipe r = lens_material_recipe_default(LENS_MATERIAL_FROSTED, app->dark_mode);
+    prism_frosted_group group = PRISM_FROSTED_GROUP_INIT;
+    group.shape = (prism_frosted_shape){.bounds = bounds, .corner_radius = corner_radius};
+    group.tint_color = r.tint & 0x00FFFFFFu;
+    group.shadow_alpha = r.shadow_alpha;
+    group.shadow_blur = r.shadow_blur * app->scale;
+    group.shadow_offset_y = 6.0f * app->scale;
+
+    prism_frosted_desc desc = PRISM_FROSTED_DESC_INIT;
+    desc.input = app->capture;
+    desc.blurred_input = blurred;
+    desc.groups = &group;
+    desc.group_count = 1;
+    desc.saturation = saturation;
+    desc.tint_strength = r.tint_opacity;
+
+    prism_material_output out = {};
+    if (prism_frosted_filter_apply(app->frosted_filter, frame, &desc, &out) == FLUX_OK)
+        gallery_emit_output(app, &out);
+}
+
+void gallery_render_acrylic(gallery_app *app, flux_frame *frame, flux_image *blurred,
+                            flux_rect bounds, float corner_radius, float polarity,
+                            float noise_intensity, float border_width) {
+    if (!app || !frame || !blurred)
+        return;
+    lens_material_recipe r = lens_material_recipe_default(LENS_MATERIAL_ACRYLIC, app->dark_mode);
+    prism_acrylic_group group = PRISM_ACRYLIC_GROUP_INIT;
+    group.shape = (prism_acrylic_shape){.bounds = bounds, .corner_radius = corner_radius};
+    group.tint_color = r.tint & 0x00FFFFFFu;
+    group.shadow_alpha = r.shadow_alpha;
+    group.shadow_blur = r.shadow_blur * app->scale;
+    group.shadow_offset_y = 6.0f * app->scale;
+
+    prism_acrylic_desc desc = PRISM_ACRYLIC_DESC_INIT;
+    desc.input = app->capture;
+    desc.blurred_input = blurred;
+    desc.groups = &group;
+    desc.group_count = 1;
+    desc.luminance_plate = polarity;
+    desc.tint_strength = r.tint_opacity;
+    desc.noise_intensity = noise_intensity;
+    desc.border_width = border_width;
+    desc.border_alpha = r.border_highlight;
+
+    prism_material_output out = {};
+    if (prism_acrylic_filter_apply(app->acrylic_filter, frame, &desc, &out) == FLUX_OK)
+        gallery_emit_output(app, &out);
+}
+
+void gallery_render_mica(gallery_app *app, flux_frame *frame, flux_image *blurred, flux_rect bounds,
+                         float corner_radius, prism_mica_kind kind, float polarity, bool inactive) {
+    if (!app || !frame || !blurred)
+        return;
+    lens_material_recipe r = lens_material_recipe_default(
+        kind == PRISM_MICA_ALT ? LENS_MATERIAL_MICA_ALT : LENS_MATERIAL_MICA, app->dark_mode);
+    prism_mica_group group = PRISM_MICA_GROUP_INIT;
+    group.shape = (prism_mica_shape){.bounds = bounds, .corner_radius = corner_radius};
+    group.shadow_alpha = r.shadow_alpha;
+    group.shadow_blur = r.shadow_blur * app->scale;
+    group.shadow_offset_y = 6.0f * app->scale;
+
+    prism_mica_desc desc = PRISM_MICA_DESC_INIT;
+    desc.wallpaper = app->capture;
+    desc.blurred_wallpaper = blurred;
+    desc.groups = &group;
+    desc.group_count = 1;
+    desc.kind = kind;
+    desc.screen_width = 0.0f;
+    desc.screen_height = 0.0f;
+    desc.luminosity_plate = polarity;
+    desc.tint_color = r.tint & 0x00FFFFFFu;
+    desc.fallback_color = r.fallback & 0x00FFFFFFu;
+    desc.fallback_weight = inactive ? 1.0f : 0.0f;
+
+    prism_material_output out = {};
+    if (prism_mica_filter_apply(app->mica_filter, frame, &desc, &out) == FLUX_OK)
+        gallery_emit_output(app, &out);
+}
+
 static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *device, float scale,
                        void *user) {
     gallery_app *app = user;
@@ -111,32 +202,34 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
     }
 
     /* ===== STEP 2: BLUR backdrop for optical materials ===== */
+    /* Unconditional on purpose: the engine prunes it when nothing samples it
+     * (ADR-0147), so the host does not need a view-dependent guard here. The
+     * host still keeps `blurred` as the handle to hand to the material. */
     flux_image *blurred = nullptr;
-    flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
-    bd.input = app->capture;
-    bd.sigma = 10.0f * scale;
-    (void)flux_blur_filter_apply(app->blur_filter, frame, &bd, &blurred);
+    {
+        flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+        bd.input = app->capture;
+        bd.sigma = 10.0f * scale;
+        (void)flux_blur_filter_apply(app->blur_filter, frame, &bd, &blurred);
+    }
 
     /* ===== STEP 3: APPLY MATERIALS ACCORDING TO VIEW MODE ===== */
-    app->glass_out = (prism_material_output){0};
-    app->frost_out = (prism_material_output){0};
-    app->acrylic_out = (prism_material_output){0};
-    app->mica_out = (prism_material_output){0};
+    app->output_count = 0;
 
-    float sidebar_w = (app->view == VIEW_GRID) ? 0.0f : 140.0f * scale;
+    float header_h = 74.0f * scale;
     gallery_layout layout = {
-        .margin_x = 24.0f * scale + sidebar_w,
-        .header_h = 92.0f * scale,
-        .margin_bottom = 20.0f * scale,
-        .avail_w = (float)W - 48.0f * scale - sidebar_w,
-        .avail_h = (float)H - 92.0f * scale - 20.0f * scale,
+        .margin_x = 24.0f * scale,
+        .header_h = header_h,
+        .margin_bottom = 54.0f * scale,
+        .avail_w = (float)W - 48.0f * scale,
+        .avail_h = (float)H - header_h - 54.0f * scale,
         .polarity = app->dark_mode ? 0.0f : 1.0f,
         .scale = scale,
     };
 
     switch (app->view) {
-    case VIEW_GRID:
-        gallery_view_grid_prepare(app, frame, blurred, &layout);
+    case VIEW_RAW:
+        /* Raw backdrop inspection mode: emit zero material layers to isolate background */
         break;
     case VIEW_GLASS:
         gallery_view_glass_prepare(app, frame, blurred, &layout);
@@ -167,26 +260,21 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
     if (app->capture)
         flux_canvas_draw_image(canvas, app->capture, (flux_rect){0, 0, W, H}, nullptr);
 
-    /* 2. Composite active material layers */
-    /* Each material draws at its own placement. Everything inside a slab but
-     * outside the material's footprints is transparent, so drawing the slab is
-     * always correct. */
-    const prism_material_output *outs[] = {&app->glass_out, &app->frost_out, &app->acrylic_out,
-                                           &app->mica_out};
-    for (size_t i = 0; i < sizeof(outs) / sizeof(outs[0]); ++i) {
-        if (!outs[i]->image)
-            continue;
-        flux_canvas_draw_image(canvas, outs[i]->image,
-                               (flux_rect){outs[i]->origin_x, outs[i]->origin_y,
-                                           (float)outs[i]->width, (float)outs[i]->height},
-                               nullptr);
+    /* 2. Composite active material layers in declaration order */
+    for (uint32_t i = 0; i < app->output_count; ++i) {
+        const prism_material_output *out = &app->outputs[i];
+        if (out->image)
+            flux_canvas_draw_image(
+                canvas, out->image,
+                (flux_rect){out->origin_x, out->origin_y, (float)out->width, (float)out->height},
+                nullptr);
     }
 }
 
 int main(int argc, char **argv) {
     gallery_app app = {
-        .view = VIEW_GRID,
-        .backdrop = BACKDROP_DYNAMIC,
+        .view = VIEW_GLASS,
+        .backdrop = BACKDROP_BOUNCING_TV,
         .animating = true,
         .dark_mode = true,
         .inactive_fallback = false,
@@ -195,6 +283,12 @@ int main(int argc, char **argv) {
         .acrylic_grain = true,
         .mica_alt = false,
         .time = 0.0f,
+        .dvd_x = 0.0f,
+        .dvd_y = 0.0f,
+        .dvd_vx = 0.0f,
+        .dvd_vy = 0.0f,
+        .dvd_bounce_count = 0,
+        .dvd_init = false,
         .smoke_mode = false,
         .smoke_frames = 0,
     };
@@ -208,13 +302,13 @@ int main(int argc, char **argv) {
         printf("=================================================================\n");
         printf(" Optics Prism Material Gallery (Native Iris Showcase)\n");
         printf(" Native Wayland cursor (wp_cursor_shape_v1) & fractional HiDPI\n");
-        printf(
-            " Hotkeys: [1..5] Views, [B] Backdrop, [D] Dark/Light, [F] Fallback, [Space] Pause\n");
+        printf(" Hotkeys: [1:Raw 2:Glass 3:Frosted 4:Acrylic 5:Mica], [B] Backdrop, [D] "
+               "Dark/Light, [Space] Play/Pause\n");
         printf("=================================================================\n\n");
     }
 
     return iris_app_run(&(iris_app_opts){
-        .title = "Optics Prism Material Gallery (1:Grid 2:Glass 3:Frosted 4:Acrylic 5:Mica)",
+        .title = "Optics Prism Material Gallery (1:Raw 2:Glass 3:Frosted 4:Acrylic 5:Mica)",
         .app_id = "org.optics.showcase.material-gallery",
         .width = 1280,
         .height = 800,

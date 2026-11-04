@@ -162,7 +162,7 @@ transient pool's normal lease path (ADR-0074 animation safety).
 |--------|------|
 | `flux_shadow_filter_create` | Create a filter (retains the device). One filter per surface/frame stream. |
 | `flux_shadow_filter_retain` / `_release` | Refcounting; release frees per-slot images. |
-| `flux_shadow_filter_apply` | Record the three shadow passes into the frame's command buffer using the frame slot's own ping/pong/output images. |
+| `flux_shadow_filter_apply` | Register the shadow as a deferred pass (ADR-0147); its dispatches are built only when something requires the output. |
 
 The exact operator leases intermediates from the per-device transient pool
 per call — correct for occasional use, but a per-frame compositor would
@@ -216,6 +216,27 @@ Named materials do not live in flux: the liquid-glass material moved to the
 prism library with a 1:1 `prism_`-prefixed API, and the descriptor knob
 `glare` is now `rim_light`. See the [prism reference](prism.md) and
 [ADR-0063](../adr/0063-liquid-glass-material-library.md).
+
+## Deferred execution
+
+`flux_blur_filter_apply` and `flux_shadow_filter_apply` **register** the work
+rather than recording it ([ADR-0147](../adr/0147-deferred-effect-passes.md)).
+The output image handle is valid the moment the call returns, but the
+dispatches are only built and submitted when something requires the pixels, and
+a pass nothing requires is pruned at submit without touching the GPU.
+
+Two consequences a caller must know:
+
+| Situation | What to do |
+|-----------|------------|
+| Another effect consumes the output (a Prism material, a custom compute pass) | Nothing. The material materializes its input itself. |
+| A canvas pass draws the output | Call `flux_frame_materialize_image(frame, image)` **before** `flux_canvas_begin`. Sampling a still-deferred output inside a pass is rejected with `FLUX_ERROR_INVALID_STATE`. |
+
+`flux_frame_materialize_image` requires a pass boundary (no canvas pass active)
+and returns `FLUX_OK` for an image that is not deferred, so callers need no
+special case. `flux_frame_plan_stats` reports how many passes were registered,
+executed, and pruned in the current frame.
+
 
 ## `flux_effect_promote`
 

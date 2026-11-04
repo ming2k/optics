@@ -85,6 +85,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_frame_present` |  |
 | `flux_frame_abandon` |  |
 | `flux_frame_alloc_transient` | `alignment` must be a power of two between 1 and 256 inclusive. |
+| `flux_frame_materialize_image` | Materialize a deferred effect output (ADR-0147). |
+| `flux_frame_plan_stats` | Read the frame's plan counters. |
 | `flux_frame_index` |  |
 | `flux_frame_timestamp_begin` | ================================================================== |
 | `flux_frame_timestamp_end` |  |
@@ -216,6 +218,9 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_frame_set_viewport` | Backend-neutral wrappers for the dynamic viewport and scissor state used by graphics pipelines. |
 | `flux_frame_set_scissor` |  |
 | `flux_frame_pipeline_barrier` |  |
+| `flux_frame_register_pass` | Register a pass at the current pass boundary. |
+| `flux_frame_require_pass` | Mark a registered pass's output as consumed. |
+| `flux_frame_reject_pending_inputs` | Fail if any of `count` images is a deferred pass output that has not executed. |
 
 ### `flux/canvas.h`
 
@@ -339,13 +344,65 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_blur_filter_create` |  |
 | `flux_blur_filter_release` |  |
 | `flux_blur_filter_apply` |  |
-| `flux_blur_filter_current` | Borrow the slot's current valid blurred output without re-recording the Dual-Kawase pyramid dispatch into `frame`'s command buffer. |
+| `flux_blur_filter_current` | Borrow the slot's current valid blurred output without re-registering the Dual-Kawase pyramid dispatch. |
 | `flux_effect_shadow` | Record the shadow into `cmd`. |
 | `flux_shadow_filter_create` |  |
 | `flux_shadow_filter_release` |  |
 | `flux_shadow_filter_apply` |  |
 | `flux_effect_promote` | Copy `transient` (an image returned by flux_effect_blur or any later effect operator) into a fresh caller-owned flux_image with the same width, height, and format. |
 | `flux_effect_reset` | End the current effect lease epoch and return its intermediate/output slots to the per-device pool. |
+
+### `flux/sdf.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_sdf_circle` | Exact. |
+| `flux_sdf_round_rect` | Exact, and `radius == 0` is a plain box. |
+| `flux_sdf_ring` | Border of half-width `half` around a shape whose signed distance is `d`: the ring is the set \|d\| <= half. |
+| `flux_sdf_squircle` | Squircle / continuous-curvature field: a rounded rectangle whose corner arc blends a circular arc (`curvature == 0`, where this is *exactly* flux_sdf_round_rect) with an L4 superellipse corner (`curvature == 1`, the "G2 squircle"). |
+| `flux_sdf_squircle_gradient` | Analytic unit gradient of flux_sdf_squircle with respect to `p` — the outward surface normal of the field. |
+| `flux_sdf_squircle_sample` | Field and shading normal from ONE evaluation. |
+| `flux_sdf_smooth_union` | Composition: the polynomial smooth-minimum of two fields — the metaball union a fused body is made of. |
+| `flux_sdf_smooth_union_gradient` | Unit gradient of flux_sdf_smooth_union with respect to position, from the two fields' unit gradients and their values. |
+| `flux_sdf_coverage` | Analytic coverage from a signed distance and the screen-space gradient magnitude of the field (`aa`, i.e. |
+
+### `flux/curve.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_curve_seg_make` | Construct a reduced segment. |
+| `flux_curve_cubic_eval` | ================================================================== |
+| `flux_curve_quad_eval` |  |
+| `flux_curve_quad_tangent` | Unit tangent at t; zero vector when the derivative vanishes (cusp). |
+| `flux_curve_quad_normal` | Unit left normal at t (tangent rotated +90°). |
+| `flux_curve_cubic_inflections` | Parameters in (0,1) where the cubic's curvature changes sign. |
+| `flux_curve_cubic_cusp` | True and writes t when the cubic has a genuine cusp (B'(t) = 0 with a reversed tangent) for some t in (0,1). |
+| `flux_curve_wang_cubic` | Minimal uniform segment count that keeps the chord deviation of a cubic below `tol` (tol > 0): ceil( sqrt( (3/(4·tol)) · max‖Δ²P‖ ) ). |
+| `flux_curve_wang_quad` | Quadratic form: ceil( sqrt( (1/(4·tol)) · ‖P0 - 2·P1 + P2‖ ) ). |
+| `flux_curve_cubic_reduce` | Reduce a cubic to line/quadratic segments whose maximum deviation from the cubic is <= tol. |
+| `flux_curve_seg_offset` | Offset a reduced segment by `dist` along its left normal. |
+| `flux_curve_seg_offset_retrograde` | Retrograde interval of an offset segment. |
+| `flux_curve_seg_bounds` | Conservative control-hull bounds of a reduced segment. |
+| `flux_curve_seg_ray_x` | x-coordinates where the segment crosses the horizontal line y = yv, in ascending order, at most 2, over the closed parameter domain [0,1]. |
+| `flux_curve_cover_bounds` | Conservative bounds of a run of segments. |
+| `flux_curve_cover_winding` | Signed winding number of the closed path at (x, y): +1 per upward crossing of the ray to +x, −1 per downward crossing. |
+| `flux_curve_cover_contains` | Inside test under `rule`. |
+| `flux_curve_cover_coverage` | Coverage of the pixel square [x, x+1) x [y, y+1) under `rule`, from an n x n grid of winding samples. |
+| `flux_curve_point_is_finite` | ================================================================== |
+| `flux_curve_seg_is_finite` |  |
+
+### `flux/observe.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `flux_observe_acquire` | Record one acquisition. |
+| `flux_observe_release` | Record one release. |
+| `flux_observe_report` | `d` may be nullptr when `opts->scope` is FLUX_SCOPE_PROCESS. |
+| `flux_observe_read_counters` | Snapshot one (kind, owner) row. |
+| `flux_observe_report_emit` | Emit the drain report for `scope` through the configured logger. |
+| `flux_observe_report_emit_process` | Emit the process-scope report through the process-global logger (the last flux_device to register one). |
+| `flux_observe_frame_drain_check` | Frame-lifetime enforcement (ADR-0129 decision 4). |
+| `flux_device_labels_emitted` | Labels actually handed to the driver since device creation (ADR-0133). |
 
 ## glyph — text shaping & layout engine
 
@@ -544,6 +601,25 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 |--------|-------------|
 | `lens_icon_register_svg` | Register an SVG string as a runtime icon. |
 
+### `lens/material.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `lens_material_recipe_default` | Standard recipe factory: returns reference neutral recipes for light/dark modes. |
+
+### `lens/patterns.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `lens_segmented_control` | Render a segmented control. |
+| `lens_virtual_grid_calc` | Compute exact virtual grid metrics for a given available width & scroll offset. |
+| `lens_tab_strip` |  |
+| `lens_split_handle_v` | Render an interactive vertical split divider between two panes. |
+| `lens_datagrid` | Render an interactive data grid with virtualized rows, column resizing, and header sorting. |
+| `lens_tree_view` |  |
+| `lens_popup_menu` | Render an anchored popup menu in LENS_BAND_POPUP with auto-flip and transient dismissal. |
+| `lens_menubar` | Render a horizontal menu bar. |
+
 ## iris — application toolkit
 
 ### `iris/app.h`
@@ -623,6 +699,14 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `iris_a11y_prefs_query` | Query the system accessibility preferences once at call time. |
 | `iris_a11y_prefs_watch` | Begin watching the accessibility preferences. |
 | `iris_a11y_prefs_unwatch` | Stop watching and release platform resources. |
+
+### `iris/dnd.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `iris_dnd_start` | Start an outgoing drag session on the current active window. |
+| `iris_dnd_is_active` | Query whether an outgoing or incoming drag session is currently active. |
+| `iris_dnd_cancel` | Cancel the active drag session if one is in flight. |
 
 ## prism — material library
 

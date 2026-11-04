@@ -26,6 +26,13 @@ struct flux_image {
     VkImageLayout current_layout;
     bool render_target;
 
+    /* True while this image is the output of a registered pass that has not
+     * executed (ADR-0147). The plan is the only writer: registration sets it,
+     * execution and pruning clear it. It lives on the image rather than only in
+     * the plan because a raw recording path (`flux_effect_*`, a custom compute
+     * pass driven by a bare VkCommandBuffer) has no frame to ask. */
+    bool deferred_pending;
+
     /* ADR-0069/0070 content color space (flux_image_color_space_desc).
      * color_params_address == 0 selects the format-derived fast path
      * (sRGB for 8-bit, linear for 16F); otherwise it is the device

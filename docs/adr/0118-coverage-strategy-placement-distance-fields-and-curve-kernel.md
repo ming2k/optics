@@ -130,9 +130,12 @@ opt-in — never a default and never a silent fallback.**
   of the one coverage contract. It is never described, encoded, or scheduled as
   a degraded substitute for curve coverage, and curve coverage is never a
   substitute for it.
-- **INV-SDF-02 — One definition per field.** A distance field is defined once,
-  in `flux_sdf_*`. Any other evaluation is a projection of that definition and
-  is pinned by a differential test.
+- **INV-SDF-02 — One definition per field, and per derivative.** A distance
+  field is defined once, in `flux_sdf_*`, together with its analytic gradient
+  (extended by [ADR-0148](0148-sdf-derivative-co-location-analytic-normals.md)).
+  Any other evaluation is a projection of that definition and is pinned by a
+  differential test; any consumer that needs a normal obtains it from the field
+  rather than by differencing it.
 - **INV-SDF-03 — Representation picks the strategy.** Analytic classes take the
   analytic path whenever paint/blend/transform allow, and "allow" means the
   transform is a *similarity* — rotation and uniform scale preserve distance, so

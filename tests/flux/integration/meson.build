@@ -173,6 +173,29 @@ if opt_canvas
   test('upload_batch', test_upload_batch, suite : 'integration')
 endif
 
+# SDF derivative parity (ADR-0148 / INV-SDF-02): dispatch the real
+# flux_sdf.glsl and compare distance + normal against <flux/sdf.h>.
+sdf_parity_spv = custom_target('test_sdf_parity.comp.spv',
+  input   : 'shaders/sdf_parity.comp',
+  depend_files : flux_sdf_glsl,
+  output  : 'sdf_parity.comp.spv',
+  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
+)
+sdf_parity_spv_h = custom_target('sdf_parity_comp_spv.h',
+  input   : sdf_parity_spv,
+  output  : 'sdf_parity_comp_spv.h',
+  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'parity_spv'],
+)
+test_sdf_parity = executable('test_sdf_parity',
+  'test_sdf_parity.c',
+  sdf_parity_spv,
+  sdf_parity_spv_h,
+  dependencies : [test_helpers_dep],
+  c_args       : tests_embed_dir_arg,
+)
+test('sdf_parity', test_sdf_parity, suite : 'integration')
+
+
 # GPU integration: needs a compiled compute shader.
 test_compute_golden = executable('test_compute_golden',
   'test_compute_golden.c',
@@ -274,6 +297,14 @@ if opt_canvas
     dependencies : [test_helpers_dep],
   )
   test('tile_b4_fine', test_tile_b4_fine, suite : 'integration')
+
+  # Deferred pass plan: pruning, materialization, and the in-pass contract
+  # (ADR-0147).
+  test_plan_prune = executable('test_plan_prune',
+    'test_plan_prune.c',
+    dependencies : [test_helpers_dep, prism_dep],
+  )
+  test('plan_prune', test_plan_prune, suite : 'integration')
 
   # Tile-compute blend and clip integration (ADR-0120 Phase B5 gate)
   test_tile_b5_renderplan = executable('test_tile_b5_renderplan',

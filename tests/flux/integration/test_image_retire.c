@@ -91,6 +91,16 @@ int main(void) {
     }
     EXPECT(released == CHURN_FRAMES);
 
+    /* Drain the frames in flight so the surface slot releases the last
+     * tracked foreign image (image 399) retained by frame_retain_image. */
+    for (uint32_t f = 0; f < 3u; ++f) {
+        flux_frame *df = nullptr;
+        EXPECT(flux_surface_begin_frame(surface, nullptr, &df) == FLUX_OK);
+        EXPECT(flux_frame_submit(df) == FLUX_OK);
+        EXPECT(flux_frame_present(df) == FLUX_OK);
+    }
+    flux_device_wait_idle(d);
+
     /* Release-without-frame: zombies parked with NO recording frame must
      * be reclaimed immediately by wait_idle (ADR-0139, recording_frames). */
     flux_image *stray = make_cover(d, 0xFF112233u);

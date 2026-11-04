@@ -29,6 +29,10 @@ LIBRARIES = [
             "libs/flux/include/flux/scene.h",
             "libs/flux/include/flux/compute.h",
             "libs/flux/include/flux/effect.h",
+            "libs/flux/include/flux/sdf.h",
+            "libs/flux/include/flux/curve.h",
+            "libs/flux/include/flux/observe.h",
+            "libs/flux/include/flux/observe_sites.h",
         ],
         r"FLUX_API",
     ),
@@ -44,7 +48,12 @@ LIBRARIES = [
     ),
     (
         "lens — immediate-mode UI",
-        ["libs/lens/include/lens/lens.h", "libs/lens/include/lens/icon.h"],
+        [
+            "libs/lens/include/lens/lens.h",
+            "libs/lens/include/lens/icon.h",
+            "libs/lens/include/lens/material.h",
+            "libs/lens/include/lens/patterns.h",
+        ],
         r"LENS_API",
     ),
     (
@@ -60,6 +69,7 @@ LIBRARIES = [
             "libs/iris/include/iris/capability.h",
             "libs/iris/include/iris/a11y.h",
             "libs/iris/include/iris/a11y_prefs.h",
+            "libs/iris/include/iris/dnd.h",
         ],
         r"IRIS_API",
     ),
@@ -103,6 +113,20 @@ def first_sentence(comment: str) -> str:
     m = re.match(r"(.+?(?<!\b[A-Z])[.!?])(?:\s|$)", text)
     sentence = m.group(1) if m else text
     return sentence.strip()
+
+
+def _belongs_to_library(rel: str, api_macro: str) -> bool:
+    """True when `rel` lives in the library that owns `api_macro`.
+
+    Derived from the LIBRARIES table rather than a path heuristic so a new
+    library adds no second place to forget."""
+    for _, headers, api in LIBRARIES:
+        if api != api_macro or not headers:
+            continue
+        lib_root = headers[0].rsplit("/include/", 1)[0]
+        if rel.startswith(lib_root + "/"):
+            return True
+    return False
 
 
 def extract(header: Path, api_macro: str):
@@ -160,6 +184,39 @@ def render(root: Path) -> str:
 
 def run_symbols_check(root: Path, check_only: bool = True) -> tuple[bool, str, str]:
     out_file = root / "docs/reference/symbols.md"
+
+    # Completeness gate (ADR-0095 symbol index): every installed header that
+    # exports the library's API macro must be listed above. Without this the
+    # guardrail only verified that a hand-maintained list was regenerated, so a
+    # whole header could ship exported-and-undocumented indefinitely — which is
+    # exactly what happened to flux/sdf.h (7 symbols) and flux/curve.h (20).
+    listed = {h for _, headers, _ in LIBRARIES for h in headers}
+    uncovered: list[str] = []
+    for lib_title, _, api in LIBRARIES:
+        for header in sorted(root.glob("libs/*/include/*/*.h")):
+            rel = header.relative_to(root).as_posix()
+            if rel in listed:
+                continue
+            if not _belongs_to_library(rel, api):
+                continue
+            text = header.read_text(encoding="utf-8")
+            if not re.search(rf"\b{api}\b", text):
+                continue
+            # A header that only *defines* the export macro declares no symbols;
+            # every library has one and none belongs in a symbol index.
+            if re.search(rf"#\s*define\s+{api}\b", text):
+                continue
+            uncovered.append(rel)
+    if uncovered:
+        return (
+            False,
+            "",
+            "symbols guardrail: these headers export a public API but are not "
+            "listed in tools/guardrails/symbols.py, so their symbols are absent "
+            "from docs/reference/symbols.md:\n"
+            + "\n".join(f"  {h}" for h in uncovered),
+        )
+
     for _, headers, _ in LIBRARIES:
         for h in headers:
             if not (root / h).exists():
@@ -174,7 +231,7 @@ def run_symbols_check(root: Path, check_only: bool = True) -> tuple[bool, str, s
                 "",
                 "docs/reference/symbols.md is stale. Regenerate with:\n    ./tools/optics fix",
             )
-        return True, "symbols.md: fresh", ""
+        return True, "symbols.md: fresh and complete", ""
 
     out_file.write_text(fresh, encoding="utf-8")
     return True, f"wrote {out_file.relative_to(root)} ({len(fresh.splitlines())} lines)", ""

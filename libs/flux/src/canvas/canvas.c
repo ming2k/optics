@@ -358,6 +358,11 @@ flux_result flux_canvas_begin(flux_canvas *c, const flux_canvas_pass_desc *desc)
     }
     if (!c->device && desc->frame)
         goto invalid;
+    /* ADR-0147: a canvas pass is a pass boundary, and the only place compute
+     * may be inserted. Flush every deferred pass the previous pass's draws
+     * required, so its output is written before this pass samples it. */
+    if (desc->frame && desc->frame->surface)
+        flux_plan_flush(&desc->frame->plan, flux_frame_vk_command_buffer(desc->frame));
     c->bound_cpu_target = target && target->is_cpu ? target : nullptr;
     flux_result result = canvas_begin_pass_impl(c, desc->frame, image, desc);
     if (result != FLUX_OK) {
@@ -779,6 +784,18 @@ void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, uint32_t im
      * a headless CPU canvas. */
     if (!c->device || sh == FLUX_BINDLESS_INVALID)
         return;
+    /* ADR-0147: sampling a deferred pass output is legal only after the
+     * producer has been materialized — and materializing requires a pass
+     * boundary, which this draw, by definition, is not inside of. A host that
+     * wants a blur composed by the canvas must therefore materialize it
+     * before beginning the pass that draws it. Rejecting the draw keeps the
+     * failure at the caller's line instead of presenting an unwritten image. */
+    if (img && c->frame && flux_plan_image_pending(&c->frame->plan, img)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "canvas sampled a deferred effect output inside a pass; call "
+                  "flux_frame_materialize_image before flux_canvas_begin (ADR-0147)");
+        return;
+    }
     flux_mat3x2 tx = c->states[c->state_top].transform;
     flux_point p0 = {dst.x, dst.y};
     flux_point p1 = {dst.x + dst.w, dst.y};

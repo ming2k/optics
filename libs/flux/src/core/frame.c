@@ -548,6 +548,10 @@ acquired:
         .slot = slot,
         .state = FLUX_FRAME_STATE_RECORDING,
     };
+    /* ADR-0147: the plan recycles this slot's secondaries. The fence wait
+     * for `slot` above already guarantees nothing the previous plan
+     * recorded is still executing. */
+    flux_plan_reset(&s->frame_slot.plan, s->device, pf->pool);
     s->frame_active = true;
     atomic_fetch_add_explicit(&s->device->recording_frames, 1u, memory_order_acq_rel);
     *out = &s->frame_slot;
@@ -864,6 +868,11 @@ flux_result flux_frame_submit(flux_frame *f) {
 
     pf->ts_was_submitted = (pf->ts_scope_count > 0);
 
+    /* ADR-0147: close the plan before the command buffer is sealed. Passes
+     * nothing required and that are not terminal were never built, so they
+     * contribute nothing to the command stream. */
+    (void)flux_plan_finalize(&f->plan, pf->cmd);
+
     vr = vkEndCommandBuffer(pf->cmd);
     if (vr != VK_SUCCESS) {
         flux_frame_leave_recording(f);
@@ -1107,6 +1116,47 @@ flux_result flux_frame_alloc_transient(flux_frame *f, size_t bytes, size_t align
         .size = bytes,
         .alignment = alignment,
     };
+    return FLUX_OK;
+}
+
+flux_result flux_frame_materialize_image(flux_frame *f, flux_image *image) {
+    if (!f || !image)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (!f->surface || f->state != FLUX_FRAME_STATE_RECORDING) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "materialize requires a recording frame");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    /* Compute cannot be recorded inside a render pass, so the caller must be
+     * at a boundary. Reporting it here keeps the failure at the call site
+     * instead of surfacing as a Vulkan validation error later. */
+    if (f->pass_active) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "materialize requires a pass boundary; a canvas pass is active");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    /* Build the producers this image depends on, then execute them HERE, at
+     * the caller's boundary. Executing now — rather than at some later
+     * flush — is what guarantees the pixels exist before the dispatches the
+     * caller is about to record: it is the caller who needs them. */
+    (void)flux_plan_require_image(&f->plan, image);
+    VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
+    flux_plan_flush(&f->plan, cmd);
+    return FLUX_OK;
+}
+
+flux_result flux_frame_plan_stats(const flux_frame *f, flux_frame_plan_counters *out) {
+    if (!out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "plan stats require a recording frame");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    /* Pruned is derived, not accumulated: a pass that has not executed by the
+     * time the caller asks is, by definition, one nothing has required. */
+    out->registered = f->plan.pass_count;
+    out->executed = f->plan.executed_total;
+    out->pruned = f->plan.pass_count - f->plan.executed_total;
+    out->fallbacks = f->plan.fallback_total;
     return FLUX_OK;
 }
 

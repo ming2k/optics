@@ -243,6 +243,215 @@ static void test_squircle(void) {
     EXPECT(isfinite(flux_sdf_squircle((flux_point){1.0f, 1.0f}, 4.0f, 4.0f, 99.0f, 1.0f)));
 }
 
+/* ------------------------------------------------------------------ */
+/*  Derivatives (ADR-0148)                                            */
+/* ------------------------------------------------------------------ */
+
+/* The normal is the derivative of the distance, not a neighbour of it. Wherever
+ * the field is differentiable, flux_sdf_squircle_sample's normal must equal a
+ * central difference of flux_sdf_squircle itself. This is the assertion that
+ * makes "one expression, its own derivative" checkable rather than
+ * aspirational: a wrong quotient rule, a dropped chain-rule term, or a gradient
+ * taken from a *different* field all land here. */
+static void test_gradient_is_the_derivative(void) {
+    const float hw = 9.0f, hh = 5.5f, r = 2.0f;
+    const float h = 1e-3f;
+    const float curve[5] = {0.0f, 0.25f, 0.5f, 0.85f, 1.0f};
+    int checked = 0;
+    for (int c = 0; c < 5; ++c) {
+        for (int i = -60; i <= 60; ++i) {
+            for (int j = -60; j <= 60; ++j) {
+                float px = (float)i * 0.2f, py = (float)j * 0.2f;
+                flux_point p = {px, py};
+                float qx = fabsf(px) - (hw - r);
+                float qy = fabsf(py) - (hh - r);
+                /* The field is not differentiable in three places, and a central
+                 * difference is not a derivative in any of them either, so the
+                 * assertion is scoped to where it is meaningful at the
+                 * differencing footprint's resolution:
+                 *   - the interior/exterior branch boundary (q == 0);
+                 *   - the interior medial axis, where the field is a max();
+                 *   - the |p| kink on the axes. */
+                if (fabsf(qx) < 1.0f || fabsf(qy) < 1.0f)
+                    continue;
+                if (qx < 0.0f && qy < 0.0f && fabsf(qx - qy) < 1.0f)
+                    continue;
+                if (fabsf(px) < 1e-2f || fabsf(py) < 1e-2f)
+                    continue;
+
+                flux_sdf_sample s = flux_sdf_squircle_sample(p, hw, hh, r, curve[c], 1.0f);
+                float dx = flux_sdf_squircle((flux_point){px + h, py}, hw, hh, r, curve[c]) -
+                           flux_sdf_squircle((flux_point){px - h, py}, hw, hh, r, curve[c]);
+                float dy = flux_sdf_squircle((flux_point){px, py + h}, hw, hh, r, curve[c]) -
+                           flux_sdf_squircle((flux_point){px, py - h}, hw, hh, r, curve[c]);
+                float len = sqrtf(dx * dx + dy * dy);
+                if (len < 1e-4f)
+                    continue;
+                /* The field is Eikonal here, so the normalised difference is the
+                 * unit gradient itself. 2e-3 rad ~ 0.11 deg is the first-order
+                 * truncation of the h = 1e-3 reference. */
+                EXPECT_NEAR(s.normal.x, dx / len, 2e-3f);
+                EXPECT_NEAR(s.normal.y, dy / len, 2e-3f);
+                /* ...and it is a unit vector. */
+                EXPECT_NEAR(sqrtf(s.normal.x * s.normal.x + s.normal.y * s.normal.y), 1.0f, 1e-5f);
+                /* The distance it carries is the field's own value: one
+                 * evaluation, not two. */
+                EXPECT_NEAR(s.distance, flux_sdf_squircle(p, hw, hh, r, curve[c]), 1e-6f);
+                checked++;
+            }
+        }
+    }
+    EXPECT(checked > 10000);
+}
+
+/* The normal does not depend on the sampling footprint outside the interior.
+ * This is what distinguishes an analytic gradient from a finite-difference one:
+ * a 4-tap normal of span 2*aa changes with aa by construction, and so does any
+ * surrogate built from a different field than the one that produced the
+ * distance. Here aa moves exactly one branch — the interior crease — which is a
+ * sampling question, not a differentiation one. */
+static void test_normal_is_analytic_not_sampled(void) {
+    const float hw = 12.0f, hh = 7.0f, r = 3.0f;
+    const float aa_values[3] = {0.25f, 1.0f, 4.0f};
+    int compared = 0;
+    for (int c = 0; c <= 10; c += 5) {
+        float curvature = (float)c / 10.0f;
+        for (int i = -50; i <= 50; ++i) {
+            for (int j = -50; j <= 50; ++j) {
+                float px = (float)i * 0.25f, py = (float)j * 0.25f;
+                flux_point p = {px, py};
+                float qx = fabsf(px) - (hw - r);
+                float qy = fabsf(py) - (hh - r);
+                if (qx <= 0.0f && qy <= 0.0f)
+                    continue;
+                flux_sdf_sample base = flux_sdf_squircle_sample(p, hw, hh, r, curvature, 1.0f);
+                for (int k = 0; k < 3; ++k) {
+                    flux_sdf_sample s =
+                        flux_sdf_squircle_sample(p, hw, hh, r, curvature, aa_values[k]);
+                    EXPECT(s.normal.x == base.normal.x);
+                    EXPECT(s.normal.y == base.normal.y);
+                    EXPECT(s.distance == base.distance);
+                    compared++;
+                }
+            }
+        }
+    }
+    EXPECT(compared > 20000);
+
+    /* ...and inside the interior the crease rule *does* respond to the
+     * footprint, which is the whole reason it exists. Point chosen so both
+     * normal components are non-zero (a zero component would survive
+     * normalisation and hide the ramp) and one unit off the medial axis. */
+    flux_point inside = {6.0f, 2.0f}; /* q = (-3, -2): |qx - qy| == 1 */
+    flux_sdf_sample tight = flux_sdf_squircle_sample(inside, hw, hh, 0.0f, 0.0f, 0.05f);
+    flux_sdf_sample wide = flux_sdf_squircle_sample(inside, hw, hh, 0.0f, 0.0f, 4.0f);
+    EXPECT(tight.normal.x != wide.normal.x);
+    /* A tight footprint converges on the continuum gradient (the dominant edge:
+     * qx < qy, so the y edge wins)... */
+    flux_sdf_sample limit = flux_sdf_squircle_gradient(inside, hw, hh, 0.0f, 0.0f);
+    EXPECT_NEAR(tight.normal.x, limit.normal.x, 1e-2f);
+    EXPECT_NEAR(tight.normal.y, limit.normal.y, 1e-2f);
+    EXPECT_NEAR(limit.normal.y, 1.0f, 1e-6f);
+    /* ...and the wide one is a blend of the two edge directions that the
+     * continuum never produces. */
+    EXPECT(wide.normal.x > 0.2f && wide.normal.x < 0.7f);
+    EXPECT(wide.normal.y > 0.7f && wide.normal.y < 0.98f);
+}
+
+/* The interior rule turns a 90-degree flip into a ramp. Sweeping *across* the
+ * interior diagonal — not along it, which never leaves the crease — the sampled
+ * normal must rotate smoothly. A hard pick changes by 1.41 (90 degrees) across
+ * one sample step; the measured ramp changes by 0.000. */
+static void test_crease_is_resolved_over_the_footprint(void) {
+    const float hw = 10.0f, hh = 10.0f, aa = 1.0f;
+    float worst_step = 0.0f;
+    /* The path stays in the first quadrant and crosses only |x| == |y|: it never
+     * touches an axis, where |p| has a kink of the *field* (a 0.34 step in the
+     * normal) that is not the crease rule's business. It is also seeded at its
+     * own first sample, so the first measured step is a step. */
+    flux_sdf_sample prev =
+        flux_sdf_squircle_sample((flux_point){2.8f, 2.6f}, hw, hh, 0.0f, 0.0f, aa);
+    for (int i = 1; i <= 400; ++i) {
+        float t = (float)i * 0.001f; /* x + y constant; x - y crosses 0 at t = 0.2 */
+        flux_sdf_sample s =
+            flux_sdf_squircle_sample((flux_point){2.8f + t, 2.6f - t}, hw, hh, 0.0f, 0.0f, aa);
+        float step = sqrtf((s.normal.x - prev.normal.x) * (s.normal.x - prev.normal.x) +
+                           (s.normal.y - prev.normal.y) * (s.normal.y - prev.normal.y));
+        if (step > worst_step)
+            worst_step = step;
+        prev = s;
+    }
+    EXPECT(worst_step < 0.02f);
+
+    /* The continuum entry point is the one that flips — asserted so the
+     * distinction cannot rot. */
+    flux_point a = {-0.05f, 0.05f};
+    flux_point b = {0.05f, -0.05f};
+    flux_sdf_sample ga = flux_sdf_squircle_gradient(a, hw, hh, 0.0f, 0.0f);
+    flux_sdf_sample gb = flux_sdf_squircle_gradient(b, hw, hh, 0.0f, 0.0f);
+    float flip = sqrtf((ga.normal.x - gb.normal.x) * (ga.normal.x - gb.normal.x) +
+                       (ga.normal.y - gb.normal.y) * (ga.normal.y - gb.normal.y));
+    EXPECT(flip > 1.0f);
+}
+
+/* Degenerate input must not produce a NaN normal. */
+static void test_gradient_degenerate(void) {
+    const flux_point pts[4] = {{0.0f, 0.0f}, {4.0f, 4.0f}, {-4.0f, 4.0f}, {1e6f, 1e6f}};
+    for (int i = 0; i < 4; ++i) {
+        flux_sdf_sample s = flux_sdf_squircle_sample(pts[i], 0.0f, 0.0f, 0.0f, 1.0f, 1.0f);
+        EXPECT(isfinite(s.distance));
+        EXPECT(isfinite(s.normal.x));
+        EXPECT(isfinite(s.normal.y));
+        EXPECT_NEAR(sqrtf(s.normal.x * s.normal.x + s.normal.y * s.normal.y), 1.0f, 1e-5f);
+
+        flux_sdf_sample g = flux_sdf_squircle_gradient(pts[i], 0.0f, 0.0f, 0.0f, 1.0f);
+        EXPECT(isfinite(g.normal.x));
+        EXPECT(isfinite(g.normal.y));
+        EXPECT_NEAR(sqrtf(g.normal.x * g.normal.x + g.normal.y * g.normal.y), 1.0f, 1e-5f);
+    }
+    /* A negative half extent and an oversized radius clamp like the fields do. */
+    flux_sdf_sample s =
+        flux_sdf_squircle_sample((flux_point){1.0f, 1.0f}, -5.0f, -5.0f, 99.0f, 1.0f, 1.0f);
+    EXPECT(isfinite(s.normal.x));
+    EXPECT(isfinite(s.distance));
+}
+
+/* The bound that makes a future binary16 attempt start from a proof instead of a
+ * rediscovery (ADR-0148): along the L4 direction circle `nx^4 + ny^4 == 1`, the
+ * normalisation factor `g = sqrt(nx^6 + ny^6)` stays inside [2^-1/4, 1].
+ *
+ * Why it matters: `d_l4 = (q4 - r)/g` is the only place the field divides by a
+ * magnitude, and `1/g` is what a narrow width would have to hold. Outside that
+ * range `g` would need a clamp and the expression would stop being safe at low
+ * precision. Asserted rather than described, so a change to the corner family
+ * that breaks the bound fails here instead of silently invalidating the note.
+ *
+ * This is a property of the *direction*, independent of shape, so it is checked
+ * directly on the parametrisation instead of through the public surface. */
+static void test_l4_normalisation_is_bounded(void) {
+    const double lo_expected = 0.8408964152537145; /* 2^-0.25 */
+    double observed_lo = 1e9, observed_hi = -1e9;
+    for (int i = 0; i <= 200000; ++i) {
+        double u = (double)i / 200000.0; /* nx^4 */
+        double nx = pow(u, 0.25);
+        double ny = pow(1.0 - u, 0.25);
+        /* ...and it really is the direction circle. */
+        EXPECT_NEAR(nx * nx * nx * nx + ny * ny * ny * ny, 1.0, 1e-12);
+        double nx2 = nx * nx, ny2 = ny * ny;
+        double g = sqrt(nx2 * nx2 * nx2 + ny2 * ny2 * ny2);
+        if (g < observed_lo)
+            observed_lo = g;
+        if (g > observed_hi)
+            observed_hi = g;
+    }
+    EXPECT_NEAR(observed_lo, lo_expected, 1e-9);
+    EXPECT_NEAR(observed_hi, 1.0, 1e-12);
+    /* Both endpoints are attainable: g == 2^-1/4 at nx == ny == 2^-1/4, and
+     * g == 1 on the axes. A bound that is never approached would be vacuous. */
+    EXPECT(observed_lo < 0.85);
+    EXPECT(observed_hi > 0.999999);
+}
+
 int main(void) {
     test_circle();
     test_round_rect();
@@ -252,5 +461,10 @@ int main(void) {
     test_eikonal();
     test_shader_parity();
     test_degenerate();
+    test_gradient_is_the_derivative();
+    test_normal_is_analytic_not_sampled();
+    test_crease_is_resolved_over_the_footprint();
+    test_gradient_degenerate();
+    test_l4_normalisation_is_bounded();
     TEST_SUMMARY();
 }

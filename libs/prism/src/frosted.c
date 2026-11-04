@@ -357,6 +357,144 @@ static bool frosted_group_dispatch_bounds(const prism_frosted_group *group, uint
     return true;
 }
 
+/* Everything one frosted submission needs to replay its dispatches later
+ * (ADR-0147). Copied into the frame's plan arena, so the descriptor and group
+ * array may live on the caller's stack and die when apply returns. */
+typedef struct frosted_plan {
+    flux_device *device;
+    struct prism_frosted_filter *filter;
+    flux_image *input;
+    flux_image *blurred;
+    flux_image *output;
+    uint32_t slot_index;
+    bool is16f;
+    uint32_t group_count;
+    float opacity;
+    float saturation;
+    float tint_strength;
+    float noise_intensity;
+    /* Precomputed dispatch geometry, so the replay does no bounds work and
+     * cannot disagree with the frames already recorded. */
+    uint32_t slab_x;
+    uint32_t slab_y;
+    uint32_t current_count;
+    frosted_region current[FROSTED_MAX_GROUPS];
+    frosted_region previous[FROSTED_MAX_GROUPS];
+    uint32_t previous_count;
+    bool clear_full;
+    bool slab_moved;
+    bool needs_output_barrier;
+    prism_frosted_group groups[FROSTED_MAX_GROUPS];
+} frosted_plan;
+
+static void frosted_plan_record(void *raw, VkCommandBuffer cmd) {
+    const frosted_plan *p = raw;
+    if (!p || cmd == VK_NULL_HANDLE || !p->filter)
+        return;
+    prism_frosted_filter *filter = p->filter;
+    const int cls = p->is16f ? 1 : 0;
+    VkImage out_vk = flux_image_vk_image(p->output);
+
+    barrier_reuse_to_compute_write(cmd, out_vk);
+
+    /* Full clear on first use or when the slab origin moved; otherwise clear
+     * only the regions the previous submission claimed plus the ones this
+     * submission claims, which is the difference between a 4K clear and a
+     * slab-sized one. */
+    if (p->clear_full) {
+        if (filter->clear_pipelines[cls]) {
+            storage_clear_push pc = {
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = (uint32_t)flux_image_width(p->output),
+                .height = (uint32_t)flux_image_height(p->output),
+                .origin_x = 0,
+                .origin_y = 0,
+                .region_width = (uint32_t)flux_image_width(p->output),
+                .region_height = (uint32_t)flux_image_height(p->output),
+            };
+            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            barrier_compute_write_to_read_write(cmd, out_vk);
+        }
+    } else if (filter->clear_pipelines[cls]) {
+        for (uint32_t i = 0; i < p->previous_count; ++i) {
+            storage_clear_push pc = {
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = (uint32_t)flux_image_width(p->output),
+                .height = (uint32_t)flux_image_height(p->output),
+                .origin_x = p->previous[i].x,
+                .origin_y = p->previous[i].y,
+                .region_width = p->previous[i].width,
+                .region_height = p->previous[i].height,
+            };
+            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+        }
+        for (uint32_t i = 0; i < p->current_count; ++i) {
+            storage_clear_push pc = {
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = (uint32_t)flux_image_width(p->output),
+                .height = (uint32_t)flux_image_height(p->output),
+                .origin_x = p->current[i].x,
+                .origin_y = p->current[i].y,
+                .region_width = p->current[i].width,
+                .region_height = p->current[i].height,
+            };
+            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+        }
+        if (p->needs_output_barrier)
+            barrier_compute_write_to_read_write(cmd, out_vk);
+    }
+
+    if (p->group_count > 0 && filter->frosted_pipelines[cls]) {
+        const uint32_t out_w = (uint32_t)flux_image_width(p->output);
+        const uint32_t out_h = (uint32_t)flux_image_height(p->output);
+        for (uint32_t i = 0; i < p->current_count; ++i) {
+            const prism_frosted_group *g = &p->groups[i];
+            const frosted_region *reg = &p->current[i];
+            frosted_push pc = {
+                .input_handle = flux_image_bindless_handle(p->input),
+                .blurred_handle = flux_image_bindless_handle(p->blurred),
+                .sampler_handle = flux_device_default_sampler_handle(p->device),
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = out_w,
+                .height = out_h,
+                .origin_x = reg->x,
+                .origin_y = reg->y,
+                .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w,
+                           g->shape.bounds.h},
+                .corner_radius = g->shape.corner_radius,
+                .opacity = g->opacity * p->opacity,
+                .saturation = g->saturation >= 0.0f ? g->saturation : p->saturation,
+                .tint_strength = g->tint_strength >= 0.0f ? g->tint_strength : p->tint_strength,
+                .noise_intensity =
+                    g->noise_intensity >= 0.0f ? g->noise_intensity : p->noise_intensity,
+                .shadow_alpha = g->shadow_alpha,
+                .shadow_blur = g->shadow_blur,
+                .shadow_offset_y = g->shadow_offset_y,
+                .tint_color = g->tint_color,
+                .group_width = reg->width,
+                .group_height = reg->height,
+                .slab_origin_x = (float)p->slab_x,
+                .slab_origin_y = (float)p->slab_y,
+                .capture_width = (float)flux_image_width(p->input),
+                .capture_height = (float)flux_image_height(p->input),
+            };
+            uint32_t gx = (reg->width + PRISM_WG - 1) / PRISM_WG;
+            uint32_t gy = (reg->height + PRISM_WG - 1) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->frosted_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            if (i + 1 < p->current_count)
+                barrier_compute_write_to_read_write(cmd, out_vk);
+        }
+    }
+
+    barrier_compute_write_to_read(cmd, out_vk);
+}
+
 flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame *frame,
                                        const prism_frosted_desc *desc, prism_material_output *out) {
     if (!filter || !frame || !desc || !out)
@@ -378,170 +516,101 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
         flux_image_bindless_handle(desc->blurred_input) == FLUX_BINDLESS_INVALID)
         return FLUX_ERROR_UNSUPPORTED;
 
+    /* ADR-0147: the blurred input is normally a deferred flux_blur_filter
+     * output; materialize it so its dispatches precede ours. */
+    flux_result mat = flux_frame_materialize_image(frame, desc->blurred_input);
+    if (mat != FLUX_OK)
+        return mat;
+
     const uint32_t capture_width = flux_image_width(desc->input);
     const uint32_t capture_height = flux_image_height(desc->input);
 
     FLUX_PROFILE_ZONE(z_frosted, "prism.frosted.apply");
 
-    uint32_t current_count = 0;
-    frosted_region current_regions[FROSTED_MAX_GROUPS];
+    flux_result r = FLUX_OK;
+    frosted_filter_slot *slot = &filter->slots[flux_frame_index(frame)];
+    frosted_plan plan = {
+        .device = filter->device,
+        .filter = filter,
+        .input = desc->input,
+        .blurred = desc->blurred_input,
+        .slot_index = flux_frame_index(frame),
+        .is16f = slot->format == FLUX_FORMAT_RGBA16_SFLOAT,
+        .group_count = desc->group_count,
+        .opacity = desc->opacity,
+        .saturation = desc->saturation,
+        .tint_strength = desc->tint_strength,
+        .noise_intensity = desc->noise_intensity,
+    };
+
     uint32_t footprint_x0 = UINT32_MAX, footprint_y0 = UINT32_MAX;
     uint32_t footprint_x1 = 0u, footprint_y1 = 0u;
-
     for (uint32_t i = 0; i < desc->group_count; ++i) {
         frosted_region reg;
-        if (frosted_group_dispatch_bounds(&desc->groups[i], capture_width, capture_height, &reg)) {
-            current_regions[current_count++] = reg;
-            if (reg.x < footprint_x0)
-                footprint_x0 = reg.x;
-            if (reg.y < footprint_y0)
-                footprint_y0 = reg.y;
-            if (reg.x + reg.width > footprint_x1)
-                footprint_x1 = reg.x + reg.width;
-            if (reg.y + reg.height > footprint_y1)
-                footprint_y1 = reg.y + reg.height;
-        }
+        if (!frosted_group_dispatch_bounds(&desc->groups[i], capture_width, capture_height, &reg))
+            continue;
+        plan.groups[plan.current_count] = desc->groups[i];
+        plan.current[plan.current_count++] = reg;
+        if (reg.x < footprint_x0)
+            footprint_x0 = reg.x;
+        if (reg.y < footprint_y0)
+            footprint_y0 = reg.y;
+        if (reg.x + reg.width > footprint_x1)
+            footprint_x1 = reg.x + reg.width;
+        if (reg.y + reg.height > footprint_y1)
+            footprint_y1 = reg.y + reg.height;
     }
 
     uint32_t footprint_w = 1u;
     uint32_t footprint_h = 1u;
-    if (current_count > 0u) {
+    if (plan.current_count > 0u) {
         footprint_w = footprint_x1 - footprint_x0;
         footprint_h = footprint_y1 - footprint_y0;
     }
 
-    uint32_t slot_index = flux_frame_index(frame);
-    flux_result r = frosted_ensure_slot(filter, slot_index, desc->input, footprint_w, footprint_h);
+    r = frosted_ensure_slot(filter, plan.slot_index, desc->input, footprint_w, footprint_h);
     if (r != FLUX_OK)
         return r;
-    frosted_filter_slot *slot = &filter->slots[slot_index];
+    slot = &filter->slots[plan.slot_index];
+    /* The slot image is only known after ensure_slot; the snapshot must carry it
+     * because the replay runs long after this frame returns. */
+    plan.output = slot->output;
+    plan.is16f = slot->format == FLUX_FORMAT_RGBA16_SFLOAT;
 
-    const uint32_t slab_x = current_count > 0u ? footprint_x0 : 0u;
-    const uint32_t slab_y = current_count > 0u ? footprint_y0 : 0u;
-    bool slab_moved = slot->initialized && (slot->slab_x != slab_x || slot->slab_y != slab_y);
+    const uint32_t slab_x = plan.current_count > 0u ? footprint_x0 : 0u;
+    const uint32_t slab_y = plan.current_count > 0u ? footprint_y0 : 0u;
+    plan.slab_x = slab_x;
+    plan.slab_y = slab_y;
+    plan.slab_moved = slot->initialized && (slot->slab_x != slab_x || slot->slab_y != slab_y);
+    plan.clear_full = !slot->initialized || plan.slab_moved;
+    plan.previous_count = slot->initialized && !plan.slab_moved ? slot->previous_count : 0u;
+    if (plan.previous_count > 0u)
+        memcpy(plan.previous, slot->previous, plan.previous_count * sizeof(frosted_region));
+    plan.needs_output_barrier =
+        (plan.previous_count > 0u || plan.current_count > 0u) && desc->group_count > 0u;
 
-    for (uint32_t i = 0; i < current_count; ++i) {
-        current_regions[i].x -= slab_x;
-        current_regions[i].y -= slab_y;
+    /* Regions are expressed relative to the slab origin, which is what the
+     * shaders add back. Doing it here means the replay needs no geometry code. */
+    for (uint32_t i = 0; i < plan.current_count; ++i) {
+        plan.current[i].x -= slab_x;
+        plan.current[i].y -= slab_y;
     }
+    for (uint32_t i = 0; i < plan.previous_count; ++i) {
+        plan.previous[i].x -= slab_x;
+        plan.previous[i].y -= slab_y;
+    }
+
+    r = frosted_ensure_pipelines(filter, plan.is16f, true, desc->group_count > 0);
+    if (r != FLUX_OK)
+        return r;
+
     slot->slab_x = slab_x;
     slot->slab_y = slab_y;
     slot->capture_width = capture_width;
     slot->capture_height = capture_height;
-
-    bool is16f = slot->format == FLUX_FORMAT_RGBA16_SFLOAT;
-    r = frosted_ensure_pipelines(filter, is16f, true, desc->group_count > 0);
-    if (r != FLUX_OK)
-        return r;
-
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
-    VkImage out_vk = flux_image_vk_image(slot->output);
-
-    barrier_reuse_to_compute_write(cmd, out_vk);
-
-    const int cls = is16f ? 1 : 0;
-
-    // Clear previous footprints or initialize full output on first use or slab movement
-    if (!slot->initialized || slab_moved) {
-        if (filter->clear_pipelines[cls]) {
-            storage_clear_push pc = {
-                .output_handle = flux_image_bindless_storage_handle(slot->output),
-                .width = slot->width,
-                .height = slot->height,
-                .origin_x = 0,
-                .origin_y = 0,
-                .region_width = slot->width,
-                .region_height = slot->height,
-            };
-            uint32_t gx = (slot->width + PRISM_WG - 1u) / PRISM_WG;
-            uint32_t gy = (slot->height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-            barrier_compute_write_to_read_write(cmd, out_vk);
-        }
-    } else if (filter->clear_pipelines[cls]) {
-        for (uint32_t i = 0; i < slot->previous_count; ++i) {
-            storage_clear_push pc = {
-                .output_handle = flux_image_bindless_storage_handle(slot->output),
-                .width = slot->width,
-                .height = slot->height,
-                .origin_x = slot->previous[i].x,
-                .origin_y = slot->previous[i].y,
-                .region_width = slot->previous[i].width,
-                .region_height = slot->previous[i].height,
-            };
-            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
-            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-        }
-        for (uint32_t i = 0; i < current_count; ++i) {
-            storage_clear_push pc = {
-                .output_handle = flux_image_bindless_storage_handle(slot->output),
-                .width = slot->width,
-                .height = slot->height,
-                .origin_x = current_regions[i].x,
-                .origin_y = current_regions[i].y,
-                .region_width = current_regions[i].width,
-                .region_height = current_regions[i].height,
-            };
-            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
-            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-        }
-        if ((slot->previous_count > 0 || current_count > 0) && desc->group_count > 0)
-            barrier_compute_write_to_read_write(cmd, out_vk);
-    }
-
-    // Render frosted bodies
-    if (desc->group_count > 0 && filter->frosted_pipelines[cls]) {
-        for (uint32_t i = 0; i < desc->group_count; ++i) {
-            const prism_frosted_group *g = &desc->groups[i];
-            frosted_region reg;
-            if (!frosted_group_dispatch_bounds(g, capture_width, capture_height, &reg))
-                continue;
-
-            frosted_push pc = {
-                .input_handle = flux_image_bindless_handle(desc->input),
-                .blurred_handle = flux_image_bindless_handle(desc->blurred_input),
-                .sampler_handle = flux_device_default_sampler_handle(filter->device),
-                .output_handle = flux_image_bindless_storage_handle(slot->output),
-                .width = slot->width,
-                .height = slot->height,
-                .origin_x = reg.x - slab_x,
-                .origin_y = reg.y - slab_y,
-                .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w,
-                           g->shape.bounds.h},
-                .corner_radius = g->shape.corner_radius,
-                .opacity = g->opacity * desc->opacity,
-                .saturation = g->saturation >= 0.0f ? g->saturation : desc->saturation,
-                .tint_strength = g->tint_strength >= 0.0f ? g->tint_strength : desc->tint_strength,
-                .noise_intensity =
-                    g->noise_intensity >= 0.0f ? g->noise_intensity : desc->noise_intensity,
-                .shadow_alpha = g->shadow_alpha,
-                .shadow_blur = g->shadow_blur,
-                .shadow_offset_y = g->shadow_offset_y,
-                .tint_color = g->tint_color,
-                .group_width = reg.width,
-                .group_height = reg.height,
-                .slab_origin_x = (float)slot->slab_x,
-                .slab_origin_y = (float)slot->slab_y,
-                .capture_width = (float)slot->capture_width,
-                .capture_height = (float)slot->capture_height,
-            };
-
-            uint32_t gx = (reg.width + PRISM_WG - 1) / PRISM_WG;
-            uint32_t gy = (reg.height + PRISM_WG - 1) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->frosted_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-
-            if (i + 1 < desc->group_count)
-                barrier_compute_write_to_read_write(cmd, out_vk);
-        }
-    }
-
-    barrier_compute_write_to_read(cmd, out_vk);
-
     slot->initialized = true;
-    slot->previous_count = current_count;
-    memcpy(slot->previous, current_regions, current_count * sizeof(frosted_region));
+    slot->previous_count = plan.current_count;
+    memcpy(slot->previous, plan.current, plan.current_count * sizeof(frosted_region));
 
     *out = (prism_material_output){
         .image = slot->output,
@@ -550,6 +619,34 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
         .width = slot->width,
         .height = slot->height,
     };
+
+    /* Defer the dispatches (ADR-0147). The handle above is valid now; the work
+     * is replayed only if something requires the output. A plan that cannot take
+     * the pass falls back to recording here, which is always correct — pruning is
+     * an optimisation, never a correctness dependency. */
+    size_t plan_bytes =
+        offsetof(frosted_plan, groups) + sizeof(prism_frosted_group) * (size_t)plan.group_count;
+    prism_deferred_pass pass = PRISM_DEFERRED_PASS_INIT;
+    pass.output = slot->output;
+    pass.label = "prism.frosted";
+    pass.inputs[0] = desc->input;
+    pass.inputs[1] = desc->blurred_input;
+    pass.input_count = 2;
+
+    /* flux copies `plan` into its own arena, so this stack snapshot is safe. */
+    flux_deferred_token *token = nullptr;
+    r = prism_deferred_register(frame, &pass, frosted_plan_record, &plan, plan_bytes, &token);
+    if (r != FLUX_OK) {
+        /* Arena or plan exhausted: record eagerly so the frame is still right.
+         * Pruning is an optimisation, never a correctness dependency. */
+        frosted_plan_record(&plan, flux_frame_vk_command_buffer(frame));
+        token = nullptr;
+    }
+
+    /* The host draws this slab in a canvas pass, so it is the terminal consumer
+     * and the pass must run. A downstream pass would instead name the token. */
+    (void)prism_deferred_require(frame, token);
+
     FLUX_PROFILE_ZONE_END(z_frosted);
     return FLUX_OK;
 }

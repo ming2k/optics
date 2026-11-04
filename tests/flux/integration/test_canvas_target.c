@@ -114,6 +114,9 @@ int main(void) {
         bd.sigma = 6.0f;
         EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
         EXPECT(blurred != nullptr);
+        /* ADR-0147: the blur is deferred; materialize before the pass that
+         * samples it, since compute cannot be inserted inside a pass. */
+        EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 
         /* Composite the blurred capture onto the frame. */
         flux_color fc = flux_color_rgba(0, 0, 0, 255);
@@ -176,6 +179,7 @@ int main(void) {
         bd.sigma = 6.0f;
         EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
         EXPECT(blurred != nullptr);
+        EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
         EXPECT(
@@ -257,6 +261,7 @@ int main(void) {
         flux_image *blurred = nullptr;
         EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
         EXPECT(blurred != nullptr);
+        EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
         EXPECT(
@@ -307,6 +312,9 @@ int main(void) {
             flux_image *shadow = nullptr;
             EXPECT(flux_shadow_filter_apply(shadow_filter, frame, &sd, &shadow) == FLUX_OK);
             EXPECT(shadow != nullptr);
+            /* ADR-0147: the shadow is deferred; materialize before the pass
+             * that samples it (compute cannot run inside a render pass). */
+            EXPECT(flux_frame_materialize_image(frame, shadow) == FLUX_OK);
 
             /* White background so the black shadow is actually visible:
              * inside the offset square the coverage is near-opaque (colour
@@ -409,6 +417,7 @@ int main(void) {
         bd.sigma = FLUX_EFFECT_BLUR_SIGMA_MAX;
         flux_image *blurred = nullptr;
         EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
         EXPECT(
@@ -453,6 +462,7 @@ int main(void) {
         flux_image *blurred = nullptr;
         EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
         EXPECT(flux_image_format(blurred) == FLUX_FORMAT_RGBA8_UNORM);
+        EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
         EXPECT(

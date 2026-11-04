@@ -180,3 +180,5 @@ silent fallback. Its primitives have landed.
 | 0144 | [Never partial-paint a swapchain — damage-rect passes and departed subtrees](0144-partial-paint-requires-complete-image.md) | Accepted |
 | 0145 | [Wayland listener slots are a pinned, mechanically verified contract](0145-wayland-listener-slot-contract.md) | Accepted |
 | 0146 | [Composed layers advance in lockstep — synchronized subsurfaces, single present point](0146-composed-layers-advance-in-lockstep.md) | Accepted |
+| 0147 | [Deferred effect passes — register, require, flush, prune](0147-deferred-effect-passes.md) | Accepted |
+| 0148 | [A distance field owns its derivative — analytic normals, pow-free fields, one evaluation](0148-sdf-derivative-co-location-analytic-normals.md) | Accepted |

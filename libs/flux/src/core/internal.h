@@ -12,6 +12,7 @@
 #include <stdatomic.h>
 #include <vulkan/vulkan.h>
 
+#include "plan.h"     /* flux_plan: deferred passes (ADR-0147) */
 #include "platform.h" /* flux_platform_mutex + friends (OS shims) */
 
 /* Set the structured error info for this thread. Pass __func__ /
@@ -954,6 +955,11 @@ struct flux_frame {
      * true. Full-frame compatibility requests populate the surface extent. */
     flux_readback_region readback_region;
 
+    /* Deferred pass plan (ADR-0147). An effect registers a pass instead of
+     * recording its dispatches, so work nothing samples is pruned rather
+     * than executed. Lives on the frame: fixed arrays plus a bump arena, so
+     * the plan costs no allocation and dies with the slot. */
+    flux_plan plan;
     /* Scene-draw caches (scene.c). begin_frame re-initialises this
      * whole struct, so they are per-frame by construction.
      *

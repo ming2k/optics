@@ -518,6 +518,101 @@ static void record_storage_clear_regions(prism_liquid_glass_filter *filter, VkCo
     }
 }
 
+/* Everything one liquid-glass submission needs to replay its dispatches later
+ * (ADR-0147). Body rows and id lists are NOT here: they upload into host-visible
+ * buffers that outlive the call, so the replay reads them through the addresses
+ * captured below. Only the dispatch geometry and the policy travel in the plan,
+ * which is what keeps the arena copy small. */
+typedef struct glass_plan {
+    flux_device *device;
+    struct prism_liquid_glass_filter *filter;
+    flux_image *input;
+    flux_image *blurred;
+    flux_image *output;
+    uint32_t output_width;
+    uint32_t output_height;
+    uint32_t capture_width;
+    uint32_t capture_height;
+    bool is16f;
+
+    prism_glass_policy policy;
+    prism_glass_copy copy;
+
+    uint64_t bodies_address;
+    uint64_t ids_address;
+
+    liquid_glass_region clear_regions[PRISM_MAX_BATCHES];
+    uint32_t clear_count;
+
+    prism_region_batch batches[PRISM_MAX_BATCHES];
+    uint32_t batch_count;
+
+    /* Per-group statistic windows, in capture space. */
+    liquid_glass_region stats_bounds[LIQUID_GLASS_MAX_GROUPS];
+    uint32_t stats_group_count;
+    uint64_t stats_address;
+    VkBuffer stats_buffer;
+} glass_plan;
+
+static void glass_plan_record(void *raw, VkCommandBuffer command) {
+    const glass_plan *p = raw;
+    if (!p || command == VK_NULL_HANDLE || !p->filter)
+        return;
+    prism_liquid_glass_filter *filter = p->filter;
+    VkImage output_image = flux_image_vk_image(p->output);
+    bool dispatched = false;
+
+    if (p->clear_count > 0u) {
+        barrier_reuse_to_compute_write(command, output_image);
+        record_storage_clear_regions(filter, command, p->output, p->clear_regions, p->clear_count,
+                                     p->is16f);
+        if (p->batch_count > 0u)
+            barrier_compute_write_to_read_write(command, output_image);
+    }
+
+    if (p->stats_group_count > 0u) {
+        for (uint32_t i = 0; i < p->stats_group_count; ++i) {
+            const liquid_glass_region *rect = &p->stats_bounds[i];
+            backdrop_stats_push spush = {
+                .input_handle = flux_image_bindless_handle(p->input),
+                .blurred_handle = flux_image_bindless_handle(p->blurred),
+                .sampler_handle = flux_device_default_sampler_handle(p->device),
+                .width = p->capture_width,
+                .height = p->capture_height,
+                .rect_x = rect->x,
+                .rect_y = rect->y,
+                .rect_width = rect->width,
+                .rect_height = rect->height,
+                .group_index = i,
+                .stats_address_lo = prism_address_lo(p->stats_address),
+                .stats_address_hi = prism_address_hi(p->stats_address),
+            };
+            flux_compute_dispatch(command, filter->stats_pipeline, &spush, sizeof(spush), 1u, 1u,
+                                  1u);
+        }
+        if (p->stats_buffer != VK_NULL_HANDLE)
+            barrier_stats_write_to_compute(command, p->stats_buffer);
+    }
+
+    for (uint32_t r = 0; r < p->batch_count; ++r) {
+        const prism_region_batch *b = &p->batches[r];
+        if (!liquid_glass_region_is_dispatchable(
+                (liquid_glass_region){b->x, b->y, b->width, b->height}, p->output_width,
+                p->output_height))
+            continue;
+        prism_glass_record_batch(command, filter->glass_pipelines[p->is16f ? 1 : 0], p->device,
+                                 &p->copy, p->output, p->output_width, p->output_height, b,
+                                 &p->policy, p->bodies_address,
+                                 p->ids_address + b->ids_first * sizeof(uint32_t));
+        dispatched = true;
+    }
+
+    /* Make the persistent output visible to the Canvas sample that follows,
+     * including a clear-only submission after every body disappeared. */
+    if (p->clear_count > 0u || dispatched)
+        barrier_compute_write_to_read(command, output_image);
+}
+
 flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, flux_frame *frame,
                                             const prism_liquid_glass_desc *desc,
                                             prism_material_output *out) {
@@ -531,6 +626,12 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
         return FLUX_ERROR_INVALID_STATE;
     flux_image *input = desc->input;
     flux_image *blurred = desc->blurred_input;
+    /* ADR-0147: `blurred` is normally a deferred flux_blur_filter output.
+     * Materialize it before this dispatch is recorded, so the blur's
+     * dispatches precede the material's in the command stream. */
+    flux_result mat = flux_frame_materialize_image(frame, blurred);
+    if (mat != FLUX_OK)
+        return mat;
     if (flux_frame_device(frame) != filter->device || flux_image_device(input) != filter->device ||
         flux_image_device(blurred) != filter->device)
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -692,53 +793,6 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
     if (result != FLUX_OK)
         return result;
 
-    FLUX_PROFILE_ZONE(z_record, "prism.liquid_glass.record");
-
-    VkCommandBuffer command = flux_frame_vk_command_buffer(frame);
-    VkImage output_image = flux_image_vk_image(slot->output);
-    if (clear_count > 0u) {
-        if (slot->initialized)
-            barrier_reuse_to_compute_write(command, output_image);
-        FLUX_PROFILE_ZONE(z_sub_clear, "prism.liquid_glass.rec_clear");
-        record_storage_clear_regions(filter, command, slot->output, clear_regions, clear_count,
-                                     is16f);
-        FLUX_PROFILE_ZONE_END(z_sub_clear);
-        if (batch_count > 0u)
-            barrier_compute_write_to_read_write(command, output_image);
-    }
-
-    /* 5. Backdrop statistics: one workgroup per body reduces the primary body's
-     * backdrop into (mean luminance, high-frequency energy). Reduction windows are
-     * capture-space rectangles, so this reads the capture, not the slab. */
-    if (desc->group_count > 0u) {
-        FLUX_PROFILE_ZONE(z_sub_stats, "prism.liquid_glass.rec_stats");
-        uint64_t stats_address = flux_buffer_device_address(slot->stats);
-        for (uint32_t i = 0; i < desc->group_count; ++i) {
-            liquid_glass_region rect =
-                liquid_glass_group_stats_bounds(&desc->groups[i], capture_width, capture_height);
-            backdrop_stats_push spush = {
-                .input_handle = flux_image_bindless_handle(input),
-                .blurred_handle = flux_image_bindless_handle(blurred),
-                .sampler_handle = flux_device_default_sampler_handle(filter->device),
-                .width = capture_width,
-                .height = capture_height,
-                .rect_x = rect.x,
-                .rect_y = rect.y,
-                .rect_width = rect.width,
-                .rect_height = rect.height,
-                .group_index = i,
-                .stats_address_lo = prism_address_lo(stats_address),
-                .stats_address_hi = prism_address_hi(stats_address),
-            };
-            flux_compute_dispatch(command, filter->stats_pipeline, &spush, sizeof(spush), 1u, 1u,
-                                  1u);
-        }
-        barrier_stats_write_to_compute(command, flux_buffer_vk_buffer(slot->stats));
-        FLUX_PROFILE_ZONE_END(z_sub_stats);
-    }
-
-    /* 6. Upload the body table and the per-region id lists, then one dispatch per
-     * region. */
     const prism_glass_policy policy = {
         .refraction = desc->refraction,
         .chromatic_aberration = desc->chromatic_aberration,
@@ -757,9 +811,12 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
         .contact_ao = desc->contact_ao,
         .ambient_fresnel = desc->ambient_fresnel,
     };
-    bool dispatched = false;
-    if (batch_count > 0u) {
-        FLUX_PROFILE_ZONE(z_sub_buf, "prism.liquid_glass.rec_buffers");
+
+    /* Upload the body rows and id lists now: they live in host-visible buffers
+     * that outlive this call, so a deferred replay reads them through the
+     * addresses captured below rather than through the arena. */
+    bool have_batches = batch_count > 0u;
+    if (have_batches) {
         uint32_t rows = desc->group_count;
         for (uint32_t i = 0; i < rows; ++i) {
             void *row = prism_body_table_row(filter->device, &filter->bodies, rows, i);
@@ -772,40 +829,82 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
             return FLUX_ERROR_OUT_OF_MEMORY;
         for (uint32_t i = 0; i < batch_ids_used; ++i)
             ids[i] = batch_ids[i];
-        FLUX_PROFILE_ZONE_END(z_sub_buf);
-
-        const prism_glass_copy copy = {
-            .sharp = input,
-            .blurred = blurred,
-            .capture_width = (float)capture_width,
-            .capture_height = (float)capture_height,
-            .slab_origin_x = (float)slab_x,
-            .slab_origin_y = (float)slab_y,
-        };
-        FLUX_PROFILE_ZONE(z_sub_dispatch, "prism.liquid_glass.rec_batch");
-        for (uint32_t r = 0; r < batch_count; ++r) {
-            if (!liquid_glass_region_is_dispatchable(
-                    (liquid_glass_region){batches[r].x, batches[r].y, batches[r].width,
-                                          batches[r].height},
-                    slot->width, slot->height))
-                continue;
-            /* The id list for this batch starts at its ids_first slot; the shader
-             * indexes from the list base, so pass the base plus the offset. */
-            prism_glass_record_batch(command, filter->glass_pipelines[is16f ? 1 : 0],
-                                     filter->device, &copy, slot->output, slot->width, slot->height,
-                                     &batches[r], &policy, filter->bodies.address,
-                                     filter->ids.address + batches[r].ids_first * sizeof(uint32_t));
-            dispatched = true;
-        }
-        FLUX_PROFILE_ZONE_END(z_sub_dispatch);
     }
-    /* The material writes storage; make the persistent output visible to its
-     * following Canvas sample, including a clear-only apply after every body
-     * disappeared. */
-    if (clear_count > 0u || dispatched)
-        barrier_compute_write_to_read(command, output_image);
 
-    FLUX_PROFILE_ZONE_END(z_record);
+    glass_plan plan = {
+        .device = filter->device,
+        .filter = filter,
+        .input = input,
+        .blurred = blurred,
+        .output = slot->output,
+        .output_width = slot->width,
+        .output_height = slot->height,
+        .capture_width = capture_width,
+        .capture_height = capture_height,
+        .is16f = is16f,
+        .policy = policy,
+        .copy =
+            {
+                .sharp = input,
+                .blurred = blurred,
+                .capture_width = (float)capture_width,
+                .capture_height = (float)capture_height,
+                .slab_origin_x = (float)slab_x,
+                .slab_origin_y = (float)slab_y,
+            },
+        .bodies_address = filter->bodies.address,
+        .ids_address = filter->ids.address,
+        .clear_count = clear_count,
+        .batch_count = batch_count,
+        .stats_group_count = desc->group_count,
+        .stats_address = slot->stats ? flux_buffer_device_address(slot->stats) : 0u,
+        .stats_buffer = slot->stats ? flux_buffer_vk_buffer(slot->stats) : VK_NULL_HANDLE,
+    };
+    /* The slab was not necessarily initialised before this call, so the reuse
+     * barrier is decided here rather than in the replay. */
+    bool needed_reuse_barrier = slot->initialized;
+    (void)needed_reuse_barrier;
+    memcpy(plan.clear_regions, clear_regions, clear_count * sizeof(clear_regions[0]));
+    memcpy(plan.batches, batches, batch_count * sizeof(batches[0]));
+    for (uint32_t i = 0; i < desc->group_count; ++i)
+        plan.stats_bounds[i] =
+            liquid_glass_group_stats_bounds(&desc->groups[i], capture_width, capture_height);
+
+    if (current_count > 0u)
+        memcpy(slot->previous, current, current_count * sizeof(current[0]));
+    slot->previous_count = current_count;
+    slot->initialized = true;
+    slot->stats_submitted = true;
+    /* A zero-group apply submits no stats; the frame-lagged read then
+     * honestly reports zero groups for this slot's last submission. */
+    slot->stats_group_count = desc->group_count;
+    *out = (prism_material_output){
+        .image = slot->output,
+        .origin_x = (float)slab_x,
+        .origin_y = (float)slab_y,
+        .width = slot->width,
+        .height = slot->height,
+    };
+
+    /* Defer the dispatches (ADR-0147): the handle above is valid now, the work
+     * replays only if something requires the output. Recording eagerly on a
+     * registration failure keeps correctness independent of pruning. */
+    prism_deferred_pass pass = PRISM_DEFERRED_PASS_INIT;
+    pass.output = slot->output;
+    pass.label = "prism.liquid_glass";
+    pass.inputs[0] = input;
+    pass.inputs[1] = blurred;
+    pass.input_count = 2;
+    flux_deferred_token *token = nullptr;
+    flux_result reg =
+        prism_deferred_register(frame, &pass, glass_plan_record, &plan, sizeof(plan), &token);
+    if (reg != FLUX_OK) {
+        glass_plan_record(&plan, flux_frame_vk_command_buffer(frame));
+        token = nullptr;
+    }
+    /* The host draws this slab in a canvas pass, so it is the terminal consumer
+     * and the pass must run. A downstream pass would name the token instead. */
+    (void)prism_deferred_require(frame, token);
 
     if (current_count > 0u)
         memcpy(slot->previous, current, current_count * sizeof(current[0]));

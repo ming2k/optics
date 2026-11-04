@@ -25,6 +25,13 @@ test_helpers_lib = static_library('test_helpers',
 core_tests_build_dir = meson.current_build_dir()
 glslang = find_program('glslangValidator', required : true)
 
+# The single source of truth for the SDF field and its derivative: the same
+# header the shipped materials include. Declared as a dependency of every
+# target that compiles it, so editing it invalidates the SPIR-V rather than
+# leaving a stale byproduct (the ccache trap ADR-0118 records).
+flux_sdf_glsl = files(meson.project_source_root() / 'libs/flux/include/flux/shaders/flux_sdf.glsl')
+flux_sdf_inc = '-I' + meson.project_source_root() / 'libs/flux/include/flux/shaders'
+
 # libdl for the fault-injection test's dlsym(RTLD_NEXT); on glibc >= 2.34
 # this resolves to libc, which is fine.
 dl_dep = cc.find_library('dl', required : false)

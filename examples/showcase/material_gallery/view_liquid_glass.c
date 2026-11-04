@@ -123,5 +123,7 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     desc.rim_light = 0.70f;
     desc.size_reference = 160.0f * l->scale;
     desc.size_scale_min = 0.65f;
-    (void)prism_liquid_glass_filter_apply(app->glass_filter, frame, &desc, &app->glass_out);
+    prism_material_output out = {};
+    if (prism_liquid_glass_filter_apply(app->glass_filter, frame, &desc, &out) == FLUX_OK)
+        gallery_emit_output(app, &out);
 }

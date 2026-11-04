@@ -11,10 +11,17 @@ The `tools/` directory hosts the **machine-enforced architecture guardrails, bui
 All local verification and automatic remediation workflow is consolidated under the unified cross-platform CLI:
 
 ```bash
-# Run all core architecture & quality guardrails in sequence
+# Run the FULL gate set: 8 architecture guardrails + clang-tidy + the bench SLA.
+# This is the command AGENTS.md means by "verify through the unified gatekeeper".
 ./tools/optics check
 
-# Run a specific guardrail check (format, boundary, lockstep, stdout, symbols, docs, tidy)
+# Quick loop while iterating: the 8 architecture guardrails only.
+# Skips clang-tidy (~2 min) and the bench SLA. Do not declare a task complete
+# on --fast alone — that is the whole reason the two modes are named apart.
+./tools/optics check --fast
+
+# Run a specific guardrail check (format, boundary, lockstep, stdout, listeners,
+# symbols, leaks, docs, tidy, bench)
 ./tools/optics check boundary
 ./tools/optics check lockstep
 

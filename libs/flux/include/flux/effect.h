@@ -125,7 +125,15 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_blur(VkCommandBuffer cmd,
  *
  * The image returned by apply is borrowed from the filter and remains valid
  * until the same slot is applied again, the filter is released, or its input
- * extent/format changes. Do not release the returned image. */
+ * extent/format changes. Do not release the returned image.
+ *
+ * The work is DEFERRED (ADR-0147): apply registers a pass and returns the
+ * handle immediately, but the four dispatches are only built when something
+ * requires the pixels. A pass nothing samples is pruned at submit and costs
+ * no GPU time, so callers do not need to guard the call by hand. Consumers
+ * that record their own compute (Prism materials, custom passes) call
+ * flux_frame_materialize_image at their boundary; a canvas draw that samples
+ * a still-pending output is rejected with FLUX_ERROR_INVALID_STATE. */
 typedef struct flux_blur_filter flux_blur_filter;
 
 FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_create(flux_device *device,
@@ -137,8 +145,13 @@ FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_apply(flux_blur_filter *fil
                                                            const flux_effect_blur_desc *desc,
                                                            flux_image **out);
 
-/* Borrow the slot's current valid blurred output without re-recording the
- * Dual-Kawase pyramid dispatch into `frame`'s command buffer.
+/* Borrow the slot's current valid blurred output without re-registering the
+ * Dual-Kawase pyramid dispatch.
+ *
+ * ADR-0147: the returned image may belong to a deferred pass that has not
+ * been executed yet. Materialize it (`flux_frame_materialize_image`) before
+ * anything samples it; a draw inside a canvas pass that reaches a pending
+ * output is rejected.
  *
  * Errors:
  *   FLUX_ERROR_INVALID_ARGUMENT — null filter/frame/out.
@@ -225,7 +238,10 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_shadow(VkCommandBuffer cmd,
  * Accepts the same flux_effect_shadow_desc as flux_effect_shadow (its `next`
  * must be NULL). The image returned by apply is borrowed from the filter and
  * remains valid until the same slot is applied again, the filter is
- * released, or its input extent/format changes. Do not release it. */
+ * released, or its input extent/format changes. Do not release it.
+ *
+ * Deferred like the blur (ADR-0147): nothing samples the shadow, nothing
+ * runs. Materialize it at a pass boundary before a canvas draw consumes it. */
 typedef struct flux_shadow_filter flux_shadow_filter;
 
 FLUX_NODISCARD FLUX_API flux_result flux_shadow_filter_create(flux_device *device,

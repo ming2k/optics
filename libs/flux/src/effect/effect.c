@@ -204,15 +204,11 @@ typedef struct output_entry {
  * Eviction is LRU over unleased entries and parks the resources on the device
  * retire queue, so eviction at lease time is safe with batches still in
  * flight. */
-#define EFFECT_POOL_BUDGET_BYTES (256ull * 1024ull * 1024ull)
-/* The floor is exactly what one operation needs at once: `flux_effect_shadow`
- * leases two intermediates and one output, `flux_effect_blur` one and one. Any
- * less would make a single 4K shadow impossible. Per pool, the working ceiling
- * is therefore `max(EFFECT_POOL_BUDGET_BYTES, 4 * transient_bytes(w, h, fmt))` —
- * at 3840x2160 RGBA16F that is 4 x 66 MiB = 264 MiB, marginally above the
- * nominal budget. Stated as a formula rather than a number because it is the
- * floor, not the budget, that binds on a 4K display. */
-#define EFFECT_POOL_MIN_ENTRIES 4u
+/* Bounding the pool by bytes with a tight budget: 32 MiB per pool
+ * bounds steady-state memory while EFFECT_POOL_MIN_ENTRIES (2) guarantees
+ * progress for large dispatches without hoarding stale textures. */
+#define EFFECT_POOL_BUDGET_BYTES (32ull * 1024ull * 1024ull)
+#define EFFECT_POOL_MIN_ENTRIES 2u
 
 /* Bytes one pooled transient of this key occupies, assuming the 4-byte-per-
  * channel floor. 16F keys double it via the format's own component size. */
@@ -312,8 +308,6 @@ typedef struct blur_filter_slot {
     uint32_t width;
     uint32_t height;
     flux_format format;
-    flux_image *half;
-    flux_image *quarter;
     flux_image *output;
     bool valid;
 } blur_filter_slot;
@@ -321,21 +315,87 @@ typedef struct blur_filter_slot {
 struct flux_blur_filter {
     atomic_uint ref_count;
     flux_device *device; /* retained; slot images hold weak device refs */
+    flux_image *half;
+    flux_image *quarter;
+    uint32_t scratch_width;
+    uint32_t scratch_height;
+    flux_format scratch_format;
     blur_filter_slot slots[FLUX_MAX_FRAMES_IN_FLIGHT];
 };
+
+/* Parameters a deferred blur pass replays (ADR-0147). Copied into the
+ * frame's plan arena, so the descriptor and region list may live on the
+ * caller's stack. */
+typedef struct blur_plan_params {
+    effect_state *st;
+    flux_device *device;
+    flux_image *input;
+    flux_image *half;
+    flux_image *quarter;
+    flux_image *output;
+    float sigma;
+    uint32_t root_width;
+    uint32_t root_height;
+    bool is16f;
+    uint32_t region_count;
+    flux_effect_region regions[];
+} blur_plan_params;
+
+static void record_backdrop_filter(effect_state *st, flux_device *device, VkCommandBuffer cmd,
+                                   flux_image *input, flux_image *half, flux_image *quarter,
+                                   flux_image *output, float requested_sigma,
+                                   const flux_effect_region *regions, uint32_t region_count,
+                                   bool is16f);
+
+static void blur_pass_record(void *raw, VkCommandBuffer cmd) {
+    blur_plan_params *p = raw;
+    if (!p || cmd == VK_NULL_HANDLE)
+        return;
+    record_backdrop_filter(p->st, p->device, cmd, p->input, p->half, p->quarter, p->output,
+                           p->sigma, p->region_count ? p->regions : nullptr, p->region_count,
+                           p->is16f);
+}
 
 typedef struct shadow_filter_slot {
     uint32_t width;
     uint32_t height;
     flux_format format;
+    flux_image *output;
+} shadow_filter_slot;
+
+/* Parameters a deferred shadow pass replays (ADR-0147). The descriptor's
+ * scalar policy is copied by value, so the caller's stack copy may die. */
+typedef struct shadow_plan_params {
+    effect_state *st;
+    flux_device *device;
+    flux_image *mask;
     flux_image *ping;
     flux_image *pong;
     flux_image *output;
-} shadow_filter_slot;
+    flux_effect_shadow_desc desc;
+} shadow_plan_params;
+
+static flux_result record_shadow_dispatch(effect_state *st, flux_device *d, VkCommandBuffer cmd,
+                                          flux_image *mask, flux_image *ping, flux_image *pong,
+                                          flux_image *output, const flux_effect_shadow_desc *desc,
+                                          bool is16f);
+
+static void shadow_pass_record(void *raw, VkCommandBuffer cmd) {
+    shadow_plan_params *p = raw;
+    if (!p || cmd == VK_NULL_HANDLE)
+        return;
+    (void)record_shadow_dispatch(p->st, p->device, cmd, p->mask, p->ping, p->pong, p->output,
+                                 &p->desc, flux_image_format(p->mask) == FLUX_FORMAT_RGBA16_SFLOAT);
+}
 
 struct flux_shadow_filter {
     atomic_uint ref_count;
     flux_device *device; /* retained; slot images hold weak device refs */
+    flux_image *ping;
+    flux_image *pong;
+    uint32_t scratch_width;
+    uint32_t scratch_height;
+    flux_format scratch_format;
     shadow_filter_slot slots[FLUX_MAX_FRAMES_IN_FLIGHT];
 };
 
@@ -747,6 +807,18 @@ flux_result flux_effect_blur(VkCommandBuffer cmd, const flux_effect_blur_desc *d
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
     flux_image *in = desc->input;
+    /* This primitive records straight into `cmd` and does not participate in the
+     * plan, so it can neither require producers nor be pruned. What it MUST not do
+     * is sample an output whose pass has not run: that reads last frame's pixels
+     * under this frame's handle (ADR-0147). Checked here — after every descriptor
+     * field has been validated and before the image is dereferenced, so a garbage
+     * pointer in a validation test still gets the argument error it expects. */
+    if (in->deferred_pending) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "exact blur input is a deferred pass output that has not executed; "
+                  "materialize it or use flux_blur_filter_apply instead");
+        return FLUX_ERROR_INVALID_STATE;
+    }
     flux_device *d = in->device;
     if (in->bindless == FLUX_BINDLESS_INVALID) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "blur input lacks sampled bindless handle");
@@ -902,6 +974,14 @@ flux_result flux_effect_shadow(VkCommandBuffer cmd, const flux_effect_shadow_des
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
     flux_image *in = desc->input;
+    /* Same rule as the exact blur, and the same placement: after descriptor
+     * validation, before the image is dereferenced. */
+    if (in->deferred_pending) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "exact shadow input is a deferred pass output that has not executed; "
+                  "materialize it or use flux_shadow_filter_apply instead");
+        return FLUX_ERROR_INVALID_STATE;
+    }
     flux_device *d = in->device;
     if (in->bindless == FLUX_BINDLESS_INVALID) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "shadow input lacks sampled bindless handle");
@@ -996,61 +1076,71 @@ void flux_blur_filter_release(flux_blur_filter *filter) {
     if (atomic_fetch_sub_explicit(&filter->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
     flux_device *device = filter->device;
+    if (filter->quarter)
+        flux_image_release(filter->quarter);
+    if (filter->half)
+        flux_image_release(filter->half);
     for (uint32_t i = 0; i < FLUX_MAX_FRAMES_IN_FLIGHT; ++i) {
         if (filter->slots[i].output)
             flux_image_release(filter->slots[i].output);
-        if (filter->slots[i].quarter)
-            flux_image_release(filter->slots[i].quarter);
-        if (filter->slots[i].half)
-            flux_image_release(filter->slots[i].half);
     }
     flux_internal_free(device, filter);
     flux_device_release(device);
 }
 
+static flux_result blur_filter_ensure_scratch(flux_blur_filter *filter, uint32_t in_w,
+                                              uint32_t in_h, flux_format storage_format) {
+    if (filter->half && filter->quarter && filter->scratch_width == in_w &&
+        filter->scratch_height == in_h && filter->scratch_format == storage_format)
+        return FLUX_OK;
+
+    if (filter->quarter)
+        flux_image_release(filter->quarter);
+    if (filter->half)
+        flux_image_release(filter->half);
+    filter->half = nullptr;
+    filter->quarter = nullptr;
+
+    uint32_t half_width = (in_w + 1u) / 2u;
+    uint32_t half_height = (in_h + 1u) / 2u;
+    uint32_t quarter_width = (half_width + 1u) / 2u;
+    uint32_t quarter_height = (half_height + 1u) / 2u;
+    flux_result r = flux_image_create_compute_writable(filter->device, half_width, half_height,
+                                                       storage_format, &filter->half);
+    if (r != FLUX_OK)
+        return r;
+    r = flux_image_create_compute_writable(filter->device, quarter_width, quarter_height,
+                                           storage_format, &filter->quarter);
+    if (r != FLUX_OK) {
+        flux_image_release(filter->half);
+        filter->half = nullptr;
+        return r;
+    }
+    filter->scratch_width = in_w;
+    filter->scratch_height = in_h;
+    filter->scratch_format = storage_format;
+    return FLUX_OK;
+}
+
 static flux_result blur_filter_ensure_slot(flux_blur_filter *filter, uint32_t index,
                                            const flux_image *input, flux_format storage_format) {
     blur_filter_slot *slot = &filter->slots[index];
-    if (slot->half && slot->quarter && slot->output && slot->width == input->width &&
-        slot->height == input->height && slot->format == storage_format)
+    if (slot->output && slot->width == input->width && slot->height == input->height &&
+        slot->format == storage_format)
         return FLUX_OK;
 
     if (slot->output)
         flux_image_release(slot->output);
-    if (slot->quarter)
-        flux_image_release(slot->quarter);
-    if (slot->half)
-        flux_image_release(slot->half);
     *slot = (blur_filter_slot){0};
 
-    uint32_t half_width = (input->width + 1u) / 2u;
-    uint32_t half_height = (input->height + 1u) / 2u;
-    uint32_t quarter_width = (half_width + 1u) / 2u;
-    uint32_t quarter_height = (half_height + 1u) / 2u;
-    flux_result r = flux_image_create_compute_writable(filter->device, half_width, half_height,
-                                                       storage_format, &slot->half);
+    flux_result r = flux_image_create_compute_writable(filter->device, input->width, input->height,
+                                                       storage_format, &slot->output);
     if (r != FLUX_OK)
         return r;
-    r = flux_image_create_compute_writable(filter->device, quarter_width, quarter_height,
-                                           storage_format, &slot->quarter);
-    if (r != FLUX_OK)
-        goto fail;
-    r = flux_image_create_compute_writable(filter->device, input->width, input->height,
-                                           storage_format, &slot->output);
-    if (r != FLUX_OK)
-        goto fail;
     slot->width = input->width;
     slot->height = input->height;
     slot->format = storage_format;
     return FLUX_OK;
-
-fail:
-    if (slot->quarter)
-        flux_image_release(slot->quarter);
-    if (slot->half)
-        flux_image_release(slot->half);
-    *slot = (blur_filter_slot){0};
-    return r;
 }
 
 static bool map_effect_region(const flux_effect_region *region, uint32_t root_width,
@@ -1130,7 +1220,8 @@ static void record_backdrop_pass(effect_state *st, flux_device *device, VkComman
 }
 
 static void record_backdrop_filter(effect_state *st, flux_device *device, VkCommandBuffer cmd,
-                                   flux_image *input, blur_filter_slot *slot, float requested_sigma,
+                                   flux_image *input, flux_image *half, flux_image *quarter,
+                                   flux_image *output, float requested_sigma,
                                    const flux_effect_region *regions, uint32_t region_count,
                                    bool is16f) {
     float sigma = requested_sigma;
@@ -1140,22 +1231,22 @@ static void record_backdrop_filter(effect_state *st, flux_device *device, VkComm
         sigma = FLUX_EFFECT_BLUR_SIGMA_MAX;
 
     if (sigma == 0.0f) {
-        record_backdrop_pass(st, device, cmd, input, slot->output, 0.0f, 2u, input->width,
-                             input->height, regions, region_count, is16f);
+        record_backdrop_pass(st, device, cmd, input, output, 0.0f, 2u, input->width, input->height,
+                             regions, region_count, is16f);
         return;
     }
 
     /* Two pyramid levels provide a wide UI blur with fixed work. Sigma tunes
      * the sub-texel offsets rather than growing a per-pixel kernel loop. */
     float offset = fminf(fmaxf(sigma * 0.25f, 0.5f), 2.5f);
-    record_backdrop_pass(st, device, cmd, input, slot->half, offset, 0u, input->width,
-                         input->height, regions, region_count, is16f);
-    record_backdrop_pass(st, device, cmd, slot->half, slot->quarter, offset, 0u, input->width,
-                         input->height, regions, region_count, is16f);
-    record_backdrop_pass(st, device, cmd, slot->quarter, slot->half, offset, 1u, input->width,
-                         input->height, regions, region_count, is16f);
-    record_backdrop_pass(st, device, cmd, slot->half, slot->output, offset, 1u, input->width,
-                         input->height, regions, region_count, is16f);
+    record_backdrop_pass(st, device, cmd, input, half, offset, 0u, input->width, input->height,
+                         regions, region_count, is16f);
+    record_backdrop_pass(st, device, cmd, half, quarter, offset, 0u, input->width, input->height,
+                         regions, region_count, is16f);
+    record_backdrop_pass(st, device, cmd, quarter, half, offset, 1u, input->width, input->height,
+                         regions, region_count, is16f);
+    record_backdrop_pass(st, device, cmd, half, output, offset, 1u, input->width, input->height,
+                         regions, region_count, is16f);
 }
 
 flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
@@ -1224,6 +1315,9 @@ flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
     flux_result r = blur_filter_ensure_slot(filter, index, input, storage_format);
     if (r != FLUX_OK)
         return r;
+    r = blur_filter_ensure_scratch(filter, input->width, input->height, storage_format);
+    if (r != FLUX_OK)
+        return r;
 
     flux_platform_mutex_lock(&st->lock);
     r = ensure_backdrop_pipeline(filter->device, st, is16f);
@@ -1232,8 +1326,51 @@ flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
         return r;
 
     blur_filter_slot *slot = &filter->slots[index];
-    record_backdrop_filter(st, filter->device, flux_frame_vk_command_buffer(frame), input, slot,
-                           desc->sigma, regions, region_count, is16f);
+
+    /* Register the blur as a deferred pass instead of recording it
+     * (ADR-0147). The output handle is valid immediately; the four
+     * dispatches are built the first time something requires this image and
+     * never built if nothing does. A plan that cannot take the pass (full,
+     * arena exhausted, or no command pool) falls back to recording here,
+     * which is always correct — pruning is an optimisation, never a
+     * correctness dependency. */
+    size_t params_bytes =
+        sizeof(blur_plan_params) + (size_t)region_count * sizeof(flux_effect_region);
+    blur_plan_params *params =
+        flux_plan_alloc_params(&frame->plan, params_bytes, alignof(blur_plan_params));
+    uint32_t pass_index = UINT32_MAX;
+    if (params) {
+        params->st = st;
+        params->device = filter->device;
+        params->input = input;
+        params->half = filter->half;
+        params->quarter = filter->quarter;
+        params->output = slot->output;
+        params->sigma = desc->sigma;
+        params->root_width = input->width;
+        params->root_height = input->height;
+        params->is16f = is16f;
+        params->region_count = region_count;
+        if (region_count > 0)
+            memcpy(params->regions, regions, (size_t)region_count * sizeof(flux_effect_region));
+
+        flux_plan_pass_desc pass = {
+            .record = blur_pass_record,
+            .params = params,
+            .label = "flux.effect.blur",
+            .inputs = {input},
+            .input_count = 1,
+            .outputs = {slot->output},
+            .output_count = 1,
+        };
+        pass_index = flux_plan_register(&frame->plan, &pass);
+    }
+    if (pass_index == UINT32_MAX) {
+        frame->plan.fallback_total++;
+        record_backdrop_filter(st, filter->device, flux_frame_vk_command_buffer(frame), input,
+                               filter->half, filter->quarter, slot->output, desc->sigma, regions,
+                               region_count, is16f);
+    }
     slot->valid = true;
     *out = slot->output;
     return FLUX_OK;
@@ -1255,6 +1392,15 @@ flux_result flux_blur_filter_current(flux_blur_filter *filter, flux_frame *frame
     blur_filter_slot *slot = &filter->slots[index];
     if (!slot->valid || !slot->output)
         return FLUX_ERROR_INVALID_STATE;
+    /* ADR-0147: `valid` only says this slot's output belongs to the current
+     * recording; the pass that writes it may still be deferred. Handing back
+     * a pending image would let the caller sample last frame's pixels, so the
+     * query refuses until the work has actually run. */
+    if (flux_plan_image_pending(&frame->plan, slot->output)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "reusable blur output is deferred and not executed yet; materialize it first");
+        return FLUX_ERROR_INVALID_STATE;
+    }
     *out = slot->output;
     return FLUX_OK;
 }
@@ -1288,57 +1434,67 @@ void flux_shadow_filter_release(flux_shadow_filter *filter) {
     if (atomic_fetch_sub_explicit(&filter->ref_count, 1u, memory_order_acq_rel) != 1u)
         return;
     flux_device *device = filter->device;
+    if (filter->pong)
+        flux_image_release(filter->pong);
+    if (filter->ping)
+        flux_image_release(filter->ping);
     for (uint32_t i = 0; i < FLUX_MAX_FRAMES_IN_FLIGHT; ++i) {
         if (filter->slots[i].output)
             flux_image_release(filter->slots[i].output);
-        if (filter->slots[i].pong)
-            flux_image_release(filter->slots[i].pong);
-        if (filter->slots[i].ping)
-            flux_image_release(filter->slots[i].ping);
     }
     flux_internal_free(device, filter);
     flux_device_release(device);
 }
 
+static flux_result shadow_filter_ensure_scratch(flux_shadow_filter *filter, uint32_t in_w,
+                                                uint32_t in_h, flux_format storage_format) {
+    if (filter->ping && filter->pong && filter->scratch_width == in_w &&
+        filter->scratch_height == in_h && filter->scratch_format == storage_format)
+        return FLUX_OK;
+
+    if (filter->pong)
+        flux_image_release(filter->pong);
+    if (filter->ping)
+        flux_image_release(filter->ping);
+    filter->ping = nullptr;
+    filter->pong = nullptr;
+
+    flux_result r = flux_image_create_compute_writable(filter->device, in_w, in_h, storage_format,
+                                                       &filter->ping);
+    if (r != FLUX_OK)
+        return r;
+    r = flux_image_create_compute_writable(filter->device, in_w, in_h, storage_format,
+                                           &filter->pong);
+    if (r != FLUX_OK) {
+        flux_image_release(filter->ping);
+        filter->ping = nullptr;
+        return r;
+    }
+    filter->scratch_width = in_w;
+    filter->scratch_height = in_h;
+    filter->scratch_format = storage_format;
+    return FLUX_OK;
+}
+
 static flux_result shadow_filter_ensure_slot(flux_shadow_filter *filter, uint32_t index,
                                              const flux_image *input, flux_format storage_format) {
     shadow_filter_slot *slot = &filter->slots[index];
-    if (slot->ping && slot->pong && slot->output && slot->width == input->width &&
-        slot->height == input->height && slot->format == storage_format)
+    if (slot->output && slot->width == input->width && slot->height == input->height &&
+        slot->format == storage_format)
         return FLUX_OK;
 
     if (slot->output)
         flux_image_release(slot->output);
-    if (slot->pong)
-        flux_image_release(slot->pong);
-    if (slot->ping)
-        flux_image_release(slot->ping);
     *slot = (shadow_filter_slot){0};
 
     flux_result r = flux_image_create_compute_writable(filter->device, input->width, input->height,
-                                                       storage_format, &slot->ping);
+                                                       storage_format, &slot->output);
     if (r != FLUX_OK)
         return r;
-    r = flux_image_create_compute_writable(filter->device, input->width, input->height,
-                                           storage_format, &slot->pong);
-    if (r != FLUX_OK)
-        goto fail;
-    r = flux_image_create_compute_writable(filter->device, input->width, input->height,
-                                           storage_format, &slot->output);
-    if (r != FLUX_OK)
-        goto fail;
     slot->width = input->width;
     slot->height = input->height;
     slot->format = storage_format;
     return FLUX_OK;
-
-fail:
-    if (slot->pong)
-        flux_image_release(slot->pong);
-    if (slot->ping)
-        flux_image_release(slot->ping);
-    *slot = (shadow_filter_slot){0};
-    return r;
 }
 
 flux_result flux_shadow_filter_apply(flux_shadow_filter *filter, flux_frame *frame,
@@ -1394,6 +1550,9 @@ flux_result flux_shadow_filter_apply(flux_shadow_filter *filter, flux_frame *fra
     flux_result r = shadow_filter_ensure_slot(filter, index, input, storage_format);
     if (r != FLUX_OK)
         return r;
+    r = shadow_filter_ensure_scratch(filter, input->width, input->height, storage_format);
+    if (r != FLUX_OK)
+        return r;
 
     flux_platform_mutex_lock(&st->lock);
     r = ensure_shadow_pipeline(filter->device, st, is16f);
@@ -1402,10 +1561,39 @@ flux_result flux_shadow_filter_apply(flux_shadow_filter *filter, flux_frame *fra
         return r;
 
     shadow_filter_slot *slot = &filter->slots[index];
-    r = record_shadow_dispatch(st, filter->device, flux_frame_vk_command_buffer(frame), input,
-                               slot->ping, slot->pong, slot->output, desc, is16f);
-    if (r != FLUX_OK)
-        return r;
+
+    /* Register the shadow as a deferred pass, exactly as the blur does
+     * (ADR-0147). A shadow whose output nothing samples costs nothing; the
+     * eager dispatch below is the fallback when the plan cannot take it. */
+    shadow_plan_params *params =
+        flux_plan_alloc_params(&frame->plan, sizeof(*params), alignof(shadow_plan_params));
+    uint32_t pass_index = UINT32_MAX;
+    if (params) {
+        params->st = st;
+        params->device = filter->device;
+        params->mask = input;
+        params->ping = filter->ping;
+        params->pong = filter->pong;
+        params->output = slot->output;
+        params->desc = *desc;
+        flux_plan_pass_desc pass = {
+            .record = shadow_pass_record,
+            .params = params,
+            .label = "flux.effect.shadow",
+            .inputs = {input},
+            .input_count = 1,
+            .outputs = {slot->output},
+            .output_count = 1,
+        };
+        pass_index = flux_plan_register(&frame->plan, &pass);
+    }
+    if (pass_index == UINT32_MAX) {
+        frame->plan.fallback_total++;
+        r = record_shadow_dispatch(st, filter->device, flux_frame_vk_command_buffer(frame), input,
+                                   filter->ping, filter->pong, slot->output, desc, is16f);
+        if (r != FLUX_OK)
+            return r;
+    }
     *out = slot->output;
     return FLUX_OK;
 }

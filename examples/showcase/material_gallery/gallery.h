@@ -21,20 +21,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum view_mode {
-    VIEW_GRID = 1,
+typedef enum view_mode : uint32_t {
+    VIEW_RAW = 1,
     VIEW_GLASS = 2,
     VIEW_FROST = 3,
     VIEW_ACRYLIC = 4,
     VIEW_MICA = 5,
 } view_mode;
 
-typedef enum backdrop_kind {
-    BACKDROP_DYNAMIC = 0,
-    BACKDROP_AURORA = 1,
-    BACKDROP_SPATIAL_GRID = 2,
-    BACKDROP_BLACK = 3,
-    BACKDROP_WHITE = 4,
+typedef enum backdrop_kind : uint32_t {
+    BACKDROP_BOUNCING_TV = 0,
+    BACKDROP_SPATIAL_GRID = 1,
+    BACKDROP_BLACK = 2,
+    BACKDROP_WHITE = 3,
     BACKDROP_COUNT,
 } backdrop_kind;
 
@@ -56,6 +55,8 @@ typedef struct gallery_layout {
     float scale;
 } gallery_layout;
 
+#define GALLERY_MAX_OUTPUTS 8u
+
 typedef struct gallery_app {
     view_mode view;
     backdrop_kind backdrop;
@@ -69,6 +70,14 @@ typedef struct gallery_app {
     bool mica_alt;
     float time;
 
+    /* Bouncing TV Screen Saver State */
+    float dvd_x;
+    float dvd_y;
+    float dvd_vx;
+    float dvd_vy;
+    uint32_t dvd_bounce_count;
+    bool dvd_init;
+
     /* GPU resources */
     flux_arena arena;
     flux_image *capture;
@@ -78,13 +87,9 @@ typedef struct gallery_app {
     prism_acrylic_filter *acrylic_filter;
     prism_mica_filter *mica_filter;
 
-    /* Frame outputs */
-    /* Material outputs carry their own placement: a prism material paints only
-     * inside its footprints, so its image is slab-sized, not capture-sized. */
-    prism_material_output glass_out;
-    prism_material_output frost_out;
-    prism_material_output acrylic_out;
-    prism_material_output mica_out;
+    /* Active material layer outputs emitted for the current frame */
+    prism_material_output outputs[GALLERY_MAX_OUTPUTS];
+    uint32_t output_count;
 
     uint32_t width_px;
     uint32_t height_px;
@@ -100,9 +105,19 @@ void gallery_ui_build(gallery_app *app, lens *ui, const lens_input *in);
 /* Backdrop provider */
 void gallery_backdrop_render(gallery_app *app, flux_canvas *canvas, float W, float H);
 
+/* Output pipeline */
+void gallery_emit_output(gallery_app *app, const prism_material_output *out);
+
+/* Declarative Zen material helpers */
+void gallery_render_frosted(gallery_app *app, flux_frame *frame, flux_image *blurred,
+                            flux_rect bounds, float corner_radius, float saturation);
+void gallery_render_acrylic(gallery_app *app, flux_frame *frame, flux_image *blurred,
+                            flux_rect bounds, float corner_radius, float polarity,
+                            float noise_intensity, float border_width);
+void gallery_render_mica(gallery_app *app, flux_frame *frame, flux_image *blurred, flux_rect bounds,
+                         float corner_radius, prism_mica_kind kind, float polarity, bool inactive);
+
 /* View preparers */
-void gallery_view_grid_prepare(gallery_app *app, flux_frame *frame, flux_image *blurred,
-                               const gallery_layout *l);
 void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image *blurred,
                                 const gallery_layout *l);
 void gallery_view_frosted_prepare(gallery_app *app, flux_frame *frame, flux_image *blurred,

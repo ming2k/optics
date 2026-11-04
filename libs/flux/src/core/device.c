@@ -1321,8 +1321,17 @@ void flux_device_release(flux_device *d) {
         d->module_state_lock_initialized = false;
     }
 
-    if (d->default_sampler)
+    flux_bindless_handle default_samp_h =
+        atomic_load_explicit(&d->default_sampler_handle, memory_order_relaxed);
+    if (default_samp_h != FLUX_BINDLESS_INVALID) {
+        flux_bindless_release(d, default_samp_h);
+        atomic_store_explicit(&d->default_sampler_handle, FLUX_BINDLESS_INVALID,
+                              memory_order_relaxed);
+    }
+    if (d->default_sampler) {
         vkDestroySampler(d->device, d->default_sampler, nullptr);
+        d->default_sampler = VK_NULL_HANDLE;
+    }
     flux_dmabuf_acquire_semaphore_pool_destroy(d);
     /* The device is idle: every parked zombie is safe to destroy. This
      * must run before the bindless heap and allocator go away — zombie
@@ -1360,7 +1369,6 @@ void flux_device_release(flux_device *d) {
      * injected through VK_EXT_debug_utils are unrecoverable). */
     flux_observe_report_emit(d, FLUX_SCOPE_DEVICE);
     flux_observe_report_emit(d, FLUX_SCOPE_CONTEXT);
-    flux_observe_report_emit(d, FLUX_SCOPE_PROCESS);
     flux_observe_destroy(d);
     if (d->queue_lock_initialized) {
         flux_platform_mutex_destroy(&d->queue_lock);
@@ -1686,22 +1694,14 @@ static void zombie_destroy(flux_device *d, flux_retire_zombie *z) {
         flux_bindless_release(d, z->bindless_storage);
     if (z->view)
         vkDestroyImageView(d->device, z->view, nullptr);
-    if (z->image) {
+    if (z->image)
         vkDestroyImage(d->device, z->image, nullptr);
-        FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", 0);
-    }
-    if (z->buffer) {
+    if (z->buffer)
         vkDestroyBuffer(d->device, z->buffer, nullptr);
-        FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_buffer", "flux/core", 0);
-    }
-    if (z->sampler) {
+    if (z->sampler)
         vkDestroySampler(d->device, z->sampler, nullptr);
-        FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_sampler", "flux/core", 0);
-    }
-    if (z->pipeline) {
+    if (z->pipeline)
         vkDestroyPipeline(d->device, z->pipeline, nullptr);
-        FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_pipeline", "flux/core", 0);
-    }
     if (z->alloc.memory)
         flux_vk_deallocate(d, &z->alloc); /* releases its own ledger row */
     if (z->imported_memory) {

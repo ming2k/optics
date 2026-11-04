@@ -6,6 +6,15 @@ test_liquid_glass = executable('test_liquid_glass',
 )
 test('liquid_glass', test_liquid_glass, suite : 'integration')
 
+# GPU-bound liquid-glass microbenchmark (ADR-0148). Reports ms/frame, does not
+# assert: it exists so a shader change's real cost can be measured instead of
+# inferred from static instruction counts. Run directly, never under `meson test`.
+bench_liquid_glass_gpu = executable('bench_liquid_glass_gpu',
+  'bench_liquid_glass_gpu.c',
+  dependencies : [test_helpers_dep, prism_dep],
+  build_by_default : false,
+)
+
 # Layered backdrop compositor (prism): frost rects carrying glass bodies in
 # one dispatch — the glass samples the frosted layer, not the sharp capture.
 test_backdrop_layer = executable('test_backdrop_layer',

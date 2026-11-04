@@ -453,6 +453,111 @@ typedef struct flux_image_barrier {
 FLUX_API void flux_frame_pipeline_barrier(flux_frame *f, const flux_image_barrier *image_barriers,
                                           uint32_t count);
 
+/* ================================================================== */
+/*  Deferred pass registration (ADR-0147)                             */
+/* ================================================================== */
+
+/* This API takes a VkCommandBuffer, so it lives here rather than in core.h: a
+ * backend-agnostic caller must never see it. Libraries that own compute work
+ * and already depend on <flux/vulkan.h> — prism is the one that does — use it to
+ * put their dispatches under the frame's plan, so work nothing samples is
+ * pruned instead of recorded. */
+
+/* Opaque handle to one registered pass. Callers never dereference it; it exists
+ * so a pass can name an input as "the output of that pass" without exposing
+ * indices or Vulkan handles. */
+typedef struct flux_deferred_token flux_deferred_token;
+
+/* Inputs and outputs one registered pass may declare. A Prism material reads a
+ * capture plus a blur and writes one slab; two outputs leaves room without
+ * inviting a variadic API. */
+#define FLUX_DEFERRED_MAX_INPUTS 8u
+#define FLUX_DEFERRED_MAX_OUTPUTS 2u
+
+/* Records the pass's dispatches into a secondary command buffer owned by the
+ * frame. Must leave every output readable by a compute sampling stage, and must
+ * not end the buffer. */
+typedef void (*flux_deferred_record_fn)(void *params, VkCommandBuffer cmd);
+
+typedef struct flux_deferred_pass_desc {
+    flux_struct_type type; /* FLUX_TYPE_DEFERRED_PASS_DESC */
+    const void *next;      /* must be nullptr */
+
+    flux_deferred_record_fn record;
+    /* Copied into the frame's plan arena by flux before registration returns, so
+     * this may point at the caller's stack. flux owns the copy; a material never
+     * sees the arena, which is what keeps `flux_frame` opaque. */
+    const void *params;
+    size_t params_size;
+    const char *label; /* optional debug label for the frame's pass scope */
+
+    /* Images this pass reads, each with the token of the pass that writes it
+     * (nullptr when no pass produces it, e.g. a canvas capture). The token is
+     * stated rather than inferred from the image pointer: that is what lets a
+     * pass order itself after an unrelated one, and what stops two passes
+     * writing the same image from silently claiming each other's output. */
+    flux_image *inputs[FLUX_DEFERRED_MAX_INPUTS];
+    flux_deferred_token *input_tokens[FLUX_DEFERRED_MAX_INPUTS];
+    uint32_t input_count;
+
+    /* Images this pass writes. At least one is required. */
+    flux_image *outputs[FLUX_DEFERRED_MAX_OUTPUTS];
+    uint32_t output_count;
+} flux_deferred_pass_desc;
+
+#define FLUX_DEFERRED_PASS_DESC_INIT {.type = FLUX_TYPE_DEFERRED_PASS_DESC}
+
+/* Register a pass at the current pass boundary.
+ *
+ * It is recorded only if something requires one of its outputs: a
+ * flux_frame_materialize_image call on an output, a downstream pass naming this
+ * token as an input, or an explicit flux_frame_require_pass. A pass nothing
+ * requires is pruned at submit and its dispatches never reach the GPU.
+ *
+ * `out_token` may be nullptr when the caller has no downstream pass to link.
+ * A returned token stays valid until the frame is presented.
+ *
+ * Errors:
+ *   FLUX_ERROR_INVALID_ARGUMENT — null frame/desc, wrong `type`, non-null
+ *     `next`, no record callback, counts above FLUX_DEFERRED_MAX_*, no output,
+ *     or a null output image.
+ *   FLUX_ERROR_INVALID_STATE    — frame not recording, or a canvas pass is
+ *     active (compute cannot be recorded inside a render pass).
+ *   FLUX_ERROR_OUT_OF_MEMORY    — the plan arena cannot hold `params_size`.
+ *   FLUX_ERROR_OUT_OF_RANGE     — the frame's plan is full. */
+FLUX_NODISCARD FLUX_API flux_result flux_frame_register_pass(flux_frame *f,
+                                                             const flux_deferred_pass_desc *desc,
+                                                             flux_deferred_token **out_token);
+
+/* Mark a registered pass's output as consumed. This is the seam for a consumer
+ * that is not itself a registered pass — typically the host drawing the output
+ * in a canvas pass. Idempotent.
+ *
+ * Errors:
+ *   FLUX_ERROR_INVALID_ARGUMENT — null frame/token, or the token does not
+ *     belong to this frame's plan.
+ *   FLUX_ERROR_INVALID_STATE    — frame not recording. */
+FLUX_NODISCARD FLUX_API flux_result flux_frame_require_pass(flux_frame *f,
+                                                            flux_deferred_token *token);
+
+/* Fail if any of `count` images is a deferred pass output that has not executed.
+ *
+ * A recording path that bypasses the plan — a raw `flux_effect_*` primitive, a
+ * custom compute pass that records straight into the command buffer — has no way
+ * to know that an image it is about to sample belongs to a pass nobody required.
+ * Reading it would silently consume last frame's pixels under this frame's
+ * handle. This is the check that makes that a named error instead.
+ *
+ * Every one-shot effect primitive calls it on its input, so the unmanaged path
+ * cannot read a pending image even though it does not participate in pruning.
+ *
+ * Errors:
+ *   FLUX_ERROR_INVALID_ARGUMENT — null frame, or null `images` with count > 0.
+ *   FLUX_ERROR_INVALID_STATE    — an image is a pending deferred output, or the
+ *     frame is not recording. */
+FLUX_NODISCARD FLUX_API flux_result
+flux_frame_reject_pending_inputs(flux_frame *f, const flux_image *const *images, uint32_t count);
+
 #ifdef __cplusplus
 }
 #endif

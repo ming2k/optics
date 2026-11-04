@@ -3344,9 +3344,6 @@ typedef struct wp_present_context {
     flux_device *device;
     flux_surface *surface;
     flux_canvas *canvas;
-    flux_surface *ui_surface;
-    flux_canvas *ui_canvas;
-    struct wl_surface *ui_wl_surface;
     const iris_app_config *cfg;
 } wp_present_context;
 
@@ -3389,10 +3386,8 @@ static void *wp_presenter_thread_main(void *arg) {
             continue;
 
         if (pkt->snapshot) {
-            flux_surface *target_surface =
-                (ctx->ui_surface != ctx->surface) ? ctx->ui_surface : ctx->surface;
-            flux_canvas *target_canvas =
-                (ctx->ui_canvas != ctx->canvas) ? ctx->ui_canvas : ctx->canvas;
+            flux_surface *target_surface = ctx->surface;
+            flux_canvas *target_canvas = ctx->canvas;
 
             uint32_t target_w = (uint32_t)ceilf(pkt->width * pkt->scale);
             uint32_t target_h = (uint32_t)ceilf(pkt->height * pkt->scale);
@@ -3411,11 +3406,8 @@ static void *wp_presenter_thread_main(void *arg) {
                 }
             }
             if (r == FLUX_OK) {
-                flux_color transparent_clear = flux_color_rgba(0, 0, 0, 0);
                 flux_color theme_clear = pkt->clear_color;
-                flux_color *pass_clear = (ctx->ui_surface != ctx->surface)
-                                             ? &transparent_clear
-                                             : (pkt->has_clear ? &theme_clear : nullptr);
+                flux_color *pass_clear = pkt->has_clear ? &theme_clear : nullptr;
 
                 /* This backend's pass takes one render area, so the packet's
                  * damage set is collapsed here — the last possible moment, after
@@ -3457,8 +3449,7 @@ static void *wp_presenter_thread_main(void *arg) {
                 }
 
                 if (drew && flux_frame_submit(frame) == FLUX_OK) {
-                    struct wl_surface *target_wl =
-                        ctx->ui_wl_surface ? ctx->ui_wl_surface : pl->surface;
+                    struct wl_surface *target_wl = pl->surface;
                     /* Always the full surface: flux paints a swapchain image at
                      * full extent (ADR-0144), so a narrower damage region here
                      * would leave the pixels it just repainted outside the
@@ -3497,11 +3488,6 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     flux_surface *surface = NULL;
     flux_canvas *canvas = NULL;
     lens *ui = NULL;
-    struct wl_surface *ui_wl_surface = NULL;
-    struct wl_subsurface *ui_wl_subsurface = NULL;
-    VkSurfaceKHR ui_vk_surface = VK_NULL_HANDLE;
-    flux_surface *ui_surface = NULL;
-    flux_canvas *ui_canvas = NULL;
     bool host_started = false;
     int rc = 1; /* pessimistic; set to 0 only on success */
 
@@ -3701,65 +3687,6 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         goto fail;
     }
 
-    /* Hardware subsurface composition (ADR-0123): when the host application
-     * draws custom canvas content (cfg->paint / cfg->prepare), allocate a
-     * dedicated Wayland subsurface with premultiplied alpha for Lens UI chrome.
-     * This decouples the UI layer from the dynamic host canvas, allowing the
-     * desktop compositor to blend them via hardware overlay planes. */
-    if ((cfg->paint || cfg->prepare) && pl.subcompositor) {
-        ui_wl_surface = wl_compositor_create_surface(pl.compositor);
-        if (ui_wl_surface) {
-            iris_wl_acquire("wl_surface");
-            ui_wl_subsurface =
-                wl_subcompositor_get_subsurface(pl.subcompositor, ui_wl_surface, pl.surface);
-            if (ui_wl_subsurface) {
-                wl_subsurface_set_position(ui_wl_subsurface, 0, 0);
-                /* Synchronized, deliberately — not desynced.
-                 *
-                 * A desynced subsurface applies its own commits immediately,
-                 * so in a loop that presents the host and the UI in one
-                 * iteration the compositor performs two compositions: one when
-                 * the parent commits, and again when the subsurface's commit
-                 * lands. The UI layer then updates at twice the base layer's
-                 * rate against a base that has not changed, which reads as
-                 * ultra-fast flicker of the top layer.
-                 *
-                 * Synchronized mode makes the surface commit the transaction
-                 * boundary: the subsurface's cached state is applied when the
-                 * parent commits, so both layers advance exactly once per
-                 * committed frame and are composited together. The loop already
-                 * commits the parent once per iteration (wp_request_pulse ...
-                 * wl_surface_commit), which is the point that applies them. */
-                wl_subsurface_set_sync(ui_wl_subsurface);
-                wl_surface_set_buffer_scale(ui_wl_surface, pl.buffer_scale);
-                wl_surface_commit(ui_wl_surface);
-
-                ui_vk_surface = wp_create_vk_surface(device, pl.display, ui_wl_surface);
-                if (ui_vk_surface) {
-                    flux_surface_desc ui_sdesc = {
-                        .type = FLUX_TYPE_SURFACE_DESC,
-                        .vk_surface_khr = ui_vk_surface,
-                        .width = (uint32_t)(pl.width * pl.buffer_scale),
-                        .height = (uint32_t)(pl.height * pl.buffer_scale),
-                        .vsync = false,
-                    };
-                    if (flux_surface_create(device, &ui_sdesc, &ui_surface) == FLUX_OK) {
-                        flux_canvas_desc ui_cdesc = {
-                            .type = FLUX_TYPE_CANVAS_DESC,
-                            .surface = ui_surface,
-                        };
-                        (void)flux_canvas_create(&ui_cdesc, &ui_canvas);
-                    }
-                }
-            }
-        }
-    }
-
-    if (!ui_canvas) {
-        ui_canvas = canvas;
-        ui_surface = surface;
-    }
-
     if (lens_create(&(lens_desc){.device = device,
                                  .theme = cfg->dark
                                               ? lens_theme_dark()
@@ -3786,9 +3713,6 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         .device = device,
         .surface = surface,
         .canvas = canvas,
-        .ui_surface = ui_surface,
-        .ui_canvas = ui_canvas,
-        .ui_wl_surface = ui_wl_surface,
         .cfg = cfg,
     };
 
@@ -3962,10 +3886,6 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             wp_emit_scale((float)pl.buffer_scale);
             wl_surface_set_buffer_scale(pl.surface, pl.buffer_scale);
             wl_surface_commit(pl.surface);
-            if (ui_wl_surface) {
-                wl_surface_set_buffer_scale(ui_wl_surface, pl.buffer_scale);
-                wl_surface_commit(ui_wl_surface);
-            }
             lens_set_scale(ui, (float)pl.buffer_scale);
             pl.resized = true;
         }
@@ -3976,10 +3896,6 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             if (!pl.has_presenter_thread) {
                 (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
                                           (uint32_t)(pl.height * pl.buffer_scale));
-                if (ui_surface && ui_surface != surface) {
-                    (void)flux_surface_resize(ui_surface, (uint32_t)(pl.width * pl.buffer_scale),
-                                              (uint32_t)(pl.height * pl.buffer_scale));
-                }
             }
             pl.resized = false;
             resized_this_frame = true;
@@ -4141,145 +4057,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                 continue;
             }
 
-            if (ui_surface != surface) {
-                /* ==============================================================
-                 * Dual-Plane Subsurface Composition (ADR-0123)
-                 * ============================================================== */
-                bool host_canvas_static = has_custom_paint && pl.paint_static && !host_animating &&
-                                          !resized_this_frame && !surface_needs_paint;
-                bool host_skip_render = has_custom_paint && pl.frame_skip_render &&
-                                        !resized_this_frame && !surface_needs_paint;
-                bool must_paint_host = has_custom_paint && !host_canvas_static && !host_skip_render;
-                bool must_paint_ui = chrome_damaged || resized_this_frame || surface_needs_paint;
-
-                /* Both layers are recorded first and presented together below.
-                 *
-                 * Presenting one layer inside its own block and the other after
-                 * it means the two presents land in separate commits. A
-                 * desynced UI subsurface latches independently, so it could be
-                 * composited against an older host frame — a persistent
-                 * one-frame offset between the layers. Static content hides it
-                 * (an offset between two identical frames is invisible);
-                 * animated content shows it as flicker at the update rate.
-                 *
-                 * Recording is independent of presentation: flux builds each
-                 * layer's commands on its own surface, and 'present' is the
-                 * commit. Keeping every present in one place, after both
-                 * records, and driving the subsurface in synchronized mode (see
-                 * the subsurface setup) makes the layers advance together. */
-                flux_frame *host_frame = nullptr;
-                flux_frame *ui_frame = nullptr;
-                bool ui_drew = false;
-                lens_scene_snapshot *snapshot = nullptr;
-
-                /* 1. Host Canvas Layer (Base Surface) */
-                if (must_paint_host) {
-                    flux_result hr = flux_surface_begin_frame(surface, NULL, &host_frame);
-                    if (hr == FLUX_OK) {
-                        lens_theme th = lens_get_theme(ui);
-                        flux_color clear = th.color_bg;
-                        flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
-                        if (cfg->prepare)
-                            cfg->prepare(host_frame, canvas, device, (float)pl.buffer_scale,
-                                         cfg->user);
-                        if (flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
-                                                          .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                          .frame = host_frame,
-                                                          .clear_color = pass_clear}) == FLUX_OK) {
-                            if (cfg->paint)
-                                cfg->paint(canvas, device, (float)pl.buffer_scale, cfg->user);
-                            (void)flux_canvas_end(canvas);
-                        }
-                        if (flux_frame_submit(host_frame) != FLUX_OK)
-                            host_frame = nullptr;
-                    }
-                }
-
-                /* 2. Lens UI Layer (Subsurface Plane with Premultiplied Alpha) */
-                if (must_paint_ui) {
-                    flux_result ur = flux_surface_begin_frame(ui_surface, NULL, &ui_frame);
-                    if (ur == FLUX_OK) {
-                        bool partial_paint = false;
-                        int32_t dmg_x = 0, dmg_y = 0;
-                        uint32_t dmg_w = 0, dmg_h = 0;
-                        flux_surface_info ui_info;
-                        flux_surface_get_info(ui_surface, &ui_info);
-
-                        if (!resized_this_frame && ui_info.width > 0 && ui_info.height > 0) {
-                            /* One scissor for this plane: the damage set is
-                             * collapsed here, at the API boundary that forces it. */
-                            flux_rect dmg = {0, 0, 0, 0};
-                            if (iris_frame_lens_damage_rect(ui, (float)pl.buffer_scale,
-                                                            (int32_t)ui_info.width,
-                                                            (int32_t)ui_info.height, &dmg)) {
-                                dmg_x = (int32_t)dmg.x;
-                                dmg_y = (int32_t)dmg.y;
-                                dmg_w = (uint32_t)dmg.w;
-                                dmg_h = (uint32_t)dmg.h;
-                                partial_paint = true;
-                            }
-                        }
-
-                        /* Clear color for UI subsurface is transparent (alpha = 0) */
-                        flux_color transparent_clear = flux_color_rgba(0, 0, 0, 0);
-                        flux_canvas_pass_desc ui_pass_desc = {
-                            .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                            .frame = ui_frame,
-                            .clear_color = &transparent_clear,
-                            .render_offset_x = partial_paint ? dmg_x : 0,
-                            .render_offset_y = partial_paint ? dmg_y : 0,
-                            .render_width = partial_paint ? dmg_w : 0,
-                            .render_height = partial_paint ? dmg_h : 0,
-                        };
-
-                        if (flux_canvas_begin(ui_canvas, &ui_pass_desc) == FLUX_OK) {
-                            if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
-                                ui_drew = lens_snapshot_submit(snapshot, ui_canvas) == FLUX_OK;
-                            }
-                            if (flux_canvas_end(ui_canvas) != FLUX_OK)
-                                ui_drew = false;
-                        }
-                        if (!ui_drew || flux_frame_submit(ui_frame) != FLUX_OK)
-                            ui_frame = nullptr;
-                    }
-                }
-
-                /* 3. Present both layers so they apply atomically.
-                 *
-                 * The subsurface is parent-synchronized, which inverts the
-                 * commit order that looks natural: a synchronized subsurface's
-                 * commit only *caches* its state, and the parent's commit is
-                 * what applies the cached state of both surfaces and triggers a
-                 * single composition. So the UI commit must come FIRST and the
-                 * base commit LAST. Committing the base first would apply the
-                 * previous frame's chrome alongside this frame's base — the same
-                 * one-frame offset this restructure exists to remove, merely
-                 * flipped.
-                 *
-                 * After the base commit the pair is on screen together and the
-                 * trailing commit in the pulse block below carries nothing new;
-                 * it is still needed there to answer the frame grant. */
-                if (ui_frame) {
-                    /* Full surface: a surface pass is painted at full extent
-                     * (ADR-0144), so damage must cover it. */
-                    wl_surface_damage_buffer(ui_wl_surface, 0, 0, INT32_MAX, INT32_MAX);
-                    if (flux_frame_present(ui_frame) == FLUX_OK) {
-                        (void)lens_snapshot_activate(ui, snapshot);
-                        surface_needs_paint = false;
-                    }
-                }
-                if (host_frame) {
-                    wl_surface_damage_buffer(pl.surface, 0, 0, INT32_MAX, INT32_MAX);
-                    (void)flux_frame_present(host_frame);
-                }
-                lens_snapshot_release(snapshot);
-
-                if (d.request_pulse) {
-                    wp_request_pulse(&pl);
-                    wl_surface_commit(pl.surface);
-                }
-                continue;
-            }
+            /* Unified Single Surface Pass: all content (custom canvas & Lens UI) rendered
+             * atomically */
 
             /* Single Surface Pass (for pure UI applications or fallback) */
             flux_frame *frame = NULL;
@@ -4348,10 +4127,12 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             };
 
             if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {
-                if (cfg->paint)
+                if (cfg->paint) {
                     cfg->paint(canvas, device, (float)pl.buffer_scale, cfg->user);
+                    drew = true;
+                }
                 if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
-                    drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK;
+                    drew = (lens_snapshot_submit(snapshot, canvas) == FLUX_OK) || drew;
                 }
                 if (flux_canvas_end(canvas) != FLUX_OK)
                     drew = false;
@@ -4491,18 +4272,6 @@ fail:
     if (pl.repeat_fd >= 0) {
         iris_fd_close_record(pl.repeat_fd, "fd_repeat");
         pl.repeat_fd = -1;
-    }
-    if (ui_canvas && ui_canvas != canvas)
-        flux_canvas_release(ui_canvas);
-    if (ui_surface && ui_surface != surface)
-        flux_surface_release(ui_surface);
-    if (ui_vk_surface)
-        wp_destroy_vk_surface(device, ui_vk_surface);
-    if (ui_wl_subsurface)
-        wl_subsurface_destroy(ui_wl_subsurface);
-    if (ui_wl_surface) {
-        wl_surface_destroy(ui_wl_surface);
-        iris_wl_release("wl_surface");
     }
     if (canvas)
         flux_canvas_release(canvas);

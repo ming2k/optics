@@ -186,18 +186,29 @@ void store_source_over(uvec2 pixel, vec4 source)
  * (ADR-0118/INV-SDF-02): `bounds` is (x, y, w, h) and the non-zero
  * half-extent floor keeps a degenerate group finite. The field - the L2/L4
  * corner blend - is defined once, in flux; this file used to restate it. */
-float squircle_sdf(vec2 p, vec4 bounds, float requested_radius, float curvature)
+vec2 squircle_centre(vec4 bounds)
 {
     vec2 half_extent = max(bounds.zw * 0.5, vec2(0.001));
-    vec2 centre = bounds.xy + half_extent;
-    return flux_sdf_squircle(p - centre, half_extent, requested_radius, curvature);
+    return bounds.xy + half_extent;
 }
 
+vec2 squircle_half(vec4 bounds)
+{
+    return max(bounds.zw * 0.5, vec2(0.001));
+}
+
+float squircle_sdf(vec2 p, vec4 bounds, float requested_radius, float curvature)
+{
+    return flux_sdf_squircle(p - squircle_centre(bounds), squircle_half(bounds), requested_radius,
+                             curvature);
+}
+
+/* A fused body is one field: the composition, like the field itself, lives in
+ * flux_sdf.glsl (ADR-0148) so it is defined once and pinned by test_sdf_parity. */
 float smooth_union(float a, float b, float radius)
 {
-    if (radius <= 0.001) return min(a, b);
-    float h = clamp(0.5 + 0.5 * (b - a) / radius, 0.0, 1.0);
-    return mix(b, a, h) - radius * h * (1.0 - h);
+    float h;
+    return flux_smooth_union(vec2(a, b), radius, h);
 }
 
 float glass_sdf(vec2 p, GlassBody b)
@@ -208,6 +219,24 @@ float glass_sdf(vec2 p, GlassBody b)
         d = smooth_union(d, squircle_sdf(p, b.shape1, b.radius1, cur), b.blend_radius);
     }
     return d;
+}
+
+/* Shading normal of the body at `p`, from ONE field evaluation per shape
+ * (ADR-0148). The previous form evaluated the field four more times per rim
+ * pixel over a 1.5 px span and differenced the results: four times the field
+ * work, first-order accurate only, and free to disagree with the coverage the
+ * same pixel used. `aa` resolves the interior medial-axis crease over one pixel,
+ * so a box diagonal and a union seam both shade continuously. */
+vec2 glass_normal(vec2 p, GlassBody b, float aa)
+{
+    float cur = b.curvature;
+    vec3 s0 = flux_sdf_squircle_sample(p - squircle_centre(b.shape0), squircle_half(b.shape0),
+                                       b.radius0, cur, aa);
+    if (b.shape_count <= 1u) return s0.yz;
+
+    vec3 s1 = flux_sdf_squircle_sample(p - squircle_centre(b.shape1), squircle_half(b.shape1),
+                                       b.radius1, cur, aa);
+    return flux_smooth_union_gradient(s0.yz, s1.yz, vec2(s0.x, s1.x), b.blend_radius);
 }
 
 float focus_field(vec2 p, GlassBody b)
@@ -298,16 +327,14 @@ void shade_body(uvec2 pixel, vec2 p, vec2 uv, GlassBody b)
      * The interior stays at exactly 0 — no centre distortion. */
     float lens = min(u * inversesqrt(1.0 - u * u + 0.02), 3.0) * (1.0 / 3.0);
 
-    /* Outward rim normal from the SDF gradient.
-     * In the flat interior (u == 0, d <= -edge) where lens bend and specular
-     * rims are zero, evaluating 4 SDF gradient taps is entirely redundant:
-     * bend offsets are lens-scaled (zero when u == 0) and the rim block below
-     * is gated on u > 0, so the fallback normal is never read. */
+    /* Outward rim normal from the SDF gradient, analytically (ADR-0148). It
+     * stays gated on the rim band: in the flat interior (u == 0) the lens bend
+     * and every rim term are zero, so the normal is never read there. `aa` is
+     * one pixel in shape units — the dispatch's shape space is capture pixels —
+     * and is consumed only by the interior crease rule. */
     vec2 rim_normal = vec2(0.0, 1.0);
     if (u > 0.0) {
-        float dx = glass_sdf(p + vec2(1.5, 0.0), b) - glass_sdf(p - vec2(1.5, 0.0), b);
-        float dy = glass_sdf(p + vec2(0.0, 1.5), b) - glass_sdf(p - vec2(0.0, 1.5), b);
-        rim_normal = normalize(vec2(dx, dy) + vec2(1e-6));
+        rim_normal = glass_normal(p, b, 1.0);
     }
 
     vec2 inv_extent = 1.0 / max(vec2(pc.capture_width, pc.capture_height), vec2(1.0));
@@ -404,11 +431,15 @@ void shade_body(uvec2 pixel, vec2 p, vec2 uv, GlassBody b)
     if (u > 0.0) {
         float top_facing = max(-rim_normal.y, 0.0);
         float key_align = max(dot(rim_normal, key_dir), 0.0);
-        float top_rim = pow(top_facing, 1.25) * (0.65 + 0.35 * pow(key_align, 1.25));
+        /* x^1.25 == x*sqrt(sqrt(x)): exact, one multiply plus two square roots
+         * instead of a transcendental. Both bases are clamped at 0. */
+        float top_rim = (top_facing * sqrt(sqrt(top_facing))) *
+                        (0.65 + 0.35 * (key_align * sqrt(sqrt(key_align))));
 
         float bot_facing = max(rim_normal.y, 0.0);
         float away_align = max(dot(rim_normal, -key_dir), 0.0);
-        float bot_rim = pow(bot_facing, 1.25) * (0.55 + 0.35 * pow(away_align, 1.25));
+        float bot_rim = (bot_facing * sqrt(sqrt(bot_facing))) *
+                        (0.55 + 0.35 * (away_align * sqrt(sqrt(away_align))));
 
         float line = exp(-(d + 0.65) * (d + 0.65) / 2.00);
         float tir_line = exp(-(d + 0.80) * (d + 0.80) / 2.00);

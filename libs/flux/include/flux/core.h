@@ -278,6 +278,7 @@ typedef enum flux_struct_type {
     FLUX_TYPE_OBSERVE_REPORT_OPTS = 49,
     FLUX_TYPE_DEVICE_ALLOC_OPTS = 50,
     FLUX_TYPE_DEVICE_FREE_OPTS = 51,
+    FLUX_TYPE_DEFERRED_PASS_DESC = 52,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -298,6 +299,7 @@ static_assert(FLUX_TYPE_OBSERVE_REPORT_OPTS == 49,
               "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_DEVICE_ALLOC_OPTS == 50, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_DEVICE_FREE_OPTS == 51, "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_DEFERRED_PASS_DESC == 52, "flux_struct_type: append only — never renumber");
 
 /* ================================================================== */
 /*  C23 Type-Safe Compound Literal Initializer (RFC-0094 / ADR-0087)  */
@@ -1371,6 +1373,50 @@ typedef struct flux_transient {
 FLUX_NODISCARD FLUX_API flux_result flux_frame_alloc_transient(flux_frame *f, size_t bytes,
                                                                size_t alignment,
                                                                flux_transient *out);
+
+/* Materialize a deferred effect output (ADR-0147).
+ *
+ * An effect applied through flux_blur_filter_apply records its dispatches
+ * lazily: the work exists on paper the moment the call returns, but its
+ * command buffer is only built and submitted when something asks for the
+ * pixels. This call is that ask, for consumers that record into the frame's
+ * command buffer directly (a material filter, a compute pass) rather than
+ * being a deferred pass themselves.
+ *
+ * Must be called at a pass boundary — no canvas pass active — because
+ * compute cannot be recorded inside a render pass. Returns FLUX_OK for an
+ * image that is not deferred (a plain image, or an already-materialized
+ * output), so callers need no special case.
+ *
+ * Errors:
+ *   FLUX_ERROR_INVALID_ARGUMENT — null frame or image.
+ *   FLUX_ERROR_INVALID_STATE    — a canvas pass is active, or the frame is
+ *                                 not recording. */
+FLUX_NODISCARD FLUX_API flux_result flux_frame_materialize_image(flux_frame *f, flux_image *image);
+
+/* ================================================================== */
+/*  Deferred pass plan accounting (ADR-0147)                          */
+/* ================================================================== */
+
+/* An effect applied through flux_blur_filter_apply (or another deferred
+ * operator) registers a pass instead of recording its dispatches. The pass
+ * is built and executed only if something requires its output; otherwise it
+ * is pruned at submit and costs no GPU time.
+ *
+ * These counters make that difference observable, which is what lets a test
+ * assert pruning rather than merely hope for it. They are per frame and
+ * reset by flux_surface_begin_frame. */
+typedef struct flux_frame_plan_counters {
+    uint32_t registered; /* passes registered this frame */
+    uint32_t executed;   /* passes whose dispatches actually ran */
+    uint32_t pruned;     /* registered passes nothing required */
+    uint32_t fallbacks;  /* passes that fell back to eager execution */
+} flux_frame_plan_counters;
+
+/* Read the frame's plan counters. Returns FLUX_ERROR_INVALID_STATE when the
+ * frame is not recording (the counters describe a live plan, not history). */
+FLUX_NODISCARD FLUX_API flux_result flux_frame_plan_stats(const flux_frame *f,
+                                                          flux_frame_plan_counters *out);
 
 FLUX_API uint32_t flux_frame_index(const flux_frame *f);
 

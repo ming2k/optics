@@ -263,4 +263,83 @@ static inline void prism_body_ids_release(prism_body_ids *ids) {
  * rather than assumes. */
 #define PRISM_MAX_BATCHES 128u
 
+/* ------------------------------------------------------------------ */
+/*  Deferred pass registration (ADR-0147)                             */
+/* ------------------------------------------------------------------ */
+
+/* Every material's dispatches are deferrable, and every material needs the same
+ * three steps: materialize the deferred inputs it samples, copy its dispatch
+ * parameters into the frame's plan arena, register a pass that replays those
+ * parameters later. Written once here because five private copies would drift —
+ * the same reason the slab geometry and body table live in this header.
+ *
+ * Why a material cares at all: a material's dispatches are the most expensive
+ * thing in a frame (measured 4.8 ms/frame for 64 liquid-glass bodies on a
+ * 1024x1024 target), and a material whose output nothing samples should cost
+ * nothing. Before this seam, registering was impossible from here: the plan was
+ * a flux-internal header, so prism could only record eagerly.
+ *
+ * Contract, identical to flux's: registration happens at a pass boundary, and
+ * the caller still returns the output handle immediately. The pass runs only if
+ * something requires it — a downstream pass naming the token, or a host calling
+ * flux_frame_require_pass. */
+
+/* The record callback a material supplies. `params` is its own arena copy. */
+typedef void (*prism_deferred_record_fn)(void *params, VkCommandBuffer cmd);
+
+typedef struct prism_deferred_pass {
+    /* Inputs the pass samples. A deferred (non-null) token is forwarded so the
+     * plan can order itself after the pass that writes it; a null token means
+     * the image comes from outside the plan. */
+    flux_image *inputs[FLUX_DEFERRED_MAX_INPUTS];
+    flux_deferred_token *input_tokens[FLUX_DEFERRED_MAX_INPUTS];
+    uint32_t input_count;
+
+    flux_image *output;
+    const char *label;
+} prism_deferred_pass;
+
+#define PRISM_DEFERRED_PASS_INIT {.input_count = 0}
+
+/* Register one material pass. The material's dispatch parameters are copied into
+ * the frame's plan arena, so they may live on the caller's stack.
+ *
+ * Returns the pass's token through `out_token` when non-null. A null token is
+ * legal — the pass then runs only if the host explicitly requires it.
+ *
+ * Errors are flux's own, unchanged: INVALID_ARGUMENT, INVALID_STATE (no pass
+ * boundary), OUT_OF_MEMORY (arena full), OUT_OF_RANGE (plan full). */
+static inline flux_result prism_deferred_register(flux_frame *frame,
+                                                  const prism_deferred_pass *pass,
+                                                  prism_deferred_record_fn record,
+                                                  const void *params, size_t params_size,
+                                                  flux_deferred_token **out_token) {
+    if (!frame || !pass || !pass->output || !record)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (pass->input_count > FLUX_DEFERRED_MAX_INPUTS)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+
+    flux_deferred_pass_desc desc = FLUX_DEFERRED_PASS_DESC_INIT;
+    desc.record = record;
+    desc.params = (void *)params;
+    desc.params_size = params_size;
+    desc.label = pass->label;
+    desc.input_count = pass->input_count;
+    desc.output_count = 1u;
+    desc.outputs[0] = pass->output;
+    for (uint32_t i = 0; i < pass->input_count; ++i) {
+        desc.inputs[i] = pass->inputs[i];
+        desc.input_tokens[i] = pass->input_tokens[i];
+    }
+    return flux_frame_register_pass(frame, &desc, out_token);
+}
+
+/* Declare the pass live when its consumer is the host rather than another pass.
+ * A null token is a no-op so callers need no branch. */
+static inline flux_result prism_deferred_require(flux_frame *frame, flux_deferred_token *token) {
+    if (!token)
+        return FLUX_OK;
+    return flux_frame_require_pass(frame, token);
+}
+
 #endif /* PRISM_MATERIAL_FRAME_H */

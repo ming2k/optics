@@ -738,6 +738,172 @@ void prism_backdrop_layer_filter_release(prism_backdrop_layer_filter *filter) {
     flux_device_release(device);
 }
 
+/* Everything one layered-backdrop submission needs to replay its dispatches
+ * later (ADR-0147). This is the widest capture domain of the five materials: the
+ * composite is three stages (clear, base+plates, glass) over two destinations
+ * (the layer output and the opaque scratch the lens samples), so the plan holds
+ * every intermediate region and the prepared push arrays rather than recomputing
+ * them — recomputation at replay time could disagree with what planning decided,
+ * and those decisions are what the stages' barriers depend on. */
+#define LAYER_PLAN_MAX_REGIONS (PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS)
+#define LAYER_PLAN_MAX_PLATES PRISM_BACKDROP_MAX_FROST_RECTS
+
+typedef struct layer_plan {
+    flux_device *device;
+    struct prism_backdrop_layer_filter *filter;
+    flux_image *input;
+    flux_image *blurred;
+    flux_image *output;
+    flux_image *scratch; /* null when no glass means no opaque base is needed */
+    uint32_t image_width;
+    uint32_t image_height;
+    uint32_t capture_width;
+    uint32_t capture_height;
+    uint32_t slab_x;
+    uint32_t slab_y;
+    bool is16f;
+    bool output_reuse_barrier;
+    bool scratch_reuse_barrier;
+
+    liquid_glass_region clear_regions[LAYER_PLAN_MAX_REGIONS];
+    uint32_t clear_count;
+
+    liquid_glass_region plate_regions[LAYER_PLAN_MAX_PLATES];
+    uint32_t plate_count;
+
+    bool draw_plates;
+    bool draw_scratch;
+    bool output_after_plates_barrier;
+
+    liquid_glass_region glass_merged[PRISM_MAX_BATCHES];
+    uint32_t glass_merged_count;
+    prism_region_batch glass_batches[PRISM_MAX_BATCHES];
+    uint32_t glass_batch_count;
+    prism_glass_policy policy;
+    prism_glass_copy copy;
+    uint64_t bodies_address;
+    uint64_t ids_address;
+
+    liquid_glass_region stats_bounds[PRISM_BACKDROP_MAX_GLASS_GROUPS];
+    uint32_t stats_group_count;
+    uint64_t stats_address;
+    VkBuffer stats_buffer;
+
+    const prism_backdrop_layer_desc *desc; /* retained by the frame; see below */
+} layer_plan;
+
+static void layer_plan_record(void *raw, VkCommandBuffer command) {
+    const layer_plan *p = raw;
+    if (!p || command == VK_NULL_HANDLE || !p->filter)
+        return;
+    prism_backdrop_layer_filter *filter = p->filter;
+    VkImage output_image = flux_image_vk_image(p->output);
+    bool glass_dispatched = false;
+
+    if (p->clear_count > 0u) {
+        if (p->output_reuse_barrier)
+            layer_barrier_reuse_to_compute_write(command, output_image);
+        for (uint32_t i = 0; i < p->clear_count; ++i) {
+            const liquid_glass_region *region = &p->clear_regions[i];
+            storage_clear_push push = {
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = p->image_width,
+                .height = p->image_height,
+                .origin_x = region->x,
+                .origin_y = region->y,
+                .region_width = region->width,
+                .region_height = region->height,
+            };
+            uint32_t gx = (region->width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+            uint32_t gy = (region->height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+            flux_compute_dispatch(command, filter->clear_pipelines[p->is16f ? 1 : 0], &push,
+                                  sizeof(push), gx, gy, 1u);
+        }
+        if (p->scratch) {
+            VkImage scratch_image = flux_image_vk_image(p->scratch);
+            if (p->scratch_reuse_barrier)
+                layer_barrier_reuse_to_compute_write(command, scratch_image);
+            for (uint32_t i = 0; i < p->clear_count; ++i) {
+                const liquid_glass_region *region = &p->clear_regions[i];
+                storage_clear_push push = {
+                    .output_handle = flux_image_bindless_storage_handle(p->scratch),
+                    .width = p->image_width,
+                    .height = p->image_height,
+                    .origin_x = region->x,
+                    .origin_y = region->y,
+                    .region_width = region->width,
+                    .region_height = region->height,
+                };
+                uint32_t gx = (region->width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+                uint32_t gy = (region->height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
+                flux_compute_dispatch(command, filter->clear_pipelines[p->is16f ? 1 : 0], &push,
+                                      sizeof(push), gx, gy, 1u);
+            }
+            if (p->glass_batch_count > 0u)
+                layer_barrier_compute_write_to_read_write(command, scratch_image);
+        }
+        if (p->glass_batch_count > 0u)
+            layer_barrier_compute_write_to_read_write(command, output_image);
+    }
+
+    if (p->stats_group_count > 0u) {
+        for (uint32_t i = 0; i < p->stats_group_count; ++i) {
+            const liquid_glass_region *rect = &p->stats_bounds[i];
+            backdrop_stats_push spush = {
+                .input_handle = flux_image_bindless_handle(p->input),
+                .blurred_handle = flux_image_bindless_handle(p->blurred),
+                .sampler_handle = flux_device_default_sampler_handle(p->device),
+                .width = p->capture_width,
+                .height = p->capture_height,
+                .rect_x = rect->x,
+                .rect_y = rect->y,
+                .rect_width = rect->width,
+                .rect_height = rect->height,
+                .group_index = i,
+                .stats_address_lo = (uint32_t)(p->stats_address & 0xFFFFFFFFu),
+                .stats_address_hi = (uint32_t)(p->stats_address >> 32u),
+            };
+            flux_compute_dispatch(command, filter->stats_pipeline, &spush, sizeof(spush), 1u, 1u,
+                                  1u);
+        }
+        if (p->stats_buffer != VK_NULL_HANDLE)
+            layer_barrier_stats_write_to_compute(command, p->stats_buffer);
+    }
+
+    if (p->draw_plates) {
+        if (p->draw_scratch) {
+            VkImage scratch_image = flux_image_vk_image(p->scratch);
+            layer_record_base_material(command, filter, p->input, p->blurred, p->scratch,
+                                       p->capture_width, p->capture_height, 0, 0, p->capture_width,
+                                       p->capture_height, p->desc, p->plate_regions, p->plate_count,
+                                       p->is16f);
+            layer_barrier_compute_write_to_sampled_and_storage(command, scratch_image);
+        }
+        layer_record_base_material(command, filter, p->input, p->blurred, p->output, p->image_width,
+                                   p->image_height, p->slab_x, p->slab_y, p->capture_width,
+                                   p->capture_height, p->desc, p->plate_regions, p->plate_count,
+                                   p->is16f);
+        if (p->output_after_plates_barrier)
+            layer_barrier_compute_write_to_read_write(command, output_image);
+    }
+
+    for (uint32_t r = 0; r < p->glass_batch_count; ++r) {
+        const prism_region_batch *b = &p->glass_batches[r];
+        if (!liquid_glass_region_is_dispatchable(
+                (liquid_glass_region){b->x, b->y, b->width, b->height}, p->image_width,
+                p->image_height))
+            continue;
+        prism_glass_record_batch(command, filter->glass_pipelines[p->is16f ? 1 : 0], p->device,
+                                 &p->copy, p->output, p->image_width, p->image_height, b,
+                                 &p->policy, p->bodies_address,
+                                 p->ids_address + b->ids_first * sizeof(uint32_t));
+        glass_dispatched = true;
+    }
+
+    if (p->clear_count > 0u || p->draw_plates || glass_dispatched)
+        layer_barrier_compute_write_to_read(command, output_image);
+}
+
 flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filter,
                                               flux_frame *frame,
                                               const prism_backdrop_layer_desc *desc,
@@ -765,6 +931,13 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         flux_image_bindless_handle(input) == FLUX_BINDLESS_INVALID ||
         flux_image_bindless_handle(blurred) == FLUX_BINDLESS_INVALID)
         return FLUX_ERROR_UNSUPPORTED;
+
+    /* ADR-0147: `blurred` is normally a deferred flux_blur_filter output;
+     * materialize it so its dispatches precede the layer's. */
+    flux_result mat = flux_frame_materialize_image(frame, blurred);
+    if (mat != FLUX_OK)
+        return mat;
+
     uint32_t index = flux_frame_index(frame);
     if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
         return FLUX_ERROR_OUT_OF_RANGE;
@@ -884,304 +1057,160 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     if (result != FLUX_OK)
         return result;
 
-    VkCommandBuffer command = flux_frame_vk_command_buffer(frame);
-    VkImage output_image = flux_image_vk_image(slot->output);
+    /* ---- Planning: every decision the replay depends on is made here ---- */
+    layer_plan plan = {
+        .device = filter->device,
+        .filter = filter,
+        .input = input,
+        .blurred = blurred,
+        .output = slot->output,
+        .scratch = (need_scratch && slot->scratch) ? slot->scratch : nullptr,
+        .image_width = image_width,
+        .image_height = image_height,
+        .capture_width = capture_width,
+        .capture_height = capture_height,
+        .slab_x = slab_x,
+        .slab_y = slab_y,
+        .is16f = is16f,
+        .output_reuse_barrier = slot->initialized,
+        .scratch_reuse_barrier = slot->initialized,
+        .draw_plates = desc->frost_count > 0u && current_count > 0u,
+        .clear_count = clear_count,
+        .stats_group_count = desc->group_count,
+        .stats_address = slot->stats ? flux_buffer_device_address(slot->stats) : 0u,
+        .stats_buffer = slot->stats ? flux_buffer_vk_buffer(slot->stats) : VK_NULL_HANDLE,
+        .desc = desc,
+        .policy =
+            {
+                .refraction = desc->refraction,
+                .chromatic_aberration = desc->chromatic_aberration,
+                .saturation = desc->saturation,
+                .brightness = desc->brightness,
+                .edge_width = desc->edge_width,
+                .rim_light = desc->rim_light,
+                .light_x = desc->light_direction.x,
+                .light_y = desc->light_direction.y,
+                .opacity = desc->opacity,
+                .size_reference = desc->size_reference,
+                .size_scale_min = desc->size_scale_min,
+                .tint_strength = desc->tint_strength,
+                .frost_strength = desc->frost_strength,
+                .curvature = desc->curvature,
+                .contact_ao = desc->contact_ao,
+                .ambient_fresnel = desc->ambient_fresnel,
+            },
+    };
+    memcpy(plan.clear_regions, clear_regions, clear_count * sizeof(clear_regions[0]));
+    for (uint32_t i = 0; i < desc->group_count; ++i)
+        plan.stats_bounds[i] =
+            liquid_glass_group_stats_bounds(&desc->groups[i], capture_width, capture_height);
 
-    /* 1. Clear previous + current footprints to transparent. */
-    if (clear_count > 0u) {
-        if (slot->initialized)
-            layer_barrier_reuse_to_compute_write(command, output_image);
-        for (uint32_t i = 0; i < clear_count; ++i) {
-            liquid_glass_region region = clear_regions[i];
-            storage_clear_push push = {
-                .output_handle = flux_image_bindless_storage_handle(slot->output),
-                .width = image_width,
-                .height = image_height,
-                .origin_x = region.x,
-                .origin_y = region.y,
-                .region_width = region.width,
-                .region_height = region.height,
-            };
-            uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-            uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-            flux_compute_dispatch(command, filter->clear_pipelines[is16f ? 1 : 0], &push,
-                                  sizeof(push), gx, gy, 1u);
-        }
-        if (need_scratch && slot->scratch) {
-            VkImage scratch_image = flux_image_vk_image(slot->scratch);
-            if (slot->initialized)
-                layer_barrier_reuse_to_compute_write(command, scratch_image);
-            for (uint32_t i = 0; i < clear_count; ++i) {
-                liquid_glass_region region = clear_regions[i];
-                storage_clear_push push = {
-                    .output_handle = flux_image_bindless_storage_handle(slot->scratch),
-                    .width = image_width,
-                    .height = image_height,
-                    .origin_x = region.x,
-                    .origin_y = region.y,
-                    .region_width = region.width,
-                    .region_height = region.height,
-                };
-                uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                flux_compute_dispatch(command, filter->clear_pipelines[is16f ? 1 : 0], &push,
-                                      sizeof(push), gx, gy, 1u);
-            }
-            if (current_count > 0u)
-                layer_barrier_compute_write_to_read_write(command, scratch_image);
-        }
-        if (current_count > 0u)
-            layer_barrier_compute_write_to_read_write(command, output_image);
-    }
-
-    /* 2. Glass statistics over the *layer* image (what the glass actually
-     * refracts) — same reduction contract as the standalone material. */
-    if (desc->group_count > 0u) {
-        uint64_t stats_address = flux_buffer_device_address(slot->stats);
-        for (uint32_t i = 0; i < desc->group_count; ++i) {
-            liquid_glass_region rect =
-                liquid_glass_group_stats_bounds(&desc->groups[i], capture_width, capture_height);
-            backdrop_stats_push spush = {
-                .input_handle = flux_image_bindless_handle(input),
-                .blurred_handle = flux_image_bindless_handle(blurred),
-                .sampler_handle = flux_device_default_sampler_handle(filter->device),
-                .width = capture_width,
-                .height = capture_height,
-                .rect_x = rect.x,
-                .rect_y = rect.y,
-                .rect_width = rect.width,
-                .rect_height = rect.height,
-                .group_index = i,
-                .stats_address_lo = (uint32_t)(stats_address & 0xFFFFFFFFu),
-                .stats_address_hi = (uint32_t)(stats_address >> 32u),
-            };
-            flux_compute_dispatch(command, filter->stats_pipeline, &spush, sizeof(spush), 1u, 1u,
-                                  1u);
-        }
-        layer_barrier_stats_write_to_compute(command, flux_buffer_vk_buffer(slot->stats));
-    }
-
-    /* 3. Base-material layer.
-     *
-     * The layer is a COMPLETE opaque background carrying base plates, and it
-     * is composed in two stages over each merged footprint region:
-     *
-     *   BASE  — resolve the sharp capture, alpha 1, once per region. The
-     *           optical lens above samples this image wherever its bend taps,
-     *           so pixels between and outside plates must already hold a true
-     *           background colour (never a cleared hole and never a
-     *           premultiplied fragment).
-     *   PLATE — one source-over dispatch per (region, plate), in caller array
-     *           order, writing only inside that plate's analytic coverage.
-     *
-     * Splitting the stages is what makes multiple plates composable: a single
-     * unconditional "write opaque pixel" pass per plate made the last plate in
-     * the array erase every earlier plate inside the shared region.
-     *
-     * Two destinations exist because the glass pass must not sample the image
-     * it writes:
-     *   - slot->scratch (opaque base + plates) is what the lens samples when
-     *     glass bodies are present;
-     *   - slot->output receives the same composite when there is no glass, so
-     *     a layer with plates only still produces the finished material.
-     * When the descriptor carries no plates the stage is skipped entirely: the
-     * lens samples the sharp capture directly.
-     */
-    if (desc->frost_count > 0u && current_count > 0u) {
-        /* Plate footprints are the leading run of `current` (plates are appended
-         * before bodies). The base stage resolves the whole slab and paints only
-         * these. */
-        liquid_glass_region plate_regions[PRISM_BACKDROP_MAX_FROST_RECTS];
-        uint32_t plate_count = 0u;
+    /* Plate footprints, translated into slab space exactly as before. */
+    if (plan.draw_plates) {
         for (uint32_t i = 0; i < desc->frost_count; ++i) {
             liquid_glass_region region;
             if (!backdrop_frost_dispatch_bounds(&desc->frost[i], capture_width, capture_height,
                                                 &region))
                 continue;
-            /* `current` is in slab space; translate this plate the same way. */
             region.x -= slab_x;
             region.y -= slab_y;
-            plate_regions[plate_count++] = region;
+            plan.plate_regions[plan.plate_count++] = region;
         }
-        /* Merge all current footprints into disjoint dispatch regions. Same
-         * overflow policy as liquid_glass_build_clear_regions: a footprint set
-         * that cannot coalesce into the dispatch budget degrades to one
-         * full-image region rather than failing a legal descriptor. */
-        const uint32_t dispatch_capacity =
-            PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS;
-        liquid_glass_region dispatch_regions[dispatch_capacity];
-        uint32_t dispatch_count = 0u;
-        for (uint32_t i = 0; i < current_count; ++i) {
-            if (!liquid_glass_add_clear_region(current[i], dispatch_regions, dispatch_capacity,
-                                               &dispatch_count)) {
-                dispatch_regions[0] = (liquid_glass_region){0u, 0u, image_width, image_height};
-                dispatch_count = 1u;
-                break;
-            }
-        }
-
-        const bool draw_scratch = need_scratch && slot->scratch;
-        if (draw_scratch) {
-            VkImage scratch_image = flux_image_vk_image(slot->scratch);
-            layer_record_base_material(command, filter, input, blurred, slot->scratch,
-                                       capture_width, capture_height, 0, 0, capture_width,
-                                       capture_height, desc, plate_regions, plate_count, is16f);
-            layer_barrier_compute_write_to_sampled_and_storage(command, scratch_image);
-        }
-        /* The output always carries the finished plate composite. When glass bodies
-         * also exist, the glass pass reads the plates from slot->scratch and blends
-         * on top of slot->output. */
-        layer_record_base_material(command, filter, input, blurred, slot->output, image_width,
-                                   image_height, slab_x, slab_y, capture_width, capture_height,
-                                   desc, plate_regions, plate_count, is16f);
-        if (current_group_count > 0u)
-            layer_barrier_compute_write_to_read_write(command, output_image);
+        plan.draw_scratch = plan.scratch != nullptr;
+        plan.output_after_plates_barrier = current_group_count > 0u;
     }
 
-    /* 4. Glass layer:
-     * When frost exists, the lens samples the frosted layer (slot->scratch).
-     * When no frost exists, the lens samples the sharp capture (desc->input).
-     * In both cases, input != slot->output, guaranteeing zero in-place cross-workgroup race
-     * hazards. */
-    const flux_image *glass_input = (need_scratch && slot->scratch) ? slot->scratch : input;
-    /* `draw_scratch` in step 3 and `glass_input` here must agree: the lens may
-     * only sample the scratch when the plate composite was actually written
-     * into it. */
-    const prism_glass_policy policy = {
-        .refraction = desc->refraction,
-        .chromatic_aberration = desc->chromatic_aberration,
-        .saturation = desc->saturation,
-        .brightness = desc->brightness,
-        .edge_width = desc->edge_width,
-        .rim_light = desc->rim_light,
-        .light_x = desc->light_direction.x,
-        .light_y = desc->light_direction.y,
-        .opacity = desc->opacity,
-        .size_reference = desc->size_reference,
-        .size_scale_min = desc->size_scale_min,
-        .tint_strength = desc->tint_strength,
-        .frost_strength = desc->frost_strength,
-        .curvature = desc->curvature,
-        .contact_ao = desc->contact_ao,
-        .ambient_fresnel = desc->ambient_fresnel,
-    };
-    /* Batched glass: coalesce the body footprints into disjoint regions and
-     * evaluate each region's bodies in one dispatch, in caller order.
-     *
-     * This is what removes both the per-body dispatch and the per-body barrier.
-     * Bodies that share pixels necessarily coalesce into one region, so their
-     * source-over order is the shader's loop order; disjoint regions never write
-     * each other's pixels, so no image barrier is required. See liquid_glass.c
-     * for the same construction and the reasoning about the Vulkan memory model. */
-    prism_region_batch glass_batches[PRISM_MAX_BATCHES];
-    uint32_t glass_batch_ids[PRISM_MAX_BODIES];
-    uint32_t glass_batch_ids_used = 0u;
-    liquid_glass_region glass_merged[PRISM_MAX_BATCHES];
-    uint32_t glass_merged_count = 0u;
-    /* Body footprints in capture space for this submission. */
-    liquid_glass_region glass_regions[PRISM_BACKDROP_MAX_GLASS_GROUPS];
-    uint32_t glass_region_body[PRISM_BACKDROP_MAX_GLASS_GROUPS];
-    uint32_t glass_region_count = 0u;
-    bool glass_dispatched = false;
-    for (uint32_t i = 0; i < current_group_count; ++i) {
-        const prism_liquid_glass_group *group = &desc->groups[current_group_indices[i]];
-        float shadow_reach = group->shadow_alpha > 0.0f ? fmaxf(group->shadow_offset_y, 0.0f) +
-                                                              2.0f * fmaxf(group->shadow_blur, 0.0f)
-                                                        : 0.0f;
-        liquid_glass_region region;
-        if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, capture_width, capture_height,
-                                                &region))
-            continue;
-        region.x -= slab_x;
-        region.y -= slab_y;
-        glass_regions[glass_region_count] = region;
-        glass_region_body[glass_region_count] = i;
-        ++glass_region_count;
-    }
-    if (glass_region_count > 0u) {
-        for (uint32_t i = 0; i < glass_region_count; ++i) {
-            if (!liquid_glass_add_clear_region(glass_regions[i], glass_merged, PRISM_MAX_BATCHES,
-                                               &glass_merged_count)) {
-                glass_merged[0] = (liquid_glass_region){0u, 0u, image_width, image_height};
-                glass_merged_count = 1u;
-                break;
-            }
+    /* Glass batching: coalesce footprints, then assign bodies in caller order. */
+    {
+        const flux_image *glass_input = plan.scratch ? plan.scratch : input;
+        (void)glass_input;
+        liquid_glass_region glass_regions[PRISM_BACKDROP_MAX_GLASS_GROUPS];
+        uint32_t glass_region_count = 0u;
+        uint32_t glass_region_body[PRISM_BACKDROP_MAX_GLASS_GROUPS];
+        for (uint32_t i = 0; i < current_group_count; ++i) {
+            const prism_liquid_glass_group *group = &desc->groups[current_group_indices[i]];
+            /* Shadow reach is per body: a body with no shadow contributes no
+             * reach, which is what keeps its dispatch bounds tight. */
+            float shadow_reach =
+                group->shadow_alpha > 0.0f
+                    ? fmaxf(group->shadow_offset_y, 0.0f) + 2.0f * fmaxf(group->shadow_blur, 0.0f)
+                    : 0.0f;
+            liquid_glass_region bounds;
+            if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, capture_width,
+                                                    capture_height, &bounds))
+                continue;
+            bounds.x -= slab_x;
+            bounds.y -= slab_y;
+            glass_regions[glass_region_count] = bounds;
+            glass_region_body[glass_region_count] = current_group_indices[i];
+            glass_region_count++;
         }
+
         uint32_t glass_owner[PRISM_BACKDROP_MAX_GLASS_GROUPS];
         for (uint32_t i = 0; i < glass_region_count; ++i) {
             glass_owner[i] = UINT32_MAX;
-            for (uint32_t r = 0; r < glass_merged_count; ++r) {
-                if (liquid_glass_regions_overlap(glass_regions[i], glass_merged[r])) {
+            for (uint32_t r = 0; r < plan.glass_merged_count; ++r) {
+                if (liquid_glass_regions_overlap(glass_regions[i], plan.glass_merged[r])) {
                     glass_owner[i] = r;
                     break;
                 }
             }
+            if (glass_owner[i] == UINT32_MAX) {
+                glass_owner[i] = plan.glass_merged_count;
+                plan.glass_merged[plan.glass_merged_count++] = glass_regions[i];
+            }
         }
-        uint32_t glass_batch_count = 0u;
-        for (uint32_t r = 0; r < glass_merged_count; ++r) {
+
+        uint32_t glass_batch_ids[PRISM_BACKDROP_MAX_GLASS_GROUPS];
+        uint32_t glass_batch_ids_used = 0u;
+        for (uint32_t r = 0; r < plan.glass_merged_count; ++r) {
             uint32_t first = glass_batch_ids_used;
             for (uint32_t i = 0; i < glass_region_count; ++i) {
                 if (glass_owner[i] == r)
-                    glass_batch_ids[glass_batch_ids_used++] =
-                        current_group_indices[glass_region_body[i]];
+                    glass_batch_ids[glass_batch_ids_used++] = glass_region_body[i];
             }
-            glass_batches[glass_batch_count++] = (prism_region_batch){
-                .x = glass_merged[r].x,
-                .y = glass_merged[r].y,
-                .width = glass_merged[r].width,
-                .height = glass_merged[r].height,
+            plan.glass_batches[plan.glass_batch_count++] = (prism_region_batch){
+                .x = plan.glass_merged[r].x,
+                .y = plan.glass_merged[r].y,
+                .width = plan.glass_merged[r].width,
+                .height = plan.glass_merged[r].height,
                 .ids_first = first,
                 .id_count = glass_batch_ids_used - first,
             };
         }
 
-        uint32_t rows = desc->group_count;
-        for (uint32_t i = 0; i < rows; ++i) {
-            void *row = prism_body_table_row(filter->device, &filter->bodies, rows, i);
-            if (!row)
+        if (plan.glass_batch_count > 0u) {
+            uint32_t rows = desc->group_count;
+            for (uint32_t i = 0; i < rows; ++i) {
+                void *row = prism_body_table_row(filter->device, &filter->bodies, rows, i);
+                if (!row)
+                    return FLUX_ERROR_OUT_OF_MEMORY;
+                *(prism_glass_body_row *)row = prism_glass_make_row(&desc->groups[i], &plan.policy);
+            }
+            uint32_t *ids = prism_body_ids_slot(filter->device, &filter->ids, glass_batch_ids_used);
+            if (!ids)
                 return FLUX_ERROR_OUT_OF_MEMORY;
-            *(prism_glass_body_row *)row = prism_glass_make_row(&desc->groups[i], &policy);
-        }
-        uint32_t *ids = prism_body_ids_slot(filter->device, &filter->ids, glass_batch_ids_used);
-        if (!ids)
-            return FLUX_ERROR_OUT_OF_MEMORY;
-        for (uint32_t i = 0; i < glass_batch_ids_used; ++i)
-            ids[i] = glass_batch_ids[i];
-        /* `ids_first` is a slot index into this filter's id table; make it the
-         * absolute offset every later use expects. */
-        for (uint32_t r = 0; r < glass_batch_count; ++r)
-            glass_batches[r].ids_first = glass_batches[r].ids_first;
-
-        const prism_glass_copy copy = {
-            .sharp = glass_input,
-            .blurred = blurred,
-            .capture_width = (float)capture_width,
-            .capture_height = (float)capture_height,
-            .slab_origin_x = (float)slab_x,
-            .slab_origin_y = (float)slab_y,
-        };
-        for (uint32_t r = 0; r < glass_batch_count; ++r) {
-            if (!liquid_glass_region_is_dispatchable(glass_merged[r], image_width, image_height))
-                continue;
-            prism_glass_record_batch(command, filter->glass_pipelines[is16f ? 1 : 0],
-                                     filter->device, &copy, slot->output, image_width, image_height,
-                                     &glass_batches[r], &policy, filter->bodies.address,
-                                     filter->ids.address +
-                                         glass_batches[r].ids_first * sizeof(uint32_t));
-            glass_dispatched = true;
+            for (uint32_t i = 0; i < glass_batch_ids_used; ++i)
+                ids[i] = glass_batch_ids[i];
+            plan.bodies_address = filter->bodies.address;
+            plan.ids_address = filter->ids.address;
+            plan.copy = (prism_glass_copy){
+                .sharp = glass_input,
+                .blurred = blurred,
+                .capture_width = (float)capture_width,
+                .capture_height = (float)capture_height,
+                .slab_origin_x = (float)slab_x,
+                .slab_origin_y = (float)slab_y,
+            };
         }
     }
-
-    /* 5. Publish the persistent output to following stages. */
-    if (clear_count > 0u || current_count > 0u || glass_dispatched)
-        layer_barrier_compute_write_to_read(command, output_image);
 
     memcpy(slot->previous, current, current_count * sizeof(current[0]));
     slot->previous_count = current_count;
     slot->initialized = true;
     slot->stats_submitted = true;
     slot->stats_group_count = desc->group_count;
-    slot->cached_revision = revision;
+
     *out = (prism_material_output){
         .image = slot->output,
         .origin_x = (float)slab_x,
@@ -1189,6 +1218,25 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         .width = slot->width,
         .height = slot->height,
     };
+
+    /* Defer the compound submission (ADR-0147). The output handle above is valid
+     * now; the three stages replay only if something requires the output. The
+     * descriptor must outlive the frame's recording, which the public contract
+     * already requires for `frost`/`groups` pointers. */
+    prism_deferred_pass pass = PRISM_DEFERRED_PASS_INIT;
+    pass.output = slot->output;
+    pass.label = "prism.backdrop_layer";
+    pass.inputs[0] = input;
+    pass.inputs[1] = blurred;
+    pass.input_count = 2;
+    flux_deferred_token *token = nullptr;
+    flux_result reg =
+        prism_deferred_register(frame, &pass, layer_plan_record, &plan, sizeof(plan), &token);
+    if (reg != FLUX_OK) {
+        layer_plan_record(&plan, flux_frame_vk_command_buffer(frame));
+        token = nullptr;
+    }
+    (void)prism_deferred_require(frame, token);
     FLUX_PROFILE_ZONE_END(z_layer);
     return FLUX_OK;
 }

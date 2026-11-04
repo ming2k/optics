@@ -359,6 +359,143 @@ static bool acrylic_group_dispatch_bounds(const prism_acrylic_group *group, uint
     return true;
 }
 
+/* Everything one acrylic submission needs to replay its dispatches later
+ * (ADR-0147). Copied into the frame's plan arena, so the descriptor and group
+ * array may live on the caller's stack. */
+typedef struct acrylic_plan {
+    flux_device *device;
+    struct prism_acrylic_filter *filter;
+    flux_image *input;
+    flux_image *blurred;
+    flux_image *output;
+    uint32_t output_width;
+    uint32_t output_height;
+    uint32_t capture_width;
+    uint32_t capture_height;
+    bool is16f;
+    float opacity;
+    float tint_strength;
+    float luminance_plate;
+    float noise_intensity;
+    float border_width;
+    float border_alpha;
+    uint32_t slab_x;
+    uint32_t slab_y;
+    uint32_t current_count;
+    acrylic_region current[ACRYLIC_MAX_GROUPS];
+    acrylic_region previous[ACRYLIC_MAX_GROUPS];
+    uint32_t previous_count;
+    bool clear_full;
+    bool needs_output_barrier;
+    uint32_t group_count;
+    prism_acrylic_group groups[ACRYLIC_MAX_GROUPS];
+} acrylic_plan;
+
+static void acrylic_plan_record(void *raw, VkCommandBuffer cmd) {
+    const acrylic_plan *p = raw;
+    if (!p || cmd == VK_NULL_HANDLE || !p->filter)
+        return;
+    prism_acrylic_filter *filter = p->filter;
+    const int cls = p->is16f ? 1 : 0;
+    VkImage out_vk = flux_image_vk_image(p->output);
+
+    barrier_reuse_to_compute_write(cmd, out_vk);
+
+    if (p->clear_full) {
+        if (filter->clear_pipelines[cls]) {
+            storage_clear_push pc = {
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = p->output_width,
+                .height = p->output_height,
+                .origin_x = 0,
+                .origin_y = 0,
+                .region_width = p->output_width,
+                .region_height = p->output_height,
+            };
+            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            barrier_compute_write_to_read_write(cmd, out_vk);
+        }
+    } else if (filter->clear_pipelines[cls]) {
+        for (uint32_t i = 0; i < p->previous_count; ++i) {
+            storage_clear_push pc = {
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = p->output_width,
+                .height = p->output_height,
+                .origin_x = p->previous[i].x,
+                .origin_y = p->previous[i].y,
+                .region_width = p->previous[i].width,
+                .region_height = p->previous[i].height,
+            };
+            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+        }
+        for (uint32_t i = 0; i < p->current_count; ++i) {
+            storage_clear_push pc = {
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = p->output_width,
+                .height = p->output_height,
+                .origin_x = p->current[i].x,
+                .origin_y = p->current[i].y,
+                .region_width = p->current[i].width,
+                .region_height = p->current[i].height,
+            };
+            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
+            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+        }
+        if (p->needs_output_barrier)
+            barrier_compute_write_to_read_write(cmd, out_vk);
+    }
+
+    if (p->group_count > 0 && filter->acrylic_pipelines[cls]) {
+        for (uint32_t i = 0; i < p->current_count; ++i) {
+            const prism_acrylic_group *g = &p->groups[i];
+            const acrylic_region *reg = &p->current[i];
+            acrylic_push pc = {
+                .input_handle = flux_image_bindless_handle(p->input),
+                .blurred_handle = flux_image_bindless_handle(p->blurred),
+                .sampler_handle = flux_device_default_sampler_handle(p->device),
+                .output_handle = flux_image_bindless_storage_handle(p->output),
+                .width = p->output_width,
+                .height = p->output_height,
+                .origin_x = reg->x,
+                .origin_y = reg->y,
+                .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w,
+                           g->shape.bounds.h},
+                .corner_radius = g->shape.corner_radius,
+                .opacity = g->opacity * p->opacity,
+                .tint_strength = g->tint_strength >= 0.0f ? g->tint_strength : p->tint_strength,
+                .luminance_plate =
+                    g->luminance_plate >= 0.0f ? g->luminance_plate : p->luminance_plate,
+                .noise_intensity =
+                    g->noise_intensity >= 0.0f ? g->noise_intensity : p->noise_intensity,
+                .border_width = g->border_width >= 0.0f ? g->border_width : p->border_width,
+                .border_alpha = g->border_alpha >= 0.0f ? g->border_alpha : p->border_alpha,
+                .shadow_alpha = g->shadow_alpha,
+                .shadow_blur = g->shadow_blur,
+                .shadow_offset_y = g->shadow_offset_y,
+                .tint_color = g->tint_color,
+                .group_width = reg->width,
+                .group_height = reg->height,
+                .slab_origin_x = (float)p->slab_x,
+                .slab_origin_y = (float)p->slab_y,
+                .capture_width = (float)p->capture_width,
+                .capture_height = (float)p->capture_height,
+            };
+            uint32_t gx = (reg->width + PRISM_WG - 1) / PRISM_WG;
+            uint32_t gy = (reg->height + PRISM_WG - 1) / PRISM_WG;
+            flux_compute_dispatch(cmd, filter->acrylic_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            if (i + 1 < p->current_count)
+                barrier_compute_write_to_read_write(cmd, out_vk);
+        }
+    }
+
+    barrier_compute_write_to_read(cmd, out_vk);
+}
+
 flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame *frame,
                                        const prism_acrylic_desc *desc, prism_material_output *out) {
     if (!filter || !frame || !desc || !out)
@@ -379,6 +516,12 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
     if (flux_image_bindless_handle(desc->input) == FLUX_BINDLESS_INVALID ||
         flux_image_bindless_handle(desc->blurred_input) == FLUX_BINDLESS_INVALID)
         return FLUX_ERROR_UNSUPPORTED;
+
+    /* ADR-0147: the blurred input is normally a deferred flux_blur_filter
+     * output; materialize it so its dispatches precede ours. */
+    flux_result mat = flux_frame_materialize_image(frame, desc->blurred_input);
+    if (mat != FLUX_OK)
+        return mat;
 
     const uint32_t capture_width = flux_image_width(desc->input);
     const uint32_t capture_height = flux_image_height(desc->input);
@@ -436,113 +579,38 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
     if (r != FLUX_OK)
         return r;
 
-    VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
-    VkImage out_vk = flux_image_vk_image(slot->output);
-
-    barrier_reuse_to_compute_write(cmd, out_vk);
-
-    const int cls = is16f ? 1 : 0;
-
-    // Clear previous footprints or initialize full output on first use or slab movement
-    if (!slot->initialized || slab_moved) {
-        if (filter->clear_pipelines[cls]) {
-            storage_clear_push pc = {
-                .output_handle = flux_image_bindless_storage_handle(slot->output),
-                .width = slot->width,
-                .height = slot->height,
-                .origin_x = 0,
-                .origin_y = 0,
-                .region_width = slot->width,
-                .region_height = slot->height,
-            };
-            uint32_t gx = (slot->width + PRISM_WG - 1u) / PRISM_WG;
-            uint32_t gy = (slot->height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-            barrier_compute_write_to_read_write(cmd, out_vk);
-        }
-    } else if (filter->clear_pipelines[cls]) {
-        for (uint32_t i = 0; i < slot->previous_count; ++i) {
-            storage_clear_push pc = {
-                .output_handle = flux_image_bindless_storage_handle(slot->output),
-                .width = slot->width,
-                .height = slot->height,
-                .origin_x = slot->previous[i].x,
-                .origin_y = slot->previous[i].y,
-                .region_width = slot->previous[i].width,
-                .region_height = slot->previous[i].height,
-            };
-            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
-            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-        }
-        for (uint32_t i = 0; i < current_count; ++i) {
-            storage_clear_push pc = {
-                .output_handle = flux_image_bindless_storage_handle(slot->output),
-                .width = slot->width,
-                .height = slot->height,
-                .origin_x = current_regions[i].x,
-                .origin_y = current_regions[i].y,
-                .region_width = current_regions[i].width,
-                .region_height = current_regions[i].height,
-            };
-            uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
-            uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-        }
-        if ((slot->previous_count > 0 || current_count > 0) && desc->group_count > 0)
-            barrier_compute_write_to_read_write(cmd, out_vk);
-    }
-
-    // Render acrylic bodies
-    if (desc->group_count > 0 && filter->acrylic_pipelines[cls]) {
-        for (uint32_t i = 0; i < desc->group_count; ++i) {
-            const prism_acrylic_group *g = &desc->groups[i];
-            acrylic_region reg;
-            if (!acrylic_group_dispatch_bounds(g, capture_width, capture_height, &reg))
-                continue;
-
-            acrylic_push pc = {
-                .input_handle = flux_image_bindless_handle(desc->input),
-                .blurred_handle = flux_image_bindless_handle(desc->blurred_input),
-                .sampler_handle = flux_device_default_sampler_handle(filter->device),
-                .output_handle = flux_image_bindless_storage_handle(slot->output),
-                .width = slot->width,
-                .height = slot->height,
-                .origin_x = reg.x - slab_x,
-                .origin_y = reg.y - slab_y,
-                .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w,
-                           g->shape.bounds.h},
-                .corner_radius = g->shape.corner_radius,
-                .opacity = g->opacity * desc->opacity,
-                .tint_strength = g->tint_strength >= 0.0f ? g->tint_strength : desc->tint_strength,
-                .luminance_plate =
-                    g->luminance_plate >= 0.0f ? g->luminance_plate : desc->luminance_plate,
-                .noise_intensity =
-                    g->noise_intensity >= 0.0f ? g->noise_intensity : desc->noise_intensity,
-                .border_width = g->border_width >= 0.0f ? g->border_width : desc->border_width,
-                .border_alpha = g->border_alpha >= 0.0f ? g->border_alpha : desc->border_alpha,
-                .shadow_alpha = g->shadow_alpha,
-                .shadow_blur = g->shadow_blur,
-                .shadow_offset_y = g->shadow_offset_y,
-                .tint_color = g->tint_color,
-                .group_width = reg.width,
-                .group_height = reg.height,
-                .slab_origin_x = (float)slot->slab_x,
-                .slab_origin_y = (float)slot->slab_y,
-                .capture_width = (float)slot->capture_width,
-                .capture_height = (float)slot->capture_height,
-            };
-
-            uint32_t gx = (reg.width + PRISM_WG - 1) / PRISM_WG;
-            uint32_t gy = (reg.height + PRISM_WG - 1) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->acrylic_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
-
-            if (i + 1 < desc->group_count)
-                barrier_compute_write_to_read_write(cmd, out_vk);
-        }
-    }
-
-    barrier_compute_write_to_read(cmd, out_vk);
+    acrylic_plan plan = {
+        .device = filter->device,
+        .filter = filter,
+        .input = desc->input,
+        .blurred = desc->blurred_input,
+        .output = slot->output,
+        .output_width = slot->width,
+        .output_height = slot->height,
+        .capture_width = capture_width,
+        .capture_height = capture_height,
+        .is16f = is16f,
+        .opacity = desc->opacity,
+        .tint_strength = desc->tint_strength,
+        .luminance_plate = desc->luminance_plate,
+        .noise_intensity = desc->noise_intensity,
+        .border_width = desc->border_width,
+        .border_alpha = desc->border_alpha,
+        .slab_x = slab_x,
+        .slab_y = slab_y,
+        .current_count = current_count,
+        .previous_count = slot->initialized && !slab_moved ? slot->previous_count : 0u,
+        .clear_full = !slot->initialized || slab_moved,
+        .needs_output_barrier =
+            (slot->initialized && !slab_moved ? slot->previous_count : 0u) > 0u ||
+            current_count > 0u,
+        .group_count = desc->group_count,
+    };
+    memcpy(plan.current, current_regions, current_count * sizeof(acrylic_region));
+    if (plan.previous_count > 0u)
+        memcpy(plan.previous, slot->previous, plan.previous_count * sizeof(acrylic_region));
+    for (uint32_t i = 0; i < desc->group_count; ++i)
+        plan.groups[i] = desc->groups[i];
 
     slot->initialized = true;
     slot->previous_count = current_count;
@@ -555,6 +623,24 @@ flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter, flux_frame 
         .width = slot->width,
         .height = slot->height,
     };
+
+    /* Defer the dispatches (ADR-0147). The handle above is valid now; the work
+     * replays only if something requires the output. Recording eagerly on a
+     * registration failure keeps correctness independent of pruning. */
+    prism_deferred_pass pass = PRISM_DEFERRED_PASS_INIT;
+    pass.output = slot->output;
+    pass.label = "prism.acrylic";
+    pass.inputs[0] = desc->input;
+    pass.inputs[1] = desc->blurred_input;
+    pass.input_count = 2;
+    flux_deferred_token *token = nullptr;
+    flux_result reg =
+        prism_deferred_register(frame, &pass, acrylic_plan_record, &plan, sizeof(plan), &token);
+    if (reg != FLUX_OK) {
+        acrylic_plan_record(&plan, flux_frame_vk_command_buffer(frame));
+        token = nullptr;
+    }
+    (void)prism_deferred_require(frame, token);
     FLUX_PROFILE_ZONE_END(z_acrylic);
     return FLUX_OK;
 }
