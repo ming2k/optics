@@ -24,6 +24,12 @@ pub struct VStack {
     pad: f32,
 }
 
+impl Default for VStack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VStack {
     pub fn new() -> Self {
         Self {
@@ -69,6 +75,12 @@ pub struct HStack {
     children: Vec<Box<dyn View>>,
     gap: f32,
     pad: f32,
+}
+
+impl Default for HStack {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HStack {

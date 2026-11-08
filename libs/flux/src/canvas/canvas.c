@@ -207,50 +207,72 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "4x MSAA Canvas pass requires a clear colour");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
+    /* Only the first rectangle of the set is used as the frame's render area
+     * hint; see canvas_end_pass_impl / vk_end_pass for the per-rect handling.
+     * The full set lives in the config, because a pass scoped to a region must
+     * not write outside it. */
+    if (desc->damage.count > 0 && !desc->damage.rects) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "Canvas damage set names a count but no rects");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     canvas_pass_config config = {
         .clear_color = desc->clear_color,
         .antialias = desc->antialias,
-        .render_offset_x = desc->render_offset_x,
-        .render_offset_y = desc->render_offset_y,
-        .render_width = desc->render_width,
-        .render_height = desc->render_height,
+        .damage = desc->damage,
+        .clear_extent = desc->clear_extent,
         .skip_stencil = false,
     };
 
-    /* ADR-0144: never partial-paint a swapchain image.
+    /* ADR-0149 decision 3: an over-capacity damage set degrades to the full
+     * extent, never to a truncated list.
      *
-     * A damage-rect pass rasterises a sub-rectangle and leaves the rest of the
-     * destination alone. For a caller-owned target image that is sound: it is
-     * one persistent buffer, so successive partial passes accumulate onto the
-     * same pixels. A swapchain is not one buffer — it is a rotation of several
-     * images, and a partial pass advances only the one it acquired.
-     *
-     * Measured on the material gallery before this rule: the same damage rect
-     * reached the five on-screen images 31, 34, 35, 18 and 18 times. Each image
-     * therefore held a different set of patches, and the compositor, cycling
-     * through them, showed a different UI state every frame — the "flicker
-     * between two frames" that regional damage introduced.
-     *
-     * Tracking "this image has had a complete frame" is not enough, which is
-     * why the flag alone was insufficient: after the first full paint every
-     * image qualifies, and from then on each incremental patch lands on one
-     * image and diverges it from the rest. The only way to keep a rotation
-     * consistent without a shared authoritative content buffer is to paint the
-     * full extent into whichever image is acquired, which makes all of them
-     * identical by construction. `render_width == 0` already means full extent
-     * (canvas_pass_render_area).
-     *
-     * The cost is rasterisation, not correctness: an on-screen partial update
-     * now repaints the whole surface. Preserving the ADR-0143 win here needs a
-     * single persistent content image that every acquired image is copied from
-     * whole; that is a separate design, not a flag. */
-    const bool requested_partial = config.render_width > 0 || config.render_height > 0;
-    if (requested_partial && !target && c->surface) {
-        config.render_offset_x = 0;
-        config.render_offset_y = 0;
-        config.render_width = 0;
-        config.render_height = 0;
+     * This has to happen here, once, at the parse point. If it did not, the
+     * per-rect helpers would silently drop the rectangles past the bound — and a
+     * dropped region is never repainted, which is the stale-pixel failure the
+     * whole damage pipeline exists to prevent. Over-covering costs one full
+     * repaint; under-covering costs permanent corruption. */
+    if (config.damage.count > FLUX_DAMAGE_CAPACITY) {
+        config.damage = (flux_damage){0};
+        config.clear_extent = true;
     }
+
+    /* ADR-0149: the localisation below rests on a *persistent* content image —
+     * one buffer that partial passes accumulate onto and that every acquired
+     * swapchain image is then copied from. If that image could not be created
+     * (OOM or an unsupported format at swapchain creation), the surface falls
+     * back to rendering directly into the acquired image, which is a rotation:
+     * the same partial pass then advances only one image and the compositor
+     * alternates between divergent buffers. That is exactly the 31/34/35/18/18
+     * divergence ADR-0144 measured.
+     *
+     * So the fallback is only correct if the pass covers the whole extent, and
+     * this is the one place that can tell. Widening here keeps the degraded
+     * path correct at the cost of rasterisation; without it the degradation is
+     * silent and permanent. */
+    const bool windowed_without_content = c->surface && !c->surface->offscreen &&
+                                          c->surface->content.image == VK_NULL_HANDLE && !target;
+    if (windowed_without_content && (config.damage.count > 0 || !config.clear_extent)) {
+        config.damage = (flux_damage){0};
+        config.clear_extent = true;
+    }
+
+    /* ADR-0149: a damage-scoped pass is legitimate on every destination,
+     * including a swapchain image.
+     *
+     * ADR-0144 forbade it because a swapchain is a *rotation* of images and a
+     * partial pass advances only the one it acquired — the images then hold
+     * different patch sets and the compositor alternates between them
+     * (measured: one rect arriving 31/34/35/18/18 times across five images).
+     * The rule was sound; the alternative it rejected — a per-image "has this
+     * image ever had a complete frame" flag — was rejected because it describes
+     * initialisation, not steady state.
+     *
+     * The epoch history in `core/frame.c` supplies what that flag could not:
+     * each image records the content epoch it last presented, and the present
+     * path copies exactly the union of write areas committed since then from
+     * the persistent content image. The rotation therefore cannot diverge,
+     * because divergence is repaired every time an image is reacquired rather
+     * than assumed absent. */
     const struct {
         flux_struct_type type;
         const void *next;

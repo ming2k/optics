@@ -821,6 +821,11 @@ typedef struct lens_desc {
     float text_scale;         /* accessibility text scale; 0/1 = 1.0  */
     lens_clipboard clipboard; /* optional host clipboard (ADR-0036)   */
     lens_dnd_host dnd;        /* optional host DnD interface (ADR-0086) */
+    /* Caret blink period in seconds; 0 = the library default (ADR-0151).
+     * Appended under the size guard, so a caller built against an older
+     * header keeps the default and never makes the library read past its
+     * own struct. */
+    float caret_blink_period_s;
 } lens_desc;
 
 FLUX_NODISCARD LENS_API flux_result lens_create(const lens_desc *desc, lens **out);
@@ -935,11 +940,19 @@ LENS_API bool lens_anim_pending(const lens *ui);
 /* True if the frame just built would paint anything different from what is
  * already on screen: base-tree or placed-subtree damage (geometry, draw
  * lists, lifecycle), an appearing/disappearing transient node or tooltip,
- * an eased value still in transit, or a focused text caret that needs its
- * blink clock. A damage-driven host may skip the whole acquire/paint/present
- * cycle when this returns false. Read-only; valid between lens_end and the
- * next lens_begin. Resize/scale changes are host-visible, not lens state —
- * the host must still paint the first frame after those itself. */
+ * an eased value still in transit, or the caret's blink phase *flipping*
+ * against the phase that is actually presented.
+ *
+ * A focused caret is not damage by its own existence (ADR-0151): the blink
+ * is a two-state clock, so only a transition between its states changes
+ * pixels. That distinction is what makes quiescence reachable for a host with
+ * a focused text field — the previous term made this function permanently
+ * true while any widget held focus.
+ *
+ * A damage-driven host may skip the whole acquire/paint/present cycle when
+ * this returns false. Read-only; valid between lens_end and the next
+ * lens_begin. Resize/scale changes are host-visible, not lens state — the
+ * host must still paint the first frame after those itself. */
 LENS_API bool lens_frame_needs_repaint(const lens *ui);
 
 /* Describe the damaged area of the frame just built as a bounded list of
@@ -1310,8 +1323,54 @@ LENS_API lens_id lens_active(const lens *ui);
 
 /* Caret rect of the focused text widget in UI-space, zero when none.
  * The platform layer forwards this to the IME (e.g. zwp_text_input) so
- * the candidate window can position itself. */
+ * the candidate window can position itself. This is *geometry* only: it
+ * says where the caret is, never whether it is painted this frame. */
 LENS_API flux_rect lens_caret_rect(const lens *ui);
+
+/* Current caret blink phase: true while the caret is in its visible half of
+ * the blink cycle (ADR-0151).
+ *
+ * Lens owns the blink clock because only lens can make it a *damage* signal.
+ * The clock advances once per frame by `lens_input.dt_seconds`, so a host
+ * that paces frames from the display's pulse gets a display-sampled blink for
+ * free, and a host that skips frames resumes on the phase it would have
+ * reached. A skin checks this before drawing the caret; the host never has to
+ * model a blink at all.
+ *
+ * Always true while the app has an IME composition in progress: frames are
+ * event-driven then, and a blink would freeze mid-composition. */
+LENS_API bool lens_caret_visible(const lens *ui);
+
+/* Override the caret blink period in seconds. `period <= 0` disables the
+ * blink: the caret then stays solid, and lens reports no caret damage at all.
+ * Accessibility preference (reduced motion) is a host policy, so the host
+ * decides; lens executes. */
+LENS_API void lens_set_caret_blink(lens *ui, float period_seconds);
+
+/* True when the caret's blink phase differs from the phase the last activated
+ * snapshot put on screen (ADR-0151).
+ *
+ * This is the host's whole caret-damage contract: forward it to the frame
+ * pacer as "one frame is owed", and never model a blink yourself. Comparing
+ * against the *presented* phase rather than the last built one is what makes
+ * a skipped frame keep its flip pending instead of dropping it, and it is why
+ * a host cannot derive this from `lens_caret_visible` alone (that is only the
+ * current phase, with no memory of what reached the display).
+ *
+ * False when no caret is focused: a phase flip nobody can see is not damage. */
+LENS_API bool lens_caret_flip_pending(const lens *ui);
+
+/* True when a caret blink clock is running: a text widget holds focus and the
+ * blink is enabled (ADR-0151).
+ *
+ * A host needs this distinct from `lens_caret_flip_pending`, and the two are
+ * not interchangeable. The clock only advances inside a build (it integrates
+ * `lens_input.dt_seconds`), so a host that stopped producing frames could
+ * never observe the next flip — the caret would freeze mid-blink. This level
+ * therefore tells the pacer to keep its *low idle tick* alive; it does not ask
+ * for a paint, and it must not buy the active-rate cadence. The paint is owed
+ * separately, by the frame on which the flip lands. */
+LENS_API bool lens_caret_clock_live(const lens *ui);
 
 /* Surrounding-text and content-hint context of the focused text widget,
  * for the host's IME integration (text-input-v3 set_surrounding_text /

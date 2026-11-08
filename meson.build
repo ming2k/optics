@@ -72,6 +72,12 @@ else
   transit_dep = declare_dependency()
 endif
 
+if get_option('svg')
+  subdir('libs/svg')
+else
+  svg_dep = declare_dependency()
+endif
+
 if get_option('prism')
   subdir('libs/prism')
 else
@@ -178,6 +184,7 @@ if get_option('tests')
   subdir('tests/flux')
   subdir('tests/prism')
   subdir('tests/transit')
+  subdir('tests/svg')
   subdir('tests/lens')
   subdir('tests/iris')
   subdir('tests/optics')

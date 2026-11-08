@@ -198,13 +198,7 @@ fn patterns_datagrid_tree_and_menu() {
 
     ui.frame(&input, |f| {
         // DataGrid
-        lens::patterns::DataGrid::new("test_grid").show(
-            f,
-            &mut cols,
-            &cells,
-            2,
-            &mut selected_row,
-        );
+        lens::patterns::DataGrid::new("test_grid").show(f, &mut cols, &cells, 2, &mut selected_row);
 
         // TreeView
         lens::patterns::TreeView::new("test_tree").show(f, &mut tree_items);
@@ -221,4 +215,163 @@ fn patterns_datagrid_tree_and_menu() {
             lens::patterns::popup_menu(f, "file_menu", anchor_rect, &menu_items);
         }
     });
+}
+
+/// A failed lens call must carry flux's own diagnostic, not just the result code.
+///
+/// `FLUX_ERROR_INVALID_ARGUMENT` alone cannot distinguish a degenerate rect from
+/// an out-of-bounds one from a double-begun pass, and each needs a different fix.
+/// Flux records *which entry point* rejected the call and *why* in a
+/// thread-local slot that the next failing call overwrites — so the only moment
+/// the detail can be captured is at the failure site, inside the wrapper. This
+/// test exists because losing it is otherwise a silent regression: the error
+/// still reports a plausible code, and nothing complains.
+#[test]
+fn a_failed_call_carries_the_flux_diagnostic() {
+    // A null ui is rejected by `lens_snapshot_activate`, and the rejection goes
+    // through `Error::from_result`, which is the seam under test.
+    let rc =
+        unsafe { lens::sys::lens_snapshot_activate(std::ptr::null_mut(), std::ptr::null_mut()) };
+    assert_ne!(
+        rc,
+        lens::sys::flux_result::FLUX_OK,
+        "null arguments must be rejected"
+    );
+
+    let diagnostic = lens::FluxDiagnostic::for_test(rc);
+    let rendered = diagnostic.to_string();
+    assert!(
+        rendered.contains("FLUX_ERROR"),
+        "the diagnostic must name the flux code, not print a bare integer: {rendered}"
+    );
+    assert_ne!(diagnostic.code, 0, "the discriminant must survive");
+    assert_eq!(
+        diagnostic.code_name,
+        format!("{rc:?}"),
+        "code_name must be the C enum's own name so logs stay greppable"
+    );
+
+    /* The cause, not just the class. `FLUX_ERROR_INVALID_ARGUMENT` alone cannot
+     * distinguish a null handle from a degenerate rect from an out-of-bounds
+     * scope; the message is what names which. Requiring it here is what stops a
+     * future refactor from quietly reverting to a code-only error — the shape
+     * would still compile and every "did it fail" test would still pass. */
+    assert!(
+        rendered.contains("lens_snapshot_activate"),
+        "the diagnostic must name the entry point that rejected the call: {rendered}"
+    );
+    assert!(
+        diagnostic.message.is_some(),
+        "the diagnostic must carry the human-readable cause: {rendered}"
+    );
+    assert!(
+        diagnostic.line > 0,
+        "the diagnostic must point at the rejecting site: {rendered}"
+    );
+}
+
+/// The caret blink is a *phase*, and the host's two questions about it are not
+/// interchangeable (ADR-0151).
+///
+/// Pinned here because the binding is where a host reads them, and the failure
+/// they exist to prevent is a silent one: reporting "a caret exists" as damage
+/// makes `lens_frame_needs_repaint` permanently true, so a host with a focused
+/// text field can never reach quiescence and composites the whole output at the
+/// panel rate for a caret that changes twice a second.
+#[test]
+fn caret_blink_is_a_phase_with_a_separate_clock() {
+    let mut ui = Ui::headless().expect("create headless ui");
+
+    // No text widget has claimed the caret, so neither question has anything to
+    // report — a focused-field contract must not fabricate a clock.
+    let mut name = TextBuf::new(64, "hello");
+    let input = Input::new((800.0, 600.0), 0.0);
+    ui.frame(&input, |f| {
+        f.textfield("caret-field", &mut name);
+    });
+    assert!(
+        !ui.caret_clock_live(),
+        "an unfocused field runs no blink clock"
+    );
+    assert!(!ui.caret_flip_pending(), "an unfocused field cannot flip");
+    assert!(ui.caret_visible(), "with no blink the caret is solid");
+
+    // Focus it through the safe surface, exactly as a host would.
+    assert!(ui.focus("caret-field"), "the field must be focusable");
+    ui.frame(&input, |f| {
+        f.textfield("caret-field", &mut name);
+    });
+    assert!(
+        ui.caret_clock_live(),
+        "a focused text field must run a blink clock"
+    );
+
+    /* The clock is a *level* and the flip is an *edge*, so advancing within one
+     * half-cycle must keep the clock live while owing no paint. Both facts are
+     * asserted together on purpose: a test that only checked "no flip" would
+     * pass for a caret that never blinks at all. */
+    let step = Input::new((800.0, 600.0), 0.05);
+    let mut flips = 0;
+    for _ in 0..40 {
+        ui.frame(&step, |f| {
+            f.textfield("caret-field", &mut name);
+        });
+        assert!(ui.caret_clock_live(), "the clock must stay live");
+        if ui.caret_flip_pending() {
+            flips += 1;
+            /* Presenting is what consumes a flip: the presented phase is
+             * recorded on activation, never on build, so a skipped frame keeps
+             * its flip pending instead of dropping it. */
+            let snapshot = ui.snapshot().expect("snapshot");
+            ui.activate(&snapshot).expect("activate");
+            assert!(
+                !ui.caret_flip_pending(),
+                "activating must consume the flip it presented"
+            );
+        }
+    }
+    /* 40 frames at 50 ms is 2 s, i.e. under two 1.06 s periods, so a correct
+     * contract owes roughly two to four paints — never 40 and never zero. */
+    assert!(
+        (1..=8).contains(&flips),
+        "a 1.06 s blink owes a few paints over 2 s, got {flips}"
+    );
+}
+
+/// Disabling the blink makes the caret solid *and* silent, and re-enabling names
+/// a period rather than assuming the library default (ADR-0151).
+#[test]
+fn a_disabled_blink_is_solid_and_reports_nothing() {
+    let mut ui = Ui::headless().expect("create headless ui");
+    ui.set_caret_blink(0.0);
+
+    let mut name = TextBuf::new(64, "hello");
+    let input = Input::new((800.0, 600.0), 1.0 / 60.0);
+    ui.frame(&input, |f| {
+        f.textfield("solid-caret", &mut name);
+    });
+    assert!(ui.focus("solid-caret"), "the field must be focusable");
+    ui.frame(&input, |f| {
+        f.textfield("solid-caret", &mut name);
+    });
+
+    assert!(
+        !ui.caret_clock_live(),
+        "a disabled blink runs no clock, so nothing keeps a host awake"
+    );
+    assert!(!ui.caret_flip_pending(), "a solid caret never flips");
+    assert!(ui.caret_visible(), "a disabled blink leaves the caret painted");
+
+    // Leaving reduced motion has to restore the blink. There is no "reset to
+    // default" entry point — `period <= 0` *is* off — so the constant exists,
+    // and this asserts it is a usable period rather than a placeholder.
+    assert!(lens::DEFAULT_CARET_BLINK_PERIOD_S > 0.0);
+    ui.set_caret_blink(lens::DEFAULT_CARET_BLINK_PERIOD_S);
+    ui.frame(&input, |f| {
+        f.textfield("solid-caret", &mut name);
+    });
+    assert!(
+        ui.caret_clock_live(),
+        "restoring the default period must bring the clock back"
+    );
 }

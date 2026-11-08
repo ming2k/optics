@@ -361,7 +361,11 @@ pub struct LiquidGlassImage<'filter> {
     _filter: PhantomData<&'filter mut LiquidGlassFilter>,
 }
 
-fn draw_image_rect(canvas: &flux::CanvasCommands<'_>, image: *mut flux_sys::flux_image, dst: sys::flux_rect) {
+fn draw_image_rect(
+    canvas: &flux::CanvasCommands<'_>,
+    image: *mut flux_sys::flux_image,
+    dst: sys::flux_rect,
+) {
     let geom = flux_sys::flux_geometry {
         kind: flux_sys::flux_geom_kind::FLUX_GEOM_RECT,
         _pad: [0; 3],

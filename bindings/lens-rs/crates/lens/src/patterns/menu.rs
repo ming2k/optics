@@ -1,7 +1,7 @@
 //! Menu & MenuBar pattern.
 
-use crate::types::Rect;
 use crate::Frame;
+use crate::types::Rect;
 use std::ffi::CString;
 
 /// Item in a popup menu.
@@ -116,11 +116,7 @@ pub fn popup_menu(
         )
     };
 
-    if act >= 0 {
-        Some(act as usize)
-    } else {
-        None
-    }
+    if act >= 0 { Some(act as usize) } else { None }
 }
 
 /// Render a horizontal menu bar. Returns the active open menu index (if any) and its anchor rect.

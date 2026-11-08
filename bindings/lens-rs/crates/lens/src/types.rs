@@ -69,9 +69,8 @@ impl Color {
         if a0 == 255 || a0 == 0 {
             Color::rgba(pr, pg, pb, a)
         } else {
-            let unpremul = |c: u8| -> u8 {
-                ((c as u32 * 255 + (a0 as u32 / 2)) / a0 as u32).min(255) as u8
-            };
+            let unpremul =
+                |c: u8| -> u8 { ((c as u32 * 255 + (a0 as u32 / 2)) / a0 as u32).min(255) as u8 };
             Color::rgba(unpremul(pr), unpremul(pg), unpremul(pb), a)
         }
     }
@@ -462,10 +461,6 @@ impl Theme {
         Theme(unsafe { sys::lens_theme_default() })
     }
 
-    pub fn default() -> Theme {
-        Theme(unsafe { sys::lens_theme_default() })
-    }
-
     pub fn dark() -> Theme {
         Theme(unsafe { sys::lens_theme_dark() })
     }
@@ -752,6 +747,11 @@ impl Theme {
 }
 
 impl Default for Theme {
+    /// The Rust-side default is the dark theme. `Theme::default()` therefore
+    /// means exactly `Default::default()` — there is no second, inherent
+    /// `default()` that shadows the trait and returns something else.
+    /// (The C entry point `lens_theme_default` is the *light* theme; use
+    /// [`Theme::light`] when that is what is meant.)
     fn default() -> Self {
         Theme::dark()
     }
@@ -947,29 +947,30 @@ impl LayoutOpts {
 
     pub(crate) fn to_raw(self) -> sys::lens_layout_opts {
         let mut b: sys::lens_box = unsafe { std::mem::zeroed() };
-        b.flex = self.flex;
-        b.width = self.width;
-        b.height = self.height;
-        b.min_width = self.min_width;
-        b.max_width = self.max_width;
-        b.min_height = self.min_height;
-        b.max_height = self.max_height;
-        b.col_span = self.col_span;
-        b.row_span = self.row_span;
-        b.grid_col = self.grid_col;
-        b.grid_row = self.grid_row;
+        let finite_pos = |v: f32| if v.is_finite() && v > 0.0 { v } else { 0.0 };
+        b.flex = finite_pos(self.flex);
+        b.width = finite_pos(self.width);
+        b.height = finite_pos(self.height);
+        b.min_width = finite_pos(self.min_width);
+        b.max_width = finite_pos(self.max_width);
+        b.min_height = finite_pos(self.min_height);
+        b.max_height = finite_pos(self.max_height);
+        b.col_span = self.col_span.max(0);
+        b.row_span = self.row_span.max(0);
+        b.grid_col = self.grid_col.max(0);
+        b.grid_row = self.grid_row.max(0);
         sys::lens_layout_opts {
             box_: b,
-            gap: self.gap,
-            pad: self.pad,
+            gap: finite_pos(self.gap),
+            pad: finite_pos(self.pad),
             align: sys::lens_align::LENS_START,
             cross: self.cross.raw(),
             bg: self.bg.raw(),
-            radius: self.radius,
+            radius: finite_pos(self.radius),
             border: self.border.raw(),
-            border_width: self.border_width,
+            border_width: finite_pos(self.border_width),
             wrap: self.wrap,
-            row_gap: self.row_gap,
+            row_gap: finite_pos(self.row_gap),
         }
     }
 }

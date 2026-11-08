@@ -6,11 +6,16 @@ This document codifies the monorepo topology, library ownership boundaries, the 
 
 ## 1. Monorepo Micro-Kernel Topology
 
-Optics is organized into seven focused, orthogonal C23 libraries under `libs/`, plus safe bindings in `bindings/`:
+Optics is organized into seven focused, orthogonal C23 runtime libraries under `libs/`, plus one document compiler and safe bindings in `bindings/`:
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
 │  Application Layer / Integrators / Examples                         │
+├──────────────────────────────────────────────────────────────────────┤
+│  Document Layer (format → primitives; not a runtime layer)           │
+│  - `libs/svg`:  SVG static-art compiler — path grammar, shape        │
+│                 decomposition, paint resolution, gradient baking,    │
+│                 fit-and-paint, headless rasterization (ADR-0150)     │
 ├──────────────────────────────────────────────────────────────────────┤
 │  Layer 3: UI State & Platform Shell                                  │
 │  - `libs/lens`: Immediate-mode UI engine, layout (Grid/Flex/Flow),   │
@@ -36,6 +41,11 @@ Optics is organized into seven focused, orthogonal C23 libraries under `libs/`, 
 │                 compute pipelines, analytic curve kernel             │
 └──────────────────────────────────────────────────────────────────────┘
 ```
+
+`libs/svg` sits beside the runtime layers rather than inside them: it links
+`flux` and nothing else, is device-less by design (ADR-0136), and exists so
+that a *document format* — a parser — never has to live in the engine
+(ADR-0150). Consumers that do not read SVG never link it.
 
 Dependencies flow strictly inward from higher layers to lower layers. Reverse dependencies across layer boundaries are prohibited.
 

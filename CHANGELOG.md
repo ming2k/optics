@@ -13,6 +13,147 @@ either.
 
 ## [Unreleased]
 
+### Added
+
+- **flux**: Damage-scoped frames reach the screen (ADR-0149). A windowed surface
+  now renders into one persistent content image and copies only the rectangles
+  written since each swapchain image was last presented, so the localisation
+  ADR-0143 measures — a one-cell edit is a 26×20 rect — survives all the way to
+  the acquired image instead of being widened to the full extent. The
+  reconciliation is a write-epoch history (`flux_damage_history`, 8 frames deep,
+  no allocation) rather than a per-image initialisation flag, which ADR-0144
+  measured to be insufficient in steady state: an image that sat out longer than
+  the window, or that missed an intervening full-extent frame, takes a full copy
+  rather than a partial union that would silently drop the oldest region.
+- **flux**: `flux_canvas_pass_desc.damage` accepts a *set* of write rectangles
+  (`flux_damage`, up to `FLUX_DAMAGE_CAPACITY`), and `clear_extent` separates
+  "the whole destination is new" from "the damage set is empty". Both backends
+  honour the set per rectangle: the LOAD seed, the output-transform encode, the
+  per-draw scissor and layer composites all iterate it, and a draw that touches
+  none of it is dropped. Writing the set's bounding box instead — the obvious
+  simplification — overwrites the widgets between two distant bands with unseeded
+  intermediate pixels.
+- **flux**: `tests/flux/unit/test_damage_history.c` proves the window arithmetic
+  without a GPU, which is where the failure modes live: "never synchronised" and
+  "already current" must resolve differently, a full-extent frame poisons every
+  older entry, and both the depth bound and the caller's capacity degrade to a
+  full copy rather than a truncated list.
+- **lens**: Damage reports the pixels that change, including the ones outside the
+  node box: borders straddle their path by half their width, image outlines
+  expand by `outline_width`, icon masks carry a stroke/AA halo, connected tabs
+  reach below and beside their box, and tab indicators are re-anchored to the
+  box's bottom edge. All of them come from one shared predictor
+  (`lensi_cmd_paint_extent`) that replay and the damage walk both use, replacing
+  two partial copies that handled only text.
+- **lens**: A scrolling viewport that changes, and a placed node that changes
+  band or position within one, now report damage. Both alter pixels no
+  descendant's own state describes, so they are tracked as `clip_changed` /
+  `restacked` and compared against what the *presented* snapshot imposed —
+  a frame that was built and then superseded never reached the screen, so it is
+  not the baseline.
+- **iris**: Each host passes the damage set through to the pass and damages the
+  compositor per rectangle (`wl_surface_damage_buffer` per rect on Wayland)
+  instead of collapsing to a bounding box, so the compositor's own damage
+  tracking is not defeated by an over-wide region.
+- **svg**: New sibling library `libsvg` — the SVG static-art compiler
+  (ADR-0150). `svg_parse` turns a document into an immutable, refcounted
+  `svg_document`; `svg_draw` paints it onto a canvas at any size;
+  `svg_rasterize` renders it with the headless CPU canvas. It owns the format
+  and nothing else: no file IO, no text, no scripting, no CSS cascade beyond
+  presentation attributes and `style=""`. It links `flux` and is device-less
+  (ADR-0136), so a consumer that does not read SVG never links it.
+  `bindings/svg-rs` carries the corresponding `svg-sys`/`svg` crates.
+- **svg**: `tests/svg/fuzz/fuzz_svg_parse` fuzzes the compiler as the
+  untrusted-input parser it is (ADR-0150's premise), replaying a committed seed
+  corpus for the ceilings, container markers, truncation boundaries and hostile
+  numbers, on the same libFuzzer lane as the flux parsers. It found two genuine
+  out-of-bounds reads before the library shipped.
+- **lens**: `lens_caret_visible`, `lens_caret_flip_pending`,
+  `lens_caret_clock_live` and `lens_set_caret_blink` make the caret blink a
+  *phase* rather than a level (ADR-0151). `lens_frame_needs_repaint` now
+  reports the phase flipping against the phase that was actually presented,
+  so an idle focused text field stops repainting twice a second — the case
+  that held a compositor at ~50% GPU on an idle window.
+- **flux**: `flux_set_diagnostic` lets a consumer library record the failure it
+  detected in flux's thread-local error slot, so `flux_get_last_error` stays the
+  single place a caller looks for "what went wrong".
+- **flux-rs**, **lens-rs**: A binding error now carries the library's
+  diagnostic, not just the result code (ADR-0153). `Error` exposes the
+  `flux_get_last_error` entry point, detail and backend code that used to be
+  discarded at the FFI boundary, where the previous message was
+  `Render(FLUX_ERROR_INVALID_ARGUMENT)` and nothing else.
+- **lens-rs**: `Snapshot::retain` takes a second owner of a snapshot, so a host
+  that caches a last-good scene and also hands it to `activate`/`submit` no
+  longer has to copy the display list or give up the reference.
+
+### Changed
+
+- **flux**: `flux_canvas_pass_desc` replaces `render_offset_x`, `render_offset_y`,
+  `render_width` and `render_height` with `damage` and `clear_extent`. The
+  single-rectangle form cannot express a damage set — the bounding box of two
+  edge bands is the whole output — so it is deleted rather than kept as a way to
+  express a lossy scope. Source-breaking for every caller, including `flux-rs`,
+  whose `CanvasPassOptions::render_area: Option<CanvasRenderArea>` becomes
+  `damage: Vec<CanvasRenderArea>`.
+- **flux**: A pass whose damage set names no pixel of its destination is rejected
+  with `FLUX_ERROR_INVALID_ARGUMENT` rather than silently painting nothing.
+- **lens**: The tooltip's painted box is measured once at `lensi_tooltip` time and
+  shared by replay and the damage walk, instead of each deriving it. The damage
+  walk is a `const lens *` pass and must not re-shape text, so measuring there
+  was not an option.
+- **lens**: Fade ghosts report their commands' painted extent, not their
+  container box.
+- **svg**: `svg_parse_opts.length` no longer has a zero-means-`strlen` shorthand;
+  measuring is the explicit `SVG_LENGTH_MEASURE`. A binding that forwards a
+  caller's byte count now passes `0` for an empty input and gets a diagnosis
+  instead of an out-of-bounds read, so the `svg-rs` empty-slice guard is no
+  longer load-bearing.
+
+### Fixed
+
+- **lens**: A tooltip no longer leaves the band it vacated unchanged on dismissal,
+  and no longer under-reports while appearing: damage now covers the painted box
+  (below the anchor, with padding) rather than the anchor alone.
+- **lens**: An icon or outlined image whose stroke fringe extended past its
+  command rect no longer leaves that fringe frozen when only the widget changes.
+- **flux**: A windowed surface whose persistent content image could not be
+  created (OOM, or an unsupported format at swapchain creation) now widens every
+  canvas pass to the full extent. Such a surface renders directly into the
+  acquired swapchain image, which is a rotation, so honouring a damage scope
+  there is the ADR-0144 divergence — the same partial patch advancing one image
+  while the compositor alternates between them. The fallback was documented as
+  correct and no longer was once ADR-0149 removed the ADR-0144 guard.
+- **lens**: An exponential ease now terminates (ADR-0152). A settled value snaps
+  to its target instead of approaching it forever, and the wake-up poll is
+  capped independently of what is allowed to wake it — a static window with the
+  pointer untouched had been polling ~70 times/second and holding 1–2% of a core
+  after ADR-0151 removed the caret's own wakeups.
+- **svg**: A `<g>` inside an opaque container (`<defs>`, `<symbol>`,
+  `<clipPath>`, `<mask>`, `<pattern>`, `<marker>`, `<filter>`, `<text>`,
+  `<image>`, `<use>`, `<title>`, `<desc>`, `<metadata>`, `<style>`, `<script>`)
+  no longer consumes the enclosing style frame. Nothing inside such a container
+  pushes a frame — the geometry is inert — so the matching `</g>` used to pop an
+  *ancestor* frame, discarding the document's inherited fill and recolouring
+  every shape after the block. `<defs><g>` is how icon sets group a symbol's
+  paths, so whole themes rendered black.
+- **svg**: A style frame that owns a heap gradient reference is disposed when it
+  is popped; `<g fill="url(#g)">` leaked the cloned id once per group.
+- **svg**: An unmatched `</g>`/`</svg>` fails the parse instead of silently
+  popping the root seed frame. Broken nesting cannot be rendered faithfully, and
+  "never a partial document" is the contract.
+- **svg**: An unterminated `<!--`, `<?`…`?>` or `<![CDATA[` no longer reads past
+  the end of the caller's span. Those three container markers were located with
+  `strstr()`, which scans for a NUL that a `(ptr, len)` input need not have, and
+  the "close marker past `end`" check ran only after the scan had already walked
+  off the buffer (ASan: heap-buffer-overflow, found by the new `fuzz_svg_parse`
+  harness within 828 executions). They now use a bounded search.
+- **svg**: `svg_parse_opts.length` is a real byte count in every case. Zero used
+  to mean "measure `text` with `strlen`", which read past the allocation for the
+  occupied case of an empty `(ptr, len)` pair — the common case for a binding
+  forwarding a caller's length. Measuring is now explicit via the new
+  `SVG_LENGTH_MEASURE` sentinel, so empty input is refused as the empty document
+  it is. `svg-rs` empty-slice parsing no longer depends on a local guard.
+
 ## [0.0.74] - 2026-11-04
 
 ### Added

@@ -65,13 +65,7 @@ impl Spring {
             velocity: self.velocity,
         };
         let res = unsafe {
-            sys::transit_spring_advance(
-                &mut raw,
-                target,
-                params.raw(),
-                dt_seconds,
-                reduced_motion,
-            )
+            sys::transit_spring_advance(&mut raw, target, params.raw(), dt_seconds, reduced_motion)
         };
         self.value = raw.value;
         self.velocity = raw.velocity;
@@ -131,10 +125,7 @@ pub struct SpringParams {
 
 impl SpringParams {
     pub const fn new(stiffness: f32, damping: f32) -> Self {
-        Self {
-            stiffness,
-            damping,
-        }
+        Self { stiffness, damping }
     }
 
     pub fn snappy() -> Self {

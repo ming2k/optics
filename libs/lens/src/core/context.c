@@ -191,6 +191,20 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
     ui->clipboard = d.clipboard;
     ui->dnd_host = d.dnd;
 
+    /* Caret blink clock defaults (ADR-0151). 530 ms is the platform
+     * convention every toolkit converged on; the clock starts visible so the
+     * first frame after focus shows a caret rather than a gap. The clock is
+     * inactive until a *widget* claims the caret (`lensi_set_caret_rect`): a
+     * host-owned caret has its own clock in the app, and driving it from here
+     * as well would make lens report flips the app's painter never made. */
+    ui->caret_blink_enabled = true;
+    ui->caret_lens_owned = false;
+    ui->caret_blink_period_s =
+        d.caret_blink_period_s > 0.0f ? d.caret_blink_period_s : LENSI_CARET_BLINK_PERIOD_S;
+    ui->caret_phase_s = 0.0f;
+    ui->caret_visible = true;
+    ui->caret_presented_visible = true;
+
     size_t arena_bytes = d.arena_bytes ? d.arena_bytes : LENSI_DEFAULT_ARENA_BYTES;
     flux_result r = flux_arena_init(&ui->arena, arena_bytes, NULL);
     if (r != FLUX_OK)
@@ -326,15 +340,19 @@ lens_theme lens_get_theme(const lens *ui) {
 void lens_set_opacity(lens *ui, float opacity) {
     if (!ui)
         return;
-    if (opacity < 0.0f)
+    if (!isfinite(opacity) || opacity < 0.0f)
         opacity = 0.0f;
-    if (opacity > 1.0f)
+    else if (opacity > 1.0f)
         opacity = 1.0f;
     ui->opacity = opacity;
 }
 
 /* Ghost replay (ADR-0078): the public pin. */
 void lens_set_ghost(lens *ui, lens_id subtree_root, float alpha) {
+    if (!isfinite(alpha) || alpha < 0.0f)
+        alpha = 0.0f;
+    else if (alpha > 1.0f)
+        alpha = 1.0f;
     lensi_ghost_pin(ui, subtree_root, alpha);
 }
 
@@ -343,7 +361,7 @@ float lens_opacity(const lens *ui) {
 }
 
 void lens_set_scale(lens *ui, float scale) {
-    if (ui && scale > 0.0f) {
+    if (ui && isfinite(scale) && scale > 0.0f) {
         ui->scale = scale;
         glyph_set_scale(ui->text, scale); /* null-safe */
     }
@@ -378,6 +396,69 @@ bool lens_has_duplicate_ids(const lens *ui) {
 }
 bool lens_anim_pending(const lens *ui) {
     return ui && ui->anim_pending;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Caret blink clock (ADR-0151)                                       */
+/* ------------------------------------------------------------------ */
+
+/* Advance the blink phase by this frame's delta. Called once per build,
+ * before any widget runs, so every consumer in the frame — the skin's
+ * caret draw, the repaint query, and the damage walk — reads the same
+ * phase.
+ *
+ * The clock advances unconditionally, not only while a caret exists: the
+ * phase is what makes a repaint differ from the last one, and a host that
+ * skips frames must be able to resume on the phase it would have reached.
+ * `dt_seconds` is the host's frame delta, which is the compositor's pulse
+ * interval on a paced frame and the idle tick on a skipped one; that is
+ * exactly the cadence a blink should be sampled at. */
+static void lensi_caret_advance_blink(lens *ui) {
+    if (!ui->caret_blink_enabled || !(ui->caret_blink_period_s > 0.0f))
+        return;
+    float dt = ui->input.dt_seconds;
+    if (!(dt > 0.0f) || !isfinite(dt))
+        dt = 0.0f;
+    const float period = ui->caret_blink_period_s;
+    /* Two periods is the longest delta that can still be integrated as a
+     * blink; a host that reports a nonsense delta must not be able to
+     * fast-forward the caret through whole cycles in one step. */
+    if (dt > 2.0f * period)
+        dt = 2.0f * period;
+    ui->caret_phase_s = fmodf(ui->caret_phase_s + dt, period);
+    ui->caret_visible = ui->caret_phase_s < period * 0.5f;
+}
+
+/* True when the caret's current phase differs from the phase actually on
+ * screen. This is the *only* caret term `lens_frame_needs_repaint` may
+ * consult: a caret that exists but has not flipped is not damage.
+ *
+ * A host-owned caret is excluded outright (ADR-0151): the app paints it with
+ * its own clock, so lens has no authority to declare its phase changed. */
+static bool lensi_caret_phase_changed(const lens *ui) {
+    if (!ui->caret_lens_owned)
+        return false;
+    if (ui->caret_rect.w <= 0.0f || ui->caret_rect.h <= 0.0f)
+        return false;
+    return ui->caret_visible != ui->caret_presented_visible;
+}
+
+bool lens_caret_flip_pending(const lens *ui) {
+    return ui ? lensi_caret_phase_changed(ui) : false;
+}
+
+bool lens_caret_clock_live(const lens *ui) {
+    if (!ui)
+        return false;
+    /* Only a widget-owned caret has a lens clock to advance (ADR-0151). */
+    if (!ui->caret_lens_owned)
+        return false;
+    /* An IME composition holds the caret solid, so no clock is needed. */
+    if (ui->input.preedit_utf8[0] != '\0')
+        return false;
+    if (!ui->caret_blink_enabled)
+        return false;
+    return ui->caret_rect.w > 0.0f && ui->caret_rect.h > 0.0f;
 }
 
 /* Read-only repaint query for damage-driven hosts (valid between lens_end
@@ -426,10 +507,14 @@ bool lens_frame_needs_repaint(const lens *ui) {
     if (lensi_ghost_active(ui))
         return true;
 
-    /* A focused text widget keeps the caret clock alive: the host paces
-     * low-frequency frames for the blink, and each of those frames must
-     * actually paint. */
-    if (ui->caret_rect.w > 0.0f)
+    /* The caret's *flip*, not its existence (ADR-0151). The old term was
+     * `ui->caret_rect.w > 0.0f`, which is a constant for as long as any text
+     * widget holds focus: it made `needs_repaint` permanently true, so every
+     * host with a focused field could never reach quiescence, and every frame
+     * it did paint re-painted an identical caret because no phase existed to
+     * advance. A blink is a 2-state clock sampled at the display cadence; only
+     * the transition between the two states changes pixels. */
+    if (lensi_caret_phase_changed(ui))
         return true;
 
     return false;
@@ -472,12 +557,7 @@ static flux_rect rect_intersect_bounds(flux_rect a, flux_rect b) {
  * descendants are visited separately. */
 /* Where one command paints, in absolute coordinates, resolved against `box`. */
 static flux_rect paint_of_cmd(flux_rect box, const lens_draw_cmd *c) {
-    const flux_rect rel_rect = lensi_offset_rel(box, c->rel);
-    if (c->kind != LENS_DRAW_TEXT)
-        return rel_rect;
-    /* Text is positioned from the advance its widget recorded, exactly as replay
-     * positions it. Neither consumer shapes here. */
-    return lensi_text_bounds(rel_rect, c->text_advance, c->rel.w < 0.0f, c->rel.h < 0.0f);
+    return lensi_cmd_paint_extent(box, c);
 }
 
 static flux_rect node_paint_bounds(const lens_node *n) {
@@ -636,6 +716,26 @@ static void damage_walk(const lens *ui, const lens_node *n, bool owned, damage_a
             (n->render_rect.x != n->final_rect.x || n->render_rect.y != n->final_rect.y ||
              n->render_rect.w != n->final_rect.w || n->render_rect.h != n->final_rect.h))
             damage_push(acc, ui, node_paint_bounds_at(n, n->render_rect));
+
+        /* A clip that changed and a placed node that re-composited both change
+         * pixels this node does not own: the clip's old band held descendants that
+         * are now hidden, and a re-stacked node changed what it occludes. Neither
+         * is derivable from the node's own paint, so the regions are reported from
+         * the state they changed away from. */
+        if (n->restacked) {
+            /* The whole placed body, since a re-stacked node can occlude or reveal
+             * any part of it, plus the extent the previous stacking showed. */
+            damage_push(acc, ui, node_paint_bounds(n));
+            if (n->has_render_rect)
+                damage_push(acc, ui,
+                            n->render_paint_rect.w > 0.0f ? n->render_paint_rect : n->render_rect);
+        } else if (n->clip_changed && n->has_prev_clip) {
+            /* The clip's *previous* extent, which is where pixels the new clip
+             * excludes still show the last presented frame, unioned with the new
+             * one so a widening clip repaints what it reveals. */
+            damage_push(acc, ui, n->prev_clip);
+            damage_push(acc, ui, lensi_node_child_clip(n));
+        }
     }
     for (const lens_node *c = n->first_child; c; c = c->next_sibling)
         damage_walk(ui, c, owned, acc);
@@ -690,6 +790,27 @@ static void damage_walk_leaving(const lens *ui, damage_accum *acc) {
     }
 }
 
+/* Damage for one ghost subtree. A ghost node carries its own box, opacity and
+ * command list, but no `lens_node` — so its paint extent is resolved command by
+ * command through the same predictor the live walk uses, which is what keeps the
+ * fading outline/halo fringe from being left behind. */
+static void damage_push_ghost(damage_accum *acc, const lens *ui, const lens_ghost_node *g) {
+    if (!g)
+        return;
+    flux_rect hit = (flux_rect){0, 0, 0, 0};
+    for (uint32_t i = 0; i < g->cmd_count; i++) {
+        const flux_rect paint = lensi_cmd_paint_extent(g->final_rect, &g->cmds[i].cmd);
+        hit = rect_union_bounds(hit, paint);
+    }
+    /* No commands of its own (a departing container): the children paint, and the
+     * container's box is the only thing that can still say where. */
+    if (hit.w <= 0.0f || hit.h <= 0.0f)
+        hit = g->final_rect;
+    damage_push(acc, ui, hit);
+    for (const lens_ghost_node *c = g->first_child; c; c = c->next_sibling)
+        damage_push_ghost(acc, ui, c);
+}
+
 static uint32_t damage_resolve(const lens *ui, const lens_damage_opts *opts) {
     flux_rect *out = opts ? opts->rects : nullptr;
     uint32_t capacity = out ? opts->capacity : 0;
@@ -705,13 +826,37 @@ static uint32_t damage_resolve(const lens *ui, const lens_damage_opts *opts) {
     damage_walk(ui, ui->root, false, &acc);
     damage_walk_leaving(ui, &acc);
 
-    if (ui->caret_rect.w > 0.0f && ui->caret_rect.h > 0.0f)
+    /* The caret rect is damage only when its visible phase flipped
+     * (ADR-0151). Its *existence* is not a pixel change — pushing the rect
+     * unconditionally meant a focused field dirtied its caret box every
+     * frame, which is the same defect the repaint query carried. */
+    if (lensi_caret_phase_changed(ui))
         damage_push(&acc, ui, ui->caret_rect);
-    if (ui->tooltip.active || ui->prev_tooltip_active)
+    /* The tooltip is painted outside the draw list, below the anchor rather than
+     * at it (replay.c: the box is `{anchor.x, anchor.y + anchor.h + 4, ...}`).
+     * Reporting the anchor would leave both the appearing box and the erased band
+     * of a disappearing one undamaged, so the painted extent is derived from the
+     * same measurements replay uses. */
+    if (ui->tooltip.active || ui->prev_tooltip_active) {
+        /* `painted` was measured at `lensi_tooltip` time, while the context was
+         * mutable — a damage walk cannot re-shape text. It survives the reset to
+         * `active = false`, so when a tooltip disappears the last painted box is
+         * exactly the band that has to be erased. The anchor is reported as well:
+         * it is where the widget sits, and a tooltip that moved leaves its previous
+         * position behind. */
+        damage_push(&acc, ui, ui->tooltip.painted);
         damage_push(&acc, ui, ui->tooltip.anchor);
+    }
+    /* Fade ghosts paint outside the live tree (ADR-0078). Their damage must be
+     * their *paint*, not their container box: a ghost's commands are the same ones
+     * replay emits — outlines, icon halos, connected-tab shoulders — and those
+     * reach outside the node rectangle. Reporting the box alone would leave the
+     * fringe of a fading ghost frozen mid-fade. */
     for (uint32_t i = 0; i < ui->ghost_count; i++) {
-        if (ui->ghosts[i] && ui->ghosts[i]->root)
-            damage_push(&acc, ui, ui->ghosts[i]->root->final_rect);
+        const lens_ghost *g = ui->ghosts[i];
+        if (!g || !g->root)
+            continue;
+        damage_push_ghost(&acc, ui, g->root);
     }
 
     /* Only the entries actually written may be read: `acc.count` includes any
@@ -839,6 +984,16 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->menu_nav = 0;
     ui->caret_rect = (flux_rect){0, 0, 0, 0};  /* refreshed by text widget */
     ui->text_context = (lens_text_context){0}; /* refreshed alongside it */
+    /* Ownership is per-frame, like the rect it describes: whichever producer
+     * claims the caret *this* frame decides whether lens owns its blink
+     * (ADR-0151). A stale `true` would let a widget-owned caret keep claiming
+     * a clock after the host took the caret back. */
+    ui->caret_lens_owned = false;
+    /* Advance the blink clock here, before any widget runs, so the phase is
+     * identical for the skin draw, the repaint query and the damage walk
+     * (ADR-0151). Doing it at widget-build time would let a frame that
+     * builds two text widgets observe two different phases. */
+    lensi_caret_advance_blink(ui);
     if (!ui->input.mouse_down[0] || ui->input.mouse_released[0]) {
         ui->dnd_source.active = false;
     }

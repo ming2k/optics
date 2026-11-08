@@ -21,6 +21,12 @@ typedef struct snapshot_node {
      * describe a vacated region. Captured while the command list is still
      * alive, and kept as a plain value so it survives the per-frame arena. */
     flux_rect paint_bounds;
+    /* The clip this node imposed on its children, and the band it was composited
+     * into (ADR-0149). Persisted here because the next frame's change detection
+     * must compare against what was *presented*, not against what was merely
+     * built — a frame that is built and then superseded never reached the screen,
+     * so its clip and band are not the baseline. */
+    flux_rect child_clip;
     lens_scroll_geometry scroll;
     bool is_scroll;
     lens_semantics semantics;
@@ -41,7 +47,10 @@ struct lens_scene_snapshot {
     flux_device *device;
     uint64_t generation;
     flux_display_list *display_list;
-    bool has_damage;
+    /* The caret phase this snapshot paints, captured at build time
+     * (ADR-0151). Activation records it as "what is on screen", which is
+     * what the next frame's phase comparison is made against. */
+    bool caret_visible;
     uint64_t owner_identity;
     snapshot_node *nodes;
     size_t node_count, overlay_head;
@@ -82,7 +91,7 @@ void lensi_node_release_cache(lens *ui, lens_node *n) {
     n->cached_dl = nullptr;
 }
 
-bool lensi_mark_subtree_changed(lens_node *n) {
+bool lensi_mark_subtree_changed(lens *ui, lens_node *n) {
     /* `self_changed` is the node's OWN paint delta: lifecycle, geometry,
      * opacity, eased hover/active, draw-list hash, and its own linked-child
      * sequence. `subtree_changed` adds every FLOW descendant's delta, because a
@@ -94,6 +103,8 @@ bool lensi_mark_subtree_changed(lens_node *n) {
      * label inside a stretch column reports that label's rect rather than the
      * column's — which is the full display. */
     bool self = false;
+    bool clip_changed = false;
+    bool restacked = false;
     if (n->phase != LENS_NODE_STABLE)
         self = true;
     if (n->has_render_rect) {
@@ -117,29 +128,66 @@ bool lensi_mark_subtree_changed(lens_node *n) {
      * sibling walk. Compare the linked-child sequence hash instead. */
     if (n->child_hash != n->last_child_hash)
         self = true;
+    /* The clip this node imposed on its children changed. A scrolling viewport
+     * that shrinks (a scrollbar appeared, a `place_bounds` clamp moved) reveals
+     * and hides descendants' pixels without touching any descendant's own state,
+     * and without touching this node's box, opacity or command list — so nothing
+     * above notices. Compared against `prev_clip`, which is updated on snapshot
+     * *activation* rather than here: the pixels that have to be erased are the
+     * ones the last presented frame showed, not the ones this frame will. */
+    if (n->is_scroll && n->child_count > 0) {
+        const flux_rect clip_now = lensi_node_child_clip(n);
+        if (!n->has_prev_clip || clip_now.x != n->prev_clip.x || clip_now.y != n->prev_clip.y ||
+            clip_now.w != n->prev_clip.w || clip_now.h != n->prev_clip.h) {
+            clip_changed = true;
+            self = true;
+        }
+    }
+    /* Re-compositing without repainting. Moving a placed node between bands or
+     * reordering it within one changes which pixels it occludes, but leaves the
+     * node's own geometry, opacity and draw list identical, so nothing else here
+     * fires. Order is the node's index in the band bucket, which is what replay
+     * actually composites by — `child_seq` is a sibling-disambiguation counter,
+     * not a z-index, and comparing it would be comparing the wrong thing. */
+    if (n->place == LENS_PLACE_ABS) {
+        uint32_t order = 0;
+        for (uint32_t i = 0; i < ui->band_counts[n->band]; i++) {
+            if (ui->bands[n->band][i] == n) {
+                order = i;
+                break;
+            }
+        }
+        if (n->band != n->prev_band || order != n->prev_band_order) {
+            restacked = true;
+            self = true;
+        }
+    }
     n->last_hover_t = n->hover_t;
     n->last_active_t = n->active_t;
 
     bool changed = self;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
-        bool child_changed = lensi_mark_subtree_changed(c);
+        bool child_changed = lensi_mark_subtree_changed(ui, c);
         if (c->place != LENS_PLACE_ABS && child_changed)
             changed = true;
     }
-    if (changed)
+    if (changed) {
         n->visual_revision++;
+    }
     n->self_changed = self;
+    n->clip_changed = clip_changed;
+    n->restacked = restacked;
     n->subtree_changed = changed;
     return changed;
 }
 
 void lensi_mark_dirty(lens *ui) {
     if (ui->root)
-        lensi_mark_subtree_changed(ui->root);
+        lensi_mark_subtree_changed(ui, ui->root);
     for (uint32_t b = 0; b < (uint32_t)LENS_BAND_COUNT; b++) {
         for (uint32_t i = 0; i < ui->band_counts[b]; i++) {
             if (ui->bands[b][i])
-                lensi_mark_subtree_changed(ui->bands[b][i]);
+                lensi_mark_subtree_changed(ui, ui->bands[b][i]);
         }
     }
 }
@@ -575,14 +623,13 @@ static flux_result compile_visuals(lens *ui, flux_display_list **out_list) {
 
     if (ui->tooltip.active) {
         const lens_theme *t = &ui->theme;
-        float pad = 4.0f;
-        float size = lensi_font_px(ui, t->font_size * 0.85f);
-        lens_text_metrics tm = lensi_text_measure_label(ui, ui->tooltip.text, size, 0.0f);
-        float w = tm.width + 2.0f * pad;
-        float h = tm.height + 2.0f * pad;
-        float x = ui->tooltip.anchor.x;
-        float y = ui->tooltip.anchor.y + ui->tooltip.anchor.h + 4.0f;
-        flux_rect bg = {x, y, w, h};
+        const float pad = 4.0f;
+        const float size = lensi_font_px(ui, t->font_size * 0.85f);
+        /* The box was measured at `lensi_tooltip` time (ADR-0149) precisely so the
+         * damage walk reports the same pixels this draws without re-shaping. */
+        const flux_rect bg = ui->tooltip.painted;
+        const float x = bg.x;
+        const float y = bg.y;
         flux_geometry g_bg = flux_geom_rect(bg);
         flux_color tt_bg = t->color_surface_elevated ? t->color_surface_elevated : t->color_bg;
         flux_brush b_bg = flux_brush_solid(lensi_opacity_color(tt_bg, ui->tooltip.opacity));
@@ -623,22 +670,52 @@ done:
     return FLUX_OK;
 }
 
+/* Record a diagnostic for a failure lens detected itself (ADR-0153).
+ *
+ * Flux's slot is thread-local and is what every binding reads, so a lens-side
+ * rejection that did not write it left the *previous* flux diagnostic in place —
+ * a different function, a different cause, or nothing. That is worse than no
+ * detail: a reader would chase the wrong code path. Recording here keeps the
+ * slot describing the failure the caller just received. */
+#define LENSI_DIAG(code, msg)                                                                      \
+    do {                                                                                           \
+        flux_set_diagnostic((code), __func__, __FILE__, __LINE__, (msg));                          \
+    } while (0)
+
 flux_result lens_snapshot_create(lens *ui, lens_scene_snapshot **out_snapshot) {
-    if (!out_snapshot)
+    if (!out_snapshot) {
+        LENSI_DIAG(FLUX_ERROR_INVALID_ARGUMENT, "lens_snapshot_create needs an output slot");
         return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     *out_snapshot = nullptr;
-    if (!ui)
+    if (!ui) {
+        LENSI_DIAG(FLUX_ERROR_INVALID_ARGUMENT, "lens_snapshot_create needs a live lens context");
         return FLUX_ERROR_INVALID_ARGUMENT;
-    if (ui->building || !ui->generation)
+    }
+    if (ui->building) {
+        LENSI_DIAG(FLUX_ERROR_INVALID_STATE,
+                   "lens_snapshot_create called while a frame is being built");
         return FLUX_ERROR_INVALID_STATE;
+    }
+    if (!ui->generation) {
+        LENSI_DIAG(FLUX_ERROR_INVALID_STATE,
+                   "lens_snapshot_create called before any frame was built");
+        return FLUX_ERROR_INVALID_STATE;
+    }
     lens_scene_snapshot *s = lensi_alloc_by_device(ui->device, sizeof(*s));
-    if (!s)
+    if (!s) {
+        LENSI_DIAG(FLUX_ERROR_OUT_OF_MEMORY, "could not allocate a scene snapshot");
         return FLUX_ERROR_OUT_OF_MEMORY;
+    }
     atomic_init(&s->ref_count, 1u);
     s->device = flux_device_retain(ui->device);
     s->owner_identity = ui->identity;
     s->overlay_head = SIZE_MAX;
-    s->has_damage = lens_frame_needs_repaint(ui);
+    /* Capture the phase this snapshot paints (ADR-0151). Taken here rather
+     * than read back from the context at activation: the context may have
+     * advanced its clock (and built a newer snapshot) by the time this one is
+     * presented, and the pixels being published are this snapshot's. */
+    s->caret_visible = ui->caret_visible;
     flux_result result = capture_metadata(ui, s);
     if (result == FLUX_OK)
         result = compile_visuals(ui, &s->display_list);
@@ -713,6 +790,7 @@ static flux_result capture_node(lens *ui, lens_scene_snapshot *s, lens_node *n, 
         .visual_revision = n->visual_revision,
         .bounds = n->final_rect,
         .paint_bounds = lensi_node_paint_bounds(n),
+        .child_clip = lensi_node_child_clip(n),
         .clip = clip,
         .semantic_parent = semantic_parent,
         .band = band,
@@ -780,12 +858,36 @@ static flux_result capture_metadata(lens *ui, lens_scene_snapshot *snapshot) {
 }
 
 flux_result lens_snapshot_activate(lens *ui, lens_scene_snapshot *snapshot) {
-    if (!ui || !snapshot)
+    if (!ui || !snapshot) {
+        LENSI_DIAG(FLUX_ERROR_INVALID_ARGUMENT,
+                   "lens_snapshot_activate needs both a ui and a snapshot");
         return FLUX_ERROR_INVALID_ARGUMENT;
-    if (ui->building || snapshot->owner_identity != ui->identity ||
-        snapshot->generation > ui->generation ||
-        snapshot->generation < ui->last_presented_generation)
+    }
+    if (ui->building) {
+        LENSI_DIAG(FLUX_ERROR_INVALID_STATE,
+                   "lens_snapshot_activate called while a frame is being built");
         return FLUX_ERROR_INVALID_STATE;
+    }
+    if (snapshot->owner_identity != ui->identity) {
+        LENSI_DIAG(FLUX_ERROR_INVALID_STATE, "snapshot belongs to a different lens context");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    if (snapshot->generation > ui->generation) {
+        LENSI_DIAG(FLUX_ERROR_INVALID_STATE,
+                   flux_diagnostic_format("snapshot generation %llu is newer than the context's "
+                                          "%llu",
+                                          (unsigned long long)snapshot->generation,
+                                          (unsigned long long)ui->generation));
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    if (snapshot->generation < ui->last_presented_generation) {
+        LENSI_DIAG(FLUX_ERROR_INVALID_STATE,
+                   flux_diagnostic_format("snapshot generation %llu predates the last presented "
+                                          "%llu (stale snapshot)",
+                                          (unsigned long long)snapshot->generation,
+                                          (unsigned long long)ui->last_presented_generation));
+        return FLUX_ERROR_INVALID_STATE;
+    }
     lens_snapshot_retain(snapshot);
     lens_snapshot_release(ui->presented_snapshot);
     ui->presented_snapshot = snapshot;
@@ -803,10 +905,23 @@ flux_result lens_snapshot_activate(lens *ui, lens_scene_snapshot *snapshot) {
         n->render_rect = entry->bounds;
         n->render_paint_rect = entry->paint_bounds;
         n->has_render_rect = true;
+        /* Presentation is the moment "what is on screen" becomes true, so the
+         * clip and band this snapshot imposed are what the next change detection
+         * compares against (ADR-0149). Advancing them at build time would compare
+         * against a frame the user never saw. */
+        n->prev_clip = entry->child_clip;
+        n->has_prev_clip = true;
+        n->prev_band = entry->band;
+        n->prev_band_order = entry->band_order;
         n->presented_revision = entry->visual_revision;
         n->presented_index = i;
         n->has_prev = true;
     }
+    /* Presentation is what makes a caret phase real (ADR-0151). Recording it
+     * here — not at build time — is what lets a skipped frame keep its damage
+     * pending: the next build compares its phase against the one the user is
+     * actually looking at. */
+    ui->caret_presented_visible = snapshot->caret_visible;
     return FLUX_OK;
 }
 

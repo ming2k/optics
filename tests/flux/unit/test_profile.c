@@ -42,7 +42,9 @@ int main(void) {
         FLUX_PROFILE_PLOT("test_metric", 42.5);
         FLUX_PROFILE_PLOT_INT("test_counter", 100);
 
-        void *dummy = (void *)(uintptr_t)0x12345000;
+        /* Unused when Tracy is compiled out: the alloc/free macros expand to
+         * ((void)0), so -Wunused-variable would fail the release build. */
+        [[maybe_unused]] void *dummy = (void *)(uintptr_t)0x12345000;
         FLUX_PROFILE_ALLOC(dummy, 64);
         FLUX_PROFILE_FREE(dummy);
 

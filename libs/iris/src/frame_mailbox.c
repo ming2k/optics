@@ -8,64 +8,81 @@
 #include <math.h>
 #include <string.h>
 
-/* The one place a damage set becomes a single device-pixel rectangle, for the
- * backends whose presentation API accepts exactly one.
+/* Convert a UI-logical damage set into device pixels, clipped to the surface.
  *
- * `rects` are UI-logical; the result is device pixels, clipped to the surface
- * because a backend rejects an out-of-bounds area outright and losing the pass
- * loses the frame's content, not just its scissor. Returns false when the set
- * covers nothing, which the caller must treat as "paint everything". */
-static bool iris_damage_rect_from(const flux_rect *rects, uint32_t count, float scale,
-                                  int32_t width, int32_t height, flux_rect *out) {
-    if (out)
-        *out = (flux_rect){0, 0, 0, 0};
-    if (!out || !rects || count == 0 || width <= 0 || height <= 0)
-        return false;
-    const float s = scale > 0.0f ? scale : 1.0f;
-    flux_rect covered = {0, 0, 0, 0};
-    for (uint32_t i = 0; i < count; i++) {
-        const flux_rect d = rects[i];
-        const float x0 = floorf(d.x * s);
-        const float y0 = floorf(d.y * s);
-        const float x1 = ceilf((d.x + d.w) * s);
-        const float y1 = ceilf((d.y + d.h) * s);
-        covered = flux_rect_union(covered, (flux_rect){x0, y0, x1 - x0, y1 - y0});
+ * Every rectangle survives: this is the boundary where units change, not where
+ * a set becomes a box. A rectangle that scales to nothing, or that lies entirely
+ * outside the surface, is dropped — an out-of-bounds area makes a backend reject
+ * the whole pass, which loses the frame's content rather than just its scissor.
+ *
+ * `full` is reported whenever the answer cannot be a list: the caller asked for
+ * everything, the set was empty, or nothing survived the clip. "Empty" and
+ * "everything" are different facts and are never conflated here. */
+static iris_frame_damage iris_damage_from(const flux_rect *rects, uint32_t count, float scale,
+                                          int32_t width, int32_t height, bool force_full) {
+    iris_frame_damage out = {0};
+    if (force_full || !rects || count == 0 || width <= 0 || height <= 0) {
+        out.full = true;
+        return out;
     }
-    if (covered.w <= 0.0f || covered.h <= 0.0f)
-        return false;
-    const float x0 = covered.x < 0.0f ? 0.0f : covered.x;
-    const float y0 = covered.y < 0.0f ? 0.0f : covered.y;
-    float x1 = covered.x + covered.w;
-    float y1 = covered.y + covered.h;
-    if (x1 > (float)width)
-        x1 = (float)width;
-    if (y1 > (float)height)
-        y1 = (float)height;
-    if (x1 <= x0 || y1 <= y0)
-        return false;
-    *out = (flux_rect){x0, y0, x1 - x0, y1 - y0};
-    return true;
+    const float s = scale > 0.0f ? scale : 1.0f;
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < count && kept < LENS_DAMAGE_RECTS_CAPACITY; i++) {
+        const flux_rect d = rects[i];
+        if (!(d.w > 0.0f) || !(d.h > 0.0f))
+            continue;
+        float x0 = floorf(d.x * s);
+        float y0 = floorf(d.y * s);
+        float x1 = ceilf((d.x + d.w) * s);
+        float y1 = ceilf((d.y + d.h) * s);
+        if (x0 < 0.0f)
+            x0 = 0.0f;
+        if (y0 < 0.0f)
+            y0 = 0.0f;
+        if (x1 > (float)width)
+            x1 = (float)width;
+        if (y1 > (float)height)
+            y1 = (float)height;
+        if (x1 <= x0 || y1 <= y0)
+            continue;
+        out.rects[kept++] = (flux_rect){x0, y0, x1 - x0, y1 - y0};
+    }
+    if (kept == 0) {
+        /* Every named region fell outside the surface. The frame still needs to
+         * paint — a caller that passes a set covering nothing observable is
+         * asking for a repaint, not for a no-op. */
+        out.full = true;
+        return out;
+    }
+    out.count = kept;
+    return out;
 }
 
-bool iris_frame_packet_damage_rect(const iris_frame_packet *pkt, float scale, int32_t width,
-                                   int32_t height, flux_rect *out) {
-    if (!pkt || pkt->damage_count == 0) {
-        if (out)
-            *out = (flux_rect){0, 0, 0, 0};
-        return false;
+iris_frame_damage iris_frame_packet_damage(const iris_frame_packet *pkt) {
+    iris_frame_damage out = {0};
+    if (!pkt) {
+        out.full = true;
+        return out;
     }
     const uint32_t count = pkt->damage_count < LENS_DAMAGE_RECTS_CAPACITY
                                ? pkt->damage_count
                                : LENS_DAMAGE_RECTS_CAPACITY;
-    return iris_damage_rect_from(pkt->damage, count, scale, width, height, out);
+    /* The packet carries logical extents plus the scale; the rects are logical
+     * too. Deriving the device extent here (rather than trusting a caller to
+     * pass one convention) is what stops the clip from being applied in the
+     * wrong units — the two callers previously disagreed about it. */
+    const float s = pkt->scale > 0.0f ? pkt->scale : 1.0f;
+    const int32_t dev_w = (int32_t)ceilf((float)pkt->width * s);
+    const int32_t dev_h = (int32_t)ceilf((float)pkt->height * s);
+    return iris_damage_from(pkt->damage, count, s, dev_w, dev_h, pkt->force_paint);
 }
 
-bool iris_frame_lens_damage_rect(const lens *ui, float scale, int32_t width, int32_t height,
-                                 flux_rect *out) {
+iris_frame_damage iris_frame_lens_damage(const lens *ui, float scale, int32_t width, int32_t height,
+                                         bool force_full) {
     flux_rect rects[LENS_DAMAGE_RECTS_CAPACITY];
     const uint32_t count = lens_damage_rects(
         ui, &(lens_damage_opts){.rects = rects, .capacity = LENS_DAMAGE_RECTS_CAPACITY});
-    return iris_damage_rect_from(rects, count, scale, width, height, out);
+    return iris_damage_from(rects, count, scale, width, height, force_full);
 }
 
 void iris_mailbox_init(iris_frame_mailbox *mb) {

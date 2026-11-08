@@ -128,11 +128,24 @@ typedef struct iris_pace_inputs {
      * without one only ever paint on lens chrome damage. */
     bool has_custom_paint;
 
-    /* lens_frame_needs_repaint(): the UI chrome itself changed. */
+    /* lens_frame_needs_repaint(): the UI chrome itself changed. This already
+     * includes a caret blink *flip* (ADR-0151), because lens reports the
+     * transition as damage — so a flip paints through `forced`, exactly like
+     * any other chrome change. */
     bool chrome_damaged;
 
-    /* A focused text caret is blinking. */
-    bool caret_visible;
+    /* A caret blink clock is live: some text widget holds focus and the blink
+     * is enabled (lens_caret_clock_live).
+     *
+     * This is a *level*, and it deliberately does not force a paint. Its only
+     * job is to keep the low idle tick alive, because lens advances the blink
+     * clock by `dt_seconds` — a contexthat stopped receiving frames could
+     * never reach its next phase, and the caret would freeze mid-blink. The
+     * paint itself is owed by `chrome_damaged` on the frame a flip lands.
+     *
+     * Reporting "a caret exists" as damage instead (the pre-ADR-0151
+     * contract) made every focused text field a permanent animation. */
+    bool caret_ticking;
 
     /* The swapchain contents were discarded (resize / scale change / first
      * frame). Forces a paint regardless of any skip declaration. */

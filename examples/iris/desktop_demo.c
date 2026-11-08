@@ -119,7 +119,11 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "table_scroll"}});
     lens_column_begin(ui, &(lens_layout_opts){.pad = 4, .gap = 2, .cross = LENS_STRETCH});
     for (int i = 0; i < TABLE_ROWS; i++) {
-        char row_lbl[64];
+        /* Wide enough for the longest possible row: cell_name's 64-byte buffer
+         * plus the two fixed-width columns. A 64-byte label is what the format
+         * string would silently truncate, and -Wformat-truncation= fails the
+         * release build for exactly that reason. */
+        char row_lbl[128];
         snprintf(row_lbl, sizeof row_lbl, "%s   |   val: %d   |   2026-01-%02d", cell_name(i),
                  (i * 137) % 9999, (i % 28) + 1);
         if (lens_selectable(

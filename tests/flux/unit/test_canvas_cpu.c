@@ -242,13 +242,11 @@ int main(void) {
     EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
 
-    /* A dirty render area constrains both the attachment clear and the
-     * initial draw scissor. Pixels outside it retain the previous blue pass. */
+    /* A damage scope constrains both the attachment clear and the initial draw
+     * scissor. Pixels outside it retain the previous blue pass. */
+    const flux_rect dirty = {16, 20, 24, 12};
     pd.clear_color = &red;
-    pd.render_offset_x = 16;
-    pd.render_offset_y = 20;
-    pd.render_width = 24;
-    pd.render_height = 12;
+    pd.damage = (flux_damage){.rects = &dirty, .count = 1};
     pd.frame = nullptr;
     EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
@@ -258,17 +256,21 @@ int main(void) {
     px(fb, stride, 8, 24, p);
     EXPECT(p[0] < 5 && p[1] < 5 && p[2] > 250 && p[3] > 250);
 
-    pd.render_offset_x = 63;
-    pd.render_width = 2;
+    /* A damage rect entirely outside the framebuffer names no pixel at all, so
+     * the pass is rejected rather than silently painting nothing. */
+    const flux_rect outside = {W + 4, 0, 2, 4};
+    pd.damage = (flux_damage){.rects = &outside, .count = 1};
+    pd.frame = nullptr;
+    EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
+
+    /* A count with no array is a malformed descriptor, not "the whole extent". */
+    pd.damage = (flux_damage){.rects = nullptr, .count = 3};
     pd.frame = nullptr;
     EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
 
     pd.clear_color = nullptr;
     pd.antialias = FLUX_CANVAS_ANTIALIAS_MSAA_4X;
-    pd.render_offset_x = 0;
-    pd.render_offset_y = 0;
-    pd.render_width = 0;
-    pd.render_height = 0;
+    pd.damage = (flux_damage){0};
     pd.frame = nullptr;
     EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
 

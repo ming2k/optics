@@ -5,8 +5,10 @@
 #define FLUX_CANVAS_INTERNAL_H
 
 #include "../core/internal.h"
+#include <assert.h>
 #include <flux/canvas.h>
 #include <flux/vulkan.h>
+#include <math.h>
 
 void canvas_fail(flux_canvas *c, flux_result result, const char *message);
 bool canvas_finite_rect(flux_rect r);
@@ -87,6 +89,24 @@ typedef struct flux_canvas_state {
     bool is_layer;
     float layer_opacity;
 } flux_canvas_state;
+
+/* Internal, ABI-independent pass policy. The public descriptor is parsed exactly
+ * once by canvas.c; backends consume this normalized value and never inspect
+ * extension memory themselves. Declared here because `flux_canvas` carries the
+ * active pass's copy. */
+typedef struct canvas_pass_config {
+    const flux_color *clear_color;
+    flux_canvas_antialias antialias;
+    /* The pass's write scope, in destination physical pixels. Empty means the
+     * full destination extent. Borrowed from the public descriptor's array, which
+     * must outlive the pass. */
+    flux_damage damage;
+    /* The caller declared the whole destination may be cleared. Distinct from an
+     * empty damage set: a frame can legitimately want "everything" while still
+     * naming regions elsewhere. */
+    bool clear_extent;
+    bool skip_stencil;
+} canvas_pass_config;
 
 /* Rendering backend vtable (defined in backend.h). The canvas holds a
  * borrowed pointer to a stateless singleton; see backend_vk.c. */
@@ -272,6 +292,10 @@ struct flux_canvas {
     flux_canvas_state states[FLUX_CANVAS_MAX_STATES];
     uint32_t state_top;
 
+    /* The active pass's damage scope (ADR-0149). Copied from the normalized
+     * config at begin_pass; borrowed rect array, must outlive the pass. */
+    canvas_pass_config pass_damage;
+
     /* Per-instance scratch buffers for fill/stroke. Moved off any
      * static / thread_local area so two canvases on two threads can
      * record concurrently without corrupting each other. */
@@ -344,43 +368,185 @@ struct flux_canvas {
     uint64_t records_created, records_replayed;
 };
 
-/* Internal, ABI-independent pass policy. The public descriptor's pNext chain
- * is parsed exactly once by canvas.c; backends consume this normalized value
- * and never inspect extension memory themselves. */
-typedef struct canvas_pass_config {
-    const flux_color *clear_color;
-    flux_canvas_antialias antialias;
-    int32_t render_offset_x;
-    int32_t render_offset_y;
-    uint32_t render_width;
-    uint32_t render_height;
-    bool skip_stencil;
-} canvas_pass_config;
-
-/* Resolve the public zero-means-full render-area convention against one
- * concrete framebuffer. Both backends use this so CPU and Vulkan reject the
- * same malformed/out-of-bounds descriptors and begin with the same scissor. */
-static inline bool canvas_pass_render_area(const canvas_pass_config *config, uint32_t fb_width,
-                                           uint32_t fb_height, flux_recti *out) {
+/* The smallest rectangle covering the pass's write scope, i.e. the
+ * dynamic-rendering renderArea. Returns false when the scope is empty in a way
+ * that is not "the whole destination" (an empty rect set that the caller also
+ * refused as full extent, or a destination with no extent).
+ *
+ * The bounding box is a *superset*: it bounds where the load/store may touch,
+ * while the scissor decides what each draw actually writes. Pixels inside the
+ * box but outside every damage rect are preserved because nothing clears,
+ * draws, or writes them back — see `backend_vk.c`'s per-rect clear, encode and
+ * layer composite. */
+static inline bool canvas_pass_render_bounds(const canvas_pass_config *config, uint32_t fb_width,
+                                             uint32_t fb_height, flux_recti *out) {
     if (!config || !out || fb_width == 0 || fb_height == 0)
         return false;
-    bool default_extent = config->render_width == 0 && config->render_height == 0;
-    if (default_extent) {
-        if (config->render_offset_x != 0 || config->render_offset_y != 0)
-            return false;
-        *out = (flux_recti){0, 0, fb_width, fb_height};
+    const flux_recti whole = {0, 0, fb_width, fb_height};
+    if (!config->damage.rects || config->damage.count == 0 || config->clear_extent) {
+        *out = whole;
         return true;
     }
-    if (config->render_width == 0 || config->render_height == 0 || config->render_offset_x < 0 ||
-        config->render_offset_y < 0)
+    /* canvas.c has already degraded an over-capacity set to `clear_extent`, so a
+     * non-covering scope here is always within the bound. Reading past it would be
+     * a bug in that parser, not a caller error, and silently clamping would turn
+     * that bug into stale pixels — assert instead. */
+    const uint32_t count = config->damage.count;
+    assert(count <= FLUX_DAMAGE_CAPACITY && "damage set was not degraded by canvas.c");
+    flux_recti bbox = {0, 0, 0, 0};
+    for (uint32_t i = 0; i < count; i++) {
+        const flux_rect r = config->damage.rects[i];
+        if (!(r.w > 0.0f) || !(r.h > 0.0f))
+            continue;
+        /* Snap outward: a fractional edge must not shrink the region that has
+         * to be preserved. */
+        const int32_t x0 = (int32_t)floorf(r.x);
+        const int32_t y0 = (int32_t)floorf(r.y);
+        const int32_t x1 = (int32_t)ceilf(r.x + r.w);
+        const int32_t y1 = (int32_t)ceilf(r.y + r.h);
+        if (x1 <= 0 || y1 <= 0 || x0 >= (int32_t)fb_width || y0 >= (int32_t)fb_height)
+            continue;
+        const int32_t cx0 = x0 < 0 ? 0 : x0;
+        const int32_t cy0 = y0 < 0 ? 0 : y0;
+        const int32_t cx1 = x1 > (int32_t)fb_width ? (int32_t)fb_width : x1;
+        const int32_t cy1 = y1 > (int32_t)fb_height ? (int32_t)fb_height : y1;
+        if (cx1 <= cx0 || cy1 <= cy0)
+            continue;
+        if (bbox.w == 0 || bbox.h == 0) {
+            bbox = (flux_recti){cx0, cy0, (uint32_t)(cx1 - cx0), (uint32_t)(cy1 - cy0)};
+        } else {
+            const int32_t ux0 = bbox.x < cx0 ? bbox.x : cx0;
+            const int32_t uy0 = bbox.y < cy0 ? bbox.y : cy0;
+            const int32_t ux1 =
+                (int32_t)(bbox.x + (int32_t)bbox.w) > cx1 ? bbox.x + (int32_t)bbox.w : cx1;
+            const int32_t uy1 =
+                (int32_t)(bbox.y + (int32_t)bbox.h) > cy1 ? bbox.y + (int32_t)bbox.h : cy1;
+            bbox = (flux_recti){ux0, uy0, (uint32_t)(ux1 - ux0), (uint32_t)(uy1 - uy0)};
+        }
+    }
+    if (bbox.w == 0 || bbox.h == 0)
         return false;
-    uint32_t x = (uint32_t)config->render_offset_x;
-    uint32_t y = (uint32_t)config->render_offset_y;
-    if (x >= fb_width || y >= fb_height || config->render_width > fb_width - x ||
-        config->render_height > fb_height - y)
+    *out = bbox;
+    return true;
+}
+
+/* True when the pass's scope is the whole destination, so single-renderArea
+ * shortcuts (one clear, one seed blit, one encode) are exact. */
+static inline bool canvas_pass_covers_extent(const canvas_pass_config *config) {
+    return !config || !config->damage.rects || config->damage.count == 0 || config->clear_extent;
+}
+
+/* Enumerate the pass's write scope as concrete, clipped, non-empty integer
+ * rectangles. Returns the number written (never more than `capacity`); a count
+ * of zero with `canvas_pass_covers_extent` true means the whole destination, and
+ * callers use `canvas_pass_render_bounds` for that single-rect case.
+ *
+ * Every consumer that must touch *each* region separately — the LOAD seed, the
+ * output encode, a layer composite — iterates this rather than the bounding box,
+ * because writing the bounding box is what preserves garbage between two damage
+ * bands and defeats the localisation. */
+static inline uint32_t canvas_pass_areas(const canvas_pass_config *config, uint32_t fb_width,
+                                         uint32_t fb_height, flux_recti *out, uint32_t capacity) {
+    if (!config || !out || capacity == 0 || fb_width == 0 || fb_height == 0)
+        return 0;
+    if (canvas_pass_covers_extent(config)) {
+        out[0] = (flux_recti){0, 0, fb_width, fb_height};
+        return 1;
+    }
+    /* canvas.c has already degraded an over-capacity set to `clear_extent`, so a
+     * non-covering scope here is always within the bound. Reading past it would be
+     * a bug in that parser, not a caller error, and silently clamping would turn
+     * that bug into stale pixels — assert instead. */
+    const uint32_t count = config->damage.count;
+    assert(count <= FLUX_DAMAGE_CAPACITY && "damage set was not degraded by canvas.c");
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < count && n < capacity; i++) {
+        const flux_rect r = config->damage.rects[i];
+        if (!(r.w > 0.0f) || !(r.h > 0.0f))
+            continue;
+        int32_t x0 = (int32_t)floorf(r.x);
+        int32_t y0 = (int32_t)floorf(r.y);
+        int32_t x1 = (int32_t)ceilf(r.x + r.w);
+        int32_t y1 = (int32_t)ceilf(r.y + r.h);
+        if (x0 < 0)
+            x0 = 0;
+        if (y0 < 0)
+            y0 = 0;
+        if (x1 > (int32_t)fb_width)
+            x1 = (int32_t)fb_width;
+        if (y1 > (int32_t)fb_height)
+            y1 = (int32_t)fb_height;
+        if (x1 <= x0 || y1 <= y0)
+            continue;
+        out[n++] = (flux_recti){x0, y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0)};
+    }
+    return n;
+}
+
+/* Resolve the scissor for one draw: the union of the damage rects that
+ * intersect `clip`, further intersected with `clip`. Returns false when the
+ * draw touches no damage at all, which means it can be dropped.
+ *
+ * Union rather than "pick one" because a single draw may straddle two damage
+ * rects. The union then also covers the gap between them, which is safe — a
+ * scissored repaint is idempotent and over-covering never leaves stale pixels —
+ * whereas walking rects per draw would multiply draws and break the vertex
+ * batching that makes a frame cheap. One rect (the common case: a draw belongs
+ * to one band) is exact. */
+static inline bool canvas_damage_select(const canvas_pass_config *config, flux_recti clip,
+                                        flux_recti *out) {
+    if (!out || clip.w == 0 || clip.h == 0)
         return false;
-    *out = (flux_recti){config->render_offset_x, config->render_offset_y, config->render_width,
-                        config->render_height};
+    if (canvas_pass_covers_extent(config)) {
+        *out = clip;
+        return true;
+    }
+    /* canvas.c has already degraded an over-capacity set to `clear_extent`, so a
+     * non-covering scope here is always within the bound. Reading past it would be
+     * a bug in that parser, not a caller error, and silently clamping would turn
+     * that bug into stale pixels — assert instead. */
+    const uint32_t count = config->damage.count;
+    assert(count <= FLUX_DAMAGE_CAPACITY && "damage set was not degraded by canvas.c");
+    int32_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    bool any = false;
+    for (uint32_t i = 0; i < count; i++) {
+        const flux_rect r = config->damage.rects[i];
+        if (!(r.w > 0.0f) || !(r.h > 0.0f))
+            continue;
+        int32_t rx0 = (int32_t)floorf(r.x);
+        int32_t ry0 = (int32_t)floorf(r.y);
+        int32_t rx1 = (int32_t)ceilf(r.x + r.w);
+        int32_t ry1 = (int32_t)ceilf(r.y + r.h);
+        if (rx0 < clip.x)
+            rx0 = clip.x;
+        if (ry0 < clip.y)
+            ry0 = clip.y;
+        if (rx1 > clip.x + (int32_t)clip.w)
+            rx1 = clip.x + (int32_t)clip.w;
+        if (ry1 > clip.y + (int32_t)clip.h)
+            ry1 = clip.y + (int32_t)clip.h;
+        if (rx1 <= rx0 || ry1 <= ry0)
+            continue;
+        if (!any) {
+            x0 = rx0;
+            y0 = ry0;
+            x1 = rx1;
+            y1 = ry1;
+            any = true;
+        } else {
+            if (rx0 < x0)
+                x0 = rx0;
+            if (ry0 < y0)
+                y0 = ry0;
+            if (rx1 > x1)
+                x1 = rx1;
+            if (ry1 > y1)
+                y1 = ry1;
+        }
+    }
+    if (!any)
+        return false;
+    *out = (flux_recti){x0, y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0)};
     return true;
 }
 

@@ -119,7 +119,10 @@ fn main() {
 
     println!("cargo:rerun-if-changed=wrapper.h");
     if let Some(src) = &source_dir {
-        println!("cargo:rerun-if-changed={}", src.join("include/vista/vista.h").display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            src.join("include/vista/vista.h").display()
+        );
     }
 }
 

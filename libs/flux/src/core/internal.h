@@ -4,6 +4,7 @@
 #ifndef FLUX_CORE_INTERNAL_H
 #define FLUX_CORE_INTERNAL_H
 
+#include "damage_history.h"
 #include <flux/core.h>
 #include <flux/math.h>    /* flux_mat4 (flux_frame scene caches) */
 #include <flux/observe.h> /* flux_scope, flux_observe_opts (ADR-0129) */
@@ -945,6 +946,27 @@ struct flux_target {
     bool in_use;
 };
 
+/* Bounded damage-rect contract shared by every layer of the damage pipeline.
+ * One frame can name at most this many disjoint device-pixel rectangles; a frame
+ * that needs more degrades to one rectangle covering the whole extent, never to a
+ * truncated list (ADR-0149 decision 3). Sized to the producer (lens reports at
+ * most LENS_DAMAGE_RECTS_CAPACITY = 64 regions). */
+#define FLUX_FRAME_DAMAGE_CAPACITY 64u
+
+/* Write-history depth and the never-synchronised sentinel live with the policy
+ * that consumes them (ADR-0149); re-exported here so the surface layout below can
+ * size its arrays from one definition. */
+#define FLUX_CONTENT_EPOCH_HISTORY FLUX_DAMAGE_HISTORY_DEPTH
+#define FLUX_CONTENT_EPOCH_NONE FLUX_DAMAGE_EPOCH_NONE
+
+typedef struct flux_frame_damage_set {
+    /* Disjoint device-pixel rectangles this frame intends to write. Empty
+     * (`count == 0`) means the frame writes its whole extent, which is also
+     * what an over-capacity frame degrades to. */
+    flux_rect rects[FLUX_FRAME_DAMAGE_CAPACITY];
+    uint32_t count;
+} flux_frame_damage_set;
+
 struct flux_frame {
     flux_surface *surface; /* not retained — surface owns the frame slot */
     uint32_t slot;         /* 0..frames_in_flight-1; matches per_frame[] */
@@ -954,6 +976,21 @@ struct flux_frame {
     /* Exact physical-pixel source region copied when readback_requested is
      * true. Full-frame compatibility requests populate the surface extent. */
     flux_readback_region readback_region;
+
+    /* ---- ADR-0149 damage-scoped frame -----------------------------------
+     *
+     * `damage` is the caller's declared write set for this frame, in physical
+     * pixels, or empty for "paint everything". `written` is what the frame
+     * actually wrote, accumulated from every pass that records into it; it is
+     * what the surface commits into its epoch history at submit.
+     *
+     * Both are populated by flux itself, never by the canvas: a pass that
+     * ignores `damage` still lands in `written`, so the epoch history can
+     * never under-describe what a swapchain image is missing. */
+    flux_frame_damage_set damage;
+    flux_frame_damage_set written;
+    bool written_overflow;      /* more than CAPACITY regions: rotate history can't describe it */
+    bool damage_scope_rejected; /* caller asked for a scope a pass could not honour */
 
     /* Deferred pass plan (ADR-0147). An effect registers a pass instead of
      * recording its dispatches, so work nothing samples is pruned rather
@@ -1017,6 +1054,16 @@ void flux_dmabuf_close_fd(int fd);
  * or NULL when the profile is parametric-only. */
 const float *flux_icc_profile_lut(const flux_icc_profile *p, uint32_t *out_size);
 
+/* `image_epoch` sentinel (ADR-0149): this image has never been synchronised
+ * with the surface's content image, so the next frame that acquires it must
+ * copy the whole extent rather than a write-area union.
+ *
+ * Defined once, above, in terms of `FLUX_DAMAGE_EPOCH_NONE`. A second literal
+ * definition here used to shadow it: same value, so nothing broke, but two
+ * independent places to change a sentinel that the epoch comparison, the
+ * history array sizing and the "never synchronised" test all depend on agreeing
+ * on exactly. */
+
 struct flux_surface {
     atomic_uint ref_count;
     flux_device *device; /* retained */
@@ -1043,6 +1090,11 @@ struct flux_surface {
      * must not let a frame slot be reused until its external consumer has
      * released the dma-buf; begin_frame then records the matching acquire. */
     bool *image_foreign_owned;
+    /* Content epoch the presented pixels of image `i` are up to date with
+     * (ADR-0149). `FLUX_CONTENT_EPOCH_NONE` means "never synchronised": the
+     * image holds nothing this surface's content image would reproduce, so the
+     * next frame that acquires it copies the whole extent. */
+    uint64_t *image_epoch;
     /* Exportable offscreen images signal one SYNC_FD-capable semaphore per
      * slot. This flag prevents exporting its temporary payload twice before
      * the slot is reacquired and submitted again. */
@@ -1135,6 +1187,31 @@ struct flux_surface {
 
     /* Transient memory ring (host-visible, mapped). */
     flux_transient_ring transient;
+
+    /* ---- ADR-0149: persistent content image + write-epoch history ------
+     *
+     * A windowed surface presents a rotation of images. A damage-scoped frame
+     * writes only its dirty band, so every image in the rotation must first be
+     * brought up to date with the *authoritative* frame. The content image is
+     * that authority: one persistent buffer holding the current complete frame,
+     * from which each acquired image receives the union of write areas committed
+     * since it last presented.
+     *
+     * Both fields are null/empty on offscreen surfaces, which keep the
+     * single-buffer semantics and need no recovery at all. */
+    struct {
+        VkImage image;
+        VkImageView view;
+        flux_vk_alloc alloc;
+        flux_bindless_handle bindless;
+        VkImageLayout layout;
+        uint32_t width, height;
+    } content;
+    /* Which frame wrote what, so a reacquired image can be repaired. The policy
+     * lives in damage_history.c because the window arithmetic is the part of this
+     * mechanism most likely to be wrong, and it is pure — testable without a GPU,
+     * which is where it is proven. */
+    flux_damage_history damage_history;
 };
 
 flux_result flux_transient_ring_init(flux_transient_ring *r, flux_device *d,
@@ -1143,6 +1220,36 @@ void flux_transient_ring_destroy(flux_transient_ring *r, flux_device *d);
 
 flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t w, uint32_t h);
 void flux_surface_destroy_swapchain(flux_surface *s);
+
+/* ---- ADR-0149 damage bookkeeping (core/frame.c + core/surface.c) ---------
+ *
+ * A windowed surface never renders into a swapchain image. It renders into one
+ * persistent *content image*, which is a single buffer and therefore
+ * accumulates damage-scoped passes exactly like a caller-owned target does;
+ * `flux_surface_sync_content` then copies from it into the acquired image,
+ * restricted to the union of write areas committed since that image was last
+ * synchronised. Both halves of that are recorded by flux itself, from the write
+ * area of every pass that targets the render image, so a caller cannot
+ * under-declare the set by passing a narrow damage scope.
+ *
+ * `flux_surface_sync_content` runs from `flux_frame_submit`, after the last pass
+ * and before the command buffer closes: that is the first point at which the
+ * frame's full write set is known, and recording the copy there keeps it in the
+ * frame's own submission — no second submit, no extra synchronisation object.
+ *
+ * This is the mechanism ADR-0144 named as its follow-up and explicitly refused
+ * to approximate with a per-image flag. */
+flux_result flux_surface_sync_content(flux_surface *s, flux_frame *f);
+void flux_frame_record_written(flux_frame *f, flux_rect area);
+
+/* The image and view a frame's default canvas pass renders into: the persistent
+ * content image on a windowed surface, the per-slot image on an offscreen one.
+ * Accessors rather than direct field reads so the canvas backend and the frame
+ * core cannot disagree about which buffer a frame owns. */
+VkImage flux_surface_render_image(const flux_surface *s);
+VkImageView flux_surface_render_view(const flux_surface *s);
+flux_bindless_handle flux_surface_render_bindless(const flux_surface *s);
+VkImageLayout *flux_surface_render_layout_slot(flux_surface *s);
 
 struct flux_sampler;
 flux_device *flux_sampler_owner(const struct flux_sampler *sampler);

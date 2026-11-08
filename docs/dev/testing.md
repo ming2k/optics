@@ -2,8 +2,9 @@
 
 ## Scope
 
-The root Meson build owns all C tests for `flux`, `lens`, and `iris`.
-The Rust bindings are three in-tree Cargo workspaces with their own tests.
+The root Meson build owns all C tests for the libraries under `libs/`.
+The Rust bindings are one in-tree Cargo workspace per library, each with its own
+tests.
 Windowed examples remain manual checks because they need a compositor and GPU
 surface.
 

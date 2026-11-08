@@ -39,7 +39,32 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [fuzz_path_flatten, fuzz_text_shape, fuzz_lens_store, fuzz_glb_parse]
+        # Each entry carries its binary directory and seed-corpus directory.
+        # They used to be re-derived from `${{ matrix.target }}` by a `case`
+        # block in every step, which duplicated the list three times and had
+        # already drifted: fuzz_lens_store builds under tests/lens/fuzz but the
+        # steps looked for it under tests/flux/fuzz, so that target failed to
+        # exec on every run. One entry per target makes that drift impossible,
+        # and adding a harness is a one-line change here.
+        include:
+          - target: fuzz_path_flatten
+            dir: tests/flux/fuzz
+            corpus: tests/flux/fuzz/corpus/path_flatten
+          - target: fuzz_text_shape
+            dir: tests/flux/fuzz
+            corpus: tests/flux/fuzz/corpus/text_shape
+          - target: fuzz_coverage_raster
+            dir: tests/flux/fuzz
+            corpus: tests/flux/fuzz/corpus/coverage_raster
+          - target: fuzz_glb_parse
+            dir: tests/flux/fuzz
+            corpus: tests/flux/fuzz/corpus/glb_parse
+          - target: fuzz_lens_store
+            dir: tests/lens/fuzz
+            corpus: tests/lens/fuzz/corpus/lens_store
+          - target: fuzz_svg_parse
+            dir: tests/svg/fuzz
+            corpus: tests/svg/fuzz/corpus/svg_parse
     steps:
       - uses: actions/checkout@v4
 
@@ -69,34 +94,14 @@ jobs:
       - name: Replay committed seed corpus (regression gate)
         run: |
           set -e
-          case '${{ matrix.target }}' in
-            fuzz_path_flatten)
-              corpus=tests/flux/fuzz/corpus/path_flatten ;;
-            fuzz_text_shape)
-              corpus=tests/flux/fuzz/corpus/text_shape ;;
-            fuzz_lens_store)
-              corpus=tests/lens/fuzz/corpus/lens_store ;;
-            fuzz_glb_parse)
-              corpus=tests/flux/fuzz/corpus/glb_parse ;;
-          esac
           ASAN_OPTIONS=abort_on_error=1:detect_leaks=1 \
-            ./build/tests/flux/fuzz/${{ matrix.target }} \
-              -runs=0 "$corpus"
+            ./build/${{ matrix.dir }}/${{ matrix.target }} \
+              -runs=0 "${{ matrix.corpus }}"
 
       - name: Bounded fuzz campaign
         id: campaign
         run: |
           set -e
-          case '${{ matrix.target }}' in
-            fuzz_path_flatten)
-              corpus=tests/flux/fuzz/corpus/path_flatten ;;
-            fuzz_text_shape)
-              corpus=tests/flux/fuzz/corpus/text_shape ;;
-            fuzz_lens_store)
-              corpus=tests/lens/fuzz/corpus/lens_store ;;
-            fuzz_glb_parse)
-              corpus=tests/flux/fuzz/corpus/glb_parse ;;
-          esac
           # PR smoke: 60s. Daily run: 300s (5 min) per target.
           runs_per_target=60
           if [ "${{ github.event_name }}" = "schedule" ]; then
@@ -106,12 +111,12 @@ jobs:
           # -fork=1 parallelises across cores; -ignore_crashes=0 makes any
           # finding fail the job immediately.
           ASAN_OPTIONS=abort_on_error=1:detect_leaks=1 \
-            timeout 600 ./build/tests/flux/fuzz/${{ matrix.target }} \
+            timeout 600 ./build/${{ matrix.dir }}/${{ matrix.target }} \
               -fork=1 -ignore_crashes=0 \
               -max_total_time=$runs_per_target \
               -rss_limit_mb=2560 \
               -artifact_prefix=/tmp/fuzz-artifacts/ \
-              /tmp/fuzz-corpus "$corpus"
+              /tmp/fuzz-corpus "${{ matrix.corpus }}"
 
       # Corpus feedback loop (daily runs only): the campaign's explored
       # corpus — every input that reached new coverage — is uploaded as

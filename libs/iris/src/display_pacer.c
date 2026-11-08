@@ -79,15 +79,20 @@ iris_pace_decision iris_pacer_tick(iris_pacer *p, const iris_pace_inputs *in) {
     bool animating = p->animating;
 
     /* Is the display actively driving frames? The caret tick is deliberately
-     * excluded — a blinking caret does not justify a display-locked cadence. */
+     * excluded — a blinking caret does not justify a display-locked cadence.
+     * A blink flip arrives as `chrome_damaged` (lens reports the transition),
+     * which is why nothing here mentions the caret. */
     bool cadence_active = grace || animating || in->host_skip_render || in->surface_needs_paint ||
                           in->chrome_damaged || in->lens_animating;
 
-    /* Is a frame pending at all? `has_custom_paint` keeps at least the low
-     * idle tick alive: such a host's content is opaque to lens, so running
-     * cfg->build is how it observes its own state changes and resumes
-     * animating. Only a lens-only host can reach full quiescence. */
-    bool cadence_any = cadence_active || in->caret_visible || in->has_custom_paint;
+    /* Is a frame pending at all? Three terms keep the low idle tick alive:
+     *   - `has_custom_paint`: such a host's content is opaque to lens, so
+     *     running cfg->build is how it observes its own state changes;
+     *   - `caret_ticking`: lens advances the blink clock by the frame delta,
+     *     so a live clock needs ticks to reach its next phase. The tick does
+     *     not paint; the flip that lands on one arrives as chrome damage.
+     * Only a host with neither can reach full quiescence. */
+    bool cadence_any = cadence_active || in->caret_ticking || in->has_custom_paint;
 
     if (!cadence_any) {
         p->idle_armed = false;

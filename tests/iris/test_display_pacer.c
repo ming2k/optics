@@ -220,9 +220,15 @@ static void test_timer_fallback_is_display_aligned(void) {
 }
 
 /* Caret-only idle: a low-rate tick that is a whole multiple of the refresh,
- * so it cannot beat against the display, and still never spins. The tick
- * exists so lens keeps advancing its blink clock; whether a frame reaches the
- * GPU is decided by the chrome damage the build reports. */
+ * so it cannot beat against the display, and still never spins.
+ *
+ * Two distinct signals must not be confused (ADR-0151):
+ *   - `caret_ticking` is a *level*: a blink clock is live, so the low idle
+ *     tick must keep running for the clock to advance. It never paints.
+ *   - `chrome_damaged` is the *edge* lens reports on the frame a flip lands:
+ *     that frame owes a real paint.
+ * The defect this pins is the old contract, where a focused caret reported
+ * itself as damage every frame and no host with a text field could quiesce. */
 static void test_caret_idle_tick(void) {
     iris_pacer p;
     iris_pacer_init(&p);
@@ -232,19 +238,18 @@ static void test_caret_idle_tick(void) {
     int paints = 0, ticks = 0;
     int64_t first_wait = 0;
     for (int i = 0; i < 200; i++) {
-        /* lens toggles the caret and reports chrome damage on the ticks where
-         * the blink state flips: the only reason to touch the GPU. */
-        bool blink_toggle = (i > 0) && (i % 2 == 0);
+        /* lens reports damage only on the frames where the phase flipped. */
+        bool blink_flip = (i > 0) && (i % 2 == 0);
 
         iris_pace_inputs in = base_inputs(t);
         in.refresh_ns = HZ60_NS;
-        in.caret_visible = true; /* the only thing keeping us awake */
-        in.chrome_damaged = blink_toggle;
+        in.caret_ticking = true; /* the clock is live: keep the idle tick */
+        in.chrome_damaged = blink_flip;
 
         iris_pace_decision d = iris_pacer_tick(&p, &in);
         CHECK_NO_SPIN(d);
 
-        if (blink_toggle) {
+        if (blink_flip) {
             /* Chrome damage is active cadence: a real frame is published. */
             CHECK(d.action == IRIS_PACE_PAINT);
         } else {
@@ -269,6 +274,48 @@ static void test_caret_idle_tick(void) {
     CHECK(first_wait == 15 * HZ60_NS);
     CHECK(first_wait >= 250 * NS_PER_MS);
     CHECK(paints == 99);
+}
+
+/* No caret clock and no canvas: nothing is pending, so the loop blocks. This
+ * is the quiescence a host without focus must reach — and the state the old
+ * "caret exists ⇒ damage" contract made unreachable. */
+static void test_quiet_caret_quiesces(void) {
+    iris_pacer p;
+    iris_pacer_init(&p);
+    iris_pacer_set_refresh(&p, HZ60_NS);
+
+    int64_t t = 0;
+    for (int i = 0; i < 8; i++) {
+        iris_pace_inputs in = base_inputs(t);
+        in.refresh_ns = HZ60_NS;
+        in.caret_ticking = false;
+        in.has_custom_paint = false;
+        in.chrome_damaged = false;
+        iris_pace_decision d = iris_pacer_tick(&p, &in);
+        CHECK(d.action == IRIS_PACE_QUIESCE);
+        CHECK(d.wait_timeout_ns == 0);
+        t += HZ60_NS;
+    }
+}
+
+/* A live caret clock is a level, so it must never buy the active-rate cadence:
+ * the tick that keeps the clock advancing stays at the idle period. This is
+ * what separates "blink the caret" from "render a 120 Hz animation". */
+static void test_caret_clock_never_raises_the_cadence(void) {
+    iris_pacer p;
+    iris_pacer_init(&p);
+    iris_pacer_set_refresh(&p, HZ60_NS);
+
+    iris_pace_inputs in = base_inputs(0);
+    in.refresh_ns = HZ60_NS;
+    in.caret_ticking = true;
+    in.has_custom_paint = false;
+    in.chrome_damaged = false;
+
+    iris_pace_decision d = iris_pacer_tick(&p, &in);
+    CHECK(d.action == IRIS_PACE_SKIP);
+    CHECK(!d.request_pulse);                  /* never subscribes to the pulse train */
+    CHECK(d.wait_timeout_ns == 15 * HZ60_NS); /* the idle period, not the refresh */
 }
 
 /* Nothing pending: drop the subscription and block. */
@@ -481,6 +528,8 @@ int main(void) {
     test_skip_render_storm_never_spins();
     test_timer_fallback_is_display_aligned();
     test_caret_idle_tick();
+    test_quiet_caret_quiesces();
+    test_caret_clock_never_raises_the_cadence();
     test_quiescence();
     test_forced_paint_precedence();
     test_lens_only_host();

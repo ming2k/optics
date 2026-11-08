@@ -3,6 +3,13 @@
 pub use lens_sys::lens_virtual_grid_plan as VirtualGridPlan;
 
 /// Compute virtual grid slice metrics.
+///
+/// The parameter list is fixed by `lens_virtual_grid_calc`'s C ABI, which
+/// cannot be re-shaped without breaking every installed consumer; the wrapper
+/// mirrors it one-for-one so the two signatures stay visibly identical. A
+/// parameter struct here would be a second, divergent spelling of the same
+/// call.
+#[allow(clippy::too_many_arguments)]
 pub fn virtual_grid_calc(
     available_width: f32,
     viewport_height: f32,

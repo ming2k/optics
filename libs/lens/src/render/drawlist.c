@@ -63,6 +63,30 @@ void lensi_drawlist_push(lens *ui, lens_node *n, lens_draw_cmd cmd) {
     if (!n)
         return;
 
+    /* Sanitize geometry and numeric properties: a degenerate command (NaN from a
+     * division by a zero-height container, or a negative extent from an
+     * overshooting spring) must not enter the drawlist. Flux's encoder rejects
+     * any non-finite or negative-extent geometry with FLUX_ERROR_INVALID_ARGUMENT,
+     * and that failure is sticky for the rest of the frame — so one NaN in one
+     * widget destroys the entire scene snapshot. Guarding here keeps the failure
+     * local: drop a non-finite command and clamp a negative extent/radius to
+     * zero. */
+    if (!isfinite(cmd.rel.x) || !isfinite(cmd.rel.y) || !isfinite(cmd.rel.w) ||
+        !isfinite(cmd.rel.h) || !isfinite(cmd.radius) || !isfinite(cmd.width) ||
+        !isfinite(cmd.text_size)) {
+        return;
+    }
+    if (cmd.kind != LENS_DRAW_TEXT) {
+        if (cmd.rel.w < 0.0f)
+            cmd.rel.w = 0.0f;
+        if (cmd.rel.h < 0.0f)
+            cmd.rel.h = 0.0f;
+    }
+    if (cmd.radius < 0.0f)
+        cmd.radius = 0.0f;
+    if (cmd.width < 0.0f)
+        cmd.width = 0.0f;
+
     /* Text commands keep only a pointer, but replay runs after the build
      * phase returns — so a caller's stack buffer (snprintf'd labels,
      * loop-local strings) would dangle. Copy the run into the per-frame

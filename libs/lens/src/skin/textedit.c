@@ -90,8 +90,12 @@ void lensi_skin_textedit(lens *ui, lens_node *n, const lens_widget_record *rec) 
             (lens_draw_cmd){.kind = LENS_DRAW_RECT, .rel = c->preedit_clause, .color = rs->accent});
     }
 
-    /* Caret */
-    if (c->show_caret) {
+    /* Caret. `show_caret` says a caret exists and is focused; the blink is a
+     * *phase* the context owns (ADR-0151), so the skin paints only while the
+     * phase is on. The widget cannot decide this itself: lens advances the
+     * clock once per frame in `lens_begin`, and a widget that re-derived a
+     * phase from its own timer would disagree with the damage walk. */
+    if (c->show_caret && ui->caret_visible) {
         lensi_drawlist_push(
             ui, n,
             (lens_draw_cmd){

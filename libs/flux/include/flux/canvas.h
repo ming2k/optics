@@ -148,6 +148,35 @@ typedef struct flux_canvas_attachment {
     };
 } flux_canvas_attachment;
 
+/* Write scope of one Canvas pass: the set of rectangles, in physical pixels of
+ * the destination, that the pass may modify. Empty (`count == 0`, or a null
+ * pointer) means "the whole destination", which is also what an over-capacity
+ * set degrades to.
+ *
+ * The set is a *scope*, not a bound: geometry outside it is culled by the
+ * rasteriser and pixels outside it are preserved. Reporting one rectangle before
+ * the consumer has seen the set destroys the localisation irrecoverably — the
+ * union of a top strip and a bottom dock is the whole output — so this type
+ * carries the whole list and the backend scissors each rectangle independently
+ * rather than collapsing. See `lens_damage_rects` for the producer side.
+ *
+ * Rectangles are expected disjoint but overlap is harmless: a scissored repaint
+ * is idempotent. */
+typedef struct flux_damage {
+    const flux_rect *rects;
+    uint32_t count;
+} flux_damage;
+
+/* Upper bound on the rectangles one pass and one frame may carry. A frame that
+ * needs more degrades to its full extent — never to a truncated list, because a
+ * dropped region leaves stale pixels on screen while an oversized one only costs
+ * work. A device whose `maxScissorSlots` is smaller lowers the effective bound
+ * and reports `FLUX_ERROR_UNSUPPORTED` from the pass rather than silently
+ * narrowing the scope. */
+enum : uint32_t {
+    FLUX_DAMAGE_CAPACITY = 64,
+};
+
 typedef struct flux_canvas_pass_desc {
     flux_struct_type type; /* FLUX_TYPE_CANVAS_PASS_DESC */
     const void *next;
@@ -155,17 +184,21 @@ typedef struct flux_canvas_pass_desc {
     flux_canvas_attachment attachment; /* resources retained until end */
     const flux_color *clear_color;     /* non-NULL: clear; NULL: load */
     flux_canvas_antialias antialias;
-    /* Dirty rectangle for a partial-frame pass, in framebuffer pixels.
-     * `render_width/height == 0` selects the full surface extent (legacy
-     * behaviour); the offset then must also be zero. When non-zero the
-     * dynamic-rendering renderArea is constrained to this rectangle, so a
-     * `clear_color`-driven clear touches only the dirty region and the rest of
-     * the image is preserved (the caller must arrange the surrounding image to
-     * already hold valid contents). */
-    int32_t render_offset_x;
-    int32_t render_offset_y;
-    uint32_t render_width;
-    uint32_t render_height;
+    /* Rectangles this pass may write, in destination physical pixels. The
+     * destination must already hold a complete frame outside them — a skipped
+     * region is not repainted. Empty selects the full destination extent.
+     *
+     * A pass is the right granularity for this because a frame can render into
+     * several destinations (a target capture and the window), and each has its
+     * own scope. The frame aggregates what its passes actually wrote into
+     * `flux_frame`'s epoch history, which is what a swapchain present uses to
+     * bring every image in the rotation up to date (ADR-0149). */
+    flux_damage damage;
+    /* Declare that this pass clears its whole destination. A full-extent pass is
+     * the only way to erase a region whose owner is gone, so the flag exists to
+     * make "I really do want everything repainted" explicit rather than inferred
+     * from an empty damage set. */
+    bool clear_extent;
 } flux_canvas_pass_desc;
 
 #define FLUX_CANVAS_PASS_DESC_INIT {.type = FLUX_TYPE_CANVAS_PASS_DESC}

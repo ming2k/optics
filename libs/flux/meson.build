@@ -45,6 +45,7 @@ flux_sources = files(
   'src/core/memory.c',
   'src/core/oneshot.c',
   'src/core/frame.c',
+  'src/core/damage_history.c',
   'src/core/plan.c',
   'src/core/result.c',
   'src/core/version.c',

@@ -1894,30 +1894,23 @@ static DWORD WINAPI win32_presenter_thread_main(LPVOID arg) {
                 flux_color theme_clear = pkt->clear_color;
                 flux_color *pass_clear = pkt->has_clear ? &theme_clear : nullptr;
 
-                /* This backend's pass takes one render area, so the packet's
-                 * damage set is collapsed here — the last possible moment, after
-                 * every consumer that could take the set has had its chance. */
-                flux_rect packet_damage = {0, 0, 0, 0};
-                bool partial =
-                    !pkt->force_paint && iris_frame_packet_damage_rect(pkt, pkt->scale, pkt->width,
-                                                                       pkt->height, &packet_damage);
-                int32_t dmg_x = 0, dmg_y = 0;
-                uint32_t dmg_w = 0, dmg_h = 0;
-                if (partial) {
-                    dmg_x = (int32_t)packet_damage.x;
-                    dmg_y = (int32_t)packet_damage.y;
-                    dmg_w = (uint32_t)packet_damage.w;
-                    dmg_h = (uint32_t)packet_damage.h;
-                }
+                /* The packet's damage set travels to the pass unchanged
+                 * (ADR-0149). DWM composites from a fresh flip-chain buffer per
+                 * frame, so the whole buffer must reach the DWM even for a
+                 * scoped frame; flux's present-time content copy does exactly
+                 * that, restricted to what this frame wrote. */
+                iris_frame_damage dmg = iris_frame_packet_damage(pkt);
 
                 flux_canvas_pass_desc pass_desc = {
                     .type = FLUX_TYPE_CANVAS_PASS_DESC,
                     .frame = frame,
                     .clear_color = pass_clear,
-                    .render_offset_x = partial ? dmg_x : 0,
-                    .render_offset_y = partial ? dmg_y : 0,
-                    .render_width = partial ? dmg_w : 0,
-                    .render_height = partial ? dmg_h : 0,
+                    .damage =
+                        {
+                            .rects = dmg.full ? nullptr : dmg.rects,
+                            .count = dmg.full ? 0 : dmg.count,
+                        },
+                    .clear_extent = dmg.full,
                 };
 
                 bool drew = false;
@@ -2380,7 +2373,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             .host_static = pl.paint_static,
             .has_custom_paint = has_custom_paint,
             .chrome_damaged = chrome_damaged,
-            .caret_visible = (lens_caret_rect(ui).w > 0.0f),
+            .caret_ticking = lens_caret_clock_live(ui),
             .surface_needs_paint = surface_forced,
             .lens_animating = lens_anim_pending(ui),
         };
@@ -2482,34 +2475,29 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             bool drew = false;
             lens_scene_snapshot *snapshot = nullptr;
 
-            /* Partial damage calculation (ADR-0123): for hosts without opaque
-             * canvas content, constrain the renderArea and clear to the dirty
-             * bounding box rather than clearing and drawing the entire window. */
-            flux_rect dmg = {0, 0, 0, 0};
-            bool partial_paint = false;
-            int32_t dmg_x = 0, dmg_y = 0;
-            uint32_t dmg_w = 0, dmg_h = 0;
-
-            if (!surface_forced && !has_custom_paint) {
-                /* One scissor for this surface: collapse the damage set here. */
-                if (iris_frame_lens_damage_rect(ui, pl.scale, (int32_t)info.width,
-                                                (int32_t)info.height, &dmg)) {
-                    dmg_x = (int32_t)dmg.x;
-                    dmg_y = (int32_t)dmg.y;
-                    dmg_w = (uint32_t)dmg.w;
-                    dmg_h = (uint32_t)dmg.h;
-                    partial_paint = true;
-                }
+            /* Damage scope for this surface (ADR-0149): the set travels intact to
+             * the pass. A host with opaque canvas content (or a forced repaint)
+             * asks for the full extent instead — its own content is not something
+             * lens can localise. */
+            iris_frame_damage dmg = {0};
+            const bool localize = !surface_forced && !has_custom_paint;
+            if (localize) {
+                dmg = iris_frame_lens_damage(ui, pl.scale, (int32_t)info.width,
+                                             (int32_t)info.height, /*force_full=*/false);
+            } else {
+                dmg.full = true;
             }
 
             flux_canvas_pass_desc pass_desc = {
                 .type = FLUX_TYPE_CANVAS_PASS_DESC,
                 .frame = frame,
                 .clear_color = pass_clear,
-                .render_offset_x = partial_paint ? dmg_x : 0,
-                .render_offset_y = partial_paint ? dmg_y : 0,
-                .render_width = partial_paint ? dmg_w : 0,
-                .render_height = partial_paint ? dmg_h : 0,
+                .damage =
+                    {
+                        .rects = dmg.full ? nullptr : dmg.rects,
+                        .count = dmg.full ? 0 : dmg.count,
+                    },
+                .clear_extent = dmg.full,
             };
 
             if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {

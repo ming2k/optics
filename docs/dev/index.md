@@ -5,7 +5,7 @@ These pages cover the internal engineering, testing, maintenance, and quality st
 - **[Engineering Standards](standards/README.md)** — Repository architecture topology, system invariants, C23 API guidelines, and PR review gates.
 - **[Setup](setup.md)** — Install dependencies, configure the build matrix, and manage toolchains.
 - **[Testing](testing.md)** — Run, select, debug, and extend the C, Rust, and benchmark test suites.
-- **[Manual Testing Runbooks](manual-testing.md)** — Interactive verification, graphics inspection, UI/input checks, and platform matrix runbooks.
+- **[Build & Run Guide](build-and-run.md)** — Build commands, interactive examples, graphics inspection, UI/input checks, and platform matrix.
 - **[Cross-Platform Invariants](cross-platform.md)** — Linux (Wayland), Windows (Win32), and macOS (Cocoa/MoltenVK) requirements and verification tooling.
 - **[Project Layout](project-layout.md)** — Structural map of libraries, tests, examples, bindings, and documentation assets.
 - **[Release & Versioning](release.md)** — Release checklist, version lockstep, and packaging procedures.

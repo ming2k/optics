@@ -290,3 +290,16 @@ test('display_list', test_display_list, suite : 'unit')
 test_public_contracts = executable('test_public_contracts',
   'test_public_contracts.c', dependencies : [test_helpers_dep])
 test('public_contracts', test_public_contracts, suite : 'unit')
+
+# ADR-0149: the write-epoch history a swapchain rotation is repaired from.
+# Pure policy — no device, no allocation — so every window-arithmetic failure
+# mode (an image older than the retained window, "current" vs "never
+# synchronised", an intervening full-extent frame) is provable without a GPU.
+# The TU is compiled into the test rather than linked: libflux builds with
+# hidden visibility, and this policy has no public entry point by design.
+test_damage_history = executable('test_damage_history',
+  ['test_damage_history.c', '../../../libs/flux/src/core/damage_history.c'],
+  include_directories : [include_directories('../../../libs/flux/src/core')],
+  dependencies : [flux_dep],
+)
+test('damage_history', test_damage_history, suite : 'unit')

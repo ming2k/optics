@@ -69,3 +69,24 @@ void flux_set_last_errorf(flux_result code, const char *function, const char *fi
     }
     flux_set_last_error(code, function, file, line, fmt ? g_error_message : nullptr, backend_code);
 }
+
+/* Public seam for a consumer library's own validation failures (see core.h).
+ * Delegates to the same slot so a caller's `flux_get_last_error` cannot tell
+ * flux-native and consumer-detected failures apart — which is the point: the
+ * binding reads one contract either way. */
+void flux_set_diagnostic(flux_result code, const char *function, const char *file, int line,
+                         const char *message) {
+    flux_set_last_error(code, function, file, line, message, 0);
+}
+
+const char *flux_diagnostic_format(const char *fmt, ...) {
+    if (!fmt) {
+        g_error_message[0] = '\0';
+        return g_error_message;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(g_error_message, sizeof(g_error_message), fmt, ap);
+    va_end(ap);
+    return g_error_message;
+}

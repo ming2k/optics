@@ -4,8 +4,8 @@
 
 use std::fmt;
 
-use flux::{Camera, Device, Format, Material, SceneLight, ScenePass};
 pub use flux::Error;
+use flux::{Camera, Device, Format, Material, SceneLight, ScenePass};
 pub use vista_sys as sys;
 
 mod materials;

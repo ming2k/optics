@@ -204,7 +204,62 @@ void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
     if (!encoder_ready(enc))
         return;
     flux_brush b = brush ? *brush : flux_brush_solid(0xff000000u);
-    if (!canvas_valid_geometry(geom) || !canvas_valid_brush(&b)) {
+    if (!geom) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "flux_encoder_draw_geometry: geom is NULL");
+        flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
+        return;
+    }
+    if (!canvas_valid_geometry(geom)) {
+        switch (geom->kind) {
+        case FLUX_GEOM_RECT:
+            FLUX_FAILF(
+                FLUX_ERROR_INVALID_ARGUMENT,
+                "flux_encoder_draw_geometry: non-finite or negative rect [%.2f, %.2f, %.2f, %.2f]",
+                (double)geom->rect.rect.x, (double)geom->rect.rect.y, (double)geom->rect.rect.w,
+                (double)geom->rect.rect.h);
+            break;
+        case FLUX_GEOM_RRECT:
+            FLUX_FAILF(FLUX_ERROR_INVALID_ARGUMENT,
+                       "flux_encoder_draw_geometry: non-finite/negative rrect [%.2f, %.2f, %.2f, "
+                       "%.2f], radius=%.2f",
+                       (double)geom->rrect.rect.x, (double)geom->rrect.rect.y,
+                       (double)geom->rrect.rect.w, (double)geom->rrect.rect.h,
+                       (double)geom->rrect.radius);
+            break;
+        case FLUX_GEOM_SQUIRCLE:
+            FLUX_FAILF(FLUX_ERROR_INVALID_ARGUMENT,
+                       "flux_encoder_draw_geometry: invalid squircle [%.2f, %.2f, %.2f, %.2f], "
+                       "r=%.2f, c=%.2f",
+                       (double)geom->squircle.rect.x, (double)geom->squircle.rect.y,
+                       (double)geom->squircle.rect.w, (double)geom->squircle.rect.h,
+                       (double)geom->squircle.radius, (double)geom->squircle.curvature);
+            break;
+        case FLUX_GEOM_CIRCLE:
+            FLUX_FAILF(FLUX_ERROR_INVALID_ARGUMENT,
+                       "flux_encoder_draw_geometry: invalid circle center=[%.2f, %.2f], r=%.2f",
+                       (double)geom->circle.cx, (double)geom->circle.cy,
+                       (double)geom->circle.radius);
+            break;
+        case FLUX_GEOM_LINE:
+            FLUX_FAILF(FLUX_ERROR_INVALID_ARGUMENT,
+                       "flux_encoder_draw_geometry: non-finite line [%.2f, %.2f] -> [%.2f, %.2f]",
+                       (double)geom->line.x0, (double)geom->line.y0, (double)geom->line.x1,
+                       (double)geom->line.y1);
+            break;
+        default:
+            FLUX_FAILF(FLUX_ERROR_INVALID_ARGUMENT,
+                       "flux_encoder_draw_geometry: invalid geometry kind %d or stroke width %.2f",
+                       (int)geom->kind, (double)geom->stroke.width);
+            break;
+        }
+        flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
+        return;
+    }
+    if (!canvas_valid_brush(&b)) {
+        FLUX_FAILF(FLUX_ERROR_INVALID_ARGUMENT,
+                   "flux_encoder_draw_geometry: invalid brush opacity=%.3f (must be in [0, 1]) or "
+                   "blend=%d",
+                   (double)b.opacity, (int)b.blend);
         flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
         return;
     }
@@ -338,6 +393,10 @@ void flux_encoder_restore(flux_encoder *enc) {
 
 void flux_encoder_clip_rect(flux_encoder *enc, flux_rect r) {
     if (!canvas_finite_rect(r)) {
+        FLUX_FAILF(
+            FLUX_ERROR_INVALID_ARGUMENT,
+            "flux_encoder_clip_rect: non-finite or negative clip rect [%.2f, %.2f, %.2f, %.2f]",
+            (double)r.x, (double)r.y, (double)r.w, (double)r.h);
         flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
         return;
     }
@@ -351,6 +410,8 @@ void flux_encoder_save_layer(flux_encoder *enc, const flux_rect *bounds, float o
         return;
     if (!isfinite(opacity) || opacity < 0 || opacity > 1 ||
         (bounds && !canvas_finite_rect(*bounds))) {
+        FLUX_FAILF(FLUX_ERROR_INVALID_ARGUMENT,
+                   "flux_encoder_save_layer: invalid opacity=%.3f or bounds", (double)opacity);
         flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
         return;
     }
@@ -370,6 +431,9 @@ void flux_encoder_save_layer(flux_encoder *enc, const flux_rect *bounds, float o
 
 static void encoder_vec2(flux_encoder *enc, flux_cmd_kind kind, float x, float y) {
     if (!isfinite(x) || !isfinite(y)) {
+        FLUX_FAILF(FLUX_ERROR_INVALID_ARGUMENT,
+                   "flux_encoder transform (kind=%d): non-finite delta/scale [%.2f, %.2f]",
+                   (int)kind, (double)x, (double)y);
         flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
         return;
     }

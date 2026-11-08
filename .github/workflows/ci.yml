@@ -165,8 +165,14 @@ jobs:
             libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
             libsystemd-dev
 
+      # --buildtype=release on purpose. The matrix legs run gcc at release and
+      # gcc at -O0 under asan-ubsan; clang at -O0 adds little and compiles away
+      # nothing, so clang-specific miscompilation of undefined behaviour stayed
+      # ungated. It did: test_svg_geometry read an uninitialised `geometry`
+      # whose `doc` pointer the clang -O2 build turned into a wild write, and
+      # every leg was green. Optimising with clang is what this leg is for.
       - name: Configure
-        run: meson setup build -Dexamples=true -Dtests=true
+        run: meson setup build -Dexamples=true -Dtests=true --buildtype=release
 
       - name: Compile
         run: meson compile -C build
@@ -182,7 +188,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        workspace: [flux-rs, lens-rs, iris-rs, prism-rs]
+        # Every workspace under bindings/ must be listed here. A workspace
+        # that is built by consumers but absent from this matrix is ungated:
+        # svg-rs, glyph-rs, vista-rs and transit-rs were, and all four had
+        # already drifted on `cargo fmt`/`clippy -D warnings` before this
+        # list was completed.
+        workspace:
+          - flux-rs
+          - glyph-rs
+          - iris-rs
+          - lens-rs
+          - prism-rs
+          - svg-rs
+          - transit-rs
+          - vista-rs
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
@@ -244,11 +263,13 @@ jobs:
 
       - name: Check all workspaces on MSRV
         run: |
-          cargo +1.85.0 check --manifest-path bindings/flux-rs/Cargo.toml \
-            --workspace --all-targets --locked
-          cargo +1.85.0 check --manifest-path bindings/lens-rs/Cargo.toml \
-            --workspace --all-targets --locked
-          cargo +1.85.0 check --manifest-path bindings/iris-rs/Cargo.toml \
-            --workspace --all-targets --locked
-          cargo +1.85.0 check --manifest-path bindings/prism-rs/Cargo.toml \
-            --workspace --all-targets --locked
+          # Enumerated from bindings/ rather than hard-coded: a workspace that
+          # is not listed here is never checked on the declared MSRV.
+          status=0
+          for manifest in bindings/*/Cargo.toml; do
+            echo "::group::MSRV check $manifest"
+            cargo +1.85.0 check --manifest-path "$manifest" \
+              --workspace --all-targets --locked || status=1
+            echo "::endgroup::"
+          done
+          exit $status

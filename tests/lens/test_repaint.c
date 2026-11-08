@@ -747,6 +747,314 @@ static void test_departed_damage_is_independent_of_unrelated_content(void) {
     }
 }
 
+/* A tooltip is painted *below* its anchor, with padding — so reporting the anchor
+ * reports a band the tooltip does not occupy and misses the one it does. This is
+ * not hypothetical: the anchor is the widget's own rect, the painted box starts at
+ * `anchor.y + anchor.h + 4`, and neither contains the other.
+ *
+ * The assertion is deliberately geometric rather than count-based: on the frame
+ * the tooltip disappears, some reported rect must reach into the band below the
+ * anchor, because that is where the ghost of the dismissed tooltip still is. */
+static void test_tooltip_dismissal_damages_the_below_anchor_band(void) {
+    lens *ui = NULL;
+    flux_canvas *canvas = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+
+    /* Settle the widget, then hover it so the box's `tooltip` string arms. The
+     * pointer is inside the label's rect, which is at the display origin. */
+    for (int i = 0; i < 4; i++) {
+        lens_begin(ui, &IN0);
+        lens_label(ui, &(lens_label_opts){.text = "hover me",
+                                          .box = {.id = "target", .tooltip = "byte counts"}});
+        test_end(ui);
+        render_frame(ui, canvas);
+    }
+
+    lens_input hover = IN0;
+    hover.cursor = (flux_point){4.0f, 4.0f};
+    lens_begin(ui, &hover);
+    lens_label(ui, &(lens_label_opts){.text = "hover me",
+                                      .box = {.id = "target", .tooltip = "byte counts"}});
+    test_end(ui);
+    render_frame(ui, canvas);
+
+    /* Dismiss: the pointer leaves, so the tooltip disappears and
+     * `prev_tooltip_active` carries the band it vacated. */
+    lens_begin(ui, &IN0);
+    lens_label(ui, &(lens_label_opts){.text = "hover me",
+                                      .box = {.id = "target", .tooltip = "byte counts"}});
+    test_end(ui);
+
+    uint32_t count = 0;
+    const flux_rect *rects = damage_rects(ui, &count);
+    CHECK(count > 0);
+    /* The anchor is the label's rect (y == 0, height ~19) and the painted box
+     * starts below it. At least one rect must reach past the anchor's bottom
+     * edge, or the dismissed tooltip's band is never repainted. */
+    bool below = false;
+    for (uint32_t i = 0; i < count && !below; i++)
+        below = rects[i].y + rects[i].h > 22.0f;
+    CHECK(below);
+
+    flux_canvas_release(canvas);
+    lens_release(ui);
+}
+
+/* An icon blits a baked coverage mask with a halo covering half its stroke, the
+ * outline twice over, and the AA fringe (render/icon_mask.c). Those pixels extend
+ * past the command rect on every side. Damage that reported the rect alone left
+ * the fringe frozen when a theme or hover change moved the icon — visible as a
+ * ghost outline that survived until an unrelated full repaint. */
+static void test_icon_damage_reaches_past_its_command_rect(void) {
+    lens *ui = NULL;
+    flux_canvas *canvas = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    CHECK(flux_canvas_create_cpu(200, 200, 1.0f, &canvas) == FLUX_OK);
+
+    for (int i = 0; i < 4; i++) {
+        lens_begin(ui, &IN0);
+        lens_icon(ui, &(lens_icon_opts){.id = LENS_ICON_CHECK, .box = {.id = "ic"}, .size = 16.0f});
+        test_end(ui);
+        render_frame(ui, canvas);
+    }
+
+    /* A colour change repaints the icon, halo included. */
+    lens_begin(ui, &IN0);
+    lens_icon(ui,
+              &(lens_icon_opts){
+                  .id = LENS_ICON_CHECK, .box = {.id = "ic"}, .size = 16.0f, .color = 0xFFFF0000u});
+    test_end(ui);
+
+    uint32_t count = 0;
+    const flux_rect *rects = damage_rects(ui, &count);
+    CHECK(count == 1);
+    if (count == 1) {
+        /* The command rect is 16x16; the halo is at least one pixel on each side
+         * for a fill run and more for a stroked one. A reported width of exactly
+         * 16 would mean the halo is not covered. */
+        CHECK(rects[0].w > 16.0f);
+        CHECK(rects[0].h > 16.0f);
+    }
+
+    flux_canvas_release(canvas);
+    lens_release(ui);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Caret blink is a phase, not a level (ADR-0151)                     */
+/* ------------------------------------------------------------------ */
+
+/* A focused text widget used to make every frame "needs repaint" for as long
+ * as it held focus, because the query tested `caret_rect.w > 0`. That is a
+ * constant, not a transition, and it is what made a host with any focused
+ * field unable to quiesce (and made the compositor re-composite an identical
+ * caret at display rate). The three properties below pin the replacement:
+ * existence alone is not damage, a flip is, and settling is reachable. */
+static char g_field_buf[64];
+
+static void build_text_frame(lens *ui, float dt) {
+    lens_input in = IN0;
+    in.dt_seconds = dt;
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){
+                          .box = {.id = "field"}, .buf = g_field_buf, .cap = sizeof g_field_buf});
+    test_end(ui);
+}
+
+/* Build a frame and *skip* presenting it — the state a damage-driven host is
+ * in between a flip it has not yet painted and the frame that will paint it.
+ * `test_end` would activate a snapshot and thereby consume the flip, which is
+ * exactly what a skipped frame must not do. */
+static void build_text_frame_unpresented(lens *ui, float dt) {
+    lens_input in = IN0;
+    in.dt_seconds = dt;
+    lens_begin(ui, &in);
+    lens_textedit(ui, &(lens_textedit_opts){
+                          .box = {.id = "field"}, .buf = g_field_buf, .cap = sizeof g_field_buf});
+    lens_end(ui);
+    CHECK(!lens_overflowed(ui));
+}
+
+/* Focus the text field by pressing inside it, then settle three frames so
+ * "nothing changed" is the baseline the caret assertions start from. */
+static void focus_text_field(lens *ui, flux_canvas *canvas) {
+    /* One build first: hit-testing reads the *presented* rect, which is zero
+     * until a frame has been arranged. */
+    build_text_frame(ui, 0.016f);
+    render_frame(ui, canvas);
+    lens_input press = IN0;
+    press.cursor = (flux_point){20, 14};
+    press.mouse_pressed[LENS_MOUSE_LEFT] = true;
+    press.mouse_down[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &press);
+    lens_textedit(ui, &(lens_textedit_opts){
+                          .box = {.id = "field"}, .buf = g_field_buf, .cap = sizeof g_field_buf});
+    test_end(ui);
+    render_frame(ui, canvas);
+    for (int i = 0; i < 3; i++) {
+        build_text_frame(ui, 0.016f);
+        render_frame(ui, canvas);
+    }
+    CHECK(lens_caret_rect(ui).w > 0.0f); /* there is a caret */
+}
+
+static void test_caret_existence_is_not_damage(void) {
+    lens *ui = NULL;
+    flux_canvas *canvas = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+
+    /* Focus the field so a caret exists (a press inside its box), then let
+     * the first frames settle. */
+    focus_text_field(ui, canvas);
+
+    /* Within one blink half-cycle nothing changes: a caret that merely exists
+     * must not be damage. 0.5 s of 16 ms frames stays inside the 530 ms half
+     * period, so no flip can have occurred. */
+    bool repainted = false;
+    for (int i = 0; i < 20; i++) {
+        build_text_frame(ui, 0.016f);
+        repainted |= lens_frame_needs_repaint(ui);
+        render_frame(ui, canvas);
+    }
+    CHECK(!repainted);
+
+    flux_canvas_release(canvas);
+    lens_release(ui);
+}
+
+static void test_caret_flip_is_damage_and_damages_only_its_rect(void) {
+    lens *ui = NULL;
+    flux_canvas *canvas = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+
+    focus_text_field(ui, canvas);
+    const bool presented = lens_caret_visible(ui);
+    CHECK(!lens_caret_flip_pending(ui));
+
+    /* Step past the half period in one frame and do NOT present it: the phase
+     * must flip, and the flip must stay pending until a frame paints it. */
+    build_text_frame_unpresented(ui, 0.6f);
+    CHECK(lens_caret_visible(ui) != presented);
+    CHECK(lens_caret_flip_pending(ui));
+    CHECK(lens_frame_needs_repaint(ui));
+
+    /* The damage must be the caret's own box, not the field or the viewport.
+     * The blink changes two pixels of accent, so a full-surface repaint here
+     * is exactly the amplification this ADR removes. */
+    uint32_t count = 0;
+    const flux_rect *rects = damage_rects(ui, &count);
+    CHECK(count >= 1);
+    const flux_rect caret = lens_caret_rect(ui);
+    bool covered = false;
+    for (uint32_t i = 0; i < count; i++)
+        covered |= rects[i].x <= caret.x && rects[i].y <= caret.y &&
+                   rects[i].x + rects[i].w >= caret.x + caret.w &&
+                   rects[i].y + rects[i].h >= caret.y + caret.h;
+    CHECK(covered);
+    /* Localization, not merely coverage: a blink must not cost the whole
+     * surface. The field may span the page width, so the bound that matters is
+     * the damaged *area* against the viewport, not a single rect's width. */
+    double area = 0.0;
+    for (uint32_t i = 0; i < count; i++)
+        area += (double)rects[i].w * (double)rects[i].h;
+    CHECK(area < 0.5 * 400.0 * 200.0);
+
+    flux_canvas_release(canvas);
+    lens_release(ui);
+}
+
+static void test_caret_clock_live_tracks_focus_and_switch(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    build_text_frame(ui, 0.016f);
+    CHECK(!lens_caret_clock_live(ui)); /* nothing focused: no clock owed */
+
+    /* A press inside the field's box focuses it; one plain build first so
+     * hit-testing has an arranged rect to test against. */
+    build_text_frame(ui, 0.016f);
+    lens_input press = IN0;
+    press.cursor = (flux_point){20, 14};
+    press.mouse_pressed[LENS_MOUSE_LEFT] = true;
+    press.mouse_down[LENS_MOUSE_LEFT] = true;
+    lens_begin(ui, &press);
+    lens_textedit(ui, &(lens_textedit_opts){
+                          .box = {.id = "field"}, .buf = g_field_buf, .cap = sizeof g_field_buf});
+    test_end(ui);
+    build_text_frame(ui, 0.016f);
+    CHECK(lens_caret_clock_live(ui));
+
+    /* A disabled blink is a solid caret: no clock, and therefore no idle tick
+     * on a host that would otherwise quiesce. */
+    lens_set_caret_blink(ui, 0.0f);
+    build_text_frame(ui, 0.016f);
+    CHECK(!lens_caret_clock_live(ui));
+    CHECK(lens_caret_visible(ui));
+
+    lens_release(ui);
+}
+
+static void test_host_owned_caret_reports_no_damage_or_clock(void) {
+    lens *ui = NULL;
+    flux_canvas *canvas = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+
+    /* An app-owned editing surface (ADR-0151): the app paints its own caret
+     * with its own clock, and lens only records the geometry so the platform
+     * layer can place the IME candidate window. Lens must therefore report
+     * neither damage nor a clock for it — otherwise two clocks drive one
+     * caret, and lens manufactures flips the app's painter never made. */
+    for (int i = 0; i < 3; i++) {
+        lens_begin(ui, &IN0);
+        lens_label(ui, &(lens_label_opts){.text = "status"});
+        test_end(ui);
+        render_frame(ui, canvas);
+    }
+
+    lens_begin(ui, &IN0);
+    lens_label(ui, &(lens_label_opts){.text = "status"});
+    lens_set_caret_rect(ui, (flux_rect){10, 10, 2, 18});
+    test_end(ui);
+
+    CHECK(lens_caret_rect(ui).w > 0.0f); /* geometry is still available */
+    CHECK(!lens_caret_clock_live(ui));
+    CHECK(!lens_caret_flip_pending(ui));
+
+    /* Stepping well past a blink half-cycle must not make lens claim a flip:
+     * the phase is not lens's to advance for this caret. */
+    lens_input slow = IN0;
+    slow.dt_seconds = 0.6f;
+    lens_begin(ui, &slow);
+    lens_label(ui, &(lens_label_opts){.text = "status"});
+    lens_set_caret_rect(ui, (flux_rect){10, 10, 2, 18});
+    test_end(ui);
+    CHECK(!lens_caret_flip_pending(ui));
+
+    flux_canvas_release(canvas);
+    lens_release(ui);
+}
+
+static void test_host_caret_does_not_keep_an_unfocused_context_awake(void) {
+    lens *ui = NULL;
+    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+
+    /* No widget holds focus, so nothing in lens paints: a host-reported caret
+     * rect alone must leave the context quiescent. */
+    for (int i = 0; i < 4; i++) {
+        lens_begin(ui, &IN0);
+        lens_set_caret_rect(ui, (flux_rect){10, 10, 2, 18});
+        test_end(ui);
+    }
+    CHECK(!lens_caret_clock_live(ui));
+    CHECK(!lens_frame_needs_repaint(ui));
+
+    lens_release(ui);
+}
+
 int main(void) {
     test_null_safety();
     test_first_frames_repaint_then_settle();
@@ -764,5 +1072,12 @@ int main(void) {
     test_removed_child_repaints_its_vacated_band();
     test_removed_container_repaints_its_children();
     test_departed_damage_is_independent_of_unrelated_content();
+    test_tooltip_dismissal_damages_the_below_anchor_band();
+    test_icon_damage_reaches_past_its_command_rect();
+    test_caret_existence_is_not_damage();
+    test_caret_flip_is_damage_and_damages_only_its_rect();
+    test_caret_clock_live_tracks_focus_and_switch();
+    test_host_owned_caret_reports_no_damage_or_clock();
+    test_host_caret_does_not_keep_an_unfocused_context_awake();
     return TEST_REPORT();
 }

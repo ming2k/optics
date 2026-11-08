@@ -18,6 +18,7 @@ HEADER_SPECS = [
     ("libs/transit/include/transit/transit.h", "TRANSIT", "transit"),
     ("libs/glyph/include/glyph/glyph.h", "GLYPH", "glyph"),
     ("libs/vista/include/vista/vista.h", "VISTA", "vista"),
+    ("libs/svg/include/svg/svg.h", "SVG", "svg"),
 ]
 
 

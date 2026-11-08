@@ -1,0 +1,16 @@
+[package]
+name = "svg"
+description = "Safe idiomatic Rust bindings to svg, the Optics SVG vector-document compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[dependencies]
+svg-sys = { path = "../svg-sys", version = "0.0.74" }
+# flux (Rust bindings) is published from a separate repo (../../../flux-rs).
+# The path works when both repos are siblings under a common parent; for other
+# layouts use a Cargo [patch] or replace with a git URL / registry version.
+flux = { path = "../../../flux-rs/crates/flux", version = "0.0.74" }

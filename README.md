@@ -22,7 +22,7 @@ Optics delivers a unified, zero-bloat foundation for desktop applications, creat
 
 ## Architecture
 
-Optics is organized into seven focused, orthogonal libraries under `libs/`:
+Optics is organized into seven runtime libraries plus the SVG document compiler, all orthogonal and all under `libs/`:
 
 | Library | Role | Description |
 | :--- | :--- | :--- |
@@ -33,6 +33,7 @@ Optics is organized into seven focused, orthogonal libraries under `libs/`:
 | **`transit`** | *Motion Vocabulary* | Analytic non-divergent springs, parametric easing curves, and motion-adaptive de-jitter smoothing. |
 | **`lens`** | *Immediate-Mode UI* | Headless UI micro-kernel: 1D Flexbox & 2D Grid layouts, canonical widgets, overlay layers, and a11y tree. |
 | **`iris`** | *Platform Shell* | Native window creation, display event loops, clipboard/IME, and OS input routing. |
+| **`svg`** | *Document Compiler* | SVG static-art parsing and compilation onto flux primitives: paths, shapes, paints, gradients, fit-and-paint, headless rasterization. |
 
 ```text
 Application
@@ -40,6 +41,7 @@ Application
   │     └── lens   ── UI Engine, Layout & Canonical Widgets
   │           ├── glyph   ── Text Shaping & Atlas
   │           └── flux    ── 2D Canvas (GPU / Headless CPU)
+  ├── svg    ── SVG Documents → flux Primitives
   └── Direct Rendering
         ├── vista   ── 3D Scene & glTF Models
         ├── prism   ── Physical Materials (Liquid Glass, Acrylic, Mica)

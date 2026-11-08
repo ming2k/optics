@@ -16,7 +16,10 @@ fn main() {
         .or_else(|| env::var_os("OPTICS_BUILD_DIR"))
         .map(PathBuf::from)
         .or_else(|| checkout_root.as_ref().map(|root| root.join("build")))
-        .filter(|dir| dir.join("meson-uninstalled/transit-uninstalled.pc").exists());
+        .filter(|dir| {
+            dir.join("meson-uninstalled/transit-uninstalled.pc")
+                .exists()
+        });
     let source_dir = env::var_os("TRANSIT_SOURCE_DIR")
         .map(PathBuf::from)
         .or_else(|| checkout_root.as_ref().map(|root| root.join("libs/transit")));
@@ -55,7 +58,9 @@ fn main() {
         .atleast_version("0.0.30")
         .probe("transit")
         .unwrap_or_else(|e| {
-            panic!("pkg-config failed for transit: {e}\nEither install transit or build Optics first.");
+            panic!(
+                "pkg-config failed for transit: {e}\nEither install transit or build Optics first."
+            );
         });
 
     let rpaths: Vec<String> = lib
@@ -104,7 +109,10 @@ fn main() {
 
     println!("cargo:rerun-if-changed=wrapper.h");
     if let Some(src) = &source_dir {
-        println!("cargo:rerun-if-changed={}", src.join("include/transit/transit.h").display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            src.join("include/transit/transit.h").display()
+        );
     }
 }
 

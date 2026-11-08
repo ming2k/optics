@@ -186,6 +186,17 @@ impl ErrorInfo {
         Self::last_if(None)
     }
 
+    /// The diagnostic recorded for `code`, if the thread slot still describes a
+    /// call that failed with it. Declining a mismatched code is what keeps a
+    /// stale entry from a previous, unrelated failure out of a new error.
+    ///
+    /// Public because a binding that converts a raw `flux_result` into its own
+    /// error type has to read the detail at the failure site — the slot is
+    /// overwritten by the next failing call, so it cannot be recovered later.
+    pub fn last_if_code(code: sys::flux_result) -> Option<ErrorInfo> {
+        Self::last_if(Some(code))
+    }
+
     fn last_if(code: Option<sys::flux_result>) -> Option<ErrorInfo> {
         let mut raw = sys::flux_error_info {
             code: sys::flux_result::FLUX_OK,
@@ -2589,6 +2600,14 @@ pub struct Encoder {
 }
 
 impl Encoder {
+    /// Borrow the raw encoder for unsafe integration (e.g. a `-sys` crate that
+    /// records into an encoder it does not own).
+    pub fn as_raw(&self) -> *mut sys::flux_encoder {
+        self.raw
+    }
+}
+
+impl Encoder {
     /// Create a borrowed view over a raw `flux_encoder` pointer.
     ///
     /// # Safety
@@ -2799,15 +2818,23 @@ impl CanvasAntialias {
 }
 
 /// Load and antialiasing policy for one [`Canvas`] pass.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+///
+/// Not `Copy`: the damage scope is an owned list. Cloning a pass policy should be
+/// an explicit decision rather than something a `Copy` bound does silently.
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct CanvasPassOptions {
     /// `Some(color)` clears the destination; `None` preserves its contents.
     pub clear: Option<u32>,
     pub antialias: CanvasAntialias,
-    /// Optional dirty rectangle in physical framebuffer pixels. `None` uses
-    /// the complete destination. Both clearing and drawing are constrained to
-    /// this rectangle while pixels outside it remain untouched.
-    pub render_area: Option<CanvasRenderArea>,
+    /// Optional damage scope: the rectangles this pass may write, in physical
+    /// framebuffer pixels. Empty uses the complete destination. Clearing and
+    /// drawing are both constrained to the set while pixels outside it remain
+    /// untouched, and a draw that touches none of them is dropped.
+    ///
+    /// A set rather than a rectangle because the bounding box of two distant
+    /// bands is nearly the whole output — collapsing to one rect destroys the
+    /// localisation this exists to carry (ADR-0143, ADR-0149).
+    pub damage: Vec<CanvasRenderArea>,
     /// Open a genuine no-stencil pass for callers that emit only operations
     /// whose semantics never require stencil (e.g. solid/image compositor
     /// blits). No stencil image is allocated, transitioned, cleared, or bound;
@@ -2818,13 +2845,13 @@ pub struct CanvasPassOptions {
     pub skip_stencil: bool,
 }
 
-/// Physical-pixel render area for a partial Canvas pass.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// One rectangle of a pass's damage scope, in physical framebuffer pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasRenderArea {
-    pub x: i32,
-    pub y: i32,
-    pub width: u32,
-    pub height: u32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 /// Build the stable base pass descriptor and its optional stack-owned pNext
@@ -2836,7 +2863,26 @@ fn with_raw_canvas_pass_desc<T>(
     f: impl FnOnce(&sys::flux_canvas_pass_desc) -> T,
 ) -> T {
     let clear = options.clear;
-    let area = options.render_area;
+    // The C descriptor borrows this array for the duration of the call, which is
+    // exactly the lifetime `f` observes.
+    let damage_rects: Vec<sys::flux_rect> = options
+        .damage
+        .iter()
+        .map(|a| sys::flux_rect {
+            x: a.x,
+            y: a.y,
+            w: a.width,
+            h: a.height,
+        })
+        .collect();
+    let damage = sys::flux_damage {
+        rects: if damage_rects.is_empty() {
+            std::ptr::null()
+        } else {
+            damage_rects.as_ptr()
+        },
+        count: damage_rects.len() as u32,
+    };
     let no_stencil = sys::flux_canvas_no_stencil_desc {
         type_: sys::flux_struct_type::FLUX_TYPE_CANVAS_NO_STENCIL_DESC,
         next: std::ptr::null(),
@@ -2856,10 +2902,8 @@ fn with_raw_canvas_pass_desc<T>(
             .map(|color| color as *const u32)
             .unwrap_or(std::ptr::null()),
         antialias: options.antialias.raw(),
-        render_offset_x: area.map_or(0, |area| area.x),
-        render_offset_y: area.map_or(0, |area| area.y),
-        render_width: area.map_or(0, |area| area.width),
-        render_height: area.map_or(0, |area| area.height),
+        damage,
+        clear_extent: false,
     };
     f(&desc)
 }

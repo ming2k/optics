@@ -41,8 +41,8 @@ int main(void) {
     flux_canvas_pass_desc pass = FLUX_CANVAS_PASS_DESC_INIT;
     pass.attachment = (flux_canvas_attachment){.kind = FLUX_CANVAS_ATTACHMENT_TARGET, .target = a};
     pass.clear_color = &blue;
-    pass.render_width = 2;
-    pass.render_height = 2;
+    const flux_rect corner = {0, 0, 2, 2};
+    pass.damage = (flux_damage){.rects = &corner, .count = 1};
     EXPECT(flux_canvas_begin(c, &pass) == FLUX_OK);
     EXPECT(flux_canvas_end(c) == FLUX_OK);
     px = flux_target_cpu_pixels(a, nullptr, nullptr, nullptr);

@@ -1,7 +1,7 @@
 //! DataGrid pattern.
 
-use crate::types::Align;
 use crate::Frame;
+use crate::types::Align;
 use std::ffi::CString;
 
 /// Sort direction for a datagrid column.

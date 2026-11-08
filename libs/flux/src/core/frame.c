@@ -102,12 +102,15 @@ static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen, b
     if (old_layout == final_layout && !exportable)
         return;
     bool after_readback = old_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    bool after_copy_dst = old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     VkImageMemoryBarrier2 b = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = after_readback ? VK_PIPELINE_STAGE_2_COPY_BIT
-                                       : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask =
-            after_readback ? VK_ACCESS_2_TRANSFER_READ_BIT : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .srcStageMask = (after_readback || after_copy_dst)
+                            ? VK_PIPELINE_STAGE_2_COPY_BIT
+                            : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = after_readback   ? VK_ACCESS_2_TRANSFER_READ_BIT
+                         : after_copy_dst ? VK_ACCESS_2_TRANSFER_WRITE_BIT
+                                          : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
         .dstStageMask = exportable  ? VK_PIPELINE_STAGE_2_NONE
                         : offscreen ? VK_PIPELINE_STAGE_2_COPY_BIT
                                     : VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
@@ -130,6 +133,124 @@ static void barrier_to_final(VkCommandBuffer cmd, VkImage img, bool offscreen, b
         .pImageMemoryBarriers = &b,
     };
     vkCmdPipelineBarrier2(cmd, &di);
+}
+
+/* ------------------------------------------------------------------ */
+/*  ADR-0149: damage-scoped presentation                              */
+/* ------------------------------------------------------------------ */
+
+static void content_barrier(VkCommandBuffer cmd, VkImage image, VkPipelineStageFlags2 src_stage,
+                            VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
+                            VkAccessFlags2 dst_access, VkImageLayout old_layout,
+                            VkImageLayout new_layout) {
+    VkImageMemoryBarrier2 b = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = src_stage,
+        .srcAccessMask = src_access,
+        .dstStageMask = dst_stage,
+        .dstAccessMask = dst_access,
+        .oldLayout = old_layout,
+        .newLayout = new_layout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    VkDependencyInfo di = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &b,
+    };
+    vkCmdPipelineBarrier2(cmd, &di);
+}
+
+/* Transition an acquired swapchain image into TRANSFER_DST so the content copy
+ * can write it. `barrier_to_color_attachment` above leaves it in
+ * COLOR_ATTACHMENT; a copy needs TRANSFER_DST. */
+static void swapchain_to_transfer_dst(VkCommandBuffer cmd, VkImage img) {
+    content_barrier(cmd, img, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                    VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+}
+
+void flux_frame_record_written(flux_frame *f, flux_rect area) {
+    if (!f || !(area.w > 0.0f) || !(area.h > 0.0f))
+        return;
+    if (f->written.count >= FLUX_FRAME_DAMAGE_CAPACITY) {
+        f->written_overflow = true;
+        return;
+    }
+    f->written.rects[f->written.count++] = area;
+}
+
+flux_result flux_surface_sync_content(flux_surface *s, flux_frame *f) {
+    if (!s || !f || s->offscreen || !s->content.image)
+        return FLUX_OK;
+    VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
+    const uint32_t idx = s->current_image;
+
+    /* What this image is missing: the union of write areas committed since it
+     * last presented. This frame's own entry is already in the history, so a
+     * frame that wrote nothing and an image that is already current both fall
+     * out of the same computation — the latter as an empty result, which needs
+     * no copy at all. */
+    flux_rect regions[FLUX_FRAME_DAMAGE_CAPACITY];
+    bool whole = false;
+    const uint32_t count = flux_damage_history_since(&s->damage_history, s->image_epoch[idx],
+                                                     regions, FLUX_FRAME_DAMAGE_CAPACITY, &whole);
+
+    const VkImageCopy full = {
+        .srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
+        .dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
+        .extent = {s->extent.width, s->extent.height, 1},
+    };
+    if (whole) {
+        vkCmdCopyImage(cmd, s->content.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s->images[idx],
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &full);
+    } else if (count > 0) {
+        VkImageCopy copies[FLUX_FRAME_DAMAGE_CAPACITY];
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < count; i++) {
+            int32_t x0 = (int32_t)regions[i].x;
+            int32_t y0 = (int32_t)regions[i].y;
+            int32_t x1 = (int32_t)(regions[i].x + regions[i].w);
+            int32_t y1 = (int32_t)(regions[i].y + regions[i].h);
+            if (x0 < 0)
+                x0 = 0;
+            if (y0 < 0)
+                y0 = 0;
+            if (x1 > (int32_t)s->extent.width)
+                x1 = (int32_t)s->extent.width;
+            if (y1 > (int32_t)s->extent.height)
+                y1 = (int32_t)s->extent.height;
+            if (x1 <= x0 || y1 <= y0)
+                continue;
+            copies[n++] = (VkImageCopy){
+                .srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
+                .srcOffset = {x0, y0, 0},
+                .dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
+                .dstOffset = {x0, y0, 0},
+                .extent = {(uint32_t)(x1 - x0), (uint32_t)(y1 - y0), 1},
+            };
+        }
+        if (n)
+            vkCmdCopyImage(cmd, s->content.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           s->images[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, n, copies);
+    }
+
+    /* The copies must be visible to the presentation engine's read of the image;
+     * `barrier_to_final` orders that at the end of submit. Recording the epoch
+     * here — not at the copy — is what makes the next reacquisition of *this*
+     * image ask for exactly the frames it will have missed. */
+    s->image_epoch[idx] = s->damage_history.committed;
+    s->image_layouts[idx] = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    return FLUX_OK;
 }
 
 /* ------------------------------------------------------------------ */
@@ -536,8 +657,46 @@ acquired:
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
-    barrier_to_color_attachment(pf->cmd, s->images[image_index], s->image_layouts[image_index],
-                                s->image_foreign_owned[image_index], s->device->graphics_family);
+    /* ADR-0149: a windowed frame renders into the persistent content image, not
+     * into the acquired swapchain image. The acquired image is only a
+     * presentation buffer; it receives pixels at submit time, restricted to what
+     * the frame's passes actually wrote. Transitioning it to COLOR_ATTACHMENT
+     * here is therefore unnecessary — and would be wrong for the copy source,
+     * which is TRANSFER_SRC from the content image.
+     *
+     * Offscreen surfaces keep the direct-image path: their "rotation" is one
+     * image per frame slot, so a damage-scoped pass accumulates correctly. */
+    if (!s->offscreen && s->content.image) {
+        /* The content image is the render target for every pass of this frame,
+         * so it arrives in COLOR_ATTACHMENT from the previous frame (or UNDEFINED
+         * on first use). */
+        const VkImageLayout content_layout = s->content.layout;
+        const VkPipelineStageFlags2 src_stage = content_layout == VK_IMAGE_LAYOUT_UNDEFINED
+                                                    ? VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT
+                                                    : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        const VkAccessFlags2 src_access =
+            content_layout == VK_IMAGE_LAYOUT_UNDEFINED
+                ? 0
+                : (VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT |
+                   VK_ACCESS_2_SHADER_READ_BIT);
+        content_barrier(
+            pf->cmd, s->content.image, src_stage, src_access, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+            content_layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        s->content.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        /* The acquired image is the copy destination for this frame. Its prior
+         * layout is whatever the previous present of *this image* left behind
+         * (PRESENT_SRC, or UNDEFINED before its first present). */
+        barrier_to_color_attachment(pf->cmd, s->images[image_index], s->image_layouts[image_index],
+                                    false, s->device->graphics_family);
+        swapchain_to_transfer_dst(pf->cmd, s->images[image_index]);
+        s->image_layouts[image_index] = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    } else {
+        barrier_to_color_attachment(pf->cmd, s->images[image_index], s->image_layouts[image_index],
+                                    s->image_foreign_owned[image_index],
+                                    s->device->graphics_family);
+    }
 
     /* Surface-owned frame slot. Stable pointer for the caller's
      * lifetime of this frame; cleared by flux_frame_present. Safe
@@ -619,9 +778,13 @@ void flux_frame_begin_pass(flux_frame *f, const flux_pass_desc *desc) {
     f->scene_bound_set = VK_NULL_HANDLE;
     f->scene_bound_layout = VK_NULL_HANDLE;
 
+    /* ADR-0149: an attachment-less pass targets the frame's render image, which
+     * on a windowed surface is the persistent content image rather than the
+     * acquired swapchain image. The accessor is the single definition of that
+     * choice, so the canvas backend and this path cannot disagree. */
     VkRenderingAttachmentInfo color = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = s->image_views[s->current_image],
+        .imageView = flux_surface_render_view(s),
         .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -658,7 +821,9 @@ void flux_frame_begin_pass(flux_frame *f, const flux_pass_desc *desc) {
             color.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         } else if (a->resolve_to_surface && a->view != VK_NULL_HANDLE) {
             color.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
-            color.resolveImageView = s->image_views[s->current_image];
+            /* ADR-0149: "surface" means the frame's render image, i.e. the
+             * persistent content image on a windowed surface. */
+            color.resolveImageView = flux_surface_render_view(s);
             color.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             color.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         }
@@ -816,6 +981,14 @@ flux_result flux_frame_submit(flux_frame *f) {
         flux_frame_end_pass(f);
     }
 
+    bool copy_readback = s->offscreen_require_readback || f->readback_requested;
+    flux_readback_region readback_region = s->offscreen_require_readback
+                                              ? (flux_readback_region){
+                                                    .width = s->extent.width,
+                                                    .height = s->extent.height,
+                                                }
+                                              : f->readback_region;
+
     foreign_images_record_release(s, pf);
     bool foreign_acquire_recorded = false;
     VkResult vr = foreign_images_record_acquire(s, pf, &foreign_acquire_recorded);
@@ -829,23 +1002,22 @@ flux_result flux_frame_submit(flux_frame *f) {
         return FLUX_ERROR_BACKEND_FAILURE;
     }
 
-    bool copy_readback = s->offscreen_require_readback || f->readback_requested;
-    flux_readback_region readback_region = s->offscreen_require_readback
-                                              ? (flux_readback_region){
-                                                    .width = s->extent.width,
-                                                    .height = s->extent.height,
-                                                }
-                                              : f->readback_region;
+    /* ADR-0149: on a windowed surface the frame rendered into the content image,
+     * so that is what readback must copy from — and it is the complete frame, so
+     * a damage-scoped frame reads back correctly rather than a half-updated
+     * swapchain image. */
+    const bool content_backed = !s->offscreen && s->content.image != VK_NULL_HANDLE;
+    const VkImage frame_output = content_backed ? s->content.image : s->images[s->current_image];
+
     if (copy_readback) {
-        barrier_to_readback(pf->cmd, s->images[s->current_image]);
+        barrier_to_readback(pf->cmd, frame_output);
         VkBufferImageCopy region = {
             .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
             .imageOffset = {(int32_t)readback_region.x, (int32_t)readback_region.y, 0},
             .imageExtent = {readback_region.width, readback_region.height, 1},
         };
-        vkCmdCopyImageToBuffer(pf->cmd, s->images[s->current_image],
-                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s->readback_staging->buffer, 1,
-                               &region);
+        vkCmdCopyImageToBuffer(pf->cmd, frame_output, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               s->readback_staging->buffer, 1, &region);
 
         VkMemoryBarrier2 readback_barrier = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
@@ -861,10 +1033,39 @@ flux_result flux_frame_submit(flux_frame *f) {
         };
         vkCmdPipelineBarrier2(pf->cmd, &readback_dependency);
     }
+
+    if (content_backed) {
+        /* Commit this frame's write set into the epoch history, then bring the
+         * acquired image up to date. Order matters: the commit must name the
+         * epoch the copy will leave the image at, so a subsequent frame copying
+         * the same image can ask "what changed since then". */
+        (void)flux_damage_history_commit(&s->damage_history, f->written.rects, f->written.count,
+                                         f->written_overflow);
+
+        /* Content image -> TRANSFER_SRC for the copy. It was left in
+         * COLOR_ATTACHMENT (or TRANSFER_SRC by a preceding readback barrier). */
+        if (!copy_readback) {
+            content_barrier(pf->cmd, s->content.image,
+                            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                            VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        }
+        s->content.layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+        flux_result sync = flux_surface_sync_content(s, f);
+        if (sync != FLUX_OK)
+            return sync;
+    }
+
+    /* Copy-destination images went to TRANSFER_DST in sync_content; the final
+     * transition therefore starts from TRANSFER_DST, not COLOR_ATTACHMENT. */
+    const VkImageLayout swapchain_old_layout =
+        content_backed ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                       : (copy_readback ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                                        : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     barrier_to_final(pf->cmd, s->images[s->current_image], s->offscreen, s->offscreen_exportable,
-                     s->device->graphics_family,
-                     copy_readback ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-                                   : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+                     s->device->graphics_family, swapchain_old_layout);
 
     pf->ts_was_submitted = (pf->ts_scope_count > 0);
 

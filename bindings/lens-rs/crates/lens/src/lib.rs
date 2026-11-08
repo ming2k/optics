@@ -33,6 +33,18 @@ use std::ptr;
 /// deliberately as the one documented unsafe escape hatch.
 pub use lens_sys as sys;
 
+/// The caret blink period lens applies when a context does not override it
+/// (Optics ADR-0151): one full on/off cycle, so a 530 ms half-cycle — the
+/// cadence X11, Win32, AppKit and GTK converged on.
+///
+/// Mirrors `LENSI_CARET_BLINK_PERIOD_S` in lens's internal header. It is exposed
+/// because "restore the default blink" has no entry point: [`Ui::set_caret_blink`]
+/// spells "no blink" as `period <= 0`, so a host that disabled the blink for an
+/// accessibility preference must name a period to bring it back. Without this
+/// constant every such host would hardcode the number and silently drift from
+/// the library.
+pub const DEFAULT_CARET_BLINK_PERIOD_S: f32 = 1.06;
+
 /// Owned immutable visual publication. It may outlive its source UI.
 pub struct Snapshot {
     raw: *mut sys::lens_scene_snapshot,
@@ -44,6 +56,24 @@ impl Snapshot {
         unsafe { sys::lens_snapshot_generation(self.raw) }
     }
 
+    /// Take a second owner of this snapshot.
+    ///
+    /// `lens_snapshot_retain` refcounts, but the Rust handle models a single
+    /// owner, so a caller that needs to keep one scene *and* hand it to
+    /// `activate`/`submit` — a host caching a last-good scene, for instance —
+    /// had no way to express it. Without this the only options were to copy the
+    /// display list or to give up the reference, and giving it up is exactly
+    /// what a fallback scene must not do.
+    ///
+    /// Both handles must be dropped independently; each releases one reference.
+    #[must_use]
+    pub fn retain(&self) -> Snapshot {
+        // SAFETY: self owns a live snapshot; retain is atomic and returns the
+        // same pointer, which the new owner releases in its own Drop.
+        let raw = unsafe { sys::lens_snapshot_retain(self.raw) };
+        Snapshot { raw }
+    }
+
     /// Execute this snapshot inside an open Canvas session.
     ///
     /// # Safety
@@ -53,7 +83,7 @@ impl Snapshot {
         // SAFETY: caller guarantees the canvas state; self retains the snapshot.
         let rc = unsafe { sys::lens_snapshot_submit(self.raw, canvas) };
         if rc != sys::flux_result::FLUX_OK {
-            return Err(Error::Render(rc));
+            return Err(Error::from_result(Error::Render, rc));
         }
         Ok(())
     }
@@ -143,7 +173,7 @@ impl Ui {
         // SAFETY: desc is fully initialized; out is a valid slot.
         let rc = unsafe { sys::lens_create(&desc, &mut out) };
         if rc != sys::flux_result::FLUX_OK || out.is_null() {
-            return Err(Error::Create(rc));
+            return Err(Error::from_result(Error::Create, rc));
         }
         Ok(Ui {
             raw: out,
@@ -204,7 +234,7 @@ impl Ui {
         // SAFETY: the UI is uniquely borrowed and the output slot is valid.
         let rc = unsafe { sys::lens_snapshot_create(self.raw, &mut raw) };
         if rc != sys::flux_result::FLUX_OK {
-            return Err(Error::Render(rc));
+            return Err(Error::from_result(Error::Render, rc));
         }
         Ok(Snapshot { raw })
     }
@@ -214,7 +244,7 @@ impl Ui {
         // SAFETY: both objects are live; C validates their identity and generation.
         let rc = unsafe { sys::lens_snapshot_activate(self.raw, snapshot.raw) };
         if rc != sys::flux_result::FLUX_OK {
-            return Err(Error::Render(rc));
+            return Err(Error::from_result(Error::Render, rc));
         }
         Ok(())
     }
@@ -358,6 +388,52 @@ impl Ui {
         CursorHint::from_raw(unsafe { sys::lens_get_cursor_hint(self.raw as *const sys::lens) })
     }
 
+    // ---- keyboard focus (host side) ---------------------------------------
+    //
+    // Focus is host state, not a draw operation: a host transfers it from an
+    // input handler or a keybinding, which runs between frames. These live on
+    // `Ui` for that reason, and they take a label rather than an id because an
+    // id is only meaningful against the id stack the last build populated — a
+    // caller that resolved it separately could hold a stale one.
+
+    /// Give keyboard focus to the widget built under `label`, reporting whether
+    /// it took.
+    ///
+    /// `false` when no widget carries that label — it is not registered, or
+    /// nothing has been built under it yet.
+    pub fn focus(&mut self, label: &str) -> bool {
+        let c = cstr(label);
+        // SAFETY: raw is live; `c` outlives the call.
+        let id = unsafe { sys::lens_current_id(self.raw, c.as_ptr()) };
+        if id == 0 {
+            return false;
+        }
+        // SAFETY: raw is live; `id` came from this context's own id stack.
+        unsafe { sys::lens_set_focus(self.raw, id) };
+        true
+    }
+
+    /// Whether the widget built under `label` currently holds keyboard focus.
+    ///
+    /// `false` for an unresolvable label, which is also the honest answer for
+    /// "nothing here is focused".
+    pub fn is_focused(&self, label: &str) -> bool {
+        let c = cstr(label);
+        // SAFETY: raw is a live context; the call only reads state.
+        let id = unsafe { sys::lens_current_id(self.raw, c.as_ptr()) };
+        if id == 0 {
+            return false;
+        }
+        // SAFETY: raw is a live context; the call only reads state.
+        unsafe { sys::lens_focused(self.raw as *const sys::lens, id) }
+    }
+
+    /// Release keyboard focus from whatever holds it.
+    pub fn clear_focus(&mut self) {
+        // SAFETY: raw is live; 0 is the documented "no widget" id.
+        unsafe { sys::lens_set_focus(self.raw, 0) };
+    }
+
     /// Accessibility reduced-motion switch. While enabled, every eased value
     /// resolves to its target within one frame — no fades or slides — and
     /// [`Ui::anim_pending`] stays false. The host owns the policy (user
@@ -378,9 +454,76 @@ impl Ui {
     /// Caret rect of the focused text widget, in UI-space; zero-sized when no
     /// text widget is focused. The host forwards this to the platform IME
     /// (e.g. `zwp_text_input`) so the candidate window can position itself.
+    ///
+    /// This is *geometry* only: it says where the caret is, never whether it is
+    /// painted this frame. [`Ui::caret_visible`] answers that.
     pub fn caret_rect(&self) -> Rect {
         // SAFETY: raw is a live context; the call only reads state.
         Rect::from_raw(unsafe { sys::lens_caret_rect(self.raw) })
+    }
+
+    /// Current caret blink phase: `true` while the caret is in the visible half
+    /// of its blink cycle (Optics ADR-0151).
+    ///
+    /// Lens owns the blink clock because only lens can make it a *damage*
+    /// signal. The clock advances once per build by `Input::dt_seconds`, so a
+    /// host paced from the display pulse gets a display-sampled blink for free,
+    /// and a host that skipped frames resumes on the phase it would have
+    /// reached. A skin checks this before drawing the caret; the host never has
+    /// to model a blink at all.
+    ///
+    /// Always `true` while an IME composition is in progress — frames are
+    /// event-driven then, and a blink would freeze mid-composition.
+    pub fn caret_visible(&self) -> bool {
+        // SAFETY: raw is a live context; the call only reads state.
+        unsafe { sys::lens_caret_visible(self.raw as *const sys::lens) }
+    }
+
+    /// Override the caret blink period in seconds (Optics ADR-0151).
+    ///
+    /// `period <= 0` (or a non-finite value) *disables* the blink: the caret
+    /// stays solid and lens reports no caret damage at all, which is how
+    /// reduced motion is expressed. Use [`DEFAULT_CARET_BLINK_PERIOD_S`] to
+    /// restore the library default, since there is no separate "reset" call.
+    ///
+    /// Accessibility preference is host policy, so the host decides; lens
+    /// executes.
+    pub fn set_caret_blink(&mut self, period_seconds: f32) {
+        // SAFETY: raw is live; the value is a plain float.
+        unsafe { sys::lens_set_caret_blink(self.raw, period_seconds) };
+    }
+
+    /// `true` when the caret's blink phase differs from the phase the last
+    /// activated snapshot put on screen (Optics ADR-0151).
+    ///
+    /// This is the host's whole caret-damage contract: forward it to the frame
+    /// pacer as "one frame is owed", and never model a blink yourself.
+    /// Comparing against the *presented* phase rather than the last built one is
+    /// what makes a skipped frame keep its flip pending instead of dropping it,
+    /// and it is why a host cannot derive this from [`Ui::caret_visible`] alone
+    /// (that is only the current phase, with no memory of what reached the
+    /// display).
+    ///
+    /// `false` when no caret is focused: a phase flip nobody can see is not
+    /// damage. Read between the frame build and the next one.
+    pub fn caret_flip_pending(&self) -> bool {
+        // SAFETY: raw is a live context; the call only reads state.
+        unsafe { sys::lens_caret_flip_pending(self.raw as *const sys::lens) }
+    }
+
+    /// `true` when a caret blink clock is running: a text widget holds focus and
+    /// the blink is enabled (Optics ADR-0151).
+    ///
+    /// Distinct from [`Ui::caret_flip_pending`], and the two are not
+    /// interchangeable. The clock only advances inside a build (it integrates
+    /// `Input::dt_seconds`), so a host that stopped producing frames could never
+    /// observe the next flip — the caret would freeze mid-blink. This level
+    /// therefore tells the pacer to keep its *low idle tick* alive; it does not
+    /// ask for a paint, and it must not buy the active-rate cadence. The paint
+    /// is owed separately, by the frame on which the flip lands.
+    pub fn caret_clock_live(&self) -> bool {
+        // SAFETY: raw is a live context; the call only reads state.
+        unsafe { sys::lens_caret_clock_live(self.raw as *const sys::lens) }
     }
 
     /// Place text on the system clipboard (via the host clipboard interface, if
@@ -815,6 +958,14 @@ impl<'frame> Frame<'frame> {
         }
     }
 
+    /// Draw a borrowed image into the current layout box.
+    ///
+    /// # Safety
+    ///
+    /// `image` must be a live `flux_image` owned by the device backing this
+    /// `Ui`, and it must stay alive (and unmodified) for the duration of the
+    /// call. A null pointer is accepted by the C layer as "no image", but
+    /// passing a dangling or already-released handle is undefined behaviour.
     pub unsafe fn image(&mut self, image: *mut sys::flux_image, w: f32, h: f32) {
         let opts = sys::lens_image_opts {
             image,
@@ -827,6 +978,12 @@ impl<'frame> Frame<'frame> {
         }
     }
 
+    /// Draw a borrowed image into the current layout box, multiplied by `tint`.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`Ui::image`]: `image` must be a live `flux_image`
+    /// owned by this `Ui`'s device, alive and unmodified for the whole call.
     pub unsafe fn image_tinted(
         &mut self,
         image: *mut sys::flux_image,
@@ -1338,10 +1495,6 @@ impl<'frame> Frame<'frame> {
         Some(Rect::from_raw(unsafe { sys::lens_node_bounds(node) }))
     }
 
-    pub fn clear_focus(&mut self) {
-        unsafe { sys::lens_set_focus(self.ui, 0) };
-    }
-
     pub fn consume_key(&mut self, key: i32) {
         unsafe { sys::lens_consume_key(self.ui, key) };
     }
@@ -1444,12 +1597,7 @@ impl<'frame> Frame<'frame> {
         Response::from_raw(unsafe { sys::lens_textedit(self.ui, &opts) })
     }
 
-    pub fn textfield_ex(
-        &mut self,
-        label: &str,
-        buf: &mut TextBuf,
-        accept_tab: bool,
-    ) -> Response {
+    pub fn textfield_ex(&mut self, label: &str, buf: &mut TextBuf, accept_tab: bool) -> Response {
         self.textedit_ex(label, buf, false, accept_tab, true)
     }
 
@@ -1528,20 +1676,127 @@ impl TextBuf {
     }
 }
 
-/// Errors from the safe surface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A lens operation failed.
+///
+/// Carries the *flux diagnostic*, not just the result code. The code alone
+/// (`FLUX_ERROR_INVALID_ARGUMENT`) cannot distinguish a degenerate rect from an
+/// out-of-bounds one from a double-begun pass, and every one of those needs a
+/// different fix. Flux records which entry point failed, at which source line,
+/// with a human-readable message, and discards it unless the caller reads it at
+/// the failure site — so the read has to happen here, in the constructor, and
+/// the detail has to travel with the error.
+///
+/// This is why the type is not `#[error("... {0:?}")]` over a bare
+/// `flux_result`: that shape throws the diagnostic away at exactly the moment it
+/// is the only thing that can explain the failure.
+#[derive(Debug)]
 pub enum Error {
     /// `lens_create` returned a non-OK `flux_result`.
-    Create(sys::flux_result),
+    Create(FluxDiagnostic),
     /// Snapshot publication or execution returned a non-OK `flux_result`.
-    Render(sys::flux_result),
+    Render(FluxDiagnostic),
+}
+
+/// The flux diagnostic behind a failed lens call.
+///
+/// `lens_sys` binds the enum from its own build of the C headers, so its
+/// `flux_result` is a nominally distinct type from `flux::sys`'s even though both
+/// mirror the same C enum. Bridging on the discriminant would need a
+/// `TryFrom<i32>` that bindgen does not emit, and would be a conversion whose
+/// only purpose is to satisfy the type checker. Carrying the code plus flux's
+/// own rendered diagnostic instead keeps the information and skips the dance: the
+/// message is what a human needs, and it comes from the same thread-local slot
+/// either way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FluxDiagnostic {
+    /// The `flux_result` discriminant, as flux reported it.
+    pub code: i32,
+    /// `"{FLUX_ERROR_...}"` — the enum's own name, so logs stay greppable.
+    pub code_name: String,
+    /// Flux entry point that failed, e.g. `"flux_canvas_begin_pass"`.
+    pub function: Option<String>,
+    /// Source file inside flux, and the line in it.
+    pub file: Option<String>,
+    pub line: i32,
+    /// Human-readable detail: which argument, which bound, which state.
+    pub message: Option<String>,
+    /// Backend result (e.g. `VkResult` as i32) when relevant.
+    pub backend_code: i32,
+}
+
+impl FluxDiagnostic {
+    /// Build a diagnostic from a raw result, for tests and for any binding that
+    /// needs to render a failure it captured itself.
+    ///
+    /// Public because the *contract* — losing the detail is a silent regression —
+    /// can only be pinned by a test, and a test has no access to the private
+    /// `Error` constructors.
+    #[doc(hidden)]
+    pub fn for_test(rc: sys::flux_result) -> Self {
+        Self::read(rc)
+    }
+
+    fn read(rc: sys::flux_result) -> Self {
+        /* Read the thread-local slot *here*, at the failure site: flux overwrites
+         * it on the next failing call, so a later read would describe a different
+         * error — or none. `last()` returns `None` when the slot is empty or
+         * holds an unrelated code, which is the "no detail recorded" case. */
+        match flux::ErrorInfo::last() {
+            Some(info) => FluxDiagnostic {
+                code: rc as i32,
+                code_name: format!("{rc:?}"),
+                function: info.function,
+                file: info.file,
+                line: info.line,
+                message: info.message,
+                backend_code: info.backend_code,
+            },
+            None => FluxDiagnostic {
+                code: rc as i32,
+                code_name: format!("{rc:?}"),
+                function: None,
+                file: None,
+                line: 0,
+                message: None,
+                backend_code: 0,
+            },
+        }
+    }
+}
+
+impl std::fmt::Display for FluxDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.code_name)?;
+        if let Some(function) = &self.function {
+            write!(f, " at {function}")?;
+            if let Some(file) = &self.file {
+                write!(f, " ({file}:{})", self.line)?;
+            }
+        }
+        if let Some(message) = &self.message {
+            write!(f, ": {message}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Error {
+    /// Build from a flux result, reading the thread-local diagnostic while it
+    /// still describes *this* call.
+    ///
+    /// `flux::ErrorInfo::last_if` declines a stale diagnostic whose code belongs
+    /// to a different call, so a missing detail means "flux did not record one
+    /// for this code" rather than "the detail was lost on the way here".
+    pub(crate) fn from_result(ctor: fn(FluxDiagnostic) -> Self, rc: sys::flux_result) -> Self {
+        ctor(FluxDiagnostic::read(rc))
+    }
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Create(rc) => write!(f, "lens_create failed (flux_result = {rc:?})"),
-            Error::Render(rc) => write!(f, "snapshot operation failed (flux_result = {rc:?})"),
+            Error::Create(info) => write!(f, "lens_create failed: {info}"),
+            Error::Render(info) => write!(f, "snapshot operation failed: {info}"),
         }
     }
 }

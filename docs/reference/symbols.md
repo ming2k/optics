@@ -18,6 +18,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_version_number` |  |
 | `flux_version_check` |  |
 | `flux_get_last_error` | Copies the most recent thread-local diagnostic into *out. |
+| `flux_set_diagnostic` | Record a diagnostic for a failure a *consumer library* detected. |
 | `flux_console_logger` |  |
 | `flux_icc_profile_create` | Parses and validates an ICC v2/v4 display/scanner-class RGB profile. |
 | `flux_icc_profile_release` |  |
@@ -519,7 +520,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_overflowed` | True if the per-frame arena overflowed during the frame just built. |
 | `lens_has_duplicate_ids` | True if the same widget id was linked more than once under one parent in the frame just built. |
 | `lens_anim_pending` | True if an eased value (hover/active fade, …) was still in transit during the frame just built. |
-| `lens_frame_needs_repaint` | True if the frame just built would paint anything different from what is already on screen: base-tree or placed-subtree damage (geometry, draw lists, lifecycle), an appearing/disappearing transient node or tooltip, an eased value still in transit, or a focused text caret that needs its blink clock. |
+| `lens_frame_needs_repaint` | True if the frame just built would paint anything different from what is already on screen: base-tree or placed-subtree damage (geometry, draw lists, lifecycle), an appearing/disappearing transient node or tooltip, an eased value still in transit, or the caret's blink phase *flipping* against the phase that is actually presented. |
 | `lens_damage_rects` | Returns the number of rectangles written. |
 | `lens_set_reduced_motion` | Accessibility reduced-motion switch. |
 | `lens_reduced_motion` |  |
@@ -581,6 +582,10 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `lens_set_focus` |  |
 | `lens_active` |  |
 | `lens_caret_rect` | Caret rect of the focused text widget in UI-space, zero when none. |
+| `lens_caret_visible` | Current caret blink phase: true while the caret is in its visible half of the blink cycle (ADR-0151). |
+| `lens_set_caret_blink` | Override the caret blink period in seconds. |
+| `lens_caret_flip_pending` | True when the caret's blink phase differs from the phase the last activated snapshot put on screen (ADR-0151). |
+| `lens_caret_clock_live` | True when a caret blink clock is running: a text widget holds focus and the blink is enabled (ADR-0151). |
 | `lens_text_context_get` |  |
 | `lens_copy` | Place text on the system clipboard (calls the host lens_clipboard.set_text if any). |
 | `lens_request_paste` | Ask the host for clipboard text (calls lens_clipboard.request_text). |
@@ -799,5 +804,26 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `transit_hysteresis_step` | Advance the latch. |
 | `transit_smoother_init` |  |
 | `transit_smoother_step` | Advance toward `target`. |
+
+## svg — vector-document compiler
+
+### `svg/svg.h`
+
+| Symbol | Description |
+|--------|-------------|
+| `svg_version` |  |
+| `svg_version_number` |  |
+| `svg_version_check` |  |
+| `svg_parse` | Parse `opts->text` into a document. |
+| `svg_release` |  |
+| `svg_live_documents` | Live document count for the whole process. |
+| `svg_viewport` | The document's intrinsic size in user units: the `viewBox` extent when present, else the `width`/`height` attributes, else the geometric bounds of the shapes. |
+| `svg_shape_count` |  |
+| `svg_shape_at` | Fill `out` with shape `index`. |
+| `svg_gradient_at` | Resolve gradient `index` (a `svg_paint::gradient` value). |
+| `svg_path_emit` | Append a shape's geometry to `path`, in document user space. |
+| `svg_draw` | Paint `opts->document` into `opts->canvas` or `opts->encoder`. |
+| `svg_rasterize` | Rasterize a document with the headless software canvas. |
+| `svg_pixmap_deinit` | Release `pixmap->pixels` and zero the struct. |
 
 Every fallible function returns `flux_result`-style codes; see [API Reference](api.md#error-model). Functions returning `void` either cannot fail or report through the library's error channel as noted.

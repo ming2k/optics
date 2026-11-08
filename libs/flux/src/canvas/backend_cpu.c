@@ -750,10 +750,14 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
     uint32_t width = host ? host->width : root->width;
     uint32_t height = host ? host->height : root->height;
     flux_recti area;
-    if (!canvas_pass_render_area(config, width, height, &area)) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "Canvas render area is invalid or out of bounds");
+    if (!canvas_pass_render_bounds(config, width, height, &area)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "Canvas damage scope names no pixel of the target");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
+    /* ADR-0149: mirror the GPU path's per-draw scissor so the two backends
+     * produce the same pixels for the same descriptor. Kept on the canvas, not
+     * on this stack frame, because submit runs later. */
+    c->pass_damage = *config;
 
     if (host) {
         uint32_t ss = config->antialias == FLUX_CANVAS_ANTIALIAS_NONE ? 1u : root->ss;
@@ -791,17 +795,26 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
     }
     if (config->clear_color) {
         vec4f cc = unpack_premul(*config->clear_color);
-        uint32_t x0 = (uint32_t)area.x * v->ss;
-        uint32_t y0 = (uint32_t)area.y * v->ss;
-        uint32_t x1 = ((uint32_t)area.x + area.w) * v->ss;
-        uint32_t y1 = ((uint32_t)area.y + area.h) * v->ss;
-        for (uint32_t y = y0; y < y1; ++y) {
-            for (uint32_t x = x0; x < x1; ++x) {
-                size_t i = (size_t)y * v->sw + x;
-                v->fb[i * 4 + 0] = cc.r;
-                v->fb[i * 4 + 1] = cc.g;
-                v->fb[i * 4 + 2] = cc.b;
-                v->fb[i * 4 + 3] = cc.a;
+        /* ADR-0149: clear only the damage rectangles, exactly as the Vulkan
+         * path restricts its clear. Pixels between two damage bands belong to
+         * other widgets and must survive this pass. */
+        flux_recti clears[FLUX_DAMAGE_CAPACITY];
+        const uint32_t clear_count =
+            canvas_pass_areas(config, width, height, clears, FLUX_DAMAGE_CAPACITY);
+        const uint32_t area_ss = v->ss;
+        for (uint32_t a = 0; a < clear_count; a++) {
+            const uint32_t x0 = (uint32_t)clears[a].x * area_ss;
+            const uint32_t y0 = (uint32_t)clears[a].y * area_ss;
+            const uint32_t x1 = ((uint32_t)clears[a].x + clears[a].w) * area_ss;
+            const uint32_t y1 = ((uint32_t)clears[a].y + clears[a].h) * area_ss;
+            for (uint32_t y = y0; y < y1; ++y) {
+                for (uint32_t x = x0; x < x1; ++x) {
+                    size_t i = (size_t)y * v->sw + x;
+                    v->fb[i * 4 + 0] = cc.r;
+                    v->fb[i * 4 + 1] = cc.g;
+                    v->fb[i * 4 + 2] = cc.b;
+                    v->fb[i * 4 + 3] = cc.a;
+                }
             }
         }
     }
@@ -830,9 +843,21 @@ static void cpu_end_pass(const flux_canvas_backend *self, flux_canvas *c) {
     if (c->bound_cpu_target) {
         const uint8_t *pixels = cpu_read_pixels(self, c, nullptr, nullptr, nullptr);
         flux_target *target = c->bound_cpu_target;
-        for (uint32_t y = 0; y < v->height; ++y)
-            memcpy(target->cpu_buffer + y * target->cpu_stride, pixels + (size_t)y * v->width * 4,
-                   (size_t)v->width * 4);
+        /* ADR-0149: write back only the damage rectangles. The scratch buffer
+         * holds the target's whole contents (loaded by cpu_load_target), so a
+         * full copy-back would still be correct — but copying only the damaged
+         * region is what proves the pass honoured its scope, and it keeps a
+         * regional update cheap on a host target as well. */
+        flux_recti written[FLUX_DAMAGE_CAPACITY];
+        const uint32_t written_count =
+            canvas_pass_areas(&c->pass_damage, v->width, v->height, written, FLUX_DAMAGE_CAPACITY);
+        for (uint32_t a = 0; a < written_count; a++) {
+            const uint32_t row_bytes = written[a].w * 4u;
+            for (uint32_t y = written[a].y; y < written[a].y + written[a].h; ++y) {
+                memcpy(target->cpu_buffer + y * target->cpu_stride + (size_t)written[a].x * 4u,
+                       pixels + (size_t)y * v->width * 4 + (size_t)written[a].x * 4u, row_bytes);
+            }
+        }
         c->backend_data = v->owner;
     }
     c->pass_active = false;
@@ -859,7 +884,14 @@ static void cpu_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_p
         return;
 
     flux_cpu_canvas *v = cpu(c);
-    flux_recti clip = c->states[c->state_top].scissor;
+    flux_recti clip;
+    /* ADR-0149: intersect the draw's logical clip with the pass's damage scope,
+     * exactly as the Vulkan backend does. A draw that touches no damage is
+     * dropped rather than rasterised. */
+    if (!canvas_damage_select(&c->pass_damage, c->states[c->state_top].scissor, &clip)) {
+        c->dropped_draws++;
+        return;
+    }
 
     /* Stencil-only pass: accumulate winding / parity into the sample-rate
      * buffer; no colour is written (the GPU masks colour off for these

@@ -13,12 +13,43 @@
 /* ---- caret rect (set by the focused text widget; read by the host) ---- */
 
 void lensi_set_caret_rect(lens *ui, flux_rect r) {
-    if (ui)
-        ui->caret_rect = r;
+    if (!ui)
+        return;
+    ui->caret_rect = r;
+    /* A text widget owns its caret, so lens owns the blink (ADR-0151). */
+    ui->caret_lens_owned = r.w > 0.0f && r.h > 0.0f;
 }
 
 flux_rect lens_caret_rect(const lens *ui) {
     return ui ? ui->caret_rect : (flux_rect){0, 0, 0, 0};
+}
+
+bool lens_caret_visible(const lens *ui) {
+    if (!ui)
+        return false;
+    /* A blink would freeze mid-composition: frames are event-driven during
+     * IME preedit, and a caret that vanished between them reads as a lost
+     * insertion point. */
+    if (ui->input.preedit_utf8[0] != '\0')
+        return true;
+    if (!ui->caret_blink_enabled)
+        return true;
+    return ui->caret_visible;
+}
+
+void lens_set_caret_blink(lens *ui, float period_seconds) {
+    if (!ui)
+        return;
+    if (!(period_seconds > 0.0f) || !isfinite(period_seconds)) {
+        ui->caret_blink_enabled = false;
+        ui->caret_visible = true;
+        return;
+    }
+    ui->caret_blink_enabled = true;
+    ui->caret_blink_period_s = period_seconds;
+    /* Keep the phase inside the new period so a mid-cycle period change
+     * cannot park the clock past the end and stall the blink. */
+    ui->caret_phase_s = fmodf(ui->caret_phase_s, period_seconds);
 }
 
 void lensi_set_text_context(lens *ui, const char *utf8, uint32_t len, uint32_t cursor,
@@ -108,5 +139,12 @@ uint32_t lens_take_paste(lens *ui, char *dst, uint32_t cap) {
 }
 
 void lens_set_caret_rect(lens *ui, flux_rect r) {
-    lensi_set_caret_rect(ui, r);
+    if (!ui)
+        return;
+    /* Host-owned caret: the app paints it and owns its clock. Lens records the
+     * geometry only, because the platform layer still needs it for the IME
+     * candidate window — and explicitly does *not* claim ownership, so this
+     * caret contributes no damage and no clock (ADR-0151). */
+    ui->caret_rect = r;
+    ui->caret_lens_owned = false;
 }

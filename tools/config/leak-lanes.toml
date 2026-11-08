@@ -186,6 +186,18 @@ lifetime = "context"
 lane     = "tests/lens/test_store.c"
 
 # ---------------------------------------------------------------------------
+# svg — process scope
+# ---------------------------------------------------------------------------
+# A parsed document is device-less by design (ADR-0136): it outlives every flux
+# device and is released only by svg_release, so no device ledger can own it.
+# svg_live_documents is the drain counter, and the lane asserts exact deltas.
+
+[kind.svg]
+scope    = "process"
+lifetime = "process"
+lane     = "tests/svg/test_svg_leak.c"
+
+# ---------------------------------------------------------------------------
 # vista — context scope
 # ---------------------------------------------------------------------------
 

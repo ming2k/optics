@@ -130,6 +130,34 @@ typedef struct flux_error_info {
  * follow the lifetime rules documented on flux_error_info above. */
 FLUX_API void flux_get_last_error(flux_error_info *out);
 
+/* Record a diagnostic for a failure a *consumer library* detected.
+ *
+ * Flux owns the thread-local slot, but validation does not stop at flux's
+ * boundary: lens rejects a snapshot activation for a stale generation, a
+ * mismatched owner, an in-progress build — failures flux never sees, with the
+ * same result codes. Without this, a binding reading the slot after such a
+ * failure gets whatever the *previous* flux call left there: a diagnostic for a
+ * different function, or none at all.
+ *
+ * Call it immediately before returning the non-OK code, so the slot describes
+ * this failure at the moment the caller can still read it. `function` and
+ * `message` must outlive the slot's contents (a literal, or `flux_error_format`
+ * for composed text); file/line point at the rejecting site.
+ *
+ * `function` is the *entry point the caller invoked*, not this helper — e.g.
+ * "lens_snapshot_activate" — because that is what the caller's log needs to name.
+ * The slot is thread-local, matching flux's own failures: one thread's
+ * diagnostic never affects another's. */
+FLUX_API void flux_set_diagnostic(flux_result code, const char *function, const char *file,
+                                  int line, const char *message);
+
+/* Compose a message into the thread-local formatting arena and return it, for
+ * passing to `flux_set_diagnostic` when the text needs values spliced in. The
+ * returned pointer is valid until the next `flux_set_diagnostic` on this thread.
+ * Truncates rather than failing: a diagnostic must never be the reason a call
+ * fails differently. */
+[[nodiscard]] FLUX_API const char *flux_diagnostic_format(const char *fmt, ...);
+
 /* ================================================================== */
 /*  Format                                                            */
 /* ================================================================== */

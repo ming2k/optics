@@ -3279,6 +3279,17 @@ static void wp_destroy_vk_surface(const flux_device *device, VkSurfaceKHR vk_sur
         vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, NULL);
 }
 
+static void wp_update_opaque_region(wp_platform *pl) {
+    if (!pl || !pl->compositor || !pl->surface || pl->width <= 0 || pl->height <= 0)
+        return;
+    struct wl_region *region = wl_compositor_create_region(pl->compositor);
+    if (!region)
+        return;
+    wl_region_add(region, 0, 0, pl->width, pl->height);
+    wl_surface_set_opaque_region(pl->surface, region);
+    wl_region_destroy(region);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Per-frame IM evaluation (text-input-v3)                              */
 /* ------------------------------------------------------------------ */
@@ -3409,30 +3420,22 @@ static void *wp_presenter_thread_main(void *arg) {
                 flux_color theme_clear = pkt->clear_color;
                 flux_color *pass_clear = pkt->has_clear ? &theme_clear : nullptr;
 
-                /* This backend's pass takes one render area, so the packet's
-                 * damage set is collapsed here — the last possible moment, after
-                 * every consumer that could take the set has had its chance. */
-                flux_rect packet_damage = {0, 0, 0, 0};
-                bool partial =
-                    !pkt->force_paint && iris_frame_packet_damage_rect(pkt, pkt->scale, pkt->width,
-                                                                       pkt->height, &packet_damage);
-                int32_t dmg_x = 0, dmg_y = 0;
-                uint32_t dmg_w = 0, dmg_h = 0;
-                if (partial) {
-                    dmg_x = (int32_t)packet_damage.x;
-                    dmg_y = (int32_t)packet_damage.y;
-                    dmg_w = (uint32_t)packet_damage.w;
-                    dmg_h = (uint32_t)packet_damage.h;
-                }
+                /* The packet's damage set travels to the pass unchanged
+                 * (ADR-0149): the canvas scissors each rectangle, so collapsing
+                 * it to a box here — the shape this call site used to have —
+                 * would repaint every widget between two distant bands. */
+                iris_frame_damage dmg = iris_frame_packet_damage(pkt);
 
                 flux_canvas_pass_desc pass_desc = {
                     .type = FLUX_TYPE_CANVAS_PASS_DESC,
                     .frame = frame,
                     .clear_color = pass_clear,
-                    .render_offset_x = partial ? dmg_x : 0,
-                    .render_offset_y = partial ? dmg_y : 0,
-                    .render_width = partial ? dmg_w : 0,
-                    .render_height = partial ? dmg_h : 0,
+                    .damage =
+                        {
+                            .rects = dmg.full ? nullptr : dmg.rects,
+                            .count = dmg.full ? 0 : dmg.count,
+                        },
+                    .clear_extent = dmg.full,
                 };
 
                 bool drew = false;
@@ -3450,18 +3453,20 @@ static void *wp_presenter_thread_main(void *arg) {
 
                 if (drew && flux_frame_submit(frame) == FLUX_OK) {
                     struct wl_surface *target_wl = pl->surface;
-                    /* Always the full surface: flux paints a swapchain image at
-                     * full extent (ADR-0144), so a narrower damage region here
-                     * would leave the pixels it just repainted outside the
-                     * region unrecomposited on screen. `partial` still tracks
-                     * whether lens could localize — it just cannot be expressed
-                     * to the compositor either. */
-                    (void)partial;
-                    (void)dmg_x;
-                    (void)dmg_y;
-                    (void)dmg_w;
-                    (void)dmg_h;
-                    wl_surface_damage_buffer(target_wl, 0, 0, INT32_MAX, INT32_MAX);
+                    /* Damage the compositor must re-read. A full-extent frame
+                     * damages the whole buffer; a scoped one damages exactly the
+                     * regions the frame wrote — the same set the canvas used, so
+                     * the compositor never re-reads a band the frame left alone,
+                     * and never misses one it touched. */
+                    if (dmg.full) {
+                        wl_surface_damage_buffer(target_wl, 0, 0, INT32_MAX, INT32_MAX);
+                    } else {
+                        for (uint32_t di = 0; di < dmg.count; di++) {
+                            wl_surface_damage_buffer(
+                                target_wl, (int32_t)dmg.rects[di].x, (int32_t)dmg.rects[di].y,
+                                (int32_t)ceilf(dmg.rects[di].w), (int32_t)ceilf(dmg.rects[di].h));
+                        }
+                    }
                     flux_result pr = flux_frame_present(frame);
                     if (pr == FLUX_ERROR_SURFACE_LOST && target_w > 0 && target_h > 0) {
                         (void)flux_surface_resize(target_surface, target_w, target_h);
@@ -3662,6 +3667,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     /* Swapchain is sized in *device* pixels — logical × buffer_scale —
      * while layout and lens_input stay in logical units. */
     wl_surface_set_buffer_scale(pl.surface, pl.buffer_scale);
+    wp_update_opaque_region(&pl);
     wl_surface_commit(pl.surface);
 
     flux_surface_desc sdesc = {
@@ -3824,7 +3830,27 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * here from render timestamps, and never 0 while a frame is pending.
          * The cap keeps the sd-bus fd's poll mask fresh while we wait on a
          * pulse that arrives on the display fd anyway. */
+        /* Absolute ceilings, not a budget to spend.
+         *
+         * Two different reasons to bound a poll, and conflating them cost the
+         * client its idle quiet:
+         *
+         *   - **Quiesced**: no frame is pending at all, so block until real
+         *     input. The cap exists only so the sd-bus fd's mask stays fresh.
+         *   - **Pulse-subscribed**: a frame *is* pending and the compositor's
+         *     `wl_surface.frame` will wake us. The cap bounds how long we are
+         *     willing to wait before re-checking that the subscription is still
+         *     live.
+         *
+         * A timer-driven tick is neither. Nothing is going to wake us early, so
+         * clamping its deadline to the pulse cap did not add resilience, it just
+         * split the deadline: a pacer asking for 250 ms slept 200, then ~50,
+         * then ~1, waking three times to reach one tick. That is where the
+         * measured ~24 wakeups/second came from on a window with zero pending
+         * work. `POLL_CAP_MS` therefore applies only when a pulse is actually
+         * outstanding. */
         const int POLL_CAP_MS = 200;
+        const bool pulse_outstanding = pl.frame_cb_pending;
         int timeout_ms;
         if (quiesced)
             timeout_ms = POLL_CAP_MS;
@@ -3837,12 +3863,11 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             long long ms = wait_ns / 1000000LL;
             if (ms < 1)
                 ms = 1; /* hard floor: poll(0) here is the spin we removed */
-            if (ms > POLL_CAP_MS)
+            if (pulse_outstanding && ms > POLL_CAP_MS)
                 ms = POLL_CAP_MS;
             timeout_ms = (int)ms;
         }
         bool woke_on_event = pump_events(&pl, timeout_ms);
-
         /* --- 2. Classify what woke us ---------------------------------- */
         bool pulse_fired = pl.frame_cb_fired;
         long long pulse_time = pl.frame_cb_time_ns;
@@ -3885,11 +3910,13 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             pl.buffer_scale = pl.pending_scale;
             wp_emit_scale((float)pl.buffer_scale);
             wl_surface_set_buffer_scale(pl.surface, pl.buffer_scale);
+            wp_update_opaque_region(&pl);
             wl_surface_commit(pl.surface);
             lens_set_scale(ui, (float)pl.buffer_scale);
             pl.resized = true;
         }
         if (pl.resized) {
+            wp_update_opaque_region(&pl);
             /* In decoupled presenter mode (ADR-0124), swapchain recreation belongs
              * strictly to the presentation worker thread (INV-THREAD-03). In single-thread
              * fallback, resize synchronously on the main thread. */
@@ -3964,6 +3991,11 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * force a real paint because they change what is on screen. */
         bool chrome_damaged = lens_frame_needs_repaint(ui);
         bool surface_forced = resized_this_frame || surface_needs_paint;
+        /* A caret asks for a frame only when its phase flipped, and lens is
+         * the single authority for that comparison (ADR-0151): it is the only
+         * component that knows which phase reached the display. The host
+         * never models a blink. */
+        const bool caret_ticking = lens_caret_clock_live(ui);
 
         iris_pace_inputs pace_in = {
             .now_ns = now,
@@ -3978,7 +4010,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             .host_static = pl.paint_static,
             .has_custom_paint = has_custom_paint,
             .chrome_damaged = chrome_damaged,
-            .caret_visible = lens_caret_rect(ui).w > 0.0f,
+            .caret_ticking = caret_ticking,
             .surface_needs_paint = surface_forced,
             .lens_animating = lens_anim_pending(ui),
         };
@@ -4096,34 +4128,30 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             bool drew = false;
             lens_scene_snapshot *snapshot = nullptr;
 
-            /* Partial damage calculation (ADR-0123): for hosts without opaque
-             * canvas content, constrain the renderArea and clear to the dirty
-             * bounding box rather than clearing and drawing the entire window. */
-            flux_rect dmg = {0, 0, 0, 0};
-            bool partial_paint = false;
-            int32_t dmg_x = 0, dmg_y = 0;
-            uint32_t dmg_w = 0, dmg_h = 0;
-
-            if (!surface_forced && !has_custom_paint) {
-                /* One scissor for this surface: collapse the damage set here. */
-                if (iris_frame_lens_damage_rect(ui, (float)pl.buffer_scale, (int32_t)info.width,
-                                                (int32_t)info.height, &dmg)) {
-                    dmg_x = (int32_t)dmg.x;
-                    dmg_y = (int32_t)dmg.y;
-                    dmg_w = (uint32_t)dmg.w;
-                    dmg_h = (uint32_t)dmg.h;
-                    partial_paint = true;
-                }
+            /* Damage scope for this surface (ADR-0149). The set travels intact to
+             * the pass and to the compositor: the canvas scissors each rectangle
+             * and the commit damages exactly those rectangles. A host with opaque
+             * canvas content (or a forced repaint) asks for the full extent
+             * instead, because its own content is not something lens can localise. */
+            iris_frame_damage dmg = {0};
+            const bool localize = !surface_forced && !has_custom_paint;
+            if (localize) {
+                dmg = iris_frame_lens_damage(ui, (float)pl.buffer_scale, (int32_t)info.width,
+                                             (int32_t)info.height, /*force_full=*/false);
+            } else {
+                dmg.full = true;
             }
 
             flux_canvas_pass_desc pass_desc = {
                 .type = FLUX_TYPE_CANVAS_PASS_DESC,
                 .frame = frame,
                 .clear_color = pass_clear,
-                .render_offset_x = partial_paint ? dmg_x : 0,
-                .render_offset_y = partial_paint ? dmg_y : 0,
-                .render_width = partial_paint ? dmg_w : 0,
-                .render_height = partial_paint ? dmg_h : 0,
+                .damage =
+                    {
+                        .rects = dmg.full ? nullptr : dmg.rects,
+                        .count = dmg.full ? 0 : dmg.count,
+                    },
+                .clear_extent = dmg.full,
             };
 
             if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {
@@ -4153,16 +4181,17 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
              * subscription can never be stranded without its commit. */
             if (d.request_pulse)
                 wp_request_pulse(&pl);
-            /* Attach damage to the upcoming commit. Always the full surface:
-             * a surface pass is painted at full extent (ADR-0144), so a
-             * narrower region would leave the pixels repainted outside it
-             * unrecomposited. */
-            (void)partial_paint;
-            (void)dmg_x;
-            (void)dmg_y;
-            (void)dmg_w;
-            (void)dmg_h;
-            wl_surface_damage_buffer(pl.surface, 0, 0, INT32_MAX, INT32_MAX);
+            /* Attach damage to the upcoming commit: exactly the regions the pass
+             * wrote, or the whole buffer when the frame was full-extent. */
+            if (dmg.full) {
+                wl_surface_damage_buffer(pl.surface, 0, 0, INT32_MAX, INT32_MAX);
+            } else {
+                for (uint32_t di = 0; di < dmg.count; di++) {
+                    wl_surface_damage_buffer(
+                        pl.surface, (int32_t)dmg.rects[di].x, (int32_t)dmg.rects[di].y,
+                        (int32_t)ceilf(dmg.rects[di].w), (int32_t)ceilf(dmg.rects[di].h));
+                }
+            }
             r = flux_frame_present(frame);
             if (r == FLUX_ERROR_SURFACE_LOST) {
                 /* No commit reached the compositor, so the grant armed above

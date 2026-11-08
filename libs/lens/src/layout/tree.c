@@ -347,6 +347,33 @@ lens_box lensi_merge_box(lens_box base, lens_box override) {
     return base;
 }
 
+/* Arm the frame's tooltip and measure the box it will paint.
+ *
+ * Both parts matter. `active` is what replay keys on, and `painted` is what
+ * damage reports — the painted box sits *below* the anchor with `2*pad` padding,
+ * so the anchor is neither a subset of it nor a superset. Measuring here is
+ * forced: the damage walk is a `const lens *` pass and must not re-shape text,
+ * because shaping mutates glyph-cache state the next submit depends on.
+ *
+ * `painted` deliberately survives the `active = false` reset at `lens_begin`, so a
+ * dismissed tooltip still knows which band it vacated. */
+static void lensi_tooltip_arm(lens *ui, const char *text, flux_rect anchor) {
+    const float pad = 4.0f;
+    ui->tooltip.active = true;
+    ui->tooltip.anchor = anchor;
+    ui->tooltip.opacity = ui->opacity;
+    size_t len = strlen(text);
+    if (len >= sizeof ui->tooltip.text)
+        len = sizeof ui->tooltip.text - 1;
+    memcpy(ui->tooltip.text, text, len);
+    ui->tooltip.text[len] = '\0';
+
+    const float size = lensi_font_px(ui, ui->theme.font_size * 0.85f);
+    const lens_text_metrics tm = lensi_text_measure_label(ui, ui->tooltip.text, size, 0.0f);
+    ui->tooltip.painted = (flux_rect){anchor.x, anchor.y + anchor.h + pad, tm.width + 2.0f * pad,
+                                      tm.height + 2.0f * pad};
+}
+
 void lensi_node_box(lens *ui, lens_node *n, const lens_box *box) {
     n->min_w = box->min_width;
     n->max_w = box->max_width;
@@ -373,14 +400,7 @@ void lensi_node_box(lens *ui, lens_node *n, const lens_box *box) {
         n->fixed_h = box->height;
     if (box->tooltip && n->has_prev && lensi_point_in(ui->input.cursor, n->prev_rect) &&
         !lensi_point_clipped_by_scroll(n, ui->input.cursor) && !lensi_widget_occluded(ui, n)) {
-        ui->tooltip.active = true;
-        ui->tooltip.anchor = n->prev_rect;
-        ui->tooltip.opacity = ui->opacity;
-        size_t len = strlen(box->tooltip);
-        if (len >= sizeof ui->tooltip.text)
-            len = sizeof ui->tooltip.text - 1;
-        memcpy(ui->tooltip.text, box->tooltip, len);
-        ui->tooltip.text[len] = '\0';
+        lensi_tooltip_arm(ui, box->tooltip, n->prev_rect);
     }
 }
 
@@ -431,14 +451,18 @@ void lens_grid_at(lens *ui, int32_t col, int32_t row) {
 }
 
 void lensi_apply_box(lens *ui, lens_box box) {
-    if (box.flex != 0) {
-        ui->next_flex = box.flex;
-        ui->have_next_flex = true;
+    if (box.flex != 0.0f) {
+        if (isfinite(box.flex) && box.flex > 0.0f) {
+            ui->next_flex = box.flex;
+            ui->have_next_flex = true;
+        }
     }
-    if (box.width != 0 || box.height != 0) {
-        ui->next_w = box.width;
-        ui->next_h = box.height;
-        ui->have_next_size = true;
+    if (box.width != 0.0f || box.height != 0.0f) {
+        float w = isfinite(box.width) && box.width > 0.0f ? box.width : 0.0f;
+        float h = isfinite(box.height) && box.height > 0.0f ? box.height : 0.0f;
+        ui->next_w = w;
+        ui->next_h = h;
+        ui->have_next_size = (w > 0.0f || h > 0.0f);
     }
     if (box.col_span > 0) {
         ui->next_col_span = (uint32_t)box.col_span;
@@ -482,14 +506,7 @@ void lensi_tooltip(lens *ui, const char *text) {
     lens_response r = lens_get_response(ui);
     if (!r.hovered)
         return;
-    ui->tooltip.active = true;
-    ui->tooltip.anchor = r.rect;
-    ui->tooltip.opacity = ui->opacity;
-    size_t len = strlen(text);
-    if (len >= sizeof ui->tooltip.text)
-        len = sizeof ui->tooltip.text - 1;
-    memcpy(ui->tooltip.text, text, len);
-    ui->tooltip.text[len] = '\0';
+    lensi_tooltip_arm(ui, text, r.rect);
 }
 
 void lens_spacer(lens *ui, float size) {

@@ -10,12 +10,26 @@ negative_knowledge: true
 
 # ADR-0144: Never partial-paint a swapchain
 
-- Status: Accepted
+- Status: Accepted. **Decision 1 is superseded by [ADR-0149](0149-damage-scoped-windowed-frames.md)**;
+  decisions 2–4 remain in force.
 - Date: 2026-11-04
 - Deciders: Optics Architecture Working Group
 - Consulted: `libs/flux` (canvas pass envelope, surface, Vulkan backend), `libs/lens` (repaint query, store), `libs/iris` (all three hosts)
 - Informed: Core Engineering
 - Amends: [ADR-0143](0143-regional-damage-rect-lists-and-paint-bounds-localization.md), [ADR-0123](0123-layered-compositing-subsurfaces-and-damage-tracking.md), [ADR-0069](0069-color-management.md)
+
+> **Superseded in part by [ADR-0149](0149-damage-scoped-windowed-frames.md).**
+> Decision 1 below — "flux never partial-paints a swapchain image" — is retired.
+> A damage-scoped pass on a surface is honoured again, because the divergence
+> this ADR could not repair (a rotation of images accumulating different patches)
+> is now repaired at every acquisition from a persistent content image plus a
+> write-epoch history. The *reasoning* in this document is not retired and should
+> be read as the constraint ADR-0149 had to satisfy: Defect 2 and the rejected
+> per-image flag are why the repair is a steady-state mechanism rather than a
+> flag, and the negative-knowledge entries about pre-filled test destinations and
+> initialisation flags still bind. Decisions 2–4 (partial passes on caller-owned
+> targets, the store sweep for departed subtrees, persisted paint geometry) are
+> unchanged.
 
 ---
 

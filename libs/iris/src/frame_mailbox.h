@@ -41,21 +41,41 @@ typedef struct iris_frame_packet {
     int32_t height;
 } iris_frame_packet;
 
-/* The single rectangle a backend accepts, as the union of the packet's damage
- * set, already scaled to device pixels. `out` receives `{0,0,0,0}` when the
- * packet carries no damage and `false`; callers then paint the full surface.
+/* Device-pixel damage scope for one frame, ready to hand to
+ * `flux_canvas_pass_desc.damage` (ADR-0149).
  *
- * This is the one sanctioned place where a set is collapsed, and it exists
- * because Win32 and some Vulkan paths take one `renderArea`. Collapsing earlier
- * would destroy the localization for every backend that can consume the set. */
-[[nodiscard]] bool iris_frame_packet_damage_rect(const iris_frame_packet *pkt, float scale,
-                                                 int32_t width, int32_t height, flux_rect *out);
+ * The conversion from UI-logical to device pixels happens here, once, because
+ * it is the boundary at which the producer's units stop mattering: a backend that
+ * scissors each rectangle independently, one that hands the set to a per-plane
+ * damage hint, and one whose API takes a single rectangle all start from the same
+ * array. Collapsing to one rectangle before this point destroys the localisation
+ * irrecoverably (ADR-0143), so no helper here does it.
+ *
+ * `force` means "the whole frame is new" (a resize, a scale change, the very
+ * first frame): the resulting scope is empty *and* flagged, which the canvas
+ * reads as the full destination. An empty scope with `force` false would be
+ * indistinguishable from "nothing changed", which is why the flag travels
+ * separately rather than being encoded as a zero rectangle. */
+typedef struct iris_frame_damage {
+    flux_rect rects[LENS_DAMAGE_RECTS_CAPACITY];
+    uint32_t count;
+    bool full; /* every pixel may have changed */
+} iris_frame_damage;
 
-/* The same collapse for a host that presents lens directly, without the mailbox
- * (the single-threaded path). Queries the frame's damage set and reduces it; use
- * this only at the API boundary that accepts one rectangle. */
-[[nodiscard]] bool iris_frame_lens_damage_rect(const lens *ui, float scale, int32_t width,
-                                               int32_t height, flux_rect *out);
+/* Resolve the packet's damage set into device pixels. A packet whose
+ * `force_paint` is set, whose set is empty, or whose regions all fall outside the
+ * surface, yields `full = true` — never "nothing". The device extent is derived
+ * from the packet's logical size and scale, so the caller never has to know which
+ * unit the clip uses. */
+[[nodiscard]] iris_frame_damage iris_frame_packet_damage(const iris_frame_packet *pkt);
+
+/* The same resolution for a host that presents lens directly, without the
+ * mailbox (the single-threaded path). `width`/`height` are the surface's *device*
+ * pixel extent (as reported by `flux_surface_get_info`), because this path has no
+ * packet to derive them from. `force_full` is the host's own "everything
+ * changed" signal. */
+[[nodiscard]] iris_frame_damage iris_frame_lens_damage(const lens *ui, float scale, int32_t width,
+                                                       int32_t height, bool force_full);
 
 typedef struct iris_frame_mailbox {
     _Atomic(iris_frame_packet *) ready;   /* published by UI, claimed by compositor */

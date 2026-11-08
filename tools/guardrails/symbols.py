@@ -90,6 +90,11 @@ LIBRARIES = [
         ["libs/transit/include/transit/transit.h"],
         r"TRANSIT_API",
     ),
+    (
+        "svg — vector-document compiler",
+        ["libs/svg/include/svg/svg.h"],
+        r"SVG_API",
+    ),
 ]
 
 DECL = re.compile(

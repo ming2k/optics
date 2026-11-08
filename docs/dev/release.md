@@ -1,8 +1,10 @@
 # Release
 
-Optics currently uses a manual source-release process. There is no root
-changelog or repository release workflow, so release notes and publication
-remain explicit maintainer steps.
+Optics uses a manual source-release process. There is no automated repository
+release workflow, so cutting release notes and publishing remain explicit
+maintainer steps. User-visible changes are recorded by hand in the root
+[`CHANGELOG.md`](../../CHANGELOG.md) under `## [Unreleased]`; promoting that
+section to a version heading is part of the release commit.
 
 ## Version Domains
 
@@ -43,8 +45,8 @@ meson compile -C build-release-asan
 meson test -C build-release-asan --no-suite bench
 ```
 
-Point the binding build scripts at `build-release` and run all three Cargo
-workspaces as described in [Testing](testing.md#rust-workspaces). Follow the
+Point the binding build scripts at `build-release` and run every Cargo
+workspace under `bindings/` as described in [Testing](testing.md#rust-workspaces). Follow the
 [Pre-release smoke verification checklist](manual-testing.md#7-pre-release-smoke-verification-checklist)
 to manually verify interactive `flux`, `prism`, and `iris` applications.
 

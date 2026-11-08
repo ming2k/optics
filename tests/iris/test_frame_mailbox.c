@@ -32,6 +32,8 @@ static void test_sequential_handshake(void) {
     p1->damage[1] = (flux_rect){300, 400, 50, 60};
     p1->damage_count = 2;
     p1->scale = 2.0f;
+    p1->width = 500;
+    p1->height = 500;
     p1->force_paint = true;
     iris_mailbox_publish(&mb, p1);
 
@@ -47,18 +49,35 @@ static void test_sequential_handshake(void) {
     CHECK(c1->damage[0].x == 10 && c1->damage[0].y == 20);
     CHECK(c1->damage[1].x == 300 && c1->damage[1].y == 400);
 
-    /* A single-rect backend collapses the set at its own boundary, in device
-     * pixels, covering both disjoint regions. */
-    flux_rect collapsed = {0, 0, 0, 0};
-    CHECK(iris_frame_packet_damage_rect(c1, c1->scale, 1000, 1000, &collapsed));
-    CHECK(collapsed.x == 20.0f && collapsed.y == 40.0f);
-    CHECK(collapsed.x + collapsed.w == 700.0f);
-    CHECK(collapsed.y + collapsed.h == 920.0f);
+    /* The damage set survives conversion as a set: two disjoint regions stay two
+     * regions, scaled to device pixels and clipped to the surface. This is the
+     * property ADR-0143 exists to protect — a collapse here would merge a HUD
+     * chip and a dock spring into one near-full-output box. */
+    iris_frame_damage set = iris_frame_packet_damage(c1);
+    /* p1->force_paint is set, so this packet asks for everything. */
+    CHECK(set.full);
+    CHECK(set.count == 0);
+
+    /* Without the force flag the two rectangles survive individually. The packet
+     * declares 500x500 logical at scale 2, so the device extent is 1000x1000 and
+     * both rects fit unclipped. */
+    c1->force_paint = false;
+    set = iris_frame_packet_damage(c1);
+    CHECK(!set.full);
+    CHECK(set.count == 2);
+    CHECK(set.rects[0].x == 20.0f && set.rects[0].y == 40.0f);
+    CHECK(set.rects[0].w == 200.0f && set.rects[0].h == 400.0f);
+    CHECK(set.rects[1].x == 600.0f && set.rects[1].y == 800.0f);
+    CHECK(set.rects[1].w == 100.0f && set.rects[1].h == 120.0f);
+    /* The union of the two would be (20,40)-(700,920); the set is strictly
+     * smaller than its own bounding box, which is the whole point. */
+    CHECK(set.rects[0].x + set.rects[0].w < set.rects[1].x);
 
     /* No damage means "paint everything", never "nothing changed". */
-    flux_rect none = {0, 0, 0, 0};
     c1->damage_count = 0;
-    CHECK(!iris_frame_packet_damage_rect(c1, c1->scale, 1000, 1000, &none));
+    set = iris_frame_packet_damage(c1);
+    CHECK(set.full);
+    CHECK(set.count == 0);
 
     /* Second claim before next publish must return NULL */
     CHECK(iris_mailbox_claim(&mb) == nullptr);

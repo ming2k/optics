@@ -139,6 +139,12 @@ typedef struct flux_vk_canvas {
     flux_output_push out_decode;
     flux_recti out_area;
     uint32_t active_slot;
+    /* The active pass's damage scope, copied from the config (ADR-0149). The
+     * rect array is borrowed from the caller's descriptor. `out_area` remains
+     * the bounding box because the output transform's viewport/scissor is a
+     * single rect; per-rect fidelity is applied by the scissor selector and by
+     * the per-rect encode loop below. */
+    canvas_pass_config active_config;
 } flux_vk_canvas;
 
 static inline flux_vk_canvas *vkc(flux_canvas *c) {
@@ -656,10 +662,14 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     uint32_t w = target ? target->width : info.width;
     uint32_t h = target ? target->height : info.height;
     flux_recti area;
-    if (!canvas_pass_render_area(config, w, h, &area)) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "Canvas render area is invalid or out of bounds");
+    if (!canvas_pass_render_bounds(config, w, h, &area)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "Canvas damage scope names no pixel of the target");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
+    /* Keep the config for end_pass (per-rect encode) and for submit (per-draw
+     * scissor). The rect array is borrowed from the caller's descriptor, which
+     * must outlive the pass by contract. */
+    v->active_config = *config;
     v->color_format =
         target ? flux_format_to_vk(target->format) : flux_surface_vk_format(c->surface);
     if (v->color_format == VK_FORMAT_UNDEFINED)
@@ -771,7 +781,13 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
     linear->layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     /* LOAD passes: seed the intermediate with the destination's current
-     * pixels, decoded into the working space (ADR-0069). */
+     * pixels, decoded into the working space (ADR-0069).
+     *
+     * ADR-0149: a damage-scoped pass seeds only the damage rectangles rather
+     * than the whole bounding box. The pixels between them belong to other
+     * widgets and are preserved by the encode step below — seeding them here
+     * would cost a full-extent read for every regional update, and copying them
+     * back would overwrite whatever else changed in the destination since. */
     if (!config->clear_color) {
         uint32_t src = FLUX_BINDLESS_INVALID;
         if (target) {
@@ -781,18 +797,25 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
                 src = target->bindless;
         } else {
             flux_surface *s = c->surface;
-            VkImage img = s->images[s->current_image];
+            VkImage img = flux_surface_render_image(s);
+            VkImageLayout *layout = flux_surface_render_layout_slot(s);
             color_barrier2(cmd, img, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
-                           s->image_layouts[s->current_image],
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-            s->image_layouts[s->current_image] = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            src = s->image_bindless[s->current_image];
+                           *layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            *layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            src = flux_surface_render_bindless(s);
         }
         if (src != FLUX_BINDLESS_INVALID) {
             v->out_decode.image_handle = src;
-            record_output_blit(c, linear->view, FLUX_CANVAS_LINEAR_FORMAT, area, &v->out_decode);
+            /* Seed exactly the damage rectangles (ADR-0149). An empty set means
+             * the whole extent, which is the single-rect case. */
+            flux_recti seed_areas[FLUX_DAMAGE_CAPACITY];
+            const uint32_t seed_count =
+                canvas_pass_areas(config, w, h, seed_areas, FLUX_DAMAGE_CAPACITY);
+            for (uint32_t i = 0; i < seed_count; i++)
+                record_output_blit(c, linear->view, FLUX_CANVAS_LINEAR_FORMAT, seed_areas[i],
+                                   &v->out_decode);
             /* The seed's attachment writes must be visible to the main
              * pass's load-op read of the same image. */
             color_barrier2(
@@ -804,12 +827,14 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
         }
         if (!target) {
             flux_surface *s = c->surface;
+            VkImage img = flux_surface_render_image(s);
+            VkImageLayout *layout = flux_surface_render_layout_slot(s);
             color_barrier2(
-                cmd, s->images[s->current_image], VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                VK_ACCESS_2_SHADER_READ_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                cmd, img, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                 VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-            s->image_layouts[s->current_image] = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            *layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
     }
 
@@ -897,6 +922,8 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
         .color_attachment_count = 1,
         .color_attachments = &att,
         .stencil = has_stencil ? &stencil_att : nullptr,
+        /* The bounding box of the damage scope. The renderArea bounds the
+         * load/store; the per-draw scissor narrows what is actually written. */
         .width = area.w,
         .height = area.h,
         .render_offset_x = area.x,
@@ -925,6 +952,11 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
                      .height = (float)h,
                      .minDepth = 0.0f,
                      .maxDepth = 1.0f};
+    /* ADR-0149: the initial scissor is the damage set's bounding box, not one
+     * rect. Every draw then narrows it through `canvas_damage_select` at submit
+     * time, so a draw that touches only one damage rect keeps that rect's exact
+     * scissor while a draw that spans two unions them. The state stack stores
+     * logical clip rects, so this value is only the pass's opening state. */
     VkRect2D sc = {.offset = {area.x, area.y}, .extent = {area.w, area.h}};
     c->states[0].scissor = area;
 
@@ -992,11 +1024,31 @@ static void vk_end_pass(const flux_canvas_backend *self, flux_canvas *c) {
         t->current_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
 
-    /* Output transform into the destination (NULL view = swapchain image,
-     * filled by flux_frame_begin_pass). LOAD preserves pixels outside the
-     * pass area; the swapchain's final PRESENT transition is frame.c's. */
-    record_output_blit(c, t ? t->view : VK_NULL_HANDLE, v->color_format, v->out_area,
-                       &v->out_encode);
+    /* Output transform into the destination (NULL view = the frame's render
+     * image, filled by flux_frame_begin_pass).
+     *
+     * ADR-0149: encode each damage rectangle, not their bounding box. Writing
+     * the box would copy the intermediate's between-band pixels — which were
+     * never seeded with this destination's contents — over whatever the other
+     * widgets had put there, which is precisely the corruption a naive
+     * "one scissor for the union" scheme produces. A pass that covers its whole
+     * destination has exactly one area, so this is one blit as before. */
+    {
+        flux_recti areas[FLUX_DAMAGE_CAPACITY];
+        const uint32_t n = canvas_pass_areas(&v->active_config, c->fb_width, c->fb_height, areas,
+                                             FLUX_DAMAGE_CAPACITY);
+        for (uint32_t i = 0; i < n; i++) {
+            record_output_blit(c, t ? t->view : VK_NULL_HANDLE, v->color_format, areas[i],
+                               &v->out_encode);
+            /* Record the write area for the surface's epoch history: this is the
+             * only place a windowed frame's pixels reach their destination, so it
+             * is the only place that knows what the frame actually wrote. */
+            if (!t && c->frame)
+                flux_frame_record_written(c->frame,
+                                          (flux_rect){(float)areas[i].x, (float)areas[i].y,
+                                                      (float)areas[i].w, (float)areas[i].h});
+        }
+    }
 
     if (!t)
         return;
@@ -1104,6 +1156,18 @@ static bool push_params_equal(const flux_canvas_push *a, const flux_canvas_push 
                   sizeof(flux_canvas_push) - offsetof(flux_canvas_push, inv_window_size)) == 0;
 }
 
+/* The scissor one draw must use: its logical clip narrowed to the pass's damage
+ * scope. Returns false when the draw touches no damage and must be dropped.
+ *
+ * Doing this per draw (rather than relying on the pass's bounding-box scissor)
+ * is what makes a regional update actually regional: within one pass the
+ * bounding box of a top band and a bottom dock spans nearly the whole output,
+ * and a scissor of that box would write the widgets in between. */
+static bool vk_draw_scissor(flux_canvas *c, flux_recti clip, flux_recti *out) {
+    flux_vk_canvas *v = vkc(c);
+    return canvas_damage_select(&v->active_config, clip, out);
+}
+
 static void vk_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_pipe_id id,
                       const flux_canvas_push *push, const flux_canvas_vertex *verts,
                       uint32_t vertex_count) {
@@ -1113,6 +1177,15 @@ static void vk_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_pi
         return;
     c->submit_calls++;
     flux_vk_canvas *v = vkc(c);
+
+    /* Cull before touching the transient ring: a draw whose entire extent lies
+     * outside the pass's damage scope writes pixels nobody will read, and the
+     * destination already holds a complete frame there by contract. */
+    flux_recti clip;
+    if (!vk_draw_scissor(c, c->states[c->state_top].scissor, &clip)) {
+        c->dropped_draws++;
+        return;
+    }
 
     /* Vertices travel through the frame's transient ring; the shader reads
      * them by buffer-reference address (push.verts_address). */
@@ -1127,7 +1200,6 @@ static void vk_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_pi
 
     flux_canvas_push pc = *push;
     pc.verts_address = slice.gpu_address;
-    flux_recti clip = c->states[c->state_top].scissor;
 
     /* Append to the open batch when all draw-visible state matches and
      * the new slice continues the batch's ring run. The ring is a bump
@@ -1166,7 +1238,18 @@ static flux_result vk_save_layer(const flux_canvas_backend *self, flux_canvas *c
     batch_flush(c);
     flux_frame_end_pass(c->frame);
 
-    flux_recti area = c->states[c->state_top].scissor;
+    /* ADR-0149: a layer inside a damage-scoped pass owns only the damaged part
+     * of its clip. The layer's own pass clears to transparent, so a wider area
+     * would still be correct — but it would allocate and clear pixels the
+     * composite then throws away. Narrowing here keeps a regional update
+     * regional all the way through the layer stack. */
+    flux_recti area;
+    if (!vk_draw_scissor(c, c->states[c->state_top].scissor, &area)) {
+        /* The layer's whole extent is undamaged. Its content is still recorded
+         * and its composite is still scoped, so give it a degenerate area: every
+         * draw inside it will be culled, and the composite produces nothing. */
+        area = (flux_recti){0, 0, 0, 0};
+    }
     uint32_t w = c->fb_width;
     uint32_t h = c->fb_height;
     if (area.x < 0) {

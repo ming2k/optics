@@ -177,8 +177,13 @@ silent fallback. Its primitives have landed.
 | 0141 | [Material compute pipeline pre-warming, cold-start hitch elimination, and headless performance governance](0141-material-compute-pipeline-prewarming-and-headless-performance-governance.md) | Accepted |
 | 0142 | [Prism-rs safe descriptor modernization, material warmup options, and caller-declared revision caching](0142-prism-rs-descriptor-modernization-warmup-revision.md) | Accepted |
 | 0143 | [Regional frame damage as a rect list, and paint-bounds localization](0143-regional-damage-rect-lists-and-paint-bounds-localization.md) | Accepted |
-| 0144 | [Never partial-paint a swapchain — damage-rect passes and departed subtrees](0144-partial-paint-requires-complete-image.md) | Accepted |
+| 0144 | [Never partial-paint a swapchain — damage-rect passes and departed subtrees](0144-partial-paint-requires-complete-image.md) | Accepted (swapchain clause superseded by [0149](0149-damage-scoped-windowed-frames.md)) |
 | 0145 | [Wayland listener slots are a pinned, mechanically verified contract](0145-wayland-listener-slot-contract.md) | Accepted |
 | 0146 | [Composed layers advance in lockstep — synchronized subsurfaces, single present point](0146-composed-layers-advance-in-lockstep.md) | Accepted |
 | 0147 | [Deferred effect passes — register, require, flush, prune](0147-deferred-effect-passes.md) | Accepted |
 | 0148 | [A distance field owns its derivative — analytic normals, pow-free fields, one evaluation](0148-sdf-derivative-co-location-analytic-normals.md) | Accepted |
+| 0149 | [Damage-scoped frames on a windowed surface — content image and write-epoch history](0149-damage-scoped-windowed-frames.md) | Accepted |
+| 0150 | [SVG is a document compiler, not a rendering feature — one library owns the format, every consumer links it](0150-svg-vector-document-compiler.md) | Accepted |
+| 0151 | [A caret blink is a phase, not a level — lens owns the clock, the host forwards the edge](0151-caret-blink-is-a-phase-not-a-level.md) | Accepted |
+| 0152 | [An ease must terminate — settled values snap, and a poll cap bounds only what can wake it](0152-an-ease-must-terminate.md) | Accepted |
+| 0153 | [A binding must carry the library's diagnostic, not just its result code](0153-a-binding-carries-the-library-diagnostic.md) | Accepted |

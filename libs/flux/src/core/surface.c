@@ -35,6 +35,8 @@ typedef struct flux_surface_image_storage {
     VkImageView *views;
     VkImageLayout *layouts;
     bool *foreign_owned;
+    /* Content epoch each presented image is synchronised with (ADR-0149). */
+    uint64_t *epochs;
     bool *sync_exported;
     VkSemaphore *render_finished;
     flux_vk_alloc *allocs;
@@ -51,6 +53,10 @@ struct flux_readback {
     flux_readback_region region;
 };
 
+/* ADR-0149 content image: created/destroyed with each swapchain generation. */
+static void content_image_destroy(flux_surface *s);
+static flux_result content_image_create(flux_surface *s, uint32_t w, uint32_t h, VkFormat format);
+
 static void image_storage_free(flux_device *d, flux_surface_image_storage *storage) {
     if (!storage)
         return;
@@ -58,6 +64,7 @@ static void image_storage_free(flux_device *d, flux_surface_image_storage *stora
     flux_internal_free(d, storage->views);
     flux_internal_free(d, storage->layouts);
     flux_internal_free(d, storage->foreign_owned);
+    flux_internal_free(d, storage->epochs);
     flux_internal_free(d, storage->sync_exported);
     flux_internal_free(d, storage->render_finished);
     flux_internal_free(d, storage->allocs);
@@ -82,19 +89,22 @@ static bool image_storage_alloc(flux_device *d, uint32_t count,
     storage->views = image_storage_alloc_array(d, count, sizeof(*storage->views));
     storage->layouts = image_storage_alloc_array(d, count, sizeof(*storage->layouts));
     storage->foreign_owned = image_storage_alloc_array(d, count, sizeof(*storage->foreign_owned));
+    storage->epochs = image_storage_alloc_array(d, count, sizeof(*storage->epochs));
     storage->sync_exported = image_storage_alloc_array(d, count, sizeof(*storage->sync_exported));
     storage->render_finished =
         image_storage_alloc_array(d, count, sizeof(*storage->render_finished));
     storage->allocs = image_storage_alloc_array(d, count, sizeof(*storage->allocs));
     storage->bindless = image_storage_alloc_array(d, count, sizeof(*storage->bindless));
     if (!storage->images || !storage->views || !storage->layouts || !storage->foreign_owned ||
-        !storage->sync_exported || !storage->render_finished || !storage->allocs ||
-        !storage->bindless) {
+        !storage->epochs || !storage->sync_exported || !storage->render_finished ||
+        !storage->allocs || !storage->bindless) {
         image_storage_free(d, storage);
         return false;
     }
-    for (uint32_t i = 0; i < count; ++i)
+    for (uint32_t i = 0; i < count; ++i) {
         storage->bindless[i] = FLUX_BINDLESS_INVALID;
+        storage->epochs[i] = FLUX_CONTENT_EPOCH_NONE;
+    }
     storage->capacity = count;
     return true;
 }
@@ -107,6 +117,7 @@ static void surface_take_image_storage(flux_surface *s, flux_surface_image_stora
     s->image_views = storage->views;
     s->image_layouts = storage->layouts;
     s->image_foreign_owned = storage->foreign_owned;
+    s->image_epoch = storage->epochs;
     s->image_sync_exported = storage->sync_exported;
     s->render_finished = storage->render_finished;
     s->image_allocs = storage->allocs;
@@ -121,6 +132,7 @@ static void surface_free_image_storage(flux_surface *s) {
         .views = s->image_views,
         .layouts = s->image_layouts,
         .foreign_owned = s->image_foreign_owned,
+        .epochs = s->image_epoch,
         .sync_exported = s->image_sync_exported,
         .render_finished = s->render_finished,
         .allocs = s->image_allocs,
@@ -133,6 +145,7 @@ static void surface_free_image_storage(flux_surface *s) {
     s->image_views = nullptr;
     s->image_layouts = nullptr;
     s->image_foreign_owned = nullptr;
+    s->image_epoch = nullptr;
     s->image_sync_exported = nullptr;
     s->render_finished = nullptr;
     s->image_allocs = nullptr;
@@ -548,6 +561,26 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
     for (uint32_t i = 0; i < new_count; ++i) {
         s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
         s->image_foreign_owned[i] = false;
+        /* A recreated swapchain hands back images the presentation engine may
+         * have recycled with arbitrary contents, so no image is synchronised
+         * with the content image (ADR-0149). The content image itself survives
+         * the swapchain: a resize changes the extent, which recreates it below,
+         * but a format-only change would not. */
+        s->image_epoch[i] = FLUX_CONTENT_EPOCH_NONE;
+    }
+
+    /* ADR-0149: (re)create the content image at the new extent. Its previous
+     * contents are not preserved across a resize — the extent changed, so every
+     * pixel moved — which is why the epoch history is reset with it. */
+    {
+        flux_result cr = content_image_create(s, extent.width, extent.height, fmt.format);
+        if (cr != FLUX_OK) {
+            /* Non-fatal: the surface renders full-extent into the acquired
+             * image instead (see flux_surface_render_image). */
+            s->content = (typeof(s->content)){.bindless = FLUX_BINDLESS_INVALID};
+            s->content.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        }
+        flux_damage_history_reset(&s->damage_history);
     }
 
     /* HDR10 static metadata rides the swapchain; reapply on every
@@ -569,6 +602,122 @@ new_swapchain_fail:
     image_storage_free(s->device, &storage);
     vkDestroySwapchainKHR(s->device->device, new_swapchain, nullptr);
     return FLUX_ERROR_BACKEND_FAILURE;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Persistent content image (ADR-0149)                               */
+/* ------------------------------------------------------------------ */
+
+static void content_image_destroy(flux_surface *s) {
+    flux_device *d = s->device;
+    if (s->content.bindless != FLUX_BINDLESS_INVALID)
+        flux_bindless_release(d, s->content.bindless);
+    if (s->content.view)
+        vkDestroyImageView(d->device, s->content.view, nullptr);
+    if (s->content.image)
+        vkDestroyImage(d->device, s->content.image, nullptr);
+    if (s->content.alloc.memory)
+        flux_vk_deallocate(d, &s->content.alloc);
+    s->content = (typeof(s->content)){.bindless = FLUX_BINDLESS_INVALID};
+    s->content.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
+/* Create the authoritative frame buffer a windowed surface renders into.
+ *
+ * Usage is exactly what the pipeline asks of it: written by the output
+ * transform (COLOR_ATTACHMENT), read by the LOAD seed (SAMPLED), and read by
+ * the present-time copy into a swapchain image (TRANSFER_SRC). No TRANSFER_DST:
+ * nothing else writes it.
+ *
+ * On failure the surface keeps working — `flux_surface_render_image` falls back
+ * to the per-slot image, which makes each frame a full-extent render. That is
+ * the pre-ADR-0149 behaviour, and it is correct, just not localised. */
+static flux_result content_image_create(flux_surface *s, uint32_t w, uint32_t h, VkFormat format) {
+    content_image_destroy(s);
+    if (s->offscreen || w == 0 || h == 0 || format == VK_FORMAT_UNDEFINED)
+        return FLUX_OK;
+
+    flux_device *d = s->device;
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = {w, h, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    if (flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &s->content.image,
+                            &s->content.alloc) != FLUX_OK) {
+        s->content.image = VK_NULL_HANDLE;
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    VkImageViewCreateInfo ivci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = s->content.image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = format,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    VkResult vr = vkCreateImageView(d->device, &ivci, nullptr, &s->content.view);
+    if (vr != VK_SUCCESS) {
+        FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "content vkCreateImageView failed", vr);
+        content_image_destroy(s);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+    if (flux_bindless_register_image(d, s->content.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     &s->content.bindless) != FLUX_OK) {
+        s->content.bindless = FLUX_BINDLESS_INVALID;
+        content_image_destroy(s);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+    s->content.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    s->content.width = w;
+    s->content.height = h;
+    return FLUX_OK;
+}
+
+/* Which buffer a windowed frame's default pass renders into. */
+VkImage flux_surface_render_image(const flux_surface *s) {
+    if (!s)
+        return VK_NULL_HANDLE;
+    if (!s->offscreen && s->content.image)
+        return s->content.image;
+    return s->images[s->current_image];
+}
+
+VkImageView flux_surface_render_view(const flux_surface *s) {
+    if (!s)
+        return VK_NULL_HANDLE;
+    if (!s->offscreen && s->content.view)
+        return s->content.view;
+    return s->image_views[s->current_image];
+}
+
+flux_bindless_handle flux_surface_render_bindless(const flux_surface *s) {
+    if (!s)
+        return FLUX_BINDLESS_INVALID;
+    if (!s->offscreen && s->content.image)
+        return s->content.bindless;
+    return s->image_bindless[s->current_image];
+}
+
+VkImageLayout *flux_surface_render_layout_slot(flux_surface *s) {
+    if (!s)
+        return nullptr;
+    if (!s->offscreen && s->content.image)
+        return &s->content.layout;
+    return &s->image_layouts[s->current_image];
 }
 
 /* ------------------------------------------------------------------ */
@@ -1107,6 +1256,11 @@ void flux_surface_destroy_swapchain(flux_surface *s) {
         s->image_bindless[i] = FLUX_BINDLESS_INVALID;
     }
     surface_free_image_storage(s);
+    /* ADR-0149: the content image is scoped to one swapchain generation. It is
+     * destroyed here — including from the create path's commit point — so a
+     * resize cannot leave a stale-extent authority behind. */
+    content_image_destroy(s);
+    flux_damage_history_reset(&s->damage_history);
     if (s->swapchain) {
         vkDestroySwapchainKHR(s->device->device, s->swapchain, nullptr);
         s->swapchain = VK_NULL_HANDLE;

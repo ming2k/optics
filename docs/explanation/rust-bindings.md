@@ -18,6 +18,7 @@ need a Rust toolchain.
 | `bindings/transit-rs/` | `transit-sys`, `transit` | Closed-form springs and motion vocabulary. |
 | `bindings/lens-rs/` | `lens-sys`, `lens` | Raw FFI and safe UI wrapper. |
 | `bindings/iris-rs/` | `iris-sys`, `iris` | Raw FFI and safe application-host wrapper. |
+| `bindings/svg-rs/` | `svg-sys`, `svg` | Raw FFI and safe SVG document-compiler wrapper. |
 
 The `*-sys` crates own native linking and bindgen output. Safe crates expose
 RAII handles and Rust error types without duplicating the C implementation.
@@ -26,7 +27,7 @@ RAII handles and Rust error types without duplicating the C implementation.
 
 Rust bindings workspaces and their inter-crate internal dependencies share
 the monorepo's single version number (`meson.project_version()`).
-This lockstep discipline is machine-enforced by `tools/check-version-lockstep.sh`,
+This lockstep discipline is machine-enforced by `./tools/optics check lockstep`,
 which parses both the C header version macros and the Cargo manifests to ensure
 zero version drift between native binaries and language bindings.
 

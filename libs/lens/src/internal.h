@@ -30,6 +30,10 @@
 #define LENSI_TRANSIENT_MAX 8u          /* max simultaneously-open transients (ADR-0060) */
 #define LENSI_STYLE_STACK_MAX 16u       /* style scope stack depth (ADR-0061) */
 #define LENSI_MODAL_STACK_MAX 4u        /* nested modal focus traps (ADR-0039) */
+/* Caret blink period: one full on/off cycle, so a 530 ms half-cycle — the
+ * cadence X11 blink, Win32, AppKit and GTK converged on (ADR-0151). A host
+ * may override it per context with `lens_set_caret_blink`. */
+#define LENSI_CARET_BLINK_PERIOD_S 1.06f
 
 /* Node placement (ADR-0060): FLOW participates in its parent's flexbox;
  * ABS escapes the flow and the ancestor clips and is emitted in its z
@@ -222,6 +226,20 @@ struct lens_node {
      * `self_changed` over FLOW interior nodes, so a single edited cell reports
      * its own cell instead of the enclosing container's full-display rect. */
     bool self_changed;
+    /* The two deltas that are NOT the node's own paint, tracked separately so the
+     * damage walk can report the region each one affects instead of the node's box
+     * (ADR-0149):
+     *
+     *   - `clip_changed` — the clip this node imposes on its children narrowed,
+     *     widened or moved. The affected pixels belong to descendants, so they are
+     *     reported from the clip's *previous* extent.
+     *   - `restacked` — a placed node changed band or position within its band, so
+     *     which pixels it occludes changed without its own paint changing.
+     *
+     * Both contribute to `self_changed`; they exist so the walk does not have to
+     * re-derive which of several causes applied. */
+    bool clip_changed;
+    bool restacked;
     /* Last successfully compiled geometry for visual cache invalidation.
      * prev_rect belongs exclusively to the activated interaction snapshot. */
     bool has_render_rect;
@@ -230,6 +248,23 @@ struct lens_node {
      * snapshot (ADR-0144). Survives the arena, so a LEAVING node's vacated
      * region is still known after its command list has been recycled. */
     flux_rect render_paint_rect;
+    /* The clip this node imposed on its children last frame, and the band it was
+     * composited into (ADR-0149). Both change what descendants look like without
+     * any descendant's own state changing:
+     *
+     *   - a scrolling container's viewport shrinks when a scrollbar appears, or a
+     *     `place_bounds` clamp moves, and the pixels that newly fall outside must
+     *     be erased — but the container's *own* box, opacity and command list are
+     *     untouched;
+     *   - moving a placed node between bands, or reordering it within one,
+     *     changes which pixels it occludes.
+     *
+     * Neither is visible to the geometry/hash comparison, so they are compared
+     * explicitly. `has_prev_clip` distinguishes "never built" from "clips nothing". */
+    bool has_prev_clip;
+    flux_rect prev_clip;
+    lens_band prev_band;
+    uint32_t prev_band_order;
 
     /* Cached DisplayList for static subtrees (ADR-0094) */
     flux_display_list *cached_dl;
@@ -463,6 +498,32 @@ struct lens {
     flux_rect caret_rect;           /* set by the focused text widget */
     lens_text_context text_context; /* set alongside caret_rect (surrounding
                                      * text + content hints for the host IME) */
+
+    /* Caret blink clock (ADR-0151). The blink is a *phase* of the caret,
+     * advanced by the frame delta, not a property of "a caret exists".
+     * `caret_visible` is the current phase; `caret_presented_visible` is the
+     * phase the last *activated* snapshot put on screen, so the change test
+     * compares against pixels the user saw rather than against a frame that
+     * may have been skipped.
+     *
+     * `caret_lens_owned` distinguishes the two kinds of caret this context
+     * holds, and only one of them is lens's to blink:
+     *
+     *   - **widget-owned** (`lensi_set_caret_rect`, from a text widget): lens
+     *     paints this caret in the skin, so lens owns its clock and reports
+     *     its flips as damage.
+     *   - **host-owned** (`lens_set_caret_rect`, the public API an app uses for
+     *     its own editor surface): the app paints the caret with its own clock.
+     *     Lens holds the rect only to answer `lens_caret_rect` for the IME
+     *     platform layer, and must report *no* damage and *no* clock for it —
+     *     otherwise two independent clocks would drive one caret, and lens
+     *     would manufacture flips the app's painter never made. */
+    bool caret_visible;
+    bool caret_blink_enabled;
+    bool caret_lens_owned;
+    float caret_blink_period_s;
+    float caret_phase_s;
+    bool caret_presented_visible;
     char paste_buf[LENSI_PASTE_MAX];
     uint32_t paste_len;   /* 0 = nothing pending */
     lens_id paste_target; /* focused widget at lens_request_paste time;
@@ -520,6 +581,15 @@ struct lens {
     struct {
         bool active;
         flux_rect anchor;
+        /* The box the tooltip actually paints, measured once at
+         * `lensi_tooltip` time (ADR-0149). Replay paints it below the anchor with
+         * `2*pad` padding, so the anchor is not its damage — and the damage walk
+         * is a `const lens *` pass that must not re-shape text (shaping mutates
+         * the glyph cache the next submit depends on), so the measurement has to
+         * happen here, while the context is mutable and the frame is building.
+         * Survives the `active = false` reset so a disappearing tooltip still
+         * knows which pixels it vacated. */
+        flux_rect painted;
         char text[128];
         float opacity; /* context opacity at lensi_tooltip time; the tooltip
                         * paints outside the draw list, so replay applies it */
@@ -866,7 +936,7 @@ void lensi_mark_dirty(lens *ui);
                                           * contains flow children only, so a placed subtree's
                                           * damage must not invalidate it — the repaint query
                                           * consults the band buckets directly (context.c). */
-bool lensi_mark_subtree_changed(lens_node *n);
+bool lensi_mark_subtree_changed(lens *ui, lens_node *n);
 /* Release the immutable child-list cache owned by this node. */
 void lensi_node_release_cache(lens *ui, lens_node *n);
 
@@ -959,18 +1029,112 @@ static inline flux_rect lensi_text_bounds(flux_rect rel_rect, float advance, boo
     return (flux_rect){x, rel_rect.y, w, rel_rect.h};
 }
 
-/* The pixels one node's OWN paint covered, resolved against its box exactly as
- * replay rasterises them (ADR-0143, ADR-0144).
+/* The clip a node imposes on its own children, resolved from layout state alone.
  *
- * Deliberately not `final_rect`: a label in a stretch column is laid out across
- * the column's full width while its glyphs occupy a few dozen pixels.
- * CLIP_PUSH/CLIP_POP paint nothing themselves and would re-widen every clipped
- * subtree, so they are skipped. A node with no commands has no own paint.
+ * Shared by replay (which installs it) and change detection (which compares it),
+ * so the two cannot disagree about where a scrolling viewport ends. A node that
+ * scrolls narrows to its padded viewport minus the scrollbar gutter; everything
+ * else clips nothing of its own and reports its box, which is the "no narrower
+ * clip" answer in a form that can be compared between frames. */
+static inline flux_rect lensi_node_child_clip(const lens_node *n) {
+    if (!n)
+        return (flux_rect){0, 0, 0, 0};
+    if (!n->is_scroll || !n->first_child)
+        return n->final_rect;
+    float viewport_w = n->final_rect.w - 2.0f * n->pad - n->scroll_gutter;
+    if (viewport_w < 0.0f)
+        viewport_w = 0.0f;
+    return (flux_rect){n->final_rect.x + n->pad, n->final_rect.y + n->pad, viewport_w,
+                       n->final_rect.h - 2.0f * n->pad};
+}
+
+/* The pixels ONE command paints, in absolute coordinates, resolved against the
+ * node box it was emitted in.
  *
- * Shared by the snapshot capture (which stores the result so it outlives the
- * per-frame arena) and the live damage walk, so the two cannot disagree.
- * Requires `n->cmds` to be alive: call only while the node's frame still owns
- * its arena. */
+ * This is the single definition of "where does this command paint", shared by
+ * replay (which rasterises it) and the damage walk (which must report exactly
+ * those pixels). The two cannot disagree about an edited label, an outlined
+ * image, or a tab that reaches outside its box — and they cannot drift apart when
+ * a new command kind is added, because replay's own `switch` and this function
+ * are checked against each other by `tests/lens/test_repaint.c`.
+ *
+ * Three kinds paint outside the `rel` rectangle and would leave stale pixels if
+ * damage reported `rel`:
+ *
+ *   - `LENS_DRAW_BORDER`      straddles the path by `width`, so half of it lies
+ *                             outside on every side.
+ *   - `LENS_DRAW_IMAGE`       draws an outline underlay expanded by
+ *                             `outline_width` on all four sides.
+ *   - `LENS_DRAW_ICON`        blits a baked coverage mask that carries a halo for
+ *                             the stroke and its AA fringe.
+ *   - `LENS_DRAW_CONNECTED_TAB` reaches `text_size` below the box and a shoulder
+ *                             outside each connected edge.
+ *   - `LENS_DRAW_TAB_INDICATOR` is re-anchored to the bottom of the box rather
+ *                             than painted at `rel`.
+ *
+ * Over-reporting is safe (a scissored repaint is idempotent); under-reporting
+ * freezes pixels, which is the failure this exists to prevent. So each expansion
+ * is derived from the same value replay uses and biased outward. */
+static inline flux_rect lensi_cmd_paint_extent(flux_rect box, const lens_draw_cmd *c) {
+    const flux_rect rel_rect = lensi_offset_rel(box, c->rel);
+    if (!c)
+        return rel_rect;
+    switch (c->kind) {
+    case LENS_DRAW_CLIP_PUSH:
+    case LENS_DRAW_CLIP_POP:
+        /* Paint nothing themselves; including them would re-widen every clipped
+         * subtree to its clip rectangle. */
+        return (flux_rect){0, 0, 0, 0};
+    case LENS_DRAW_TEXT:
+        /* Positioned from the advance its widget recorded, exactly as replay
+         * positions it. Neither consumer shapes here. */
+        return lensi_text_bounds(rel_rect, c->text_advance, c->rel.w < 0.0f, c->rel.h < 0.0f);
+    case LENS_DRAW_BORDER: {
+        if (!(c->width > 0.0f) || (c->color >> 24) == 0)
+            return (flux_rect){0, 0, 0, 0};
+        const float e = c->width * 0.5f;
+        return (flux_rect){rel_rect.x - e, rel_rect.y - e, rel_rect.w + 2.0f * e,
+                           rel_rect.h + 2.0f * e};
+    }
+    case LENS_DRAW_IMAGE: {
+        const float e = c->outline_width > 0.0f ? c->outline_width : 0.0f;
+        return (flux_rect){rel_rect.x - e, rel_rect.y - e, rel_rect.w + 2.0f * e,
+                           rel_rect.h + 2.0f * e};
+    }
+    case LENS_DRAW_ICON: {
+        /* replay blits the mask at `origin - halo` with extent `px + 2*halo`, where
+         * the halo covers half the stroke, the full outline twice over, and the AA
+         * fringe (render/icon_mask.c:306-317). Halos are computed in device pixels
+         * but scale 1:1 with logical units inside a node, so the same expression
+         * holds here. The +2 absorbs the fringe rounding. */
+        const float stroke = c->width > 0.0f ? c->width : 0.0f;
+        const float outline = c->outline_width > 0.0f ? c->outline_width : 0.0f;
+        const float e = stroke * 0.5f + outline * 2.0f + 2.0f;
+        return (flux_rect){rel_rect.x - e, rel_rect.y - e, rel_rect.w + 2.0f * e,
+                           rel_rect.h + 2.0f * e};
+    }
+    case LENS_DRAW_TAB_INDICATOR: {
+        /* Re-anchored to the bottom edge of the box (replay.c:201-203). */
+        const float thickness = c->width > 0.0f ? c->width : 3.0f;
+        return (flux_rect){rel_rect.x, box.y + box.h - thickness, rel_rect.w, thickness};
+    }
+    case LENS_DRAW_CONNECTED_TAB: {
+        /* Reaches `text_size` below the box, plus a shoulder outside each
+         * connected edge (replay.c:209-249). */
+        const float depth = c->text_size > 0.0f ? c->text_size : 0.0f;
+        const float shoulder = c->width > 0.0f ? c->width : 0.0f;
+        const bool left = (c->flags & LENSI_TAB_CONNECT_LEFT) != 0;
+        const bool right = (c->flags & LENSI_TAB_CONNECT_RIGHT) != 0;
+        const float x0 = rel_rect.x - (left ? shoulder : 0.0f);
+        const float x1 = rel_rect.x + rel_rect.w + (right ? shoulder : 0.0f);
+        return (flux_rect){x0, rel_rect.y, x1 - x0, rel_rect.h + depth};
+    }
+    case LENS_DRAW_RECT:
+    default:
+        return rel_rect;
+    }
+}
+
 static inline flux_rect lensi_node_paint_bounds(const lens_node *n) {
     if (!n || !n->cmds)
         return (flux_rect){0, 0, 0, 0};
@@ -979,11 +1143,7 @@ static inline flux_rect lensi_node_paint_bounds(const lens_node *n) {
         const lens_draw_cmd *c = &n->cmds[i];
         if (c->kind == LENS_DRAW_CLIP_PUSH || c->kind == LENS_DRAW_CLIP_POP)
             continue;
-        const flux_rect rel_rect = lensi_offset_rel(n->final_rect, c->rel);
-        const flux_rect paint =
-            c->kind == LENS_DRAW_TEXT
-                ? lensi_text_bounds(rel_rect, c->text_advance, c->rel.w < 0.0f, c->rel.h < 0.0f)
-                : rel_rect;
+        const flux_rect paint = lensi_cmd_paint_extent(n->final_rect, c);
         if (d.w <= 0.0f || d.h <= 0.0f) {
             d = paint;
         } else if (paint.w > 0.0f && paint.h > 0.0f) {
@@ -1001,14 +1161,41 @@ static inline flux_rect lensi_node_paint_bounds(const lens_node *n) {
  * marks the frame as animating (`ui->anim_pending`): an input-driven host can
  * then schedule the next frame and let the animation settle instead of
  * freezing mid-fade when input stops. `ui` may be NULL (e.g. tests). Under
- * reduced motion the value resolves to `target` immediately. */
+ * reduced motion the value resolves to `target` immediately.
+ *
+ * The value must be **terminal**: within one epsilon of the target it snaps
+ * there rather than continuing to approach. A pure exponential ease only
+ * arrives at infinity, and the last float ulps are indistinguishable from an
+ * animation to every consumer downstream —
+ *
+ *   * a node's change detection compares `hover_t` against `last_hover_t`, so
+ *     a value that still moves by 1e-7 marks the node changed, bumps its
+ *     visual revision, and emits damage on every frame, forever;
+ *   * `chrome_damaged` then keeps the pacer's active cadence alive;
+ *   * the backend therefore stays subscribed to the display pulse train and
+ *     commits a bufferless buffer at the panel rate for the rest of the
+ *     session, with no pixel ever different.
+ *
+ * Measured before this snap existed: a static window with the pointer
+ * untouched held the client at ~70 wakeups/second and the compositor's
+ * `Render/3D` near its animated baseline, because a hover fade that had
+ * visually finished never stopped "changing". Snapping within the same epsilon
+ * that already defines "arrived" makes a settled value exactly equal to its
+ * target, so the next frame's comparison finds no change and quiescence is
+ * reachable. */
 static inline float lensi_approach(lens *ui, float cur, float target, float dt, float rate) {
+    /* Arrived is arrived: the threshold is shared with the `anim_pending` test
+     * below so the two can never disagree about whether motion is over. */
+    const float LENSI_ARRIVE_EPS = 0.0015f;
     if (ui && ui->reduced_motion)
         return target;
     float k = dt * rate;
     float next = (k >= 1.0f) ? target : cur + (target - cur) * k;
-    if (ui && fabsf(next - target) > 0.0015f)
+    if (fabsf(next - target) <= LENSI_ARRIVE_EPS)
+        next = target;
+    if (ui && next != target) {
         ui->anim_pending = true;
+    }
     return next;
 }
 

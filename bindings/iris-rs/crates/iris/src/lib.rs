@@ -386,14 +386,7 @@ impl Application {
         S: FnMut(StartHost) -> bool,
         T: FnMut(StopHost),
     {
-        Self::run_impl(
-            config,
-            start,
-            stop,
-            build,
-            paint,
-            None::<fn(RecordHost)>,
-        )
+        Self::run_impl(config, start, stop, build, paint, None::<fn(RecordHost)>)
     }
 
     /// Run an application with a decoupled vector recording callback (ADR-0127).
@@ -1515,8 +1508,39 @@ pub mod dnd {
         pub const ASK: Self = Self(sys::iris_dnd_action::IRIS_DND_ACTION_ASK as u32);
     }
 
+    /// Why a drag session could not be started.
+    ///
+    /// `iris_dnd_start` collapses every failure to `-1`; the distinction that
+    /// matters to a caller is whether the platform can drag at all
+    /// ([`DndError::Unsupported`], the answer on a backend without a drag
+    /// implementation) or whether an otherwise capable backend refused this
+    /// particular session (no active window, a drag already in flight).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum DndError {
+        /// No drag-and-drop implementation on this platform or build.
+        Unsupported,
+        /// The platform implements drag-and-drop but refused this session.
+        Rejected,
+    }
+
+    impl std::fmt::Display for DndError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                DndError::Unsupported => {
+                    write!(f, "drag-and-drop is not supported on this platform")
+                }
+                DndError::Rejected => write!(f, "the platform refused to start the drag session"),
+            }
+        }
+    }
+
+    impl std::error::Error for DndError {}
+
     /// Start an outgoing drag session.
-    pub fn start_drag(text: &str, actions: DndAction) -> Result<(), ()> {
+    ///
+    /// The payload is copied by the backend before this returns, so `text` is
+    /// only borrowed for the duration of the call.
+    pub fn start_drag(text: &str, actions: DndAction) -> Result<(), DndError> {
         let src = sys::iris_dnd_source {
             actions: actions.0,
             mime_types: std::ptr::null(),
@@ -1526,7 +1550,13 @@ pub mod dnd {
             callbacks: unsafe { std::mem::zeroed() },
         };
         let rc = unsafe { sys::iris_dnd_start(&src) };
-        if rc == 0 { Ok(()) } else { Err(()) }
+        if rc == 0 {
+            Ok(())
+        } else if supports(Capability::DragSource) {
+            Err(DndError::Rejected)
+        } else {
+            Err(DndError::Unsupported)
+        }
     }
 
     /// Query whether a drag session is currently active.
