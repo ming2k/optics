@@ -13,6 +13,8 @@ either.
 
 ## [Unreleased]
 
+## [0.0.75] - 2026-11-08
+
 ### Added
 
 - **flux**: Damage-scoped frames reach the screen (ADR-0149). A windowed surface

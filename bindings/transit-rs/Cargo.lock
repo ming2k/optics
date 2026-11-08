@@ -216,14 +216,14 @@ dependencies = [
 
 [[package]]
 name = "transit"
-version = "0.0.74"
+version = "0.0.75"
 dependencies = [
  "transit-sys",
 ]
 
 [[package]]
 name = "transit-sys"
-version = "0.0.74"
+version = "0.0.75"
 dependencies = [
  "bindgen",
  "pkg-config",
