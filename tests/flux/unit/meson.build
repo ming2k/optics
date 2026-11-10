@@ -197,6 +197,7 @@ test_error_info = executable('test_error_info',
   'test_error_info.c',
   '../../../libs/flux/src/core/result.c',
   dependencies : [test_helpers_dep],
+  c_args : ['-DFLUX_STATIC=1'],
 )
 test('error_info', test_error_info, suite : 'unit')
 

@@ -83,7 +83,7 @@ jobs:
             libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
             libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
             libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
-            libsystemd-dev fonts-noto-cjk
+            libsystemd-dev fonts-noto-cjk libclang-rt-18-dev
 
       - name: Install Slang compiler
         run: |

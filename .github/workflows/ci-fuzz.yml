@@ -76,7 +76,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang lld ninja-build pkg-config \
+            build-essential clang lld ninja-build pkg-config libclang-rt-18-dev \
             libvulkan-dev libfreetype-dev
 
       - name: Install Slang compiler
