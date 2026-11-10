@@ -134,6 +134,8 @@ static_assert(sizeof((cp_accum *)0)->preedit == sizeof((lens_input *)0)->preedit
 
 @class IrisView;
 
+static int64_t cocoa_query_refresh_ns(NSWindow *window);
+
 /* One ObjC object owns all per-app state. Using an NSObject (not a C struct
  * of ObjC pointers) keeps every NS reference ARC-managed; the C POD fields
  * live in @public ivars so the code stays shaped like app_wayland.c. */
@@ -183,6 +185,22 @@ static_assert(sizeof((cp_accum *)0)->preedit == sizeof((lens_input *)0)->preedit
 @end
 
 @implementation IrisPlatform
+@end
+
+/* Declared before the context-free helpers and drag/clipboard callbacks
+ * that message the view; the implementation follows much later. */
+@interface IrisView : NSView <NSTextInputClient, NSDraggingDestination, NSDraggingSource> {
+  @public
+    /* Owned by iris_app_run_cocoa for the whole view lifetime; the view is
+     * torn down first, so a weak back-pointer is safe. */
+    __unsafe_unretained IrisPlatform *_platform;
+    NSString *_marked_text;         /* live IME composition, nil when none          */
+    NSRange _selected_in_marked;    /* caret/selection inside _marked_text     */
+    bool _ime_delivered_this_event; /* insertText/setMarkedText fired during
+                                     * the current keyDown: dispatch         */
+}
+- (instancetype)initWithFrame:(NSRect)frame platform:(IrisPlatform *)pl;
+- (void)irisUpdateMetalLayer;
 @end
 
 /* iris_set_cursor is a public, context-free API; it reaches the active
@@ -715,20 +733,6 @@ static int key_sentinel(unsigned short keyCode) {
 /* ------------------------------------------------------------------ */
 /*  View — input, IME (NSTextInputClient), CAMetalLayer backing         */
 /* ------------------------------------------------------------------ */
-
-@interface IrisView : NSView <NSTextInputClient, NSDraggingDestination, NSDraggingSource> {
-  @public
-    /* Owned by iris_app_run_cocoa for the whole view lifetime; the view is
-     * torn down first, so a weak back-pointer is safe. */
-    __unsafe_unretained IrisPlatform *_platform;
-    NSString *_marked_text;         /* live IME composition, nil when none          */
-    NSRange _selected_in_marked;    /* caret/selection inside _marked_text     */
-    bool _ime_delivered_this_event; /* insertText/setMarkedText fired during
-                                     * the current keyDown: dispatch         */
-}
-- (instancetype)initWithFrame:(NSRect)frame platform:(IrisPlatform *)pl;
-- (void)irisUpdateMetalLayer;
-@end
 
 @implementation IrisView
 
@@ -1323,7 +1327,7 @@ static void post_app_defined(NSInteger subtype) {
  * through a posted ApplicationDefined event handled at the top of the next
  * loop iteration, outside any lens_begin/end pair. */
 static void clip_request_text(void *user) {
-    IrisPlatform *pl = user;
+    IrisPlatform *pl = (__bridge IrisPlatform *)user;
     @autoreleasepool {
         NSString *s = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString];
         if (!s)
@@ -1475,7 +1479,7 @@ static void iris_cocoa_wakeup_kick(void *user) {
 /* Invoked on the iris main thread (KVO on NSApp.effectiveAppearance fires
  * on the main thread; theme_cocoa.m guarantees main-thread delivery). */
 static void on_color_scheme_changed(iris_color_scheme scheme, void *user) {
-    IrisPlatform *pl = user;
+    IrisPlatform *pl = (__bridge IrisPlatform *)user;
     if (!pl || !pl->ui)
         return;
     lens_theme th =
@@ -1488,7 +1492,7 @@ static void on_color_scheme_changed(iris_color_scheme scheme, void *user) {
  * notification (a11y_prefs_cocoa.m). Applies the OS accessibility
  * preferences to lens directly (lens is headless and cannot see them). */
 static void on_a11y_prefs(const iris_a11y_prefs *prefs, void *user) {
-    IrisPlatform *pl = user;
+    IrisPlatform *pl = (__bridge IrisPlatform *)user;
     if (!pl || !pl->ui)
         return;
     lens_set_reduced_motion(pl->ui, prefs->reduced_motion);
@@ -1503,7 +1507,7 @@ static void on_a11y_prefs(const iris_a11y_prefs *prefs, void *user) {
         th.color_disabled = flux_color_rgba(0xaa, 0xaa, 0xaa, 0xff);
         lens_set_theme(pl->ui, th);
     } else {
-        on_color_scheme_changed(iris_query_system_color_scheme(), pl);
+        on_color_scheme_changed(iris_query_system_color_scheme(), (__bridge void *)pl);
     }
     /* Force a frame so the new preferences reach the screen even while the
      * loop is idle-parked. */
@@ -1517,7 +1521,7 @@ static void on_a11y_prefs(const iris_a11y_prefs *prefs, void *user) {
 static VkSurfaceKHR create_vk_surface(const flux_device *device, CALayer *layer) {
     VkMetalSurfaceCreateInfoEXT msci = {
         .sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
-        .pLayer = (__bridge const CAMetalLayer *)layer,
+        .pLayer = (const CAMetalLayer *)layer,
     };
     VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
     if (vkCreateMetalSurfaceEXT(flux_device_vk_instance(device), &msci, NULL, &vk_surface) !=
@@ -1642,6 +1646,17 @@ static void *cocoa_presenter_thread_main(void *arg) {
     return nullptr;
 }
 
+static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t actions,
+                                      void *user) {
+    (void)user;
+    iris_dnd_source src = {
+        .actions = actions,
+        .static_text = text,
+        .static_text_len = len,
+    };
+    return iris_dnd_start(&src);
+}
+
 int iris_app_run_cocoa(const iris_app_config *cfg) {
     /* All resources declared up front (and every ObjC strong local nil-
      * initialized) so a single `fail:` cleanup block runs on every exit
@@ -1660,6 +1675,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
     NSWindow *window = nil;
     IrisView *view = nil;
     IrisWindowDelegate *win_delegate = nil;
+    cocoa_present_context pctx = {0};
 
     @autoreleasepool {
         pl = [IrisPlatform new];
@@ -1692,7 +1708,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
          * (the theme watcher) can post through it; unregistered on the
          * teardown path. The kick posts an ApplicationDefined event —
          * see the header comment for why not CFRunLoopPerformBlock. */
-        iris_platform_wakeup_set_kick(iris_cocoa_wakeup_kick, pl);
+        iris_platform_wakeup_set_kick(iris_cocoa_wakeup_kick, (__bridge void *)pl);
         wakeup_registered = true;
 
         window = [[NSWindow alloc]
@@ -1791,17 +1807,6 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
             goto fail;
         }
 
-        static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t actions,
-                                              void *user) {
-            (void)user;
-            iris_dnd_source src = {
-                .actions = actions,
-                .static_text = text,
-                .static_text_len = len,
-            };
-            return iris_dnd_start(&src);
-        }
-
         if (lens_create(&(lens_desc){.device = device,
                                      .theme = cfg->dark ? lens_theme_dark()
                                                         : (iris_system_prefers_dark()
@@ -1823,12 +1828,10 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         }
         host_started = true;
 
-        cocoa_present_context pctx = {
-            .pl = pl,
-            .surface = surface,
-            .canvas = canvas,
-            .cfg = cfg,
-        };
+        pctx.pl = pl;
+        pctx.surface = surface;
+        pctx.canvas = canvas;
+        pctx.cfg = cfg;
 
         /* Decoupled Presentation Engine (ADR-0124): for pure UI applications without
          * custom immediate canvas painting, launch the dedicated presentation worker
@@ -1890,7 +1893,8 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
          * (theme_watch_internal.h), never the host's public watch slot. */
         pl->theme_watching = false;
         if (!cfg->dark)
-            pl->theme_watching = (iris_theme__watch_backend(on_color_scheme_changed, pl) == 0);
+            pl->theme_watching =
+                (iris_theme__watch_backend(on_color_scheme_changed, (__bridge void *)pl) == 0);
 
         /* Accessibility preferences (ADR-0075): apply the OS's
          * reduced-motion / high-contrast / text-scale preferences to lens
@@ -1902,9 +1906,10 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
             lens_set_reduced_motion(ui, prefs.reduced_motion);
             lens_set_text_scale(ui, prefs.text_scale);
             if (prefs.high_contrast)
-                on_a11y_prefs(&prefs, pl);
+                on_a11y_prefs(&prefs, (__bridge void *)pl);
         }
-        pl->a11y_prefs_watching = (iris_a11y_prefs__watch_backend(on_a11y_prefs, pl) == 0);
+        pl->a11y_prefs_watching =
+            (iris_a11y_prefs__watch_backend(on_a11y_prefs, (__bridge void *)pl) == 0);
 
         /* Accessibility bridge: the darwin build ships a11y_stub.c, so this
          * is inert today; the call sites stay so a future NSAccessibility

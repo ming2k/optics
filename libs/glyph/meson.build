@@ -19,7 +19,8 @@ elif text_host_system == 'windows'
   text_cc = meson.get_compiler('c')
   dwrite_dep = text_cc.find_library('dwrite', required : true)
   uuid_dep = text_cc.find_library('uuid', required : true)
-  text_backend_deps += [dwrite_dep, uuid_dep]
+  dxguid_dep = text_cc.find_library('dxguid', required : true)
+  text_backend_deps += [dwrite_dep, uuid_dep, dxguid_dep]
   text_platform_sources = files('src/txt_platform_font_directwrite.c')
 elif text_host_system == 'darwin'
   apple_dep = dependency('appleframeworks',

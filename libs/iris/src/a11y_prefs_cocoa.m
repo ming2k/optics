@@ -36,10 +36,10 @@ static id g_observer = nil;
 
 IRIS_API iris_a11y_prefs iris_a11y_prefs_query(void) {
     iris_a11y_prefs p = {.reduced_motion = false, .high_contrast = false, .text_scale = 1.0f};
-    if (@available(macOS 10.10, *)) {
+    if (@available(macOS 10.14, *)) {
         NSWorkspace *ws = [NSWorkspace sharedWorkspace];
         p.reduced_motion = ws.accessibilityDisplayShouldReduceMotion;
-        p.high_contrast = ws.accessibilityDisplayIsHighContrastEnabled;
+        p.high_contrast = ws.accessibilityDisplayShouldIncreaseContrast;
     }
     return p;
 }

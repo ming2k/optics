@@ -108,11 +108,11 @@ jobs:
           set -e
           version=$(sed -n "s/^  version : '\([^']*\)'.*/\1/p" meson.build | head -1)
           major=${version%%.*}
-          REF_LIBS=$(find /tmp/abi-ref/build -type f -name 'lib*.so.*' | sort)
+          REF_LIBS=$(find /tmp/abi-ref/build -type f -name 'lib*.so.*' ! -name '*.symbols' | sort)
           FAIL=0
           for ref in $REF_LIBS; do
             name=$(basename "$ref" | sed 's/\.so\..*//')
-            cur=$(find build-abi -type f -name "${name}.so.*" | head -1)
+            cur=$(find build-abi -type f -name "${name}.so.*" ! -name '*.symbols' | head -1)
             if [ -z "$cur" ]; then
               echo "FAIL: $name missing from current build"
               FAIL=1
