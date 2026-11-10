@@ -18,6 +18,43 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* pthread_barrier_t is missing on Apple platforms (and some winpthreads
+ * builds), so keep the test portable with a tiny mutex/cond barrier. */
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int parties;
+    int count;
+    int generation;
+} test_barrier;
+
+static void test_barrier_init(test_barrier *b, int parties) {
+    pthread_mutex_init(&b->mutex, NULL);
+    pthread_cond_init(&b->cond, NULL);
+    b->parties = parties;
+    b->count = 0;
+    b->generation = 0;
+}
+
+static void test_barrier_wait(test_barrier *b) {
+    pthread_mutex_lock(&b->mutex);
+    const int generation = b->generation;
+    if (++b->count == b->parties) {
+        b->count = 0;
+        b->generation++;
+        pthread_cond_broadcast(&b->cond);
+    } else {
+        while (generation == b->generation)
+            pthread_cond_wait(&b->cond, &b->mutex);
+    }
+    pthread_mutex_unlock(&b->mutex);
+}
+
+static void test_barrier_destroy(test_barrier *b) {
+    pthread_cond_destroy(&b->cond);
+    pthread_mutex_destroy(&b->mutex);
+}
+
 typedef struct {
     flux_device *d;
     int iterations;
@@ -26,7 +63,7 @@ typedef struct {
 
 typedef struct {
     flux_device *d;
-    pthread_barrier_t *start;
+    test_barrier *start;
     int completed;
 } canvas_worker_arg;
 
@@ -34,7 +71,7 @@ typedef struct {
  * owns its surface/canvas; only the lazily-created device cache is shared. */
 static void *canvas_init_worker(void *p) {
     canvas_worker_arg *a = p;
-    pthread_barrier_wait(a->start);
+    test_barrier_wait(a->start);
     flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
     sd.width = 16;
     sd.height = 16;
@@ -102,8 +139,8 @@ int main(void) {
         enum { N_THREADS = 4 };
         pthread_t threads[N_THREADS];
         canvas_worker_arg args[N_THREADS] = {0};
-        pthread_barrier_t start;
-        pthread_barrier_init(&start, NULL, N_THREADS);
+        test_barrier start;
+        test_barrier_init(&start, N_THREADS);
         for (int i = 0; i < N_THREADS; ++i) {
             args[i].d = d;
             args[i].start = &start;
@@ -114,7 +151,7 @@ int main(void) {
             pthread_join(threads[i], NULL);
             total += args[i].completed;
         }
-        pthread_barrier_destroy(&start);
+        test_barrier_destroy(&start);
         EXPECT(total == N_THREADS);
     }
 

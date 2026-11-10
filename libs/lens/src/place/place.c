@@ -248,13 +248,16 @@ static void band_push(lens *ui, lens_band band, lens_node *n) {
         uint32_t nc = ui->band_caps[band] ? ui->band_caps[band] : 4;
         if (ui->bands[band] && ui->band_counts[band] == nc)
             nc = nc * 2;
-        lens_node **na = flux_arena_alloc(&ui->arena, nc * sizeof *na);
+        lens_node **na =
+            flux_arena_alloc(&ui->arena, nc * sizeof *na); // NOLINT(bugprone-sizeof-expression)
         if (!na) {
             lensi_set_overflow(ui);
             return;
         }
         if (ui->bands[band])
-            memcpy(na, ui->bands[band], ui->band_counts[band] * sizeof *ui->bands[band]);
+            memcpy(na, ui->bands[band],
+                   ui->band_counts[band] *
+                       sizeof *ui->bands[band]); // NOLINT(bugprone-sizeof-expression)
         ui->bands[band] = na;
         ui->band_caps[band] = nc;
     }

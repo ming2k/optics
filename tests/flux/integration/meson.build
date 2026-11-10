@@ -158,12 +158,15 @@ test_memory_budget = executable('test_memory_budget',
 test('memory_budget', test_memory_budget, suite : 'integration')
 
 # OOM fault injection: interposed vkAllocateMemory drives the pool,
-# dedicated, and reclaim-retry failure paths end to end.
-test_alloc_fault = executable('test_alloc_fault',
-  'test_alloc_fault.c',
-  dependencies : [test_helpers_dep, dl_dep],
-)
-test('alloc_fault', test_alloc_fault, suite : 'integration')
+# dedicated, and reclaim-retry failure paths end to end. The interposer
+# uses dlsym(RTLD_NEXT), so this lane is Linux-only.
+if host_machine.system() == 'linux'
+  test_alloc_fault = executable('test_alloc_fault',
+    'test_alloc_fault.c',
+    dependencies : [test_helpers_dep, dl_dep],
+  )
+  test('alloc_fault', test_alloc_fault, suite : 'integration')
+endif
 
 # Batched uploads: one submission for a bulk load, auto-flush at frame
 # begin, steady-state allocator accounting afterwards.

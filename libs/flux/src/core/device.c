@@ -506,7 +506,8 @@ static flux_result pick_physical_device(flux_device *d, const flux_device_desc *
         return FLUX_ERROR_UNSUPPORTED;
     }
 
-    VkPhysicalDevice *pds = calloc(count, sizeof(*pds));
+    VkPhysicalDevice *pds =
+        calloc(count, sizeof(*pds)); // NOLINT(bugprone-sizeof-expression): pointer array
     if (!pds)
         return FLUX_ERROR_OUT_OF_MEMORY;
     vr = vkEnumeratePhysicalDevices(d->instance, &count, pds);

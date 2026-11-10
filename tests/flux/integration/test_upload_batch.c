@@ -12,11 +12,14 @@
  *     (no staging or zombie leakage from the batch path)
  */
 #include "test_helpers.h"
+
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/resource.h>
+#endif
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
 #include <string.h>
-#include <sys/resource.h>
 
 #define W 64u
 #define H 64u
@@ -194,6 +197,7 @@ int main(void) {
      *     ~72 KiB of driver state per cycle on Intel ANV. Two windows of
      *     many rounds must show the same MaxRSS to within a small
      *     allowance. --- */
+#if defined(__linux__) || defined(__APPLE__)
     {
         struct rusage ru0, ru1, ru2;
         static uint8_t churn[16 * 16 * 4];
@@ -267,6 +271,7 @@ int main(void) {
         EXPECT(w1 - w0 < warmup * 512);
         EXPECT(w2 - w1 < warmup * 512);
     }
+#endif
 
     flux_image_release(red);
     flux_image_release(green);

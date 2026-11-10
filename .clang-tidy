@@ -19,6 +19,8 @@
 ---
 Checks: >
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-optin.performance.Padding,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
   bugprone-assert-with-side-effect,
   bugprone-dangling-handle,
   bugprone-fold-init-type,

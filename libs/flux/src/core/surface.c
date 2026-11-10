@@ -85,15 +85,20 @@ static bool image_storage_alloc(flux_device *d, uint32_t count,
     if (count == 0)
         return false;
 
-    storage->images = image_storage_alloc_array(d, count, sizeof(*storage->images));
-    storage->views = image_storage_alloc_array(d, count, sizeof(*storage->views));
-    storage->layouts = image_storage_alloc_array(d, count, sizeof(*storage->layouts));
+    storage->images = image_storage_alloc_array(
+        d, count, sizeof(*storage->images)); // NOLINT(bugprone-sizeof-expression)
+    storage->views = image_storage_alloc_array(
+        d, count, sizeof(*storage->views)); // NOLINT(bugprone-sizeof-expression)
+    storage->layouts = image_storage_alloc_array(
+        d, count, sizeof(*storage->layouts)); // NOLINT(bugprone-sizeof-expression)
     storage->foreign_owned = image_storage_alloc_array(d, count, sizeof(*storage->foreign_owned));
     storage->epochs = image_storage_alloc_array(d, count, sizeof(*storage->epochs));
-    storage->sync_exported = image_storage_alloc_array(d, count, sizeof(*storage->sync_exported));
-    storage->render_finished =
-        image_storage_alloc_array(d, count, sizeof(*storage->render_finished));
-    storage->allocs = image_storage_alloc_array(d, count, sizeof(*storage->allocs));
+    storage->sync_exported = image_storage_alloc_array(
+        d, count, sizeof(*storage->sync_exported)); // NOLINT(bugprone-sizeof-expression)
+    storage->render_finished = image_storage_alloc_array(
+        d, count, sizeof(*storage->render_finished)); // NOLINT(bugprone-sizeof-expression)
+    storage->allocs = image_storage_alloc_array(
+        d, count, sizeof(*storage->allocs)); // NOLINT(bugprone-sizeof-expression)
     storage->bindless = image_storage_alloc_array(d, count, sizeof(*storage->bindless));
     if (!storage->images || !storage->views || !storage->layouts || !storage->foreign_owned ||
         !storage->epochs || !storage->sync_exported || !storage->render_finished ||

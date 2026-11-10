@@ -270,11 +270,14 @@ void flux_dmabuf_acquire_semaphore_recycle(flux_device *d, VkSemaphore semaphore
     if (d->dmabuf_acquire_pool_count == d->dmabuf_acquire_pool_capacity) {
         uint32_t next_capacity =
             d->dmabuf_acquire_pool_capacity ? d->dmabuf_acquire_pool_capacity * 2u : 8u;
-        VkSemaphore *grown = flux_internal_alloc(d, (size_t)next_capacity * sizeof(*grown));
+        VkSemaphore *grown = flux_internal_alloc(
+            d, (size_t)next_capacity * sizeof(*grown)); // NOLINT(bugprone-sizeof-expression)
+
         if (grown) {
             if (d->dmabuf_acquire_pool_count > 0)
                 memcpy(grown, d->dmabuf_acquire_pool,
-                       (size_t)d->dmabuf_acquire_pool_count * sizeof(*grown));
+                       (size_t)d->dmabuf_acquire_pool_count *
+                           sizeof(*grown)); // NOLINT(bugprone-sizeof-expression)
             flux_internal_free(d, d->dmabuf_acquire_pool);
             d->dmabuf_acquire_pool = grown;
             d->dmabuf_acquire_pool_capacity = next_capacity;
