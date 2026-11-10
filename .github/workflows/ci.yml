@@ -60,11 +60,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        config: [release, asan-ubsan]
+        include:
+          - config: release
+            cc: clang
+            cxx: clang++
+          - config: asan-ubsan
+            cc: clang-22
+            cxx: clang++-22
     env:
       DEBIAN_FRONTEND: noninteractive
-      CC: clang
-      CXX: clang++
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,7 +89,18 @@ jobs:
             libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
             libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
             libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
-            libsystemd-dev fonts-noto-cjk libclang-rt-18-dev
+            libsystemd-dev fonts-noto-cjk
+
+      - name: Install Clang 22 (ASan lane)
+        if: matrix.config == 'asan-ubsan'
+        run: |
+          sudo install -d /etc/apt/keyrings
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | \
+            sudo tee /etc/apt/keyrings/llvm.asc >/dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/llvm.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | \
+            sudo tee /etc/apt/sources.list.d/llvm-22.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang-22 libclang-rt-22-dev
 
       - name: Install Slang compiler
         run: |
