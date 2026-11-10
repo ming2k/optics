@@ -49,11 +49,13 @@ test_image_update = executable('test_image_update',
 )
 test('image_update', test_image_update, suite : 'integration')
 
-test_dmabuf = executable('test_dmabuf',
-  'test_dmabuf.c',
-  dependencies : [test_helpers_dep],
-)
-test('dmabuf', test_dmabuf, suite : 'integration')
+if host_machine.system() == 'linux'
+  test_dmabuf = executable('test_dmabuf',
+    'test_dmabuf.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('dmabuf', test_dmabuf, suite : 'integration')
+endif
 
 test_compute = executable('test_compute',
   'test_compute.c',

@@ -73,14 +73,17 @@ test('style_cascade', test_style_cascade)
 # pattern as test_icon_runtime_content); the live registry in the
 # shared library still runs during the in-process legitimate-pattern
 # section. The violation case forks and expects SIGABRT.
-test_borrow_check = executable('test_borrow_check',
-  'test_borrow_check.c',
-  '../../libs/lens/src/core/borrow.c',
-  dependencies        : [lens_dep, m_dep],
-  include_directories : lens_inc,
-  c_args              : ['-DLENS_DEBUG_BORROWS=1'],
-)
-test('borrow_check', test_borrow_check)
+# The violation case forks and re-execs /proc/self/exe; keep it on Linux.
+if host_machine.system() == 'linux'
+  test_borrow_check = executable('test_borrow_check',
+    'test_borrow_check.c',
+    '../../libs/lens/src/core/borrow.c',
+    dependencies        : [lens_dep, m_dep],
+    include_directories : lens_inc,
+    c_args              : ['-DLENS_DEBUG_BORROWS=1'],
+  )
+  test('borrow_check', test_borrow_check)
+endif
 
 # Icon coverage-mask cache (ADR-0112): bake sizing, key identity, layer
 # separation, device-grid-exact placement at fractional scales, and the run

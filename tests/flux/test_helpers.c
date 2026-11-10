@@ -10,7 +10,9 @@
  */
 #include "test_helpers.h"
 
+#if defined(__linux__)
 #include <dlfcn.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 
@@ -38,6 +40,7 @@ const char *__lsan_default_suppressions(void) {
  * with RTLD_NODELETE so it stays mapped through process exit.
  * RTLD_NOLOAD only promotes libraries that are already resident —
  * nothing new is loaded. */
+#if defined(__linux__)
 static void pin_loaded_vulkan_drivers(void) {
     FILE *maps = fopen("/proc/self/maps", "r");
     if (!maps)
@@ -56,6 +59,9 @@ static void pin_loaded_vulkan_drivers(void) {
     }
     fclose(maps);
 }
+#else
+static void pin_loaded_vulkan_drivers(void) {}
+#endif
 
 /* Cached so the dozen-odd device-needing tests don't each pay the
  * instance+device-create cost just to learn "no Vulkan here". */
