@@ -324,7 +324,9 @@ VISTA_API flux_result vista_scene_set_materials(vista_scene *scene, flux_materia
         return FLUX_ERROR_INVALID_ARGUMENT;
     flux_material **replacement = NULL;
     if (material_count > 0) {
-        replacement = calloc(material_count, sizeof(*replacement));
+        /* Pointer array: the element is a flux_material *, not a struct. */
+        replacement =
+            calloc(material_count, sizeof(*replacement)); // NOLINT(bugprone-sizeof-expression)
         if (!replacement)
             return FLUX_ERROR_OUT_OF_MEMORY;
         for (uint32_t i = 0; i < material_count; ++i)

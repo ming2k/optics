@@ -18,6 +18,7 @@
 # bugs in C codebases of this shape.
 ---
 Checks: >
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
   bugprone-assert-with-side-effect,
   bugprone-dangling-handle,
   bugprone-fold-init-type,
