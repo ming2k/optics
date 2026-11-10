@@ -34,6 +34,13 @@
 
 #include "txt_platform_font.h"
 
+/* MinGW's import libraries do not carry the DirectWrite interface IDs;
+ * DEFINE_GUID from the headers emits them locally when INITGUID is set.
+ * MSVC's dwrite.lib already provides them, so keep this MinGW-only. */
+#if defined(__MINGW32__) && !defined(INITGUID)
+#define INITGUID
+#endif
+
 #include <dwrite.h>
 #include <dwrite_2.h>
 #include <windows.h>

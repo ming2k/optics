@@ -1815,8 +1815,9 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                                      .scale = pl->scale,
                                      .clipboard = {.set_text = clip_set_text,
                                                    .request_text = clip_request_text,
-                                                   .user = pl},
-                                     .dnd = {.start_drag = lens_host_start_drag_cocoa, .user = pl}},
+                                                   .user = (__bridge void *)pl},
+                                     .dnd = {.start_drag = lens_host_start_drag_cocoa,
+                                             .user = (__bridge void *)pl}},
                         &ui) != FLUX_OK) {
             fprintf(stderr, "lens_create failed\n");
             goto fail;
