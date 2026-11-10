@@ -592,12 +592,43 @@ static void mat3_to_push(const flux_mat3 *m, float out[3][4]) {
     }
 }
 
-/* Record one fullscreen output-transform blit (ADR-0069). `push->flags`
- * picks the direction: encode (intermediate -> destination, the end_pass
- * tail) or decode (destination -> intermediate, the LOAD seed).
- * dest_view == VK_NULL_HANDLE targets the frame's swapchain image. */
-static void record_output_blit(flux_canvas *c, VkImageView dest_view, VkFormat dest_format,
-                               flux_recti area, const flux_output_push *push) {
+/* Record the output-transform blits for a pass's disjoint damage rectangles
+ * (ADR-0069, ADR-0149) inside a single Dynamic Rendering pass. `push->flags`
+ * picks the direction: encode (intermediate -> destination, the end_pass tail)
+ * or decode (destination -> intermediate, the LOAD seed).
+ * dest_view == VK_NULL_HANDLE targets the frame's render image.
+ *
+ * Issuing all `area_count` scissored draws inside one pass rather than opening
+ * a separate render pass per rectangle avoids `FLUX_LOAD_DONT_CARE` tile
+ * clobbering when two damage rectangles share a GPU tile during the decode
+ * seed, and eliminates inter-pass write-after-write hazards during encode. */
+static void record_output_blits(flux_canvas *c, VkImageView dest_view, VkFormat dest_format,
+                                const flux_recti *areas, uint32_t area_count,
+                                const flux_output_push *push) {
+    if (!areas || area_count == 0)
+        return;
+
+    int32_t min_x = areas[0].x;
+    int32_t min_y = areas[0].y;
+    int32_t max_x = areas[0].x + (int32_t)areas[0].w;
+    int32_t max_y = areas[0].y + (int32_t)areas[0].h;
+    for (uint32_t i = 1; i < area_count; i++) {
+        const int32_t x0 = areas[i].x;
+        const int32_t y0 = areas[i].y;
+        const int32_t x1 = areas[i].x + (int32_t)areas[i].w;
+        const int32_t y1 = areas[i].y + (int32_t)areas[i].h;
+        if (x0 < min_x)
+            min_x = x0;
+        if (y0 < min_y)
+            min_y = y0;
+        if (x1 > max_x)
+            max_x = x1;
+        if (y1 > max_y)
+            max_y = y1;
+    }
+    if (max_x <= min_x || max_y <= min_y)
+        return;
+
     flux_vk_canvas *v = vkc(c);
     VkPipelineLayout layout;
     VkPipeline pipeline;
@@ -611,9 +642,9 @@ static void record_output_blit(flux_canvas *c, VkImageView dest_view, VkFormat d
     flux_pass_attachment att = {
         .view = dest_view,
         .format = dest_format,
-        /* Encode preserves the pixels outside `area` (partial redraw);
-         * the decode seed overwrites exactly the region the main pass
-         * will read, so its load is irrelevant. */
+        /* Encode preserves the pixels outside `areas` (partial redraw);
+         * the decode seed overwrites every region the main pass will read
+         * within this single pass, so its initial load is irrelevant. */
         .load_op = (push->flags & FLUX_OUTPUT_F_DECODE) ? FLUX_LOAD_DONT_CARE : FLUX_LOAD_LOAD,
         .store_op = FLUX_STORE_STORE,
     };
@@ -621,10 +652,10 @@ static void record_output_blit(flux_canvas *c, VkImageView dest_view, VkFormat d
         .type = FLUX_TYPE_PASS_DESC,
         .color_attachment_count = 1,
         .color_attachments = &att,
-        .width = (uint32_t)area.w,
-        .height = (uint32_t)area.h,
-        .render_offset_x = area.x,
-        .render_offset_y = area.y,
+        .width = (uint32_t)(max_x - min_x),
+        .height = (uint32_t)(max_y - min_y),
+        .render_offset_x = min_x,
+        .render_offset_y = min_y,
     };
     flux_frame_begin_pass(c->frame, &pass);
 
@@ -641,12 +672,14 @@ static void record_output_blit(flux_canvas *c, VkImageView dest_view, VkFormat d
                      .minDepth = 0.0f,
                      .maxDepth = 1.0f};
     vkCmdSetViewport(cmd, 0, 1, &vp);
-    VkRect2D sc = {.offset = {area.x, area.y}, .extent = {(uint32_t)area.w, (uint32_t)area.h}};
-    vkCmdSetScissor(cmd, 0, 1, &sc);
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                        sizeof(*push), push);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
-    c->recorded_draws++;
+    for (uint32_t i = 0; i < area_count; i++) {
+        VkRect2D sc = {.offset = {areas[i].x, areas[i].y}, .extent = {areas[i].w, areas[i].h}};
+        vkCmdSetScissor(cmd, 0, 1, &sc);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+        c->recorded_draws++;
+    }
     flux_frame_end_pass(c->frame);
     v->bound_pipeline = VK_NULL_HANDLE; /* the blit clobbered the canvas binding */
     v->pipeline_memo.valid = false;
@@ -808,14 +841,13 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
         }
         if (src != FLUX_BINDLESS_INVALID) {
             v->out_decode.image_handle = src;
-            /* Seed exactly the damage rectangles (ADR-0149). An empty set means
-             * the whole extent, which is the single-rect case. */
+            /* Seed the disjoint damage rectangles (ADR-0149) inside one pass.
+             * An empty set means the whole extent, which is the single-rect case. */
             flux_recti seed_areas[FLUX_DAMAGE_CAPACITY];
             const uint32_t seed_count =
                 canvas_pass_areas(config, w, h, seed_areas, FLUX_DAMAGE_CAPACITY);
-            for (uint32_t i = 0; i < seed_count; i++)
-                record_output_blit(c, linear->view, FLUX_CANVAS_LINEAR_FORMAT, seed_areas[i],
-                                   &v->out_decode);
+            record_output_blits(c, linear->view, FLUX_CANVAS_LINEAR_FORMAT, seed_areas, seed_count,
+                                &v->out_decode);
             /* The seed's attachment writes must be visible to the main
              * pass's load-op read of the same image. */
             color_barrier2(
@@ -1037,17 +1069,8 @@ static void vk_end_pass(const flux_canvas_backend *self, flux_canvas *c) {
         flux_recti areas[FLUX_DAMAGE_CAPACITY];
         const uint32_t n = canvas_pass_areas(&v->active_config, c->fb_width, c->fb_height, areas,
                                              FLUX_DAMAGE_CAPACITY);
-        for (uint32_t i = 0; i < n; i++) {
-            record_output_blit(c, t ? t->view : VK_NULL_HANDLE, v->color_format, areas[i],
-                               &v->out_encode);
-            /* Record the write area for the surface's epoch history: this is the
-             * only place a windowed frame's pixels reach their destination, so it
-             * is the only place that knows what the frame actually wrote. */
-            if (!t && c->frame)
-                flux_frame_record_written(c->frame,
-                                          (flux_rect){(float)areas[i].x, (float)areas[i].y,
-                                                      (float)areas[i].w, (float)areas[i].h});
-        }
+        record_output_blits(c, t ? t->view : VK_NULL_HANDLE, v->color_format, areas, n,
+                            &v->out_encode);
     }
 
     if (!t)

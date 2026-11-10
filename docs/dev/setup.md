@@ -11,15 +11,16 @@ The [root README](../../README.md) contains the shorter build-only path.
 | Ninja | Any Meson-supported version | Default build backend. |
 | C compiler | GCC `>= 15` or Clang `>= 19`; MSVC cl / Apple Clang also work | The C23 sources prefer `#embed`; toolchains without it automatically use generated shader headers (`tools/spv2h.py`). |
 | `pkg-config` | Any current version | Finds system libraries. |
-| `glslangValidator` | Vulkan 1.3 SPIR-V support | Compiles bundled shaders. |
+| `slangc` | Slang 2026.17+ (CI pins 2026.21; recent Vulkan SDKs bundle it) | Compiles bundled shaders to SPIR-V ([ADR-0156](../adr/0156-slang-first-shader-architecture.md)). |
 
 **Linux**: the default feature set requires Vulkan headers and loader plus FreeType,
-HarfBuzz, Fontconfig, and FriBidi. GLFW is needed for the windowed `flux`
+HarfBuzz, Fontconfig, and FriBidi. `slangc` is provided by recent LunarG Vulkan
+SDKs or the standalone Slang release. GLFW is needed for the windowed `flux`
 examples. The `iris` Wayland backend additionally uses
 `wayland-client`, Wayland protocols, and XKB Common. `libsystemd` is optional;
 without it, live theme watching and AT-SPI use their stub implementations.
 
-**Windows**: the Vulkan SDK (headers, loader, glslangValidator) plus clang-cl,
+**Windows**: the Vulkan SDK 1.4+ (headers, loader, slangc) plus clang-cl,
 MSVC, or MinGW. FreeType/HarfBuzz/FriBidi resolve automatically through the
 bundled `subprojects/*.wrap` fallbacks; font discovery uses DirectWrite, so
 fontconfig is not needed. When forcing the fallbacks, disable two optional
@@ -27,7 +28,8 @@ dependency cycles: `-Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled`.
 The iris backend is Win32 (`app_win32.c`).
 
 **macOS**: MoltenVK >= 1.3 (older releases advertise only Vulkan 1.2 and are
-rejected), a Vulkan loader (`vulkan-loader` via Homebrew), glslang, and the
+rejected), a Vulkan loader (`vulkan-loader` via Homebrew), the pinned Slang
+release from the official tarball (Homebrew has no `slang` formula), and the
 same three text libraries (wraps also work). Font discovery uses CoreText.
 The iris backend is Cocoa (`app_cocoa.m`); Objective-C is enabled
 automatically by `libs/iris/meson.build`. See
@@ -37,7 +39,7 @@ On Debian or Ubuntu, install the development packages with:
 
 ```bash
 sudo apt-get install -y --no-install-recommends \
-  build-essential meson ninja-build pkg-config glslang-tools vulkan-tools \
+  build-essential meson ninja-build pkg-config vulkan-tools \
   libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
   libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
   libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
@@ -133,7 +135,7 @@ so a different local major version will refuse rather than produce noise).
 | Symptom | First check |
 |---------|-------------|
 | Compiler rejects `#embed` | Nothing to do — the generated-header fallback builds automatically. To force it (or verify it), add `-DFLUX_SHADER_NO_EMBED=1` to `c_args`. |
-| `glslangValidator` not found | Install `glslang-tools` and reconfigure. |
+| `slangc` not found | Install Vulkan SDK 1.4+ or the pinned Slang release from the official tarball, then ensure `slangc` is in PATH. |
 | FreeType, HarfBuzz, Fontconfig, or FriBidi missing | Install the text development packages, or configure with `-Dtext=false`. |
 | GLFW warning and missing windowed `flux` examples | Install GLFW development files and reconfigure. |
 | `iris` reports that its backend was skipped | Install Wayland, XKB Common, and Vulkan development files, then reconfigure. |

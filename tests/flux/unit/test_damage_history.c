@@ -129,18 +129,22 @@ static void test_full_entry_poisons_everything_older(void) {
     CHECK(!full);
 }
 
-static void test_empty_commit_means_full_not_nothing(void) {
+static void test_empty_commit_is_no_change_unless_full_is_explicit(void) {
     flux_damage_history h;
     flux_damage_history_reset(&h);
     const uint64_t e1 = commit_band(&h, 10.0f);
-    /* A frame that commits no rectangles has no narrower description of what it
-     * wrote. Reading that as "nothing changed" is the one direction that leaves
-     * stale pixels on screen, so it must read as "everything". */
+    /* A pacing or history-repair frame can present without writing a new pixel.
+     * Empty + full=false is that no-change epoch; only the explicit `full`
+     * verdict widens it to the whole extent. */
     (void)flux_damage_history_commit(&h, nullptr, 0, false);
 
     flux_rect out[64];
-    bool full = false;
+    bool full = true;
     CHECK(flux_damage_history_since(&h, e1, out, 64, &full) == 0);
+    CHECK(!full);
+
+    const uint64_t e3 = flux_damage_history_commit(&h, nullptr, 0, true);
+    CHECK(flux_damage_history_since(&h, e3 - 1, out, 64, &full) == 0);
     CHECK(full);
 }
 
@@ -222,16 +226,58 @@ static void test_reset_forgets_history(void) {
     CHECK(h.committed == 0);
 }
 
+static bool rects_overlap(flux_rect a, flux_rect b) {
+    const float ix0 = a.x > b.x ? a.x : b.x;
+    const float iy0 = a.y > b.y ? a.y : b.y;
+    const float ix1 = (a.x + a.w) < (b.x + b.w) ? (a.x + a.w) : (b.x + b.w);
+    const float iy1 = (a.y + a.h) < (b.y + b.h) ? (a.y + a.h) : (b.y + b.h);
+    return ix0 < ix1 && iy0 < iy1;
+}
+
+static void test_overlapping_and_duplicate_rects_are_pairwise_disjoint(void) {
+    flux_damage_history h;
+    flux_damage_history_reset(&h);
+    const uint64_t e1 = commit_band(&h, 100.0f);
+
+    /* Duplicate rects within a single commit (e.g. a 2-pass frame) collapse to one. */
+    const flux_rect dup[2] = {
+        {10.0f, 10.0f, 20.0f, 20.0f},
+        {10.0f, 10.0f, 20.0f, 20.0f},
+    };
+    (void)flux_damage_history_commit(&h, dup, 2, false);
+
+    /* Partially overlapping rect in the next epoch: [20..40, 20..40] overlaps
+     * [10..30, 10..30] on [20..30, 20..30] (area 100), so union area is
+     * 400 + 400 - 100 = 700. */
+    const flux_rect cross = {20.0f, 20.0f, 20.0f, 20.0f};
+    (void)flux_damage_history_commit(&h, &cross, 1, false);
+
+    flux_rect out[64];
+    bool full = true;
+    const uint32_t n = flux_damage_history_since(&h, e1, out, 64, &full);
+    CHECK(!full);
+    CHECK(n == 3);
+
+    float total_area = 0.0f;
+    for (uint32_t i = 0; i < n; i++) {
+        total_area += out[i].w * out[i].h;
+        for (uint32_t j = i + 1; j < n; j++)
+            CHECK(!rects_overlap(out[i], out[j]));
+    }
+    CHECK(total_area == 700.0f);
+}
+
 int main(void) {
     test_never_synchronised_is_full();
     test_already_current_copies_nothing();
     test_gap_union();
     test_full_entry_poisons_everything_older();
-    test_empty_commit_means_full_not_nothing();
+    test_empty_commit_is_no_change_unless_full_is_explicit();
     test_window_overflow_falls_back_to_full();
     test_capacity_overflow_falls_back_to_full();
     test_commit_counts_rects_and_drops_degenerate();
     test_reset_forgets_history();
+    test_overlapping_and_duplicate_rects_are_pairwise_disjoint();
 
     fprintf(stderr, "damage_history: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

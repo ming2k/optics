@@ -7,6 +7,85 @@
 
 #include <string.h>
 
+#define DISJOINT_WORKLIST_CAP (FLUX_DAMAGE_HISTORY_RECTS * 4u)
+
+/* Insert `r` (which must have positive width and height) into `out[0..*count)`
+ * by subtracting every existing rectangle from `r` so the resulting array is
+ * strictly pairwise-disjoint. Returns false if the disjoint decomposition
+ * cannot fit in `capacity` (or the internal worklist), in which case the caller
+ * must degrade to a full-extent copy. */
+bool flux_rect_set_append_disjoint(flux_rect *out, uint32_t *count, uint32_t capacity,
+                                   flux_rect r) {
+    if (!out || capacity == 0)
+        return false;
+
+    flux_rect pending[DISJOINT_WORKLIST_CAP];
+    flux_rect next[DISJOINT_WORKLIST_CAP];
+    pending[0] = r;
+    uint32_t pending_count = 1;
+
+    const uint32_t existing_count = *count;
+    for (uint32_t i = 0; i < existing_count && pending_count > 0; i++) {
+        const flux_rect e = out[i];
+        const float ex0 = e.x;
+        const float ey0 = e.y;
+        const float ex1 = e.x + e.w;
+        const float ey1 = e.y + e.h;
+
+        uint32_t next_count = 0;
+        for (uint32_t p = 0; p < pending_count; p++) {
+            const flux_rect c = pending[p];
+            const float cx0 = c.x;
+            const float cy0 = c.y;
+            const float cx1 = c.x + c.w;
+            const float cy1 = c.y + c.h;
+
+            const float ix0 = cx0 > ex0 ? cx0 : ex0;
+            const float iy0 = cy0 > ey0 ? cy0 : ey0;
+            const float ix1 = cx1 < ex1 ? cx1 : ex1;
+            const float iy1 = cy1 < ey1 ? cy1 : ey1;
+
+            if (!(ix0 < ix1 && iy0 < iy1)) {
+                if (next_count >= DISJOINT_WORKLIST_CAP)
+                    return false;
+                next[next_count++] = c;
+                continue;
+            }
+
+            if (cy0 < iy0) {
+                if (next_count >= DISJOINT_WORKLIST_CAP)
+                    return false;
+                next[next_count++] = (flux_rect){cx0, cy0, cx1 - cx0, iy0 - cy0};
+            }
+            if (iy1 < cy1) {
+                if (next_count >= DISJOINT_WORKLIST_CAP)
+                    return false;
+                next[next_count++] = (flux_rect){cx0, iy1, cx1 - cx0, cy1 - iy1};
+            }
+            if (cx0 < ix0) {
+                if (next_count >= DISJOINT_WORKLIST_CAP)
+                    return false;
+                next[next_count++] = (flux_rect){cx0, iy0, ix0 - cx0, iy1 - iy0};
+            }
+            if (ix1 < cx1) {
+                if (next_count >= DISJOINT_WORKLIST_CAP)
+                    return false;
+                next[next_count++] = (flux_rect){ix1, iy0, cx1 - ix1, iy1 - iy0};
+            }
+        }
+        memcpy(pending, next, next_count * sizeof(flux_rect));
+        pending_count = next_count;
+    }
+
+    if (pending_count == 0)
+        return true;
+    if (*count + pending_count > capacity)
+        return false;
+    memcpy(&out[*count], pending, pending_count * sizeof(flux_rect));
+    *count += pending_count;
+    return true;
+}
+
 void flux_damage_history_reset(flux_damage_history *h) {
     if (!h)
         return;
@@ -21,32 +100,22 @@ uint64_t flux_damage_history_commit(flux_damage_history *h, const flux_rect *rec
     flux_damage_epoch *slot = &h->entries[epoch % FLUX_DAMAGE_HISTORY_DEPTH];
     slot->epoch = epoch;
 
-    /* An empty set means the frame could not localise itself: treat it as the
-     * whole extent rather than as "nothing changed". A frame that genuinely wrote
-     * nothing should not be committing at all, and if it does, over-copying costs
-     * a blit while under-copying leaves stale pixels on screen. */
+    /* `full` is the explicit "whole extent" verdict. Empty + full=false is a
+     * real no-change epoch: a frame can be presented for pacing or to repair
+     * history without writing a new pixel. Treating that as full made every
+     * windowed content sync copy the whole swapchain image on every frame. */
     uint32_t n = 0;
-    uint32_t live = 0;
     if (!full && rects && count > 0) {
         for (uint32_t i = 0; i < count; i++) {
             if (!(rects[i].w > 0.0f) || !(rects[i].h > 0.0f))
                 continue; /* names no pixel; not a reason to widen the frame */
-            live++;
-            if (n < FLUX_DAMAGE_HISTORY_RECTS)
-                slot->rects[n++] = rects[i];
+            if (!flux_rect_set_append_disjoint(slot->rects, &n, FLUX_DAMAGE_HISTORY_RECTS,
+                                               rects[i])) {
+                n = 0;
+                full = true;
+                break;
+            }
         }
-        /* More disjoint regions than the slot can name: the omitted ones have no
-         * coordinates to contribute, so the whole extent is the only answer that
-         * covers them. A degenerate rect that was merely *dropped* above is not
-         * this case — it covers nothing. */
-        if (live > FLUX_DAMAGE_HISTORY_RECTS) {
-            n = 0;
-            full = true;
-        }
-        if (n == 0 && !full)
-            full = true;
-    } else {
-        full = true;
     }
     slot->count = n;
     slot->full = full;
@@ -92,12 +161,14 @@ uint32_t flux_damage_history_since(const flux_damage_history *h, uint64_t since,
             continue;
         if (e->full)
             return 0;
-        /* Count before copying: an entry that cannot fit the caller's buffer is
-         * an unknown set, and a partial list would under-cover. */
-        if (!out || n + e->count > capacity)
-            return 0;
-        for (uint32_t r = 0; r < e->count; r++)
-            out[n++] = e->rects[r];
+        for (uint32_t r = 0; r < e->count; r++) {
+            /* Decompose across epochs so `vkCmdCopyImage` never receives
+             * overlapping regions (VUID-vkCmdCopyImage-pRegions-00124). An
+             * entry whose disjoint split cannot fit the caller's buffer falls
+             * back to a full copy rather than under-covering. */
+            if (!flux_rect_set_append_disjoint(out, &n, capacity, e->rects[r]))
+                return 0;
+        }
     }
     if (out_full)
         *out_full = false;

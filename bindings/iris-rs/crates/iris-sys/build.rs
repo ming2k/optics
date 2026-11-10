@@ -103,13 +103,13 @@ fn main() {
         set_pkg_config_path(&dirs, &os);
     }
 
-    // Enforce the MINIMUM C library version this crate's bindings assume
-    // (a11y surface matches this header set (0.0.30)); pkg-config fails the build loudly when an older flux/lens/
-    // iris/prism is picked up (e.g. a stale system install shadowing the
-    // meson uninstalled dir).
+    // Pre-1.0 has no stable ABI: the bindings are generated from this
+    // crate's exact headers, so the C library must be the same X.Y.Z.
+    // A stale system install fails the build here instead of loading at
+    // runtime with a mismatched descriptor layout.
     let iris = pkg_config::Config::new()
         .print_system_libs(false)
-        .atleast_version("0.0.30")
+        .exactly_version(env!("CARGO_PKG_VERSION"))
         .probe("iris")
         .unwrap_or_else(|e| {
             panic!(

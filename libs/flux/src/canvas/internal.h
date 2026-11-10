@@ -293,8 +293,12 @@ struct flux_canvas {
     uint32_t state_top;
 
     /* The active pass's damage scope (ADR-0149). Copied from the normalized
-     * config at begin_pass; borrowed rect array, must outlive the pass. */
+     * config at begin_pass. `pass_damage_rects` is the canvas-owned backing
+     * store: the caller's `flux_damage` array is only promised for the
+     * `flux_canvas_begin` call, and every draw and `end_pass` consults this
+     * scope long after that call returns. */
     canvas_pass_config pass_damage;
+    flux_rect pass_damage_rects[FLUX_DAMAGE_CAPACITY];
 
     /* Per-instance scratch buffers for fill/stroke. Moved off any
      * static / thread_local area so two canvases on two threads can
@@ -436,15 +440,96 @@ static inline bool canvas_pass_covers_extent(const canvas_pass_config *config) {
     return !config || !config->damage.rects || config->damage.count == 0 || config->clear_extent;
 }
 
-/* Enumerate the pass's write scope as concrete, clipped, non-empty integer
- * rectangles. Returns the number written (never more than `capacity`); a count
- * of zero with `canvas_pass_covers_extent` true means the whole destination, and
- * callers use `canvas_pass_render_bounds` for that single-rect case.
+/* Insert integer rectangle `r` into `out[0..*count)` by subtracting every
+ * existing rectangle so the output set is strictly pairwise-disjoint. Returns
+ * false if the disjoint decomposition cannot fit in `capacity`. */
+static inline bool canvas_append_disjoint_recti(flux_recti *out, uint32_t *count, uint32_t capacity,
+                                                flux_recti r) {
+    if (!out || capacity == 0 || r.w == 0 || r.h == 0)
+        return false;
+
+    enum { WORKLIST_CAP = FLUX_DAMAGE_CAPACITY * 4u };
+    flux_recti pending[WORKLIST_CAP];
+    flux_recti next[WORKLIST_CAP];
+    pending[0] = r;
+    uint32_t pending_count = 1;
+
+    const uint32_t existing_count = *count;
+    for (uint32_t i = 0; i < existing_count && pending_count > 0; i++) {
+        const flux_recti e = out[i];
+        const int32_t ex0 = e.x;
+        const int32_t ey0 = e.y;
+        const int32_t ex1 = e.x + (int32_t)e.w;
+        const int32_t ey1 = e.y + (int32_t)e.h;
+
+        uint32_t next_count = 0;
+        for (uint32_t p = 0; p < pending_count; p++) {
+            const flux_recti c = pending[p];
+            const int32_t cx0 = c.x;
+            const int32_t cy0 = c.y;
+            const int32_t cx1 = c.x + (int32_t)c.w;
+            const int32_t cy1 = c.y + (int32_t)c.h;
+
+            const int32_t ix0 = cx0 > ex0 ? cx0 : ex0;
+            const int32_t iy0 = cy0 > ey0 ? cy0 : ey0;
+            const int32_t ix1 = cx1 < ex1 ? cx1 : ex1;
+            const int32_t iy1 = cy1 < ey1 ? cy1 : ey1;
+
+            if (!(ix0 < ix1 && iy0 < iy1)) {
+                if (next_count >= WORKLIST_CAP)
+                    return false;
+                next[next_count++] = c;
+                continue;
+            }
+            if (cy0 < iy0) {
+                if (next_count >= WORKLIST_CAP)
+                    return false;
+                next[next_count++] =
+                    (flux_recti){cx0, cy0, (uint32_t)(cx1 - cx0), (uint32_t)(iy0 - cy0)};
+            }
+            if (iy1 < cy1) {
+                if (next_count >= WORKLIST_CAP)
+                    return false;
+                next[next_count++] =
+                    (flux_recti){cx0, iy1, (uint32_t)(cx1 - cx0), (uint32_t)(cy1 - iy1)};
+            }
+            if (cx0 < ix0) {
+                if (next_count >= WORKLIST_CAP)
+                    return false;
+                next[next_count++] =
+                    (flux_recti){cx0, iy0, (uint32_t)(ix0 - cx0), (uint32_t)(iy1 - iy0)};
+            }
+            if (ix1 < cx1) {
+                if (next_count >= WORKLIST_CAP)
+                    return false;
+                next[next_count++] =
+                    (flux_recti){ix1, iy0, (uint32_t)(cx1 - ix1), (uint32_t)(iy1 - iy0)};
+            }
+        }
+        for (uint32_t p = 0; p < next_count; p++)
+            pending[p] = next[p];
+        pending_count = next_count;
+    }
+
+    if (pending_count == 0)
+        return true;
+    if (*count + pending_count > capacity)
+        return false;
+    for (uint32_t p = 0; p < pending_count; p++)
+        out[(*count)++] = pending[p];
+    return true;
+}
+
+/* Enumerate the pass's write scope as concrete, clipped, non-empty, strictly
+ * pairwise-disjoint integer rectangles. Returns the number written (never more
+ * than `capacity`).
  *
  * Every consumer that must touch *each* region separately — the LOAD seed, the
  * output encode, a layer composite — iterates this rather than the bounding box,
  * because writing the bounding box is what preserves garbage between two damage
- * bands and defeats the localisation. */
+ * bands and defeats the localisation. Pairwise-disjointness guarantees no pixel
+ * is decoded or encoded twice when caller-supplied damage rectangles overlap or
+ * share a rounded integer boundary. */
 static inline uint32_t canvas_pass_areas(const canvas_pass_config *config, uint32_t fb_width,
                                          uint32_t fb_height, flux_recti *out, uint32_t capacity) {
     if (!config || !out || capacity == 0 || fb_width == 0 || fb_height == 0)
@@ -460,7 +545,7 @@ static inline uint32_t canvas_pass_areas(const canvas_pass_config *config, uint3
     const uint32_t count = config->damage.count;
     assert(count <= FLUX_DAMAGE_CAPACITY && "damage set was not degraded by canvas.c");
     uint32_t n = 0;
-    for (uint32_t i = 0; i < count && n < capacity; i++) {
+    for (uint32_t i = 0; i < count; i++) {
         const flux_rect r = config->damage.rects[i];
         if (!(r.w > 0.0f) || !(r.h > 0.0f))
             continue;
@@ -478,7 +563,11 @@ static inline uint32_t canvas_pass_areas(const canvas_pass_config *config, uint3
             y1 = (int32_t)fb_height;
         if (x1 <= x0 || y1 <= y0)
             continue;
-        out[n++] = (flux_recti){x0, y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0)};
+        const flux_recti ri = {x0, y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0)};
+        if (!canvas_append_disjoint_recti(out, &n, capacity, ri)) {
+            out[0] = (flux_recti){0, 0, fb_width, fb_height};
+            return 1;
+        }
     }
     return n;
 }

@@ -360,12 +360,15 @@ fn a_disabled_blink_is_solid_and_reports_nothing() {
         "a disabled blink runs no clock, so nothing keeps a host awake"
     );
     assert!(!ui.caret_flip_pending(), "a solid caret never flips");
-    assert!(ui.caret_visible(), "a disabled blink leaves the caret painted");
+    assert!(
+        ui.caret_visible(),
+        "a disabled blink leaves the caret painted"
+    );
 
     // Leaving reduced motion has to restore the blink. There is no "reset to
     // default" entry point — `period <= 0` *is* off — so the constant exists,
     // and this asserts it is a usable period rather than a placeholder.
-    assert!(lens::DEFAULT_CARET_BLINK_PERIOD_S > 0.0);
+    const { assert!(lens::DEFAULT_CARET_BLINK_PERIOD_S > 0.0) };
     ui.set_caret_blink(lens::DEFAULT_CARET_BLINK_PERIOD_S);
     ui.frame(&input, |f| {
         f.textfield("solid-caret", &mut name);

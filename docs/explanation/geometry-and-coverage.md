@@ -34,10 +34,10 @@ from an exact path.
 | Stroke expansion | Per-vertex mitre frames; inner offset clamped at the local radius of curvature; miter/bevel/round joins; butt/square/round caps | `libs/flux/src/canvas/geometry_stroke.c` |
 | Path building | `MOVE`/`LINE`/`QUAD`/`CUBIC`/`CLOSE` verbs; rect / round-rect / circle constructors; squircle constructed as two cubics per corner fitted to `flux_sdf_squircle`'s zero set | `libs/flux/src/canvas/path.c` |
 | Distance fields (primitives) | Circle, rounded rect, squircle (circular↔L4 corner blend), border ring, analytic coverage | `libs/flux/include/flux/sdf.h`, `libs/flux/src/sdf/sdf.c` |
-| Distance field (device) | Rounded-rect field, border ring adjustment, one-pixel analytic coverage | `libs/flux/src/canvas/shaders/canvas_sdf.frag` |
+| Distance field (device) | Rounded-rect field, border ring adjustment, one-pixel analytic coverage | `libs/flux/src/canvas/shaders/canvas_sdf.frag.slang` |
 | Distance field (host) | The same field via the shared primitive | `libs/flux/src/canvas/backend_cpu.c` (`frag_sdf`) |
 | Strategy dispatch | Which geometry class takes the analytic path and under which paint/blend/transform. Rounded rect, circle and squircle are analytic when solid + SRC_OVER + axis-uniform | `libs/flux/src/canvas/canvas.c` (`canvas_draw_geometry`, `draw_sdf_shape`) |
-| Material distance fields | Rounded-rect field via the shared snippet; squircle field local to the material | `libs/flux/include/flux/shaders/flux_sdf.glsl` (included by `prism/src/shaders/frosted.comp`, `liquid_glass.comp`, `acrylic.comp`, `mica.comp`, `backdrop_frost.comp`) |
+| Material distance fields | Rounded-rect field via the shared snippet; squircle field local to the material | `libs/flux/include/flux/shaders/flux_sdf.slang` (included by `prism/src/shaders/frosted.comp.slang`, `liquid_glass.comp.slang`, `acrylic.comp.slang`, `mica.comp.slang`, `backdrop_frost.comp.slang`) |
 | Baked coverage (opt-in) | Device-resolution icon coverage mask, supersampled at bake time | `libs/lens/src/render/icon_mask.c` |
 | Glyph coverage | FreeType-rasterised coverage atlas (host-resident or device) | `libs/glyph/src/atlas.c` |
 | Icon vector source | SVG path parsing; elliptical arcs converted to cubic Béziers | `libs/lens/src/icon_svg.c` |

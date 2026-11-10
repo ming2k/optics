@@ -1,6 +1,6 @@
 # Liquid Glass Optical Architecture & Physical Rendering Paradigm
 
-This document formalises the optical foundation, shader mathematics, contrast-preservation architecture, and automated verification methodology of **Prism Liquid Glass** (`<prism/liquid_glass.h>`, `liquid_glass.comp`). It details how Optics achieves physical dielectric glass realism for desktop and spatial user interfaces without ray tracing, adhering to [ADR-0100](../adr/0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md).
+This document formalises the optical foundation, shader mathematics, contrast-preservation architecture, and automated verification methodology of **Prism Liquid Glass** (`<prism/liquid_glass.h>`, `liquid_glass.comp.slang`). It details how Optics achieves physical dielectric glass realism for desktop and spatial user interfaces without ray tracing, adhering to [ADR-0100](../adr/0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md).
 
 ---
 

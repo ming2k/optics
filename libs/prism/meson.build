@@ -10,92 +10,102 @@ endif
 
 prism_inc = include_directories('include')
 
-glslang = find_program('glslangValidator', required : true)
+slangc = find_program('slangc', required : true)
+slangc_flags = ['-target', 'spirv', '-profile', 'spirv_1_6', '-Wno-41012']
 
 # The analytic distance field is defined once, in flux (ADR-0118); Prism's
 # materials consume that definition instead of carrying their own copies.
-flux_sdf_inc = '-I' + meson.project_source_root() / 'libs/flux/include/flux/shaders'
-flux_sdf_glsl = files(meson.project_source_root() / 'libs/flux/include/flux/shaders/flux_sdf.glsl')
+flux_sdf_inc = [
+  '-I' + meson.project_source_root() / 'libs/flux/include',
+  '-I' + meson.project_source_root() / 'libs/flux/include/flux/shaders',
+]
+flux_sdf_slang = files(meson.project_source_root() / 'libs/flux/include/flux/shaders/flux_sdf.slang')
 
 # Liquid Glass SPIR-V
 liquid_glass_comp_spv = custom_target('liquid_glass.comp.spv',
-  input   : 'src/shaders/liquid_glass.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/liquid_glass.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'liquid_glass.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
 )
 liquid_glass_16f_comp_spv = custom_target('liquid_glass_16f.comp.spv',
-  input   : 'src/shaders/liquid_glass.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/liquid_glass.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'liquid_glass_16f.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F',
-             '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F', '@INPUT@', '-o', '@OUTPUT@'],
 )
 
 # Frosted Glass SPIR-V
 frosted_comp_spv = custom_target('frosted.comp.spv',
-  input   : 'src/shaders/frosted.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/frosted.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'frosted.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
 )
 frosted_16f_comp_spv = custom_target('frosted_16f.comp.spv',
-  input   : 'src/shaders/frosted.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/frosted.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'frosted_16f.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F',
-             '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F', '@INPUT@', '-o', '@OUTPUT@'],
 )
 
 # Acrylic SPIR-V
 acrylic_comp_spv = custom_target('acrylic.comp.spv',
-  input   : 'src/shaders/acrylic.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/acrylic.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'acrylic.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
 )
 acrylic_16f_comp_spv = custom_target('acrylic_16f.comp.spv',
-  input   : 'src/shaders/acrylic.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/acrylic.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'acrylic_16f.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F',
-             '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F', '@INPUT@', '-o', '@OUTPUT@'],
 )
 
 # Mica SPIR-V
 mica_comp_spv = custom_target('mica.comp.spv',
-  input   : 'src/shaders/mica.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/mica.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'mica.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
 )
 mica_16f_comp_spv = custom_target('mica_16f.comp.spv',
-  input   : 'src/shaders/mica.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/mica.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'mica_16f.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F',
-             '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F', '@INPUT@', '-o', '@OUTPUT@'],
 )
 
 # Common utility SPIR-V
 storage_clear_comp_spv = custom_target('storage_clear.comp.spv',
-  input   : 'src/shaders/storage_clear.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/storage_clear.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'storage_clear.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
 )
 storage_clear_16f_comp_spv = custom_target('storage_clear_16f.comp.spv',
-  input   : 'src/shaders/storage_clear.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/storage_clear.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'storage_clear_16f.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F',
-             '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F', '@INPUT@', '-o', '@OUTPUT@'],
 )
 backdrop_stats_comp_spv = custom_target('backdrop_stats.comp.spv',
-  input   : 'src/shaders/backdrop_stats.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/backdrop_stats.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'backdrop_stats.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
 )
 
 prism_c_args = ['-DPRISM_BUILDING=1', '-DPRISM_SHADER_NO_EMBED=1']
@@ -150,17 +160,18 @@ mica_16f_spv_h = custom_target('mica_16f_spv.h',
 )
 
 backdrop_frost_comp_spv = custom_target('backdrop_frost.comp.spv',
-  input   : 'src/shaders/backdrop_frost.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/backdrop_frost.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'backdrop_frost.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
 )
 backdrop_frost_16f_comp_spv = custom_target('backdrop_frost_16f.comp.spv',
-  input   : 'src/shaders/backdrop_frost.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'src/shaders/backdrop_frost.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'backdrop_frost_16f.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F',
-             '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+             flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F', '@INPUT@', '-o', '@OUTPUT@'],
 )
 
 storage_clear_spv_h = custom_target('storage_clear_spv.h',

@@ -6,17 +6,21 @@ installed.
 
 ## Step 1 — Prepare the Environment
 
-You need a C23 compiler with `#embed` support, Meson, Ninja,
-`glslangValidator`, and the development libraries used by the default feature
-set. On Debian or Ubuntu, install them with:
+You need a C23 compiler with `#embed` support, Meson, Ninja, `slangc` (from a
+recent Vulkan SDK or the pinned Slang release), and the development libraries
+used by the default feature set. On Debian or Ubuntu, install the system
+packages with:
 
 ```bash
 sudo apt-get install -y --no-install-recommends \
-  build-essential meson ninja-build pkg-config glslang-tools vulkan-tools \
+  build-essential meson ninja-build pkg-config vulkan-tools \
   libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
   libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
   libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev
 ```
+
+Ubuntu's archive does not ship `slangc`; install the official release from the
+Slang project (or a recent Vulkan SDK) and ensure it is on `PATH`.
 
 If the distribution compiler is older than GCC 15 or Clang 19, install a
 newer compiler and select it with `CC` when configuring Meson.

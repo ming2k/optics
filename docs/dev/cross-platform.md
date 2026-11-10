@@ -23,7 +23,7 @@ backend still link via `IRIS_BUILD_NO_BACKEND`.
   `#embed` — otherwise meson falls back to generated shader headers
   automatically (`-Dshader_embed=auto`). MSVC `cl` is *not* supported (no
   `#embed`, no C23 atomics). The Vulkan SDK provides headers, the loader,
-  and `glslangValidator`.
+  and `slangc`.
 - **macOS**: MoltenVK ≥ 1.3 (older releases only advertise Vulkan 1.2 and
   are rejected at device selection). flux auto-enables
   `VK_KHR_portability_enumeration` and `VK_KHR_portability_subset` when the

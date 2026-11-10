@@ -56,12 +56,19 @@ typedef struct flux_damage_history {
  * image is synchronised with anything. */
 void flux_damage_history_reset(flux_damage_history *h);
 
+/* Subtract every rectangle already in `out[0..*count)` from `r` and append the
+ * remainder, keeping the set strictly pairwise disjoint. Returns false when the
+ * decomposition cannot fit `capacity` (the caller must degrade to full). This
+ * is the single implementation of damage-set union in the engine: the epoch
+ * history and the frame repaint scope both use it so they cannot disagree about
+ * overlap or outward rounding. */
+bool flux_rect_set_append_disjoint(flux_rect *out, uint32_t *count, uint32_t capacity, flux_rect r);
+
 /* Commit one frame's write set and return the epoch number it was given.
  *
- * `rects`/`count` may be empty, which means "this frame wrote its whole extent"
- * — the caller has no narrower description, and under-describing is the one
- * failure mode that leaves stale pixels on screen. `full` forces that reading
- * explicitly for a frame that could not fit its set in the bound. */
+ * `full` is the explicit "wrote the whole extent / could not localise" verdict.
+ * Empty + full=false is a real no-change epoch (a pacing or history-repair
+ * frame); it neither widens the history nor requires a copy. */
 uint64_t flux_damage_history_commit(flux_damage_history *h, const flux_rect *rects, uint32_t count,
                                     bool full);
 

@@ -436,6 +436,8 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
     uint32_t image_count = caps.minImageCount;
     if (image_count < UINT32_MAX)
         image_count++;
+    if (image_count <= s->frames_in_flight)
+        image_count = s->frames_in_flight + 1u;
     if (caps.maxImageCount > 0 && image_count > caps.maxImageCount)
         image_count = caps.maxImageCount;
     bool readback_supported = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
@@ -581,6 +583,7 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
             s->content.layout = VK_IMAGE_LAYOUT_UNDEFINED;
         }
         flux_damage_history_reset(&s->damage_history);
+        s->presented_epoch = FLUX_DAMAGE_EPOCH_NONE;
     }
 
     /* HDR10 static metadata rides the swapchain; reapply on every
@@ -1216,6 +1219,10 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
         s->image_foreign_owned[i] = false;
         s->image_sync_exported[i] = false;
     }
+    /* A new image ring has no content to preserve: every acquired image is
+     * unsynchronised, and the display is about to receive a fresh surface. */
+    flux_surface_invalidate_damage(s);
+
     if (s->offscreen_require_readback) {
         size_t needed;
         if (readback_staging_size(w, h, s->format, &needed) != FLUX_OK) {
@@ -1261,6 +1268,7 @@ void flux_surface_destroy_swapchain(flux_surface *s) {
      * resize cannot leave a stale-extent authority behind. */
     content_image_destroy(s);
     flux_damage_history_reset(&s->damage_history);
+    s->presented_epoch = FLUX_DAMAGE_EPOCH_NONE;
     if (s->swapchain) {
         vkDestroySwapchainKHR(s->device->device, s->swapchain, nullptr);
         s->swapchain = VK_NULL_HANDLE;
@@ -1379,6 +1387,7 @@ flux_result flux_surface_create(flux_device *device, const flux_surface_desc *de
     s->hdr_preferred = desc->hdr_preferred;
     s->last_submitted_slot = UINT32_MAX;
     s->last_readback_slot = UINT32_MAX;
+    s->presented_epoch = FLUX_DAMAGE_EPOCH_NONE;
     s->last_readback_region = (flux_readback_region){0};
     s->frames_in_flight = device->frames_in_flight;
     if (s->frames_in_flight > FLUX_MAX_FRAMES_IN_FLIGHT)
@@ -2267,6 +2276,37 @@ flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
         }
         close(sync_fd);
     }
+    return FLUX_OK;
+}
+
+void flux_surface_invalidate_damage(flux_surface *s) {
+    if (!s)
+        return;
+    flux_damage_history_reset(&s->damage_history);
+    for (uint32_t i = 0; i < s->image_count; ++i)
+        s->image_epoch[i] = FLUX_DAMAGE_EPOCH_NONE;
+    s->presented_epoch = FLUX_DAMAGE_EPOCH_NONE;
+    s->frame_slot.epoch = 0;
+    s->frame_slot.repaint.count = 0;
+    s->frame_slot.repaint_full = false;
+}
+
+flux_result flux_surface_scanout_damage(const flux_surface *s, flux_rect *out_rects,
+                                        uint32_t capacity, uint32_t *out_count, bool *out_full) {
+    if (!s || !out_count || !out_full || (capacity > 0 && !out_rects))
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_count = 0;
+    *out_full = true;
+    if (s->presented_epoch == FLUX_DAMAGE_EPOCH_NONE)
+        return FLUX_OK;
+
+    bool full = false;
+    const uint32_t count = flux_damage_history_since(&s->damage_history, s->presented_epoch,
+                                                     out_rects, capacity, &full);
+    if (full)
+        return FLUX_OK;
+    *out_full = false;
+    *out_count = count;
     return FLUX_OK;
 }
 

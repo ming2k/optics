@@ -32,9 +32,11 @@
  * to one renderArea overwrites the middle band with garbage.
  */
 #include "test_helpers.h"
+#include <flux/canvas_helpers.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
+#include <stdlib.h>
 #include <string.h>
 
 #define W 64u
@@ -181,6 +183,68 @@ int main(void) {
      * green full-extent pass at the top of this test, so it is green. Anything
      * else means the two rects became one box and the gap was written. */
     EXPECT(is_green(px_at(px, W / 2, H / 2)));
+
+    /* The damage scope is a description borrowed only for the
+     * `flux_canvas_begin` call. A caller (the Rust binding's
+     * `CanvasPassOptions`, in production) routinely owns the rectangle list in
+     * a temporary container that is gone before the pass ends. Reusing the
+     * caller's array immediately after begin therefore must not change the
+     * active scope: the pass has to own a copy.
+     *
+     * This is not a theoretical lifetime nicety. When the pointer dangled, the
+     * end-of-pass encode resolved a garbage or out-of-bounds scope, emitted
+     * zero output blits, and left the previous frame's pixels (an old window,
+     * its shadow, a tooltip) on screen indefinitely. */
+    {
+        /* Fill every image in the rotation first: the scoped pass below writes
+         * only its damaged band, so the slot it acquires must already hold a
+         * complete green frame outside that band. */
+        for (uint32_t i = 0; i < info.image_count; ++i) {
+            EXPECT(flux_surface_begin_frame(s, nullptr, &f) == FLUX_OK);
+            EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                 .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                 .frame = f,
+                                                 .clear_color = &green,
+                                             }) == FLUX_OK);
+            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            EXPECT(flux_frame_submit(f) == FLUX_OK);
+            EXPECT(flux_frame_present(f) == FLUX_OK);
+        }
+
+        flux_rect *scoped = malloc(sizeof(*scoped));
+        EXPECT(scoped != nullptr);
+        if (scoped) {
+            *scoped = (flux_rect){0, (float)TOP_Y, (float)W, (float)BAND_H};
+            EXPECT(flux_surface_begin_frame(s, nullptr, &f) == FLUX_OK);
+            EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                 .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                 .frame = f,
+                                                 .clear_color = &red,
+                                                 .damage =
+                                                     (flux_damage){
+                                                         .rects = scoped,
+                                                         .count = 1,
+                                                     },
+                                             }) == FLUX_OK);
+            /* The caller is free to reuse its array as soon as begin returns. */
+            *scoped = (flux_rect){0, (float)BOT_Y, (float)W, (float)BAND_H};
+            free(scoped);
+            flux_canvas_fill_rect_color(canvas, (flux_rect){0, 0, (float)W, (float)H},
+                                        flux_color_rgba(0, 0, 255, 255));
+            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            EXPECT(flux_frame_submit(f) == FLUX_OK);
+            EXPECT(flux_frame_present(f) == FLUX_OK);
+
+            memset(px, 0xCD, BYTES);
+            EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+            const uint8_t *top = px_at(px, W / 2, TOP_Y + BAND_H / 2);
+            const uint8_t *mid = px_at(px, W / 2, H / 2);
+            const uint8_t *bottom = px_at(px, W / 2, BOT_Y + BAND_H / 2);
+            EXPECT(top[2] > 250 && top[0] < 5);
+            EXPECT(is_green(mid));
+            EXPECT(is_green(bottom));
+        }
+    }
 
     flux_canvas_release(canvas);
     flux_surface_release(s);

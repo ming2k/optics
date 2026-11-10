@@ -28,6 +28,13 @@
 extern "C" {
 #endif
 
+/* A rectangle in surface-local physical pixels. Kept in core.h because damage
+ * is a first-class frame input/output, not a canvas-private detail. The math
+ * helpers remain in <flux/math.h>. */
+typedef struct flux_rect {
+    float x, y, w, h;
+} flux_rect;
+
 /* ================================================================== */
 /*  Visibility & attributes                                           */
 /* ================================================================== */
@@ -1308,6 +1315,31 @@ FLUX_NODISCARD FLUX_API flux_result flux_surface_export_dmabuf_explicit(flux_sur
 FLUX_API uint32_t flux_surface_last_slot(const flux_surface *s);
 
 /* ================================================================== */
+/*  Damage                                                            */
+/* ================================================================== */
+
+/* Upper bound on the rectangles one damage set may carry. A frame that needs
+ * more degrades to its full extent — never to a truncated list, because a
+ * dropped region leaves stale pixels on screen while an oversized one only
+ * costs work. */
+enum : uint32_t {
+    FLUX_DAMAGE_CAPACITY = 64,
+};
+
+/* A set of dirty rectangles in physical surface pixels. The array is borrowed
+ * and only read during the call that receives it; callers may build it in a
+ * temporary container.
+ *
+ * For a canvas pass, an empty set means "the whole destination" (see
+ * flux_canvas_pass_desc::damage). For a frame's repaint scope, use the
+ * companion `out_full` flag: empty + full=false means "nothing to paint". The
+ * two meanings are never inferred from the same field. */
+typedef struct flux_damage {
+    const flux_rect *rects;
+    uint32_t count;
+} flux_damage;
+
+/* ================================================================== */
 /*  Frame                                                             */
 /* ================================================================== */
 
@@ -1316,6 +1348,16 @@ typedef struct flux_frame_begin_desc {
     const void *next;
     uint64_t timeout_ns; /* 0 = FLUX_DEFAULT_FRAME_TIMEOUT_NS (2s) unless non_blocking is true */
     bool non_blocking; /* true = return FLUX_ERROR_TIMEOUT immediately if acquire/fence not ready */
+    /* What changed in the scene this frame is about to record, in physical
+     * surface pixels. Flux unions this with the history the acquired image
+     * missed and exposes the result through flux_frame_repaint_scope().
+     *
+     * `damage_full` means "the whole extent changed / could not be
+     * localised". Empty damage with damage_full=false means "no new damage"
+     * (a history-repair or capture-only frame), not "full". A NULL `desc`
+     * keeps the conservative pre-damage contract: full repaint. */
+    flux_damage damage;
+    bool damage_full;
 } flux_frame_begin_desc;
 
 /* Default fence/acquire timeout for frame begin, image upload, and one-shot
@@ -1324,7 +1366,10 @@ typedef struct flux_frame_begin_desc {
  * than freezing the caller thread indefinitely. */
 #define FLUX_DEFAULT_FRAME_TIMEOUT_NS (2000000000ull)
 
-#define FLUX_FRAME_BEGIN_DESC_INIT {.type = FLUX_TYPE_FRAME_BEGIN_DESC}
+/* The initializer is conservative: a caller that does not describe its damage
+ * repaints the whole extent. Override `damage_full` to false only when passing
+ * an explicit `damage` set (or a genuine no-change frame). */
+#define FLUX_FRAME_BEGIN_DESC_INIT {.type = FLUX_TYPE_FRAME_BEGIN_DESC, .damage_full = true}
 
 FLUX_NODISCARD FLUX_API flux_result flux_surface_begin_frame(flux_surface *s,
                                                              const flux_frame_begin_desc *desc,
@@ -1446,7 +1491,62 @@ typedef struct flux_frame_plan_counters {
 FLUX_NODISCARD FLUX_API flux_result flux_frame_plan_stats(const flux_frame *f,
                                                           flux_frame_plan_counters *out);
 
+/* Frame-in-flight slot index, in [0, frames_in_flight). Per-slot GPU
+ * resources (filters, readback rings) key on this value.
+ *
+ * This is NOT the swapchain image the frame renders into. A swapchain may
+ * carry more images than there are frames in flight, and the image index is
+ * chosen by the presentation engine at acquire time. Content-preservation
+ * and damage history must key on `flux_frame_image_index`: one entry per
+ * image, never one per frame slot. */
 FLUX_API uint32_t flux_frame_index(const flux_frame *f);
+
+/* Swapchain image index acquired for this frame. Stable from begin_frame
+ * until present. For offscreen surfaces (no swapchain) this equals the frame
+ * slot. */
+FLUX_API uint32_t flux_frame_image_index(const flux_frame *f);
+
+/* The pixels this recording frame must repaint, in physical surface pixels.
+ *
+ * The answer is the union of (a) every write committed since this image last
+ * became current and (b) the current frame's damage passed to
+ * flux_surface_begin_frame. On a windowed surface whose persistent content
+ * image holds the authoritative frame, history is repaired by an internal
+ * copy and the returned scope is only the current damage; the API hides that
+ * distinction from the caller.
+ *
+ * `*out_full = true` means repaint the whole extent (the image was never
+ * initialised, history overflowed, or the current damage was full).
+ * `*out_full = false` with `*out_count == 0` means nothing needs painting.
+ *
+ * The caller owns `out_rects`; `capacity` must be at least
+ * FLUX_DAMAGE_CAPACITY to receive every case. If the scope does not fit,
+ * FLUX_ERROR_OUT_OF_RANGE is returned and `*out_full` is set so the caller can
+ * conservatively repaint everything. */
+FLUX_NODISCARD FLUX_API flux_result flux_frame_repaint_scope(const flux_frame *f,
+                                                             flux_rect *out_rects,
+                                                             uint32_t capacity, uint32_t *out_count,
+                                                             bool *out_full);
+
+/* The pixels changed since this surface's most recent successful present, in
+ * physical surface pixels. This is the damage a scanout/KMS consumer should
+ * receive: it includes frames that were submitted and then abandoned before
+ * scanout, and it is independent of which ring image the next frame acquires.
+ *
+ * `*out_full = true` means there is no usable history (nothing presented yet,
+ * history was invalidated, or the retained window overflowed). Empty with
+ * `*out_full = false` means the display is already current. */
+FLUX_NODISCARD FLUX_API flux_result flux_surface_scanout_damage(const flux_surface *s,
+                                                                flux_rect *out_rects,
+                                                                uint32_t capacity,
+                                                                uint32_t *out_count,
+                                                                bool *out_full);
+
+/* Forget every damage epoch and image-history entry. Call after the display
+ * content was lost or replaced outside the normal present path (VT switch,
+ * backend takeover). The next frame repaints in full. Must not be called while
+ * a frame is recording. */
+FLUX_API void flux_surface_invalidate_damage(flux_surface *s);
 
 /* ================================================================== */
 /*  GPU profiling — timestamp queries                                 */

@@ -23,13 +23,13 @@ test_helpers_lib = static_library('test_helpers',
 )
 # --- shared SPIR-V custom_targets (used by integration tests) ---
 core_tests_build_dir = meson.current_build_dir()
-glslang = find_program('glslangValidator', required : true)
+slangc = find_program('slangc', required : true)
 
 # The single source of truth for the SDF field and its derivative: the same
 # header the shipped materials include. Declared as a dependency of every
 # target that compiles it, so editing it invalidates the SPIR-V rather than
 # leaving a stale byproduct (the ccache trap ADR-0118 records).
-flux_sdf_glsl = files(meson.project_source_root() / 'libs/flux/include/flux/shaders/flux_sdf.glsl')
+flux_sdf_slang = files(meson.project_source_root() / 'libs/flux/include/flux/shaders/flux_sdf.slang')
 flux_sdf_inc = '-I' + meson.project_source_root() / 'libs/flux/include/flux/shaders'
 
 # libdl for the fault-injection test's dlsym(RTLD_NEXT); on glibc >= 2.34
@@ -37,24 +37,24 @@ flux_sdf_inc = '-I' + meson.project_source_root() / 'libs/flux/include/flux/shad
 dl_dep = cc.find_library('dl', required : false)
 
 triangle_vert_spv = custom_target('test_triangle.vert.spv',
-  input   : 'shaders/triangle.vert',
+  input   : 'shaders/triangle.vert.slang',
   output  : 'triangle.vert.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, '-target', 'spirv', '-profile', 'spirv_1_6', '-entry', 'main', '-stage', 'vertex', '@INPUT@', '-o', '@OUTPUT@'],
 )
 triangle_frag_spv = custom_target('test_triangle.frag.spv',
-  input   : 'shaders/triangle.frag',
+  input   : 'shaders/triangle.frag.slang',
   output  : 'triangle.frag.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, '-target', 'spirv', '-profile', 'spirv_1_6', '-entry', 'main', '-stage', 'fragment', '@INPUT@', '-o', '@OUTPUT@'],
 )
 triangle_attr_vert_spv = custom_target('test_triangle_attr.vert.spv',
-  input   : 'shaders/triangle_attr.vert',
+  input   : 'shaders/triangle_attr.vert.slang',
   output  : 'triangle_attr.vert.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, '-target', 'spirv', '-profile', 'spirv_1_6', '-entry', 'main', '-stage', 'vertex', '@INPUT@', '-o', '@OUTPUT@'],
 )
 fill_pattern_spv = custom_target('test_fill_pattern.comp.spv',
-  input   : 'shaders/fill_pattern.comp',
+  input   : 'shaders/fill_pattern.comp.slang',
   output  : 'fill_pattern.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, '-target', 'spirv', '-profile', 'spirv_1_6', '-entry', 'main', '-stage', 'compute', '@INPUT@', '-o', '@OUTPUT@'],
 )
 
 # --embed-dir is GCC/Clang-only; probe it so MSVC cl can still configure

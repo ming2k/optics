@@ -55,7 +55,7 @@ fn main() {
 
     let lib = pkg_config::Config::new()
         .print_system_libs(false)
-        .atleast_version("0.0.30")
+        .exactly_version(env!("CARGO_PKG_VERSION"))
         .probe("transit")
         .unwrap_or_else(|e| {
             panic!(

@@ -960,9 +960,10 @@ struct flux_target {
 #define FLUX_CONTENT_EPOCH_NONE FLUX_DAMAGE_EPOCH_NONE
 
 typedef struct flux_frame_damage_set {
-    /* Disjoint device-pixel rectangles this frame intends to write. Empty
-     * (`count == 0`) means the frame writes its whole extent, which is also
-     * what an over-capacity frame degrades to. */
+    /* Disjoint device-pixel rectangles. The surrounding frame decides what an
+     * empty set means: `damage_full` / `repaint_full` carry the whole-extent
+     * verdict separately, so "no change" and "everything changed" never share
+     * one representation. An over-capacity set degrades to the full flag. */
     flux_rect rects[FLUX_FRAME_DAMAGE_CAPACITY];
     uint32_t count;
 } flux_frame_damage_set;
@@ -979,18 +980,24 @@ struct flux_frame {
 
     /* ---- ADR-0149 damage-scoped frame -----------------------------------
      *
-     * `damage` is the caller's declared write set for this frame, in physical
-     * pixels, or empty for "paint everything". `written` is what the frame
-     * actually wrote, accumulated from every pass that records into it; it is
-     * what the surface commits into its epoch history at submit.
+     * `damage` is the caller's declared change set for this frame, in physical
+     * pixels. `damage_full` is its explicit whole-extent verdict; empty with
+     * false means "no new damage". `repaint` is the derived answer the caller
+     * must paint: history the acquired image missed plus the current damage
+     * (windowed content-backed surfaces repair history with an internal copy
+     * and report only current damage). `epoch` is the history entry this frame
+     * commits at submit; it is what present advances `presented_epoch` to and
+     * what an abandoned frame leaves un-presented.
      *
-     * Both are populated by flux itself, never by the canvas: a pass that
-     * ignores `damage` still lands in `written`, so the epoch history can
-     * never under-describe what a swapchain image is missing. */
+     * The delta is the caller's damage, never a reconstruction from draw calls:
+     * an offscreen image also writes the history it missed, and treating those
+     * writes as new damage would make first-use Full circulate forever. */
     flux_frame_damage_set damage;
-    flux_frame_damage_set written;
-    bool written_overflow;      /* more than CAPACITY regions: rotate history can't describe it */
+    bool damage_full;
+    flux_frame_damage_set repaint;
+    bool repaint_full;
     bool damage_scope_rejected; /* caller asked for a scope a pass could not honour */
+    uint64_t epoch;             /* 0 until submit commits this frame */
 
     /* Deferred pass plan (ADR-0147). An effect registers a pass instead of
      * recording its dispatches, so work nothing samples is pruned rather
@@ -1212,6 +1219,11 @@ struct flux_surface {
      * mechanism most likely to be wrong, and it is pure — testable without a GPU,
      * which is where it is proven. */
     flux_damage_history damage_history;
+    /* Epoch of the most recent frame that actually reached the display. The
+     * difference between this and `damage_history.committed` is the scanout
+     * damage: every write the screen has not seen yet, including frames that
+     * were submitted and then abandoned before their external flip. */
+    uint64_t presented_epoch;
 };
 
 flux_result flux_transient_ring_init(flux_transient_ring *r, flux_device *d,
@@ -1240,7 +1252,6 @@ void flux_surface_destroy_swapchain(flux_surface *s);
  * This is the mechanism ADR-0144 named as its follow-up and explicitly refused
  * to approximate with a per-image flag. */
 flux_result flux_surface_sync_content(flux_surface *s, flux_frame *f);
-void flux_frame_record_written(flux_frame *f, flux_rect area);
 
 /* The image and view a frame's default canvas pass renders into: the persistent
  * content image on a windowed surface, the per-slot image on an offscreen one.

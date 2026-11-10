@@ -6,14 +6,14 @@
  * and is pinned by a differential test". Before this test the device side had
  * no such pin: `test_sdf` compared the host implementation against a *hand
  * transcribed* reference of the shader expression, which cannot detect a change
- * to `flux_sdf.glsl` at all. The pin was described in prose and enforced by
+ * to `flux_sdf.slang` at all. The pin was described in prose and enforced by
  * nothing.
  *
- * This test dispatches the real `flux_sdf.glsl` — the same header the shipped
+ * This test dispatches the real `flux_sdf.slang` — the same header the shipped
  * materials include — and compares its distance and normal against
  * `<flux/sdf.h>` sample by sample. Drift in either direction fails here:
  *
- *   - edit the GLSL field or edge rule   -> GPU moves, host does not
+ *   - edit the Slang field or edge rule  -> GPU moves, host does not
  *   - edit the host field or gradient    -> host moves, GPU does not
  *   - edit both inconsistently           -> both move, disagreement remains
  *

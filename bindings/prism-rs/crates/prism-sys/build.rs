@@ -138,13 +138,13 @@ fn main() {
 
     // 2. Probe. prism's `Requires: flux` pulls libflux's link directives in
     //    automatically; emits rustc-link-lib / rustc-link-search for both.
-    // Enforce the MINIMUM C library version this crate's bindings assume
-    // (prism_version_string exists (0.0.30)); pkg-config fails the build loudly when an older flux/lens/
-    // iris/prism is picked up (e.g. a stale system install shadowing the
-    // meson uninstalled dir).
+    // Pre-1.0 has no stable ABI: the bindings are generated from this
+    // crate's exact headers, so the C library must be the same X.Y.Z.
+    // A stale system install fails the build here instead of loading at
+    // runtime with a mismatched descriptor layout.
     let lib = pkg_config::Config::new()
         .print_system_libs(false)
-        .atleast_version("0.0.30")
+        .exactly_version(env!("CARGO_PKG_VERSION"))
         .probe("prism")
         .unwrap_or_else(|e| {
             panic!(

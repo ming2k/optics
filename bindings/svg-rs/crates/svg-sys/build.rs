@@ -80,7 +80,7 @@ fn main() {
 
     let svg = pkg_config::Config::new()
         .print_system_libs(false)
-        .atleast_version("0.0.74")
+        .exactly_version(env!("CARGO_PKG_VERSION"))
         .probe("svg")
         .unwrap_or_else(|e| {
             panic!(

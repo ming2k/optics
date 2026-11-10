@@ -71,9 +71,8 @@ FLUX_API flux_vec4 flux_vec4_normalize(flux_vec4 v);
 typedef struct flux_point {
     float x, y;
 } flux_point;
-typedef struct flux_rect {
-    float x, y, w, h;
-} flux_rect;
+/* flux_rect is a core value type (flux/core.h): damage is a frame-native
+ * concept and every layer that names a dirty region needs the same struct. */
 
 /* The smallest rectangle covering both `a` and `b`. An empty operand
  * contributes nothing; two empty rectangles union to an empty rectangle.

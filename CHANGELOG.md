@@ -7,11 +7,54 @@ All notable, user-visible changes to the C libraries in this monorepo
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [semver](https://semver.org/) with the pre-1.0 allowances
-documented in [docs/reference/api.md](docs/reference/api.md) — patch
-releases are source- and binary-compatible, minor releases may break
-either.
+documented in [docs/reference/api.md](docs/reference/api.md) — **any**
+pre-1.0 release may break source or binary compatibility, so the SONAME
+carries the full version and a mismatched binary fails to load instead of
+silently reading a different descriptor layout.
 
 ## [Unreleased]
+
+### Added
+
+- **flux & prism**: Complete, clean-break migration of the entire shader infrastructure
+  from legacy GLSL 460 (`glslangValidator`) to Slang (`slangc`)
+  ([ADR-0156](docs/adr/0156-slang-first-shader-architecture.md)). All shader modules
+  across Canvas (solid, gradient, image, glyph, SDF, output blit, tile raster, vector
+  evaluation), Scene (unlit, phong, skinning, 3D vector), Effect (blur, backdrop, shadow,
+  16F storage variants), and Prism materials (Liquid Glass, Frosted Glass, Acrylic, Mica,
+  Layered Backdrop, Storage Clear, Backdrop Statistics) are now authored in native
+  Slang (`.slang`). Shaders compile directly to Vulkan 1.3 SPIR-V 1.6 via the Vulkan
+  SDK `slangc` compiler. Legacy `.glsl`, `.vert`, `.frag`, and `.comp` sources are
+  completely eliminated with zero backward-compatibility shims.
+- **flux**: Area damage is now a native frame input and output
+  ([ADR-0155](docs/adr/0155-frame-damage-is-a-native-epoch-ledger.md)).
+  `flux_frame_begin_desc` carries the current delta, `flux_frame_repaint_scope`
+  returns the exact pixels the acquired image must paint, and
+  `flux_surface_scanout_damage` returns the changes since the last successful
+  present for KMS/scanout hints. A surface epoch history now covers offscreen
+  and windowed images alike, so callers no longer maintain a parallel
+  per-image damage ledger. `flux_surface_invalidate_damage` resets the ledger
+  after VT/backend takeover.
+
+### Changed
+
+- **flux**: Submission commits a frame's delta and image epoch; presentation
+  publishes the epoch and abandonment leaves it un-presented. An empty commit
+  with `full=false` is a real no-change epoch, so windowed content sync no
+  longer copies the whole swapchain image on every frame. A `Busy` retry no
+  longer needs a full repaint.
+- **packaging**: Pre-1.0 SONAMEs now carry the full version
+  (`libflux.so.0.0.75`, not `libflux.so.0.0`). Releases in this line have
+  appended descriptor fields and changed pass behavior on patch bumps; a
+  shared SONAME let a binary built against one release load another and read a
+  struct whose layout it did not share. The new boundary fails fast at load
+  time. Post-1.0 keeps `major.minor`.
+- **flux**: A Canvas pass copies its damage scope during `flux_canvas_begin`
+  (ADR-0154 §5). The caller's `flux_damage` array no longer has to outlive the
+  call; retaining it was a use-after-free that made `end_pass` resolve
+  `count == 0` or a garbage scissor and skip the output encode.
+- **flux, lens**: Pairwise-disjoint damage decomposition, single-pass output
+  blits, and the bounded UNORM8 output dither (ADR-0154).
 
 ## [0.0.75] - 2026-11-08
 

@@ -162,20 +162,8 @@ typedef struct flux_canvas_attachment {
  *
  * Rectangles are expected disjoint but overlap is harmless: a scissored repaint
  * is idempotent. */
-typedef struct flux_damage {
-    const flux_rect *rects;
-    uint32_t count;
-} flux_damage;
-
-/* Upper bound on the rectangles one pass and one frame may carry. A frame that
- * needs more degrades to its full extent — never to a truncated list, because a
- * dropped region leaves stale pixels on screen while an oversized one only costs
- * work. A device whose `maxScissorSlots` is smaller lowers the effective bound
- * and reports `FLUX_ERROR_UNSUPPORTED` from the pass rather than silently
- * narrowing the scope. */
-enum : uint32_t {
-    FLUX_DAMAGE_CAPACITY = 64,
-};
+/* `flux_damage` and FLUX_DAMAGE_CAPACITY are core types (flux/core.h): a
+ * damage set is a frame input, not a canvas-private convention. */
 
 typedef struct flux_canvas_pass_desc {
     flux_struct_type type; /* FLUX_TYPE_CANVAS_PASS_DESC */
@@ -187,6 +175,10 @@ typedef struct flux_canvas_pass_desc {
     /* Rectangles this pass may write, in destination physical pixels. The
      * destination must already hold a complete frame outside them — a skipped
      * region is not repainted. Empty selects the full destination extent.
+     *
+     * The array is read and copied during `flux_canvas_begin`; it does not need
+     * to outlive that call. Retaining it for the whole pass would be a
+     * use-after-free for bindings that build the list in a temporary container.
      *
      * A pass is the right granularity for this because a frame can render into
      * several destinations (a target capture and the window), and each has its

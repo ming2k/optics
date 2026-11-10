@@ -171,6 +171,35 @@ The frame's command buffer is reset (pool-level) at the start of
 every frame, so per-frame allocations and recorded commands do not
 accumulate across frames.
 
+### Frame damage
+
+A frame may describe what changed through `flux_frame_begin_desc.damage`
+and `damage_full` (ADR-0155). The two fields are an explicit verdict:
+
+- `damage_full = true` means the whole extent changed or could not be
+  localized. `FLUX_FRAME_BEGIN_DESC_INIT` defaults to this conservative
+  value; a `NULL` desc means the same.
+- `damage_full = false` with a non-empty `damage` set is a localized
+  change. The array is borrowed only for the `begin_frame` call.
+- `damage_full = false` with an empty set is a real no-change frame (pacing
+  or capture), not a full repaint.
+
+`flux_frame_repaint_scope()` returns the pixels the acquired image must
+paint, combining the current damage with history the image missed. On a
+windowed content-backed surface the engine repairs history internally and
+returns only the current damage. The result is copied into the caller's
+rectangle buffer; the frame retains no borrow.
+
+`flux_surface_scanout_damage()` answers a different question: what has the
+display not seen since the most recent successful present? It includes
+submitted-but-abandoned frames and is independent of the next image
+acquired. Use it for KMS/scanout hints, not as a Canvas pass scope.
+
+`flux_surface_invalidate_damage()` forgets the history after a VT switch or
+backend takeover; the next frame repaints in full. Image-history lookup must
+key on `flux_frame_image_index()`, not the frame-in-flight slot returned by
+`flux_frame_index()`.
+
 Multi-pass image dependencies, reverse ROI, forward damage, and target
 lifetimes are planned through Flux's RenderPlan compiler (ADR-0089 / ADR-0092),
 replacing external graph planning with a single dependency-driven execution path.
@@ -200,16 +229,17 @@ differently:
 
 | Version transition           | Source compat              | Binary compat              |
 |------------------------------|----------------------------|----------------------------|
-| Patch (`0.N.x → 0.N.y`)      | Yes                        | Yes                        |
-| Minor pre-1.0 (`0.N → 0.N+1`)| May break; called out in release notes | May break; **rebuild required** |
+| Any pre-1.0 release (`0.x.y → 0.x.z`) | May break; called out in release notes | May break; **rebuild required** |
 | Minor post-1.0 (`1.N → 1.N+1`)| Yes                        | Yes — new fields only via `next`-chained extension structs; base layouts are frozen at 1.0 |
 | Major (`N.0 → N+1.0`)        | May break                  | May break                  |
 
 Pre-1.0, fields can be appended directly to a base desc when it makes
-sense. A 0.1 binary linked against a 0.2 `libflux.so` is **not
-guaranteed safe**: the library may read past the end of the
-caller's smaller struct. Recompile against the matching headers when
-you upgrade across a minor bump.
+sense. The pre-1.0 SONAME is the **full version string**
+(`libflux.so.0.0.75`), not `major.minor`: releases in this line have
+appended descriptor fields and changed pass behavior on patch bumps, so
+`0.0.74` and `0.0.75` do not share a binary contract. A binary built against
+one release fails to load the other instead of silently reading a smaller
+struct. Recompile against the matching headers when you upgrade.
 
 Post-1.0, base desc layouts are frozen. Library-side additions ride a chained
 extension struct accessed through `next`. The library walks that chain looking

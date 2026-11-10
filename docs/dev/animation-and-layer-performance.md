@@ -11,7 +11,7 @@ Engineering know-how and root-cause patterns for high-refresh (60Hz/120Hz/144Hz)
 
 2. **Premultiplied sRGB Scaling Invariant (`R, G, B <= A`)**:
    - `flux_color` stores premultiplied sRGB channels (`0xAARRGGBB` where `R, G, B` are already multiplied by `A / 255`).
-   - Both the Vulkan vertex shader (`flux_decode_premul_srgb` in `canvas_color.glsl`) and the CPU rasterizer (`flux_color_to_linear` in `color.c`) un-premultiply by dividing `rgb / a` before applying the sRGB-to-linear transfer function, then re-multiply by `a`.
+   - Both the Vulkan vertex shader (`flux_decode_premul_srgb` in `canvas_color.slang`) and the CPU rasterizer (`flux_color_to_linear` in `color.c`) un-premultiply by dividing `rgb / a` before applying the sRGB-to-linear transfer function, then re-multiply by `a`.
    - Therefore, any opacity modulation helper (`lensi_opacity_color`) **must scale all four channels (`A, R, G, B`) proportionally by `opacity`**. Scaling only the `A` byte leaves `R, G, B > A`, which causes `rgb / a > 1.0` during linear decoding and produces severe additive highlight blowout.
    - Similarly, `lens::Color::with_alpha(a)` in Rust bindings must un-premultiply non-opaque colors (`0 < a0 < 255`) before re-premultiplying with the new alpha `a`.
 

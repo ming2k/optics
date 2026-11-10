@@ -65,6 +65,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # clang-tidy configures and compiles the shader-bearing libraries, so
+      # the compiler and Slang toolchain must exist before the analysis step.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential meson ninja-build pkg-config \
+            libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
+            libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
+            libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
+            libsystemd-dev
+
+      - name: Install Slang compiler
+        run: |
+          SLANG_VER="2026.21"
+          curl -sSL "https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-linux-x86_64.tar.gz" | sudo tar -xz -C /usr/local
+
       # Material boundary (ADR-0063): flux owns rendering mechanism and must
       # not reference any named material; materials live in prism.
       - name: Material boundary check
@@ -97,7 +114,7 @@ jobs:
       # wp_presentation_feedback (missing sync_output), killing consumers on
       # the first presented frame. The check is hermetic — it reads the pinned
       # contract in tools/config/wayland-listeners.toml, not the host's
-      # protocol corpus — so it runs here, before any package is installed.
+      # protocol corpus — so it does not depend on installed Wayland headers.
       - name: Wayland listener contract
         run: ./tools/optics check listeners
 
@@ -111,16 +128,6 @@ jobs:
       # Documentation integrity & audience firewall verification (ADR-0125)
       - name: Documentation integrity check
         run: ./tools/optics check docs
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential meson ninja-build pkg-config glslang-tools \
-            libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
-            libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
-            libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
-            libsystemd-dev
 
       - name: Configure (release)
         if: matrix.config == 'release'
@@ -159,11 +166,16 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang lld meson ninja-build pkg-config glslang-tools \
+            build-essential clang lld meson ninja-build pkg-config \
             libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
             libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
             libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
             libsystemd-dev
+
+      - name: Install Slang compiler
+        run: |
+          SLANG_VER="2026.21"
+          curl -sSL "https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-linux-x86_64.tar.gz" | sudo tar -xz -C /usr/local
 
       # --buildtype=release on purpose. The matrix legs run gcc at release and
       # gcc at -O0 under asan-ubsan; clang at -O0 adds little and compiles away
@@ -211,11 +223,16 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential meson ninja-build pkg-config glslang-tools \
+            build-essential meson ninja-build pkg-config \
             libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
             libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
             libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
             libsystemd-dev
+
+      - name: Install Slang compiler
+        run: |
+          SLANG_VER="2026.21"
+          curl -sSL "https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-linux-x86_64.tar.gz" | sudo tar -xz -C /usr/local
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -247,11 +264,16 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential meson ninja-build pkg-config glslang-tools \
+            build-essential meson ninja-build pkg-config \
             libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
             libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
             libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
             libsystemd-dev
+
+      - name: Install Slang compiler
+        run: |
+          SLANG_VER="2026.21"
+          curl -sSL "https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-linux-x86_64.tar.gz" | sudo tar -xz -C /usr/local
 
       - name: Install Rust 1.85.0
         run: rustup toolchain install 1.85.0 --profile minimal

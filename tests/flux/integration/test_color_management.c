@@ -634,6 +634,53 @@ int main(void) {
         flux_icc_profile_release(lab_v4);
     }
 
+    /* --- 14. Repeated LOAD passes with overlapping damage rects are bit-exact idempotent --- */
+    {
+        flux_surface_info info;
+        flux_surface_get_info(s, &info);
+        flux_color dark_desktop = flux_color_rgba(26, 27, 30, 255);
+        for (uint32_t i = 0; i < info.image_count; ++i)
+            EXPECT(render_frame(s, canvas, dark_desktop, nullptr, nullptr) == FLUX_OK);
+
+        static uint8_t baseline[BYTES];
+        memset(baseline, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, baseline, BYTES) == FLUX_OK);
+
+        const flux_rect overlapping_damage[2] = {
+            {0.0f, 0.0f, 64.0f, 64.0f},
+            {32.0f, 32.0f, 64.0f, 64.0f},
+        };
+        for (uint32_t pass_idx = 0; pass_idx < 8; ++pass_idx) {
+            flux_frame *frame = nullptr;
+            EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+            EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                 .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                 .frame = frame,
+                                                 .clear_color = nullptr,
+                                                 .damage =
+                                                     {
+                                                         .rects = overlapping_damage,
+                                                         .count = 2,
+                                                     },
+                                             }) == FLUX_OK);
+            flux_canvas_fill_rect_color(canvas, (flux_rect){0.0f, 0.0f, 8.0f, 8.0f},
+                                        flux_color_rgba(255, 255, 255, 255));
+            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            EXPECT(flux_frame_present(frame) == FLUX_OK);
+        }
+
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        /* Every pixel in the overlapping LOAD region (48, 48) outside the 8x8
+         * white box must remain bit-for-bit identical to the initial solid fill
+         * with zero dither grain accumulation. */
+        const uint8_t *orig = px_at(baseline, 48, 48);
+        const uint8_t *after = px_at(px, 48, 48);
+        EXPECT(orig[0] == 26 && orig[1] == 27 && orig[2] == 30 && orig[3] == 255);
+        EXPECT(memcmp(orig, after, 4) == 0);
+    }
+
     flux_canvas_release(canvas);
     flux_surface_release(s);
     flux_device_release(d);

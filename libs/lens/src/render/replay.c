@@ -66,15 +66,21 @@ static flux_result capture_metadata(lens *ui, lens_scene_snapshot *snapshot);
  * borders, glyph bitmaps) map cleanly to physical pixels.  Keeps the
  * right/bottom edge invariant so adjacent widgets don't drift apart. */
 static flux_rect snap_rect(flux_rect r, float scale) {
+    /* Snapping moves the leading edge to the device grid and preserves the
+     * trailing edge. For an extent smaller than one device pixel the leading
+     * edge can round past the trailing edge, which would turn a legitimate
+     * sub-pixel sliver into a negative width. Flux rejects the whole command
+     * stream on a negative rect, so the snapped extent must be clamped: a
+     * command with zero area simply draws nothing. */
     if (scale <= 0.0f || scale == 1.0f) {
         float x = roundf(r.x);
         float y = roundf(r.y);
-        return (flux_rect){x, y, r.w + r.x - x, r.h + r.y - y};
+        return (flux_rect){x, y, fmaxf(0.0f, r.w + r.x - x), fmaxf(0.0f, r.h + r.y - y)};
     }
     float inv = 1.0f / scale;
     float x = roundf(r.x * scale) * inv;
     float y = roundf(r.y * scale) * inv;
-    return (flux_rect){x, y, r.w + r.x - x, r.h + r.y - y};
+    return (flux_rect){x, y, fmaxf(0.0f, r.w + r.x - x), fmaxf(0.0f, r.h + r.y - y)};
 }
 
 static inline bool rect_overlaps(flux_rect a, flux_rect b) {

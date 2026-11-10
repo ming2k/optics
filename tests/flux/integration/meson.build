@@ -174,12 +174,12 @@ if opt_canvas
 endif
 
 # SDF derivative parity (ADR-0148 / INV-SDF-02): dispatch the real
-# flux_sdf.glsl and compare distance + normal against <flux/sdf.h>.
+# flux_sdf.slang and compare distance + normal against <flux/sdf.h>.
 sdf_parity_spv = custom_target('test_sdf_parity.comp.spv',
-  input   : 'shaders/sdf_parity.comp',
-  depend_files : flux_sdf_glsl,
+  input   : 'shaders/sdf_parity.comp.slang',
+  depend_files : flux_sdf_slang,
   output  : 'sdf_parity.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, flux_sdf_inc, '-target', 'spirv', '-profile', 'spirv_1_6', '-entry', 'main', '-stage', 'compute', '@INPUT@', '-o', '@OUTPUT@'],
 )
 sdf_parity_spv_h = custom_target('sdf_parity_comp_spv.h',
   input   : sdf_parity_spv,
@@ -229,6 +229,16 @@ if opt_canvas
     dependencies : [test_helpers_dep],
   )
   test('offscreen', test_offscreen, suite : 'integration')
+
+  # Native frame damage ledger: epoch history, first-use Full, abandoned
+  # submission retry, and scanout delta. This is the contract the compositor's
+  # area-damage pipeline relies on; it must not drift back into a caller-side
+  # per-image ledger.
+  test_frame_damage = executable('test_frame_damage',
+    'test_frame_damage.c',
+    dependencies : [test_helpers_dep],
+  )
+  test('frame_damage', test_frame_damage, suite : 'integration')
 
   # Canvas feature matrix on the GPU: gradients, strokes, and the
   # hole-bridging fill (ADR-0011), asserted by read-back pixel.

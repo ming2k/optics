@@ -25,11 +25,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Vulkan SDK provides headers, vulkan-1.lib and glslangValidator.exe.
+      # Vulkan SDK provides headers and vulkan-1.lib. Slang is installed
+      # separately so Windows uses the same pinned compiler as Linux/macOS.
       - name: Install Vulkan SDK
         uses: humbletim/install-vulkan-sdk@v1.1.1
         with:
           version: 1.4.321.0
+
+      - name: Install Slang compiler
+        shell: pwsh
+        run: |
+          $ver = "2026.21"
+          Invoke-WebRequest -Uri "https://github.com/shader-slang/slang/releases/download/v$ver/slang-$ver-windows-x86_64.zip" -OutFile slang.zip
+          Expand-Archive -Path slang.zip -DestinationPath "$env:RUNNER_TEMP\slang" -Force
+          "$env:RUNNER_TEMP\slang\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install meson/ninja + clang
         run: |
@@ -64,9 +73,16 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install meson ninja glslang \
+          brew install meson ninja \
             molten-vk vulkan-loader vulkan-headers \
             freetype harfbuzz fribidi
+
+      # Homebrew has no Slang formula. Fetch the pinned official macOS ARM
+      # build so the same compiler version is used on every CI platform.
+      - name: Install Slang compiler
+        run: |
+          SLANG_VER="2026.21"
+          curl -sSL "https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-macos-aarch64.tar.gz" | sudo tar -xz -C /usr/local
 
       # Homebrew's vulkan-loader ships vulkan.pc; MoltenVK is plugged in as
       # the ICD. flux auto-enables VK_KHR_portability_enumeration /

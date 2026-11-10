@@ -17,6 +17,7 @@
 #include "internal.h"
 #include <flux/vulkan.h>
 
+#include <math.h>
 #include <string.h>
 
 /* ------------------------------------------------------------------ */
@@ -179,14 +180,71 @@ static void swapchain_to_transfer_dst(VkCommandBuffer cmd, VkImage img) {
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 }
 
-void flux_frame_record_written(flux_frame *f, flux_rect area) {
-    if (!f || !(area.w > 0.0f) || !(area.h > 0.0f))
-        return;
-    if (f->written.count >= FLUX_FRAME_DAMAGE_CAPACITY) {
-        f->written_overflow = true;
-        return;
+typedef struct copy_box_i32 {
+    int32_t x0, y0, x1, y1;
+} copy_box_i32;
+
+/* Decompose integer copy box `box` against `out[0..*count)` so the resulting
+ * `VkImageCopy` regions are strictly pairwise-disjoint, satisfying
+ * VUID-vkCmdCopyImage-pRegions-00124 even when adjacent float rects share a
+ * pixel boundary after outward rounding. */
+static bool append_disjoint_copy_box(copy_box_i32 *out, uint32_t *count, uint32_t capacity,
+                                     copy_box_i32 box) {
+    enum { WORKLIST_CAP = FLUX_FRAME_DAMAGE_CAPACITY * 4u };
+    copy_box_i32 pending[WORKLIST_CAP];
+    copy_box_i32 next[WORKLIST_CAP];
+    pending[0] = box;
+    uint32_t pending_count = 1;
+
+    const uint32_t existing_count = *count;
+    for (uint32_t i = 0; i < existing_count && pending_count > 0; i++) {
+        const copy_box_i32 e = out[i];
+        uint32_t next_count = 0;
+        for (uint32_t p = 0; p < pending_count; p++) {
+            const copy_box_i32 c = pending[p];
+            const int32_t ix0 = c.x0 > e.x0 ? c.x0 : e.x0;
+            const int32_t iy0 = c.y0 > e.y0 ? c.y0 : e.y0;
+            const int32_t ix1 = c.x1 < e.x1 ? c.x1 : e.x1;
+            const int32_t iy1 = c.y1 < e.y1 ? c.y1 : e.y1;
+
+            if (!(ix0 < ix1 && iy0 < iy1)) {
+                if (next_count >= WORKLIST_CAP)
+                    return false;
+                next[next_count++] = c;
+                continue;
+            }
+            if (c.y0 < iy0) {
+                if (next_count >= WORKLIST_CAP)
+                    return false;
+                next[next_count++] = (copy_box_i32){c.x0, c.y0, c.x1, iy0};
+            }
+            if (iy1 < c.y1) {
+                if (next_count >= WORKLIST_CAP)
+                    return false;
+                next[next_count++] = (copy_box_i32){c.x0, iy1, c.x1, c.y1};
+            }
+            if (c.x0 < ix0) {
+                if (next_count >= WORKLIST_CAP)
+                    return false;
+                next[next_count++] = (copy_box_i32){c.x0, iy0, ix0, iy1};
+            }
+            if (ix1 < c.x1) {
+                if (next_count >= WORKLIST_CAP)
+                    return false;
+                next[next_count++] = (copy_box_i32){ix1, iy0, c.x1, iy1};
+            }
+        }
+        memcpy(pending, next, next_count * sizeof(copy_box_i32));
+        pending_count = next_count;
     }
-    f->written.rects[f->written.count++] = area;
+
+    if (pending_count == 0)
+        return true;
+    if (*count + pending_count > capacity)
+        return false;
+    memcpy(&out[*count], pending, pending_count * sizeof(copy_box_i32));
+    *count += pending_count;
+    return true;
 }
 
 flux_result flux_surface_sync_content(flux_surface *s, flux_frame *f) {
@@ -210,17 +268,14 @@ flux_result flux_surface_sync_content(flux_surface *s, flux_frame *f) {
         .dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
         .extent = {s->extent.width, s->extent.height, 1},
     };
-    if (whole) {
-        vkCmdCopyImage(cmd, s->content.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s->images[idx],
-                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &full);
-    } else if (count > 0) {
-        VkImageCopy copies[FLUX_FRAME_DAMAGE_CAPACITY];
-        uint32_t n = 0;
+    copy_box_i32 boxes[FLUX_FRAME_DAMAGE_CAPACITY];
+    uint32_t n = 0;
+    if (!whole && count > 0) {
         for (uint32_t i = 0; i < count; i++) {
-            int32_t x0 = (int32_t)regions[i].x;
-            int32_t y0 = (int32_t)regions[i].y;
-            int32_t x1 = (int32_t)(regions[i].x + regions[i].w);
-            int32_t y1 = (int32_t)(regions[i].y + regions[i].h);
+            int32_t x0 = (int32_t)floorf(regions[i].x);
+            int32_t y0 = (int32_t)floorf(regions[i].y);
+            int32_t x1 = (int32_t)ceilf(regions[i].x + regions[i].w);
+            int32_t y1 = (int32_t)ceilf(regions[i].y + regions[i].h);
             if (x0 < 0)
                 x0 = 0;
             if (y0 < 0)
@@ -231,17 +286,30 @@ flux_result flux_surface_sync_content(flux_surface *s, flux_frame *f) {
                 y1 = (int32_t)s->extent.height;
             if (x1 <= x0 || y1 <= y0)
                 continue;
-            copies[n++] = (VkImageCopy){
+            if (!append_disjoint_copy_box(boxes, &n, FLUX_FRAME_DAMAGE_CAPACITY,
+                                          (copy_box_i32){x0, y0, x1, y1})) {
+                whole = true;
+                break;
+            }
+        }
+    }
+    if (whole) {
+        vkCmdCopyImage(cmd, s->content.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s->images[idx],
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &full);
+    } else if (n > 0) {
+        VkImageCopy copies[FLUX_FRAME_DAMAGE_CAPACITY];
+        for (uint32_t i = 0; i < n; i++) {
+            copies[i] = (VkImageCopy){
                 .srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
-                .srcOffset = {x0, y0, 0},
+                .srcOffset = {boxes[i].x0, boxes[i].y0, 0},
                 .dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
-                .dstOffset = {x0, y0, 0},
-                .extent = {(uint32_t)(x1 - x0), (uint32_t)(y1 - y0), 1},
+                .dstOffset = {boxes[i].x0, boxes[i].y0, 0},
+                .extent = {(uint32_t)(boxes[i].x1 - boxes[i].x0),
+                           (uint32_t)(boxes[i].y1 - boxes[i].y0), 1},
             };
         }
-        if (n)
-            vkCmdCopyImage(cmd, s->content.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           s->images[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, n, copies);
+        vkCmdCopyImage(cmd, s->content.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s->images[idx],
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, n, copies);
     }
 
     /* The copies must be visible to the presentation engine's read of the image;
@@ -488,11 +556,85 @@ static void foreign_images_submit_succeeded(flux_per_frame *pf) {
 /*  Frame lifecycle                                                   */
 /* ------------------------------------------------------------------ */
 
+/* Copy one caller-supplied damage set into a frame-owned fixed set. Overflow
+ * degrades to full rather than truncating: the one failure mode this pipeline
+ * must never have is "forgot a changed region". */
+static void frame_copy_damage_set(flux_frame_damage_set *dst, bool *dst_full,
+                                  const flux_damage *src, bool src_full) {
+    dst->count = 0;
+    *dst_full = src_full;
+    if (src_full || !src || src->count == 0)
+        return;
+    for (uint32_t i = 0; i < src->count; i++) {
+        const flux_rect r = src->rects[i];
+        if (!(r.w > 0.0f) || !(r.h > 0.0f))
+            continue;
+        if (!flux_rect_set_append_disjoint(dst->rects, &dst->count, FLUX_FRAME_DAMAGE_CAPACITY,
+                                           r)) {
+            dst->count = 0;
+            *dst_full = true;
+            return;
+        }
+    }
+}
+
+/* Derive what the caller must paint into the acquired image.
+ *
+ * Windowed content-backed surfaces keep one authoritative image and repair an
+ * acquired swapchain image by copying the epochs it missed at submit. Their
+ * canvas scope is therefore only the current damage. Offscreen surfaces render
+ * directly into the acquired image, so the scope is the missed history union the
+ * current damage. The caller never has to know which strategy is in use. */
+static void frame_compute_repaint(flux_surface *s, flux_frame *f) {
+    f->repaint.count = 0;
+    f->repaint_full = false;
+    if (f->damage_full) {
+        f->repaint_full = true;
+        return;
+    }
+
+    const bool content_backed = !s->offscreen && s->content.image != VK_NULL_HANDLE;
+    const uint64_t image_epoch = s->image_epoch[s->current_image];
+    if (content_backed && image_epoch != FLUX_DAMAGE_EPOCH_NONE) {
+        f->repaint = f->damage;
+        return;
+    }
+
+    flux_rect history[FLUX_FRAME_DAMAGE_CAPACITY];
+    bool history_full = false;
+    const uint32_t history_count = flux_damage_history_since(
+        &s->damage_history, image_epoch, history, FLUX_FRAME_DAMAGE_CAPACITY, &history_full);
+    if (history_full) {
+        f->repaint_full = true;
+        return;
+    }
+    for (uint32_t i = 0; i < history_count; i++) {
+        if (!flux_rect_set_append_disjoint(f->repaint.rects, &f->repaint.count,
+                                           FLUX_FRAME_DAMAGE_CAPACITY, history[i])) {
+            f->repaint.count = 0;
+            f->repaint_full = true;
+            return;
+        }
+    }
+    for (uint32_t i = 0; i < f->damage.count; i++) {
+        if (!flux_rect_set_append_disjoint(f->repaint.rects, &f->repaint.count,
+                                           FLUX_FRAME_DAMAGE_CAPACITY, f->damage.rects[i])) {
+            f->repaint.count = 0;
+            f->repaint_full = true;
+            return;
+        }
+    }
+}
+
 flux_result flux_surface_begin_frame(flux_surface *s, const flux_frame_begin_desc *desc,
                                      flux_frame **out) {
     if (!s || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;
+    if (desc && desc->damage.count > 0 && !desc->damage.rects) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "frame damage names a count but no rects");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
 
     if (s->frame_active) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
@@ -696,6 +838,7 @@ acquired:
         barrier_to_color_attachment(pf->cmd, s->images[image_index], s->image_layouts[image_index],
                                     s->image_foreign_owned[image_index],
                                     s->device->graphics_family);
+        s->image_layouts[image_index] = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
 
     /* Surface-owned frame slot. Stable pointer for the caller's
@@ -711,6 +854,13 @@ acquired:
      * for `slot` above already guarantees nothing the previous plan
      * recorded is still executing. */
     flux_plan_reset(&s->frame_slot.plan, s->device, pf->pool);
+    {
+        const flux_damage damage = desc ? desc->damage : (flux_damage){0};
+        const bool damage_full = desc ? desc->damage_full : true;
+        frame_copy_damage_set(&s->frame_slot.damage, &s->frame_slot.damage_full, &damage,
+                              damage_full);
+        frame_compute_repaint(s, &s->frame_slot);
+    }
     s->frame_active = true;
     atomic_fetch_add_explicit(&s->device->recording_frames, 1u, memory_order_acq_rel);
     *out = &s->frame_slot;
@@ -1034,14 +1184,16 @@ flux_result flux_frame_submit(flux_frame *f) {
         vkCmdPipelineBarrier2(pf->cmd, &readback_dependency);
     }
 
-    if (content_backed) {
-        /* Commit this frame's write set into the epoch history, then bring the
-         * acquired image up to date. Order matters: the commit must name the
-         * epoch the copy will leave the image at, so a subsequent frame copying
-         * the same image can ask "what changed since then". */
-        (void)flux_damage_history_commit(&s->damage_history, f->written.rects, f->written.count,
-                                         f->written_overflow);
+    /* Commit this frame's *delta* into the epoch history for every surface,
+     * windowed or offscreen. Submission is the commit point for image content:
+     * a later KMS rejection abandons the flip, not the pixels. The delta is the
+     * caller's current damage, not the repaint scope: an offscreen image also
+     * writes the history it missed, and re-committing that as new damage would
+     * make first-use Full circulate around the ring forever. */
+    f->epoch = flux_damage_history_commit(&s->damage_history, f->damage.rects, f->damage.count,
+                                          f->damage_full);
 
+    if (content_backed) {
         /* Content image -> TRANSFER_SRC for the copy. It was left in
          * COLOR_ATTACHMENT (or TRANSFER_SRC by a preceding readback barrier). */
         if (!copy_readback) {
@@ -1054,8 +1206,17 @@ flux_result flux_frame_submit(flux_frame *f) {
         s->content.layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 
         flux_result sync = flux_surface_sync_content(s, f);
-        if (sync != FLUX_OK)
+        if (sync != FLUX_OK) {
+            /* The copy is the only thing that makes this image coherent with
+             * the content image. A failed sync invalidates every epoch rather
+             * than leaving a silently stale image in the rotation. */
+            flux_surface_invalidate_damage(s);
             return sync;
+        }
+    } else {
+        /* Offscreen surfaces render directly into the acquired image; the
+         * commit above is the image's new content epoch. */
+        s->image_epoch[s->current_image] = f->epoch;
     }
 
     /* Copy-destination images went to TRANSFER_DST in sync_content; the final
@@ -1219,6 +1380,7 @@ flux_result flux_frame_present(flux_frame *f) {
         /* Nothing to present (ADR-0013); complete the frame so the
          * caller's begin → submit → present loop works unchanged. */
         s->current_frame = (s->current_frame + 1u) % s->frames_in_flight;
+        s->presented_epoch = f->epoch;
         s->frame_active = false;
         f->state = FLUX_FRAME_STATE_PRESENTED;
         /* ADR-0129 decision 4: the frame boundary is the only drain point
@@ -1264,6 +1426,7 @@ flux_result flux_frame_present(flux_frame *f) {
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkQueuePresentKHR failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
+    s->presented_epoch = f->epoch;
     return FLUX_OK;
 }
 
@@ -1363,6 +1526,33 @@ flux_result flux_frame_plan_stats(const flux_frame *f, flux_frame_plan_counters 
 
 uint32_t flux_frame_index(const flux_frame *f) {
     return f ? f->slot : 0;
+}
+
+uint32_t flux_frame_image_index(const flux_frame *f) {
+    if (!f || !f->surface)
+        return 0;
+    return f->surface->current_image;
+}
+
+flux_result flux_frame_repaint_scope(const flux_frame *f, flux_rect *out_rects, uint32_t capacity,
+                                     uint32_t *out_count, bool *out_full) {
+    if (!f || !f->surface || !out_count || !out_full)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_count = 0;
+    *out_full = f->repaint_full;
+    if (f->repaint_full)
+        return FLUX_OK;
+    if (f->repaint.count > capacity) {
+        *out_full = true;
+        return FLUX_ERROR_OUT_OF_RANGE;
+    }
+    if (f->repaint.count > 0) {
+        if (!out_rects)
+            return FLUX_ERROR_INVALID_ARGUMENT;
+        memcpy(out_rects, f->repaint.rects, (size_t)f->repaint.count * sizeof(*out_rects));
+    }
+    *out_count = f->repaint.count;
+    return FLUX_OK;
 }
 
 flux_frame_state flux_frame_get_state(const flux_frame *f) {

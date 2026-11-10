@@ -11,7 +11,7 @@
  * provably the derivative of the expression that produced its distance, rather
  * than a difference of neighbouring samples.
  *
- * This is the same expression the device shaders evaluate (flux_sdf.glsl), so
+ * This is the same expression the device shaders evaluate (flux_sdf.slang), so
  * host and device coverage agree by construction rather than by tolerance;
  * test_sdf pins that parity, including the gradients.
  *

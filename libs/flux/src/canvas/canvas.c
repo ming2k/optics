@@ -256,6 +256,24 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
         config.clear_extent = true;
     }
 
+    /* Take ownership of the damage rectangles for the lifetime of the pass.
+     *
+     * The descriptor is a *description*, not a lease on the caller's array: the
+     * pass consults its scope on every draw and again at end_pass, long after
+     * `flux_canvas_begin` has returned. Bindings routinely build the rect list
+     * in a temporary container (the Rust binding's `CanvasPassOptions` owns a
+     * `Vec`), so retaining the pointer was a use-after-free that silently
+     * produced `count == 0` encodes and left stale pixels on screen. Copying
+     * here makes the API's actual contract match its documentation and keeps
+     * both backends independent of caller storage. */
+    if (config.damage.count > 0) {
+        memcpy(c->pass_damage_rects, config.damage.rects,
+               (size_t)config.damage.count * sizeof(*c->pass_damage_rects));
+        config.damage.rects = c->pass_damage_rects;
+    } else {
+        config.damage.rects = nullptr;
+    }
+
     /* ADR-0149: a damage-scoped pass is legitimate on every destination,
      * including a swapchain image.
      *

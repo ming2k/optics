@@ -88,7 +88,11 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_frame_alloc_transient` | `alignment` must be a power of two between 1 and 256 inclusive. |
 | `flux_frame_materialize_image` | Materialize a deferred effect output (ADR-0147). |
 | `flux_frame_plan_stats` | Read the frame's plan counters. |
-| `flux_frame_index` |  |
+| `flux_frame_index` | Frame-in-flight slot index, in [0, frames_in_flight). |
+| `flux_frame_image_index` | Swapchain image index acquired for this frame. |
+| `flux_frame_repaint_scope` | The pixels this recording frame must repaint, in physical surface pixels. |
+| `flux_surface_scanout_damage` | The pixels changed since this surface's most recent successful present, in physical surface pixels. |
+| `flux_surface_invalidate_damage` | Forget every damage epoch and image-history entry. |
 | `flux_frame_timestamp_begin` | ================================================================== |
 | `flux_frame_timestamp_end` |  |
 | `flux_frame_collect_timestamps` | Returns timestamps from the most recent COMPLETED frame at this frame's slot. |

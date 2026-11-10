@@ -126,7 +126,7 @@ typedef struct prism_glass_body_row {
     /* Pad to PRISM_BODY_STRIDE. The shader's GlassBody pads identically: the row
      * stride is one number shared by both sides, and a mismatch reads the wrong
      * row. Asserted below on both the payload and the total. */
-    uint32_t pad0[2];  /* payload 136 -> 144, matching glslang's 16-alignment */
+    uint32_t pad0[2];  /* payload 136 -> 144, matching 16-byte alignment of GlassBody (ADR-0156) */
     uint32_t pad1[28]; /* 112 more -> 256 == PRISM_BODY_STRIDE */
 } prism_glass_body_row;
 

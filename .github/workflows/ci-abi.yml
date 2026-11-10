@@ -1,17 +1,23 @@
 name: abi
 
-# ABI compatibility gate (libabigail): every library's exported surface
-# must stay compatible across patch releases, and additive across minor
-# releases. The reference ABI is dumped from the previous tag; a PR that
-# changes the ABI fails here with a typed report (fn-symbol / fn-para /
+# ABI compatibility gate (libabigail). Post-1.0, every library's exported
+# surface must stay compatible across patch releases and additive across
+# minor releases. The reference ABI is dumped from the previous tag; a PR
+# that changes it fails here with a typed report (fn-symbol / fn-para /
 # data-member kind) instead of breaking a downstream consumer silently.
+#
+# Pre-1.0 there is no binary compatibility promise (docs/reference/api.md):
+# the SONAME carries the full X.Y.Z, so a binary built against one release
+# fails to load another instead of silently reading a changed descriptor.
+# The gate still reports every difference for review, but only post-1.0
+# differences fail. The pre-1.0 invariant it enforces is that the SONAME
+# actually carries the full version.
 #
 # Reference: the most recent tag reachable from this commit (typically
 # the previous release). A release commit itself compares against the
 # release before it, so every release-to-release ABI diff is reviewed.
 #
-# Suppressible: genuine intentional breaks (pre-1.0, one line in
-# docs/reference/api.md + a minor-version bump) are recorded in
+# Suppressible: genuine intentional post-1.0 breaks are recorded in
 # tools/config/abi-supprs.abignore — the suppression file is part of the
 # review, not a shadow valve.
 
@@ -42,7 +48,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential meson ninja-build pkg-config abigail-tools \
-            libvulkan-dev libfreetype-dev
+            glslang-tools libvulkan-dev libfreetype-dev
+
+      # The reference tag still compiles GLSL; the current tree needs Slang.
+      - name: Install Slang compiler
+        run: |
+          SLANG_VER="2026.21"
+          curl -sSL "https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-linux-x86_64.tar.gz" | sudo tar -xz -C /usr/local
 
       - name: Determine reference tag
         id: ref
@@ -87,23 +99,40 @@ jobs:
         if: steps.ref.outputs.skip != 'true'
         run: |
           set -e
-          REF_LIBS=$(find /tmp/abi-ref/build -name 'lib*.so.*' ! -name '*.*.*.*' | sort)
+          version=$(sed -n "s/^  version : '\([^']*\)'.*/\1/p" meson.build | head -1)
+          major=${version%%.*}
+          REF_LIBS=$(find /tmp/abi-ref/build -type f -name 'lib*.so.*' | sort)
           FAIL=0
           for ref in $REF_LIBS; do
             name=$(basename "$ref" | sed 's/\.so\..*//')
-            cur=$(find build-abi -name "$(basename "$ref")" | head -1)
+            cur=$(find build-abi -type f -name "${name}.so.*" | head -1)
             if [ -z "$cur" ]; then
               echo "FAIL: $name missing from current build"
               FAIL=1
               continue
             fi
-            echo "=== $name: $(basename "$ref") vs $(basename "$cur")"
+            soname=$(readelf -d "$cur" | sed -n 's/.*SONAME.*\[\(.*\)\]/\1/p')
+            echo "=== $name: $(basename "$ref") vs $(basename "$cur") (SONAME $soname)"
+            if [ "$major" = "0" ]; then
+              case "$soname" in
+                *"$version"*) ;;
+                *)
+                  echo "FAIL: pre-1.0 SONAME '$soname' does not carry full version '$version'"
+                  FAIL=1
+                  ;;
+              esac
+            fi
             if ! abidiff --leaf-changes-only \
                  --suppressions tools/config/abi-supprs.abignore \
                  "$ref" "$cur" > /tmp/abidiff-$name.txt; then
-              echo "ABI BREAK in $name:"
-              cat /tmp/abidiff-$name.txt
-              FAIL=1
+              if [ "$major" = "0" ]; then
+                echo "pre-1.0 ABI change in $name (release-specific SONAME allows it):"
+                head -40 /tmp/abidiff-$name.txt
+              else
+                echo "ABI BREAK in $name:"
+                cat /tmp/abidiff-$name.txt
+                FAIL=1
+              fi
             else
               head -5 /tmp/abidiff-$name.txt || true
             fi

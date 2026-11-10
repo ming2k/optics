@@ -1732,27 +1732,62 @@ impl Surface {
 
     /// Acquire the next frame. Returns the backend result so callers can handle
     /// `SURFACE_LOST` / out-of-date by resizing.
+    ///
+    /// The caller did not describe what changed, so Flux conservatively treats
+    /// the frame as full-extent. Use [`Self::begin_frame_with_damage`] when the
+    /// compositor has a localized damage set.
     pub fn begin_frame(&self) -> Result<Frame<'_>, Error> {
-        self.begin_frame_opts(0, false)
+        self.begin_frame_opts(0, false, &Damage::Full)
     }
 
-    /// Acquire the next frame with an explicit timeout in nanoseconds.
+    /// Acquire the next frame with an explicit timeout in nanoseconds. Equivalent
+    /// to [`Self::begin_frame`] with the default conservative damage verdict.
     pub fn begin_frame_timeout(&self, timeout_ns: u64) -> Result<Frame<'_>, Error> {
-        self.begin_frame_opts(timeout_ns, false)
+        self.begin_frame_opts(timeout_ns, false, &Damage::Full)
+    }
+
+    /// Acquire the next frame with the changes this frame is about to record.
+    ///
+    /// Flux unions this with the history the acquired image missed and exposes
+    /// the exact repaint scope through [`Frame::repaint_scope`]. On windowed
+    /// surfaces the engine repairs history from its persistent content image,
+    /// so the returned scope is only the current damage.
+    pub fn begin_frame_with_damage(&self, damage: &Damage) -> Result<Frame<'_>, Error> {
+        self.begin_frame_opts(0, false, damage)
+    }
+
+    /// Timed variant of [`Self::begin_frame_with_damage`].
+    pub fn begin_frame_timeout_with_damage(
+        &self,
+        timeout_ns: u64,
+        damage: &Damage,
+    ) -> Result<Frame<'_>, Error> {
+        self.begin_frame_opts(timeout_ns, false, damage)
     }
 
     /// Acquire the next frame non-blockingly. Returns `Error::Timeout` immediately
     /// if the fence has not retired or a swapchain image is not ready, without
     /// blocking the calling thread.
     pub fn begin_frame_nonblocking(&self) -> Result<Frame<'_>, Error> {
-        self.begin_frame_opts(0, true)
+        self.begin_frame_opts(0, true, &Damage::Full)
     }
 
-    fn begin_frame_opts(&self, timeout_ns: u64, non_blocking: bool) -> Result<Frame<'_>, Error> {
+    fn begin_frame_opts(
+        &self,
+        timeout_ns: u64,
+        non_blocking: bool,
+        damage: &Damage,
+    ) -> Result<Frame<'_>, Error> {
+        let (raw_rects, full) = damage.raw();
         let desc = sys::flux_frame_begin_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_FRAME_BEGIN_DESC,
             timeout_ns,
             non_blocking,
+            damage: sys::flux_damage {
+                rects: raw_rects.as_ptr(),
+                count: raw_rects.len() as u32,
+            },
+            damage_full: full,
             ..unsafe { std::mem::zeroed() }
         };
         let mut out: *mut sys::flux_frame = std::ptr::null_mut();
@@ -1761,6 +1796,38 @@ impl Surface {
             raw: out,
             surface: self,
         })
+    }
+
+    /// The damage the last presented frame has not put on screen yet, in
+    /// physical surface pixels. This is the set a KMS/scanout hint should use:
+    /// it includes frames submitted and then abandoned before scanout, and it is
+    /// independent of which ring image the next frame acquires.
+    pub fn scanout_damage(&self) -> Result<Damage, Error> {
+        let mut raw = [sys::flux_rect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        }; sys::FLUX_DAMAGE_CAPACITY as usize];
+        let mut count = 0u32;
+        let mut full = false;
+        Error::check(unsafe {
+            sys::flux_surface_scanout_damage(
+                self.raw,
+                raw.as_mut_ptr(),
+                raw.len() as u32,
+                &mut count,
+                &mut full,
+            )
+        })?;
+        Ok(Damage::from_raw(&raw, count, full))
+    }
+
+    /// Forget all damage epochs, e.g. after a VT switch made the display
+    /// contents unknown. The next frame repaints in full. Must not be called
+    /// while a frame is recording.
+    pub fn invalidate_damage(&self) {
+        unsafe { sys::flux_surface_invalidate_damage(self.raw) };
     }
 
     /// Raw `flux_surface*` for FFI edges (iris does this when bridging).
@@ -1818,6 +1885,44 @@ impl<'surface> Frame<'surface> {
     /// one instance per slot when the previous frame may still be executing.
     pub fn index(&self) -> u32 {
         unsafe { sys::flux_frame_index(self.raw) }
+    }
+
+    /// Swapchain image acquired for this frame, stable until present.
+    ///
+    /// Damage history and any content-preservation cache belong to this index,
+    /// not to [`Self::index`]: the presentation engine may own more images than
+    /// there are frames in flight, and the mapping from slot to image is not
+    /// stable across frames. For offscreen surfaces this equals the slot.
+    pub fn image_index(&self) -> u32 {
+        unsafe { sys::flux_frame_image_index(self.raw) }
+    }
+
+    /// The exact pixels this recording frame must repaint, in physical surface
+    /// pixels. `Damage::Full` means repaint the whole extent; `Damage::None`
+    /// means the acquired image is already current (a capture/pacing frame).
+    ///
+    /// The scope is Flux's own answer, derived from the per-image epoch history
+    /// and the damage passed to the begin call. Callers must not maintain a
+    /// parallel per-image damage ledger.
+    pub fn repaint_scope(&self) -> Result<Damage, Error> {
+        let mut raw = [sys::flux_rect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        }; sys::FLUX_DAMAGE_CAPACITY as usize];
+        let mut count = 0u32;
+        let mut full = false;
+        Error::check(unsafe {
+            sys::flux_frame_repaint_scope(
+                self.raw,
+                raw.as_mut_ptr(),
+                raw.len() as u32,
+                &mut count,
+                &mut full,
+            )
+        })?;
+        Ok(Damage::from_raw(&raw, count, full))
     }
 
     /// Current extent of the surface this frame records into.
@@ -2854,6 +2959,68 @@ pub struct CanvasRenderArea {
     pub height: f32,
 }
 
+/// A frame/scanout damage verdict in physical surface pixels.
+///
+/// This is deliberately not a canvas-pass scope: an empty pass scope means the
+/// whole destination, while [`Damage::None`] means nothing changed. Keeping the
+/// verdict explicit prevents the two conventions from drifting.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Damage {
+    None,
+    Area(Vec<CanvasRenderArea>),
+    Full,
+}
+
+impl Damage {
+    pub(crate) fn raw(&self) -> (Vec<sys::flux_rect>, bool) {
+        match self {
+            Self::None => (Vec::new(), false),
+            Self::Full => (Vec::new(), true),
+            Self::Area(areas) => (
+                areas
+                    .iter()
+                    .map(|a| sys::flux_rect {
+                        x: a.x,
+                        y: a.y,
+                        w: a.width,
+                        h: a.height,
+                    })
+                    .collect(),
+                false,
+            ),
+        }
+    }
+
+    pub(crate) fn from_raw(raw: &[sys::flux_rect], count: u32, full: bool) -> Self {
+        if full {
+            return Self::Full;
+        }
+        let n = (count as usize).min(raw.len());
+        if n == 0 {
+            return Self::None;
+        }
+        Self::Area(
+            raw[..n]
+                .iter()
+                .map(|r| CanvasRenderArea {
+                    x: r.x,
+                    y: r.y,
+                    width: r.w,
+                    height: r.h,
+                })
+                .collect(),
+        )
+    }
+
+    pub fn is_full(&self) -> bool {
+        matches!(self, Self::Full)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
 /// Build the stable base pass descriptor and its optional stack-owned pNext
 /// extension, then invoke `f` while every referenced value is alive. Keeping
 /// the no-stencil policy out of the base structure preserves C ABI compatibility
@@ -2863,8 +3030,10 @@ fn with_raw_canvas_pass_desc<T>(
     f: impl FnOnce(&sys::flux_canvas_pass_desc) -> T,
 ) -> T {
     let clear = options.clear;
-    // The C descriptor borrows this array for the duration of the call, which is
-    // exactly the lifetime `f` observes.
+    // The C descriptor reads this array during `flux_canvas_begin` and copies
+    // it into canvas-owned storage before returning; it is not retained for the
+    // session lifetime. Keeping the Vec local is therefore correct and avoids
+    // forcing every session to own a second copy of its damage scope.
     let damage_rects: Vec<sys::flux_rect> = options
         .damage
         .iter()

@@ -59,6 +59,7 @@ bool test_helpers_have_vulkan(void);
  * Caller owns the returned pointer; release with flux_device_release().
  */
 flux_device *test_helpers_make_headless_device(void);
+flux_device *test_helpers_make_headless_device_in_flight(uint32_t frames_in_flight);
 
 /*
  * Create a device that requires the dma-buf external-memory

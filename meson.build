@@ -21,12 +21,22 @@ pkg = import('pkgconfig')
 clang_cc = find_program('clang', required : false, version : '>=10')
 
 # Soname policy shared by every library in this tree (see
-# docs/reference/api.md): the SONAME encodes the compatibility boundary
-# (major.minor while pre-1.0 — patches are binary compatible, minors may
-# break), while the real-name suffix carries the full X.Y.Z. Deriving it
-# once here keeps all six libraries consistent by construction.
+# docs/reference/api.md).
+#
+# Pre-1.0 there is no ABI promise: this tree has repeatedly appended fields to
+# tagged descriptor structs and changed behavior in *patch* releases
+# (`0.0.74 -> 0.0.75` added the Canvas damage scope). A SONAME of
+# `major.minor` collapses every `0.0.x` release onto `libflux.so.0.0`, so a
+# binary built against one release silently loads another and reads a struct
+# whose layout it does not share. The pre-1.0 compatibility boundary is
+# therefore the full version string. From 1.0 on it is `major.minor`, while the
+# real-name suffix continues to carry the full X.Y.Z.
 optics_version_parts = meson.project_version().split('.')
-optics_soname = '@0@.@1@'.format(optics_version_parts[0], optics_version_parts[1])
+if optics_version_parts[0].to_int() == 0
+  optics_soname = meson.project_version()
+else
+  optics_soname = '@0@.@1@'.format(optics_version_parts[0], optics_version_parts[1])
+endif
 
 # _GNU_SOURCE is a glibc feature-test macro; defining it on Windows /
 # macOS toolchains is at best meaningless and at worst an error.

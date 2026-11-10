@@ -1,4 +1,4 @@
-glslang = find_program('glslangValidator', required : true)
+slangc = find_program('slangc', required : true)
 
 # C23 #embed bakes SPIR-V into the example binaries; toolchains without it
 # (MSVC cl, Apple Clang) take the tools/build/spv2h.py generated headers instead
@@ -10,9 +10,9 @@ spv2h    = files('../../tools/build/spv2h.py')
 
 # Headless compute example — built unconditionally.
 fill_comp_spv = custom_target('fill.comp.spv',
-  input   : 'shaders/fill.comp',
+  input   : 'shaders/fill.slang',
   output  : 'fill.comp.spv',
-  command : [glslang, '-V', '--target-env', 'vulkan1.3', '@INPUT@', '-o', '@OUTPUT@'],
+  command : [slangc, '-target', 'spirv', '-profile', 'spirv_1_6', '-entry', 'main', '-stage', 'compute', '@INPUT@', '-o', '@OUTPUT@'],
 )
 fill_comp_h = custom_target('fill_comp_spv.h',
   input   : fill_comp_spv,

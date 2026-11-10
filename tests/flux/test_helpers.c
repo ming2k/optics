@@ -71,16 +71,20 @@ bool test_helpers_have_vulkan(void) {
     return g_have_vulkan_cached == 1;
 }
 
-flux_device *test_helpers_make_headless_device(void) {
+flux_device *test_helpers_make_headless_device_in_flight(uint32_t frames_in_flight) {
     flux_device_desc d = FLUX_DEVICE_DESC_INIT;
     d.headless = true;
-    d.frames_in_flight = 1;
+    d.frames_in_flight = frames_in_flight;
     d.validation = FLUX_VALIDATION_OFF;
     flux_device *out = nullptr;
     if (flux_device_create(&d, &out) != FLUX_OK)
         return nullptr;
     pin_loaded_vulkan_drivers();
     return out;
+}
+
+flux_device *test_helpers_make_headless_device(void) {
+    return test_helpers_make_headless_device_in_flight(1);
 }
 
 /*

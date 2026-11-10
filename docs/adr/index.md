@@ -187,3 +187,6 @@ silent fallback. Its primitives have landed.
 | 0151 | [A caret blink is a phase, not a level — lens owns the clock, the host forwards the edge](0151-caret-blink-is-a-phase-not-a-level.md) | Accepted |
 | 0152 | [An ease must terminate — settled values snap, and a poll cap bounds only what can wake it](0152-an-ease-must-terminate.md) | Accepted |
 | 0153 | [A binding must carry the library's diagnostic, not just its result code](0153-a-binding-carries-the-library-diagnostic.md) | Accepted |
+| 0154 | [Pairwise-disjoint damage decomposition, single-pass output blits, and idempotent UNORM8 output dither](0154-pairwise-disjoint-damage-and-idempotent-output-dither.md) | Accepted |
+| 0155 | [Frame damage is a native epoch ledger, not a caller-side per-image history](0155-frame-damage-is-a-native-epoch-ledger.md) | Accepted |
+| 0156 | [Slang-first shader architecture — retiring GLSL, modular device code, and clean-break SPIR-V compilation](0156-slang-first-shader-architecture.md) | Accepted |

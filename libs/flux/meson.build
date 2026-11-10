@@ -98,6 +98,14 @@ flux_embed_dir_arg = cc.get_supported_arguments('--embed-dir=' + meson.current_b
 if opt_canvas or opt_scene or opt_effect
   flux_c_args += flux_embed_dir_arg
 endif
+# One Slang discovery for every shader-bearing module. Defining it here (not
+# inside the canvas block) keeps `-Dcanvas=false -Dscene=true` and
+# `-Dcanvas=false -Deffect=true` valid configurations: both compile shaders.
+if opt_canvas or opt_scene or opt_effect
+  slangc = find_program('slangc', required : true)
+  slangc_flags = ['-target', 'spirv', '-profile', 'spirv_1_6', '-Wno-41012']
+endif
+
 # Per-shader accumulators for the generated-header fallback; the
 # custom_target loop sits after the module blocks.
 flux_shader_spvs = []
@@ -122,90 +130,84 @@ if opt_canvas
   )
   flux_c_args += '-DFLUX_HAVE_CANVAS=1'
 
-  glslang = find_program('glslangValidator', required : true)
+  canvas_shader_deps = [
+    files('src/canvas/shaders/canvas_color.slang'),
+    files('include/flux/shaders/flux_sdf.slang'),
+    files('include/flux/shaders/flux_vector_eval.slang'),
+  ]
+  canvas_shader_inc = [
+    '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+    '-I' + meson.current_source_dir() / 'include',
+    '-I' + meson.current_source_dir() / 'include/flux/shaders',
+  ]
   canvas_solid_vert_spv = custom_target('canvas_solid.vert.spv',
-    input   : 'src/canvas/shaders/canvas_solid.vert',
-    depend_files : 'src/canvas/shaders/canvas_color.glsl',
-
+    input   : 'src/canvas/shaders/canvas_solid.vert.slang',
+    depend_files : canvas_shader_deps,
     output  : 'canvas_solid.vert.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'vertex',
+               canvas_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_solid_frag_spv = custom_target('canvas_solid.frag.spv',
-    input   : 'src/canvas/shaders/canvas_solid.frag',
+    input   : 'src/canvas/shaders/canvas_solid.frag.slang',
+    depend_files : canvas_shader_deps,
     output  : 'canvas_solid.frag.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'fragment',
+               canvas_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_gradient_frag_spv = custom_target('canvas_gradient.frag.spv',
-    input   : 'src/canvas/shaders/canvas_gradient.frag',
-    depend_files : 'src/canvas/shaders/canvas_color.glsl',
-
+    input   : 'src/canvas/shaders/canvas_gradient.frag.slang',
+    depend_files : canvas_shader_deps,
     output  : 'canvas_gradient.frag.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'fragment',
+               canvas_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_image_frag_spv = custom_target('canvas_image.frag.spv',
-    input   : 'src/canvas/shaders/canvas_image.frag',
-    depend_files : ['src/canvas/shaders/canvas_color.glsl',
-                    'include/flux/shaders/flux_sdf.glsl'],
-
+    input   : 'src/canvas/shaders/canvas_image.frag.slang',
+    depend_files : canvas_shader_deps,
     output  : 'canvas_image.frag.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '-I' + meson.current_source_dir() / 'include/flux/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'fragment',
+               canvas_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_glyph_frag_spv = custom_target('canvas_glyph.frag.spv',
-    input   : 'src/canvas/shaders/canvas_glyph.frag',
+    input   : 'src/canvas/shaders/canvas_glyph.frag.slang',
+    depend_files : canvas_shader_deps,
     output  : 'canvas_glyph.frag.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'fragment',
+               canvas_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_sdf_frag_spv = custom_target('canvas_sdf.frag.spv',
-    input   : 'src/canvas/shaders/canvas_sdf.frag',
-    depend_files : 'include/flux/shaders/flux_sdf.glsl',
+    input   : 'src/canvas/shaders/canvas_sdf.frag.slang',
+    depend_files : canvas_shader_deps,
     output  : 'canvas_sdf.frag.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '-I' + meson.current_source_dir() / 'include/flux/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'fragment',
+               canvas_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_output_vert_spv = custom_target('canvas_output.vert.spv',
-    input   : 'src/canvas/shaders/canvas_output.vert',
+    input   : 'src/canvas/shaders/canvas_output.vert.slang',
+    depend_files : canvas_shader_deps,
     output  : 'canvas_output.vert.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'vertex',
+               canvas_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_output_frag_spv = custom_target('canvas_output.frag.spv',
-    input   : 'src/canvas/shaders/canvas_output.frag',
-    depend_files : 'src/canvas/shaders/canvas_color.glsl',
-
+    input   : 'src/canvas/shaders/canvas_output.frag.slang',
+    depend_files : canvas_shader_deps,
     output  : 'canvas_output.frag.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'fragment',
+               canvas_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_tile_raster_comp_spv = custom_target('canvas_tile_raster.comp.spv',
-    input   : 'src/canvas/shaders/canvas_tile_raster.comp',
+    input   : 'src/canvas/shaders/canvas_tile_raster.comp.slang',
     output  : 'canvas_tile_raster.comp.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+               canvas_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   canvas_vector_frag_spv = custom_target('canvas_vector.frag.spv',
-    input   : 'src/canvas/shaders/canvas_vector.frag',
-    depend_files : ['src/canvas/shaders/canvas_color.glsl',
-                    'include/flux/shaders/flux_vector_eval.glsl'],
+    input   : 'src/canvas/shaders/canvas_vector.frag.slang',
+    depend_files : canvas_shader_deps,
     output  : 'canvas_vector.frag.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '-I' + meson.current_source_dir() / 'include/flux/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'fragment',
+               canvas_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   flux_extra_inputs += [canvas_solid_vert_spv, canvas_solid_frag_spv,
                         canvas_gradient_frag_spv, canvas_image_frag_spv,
@@ -227,69 +229,71 @@ if opt_scene
   flux_sources += files('src/scene/scene.c')
   flux_c_args += '-DFLUX_HAVE_SCENE=1'
 
-  if not is_variable('glslang')
-    glslang = find_program('glslangValidator', required : true)
-  endif
-  scene_shader_deps = ['src/scene/shaders/scene_color.glsl',
-                       'src/canvas/shaders/canvas_color.glsl',
-                       'include/flux/shaders/flux_vector_eval.glsl']
-  scene_shader_inc = ['-I' + meson.current_source_dir() / 'src/canvas/shaders',
-                      '-I' + meson.current_source_dir() / 'src/scene/shaders',
-                      '-I' + meson.current_source_dir() / 'include/flux/shaders']
+  scene_shader_deps = [
+    files('src/scene/shaders/scene_color.slang'),
+    files('src/canvas/shaders/canvas_color.slang'),
+    files('include/flux/shaders/flux_vector_eval.slang'),
+  ]
+  scene_shader_inc = [
+    '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+    '-I' + meson.current_source_dir() / 'src/scene/shaders',
+    '-I' + meson.current_source_dir() / 'include',
+    '-I' + meson.current_source_dir() / 'include/flux/shaders',
+  ]
   scene_unlit_vert_spv = custom_target('scene_unlit.vert.spv',
-    input   : 'src/scene/shaders/scene_unlit.vert',
+    input   : 'src/scene/shaders/scene_unlit.vert.slang',
     depend_files : scene_shader_deps,
     output  : 'scene_unlit.vert.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'vertex',
                scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_unlit_frag_spv = custom_target('scene_unlit.frag.spv',
-    input   : 'src/scene/shaders/scene_unlit.frag',
+    input   : 'src/scene/shaders/scene_unlit.frag.slang',
     depend_files : scene_shader_deps,
     output  : 'scene_unlit.frag.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'fragment',
                scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_phong_vert_spv = custom_target('scene_phong.vert.spv',
-    input   : 'src/scene/shaders/scene_phong.vert',
+    input   : 'src/scene/shaders/scene_phong.vert.slang',
     depend_files : scene_shader_deps,
     output  : 'scene_phong.vert.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'vertex',
                scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_phong_frag_spv = custom_target('scene_phong.frag.spv',
-    input   : 'src/scene/shaders/scene_phong.frag',
+    input   : 'src/scene/shaders/scene_phong.frag.slang',
     depend_files : scene_shader_deps,
     output  : 'scene_phong.frag.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'fragment',
                scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_unlit_skin_vert_spv = custom_target('scene_unlit_skin.vert.spv',
-    input   : 'src/scene/shaders/scene_unlit_skin.vert',
+    input   : 'src/scene/shaders/scene_unlit_skin.vert.slang',
     depend_files : scene_shader_deps,
     output  : 'scene_unlit_skin.vert.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'vertex',
                scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_phong_skin_vert_spv = custom_target('scene_phong_skin.vert.spv',
-    input   : 'src/scene/shaders/scene_phong_skin.vert',
+    input   : 'src/scene/shaders/scene_phong_skin.vert.slang',
     depend_files : scene_shader_deps,
     output  : 'scene_phong_skin.vert.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'vertex',
                scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_vector_vert_spv = custom_target('scene_vector.vert.spv',
-    input   : 'src/scene/shaders/scene_vector.vert',
+    input   : 'src/scene/shaders/scene_vector.vert.slang',
     depend_files : scene_shader_deps,
     output  : 'scene_vector.vert.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'vertex',
                scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   scene_vector_frag_spv = custom_target('scene_vector.frag.spv',
-    input   : 'src/scene/shaders/scene_vector.frag',
+    input   : 'src/scene/shaders/scene_vector.frag.slang',
     depend_files : scene_shader_deps,
     output  : 'scene_vector.frag.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'fragment',
                scene_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   flux_extra_inputs += [scene_unlit_vert_spv, scene_unlit_frag_spv,
@@ -313,52 +317,48 @@ if opt_effect
   flux_sources += files('src/effect/effect.c')
   flux_c_args += '-DFLUX_HAVE_EFFECT=1'
 
-  if not is_variable('glslang')
-    glslang = find_program('glslangValidator', required : true)
-  endif
+  effect_shader_inc = [
+    '-I' + meson.current_source_dir() / 'src/canvas/shaders',
+    '-I' + meson.current_source_dir() / 'include',
+    '-I' + meson.current_source_dir() / 'include/flux/shaders',
+  ]
   effect_blur_comp_spv = custom_target('effect_blur.comp.spv',
-    input   : 'src/effect/shaders/effect_blur.comp',
+    input   : 'src/effect/shaders/effect_blur.comp.slang',
     output  : 'effect_blur.comp.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+               effect_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   effect_backdrop_comp_spv = custom_target('effect_backdrop.comp.spv',
-    input   : 'src/effect/shaders/effect_backdrop.comp',
+    input   : 'src/effect/shaders/effect_backdrop.comp.slang',
     output  : 'effect_backdrop.comp.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+               effect_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   # ADR-0069: rgba16f storage variants for working-space (16F) content.
   effect_blur_16f_comp_spv = custom_target('effect_blur_16f.comp.spv',
-    input   : 'src/effect/shaders/effect_blur.comp',
+    input   : 'src/effect/shaders/effect_blur.comp.slang',
     output  : 'effect_blur_16f.comp.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3', '-DEFFECT_STORAGE_RGBA16F',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+               '-DEFFECT_STORAGE_RGBA16F', effect_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   effect_backdrop_16f_comp_spv = custom_target('effect_backdrop_16f.comp.spv',
-    input   : 'src/effect/shaders/effect_backdrop.comp',
+    input   : 'src/effect/shaders/effect_backdrop.comp.slang',
     output  : 'effect_backdrop_16f.comp.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3', '-DEFFECT_STORAGE_RGBA16F',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+               '-DEFFECT_STORAGE_RGBA16F', effect_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   # ADR-0074: drop-shadow operator (mask in, tinted premultiplied shadow out).
   effect_shadow_comp_spv = custom_target('effect_shadow.comp.spv',
-    input   : 'src/effect/shaders/effect_shadow.comp',
+    input   : 'src/effect/shaders/effect_shadow.comp.slang',
     output  : 'effect_shadow.comp.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+               effect_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   effect_shadow_16f_comp_spv = custom_target('effect_shadow_16f.comp.spv',
-    input   : 'src/effect/shaders/effect_shadow.comp',
+    input   : 'src/effect/shaders/effect_shadow.comp.slang',
     output  : 'effect_shadow_16f.comp.spv',
-    command : [glslang, '-V', '--target-env', 'vulkan1.3', '-DEFFECT_STORAGE_RGBA16F',
-               '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-               '@INPUT@', '-o', '@OUTPUT@'],
+    command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
+               '-DEFFECT_STORAGE_RGBA16F', effect_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
   flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
                         effect_blur_16f_comp_spv, effect_backdrop_16f_comp_spv,
@@ -402,15 +402,16 @@ endif
 # flux_canvas_draw_glyph_run remains in the canvas module — glyph feeds it.
 
 # SO versioning (libtool semantics, per docs/reference/api.md):
-#   - `soversion` (the SONAME) encodes the *compatibility boundary*. The
-#     policy table says pre-1.0 patch releases are binary compatible and
-#     minor releases may break; therefore the SONAME is "major.minor"
-#     (optics_soname, derived once in the top-level meson.build).
-#   - `version` (the real-name suffix) is the full X.Y.Z so each release
-#     is a distinct file on disk while ld.so still resolves to the same
-#     SONAME across patches.
-# Carrying the full X.Y.Z in the SONAME (as this file once did) changes
-# the link name on every patch release and contradicts the policy table.
+#   - `soversion` (the SONAME) encodes the *compatibility boundary*. Pre-1.0
+#     this tree has appended descriptor fields and changed pass behavior on
+#     patch bumps, so the boundary is the full version (`0.0.75`). From 1.0 on
+#     it is `major.minor`; `optics_soname` is derived once in the top-level
+#     meson.build.
+#   - `version` (the real-name suffix) is the full X.Y.Z so each release is a
+#     distinct file on disk.
+# Keeping a binary linked to one pre-1.0 release from silently loading another
+# is the point: the SONAMEs differ and ld.so fails fast instead of reading a
+# descriptor whose layout changed.
 
 flux_lib = library('flux',
   flux_sources,
@@ -437,10 +438,10 @@ install_headers(
   subdir : 'flux',
 )
 
-# The analytic distance field is defined once for GLSL consumers too
-# (ADR-0118); Prism's materials include it rather than keeping private copies.
-install_headers('include/flux/shaders/flux_sdf.glsl',
-                'include/flux/shaders/flux_vector_eval.glsl',
+# The analytic distance field is defined once for Slang consumers too
+# (ADR-0118, ADR-0156); Prism's materials include it rather than keeping private copies.
+install_headers('include/flux/shaders/flux_sdf.slang',
+                'include/flux/shaders/flux_vector_eval.slang',
                 subdir : 'flux/shaders')
 install_headers('include/flux/vault/tess_earcut.h', subdir : 'flux/vault')
 if opt_canvas
