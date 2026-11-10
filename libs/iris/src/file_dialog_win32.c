@@ -284,7 +284,7 @@ static int pick_open(const iris_file_dialog_opts *opts, bool multiple, bool fold
     if (out_truncated)
         *out_truncated = 0;
     if (!out_paths || out_cap == 0)
-        return 0;
+        return IRIS_PICK_UNAVAILABLE;
     out_paths[0] = '\0';
     if (out_bytes_used)
         *out_bytes_used = 0;
