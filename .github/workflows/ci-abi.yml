@@ -54,7 +54,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential ninja-build pkg-config abigail-tools \
-            glslang-tools libvulkan-dev libfreetype-dev
+            glslang-tools libvulkan-dev libfreetype-dev libharfbuzz-dev \
+            libfontconfig1-dev libfribidi-dev
 
       # The reference tag still compiles GLSL; the current tree needs Slang.
       - name: Install Slang compiler

@@ -16,7 +16,7 @@
  *    capped by the caller's max_results. Unlike fontconfig this does NOT
  *    cross family boundaries; per-codepoint fallback below picks up
  *    CJK/emoji coverage.
- *  - Codepoint query: CTFontCreateForCharacters on the family-matched
+ *  - Codepoint query: CTFontCreateForString on the family-matched
  *    base font — CoreText's cascade/fallback mechanism — then a coverage
  *    verification (mirroring the fontconfig backend).
  *  - File path: CTFontDescriptorCopyAttribute(kCTFontURLAttribute) →
@@ -145,8 +145,8 @@ static CTFontDescriptorRef make_descriptor(const char *family_name, float weight
 
     CGFloat w = css_to_ct_weight(weight);
     CFNumberRef wnum = CFNumberCreate(kCFAllocatorDefault, kCFNumberCGFloatType, &w);
-    uint32_t symbolic = italic ? (uint32_t)kCTFontItalicTrait : 0u;
-    CFNumberRef snum = CFNumberCreate(kCFAllocatorDefault, kCFNumberUInt32Type, &symbolic);
+    SInt32 symbolic = italic ? (SInt32)kCTFontItalicTrait : 0;
+    CFNumberRef snum = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &symbolic);
 
     CTFontDescriptorRef desc = NULL;
     CFDictionaryRef traits = NULL;
@@ -295,7 +295,13 @@ bool txt_platform_font_query_codepoint(const char *family_name, float weight, bo
     }
 
     /* CoreText cascade: the fallback font that renders these characters. */
-    fb = CTFontCreateForCharacters(base, chars, len, NULL);
+    {
+        CFStringRef probe = CFStringCreateWithCharacters(kCFAllocatorDefault, chars, len);
+        if (!probe)
+            goto done;
+        fb = CTFontCreateForString(base, probe, CFRangeMake(0, len));
+        CFRelease(probe);
+    }
     if (!fb)
         goto done;
 

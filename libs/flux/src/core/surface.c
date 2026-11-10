@@ -2279,37 +2279,6 @@ flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
     return FLUX_OK;
 }
 
-void flux_surface_invalidate_damage(flux_surface *s) {
-    if (!s)
-        return;
-    flux_damage_history_reset(&s->damage_history);
-    for (uint32_t i = 0; i < s->image_count; ++i)
-        s->image_epoch[i] = FLUX_DAMAGE_EPOCH_NONE;
-    s->presented_epoch = FLUX_DAMAGE_EPOCH_NONE;
-    s->frame_slot.epoch = 0;
-    s->frame_slot.repaint.count = 0;
-    s->frame_slot.repaint_full = false;
-}
-
-flux_result flux_surface_scanout_damage(const flux_surface *s, flux_rect *out_rects,
-                                        uint32_t capacity, uint32_t *out_count, bool *out_full) {
-    if (!s || !out_count || !out_full || (capacity > 0 && !out_rects))
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    *out_count = 0;
-    *out_full = true;
-    if (s->presented_epoch == FLUX_DAMAGE_EPOCH_NONE)
-        return FLUX_OK;
-
-    bool full = false;
-    const uint32_t count = flux_damage_history_since(&s->damage_history, s->presented_epoch,
-                                                     out_rects, capacity, &full);
-    if (full)
-        return FLUX_OK;
-    *out_full = false;
-    *out_count = count;
-    return FLUX_OK;
-}
-
 flux_result flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, int *out_sync_fd) {
     if (!s || !out_fd || !out_sync_fd)
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -2359,6 +2328,39 @@ flux_result flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, in
     return FLUX_ERROR_UNSUPPORTED;
 }
 #endif /* FLUX_HAVE_DMABUF */
+
+/* Damage history is platform-neutral state; keep it outside the dma-buf
+ * branch so macOS/Windows export the symbols too. */
+void flux_surface_invalidate_damage(flux_surface *s) {
+    if (!s)
+        return;
+    flux_damage_history_reset(&s->damage_history);
+    for (uint32_t i = 0; i < s->image_count; ++i)
+        s->image_epoch[i] = FLUX_DAMAGE_EPOCH_NONE;
+    s->presented_epoch = FLUX_DAMAGE_EPOCH_NONE;
+    s->frame_slot.epoch = 0;
+    s->frame_slot.repaint.count = 0;
+    s->frame_slot.repaint_full = false;
+}
+
+flux_result flux_surface_scanout_damage(const flux_surface *s, flux_rect *out_rects,
+                                        uint32_t capacity, uint32_t *out_count, bool *out_full) {
+    if (!s || !out_count || !out_full || (capacity > 0 && !out_rects))
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_count = 0;
+    *out_full = true;
+    if (s->presented_epoch == FLUX_DAMAGE_EPOCH_NONE)
+        return FLUX_OK;
+
+    bool full = false;
+    const uint32_t count = flux_damage_history_since(&s->damage_history, s->presented_epoch,
+                                                     out_rects, capacity, &full);
+    if (full)
+        return FLUX_OK;
+    *out_full = false;
+    *out_count = count;
+    return FLUX_OK;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Raw VK accessors (vulkan.h)                                       */
