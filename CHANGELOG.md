@@ -14,6 +14,8 @@ silently reading a different descriptor layout.
 
 ## [Unreleased]
 
+## [0.0.76] - 2026-11-10
+
 ### Added
 
 - **flux & prism**: Complete, clean-break migration of the entire shader infrastructure
@@ -44,7 +46,7 @@ silently reading a different descriptor layout.
   longer copies the whole swapchain image on every frame. A `Busy` retry no
   longer needs a full repaint.
 - **packaging**: Pre-1.0 SONAMEs now carry the full version
-  (`libflux.so.0.0.75`, not `libflux.so.0.0`). Releases in this line have
+  (`libflux.so.0.0.76`, not `libflux.so.0.0`). Releases in this line have
   appended descriptor fields and changed pass behavior on patch bumps; a
   shared SONAME let a binary built against one release load another and read a
   struct whose layout it did not share. The new boundary fails fast at load

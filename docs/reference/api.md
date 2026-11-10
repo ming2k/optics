@@ -235,9 +235,9 @@ differently:
 
 Pre-1.0, fields can be appended directly to a base desc when it makes
 sense. The pre-1.0 SONAME is the **full version string**
-(`libflux.so.0.0.75`), not `major.minor`: releases in this line have
+(`libflux.so.0.0.76`), not `major.minor`: releases in this line have
 appended descriptor fields and changed pass behavior on patch bumps, so
-`0.0.74` and `0.0.75` do not share a binary contract. A binary built against
+`0.0.75` and `0.0.76` do not share a binary contract. A binary built against
 one release fails to load the other instead of silently reading a smaller
 struct. Recompile against the matching headers when you upgrade.
 

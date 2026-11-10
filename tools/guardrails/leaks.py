@@ -274,7 +274,7 @@ def check_attribution(repo_root: Path, errors: list[str]) -> None:
 
     inspected = 0
     for build_dir in candidates:
-        lib = build_dir / "libs" / "flux" / "libflux.so.0.0.75"
+        lib = build_dir / "libs" / "flux" / "libflux.so.0.0.76"
         if not lib.is_file():
             found = sorted((build_dir / "libs" / "flux").glob("libflux.so*"))
             if not found:
