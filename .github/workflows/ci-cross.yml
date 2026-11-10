@@ -20,48 +20,51 @@ concurrency:
 
 jobs:
   windows:
-    name: build & test (windows-2022, clang-cl)
+    name: build & test (windows-2022, MSYS2 UCRT64)
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-
-      # Vulkan SDK provides headers and vulkan-1.lib. Slang is installed
-      # separately so Windows uses the same pinned compiler as Linux/macOS.
-      - name: Install Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.4.321.0
 
       - name: Install Slang compiler
         shell: pwsh
         run: |
           $ver = "2026.21"
           Invoke-WebRequest -Uri "https://github.com/shader-slang/slang/releases/download/v$ver/slang-$ver-windows-x86_64.zip" -OutFile slang.zip
-          Expand-Archive -Path slang.zip -DestinationPath "$env:RUNNER_TEMP\slang" -Force
-          "$env:RUNNER_TEMP\slang\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Expand-Archive -Path slang.zip -DestinationPath C:\slang -Force
 
-      - name: Install meson/ninja + clang
-        run: |
-          python -m pip install --upgrade pip
-          pip install 'meson>=1.8.0' ninja
+      # MinGW-w64 GCC has the C23 support this tree needs. The Vulkan
+      # headers/loader and text dependencies come from MSYS2 instead of the
+      # Windows Vulkan SDK installer, so the job does not depend on MSVC's
+      # development shell. fontconfig is Linux-only; DirectWrite is used here.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            meson ninja pkgconf
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-vulkan-headers
+            mingw-w64-ucrt-x86_64-vulkan-loader
+            mingw-w64-ucrt-x86_64-freetype
+            mingw-w64-ucrt-x86_64-harfbuzz
+            mingw-w64-ucrt-x86_64-fribidi
 
-      # freetype2 / harfbuzz / fribidi resolve via subprojects/*.wrap
-      # fallback (wrap-mode default: system first, wrap when missing).
-      # fontconfig is Linux-only — font discovery uses DirectWrite here.
       - name: Configure
-        shell: bash
+        shell: msys2 {0}
         run: |
+          export PATH="/c/slang/bin:$PATH"
           meson setup build -Dexamples=false -Dtests=true \
-            --buildtype=debugoptimized \
-            -Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled
+            --buildtype=debugoptimized
 
       - name: Compile
-        shell: bash
-        run: meson compile -C build
+        shell: msys2 {0}
+        run: |
+          export PATH="/c/slang/bin:$PATH"
+          meson compile -C build
 
       - name: Test (no GPU suites)
-        shell: bash
+        shell: msys2 {0}
         run: |
+          export PATH="/c/slang/bin:$PATH"
           meson test -C build --print-errorlogs \
             --no-suite integration --no-suite bench --no-suite fuzz
 

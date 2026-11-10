@@ -102,12 +102,18 @@ if host_system == 'linux'
     # scanner generates an unresolved extern for it. Stripping the
     # request (we never call it; iris is mouse-only today) avoids the
     # link error without dragging in tablet-tool-v2.
+    #
+    # text-input-unstable-v3.xml is also vendored: the listener fills every
+    # v2/v3 event slot (libwayland aborts on a NULL slot), while older host
+    # protocol packages — including Ubuntu 24.04's — predate `preedit_hint`,
+    # `action`, and `language`. Pinning the XML keeps the generated listener
+    # and app_wayland.c's slot contract in lockstep.
     wl = import('wayland')
     iris_proto_src = wl.scan_xml(
       wl.find_protocol('xdg-shell'),
       wl.find_protocol('xdg-decoration', state : 'unstable', version : 1),
       wl.find_protocol('xdg-foreign', state : 'unstable', version : 2),
-      wl.find_protocol('text-input', state : 'unstable', version : 3),
+      'protocol/text-input-unstable-v3.xml',
       wl.find_protocol('fractional-scale', state : 'staging', version : 1),
       wl.find_protocol('primary-selection', state : 'unstable', version : 1),
       wl.find_protocol('xdg-activation', state : 'staging', version : 1),

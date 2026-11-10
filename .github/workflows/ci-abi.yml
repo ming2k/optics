@@ -56,6 +56,15 @@ jobs:
             build-essential ninja-build pkg-config abigail-tools \
             glslang-tools libvulkan-dev libfreetype-dev
 
+      # Ubuntu 24.04's wayland-protocols predates text-input-v3's
+      # preedit_hint/action/language events. The reference tag uses the host
+      # XML; install a current copy so its Wayland backend compiles.
+      - name: Install newer wayland-protocols for the reference build
+        run: |
+          curl -sSL "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/archive/1.49/wayland-protocols-1.49.tar.gz" | tar -xz -C /tmp
+          meson setup /tmp/wp /tmp/wayland-protocols-1.49
+          sudo meson install -C /tmp/wp
+
       # The reference tag still compiles GLSL; the current tree needs Slang.
       - name: Install Slang compiler
         run: |
