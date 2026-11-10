@@ -62,8 +62,8 @@ void flux_set_last_errorf(flux_result code, const char *function, const char *fi
     if (fmt) {
         va_list ap;
         va_start(ap, fmt);
-        vsnprintf(g_error_message, sizeof(g_error_message), fmt,
-                  ap); // NOLINT(clang-analyzer-valist.Uninitialized): va_start initializes ap
+        // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized): va_start initializes ap
+        vsnprintf(g_error_message, sizeof(g_error_message), fmt, ap);
         va_end(ap);
     } else {
         g_error_message[0] = '\0';
@@ -87,6 +87,7 @@ const char *flux_diagnostic_format(const char *fmt, ...) {
     }
     va_list ap;
     va_start(ap, fmt);
+    // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized): va_start initializes ap
     vsnprintf(g_error_message, sizeof(g_error_message), fmt, ap);
     va_end(ap);
     return g_error_message;

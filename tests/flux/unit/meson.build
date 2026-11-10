@@ -152,11 +152,16 @@ test('canvas_cpu_text', test_canvas_cpu_text, suite : 'unit')
 # Long-session text soak: drives the glyph cache past its live ceiling and
 # replays resident working sets, asserting the diagnostic counters (evictions,
 # hits vs misses, atlas pages/clears) stay in their documented steady states.
-test_text_soak = executable('test_text_soak',
-  'test_text_soak.c',
-  dependencies : [test_helpers_dep, glyph_dep],
-)
-test('text_soak', test_text_soak, suite : 'unit', timeout : 120)
+# The soak's 9000-glyph working set needs a real CJK face; CI only guarantees
+# one on Linux (fonts-noto-cjk), while macOS fallback faces are not loadable
+# by FreeType and Windows runner fonts vary.
+if host_machine.system() == 'linux'
+  test_text_soak = executable('test_text_soak',
+    'test_text_soak.c',
+    dependencies : [test_helpers_dep, glyph_dep],
+  )
+  test('text_soak', test_text_soak, suite : 'unit', timeout : 120)
+endif
 
 # Atlas-clear invalidation: a segment recorded before an atlas_clear carries
 # pre-clear glyph UVs, so replay must be refused via the host-atlas

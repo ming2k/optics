@@ -14,7 +14,7 @@
 
 src_inc = include_directories('../../libs/iris/src')
 
-tests = ['test_version', 'test_app_api', 'test_theme', 'test_uri', 'test_capability']
+tests = ['test_version', 'test_app_api', 'test_uri', 'test_capability']
 
 foreach t : tests
   exe = executable(t, t + '.c',
@@ -33,6 +33,15 @@ exe_a11y = executable('test_a11y_util',
   dependencies        : [lens_dep, m_dep],
 )
 test('test_a11y_util', exe_a11y)
+
+# test_theme pins the Linux theme_linux.c GTK_THEME/gsettings branch; the
+# Cocoa and Win32 backends answer from the OS instead.
+if host_machine.system() == 'linux'
+  exe_theme = executable('test_theme', 'test_theme.c',
+    dependencies : [iris_dep, m_dep],
+  )
+  test('test_theme', exe_theme)
+endif
 
 # test_a11y_prefs: the public preference API against libiris (query always
 # links; watch may be the stub on libsystemd-less builds — both paths are
