@@ -105,6 +105,7 @@ test_icon_mask = executable('test_icon_mask',
   '../../libs/lens/src/icon_svg.c',
   dependencies        : [lens_dep, m_dep],
   include_directories : [lens_inc, flux_inc],
+  c_args              : ['-DLENS_STATIC=1'],
 )
 test('icon_mask', test_icon_mask)
 
@@ -132,6 +133,7 @@ test_icon_runtime_content = executable('test_icon_runtime_content',
   '../../libs/lens/src/icon_svg.c',
   dependencies        : [lens_dep, m_dep],
   include_directories : lens_inc,
+  c_args              : ['-DLENS_STATIC=1'],
 )
 test('icon_runtime_content', test_icon_runtime_content)
 
@@ -144,6 +146,7 @@ test_icon_runtime_runs = executable('test_icon_runtime_runs',
   '../../libs/lens/src/icon_svg.c',
   dependencies        : [lens_dep, m_dep],
   include_directories : lens_inc,
+  c_args              : ['-DLENS_STATIC=1'],
 )
 test('icon_runtime_runs', test_icon_runtime_runs)
 
