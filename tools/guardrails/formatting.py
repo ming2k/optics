@@ -33,6 +33,24 @@ def get_c_sources(repo_root: Path) -> list[str]:
     return sources
 
 
+def resolve_clang_format() -> str:
+    """Resolve the pinned formatter without depending on update-alternatives.
+
+    Distro packages install the pinned binary as `clang-format-22` while the
+    unversioned `clang-format` link may still point at an older default. Prefer
+    the versioned name (and an explicit CLANG_FORMAT override), then fall back
+    to the plain command so the version check below still reports a clear
+    error when the pinned major is absent."""
+    explicit = os.environ.get("CLANG_FORMAT")
+    if explicit:
+        return explicit
+    for candidate in (f"clang-format-{PINNED_MAJOR}", "clang-format"):
+        path = shutil.which(candidate)
+        if path:
+            return path
+    return "clang-format"
+
+
 def check_clang_format_version(cf_bin: str) -> tuple[bool, str]:
     try:
         res = subprocess.run([cf_bin, "--version"], capture_output=True, text=True, check=True)
@@ -51,7 +69,9 @@ def check_clang_format_version(cf_bin: str) -> tuple[bool, str]:
         return False, f"error: clang-format not found or failed to execute: {e}"
 
 
-def run_format_check(repo_root: Path, fix: bool = False, cf_bin: str = "clang-format") -> tuple[bool, str, str]:
+def run_format_check(repo_root: Path, fix: bool = False, cf_bin: str | None = None) -> tuple[bool, str, str]:
+    if cf_bin is None:
+        cf_bin = resolve_clang_format()
     ok, ver_err = check_clang_format_version(cf_bin)
     if not ok:
         return False, "", ver_err

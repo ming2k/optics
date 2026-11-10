@@ -28,7 +28,7 @@ jobs:
       # Vulkan SDK provides headers and vulkan-1.lib. Slang is installed
       # separately so Windows uses the same pinned compiler as Linux/macOS.
       - name: Install Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1.1.1
+        uses: humbletim/install-vulkan-sdk@v1.2
         with:
           version: 1.4.321.0
 
@@ -43,7 +43,7 @@ jobs:
       - name: Install meson/ninja + clang
         run: |
           python -m pip install --upgrade pip
-          pip install meson ninja
+          pip install 'meson>=1.8.0' ninja
 
       # freetype2 / harfbuzz / fribidi resolve via subprojects/*.wrap
       # fallback (wrap-mode default: system first, wrap when missing).

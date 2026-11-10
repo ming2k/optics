@@ -33,6 +33,8 @@ concurrency:
 
 env:
   DEBIAN_FRONTEND: noninteractive
+  CC: clang
+  CXX: clang++
 
 jobs:
   abidiff:
@@ -43,11 +45,15 @@ jobs:
         with:
           fetch-depth: 0 # tags for the reference build
 
+      - name: Install Meson >= 1.8
+        run: |
+          sudo python3 -m pip install --break-system-packages --ignore-installed 'meson>=1.8.0'
+
       - name: Install build dependencies + libabigail
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential meson ninja-build pkg-config abigail-tools \
+            build-essential ninja-build pkg-config abigail-tools \
             glslang-tools libvulkan-dev libfreetype-dev
 
       # The reference tag still compiles GLSL; the current tree needs Slang.
