@@ -40,7 +40,9 @@ jobs:
         with:
           msystem: UCRT64
           install: >-
-            meson ninja pkgconf
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-vulkan-headers
             mingw-w64-ucrt-x86_64-vulkan-loader
@@ -69,8 +71,8 @@ jobs:
             --no-suite integration --no-suite bench --no-suite fuzz
 
   macos:
-    name: build & test (macos-14, MoltenVK)
-    runs-on: macos-14
+    name: build & test (macos-15-intel, MoltenVK)
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
@@ -80,12 +82,14 @@ jobs:
             molten-vk vulkan-loader vulkan-headers \
             freetype harfbuzz fribidi
 
-      # Homebrew has no Slang formula. Fetch the pinned official macOS ARM
-      # build so the same compiler version is used on every CI platform.
+      # Homebrew has no Slang formula. Fetch the pinned official x86_64 build
+      # so the same compiler version is used on every CI platform.
       - name: Install Slang compiler
         run: |
           SLANG_VER="2026.21"
-          curl -sSL "https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-macos-aarch64.tar.gz" | sudo tar -xz -C /usr/local
+          sudo mkdir -p /opt/slang
+          curl -sSL "https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-macos-x86_64.tar.gz" | sudo tar -xz -C /opt/slang
+          echo "/opt/slang/bin" >> "$GITHUB_PATH"
 
       # Homebrew's vulkan-loader ships vulkan.pc; MoltenVK is plugged in as
       # the ICD. flux auto-enables VK_KHR_portability_enumeration /
@@ -100,7 +104,7 @@ jobs:
 
       - name: Test (no GPU suites)
         env:
-          VK_ICD_FILENAMES: /opt/homebrew/share/vulkan/icd.d/MoltenVK_icd.json
+          VK_ICD_FILENAMES: /usr/local/share/vulkan/icd.d/MoltenVK_icd.json
         run: |
           meson test -C build --print-errorlogs \
             --no-suite integration --no-suite bench --no-suite fuzz

@@ -79,10 +79,13 @@ int main(void) {
     EXPECT(glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
     EXPECT(t != nullptr);
 
-    /* Skip when no shaping backend: measure-only draws no glyphs. */
+    /* Skip when no shaping backend, or when no CJK face is installed: the
+     * oversize working set below is made of U+4E00.. glyphs, so a Latin-only
+     * font set cannot drive the cache past its ceiling. */
     glyph_metrics probe = glyph_measure(t, "A", 1, nullptr);
-    if (probe.width <= 0.0f) {
-        fprintf(stderr, "text_soak: no shaping backend; skipping\n");
+    glyph_metrics cjk = glyph_measure(t, "\xE4\xB8\x80", 1, nullptr);
+    if (probe.width <= 0.0f || cjk.width <= 0.0f) {
+        fprintf(stderr, "text_soak: no shaping backend or CJK face; skipping\n");
         TEST_SUMMARY();
     }
 

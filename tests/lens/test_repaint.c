@@ -46,6 +46,11 @@ static void render_frame(lens *ui, flux_canvas *canvas) {
     CHECK(flux_canvas_end(canvas) == FLUX_OK);
 }
 
+static bool rect_covers(flux_rect outer, flux_rect inner) {
+    return outer.x <= inner.x && outer.y <= inner.y && outer.x + outer.w >= inner.x + inner.w &&
+           outer.y + outer.h >= inner.y + inner.h;
+}
+
 /* The frame's damage list, via the public count-then-fill contract. Returns a
  * buffer with static lifetime so callers can inspect it after the helper. */
 static const flux_rect *damage_rects(const lens *ui, uint32_t *count) {
@@ -608,9 +613,12 @@ static void test_removed_child_repaints_its_vacated_band(void) {
     CHECK(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     char tick[32];
-    const flux_rect row_c = {0, 65, 36, 20};
+    flux_rect row_c = {0};
 
-    /* Settle a three-row list. */
+    /* Settle a three-row list and capture the row's real bounds. The exact
+     * glyph advance depends on the host's font build, so a hard-coded rect
+     * would fail on a different FreeType/HarfBuzz version for reasons that
+     * have nothing to do with damage. */
     for (int i = 0; i < 4; i++) {
         snprintf(tick, sizeof tick, "tick=%d", i);
         lens_begin(ui, &IN0);
@@ -618,11 +626,16 @@ static void test_removed_child_repaints_its_vacated_band(void) {
         lens_column_begin(ui, &(lens_layout_opts){.box = {.id = "list", .min_width = 120}});
         lens_label(ui, &(lens_label_opts){.text = "row-a"});
         lens_label(ui, &(lens_label_opts){.text = "row-b"});
-        lens_label(ui, &(lens_label_opts){.text = "row-c"});
+        lens_response row_c_node = lens_label(ui, &(lens_label_opts){.text = "row-c"});
         lens_column_end(ui);
         test_end(ui);
+        if (i == 3) {
+            CHECK(row_c_node.id != 0);
+            row_c = lens_node_bounds(lens_find(ui, row_c_node.id));
+        }
         render_frame(ui, canvas);
     }
+    CHECK(row_c.w > 0.0f && row_c.h > 0.0f);
 
     /* Drop the trailing row. The ticker changes in the same frame, so the
      * "no region named" viewport fallback cannot mask an omission here. */
@@ -641,9 +654,7 @@ static void test_removed_child_repaints_its_vacated_band(void) {
     /* The vacated band must be covered by at least one reported rect. */
     bool covered = false;
     for (uint32_t i = 0; i < count && !covered; i++)
-        covered = rects[i].x <= row_c.x && rects[i].y <= row_c.y &&
-                  rects[i].x + rects[i].w >= row_c.x + row_c.w &&
-                  rects[i].y + rects[i].h >= row_c.y + row_c.h;
+        covered = rect_covers(rects[i], row_c);
     CHECK(covered);
 
     /* Localization holds: a couple of small strips, not the whole display the
@@ -704,24 +715,31 @@ static void test_removed_container_repaints_its_children(void) {
  * the amount of unrelated content differs.
  */
 static void test_departed_damage_is_independent_of_unrelated_content(void) {
-    const flux_rect expect = {0, 65, 36, 20};
+    flux_rect expect = {0};
+    bool have_expect = false;
     for (int fillers = 0; fillers <= 40; fillers = fillers ? fillers * 8 : 1) {
         lens *ui = NULL;
         flux_canvas *canvas = NULL;
         CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
         CHECK(flux_canvas_create_cpu(900, 400, 1.0f, &canvas) == FLUX_OK);
 
+        flux_rect row_c = {0};
         for (int i = 0; i < 4; i++) {
             lens_begin(ui, &WIDE_IN);
             lens_label(ui, &(lens_label_opts){.text = "ticker", .box = {.id = "ticker"}});
             lens_column_begin(ui, &(lens_layout_opts){.box = {.id = "list", .min_width = 120}});
             lens_label(ui, &(lens_label_opts){.text = "row-a"});
             lens_label(ui, &(lens_label_opts){.text = "row-b"});
-            lens_label(ui, &(lens_label_opts){.text = "row-c"});
+            lens_response row_c_node = lens_label(ui, &(lens_label_opts){.text = "row-c"});
             lens_column_end(ui);
             test_end(ui);
+            if (i == 3) {
+                CHECK(row_c_node.id != 0);
+                row_c = lens_node_bounds(lens_find(ui, row_c_node.id));
+            }
             render_frame(ui, canvas);
         }
+        CHECK(row_c.w > 0.0f && row_c.h > 0.0f);
 
         lens_begin(ui, &WIDE_IN);
         lens_label(ui, &(lens_label_opts){.text = "tick=9", .box = {.id = "ticker"}});
@@ -736,11 +754,23 @@ static void test_departed_damage_is_independent_of_unrelated_content(void) {
 
         uint32_t count = 0;
         const flux_rect *rects = damage_rects(ui, &count);
-        bool found = false;
-        for (uint32_t i = 0; i < count && !found; i++)
-            found = fabsf(rects[i].x - expect.x) < 0.01f && fabsf(rects[i].y - expect.y) < 0.01f &&
-                    fabsf(rects[i].w - expect.w) < 0.01f && fabsf(rects[i].h - expect.h) < 0.01f;
-        CHECK(found);
+        flux_rect departed = {0};
+        for (uint32_t i = 0; i < count && departed.w == 0.0f; i++)
+            if (rect_covers(rects[i], row_c))
+                departed = rects[i];
+        CHECK(departed.w > 0.0f && departed.h > 0.0f);
+
+        /* The first iteration defines the expected region; unrelated content
+         * must not move or resize it on later iterations. */
+        if (!have_expect) {
+            expect = departed;
+            have_expect = true;
+        } else {
+            CHECK_NEAR(departed.x, expect.x, 0.01f);
+            CHECK_NEAR(departed.y, expect.y, 0.01f);
+            CHECK_NEAR(departed.w, expect.w, 0.01f);
+            CHECK_NEAR(departed.h, expect.h, 0.01f);
+        }
 
         flux_canvas_release(canvas);
         lens_release(ui);
