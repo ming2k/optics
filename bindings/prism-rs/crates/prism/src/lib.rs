@@ -482,15 +482,12 @@ impl BaseMaterial {
     }
 }
 
-/// Backward-compatible alias for existing call sites.
-pub type BackdropFrost = BaseMaterial;
-
 /// Execution descriptor for [`BackdropLayerFilter::apply`] adhering to `[INV-ARCH-OPTS]` (ADR-0142).
 pub struct BackdropLayerApplyOpts<'a, 'frame> {
     pub frame: &'a flux::Frame<'frame>,
     pub input: &'a flux::Image,
     pub blurred: &'a flux::BlurredImage<'a>,
-    pub frost: &'a [BackdropFrost],
+    pub base_materials: &'a [BaseMaterial],
     pub groups: &'a [LiquidGlassGroup],
     pub params: LiquidGlassParams,
     /// Caller-declared content revision tag (ADR-0137). When `Some(rev)` with
@@ -532,14 +529,17 @@ impl BackdropLayerFilter {
         })
     }
 
-    /// Frost the backdrop, then refract the glass groups through it —
+    /// Resolve the base materials, then refract the glass groups through them —
     /// one call replacing a manual frost+blur+glass chain.
     pub fn apply<'filter, 'frame>(
         &'filter mut self,
         opts: &BackdropLayerApplyOpts<'_, 'frame>,
     ) -> Result<BackdropLayerImage<'filter>, Error> {
-        let raw_frost: Vec<sys::prism_backdrop_frost> =
-            opts.frost.iter().map(BackdropFrost::as_raw).collect();
+        let raw_base_materials: Vec<sys::prism_base_material> = opts
+            .base_materials
+            .iter()
+            .map(BaseMaterial::as_raw)
+            .collect();
         let raw_groups: Vec<RawGroup> = opts.groups.iter().map(LiquidGlassGroup::as_raw).collect();
         let group_ptrs: Vec<sys::prism_liquid_glass_group> = raw_groups
             .iter()
@@ -559,12 +559,12 @@ impl BackdropLayerFilter {
             },
             input: opts.input.as_raw(),
             blurred_input: opts.blurred.as_raw(),
-            frost: if raw_frost.is_empty() {
+            base_materials: if raw_base_materials.is_empty() {
                 std::ptr::null()
             } else {
-                raw_frost.as_ptr()
+                raw_base_materials.as_ptr()
             },
-            frost_count: u32::try_from(raw_frost.len()).unwrap_or(u32::MAX),
+            base_material_count: u32::try_from(raw_base_materials.len()).unwrap_or(u32::MAX),
             groups: if group_ptrs.is_empty() {
                 std::ptr::null()
             } else {

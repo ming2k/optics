@@ -61,3 +61,11 @@ ADR-0124 established the decoupled dual-thread pipeline (UI Event Thread 0 vs Co
 
 - **Positive:** Hybrid applications combining custom vector graphics with Lens UI chrome achieve 100% decoupled dual-threaded presentation across Wayland, Windows, and macOS without swapchain stalls or single-thread fallbacks.
 - **Verification:** All guardrails (`./tools/optics check`), MinGW/Zig cross-compilation checks, and all 151 unit/integration tests pass cleanly.
+
+## Amendment — 2026-11-10
+
+The replacement is now complete rather than optional: `iris_paint_fn` and the
+`iris_app_opts.paint` field are removed, `iris_record_fn` is the only
+host-canvas path, and the fallback path (used when `prepare` requires the main
+thread) submits the recorded display list through the Canvas. There is no
+second synchronous host-canvas route to keep the two implementations aligned.

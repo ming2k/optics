@@ -190,3 +190,4 @@ silent fallback. Its primitives have landed.
 | 0154 | [Pairwise-disjoint damage decomposition, single-pass output blits, and idempotent UNORM8 output dither](0154-pairwise-disjoint-damage-and-idempotent-output-dither.md) | Accepted |
 | 0155 | [Frame damage is a native epoch ledger, not a caller-side per-image history](0155-frame-damage-is-a-native-epoch-ledger.md) | Accepted |
 | 0156 | [Slang-first shader architecture — retiring GLSL, modular device code, and clean-break SPIR-V compilation](0156-slang-first-shader-architecture.md) | Accepted |
+| 0157 | [DisplayList serialization is a versioned byte protocol with caller-owned resource IDs](0157-display-list-serialization-protocol.md) | Accepted |

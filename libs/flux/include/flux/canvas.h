@@ -426,11 +426,15 @@ FLUX_API void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geo
  * not acquire ownership. Each retained reference must be released once. */
 typedef struct flux_display_list flux_display_list;
 
+/* Dynamic image slots one display list can declare. The mask is a uint64_t. */
+#define FLUX_DISPLAY_LIST_MAX_INPUTS 64u
+
 typedef struct flux_encoder flux_encoder;
 
 typedef struct flux_encoder_desc {
-    size_t max_bytes;      /* Owned command storage budget; zero selects 64 MiB. */
-    uint32_t max_commands; /* Expanded execution budget; zero selects 1,048,576 commands. */
+    size_t max_bytes;          /* Owned command storage budget; zero selects 64 MiB. */
+    uint32_t max_commands;     /* Expanded execution budget; zero selects 1,048,576. */
+    size_t max_retained_bytes; /* Pinned image-content budget; zero = unbounded. */
 } flux_encoder_desc;
 
 /* Unique recorder. Creation owns all scratch storage. Finish is terminal;
@@ -443,6 +447,14 @@ FLUX_API void flux_encoder_fail(flux_encoder *enc, flux_result error);
 FLUX_API flux_result flux_encoder_status(const flux_encoder *enc);
 FLUX_API void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
                                          const flux_brush *brush);
+
+/* Record an image-brush geometry whose image is a dynamic input slot rather
+ * than a concrete image. `brush` must be FLUX_BRUSH_IMAGE_PATTERN; its
+ * image/sampler fields are ignored and supplied at execution. `slot` must be
+ * below FLUX_DISPLAY_LIST_MAX_INPUTS. The list retains no image for this draw,
+ * so a slot without a binding fails before any pixels are written. */
+FLUX_API void flux_encoder_draw_geometry_slot(flux_encoder *enc, const flux_geometry *geom,
+                                              const flux_brush *brush, uint32_t slot);
 FLUX_API void flux_encoder_draw_glyph_run(flux_encoder *enc, const flux_glyph_run_desc *desc);
 FLUX_API void flux_encoder_save(flux_encoder *enc);
 FLUX_API void flux_encoder_restore(flux_encoder *enc);
@@ -464,17 +476,94 @@ FLUX_API flux_display_list *flux_display_list_retain(flux_display_list *list);
 FLUX_API void flux_display_list_release(flux_display_list *list);
 FLUX_API size_t flux_display_list_size(const flux_display_list *list);
 FLUX_API uint32_t flux_display_list_command_count(const flux_display_list *list);
+/* Pinned image-content bytes retained by this list, including child lists.
+ * A shared child is counted once per list that pins it. */
+FLUX_API size_t flux_display_list_retained_bytes(const flux_display_list *list);
+/* Bit set of dynamic image input slots this list (including children) uses. */
+FLUX_API uint64_t flux_display_list_input_mask(const flux_display_list *list);
 
-/* Submit an immutable display list to a canvas for batch execution. */
+/* One execution binding for a dynamic image slot. The slot must be present in
+ * the list's input mask; the image is borrowed for the submit call and
+ * retained by the canvas for the frame. */
+typedef struct flux_display_list_binding {
+    uint32_t slot;
+    flux_image *image;
+    flux_sampler *sampler; /* optional (nullptr = default linear) */
+} flux_display_list_binding;
+
+/* Submit an immutable display list to a canvas for batch execution. A list
+ * that declares dynamic inputs fails with FLUX_ERROR_INVALID_STATE here; use
+ * the bound form below. */
 FLUX_NODISCARD FLUX_API flux_result flux_canvas_submit_display_list(flux_canvas *c,
                                                                     const flux_display_list *list);
+/* Submit a list with every dynamic image slot bound exactly once. Missing,
+ * duplicate, out-of-range, or null bindings fail before execution. */
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_submit_display_list_bound(
+    flux_canvas *c, const flux_display_list *list, const flux_display_list_binding *bindings,
+    uint32_t binding_count);
+
+/* ================================================================== */
+/*  DisplayList serialization (ADR-0157)                              */
+/* ================================================================== */
+
+/* A serialized list is a versioned byte stream with a resource table. It
+ * never contains C pointers or native struct bytes. Resources are identified
+ * by caller-assigned nonzero IDs; child lists are flattened into the command
+ * stream with their state isolation preserved by SAVE/RESTORE. */
+
+typedef enum flux_display_list_resource_kind {
+    FLUX_DISPLAY_LIST_RESOURCE_IMAGE = 1,
+    FLUX_DISPLAY_LIST_RESOURCE_SAMPLER = 2,
+} flux_display_list_resource_kind;
+
+/* Return a stable nonzero ID for `resource`, or 0 to abort serialization.
+ * The same (kind, resource) pair must always return the same ID, and one ID
+ * cannot name two different resources. */
+typedef uint32_t (*flux_display_list_resource_id_fn)(void *user,
+                                                     flux_display_list_resource_kind kind,
+                                                     const void *resource);
+
+/* Resolve an ID from the serialized table. Return nullptr to fail the load.
+ * Images are snapshotted by the loader; samplers are retained by the list. */
+typedef const void *(*flux_display_list_resource_resolve_fn)(void *user,
+                                                             flux_display_list_resource_kind kind,
+                                                             uint32_t id);
+
+typedef struct flux_display_list_serialize_opts {
+    flux_struct_type type; /* FLUX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS */
+    const void *next;
+    flux_display_list_resource_id_fn resource_id;
+    void *user;
+} flux_display_list_serialize_opts;
+
+typedef struct flux_display_list_deserialize_opts {
+    flux_struct_type type; /* FLUX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS */
+    const void *next;
+    flux_display_list_resource_resolve_fn resolve;
+    void *user;
+} flux_display_list_deserialize_opts;
+
+#define FLUX_DISPLAY_LIST_SERIALIZE_OPTS_INIT {.type = FLUX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS}
+#define FLUX_DISPLAY_LIST_DESERIALIZE_OPTS_INIT {.type = FLUX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS}
+
+/* Serialize to a newly allocated byte stream. Release with
+ * flux_display_list_serialized_free. A list with resources requires
+ * opts->resource_id; a list without resources may pass nullptr opts. */
+FLUX_NODISCARD FLUX_API flux_result flux_display_list_serialize(
+    const flux_display_list *list, const flux_display_list_serialize_opts *opts, uint8_t **out_data,
+    size_t *out_size);
+
+/* Load a serialized list. Every table entry must resolve; malformed input,
+ * duplicate IDs, unknown opcodes, bad lengths, and missing resources fail
+ * with no published list and no retained reference. */
+FLUX_NODISCARD FLUX_API flux_result flux_display_list_deserialize(
+    const uint8_t *data, size_t size, const flux_display_list_deserialize_opts *opts,
+    flux_display_list **out_list);
+
+FLUX_API void flux_display_list_serialized_free(uint8_t *data);
 
 /* Record an owned child list under the recorder's current placement and clip.
- * Child state changes are isolated from subsequent commands. The child is
- * retained without copying its payload. Cycles are impossible because only
- * published immutable lists can be referenced; excessive nesting fails.
- * max_bytes and display_list_size count local storage, excluding shared children.
- * command_count includes expanded child commands. No serialization API is provided. */
+ * Child state is isolated; the child is retained without copying. */
 FLUX_NODISCARD FLUX_API flux_result flux_encoder_draw_display_list(flux_encoder *enc,
                                                                    const flux_display_list *list);
 

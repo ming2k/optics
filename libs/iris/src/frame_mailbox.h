@@ -33,7 +33,6 @@ typedef struct iris_frame_packet {
     flux_rect damage[LENS_DAMAGE_RECTS_CAPACITY];
     uint32_t damage_count;
     bool force_paint;
-    bool has_custom_paint;
     bool has_clear;
     flux_color clear_color;
     float scale;

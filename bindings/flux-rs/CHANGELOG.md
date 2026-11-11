@@ -7,6 +7,12 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **ADR-0090 surface.** `Image::snapshot` publishes a copy-on-write immutable
+  image version; `Image::size_bytes` reports content bytes.
+  `DisplayList::input_mask` / `DisplayList::retained_bytes` expose dynamic
+  slots and pinned content. `Encoder::draw_image_slot` records a rect whose
+  image is bound at execution, and
+  `CanvasCommands::submit_display_list_bound` supplies those bindings.
 - `SubmittedFrame::abandon` and a `Drop` implementation that releases a
   submitted frame without presenting or advancing the offscreen ring slot, so a
   deferred or rejected external KMS flip retries on the same free backbuffer
@@ -15,7 +21,8 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Replace `Encoder::with_budget` with `Encoder::with_limits` for storage and expanded execution budgets; add shared child composition through `Encoder::draw_display_list`.
+- `Encoder::with_limits` remains the two-budget constructor; `Encoder::with_budget`
+  is restored with the ADR-0090 retained-content budget as its third argument.
 
 
 ### Fixed

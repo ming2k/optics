@@ -1168,6 +1168,7 @@ flux_result flux_canvas_create_cpu_ss(uint32_t width, uint32_t height, float sca
     c->content_scale = (scale > 0.0f) ? scale : 1.0f;
     c->states[0].transform = flux_mat3x2_scale(c->content_scale, c->content_scale);
     c->state_top = 0;
+    c->plan_node = UINT32_MAX;
     c->fb_width = width;
     c->fb_height = height;
     c->cpu_supersample = supersample;

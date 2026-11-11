@@ -71,7 +71,7 @@ iris_pace_decision iris_pacer_tick(iris_pacer *p, const iris_pace_inputs *in) {
     bool forced = in->surface_needs_paint || in->chrome_damaged;
 
     /* Latch the host's animation request. It is normally raised from
-     * cfg->paint, which a skip iteration never runs — so it must survive
+     * cfg->record, which a skip iteration never runs — so it must survive
      * until the frame it asks for is actually produced (cleared below on a
      * PAINT), or the cadence collapses mid-animation. */
     if (in->host_animating)
@@ -86,13 +86,13 @@ iris_pace_decision iris_pacer_tick(iris_pacer *p, const iris_pace_inputs *in) {
                           in->chrome_damaged || in->lens_animating;
 
     /* Is a frame pending at all? Three terms keep the low idle tick alive:
-     *   - `has_custom_paint`: such a host's content is opaque to lens, so
+     *   - `has_host_content`: such a host's content is opaque to lens, so
      *     running cfg->build is how it observes its own state changes;
      *   - `caret_ticking`: lens advances the blink clock by the frame delta,
      *     so a live clock needs ticks to reach its next phase. The tick does
      *     not paint; the flip that lands on one arrives as chrome damage.
      * Only a host with neither can reach full quiescence. */
-    bool cadence_any = cadence_active || in->caret_ticking || in->has_custom_paint;
+    bool cadence_any = cadence_active || in->caret_ticking || in->has_host_content;
 
     if (!cadence_any) {
         p->idle_armed = false;
@@ -108,9 +108,9 @@ iris_pace_decision iris_pacer_tick(iris_pacer *p, const iris_pace_inputs *in) {
      * pre-pacer behaviour, so only the schedule moved here. A pending
      * animation request outranks a static declaration: a host that asked for
      * the next frame has announced its content is about to change. */
-    bool skip_render = in->has_custom_paint && in->host_skip_render && !forced;
-    bool canvas_static = in->has_custom_paint && in->host_static && !animating && !forced;
-    bool paint = !skip_render && !canvas_static && (in->has_custom_paint || forced || animating);
+    bool skip_render = in->has_host_content && in->host_skip_render && !forced;
+    bool canvas_static = in->has_host_content && in->host_static && !animating && !forced;
+    bool paint = !skip_render && !canvas_static && (in->has_host_content || forced || animating);
 
     if (cadence_active && in->have_pulse_source) {
         /* Pulse-driven (INV-PACE-01/02). The pacer never invents a period

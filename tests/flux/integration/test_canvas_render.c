@@ -16,6 +16,8 @@
 #endif
 #include "test_helpers.h"
 
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,11 +25,48 @@
 #define H 128u
 #define BYTES (W * H * 4u)
 
+typedef struct snapshot_stress {
+    flux_image *image;
+    atomic_bool stop;
+    atomic_uint failures;
+} snapshot_stress;
+
+static void *snapshot_worker(void *user) {
+    snapshot_stress *stress = user;
+    while (!atomic_load_explicit(&stress->stop, memory_order_relaxed)) {
+        flux_image *snapshot = nullptr;
+        if (flux_image_snapshot(stress->image, &snapshot) == FLUX_OK)
+            flux_image_release(snapshot);
+        else
+            atomic_fetch_add_explicit(&stress->failures, 1u, memory_order_relaxed);
+    }
+    return nullptr;
+}
+
 static const uint8_t *px_at(const uint8_t *px, uint32_t x, uint32_t y) {
     return px + (y * W + x) * 4u;
 }
 
 typedef void (*draw_fn)(flux_canvas *canvas, void *user);
+
+typedef struct display_list_case {
+    const flux_display_list *list;
+} display_list_case;
+
+static uint32_t test_resource_id(void *user, flux_display_list_resource_kind kind,
+                                 const void *resource) {
+    return kind == FLUX_DISPLAY_LIST_RESOURCE_IMAGE && resource == user ? 7u : 0u;
+}
+
+static const void *test_resource_resolve(void *user, flux_display_list_resource_kind kind,
+                                         uint32_t id) {
+    return kind == FLUX_DISPLAY_LIST_RESOURCE_IMAGE && id == 7u ? user : nullptr;
+}
+
+static void draw_display_list(flux_canvas *canvas, void *user) {
+    const display_list_case *c = user;
+    EXPECT(flux_canvas_submit_display_list(canvas, c->list) == FLUX_OK);
+}
 
 static flux_result render_frame(flux_surface *s, flux_canvas *canvas, draw_fn draw, void *user) {
     flux_frame *frame = nullptr;
@@ -513,6 +552,176 @@ int main(void) {
         idesc.initial_data = image_px;
         flux_image *image = nullptr;
         EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
+        EXPECT(flux_image_size_bytes(image) == 2u * 2u * 4u);
+
+        /* ADR-0090 pinned-content budget: the list owns the image bytes, and a
+         * budget smaller than one image refuses publication instead of
+         * silently pinning it. */
+        flux_encoder *enc = nullptr;
+        EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
+        flux_brush image_brush = {
+            .kind = FLUX_BRUSH_IMAGE_PATTERN,
+            .blend = FLUX_BLEND_SRC_OVER,
+            .opacity = 1.0f,
+            .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+        };
+        flux_geometry image_geom = flux_geom_rect((flux_rect){0, 0, 2, 2});
+        flux_encoder_draw_geometry(enc, &image_geom, &image_brush);
+        flux_display_list *image_list = nullptr;
+        EXPECT(flux_encoder_finish(enc, &image_list) == FLUX_OK);
+        flux_encoder_destroy(enc);
+        EXPECT(flux_display_list_retained_bytes(image_list) == 16u);
+        flux_display_list_release(image_list);
+
+        EXPECT(flux_encoder_create(&(flux_encoder_desc){.max_retained_bytes = 8u}, &enc) ==
+               FLUX_OK);
+        flux_encoder_draw_geometry(enc, &image_geom, &image_brush);
+        EXPECT(flux_encoder_status(enc) == FLUX_ERROR_OUT_OF_MEMORY);
+        EXPECT(flux_encoder_finish(enc, &image_list) == FLUX_ERROR_OUT_OF_MEMORY);
+        EXPECT(image_list == nullptr);
+        flux_encoder_destroy(enc);
+
+        /* ADR-0090 immutable snapshot: a list recorded against a snapshot
+         * keeps the old pixels after the original image is updated. */
+        flux_image *snapshot = nullptr;
+        EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_OK);
+        EXPECT(snapshot != nullptr);
+        flux_encoder *snapshot_enc = nullptr;
+        EXPECT(flux_encoder_create(nullptr, &snapshot_enc) == FLUX_OK);
+        flux_encoder_draw_geometry(
+            snapshot_enc, &image_geom,
+            &(flux_brush){
+                .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                .blend = FLUX_BLEND_SRC_OVER,
+                .opacity = 1.0f,
+                .image = {.image = snapshot, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+            });
+        flux_display_list *old_list = nullptr;
+        EXPECT(flux_encoder_finish(snapshot_enc, &old_list) == FLUX_OK);
+        flux_encoder_destroy(snapshot_enc);
+
+        uint32_t blue_px[4] = {0xFFFF0000u, 0xFFFF0000u, 0xFFFF0000u, 0xFFFF0000u};
+        EXPECT(flux_image_update_region(image, 0, 0, 2, 2, blue_px, sizeof blue_px) == FLUX_OK);
+
+        flux_encoder *new_enc = nullptr;
+        EXPECT(flux_encoder_create(nullptr, &new_enc) == FLUX_OK);
+        flux_encoder_draw_geometry(
+            new_enc, &image_geom,
+            &(flux_brush){
+                .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                .blend = FLUX_BLEND_SRC_OVER,
+                .opacity = 1.0f,
+                .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+            });
+        flux_display_list *new_list = nullptr;
+        EXPECT(flux_encoder_finish(new_enc, &new_list) == FLUX_OK);
+        flux_encoder_destroy(new_enc);
+
+        flux_geometry full = flux_geom_rect((flux_rect){0, 0, (float)W, (float)H});
+        (void)full;
+        display_list_case old_case = {.list = old_list};
+        /* Scale the 2x2 source over the output so both colours are visible. */
+        flux_encoder *scale_enc = nullptr;
+        EXPECT(flux_encoder_create(nullptr, &scale_enc) == FLUX_OK);
+        flux_encoder_scale(scale_enc, (float)W / 2.0f, (float)H / 2.0f);
+        flux_encoder_draw_geometry(
+            scale_enc, &image_geom,
+            &(flux_brush){
+                .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                .blend = FLUX_BLEND_SRC_OVER,
+                .opacity = 1.0f,
+                .image = {.image = snapshot, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+            });
+        flux_display_list *scaled_old = nullptr;
+        EXPECT(flux_encoder_finish(scale_enc, &scaled_old) == FLUX_OK);
+        flux_encoder_destroy(scale_enc);
+        old_case.list = scaled_old;
+        EXPECT(render_frame(s, canvas, draw_display_list, &old_case) == FLUX_OK);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, 32, 32)[0] > 200 && px_at(px, 32, 32)[1] < 40);
+        EXPECT(px_at(px, 96, 32)[1] > 200 && px_at(px, 96, 32)[0] < 40);
+
+        flux_encoder *scale_new_enc = nullptr;
+        EXPECT(flux_encoder_create(nullptr, &scale_new_enc) == FLUX_OK);
+        flux_encoder_scale(scale_new_enc, (float)W / 2.0f, (float)H / 2.0f);
+        flux_encoder_draw_geometry(
+            scale_new_enc, &image_geom,
+            &(flux_brush){
+                .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                .blend = FLUX_BLEND_SRC_OVER,
+                .opacity = 1.0f,
+                .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+            });
+        flux_display_list *scaled_new = nullptr;
+        EXPECT(flux_encoder_finish(scale_new_enc, &scaled_new) == FLUX_OK);
+        flux_encoder_destroy(scale_new_enc);
+        display_list_case new_case = {.list = scaled_new};
+        EXPECT(render_frame(s, canvas, draw_display_list, &new_case) == FLUX_OK);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, 32, 32)[2] > 200 && px_at(px, 32, 32)[0] < 40);
+        EXPECT(px_at(px, 96, 96)[2] > 200 && px_at(px, 96, 96)[0] < 40);
+
+        flux_display_list_release(old_list);
+        flux_display_list_release(new_list);
+        flux_display_list_release(scaled_old);
+        flux_display_list_release(scaled_new);
+        flux_image_release(snapshot);
+
+        /* Restore the quadrant fixture for the transform tests below. */
+        EXPECT(flux_image_update_region(image, 0, 0, 2, 2, image_px, sizeof image_px) == FLUX_OK);
+
+        /* Color-managed images share their immutable color state across a
+         * snapshot/COW split instead of refusing the update. */
+        flux_color_space p3 = FLUX_COLOR_SPACE_DISPLAY_P3;
+        flux_image_color_space_desc color_desc = {
+            .type = FLUX_TYPE_IMAGE_COLOR_SPACE_DESC,
+            .space = &p3,
+        };
+        flux_image_desc color_image_desc = {
+            .type = FLUX_TYPE_IMAGE_DESC,
+            .next = &color_desc,
+            .width = 2,
+            .height = 2,
+            .format = FLUX_FORMAT_RGBA8_UNORM,
+            .initial_data = image_px,
+        };
+        flux_image *color_image = nullptr;
+        EXPECT(flux_image_create(d, &color_image_desc, &color_image) == FLUX_OK);
+        flux_image *color_snapshot = nullptr;
+        EXPECT(flux_image_snapshot(color_image, &color_snapshot) == FLUX_OK);
+        EXPECT(flux_image_update_region(color_image, 0, 0, 2, 2, blue_px, sizeof blue_px) ==
+               FLUX_OK);
+        flux_image_release(color_snapshot);
+        flux_image_release(color_image);
+
+        /* DisplayList serialization carries the image as a caller-owned ID,
+         * then rebinds it through the resolver on load (ADR-0157). */
+        flux_encoder *wire_enc = nullptr;
+        EXPECT(flux_encoder_create(nullptr, &wire_enc) == FLUX_OK);
+        flux_encoder_draw_geometry(
+            wire_enc, &(flux_geometry){.kind = FLUX_GEOM_RECT, .rect = {.rect = {0, 0, 2, 2}}},
+            &image_brush);
+        flux_display_list *wire_list = nullptr;
+        EXPECT(flux_encoder_finish(wire_enc, &wire_list) == FLUX_OK);
+        flux_encoder_destroy(wire_enc);
+        uint8_t *wire = nullptr;
+        size_t wire_size = 0;
+        flux_display_list_serialize_opts sopts = FLUX_DISPLAY_LIST_SERIALIZE_OPTS_INIT;
+        sopts.resource_id = test_resource_id;
+        sopts.user = image;
+        EXPECT(flux_display_list_serialize(wire_list, &sopts, &wire, &wire_size) == FLUX_OK);
+        flux_display_list_deserialize_opts dopts = FLUX_DISPLAY_LIST_DESERIALIZE_OPTS_INIT;
+        dopts.resolve = test_resource_resolve;
+        dopts.user = image;
+        flux_display_list *wire_loaded = nullptr;
+        EXPECT(flux_display_list_deserialize(wire, wire_size, &dopts, &wire_loaded) == FLUX_OK);
+        display_list_case wire_case = {.list = wire_loaded};
+        EXPECT(render_frame(s, canvas, draw_display_list, &wire_case) == FLUX_OK);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        EXPECT(px_at(px, 32, 32)[3] == 255);
+        flux_display_list_serialized_free(wire);
+        flux_display_list_release(wire_loaded);
+        flux_display_list_release(wire_list);
 
         flux_sampler_desc sdesc = FLUX_SAMPLER_DESC_INIT;
         sdesc.min_filter = FLUX_FILTER_NEAREST;
@@ -737,6 +946,32 @@ int main(void) {
     EXPECT(abs((int)px_single[0] - (int)px_overlap[0]) <= 2);
     EXPECT(px_single[3] == 255);
     EXPECT(px_overlap[3] == 255);
+
+    /* ADR-0090: snapshot and content update serialize on the image version
+     * lock; a concurrent snapshot must never observe a half-swapped handle. */
+    {
+        uint32_t source[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+        flux_image_desc idesc = FLUX_IMAGE_DESC_INIT;
+        idesc.width = 2;
+        idesc.height = 2;
+        idesc.format = FLUX_FORMAT_RGBA8_UNORM;
+        idesc.initial_data = source;
+        flux_image *image = nullptr;
+        EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
+        snapshot_stress stress = {.image = image};
+        atomic_init(&stress.stop, false);
+        atomic_init(&stress.failures, 0u);
+        pthread_t thread;
+        EXPECT(pthread_create(&thread, nullptr, snapshot_worker, &stress) == 0);
+        for (uint32_t i = 0; i < 200; ++i) {
+            source[0] = 0xFF000000u | i;
+            EXPECT(flux_image_update_region(image, 0, 0, 2, 2, source, sizeof source) == FLUX_OK);
+        }
+        atomic_store_explicit(&stress.stop, true, memory_order_relaxed);
+        pthread_join(thread, nullptr);
+        EXPECT(atomic_load_explicit(&stress.failures, memory_order_relaxed) == 0u);
+        flux_image_release(image);
+    }
 
     flux_arena_deinit(&arena);
     flux_canvas_release(canvas);

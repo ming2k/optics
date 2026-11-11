@@ -173,5 +173,40 @@ int main(void) {
         flux_icc_profile_release(v4);
     }
 
+    /* --- 11. An ICC LUT-tagged image snapshots and COWs without dropping
+     * or duplicating its color state (ADR-0090). --- */
+    {
+        size_t len = icc_build_mft1_constant_white(data, &defs[0]);
+        size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, len, defs, 1);
+        flux_icc_profile *p = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        flux_device *d = test_helpers_make_headless_device();
+        if (d) {
+            flux_image_color_space_desc cs = {
+                .type = FLUX_TYPE_IMAGE_COLOR_SPACE_DESC,
+                .icc = p,
+            };
+            uint32_t pixels[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+            flux_image_desc idesc = {
+                .type = FLUX_TYPE_IMAGE_DESC,
+                .next = &cs,
+                .width = 2,
+                .height = 2,
+                .format = FLUX_FORMAT_RGBA8_UNORM,
+                .initial_data = pixels,
+            };
+            flux_image *image = nullptr;
+            EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
+            flux_image *snapshot = nullptr;
+            EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_OK);
+            uint32_t update[4] = {0xFF0000FFu, 0xFF0000FFu, 0xFF0000FFu, 0xFF0000FFu};
+            EXPECT(flux_image_update_region(image, 0, 0, 2, 2, update, sizeof update) == FLUX_OK);
+            flux_image_release(snapshot);
+            flux_image_release(image);
+            flux_device_release(d);
+        }
+        flux_icc_profile_release(p);
+    }
+
     TEST_SUMMARY();
 }

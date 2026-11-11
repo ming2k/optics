@@ -87,8 +87,8 @@ fn acrylic_group_mapping() {
 }
 
 #[test]
-fn backdrop_frost_maps_rect_and_opacity() {
-    let frost = prism::BackdropFrost {
+fn base_material_maps_rect_and_opacity() {
+    let plate = prism::BaseMaterial {
         x: 4.0,
         y: 8.0,
         width: 320.0,
@@ -98,7 +98,7 @@ fn backdrop_frost_maps_rect_and_opacity() {
         tint_color: [0x10, 0x22, 0x3A],
         tint_strength: 0.6,
     };
-    let raw = frost.as_raw();
+    let raw = plate.as_raw();
     assert_eq!(
         (raw.bounds.x, raw.bounds.y, raw.bounds.w, raw.bounds.h),
         (4.0, 8.0, 320.0, 200.0)

@@ -165,7 +165,7 @@ typedef struct w32_platform {
     bool minimized;                 /* SIZE_MINIMIZED: no valid render target    */
     bool force_paint;               /* WM_PAINT asked for a real frame      */
     bool animation_frame_requested; /* host asked for active-rate follow-up */
-    bool paint_static;              /* host declared this frame's canvas static */
+    bool record_static;             /* host declared this frame's canvas static */
     bool frame_skip_render;         /* host asked to skip rendering but keep the active cadence */
     int64_t refresh_ns;             /* learned display period; 0 = unknown   */
     bool theme_watching;            /* backend theme watch registered       */
@@ -224,10 +224,10 @@ void iris_request_animation_frame_win32(void) {
         pl->animation_frame_requested = true;
 }
 
-void iris_paint_mark_static_win32(void) {
+void iris_record_mark_static_win32(void) {
     w32_platform *pl = g_active_pl;
     if (pl)
-        pl->paint_static = true;
+        pl->record_static = true;
 }
 
 void iris_request_frame_skip_render_win32(void) {
@@ -998,11 +998,6 @@ IRIS_API int iris_window_create_activation_token(const char *app_id, char *out_b
     (void)out_buf;
     (void)out_cap;
     return -1;
-}
-
-IRIS_API int iris_wayland_create_activation_token(const char *app_id, char *out_buf,
-                                                  size_t out_cap) {
-    return iris_window_create_activation_token(app_id, out_buf, out_cap);
 }
 
 /* ================================================================== */
@@ -2126,10 +2121,11 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         .cfg = cfg,
     };
 
-    /* Decoupled Presentation Engine (ADR-0124): for pure UI applications without
-     * custom immediate canvas painting, launch the dedicated presentation worker
-     * thread to asynchronously consume immutable scene snapshots. */
-    if (!cfg->paint && !cfg->prepare) {
+    /* Decoupled Presentation Engine (ADR-0124): launch the dedicated
+     * presentation worker thread for every host that does not need a
+     * main-thread prepare pass. Recorded host content travels through the
+     * mailbox as an immutable display list. */
+    if (!cfg->prepare) {
         iris_mailbox_init(&pl.mailbox);
         pl.present_event = CreateEventW(NULL, FALSE, FALSE, NULL);
         if (pl.present_event) {
@@ -2168,7 +2164,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
      *     timestamps (INV-PACE-04).
      *
      * A lens-only host reaches full quiescence (quiesced = true, blocking in
-     * pump_events with INFINITE); a host with cfg->paint keeps the low idle
+     * pump_events with INFINITE); a host with cfg->record keeps the low idle
      * tick alive so its cfg->build can observe state changes. */
     iris_pacer pacer;
     iris_pacer_init(&pacer);
@@ -2183,8 +2179,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     long long wait_ns = 0;
     long long last_sim_ns = 0;
     double prev_cx = pl.acc.cx, prev_cy = pl.acc.cy;
-    const bool has_custom_paint =
-        (cfg->paint != NULL || cfg->prepare != NULL || cfg->record != NULL);
+    const bool has_host_content = (cfg->prepare != NULL || cfg->record != NULL);
 
     pl.ui = ui;
 
@@ -2257,7 +2252,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                 .now_ns = now,
                 .refresh_ns = pl.refresh_ns,
                 .have_pulse_source = false,
-                .has_custom_paint = has_custom_paint,
+                .has_host_content = has_host_content,
             };
             iris_pace_decision idle_d = iris_pacer_tick(&pacer, &idle_in);
             quiesced = (idle_d.action == IRIS_PACE_QUIESCE);
@@ -2370,15 +2365,15 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             .input_active = input_active,
             .host_animating = host_animating,
             .host_skip_render = pl.frame_skip_render,
-            .host_static = pl.paint_static,
-            .has_custom_paint = has_custom_paint,
+            .host_static = pl.record_static,
+            .has_host_content = has_host_content,
             .chrome_damaged = chrome_damaged,
             .caret_ticking = lens_caret_clock_live(ui),
             .surface_needs_paint = surface_forced,
             .lens_animating = lens_anim_pending(ui),
         };
         pl.frame_skip_render = false;
-        pl.paint_static = false;
+        pl.record_static = false;
 
         iris_pace_decision d = iris_pacer_tick(&pacer, &pace_in);
         quiesced = (d.action == IRIS_PACE_QUIESCE);
@@ -2391,15 +2386,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                 /* Decoupled Presentation Engine (ADR-0124 & ADR-0127): hand off immutable snapshot
                  * and optional host recorded display list to dedicated presentation worker thread.
                  */
-                flux_display_list *host_list = nullptr;
-                if (cfg->record) {
-                    flux_encoder *enc = nullptr;
-                    if (flux_encoder_create(&(flux_encoder_desc){}, &enc) == FLUX_OK) {
-                        cfg->record(enc, pl.scale, cfg->user);
-                        (void)flux_encoder_finish(enc, &host_list);
-                        flux_encoder_destroy(enc);
-                    }
-                }
+                flux_display_list *host_list = iris_record_host_canvas(cfg, pl.scale);
 
                 lens_scene_snapshot *snapshot = nullptr;
                 if (lens_snapshot_create(ui, &snapshot) == FLUX_OK || host_list != nullptr) {
@@ -2414,7 +2401,6 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                             ui, &(lens_damage_opts){.rects = pkt->damage,
                                                     .capacity = LENS_DAMAGE_RECTS_CAPACITY});
                         pkt->force_paint = surface_forced;
-                        pkt->has_custom_paint = false;
                         lens_theme th = lens_get_theme(ui);
                         pkt->clear_color = th.color_bg;
                         pkt->has_clear = !cfg->no_clear;
@@ -2467,20 +2453,21 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             if (cfg->prepare)
                 cfg->prepare(frame, canvas, device, pl.scale, cfg->user);
 
-            /* Clear to the current theme's body background; the host paint
-             * callback (if any) draws *under* lens's chrome. */
+            /* Clear to the current theme's body background; recorded host
+             * content draws *under* lens's chrome. */
             lens_theme th = lens_get_theme(ui);
             flux_color clear = th.color_bg;
             flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
             bool drew = false;
             lens_scene_snapshot *snapshot = nullptr;
+            flux_display_list *host_list = iris_record_host_canvas(cfg, pl.scale);
 
             /* Damage scope for this surface (ADR-0149): the set travels intact to
              * the pass. A host with opaque canvas content (or a forced repaint)
              * asks for the full extent instead — its own content is not something
              * lens can localise. */
             iris_frame_damage dmg = {0};
-            const bool localize = !surface_forced && !has_custom_paint;
+            const bool localize = !surface_forced && !has_host_content;
             if (localize) {
                 dmg = iris_frame_lens_damage(ui, pl.scale, (int32_t)info.width,
                                              (int32_t)info.height, /*force_full=*/false);
@@ -2501,14 +2488,16 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             };
 
             if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {
-                if (cfg->paint)
-                    cfg->paint(canvas, device, pl.scale, cfg->user);
+                if (host_list) {
+                    drew = flux_canvas_submit_display_list(canvas, host_list) == FLUX_OK;
+                }
                 if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
-                    drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK;
+                    drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK || drew;
                 }
                 if (flux_canvas_end(canvas) != FLUX_OK)
                     drew = false;
             }
+            flux_display_list_release(host_list);
 
             if (!drew) {
                 lens_snapshot_release(snapshot);

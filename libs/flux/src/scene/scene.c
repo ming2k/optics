@@ -699,8 +699,8 @@ static void fill_surface_params(scene_surface_params *p, const flux_material *ma
     p->color_flags = 0;
     p->_color_pad = 0;
     if (material->renders_working_space && img) {
-        if (img->color_params_address != 0) {
-            p->color_params_address = img->color_params_address;
+        if (img->color && img->color->color_params_address != 0) {
+            p->color_params_address = img->color->color_params_address;
             p->color_flags = SCENE_COLOR_DECODE | SCENE_COLOR_HAS_PARAMS;
         } else if (img->format == FLUX_FORMAT_RGBA8_UNORM ||
                    img->format == FLUX_FORMAT_BGRA8_UNORM ||

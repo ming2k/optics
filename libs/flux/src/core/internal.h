@@ -13,8 +13,9 @@
 #include <stdatomic.h>
 #include <vulkan/vulkan.h>
 
-#include "plan.h"     /* flux_plan: deferred passes (ADR-0147) */
-#include "platform.h" /* flux_platform_mutex + friends (OS shims) */
+#include "plan.h"        /* flux_plan: deferred passes (ADR-0147) */
+#include "platform.h"    /* flux_platform_mutex + friends (OS shims) */
+#include "render_plan.h" /* flux_render_plan: target contract IR (ADR-0089) */
 
 /* Set the structured error info for this thread. Pass __func__ /
  * __FILE__ / __LINE__ at the call site. message and backend_code may
@@ -505,6 +506,9 @@ struct flux_device {
      * which funnels them through this same lock. */
     flux_platform_mutex queue_lock;
     bool queue_lock_initialized;
+    /* Serializes image snapshot creation and content updates (ADR-0090). */
+    flux_platform_mutex image_version_lock;
+    bool image_version_lock_initialized;
 
     /* Reusable external SYNC_FD semaphores for per-frame dma-buf acquire
      * waits. A semaphore enters this pool only after the frame-slot fence
@@ -756,10 +760,16 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
  * transitions and vkCmdCopyBufferToImage on a transient queue
  * submission. The image transitions from old_layout (UNDEFINED for a
  * first-time upload, SHADER_READ_ONLY_OPTIMAL for a region update)
- * through TRANSFER_DST_OPTIMAL and back to SHADER_READ_ONLY_OPTIMAL. */
-flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_x, int32_t offset_y,
-                                    uint32_t width, uint32_t height, VkImageLayout old_layout,
-                                    const void *data, size_t bytes);
+ * through TRANSFER_DST_OPTIMAL and back to SHADER_READ_ONLY_OPTIMAL.
+ *
+ * `plan_destination` is the flux_image the upload writes (NULL for an internal
+ * image with no plan identity, such as a baked LUT). When a frame is recording
+ * on this thread, the upload records an UPLOAD node in that frame's RenderPlan
+ * before the copy is emitted (ADR-0089 1B-2B). */
+flux_result flux_vk_upload_to_image(flux_device *d, struct flux_image *plan_destination,
+                                    VkImage dst, int32_t offset_x, int32_t offset_y, uint32_t width,
+                                    uint32_t height, VkImageLayout old_layout, const void *data,
+                                    size_t bytes);
 
 /* One-shot layout transition (no data copy). Used when an image has
  * no initial_data but must still be in SHADER_READ_ONLY_OPTIMAL. */
@@ -1004,6 +1014,10 @@ struct flux_frame {
      * than executed. Lives on the frame: fixed arrays plus a bump arena, so
      * the plan costs no allocation and dies with the slot. */
     flux_plan plan;
+    /* RenderPlan IR for this frame's Canvas pass graph (ADR-0089). The
+     * direct backend path is still authoritative in 1B-1; this records and
+     * validates the target/resource contract before a pass begins. */
+    flux_render_plan render_plan;
     /* Scene-draw caches (scene.c). begin_frame re-initialises this
      * whole struct, so they are per-frame by construction.
      *
@@ -1040,6 +1054,26 @@ bool flux_frame_track_resource(flux_frame *frame, void *resource,
 /* Attach a one-shot semaphore to an image already tracked by this frame.
  * Takes ownership of `semaphore` only on success. */
 bool flux_frame_set_foreign_image_acquire(flux_frame *frame, void *resource, VkSemaphore semaphore);
+
+/* The frame currently being recorded on this thread, or NULL. A small stack
+ * tolerates a host that records several surfaces on one thread. Upload path
+ * recording (ADR-0089 1B-2B) uses it to attach an UPLOAD node to the frame the
+ * upload belongs to; uploads outside a frame stay frame-independent, which is
+ * exactly what flux_surface_begin_frame's batch flush already guarantees. */
+flux_frame *flux_frame_current(void);
+
+/* Transition a recording frame out of RECORDING: clears this thread's
+ * current-frame entry and decrements the device's recording-frame count.
+ * Resize/release call it when they abandon a frame without submit. */
+void flux_frame_leave_recording(flux_frame *f);
+
+/* Record the managed staging -> image upload as a RenderPlan UPLOAD node.
+ * The node states the destination (image, full or sub-rect region) and the
+ * staging buffer it reads, and orders itself after any earlier plan writer of
+ * the destination. Validated before the copy is recorded; returns an error
+ * rather than emitting a write the plan cannot describe. */
+flux_result flux_frame_plan_upload(flux_frame *f, struct flux_image *destination, int32_t x,
+                                   int32_t y, uint32_t width, uint32_t height, const void *staging);
 
 /* External SYNC_FD semaphore pool used by reusable dma-buf per-frame waits. */
 VkSemaphore flux_dmabuf_acquire_semaphore_take(flux_device *device);

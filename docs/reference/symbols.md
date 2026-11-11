@@ -25,6 +25,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_icc_profile_color_space` | When the profile is exactly representable in the parametric model (matrix + a transfer curve from the flux set), fills `out` and returns true. |
 | `flux_image_create` |  |
 | `flux_image_release` |  |
+| `flux_image_snapshot` | Publish an immutable snapshot handle. |
+| `flux_image_size_bytes` | Content bytes described by the image extent and pixel format. |
 | `flux_image_width` |  |
 | `flux_image_height` |  |
 | `flux_image_format` |  |
@@ -262,6 +264,7 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_encoder_fail` | Producers propagate capture failures into the recorder's sticky result. |
 | `flux_encoder_status` |  |
 | `flux_encoder_draw_geometry` |  |
+| `flux_encoder_draw_geometry_slot` | Record an image-brush geometry whose image is a dynamic input slot rather than a concrete image. |
 | `flux_encoder_draw_glyph_run` |  |
 | `flux_encoder_save` |  |
 | `flux_encoder_restore` |  |
@@ -276,7 +279,13 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `flux_display_list_release` |  |
 | `flux_display_list_size` |  |
 | `flux_display_list_command_count` |  |
+| `flux_display_list_retained_bytes` | Pinned image-content bytes retained by this list, including child lists. |
+| `flux_display_list_input_mask` | Bit set of dynamic image input slots this list (including children) uses. |
 | `flux_canvas_submit_display_list` | Submit an immutable display list to a canvas for batch execution. |
+| `flux_canvas_submit_display_list_bound` | Submit a list with every dynamic image slot bound exactly once. |
+| `flux_display_list_serialize` | Serialize to a newly allocated byte stream. |
+| `flux_display_list_deserialize` | Load a serialized list. |
+| `flux_display_list_serialized_free` |  |
 | `flux_encoder_draw_display_list` | Record an owned child list under the recorder's current placement and clip. |
 | `flux_canvas_get_plan_stats` |  |
 | `flux_canvas_draw_glyph_run` | Draw a pre-shaped glyph run as a single batched draw call. |
@@ -639,8 +648,8 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `iris_version_number` |  |
 | `iris_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
 | `iris_request_animation_frame` | Request one more frame at the backend's active animation cadence. |
-| `iris_paint_mark_static` | Declare the current frame's host canvas content static. |
-| `iris_request_frame_skip_render` | Zero-render skip for hosts with a paint callback: after a build in which the host knows the canvas content is unchanged *and* it still wants the active-rate cadence to continue, call this instead of (not in addition to) iris_paint_mark_static. |
+| `iris_record_mark_static` | Declare the current frame's recorded host canvas content static. |
+| `iris_request_frame_skip_render` | Zero-render skip for hosts with a record callback: after a build in which the host knows the canvas content is unchanged *and* it still wants the active-rate cadence to continue, call this instead of (not in addition to) iris_record_mark_static. |
 | `iris_post_to_main_thread` | Post fn(user) to the iris main thread. |
 
 ### `iris/window.h`
@@ -660,7 +669,6 @@ blocking behavior per call, see [Thread Safety](thread-safety.md).
 | `iris_window_set_max_size` |  |
 | `iris_window_get_geometry` | Snapshot of the active window's logical geometry. |
 | `iris_window_create_activation_token` | Request a window activation token (xdg-activation-v1 on Wayland) to pass to an external or child process for seamless focus handoff. |
-| `iris_wayland_create_activation_token` | Compatibility alias for iris_window_create_activation_token. |
 
 ### `iris/cursor.h`
 

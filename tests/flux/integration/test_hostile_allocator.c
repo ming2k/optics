@@ -23,8 +23,10 @@
  * A library that bypasses the funnel shows up as "0 bytes seen for owner=X",
  * which is the direct, falsifiable form of the contract.
  */
+#include "../icc_testkit.h"
 #include "test_helpers.h"
 
+#include <flux/flux.h>
 #include <flux/observe.h>
 #include <lens/lens.h>
 #include <prism/prism.h>
@@ -265,6 +267,117 @@ static void lane_lens_uses_funnel(flux_device *d) {
     (void)during;
 }
 
+static void lane_image_snapshot_oom(flux_device *d) {
+    flux_image_desc idesc = FLUX_IMAGE_DESC_INIT;
+    idesc.width = 2;
+    idesc.height = 2;
+    idesc.format = FLUX_FORMAT_RGBA8_UNORM;
+    flux_image *image = nullptr;
+    EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
+
+    size_t before = g_live_bytes;
+    flux_image *snapshot = nullptr;
+    g_fail_at = g_alloc_seq + 1;
+    EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_ERROR_OUT_OF_MEMORY);
+    EXPECT(snapshot == nullptr);
+    g_fail_at = 0;
+
+    /* The failed snapshot must not poison the source image. */
+    EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_OK);
+    EXPECT(snapshot != nullptr);
+    flux_image_release(snapshot);
+    flux_image_release(image);
+    EXPECT(g_live_bytes <= before);
+}
+
+static void lane_image_lut_oom(flux_device *d) {
+    uint8_t pdata[8192];
+    icc_tag_def defs[8];
+    size_t len = icc_build_mft1_constant_white(pdata, &defs[0]);
+    uint8_t profile[16384];
+    size_t size = icc_build_profile(profile, "mntr", "XYZ ", pdata, len, defs, 1);
+    flux_icc_profile *icc = nullptr;
+    EXPECT(flux_icc_profile_create(profile, size, &icc) == FLUX_OK);
+
+    flux_image_color_space_desc csd = FLUX_IMAGE_COLOR_SPACE_DESC_INIT;
+    csd.icc = icc;
+    uint32_t pixels[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    flux_image_desc idesc = FLUX_IMAGE_DESC_INIT;
+    idesc.next = &csd;
+    idesc.width = 2;
+    idesc.height = 2;
+    idesc.format = FLUX_FORMAT_RGBA8_UNORM;
+    idesc.initial_data = pixels;
+
+    size_t before = g_live_bytes;
+    bool published = false;
+    /* Fail each successive allocation until the LUT image, binds, and params
+     * buffer have all been exercised once. Every failure must unwind cleanly;
+     * the eventual success proves the loop reached the whole construction. */
+    for (uint64_t offset = 1; offset <= 64 && !published; ++offset) {
+        flux_image *image = nullptr;
+        g_fail_at = g_alloc_seq + offset;
+        flux_result r = flux_image_create(d, &idesc, &image);
+        g_fail_at = 0;
+        if (r == FLUX_OK) {
+            EXPECT(image != nullptr);
+            published = true;
+            flux_image_release(image);
+        } else {
+            EXPECT(image == nullptr);
+            EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY || r == FLUX_ERROR_BACKEND_FAILURE);
+        }
+    }
+    EXPECT(published);
+    flux_icc_profile_release(icc);
+    flux_device_wait_idle(d);
+    EXPECT(g_live_bytes <= before);
+}
+
+static void lane_sampler_buffer_oom(flux_device *d) {
+    size_t before = g_live_bytes;
+    bool sampler_ok = false;
+    for (uint64_t offset = 1; offset <= 16 && !sampler_ok; ++offset) {
+        flux_sampler *sampler = nullptr;
+        g_fail_at = g_alloc_seq + offset;
+        flux_result r =
+            flux_sampler_create(d, &(flux_sampler_desc)FLUX_SAMPLER_DESC_INIT, &sampler);
+        g_fail_at = 0;
+        if (r == FLUX_OK) {
+            EXPECT(sampler != nullptr);
+            sampler_ok = true;
+            flux_sampler_release(sampler);
+        } else {
+            EXPECT(sampler == nullptr);
+            EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY);
+        }
+    }
+    EXPECT(sampler_ok);
+
+    bool buffer_ok = false;
+    for (uint64_t offset = 1; offset <= 16 && !buffer_ok; ++offset) {
+        flux_buffer *buffer = nullptr;
+        flux_buffer_desc bd = FLUX_BUFFER_DESC_INIT;
+        bd.size = 256;
+        bd.usage = FLUX_BUFFER_USAGE_STORAGE;
+        bd.location = FLUX_BUFFER_HOST_VISIBLE;
+        g_fail_at = g_alloc_seq + offset;
+        flux_result r = flux_buffer_create(d, &bd, &buffer);
+        g_fail_at = 0;
+        if (r == FLUX_OK) {
+            EXPECT(buffer != nullptr);
+            buffer_ok = true;
+            flux_buffer_release(buffer);
+        } else {
+            EXPECT(buffer == nullptr);
+            EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY || r == FLUX_ERROR_BACKEND_FAILURE);
+        }
+    }
+    EXPECT(buffer_ok);
+    flux_device_wait_idle(d);
+    EXPECT(g_live_bytes <= before);
+}
+
 int main(void) {
     flux_device *d = make_hostile_device();
     if (!d) {
@@ -279,6 +392,9 @@ int main(void) {
     lane_funnel_oom(d);
     lane_prism_uses_funnel(d);
     lane_lens_uses_funnel(d);
+    lane_image_snapshot_oom(d);
+    lane_image_lut_oom(d);
+    lane_sampler_buffer_oom(d);
 
     flux_device_release(d);
     flux_device_wait_idle(nullptr);

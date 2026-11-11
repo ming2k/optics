@@ -15,7 +15,7 @@
  * one persistent transparent output (the same contract as the other prism
  * materials):
  *
- *   1. frost: every `prism_backdrop_frost` rectangle writes the blurred
+ *   1. frost: every `prism_base_material` rectangle writes the blurred
  *      backdrop, source-over, inside its rect (rounded-rect SDF coverage,
  *      per-rect opacity);
  *   2. glass: every `prism_liquid_glass_group` is evaluated exactly as
@@ -80,12 +80,7 @@ typedef struct prism_base_material {
 #define PRISM_BASE_MATERIAL_INIT                                                                   \
     {.corner_radius = 0.0f, .opacity = 1.0f, .tint_color = 0xFFFFFFu, .tint_strength = 0.0f}
 
-/* Backward-compatible alias for existing call sites. */
-typedef prism_base_material prism_backdrop_frost;
-#define PRISM_BACKDROP_FROST_INIT PRISM_BASE_MATERIAL_INIT
-
 #define PRISM_BACKDROP_MAX_BASE_MATERIALS 16u
-#define PRISM_BACKDROP_MAX_FROST_RECTS PRISM_BACKDROP_MAX_BASE_MATERIALS
 #define PRISM_BACKDROP_MAX_GLASS_GROUPS 64u
 
 /*
@@ -175,8 +170,8 @@ typedef struct prism_backdrop_layer_desc {
     flux_image *blurred_input; /* blurred backdrop (required, same extent) */
 
     /* 1. Base Material Layer (底衬材质层) */
-    const prism_base_material *frost; /* may be NULL/0; base material plates */
-    uint32_t frost_count;
+    const prism_base_material *base_materials; /* may be NULL/0; base material plates */
+    uint32_t base_material_count;
 
     /* 2. Optical Glass Layer (高光与折射透镜层) */
     const prism_liquid_glass_group *groups; /* may be NULL/0 */

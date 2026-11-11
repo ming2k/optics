@@ -270,11 +270,10 @@ struct glyph_ctx {
 
     /* Multi-page GPU atlas. Page 0 is created lazily on first use exactly
      * as the single image was; pages 1..n appear only when page n-1 is
-     * full and the cap allows another. `atlas` stays an alias for the
-     * current page so measure-only and CPU-canvas callers are unaffected.
-     * The host coverage buffer (`atlas_pixels`) is shared by all pages:
-     * only one page's dirty box is ever pending at a time because the
-     * rasteriser always blits into the current page. */
+     * full and the cap allows another. The host coverage buffer
+     * (`atlas_pixels`) is shared by all pages: only one page's dirty box is
+     * ever pending at a time because the rasteriser always blits into the
+     * current page. */
     flux_image *atlas_pages[TXT_ATLAS_MAX_PAGES];
     uint8_t atlas_page_count; /* pages in use; 0 until first allocation */
     uint8_t atlas_page;       /* current packing page index */
@@ -288,21 +287,7 @@ struct glyph_ctx {
     uint16_t atlas_page_dirty_y0[TXT_ATLAS_MAX_PAGES];
     uint16_t atlas_page_dirty_x1[TXT_ATLAS_MAX_PAGES];
     uint16_t atlas_page_dirty_y1[TXT_ATLAS_MAX_PAGES];
-    /* Compatibility view: the current page's image. Kept in sync by the
-     * atlas module (NULL while no page exists / CPU canvas). */
-    flux_image *atlas;
     uint8_t *atlas_pixels;
-    uint32_t atlas_cursor_x;
-    uint32_t atlas_cursor_y;
-    uint32_t atlas_row_height;
-    bool atlas_dirty;
-    /* Dirty bounding box (exclusive max) accumulated by
-     * txt_atlas_mark_dirty() on each cache-miss blit. Flushed by
-     * txt_atlas_flush() as a single GPU upload before the next
-     * draw_glyph_run — replaces the per-glyph submit-and-wait that
-     * caused one GPU pipeline stall per each new glyph. */
-    uint16_t atlas_dirty_x0, atlas_dirty_y0;
-    uint16_t atlas_dirty_x1, atlas_dirty_y1;
     /* Count of atlas_clear() calls (full-texture reclaims). Climbs when
      * the working set exceeds every page; each clear forces the next
      * frame to re-rasterise every visible glyph. Exposed via

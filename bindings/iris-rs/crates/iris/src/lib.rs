@@ -8,21 +8,21 @@
 //!    pair. The host builds its chrome (immediate-mode lens widgets) and
 //!    reads the per-frame [`Input`] snapshot to drive anything lens itself
 //!    does not own.
-//! 2. **paint** ([`PaintHost`]) — inside an open `flux_canvas_begin/end`
-//!    pair, *before* lens renders its widget layer. Anything drawn here
-//!    composites under the chrome. Use it for surfaces lens cannot describe
-//!    (a document canvas, an image, a custom render path).
+//! 2. **record** ([`RecordHost`]) — on the UI thread, before the frame is
+//!    submitted. The host records host canvas content into an immutable
+//!    display list; iris composites it under the chrome. Use it for surfaces
+//!    lens cannot describe (a document canvas, an image, a custom render path).
 //!
-//! Either closure may be `None` — a pure-chrome app skips `paint`, a
+//! Either closure may be `None` — a pure-chrome app skips `record`, a
 //! pure-canvas demo skips `build`.
 //!
 //! ```no_run
 //! use iris::{Application, Config};
 //!
-//! Application::run(
+//! Application::run_with_record(
 //!     Config::new("Demo").unwrap(),
 //!     |_frame, _input| { /* build chrome */ },
-//!     Some(|_canvas| { /* paint document surface */ }),
+//!     Some(|_host| { /* record document surface */ }),
 //! ).unwrap();
 //! ```
 //!
@@ -54,74 +54,6 @@ pub use lens::{
     PlaceMode, PlaceOpts, Rect, Response, Style, TextBuf, Theme, Ui,
 };
 
-/// A thin wrapper over the raw pointers iris hands to the paint
-/// callback: the canvas (live inside an open
-/// `flux_canvas_begin_frame`/`flux_canvas_end_frame` pair), the device
-/// iris owns for this app, and the current device-pixel ratio. All three
-/// borrows are valid only inside the paint call.
-///
-/// Hosts that need a `flux::Device`-shaped handle (e.g. to create a
-/// `glyph::Text` context) **must** borrow `flux_device()` rather than
-/// opening their own — two `flux_device`s in one process is unsupported
-/// and crashes.
-///
-/// Hosts drawing canvas content directly should wrap their draw in
-/// `canvas.save / canvas.scale(s, s) / ... / canvas.restore` and call
-/// `glyph_set_scale(text, s)` so glyphs rasterise crisply on HiDPI.
-/// lens applies the same scale to its own chrome internally; the host
-/// only scales the document-surface portion.
-pub struct PaintHost {
-    canvas: *mut sys::flux_canvas,
-    device: *mut sys::flux_device,
-    scale: f32,
-}
-
-impl PaintHost {
-    /// The canvas iris is handing the paint callback, as a borrowed
-    /// (non-owning) `flux::Canvas`. It is already inside its
-    /// begin/end pair for this frame; draw through it directly. The borrow
-    /// lives for the callback only — iris owns and destroys the canvas.
-    ///
-    /// The pointer came straight from iris's `iris_paint_fn` C callback,
-    /// which types it `flux_canvas*`; `iris-sys` re-exports the one
-    /// `flux_canvas` definition from `flux-sys`, so the cast to the
-    /// `flux` crate's view is a no-op reinterpretation of an opaque
-    /// handle (see [`flux::CanvasCommands::borrow_raw`]'s contract for
-    /// sibling-binding pointers).
-    pub fn flux_canvas(&self) -> flux::CanvasCommands<'_> {
-        // SAFETY: iris handed us a live `flux_canvas*` for the duration of
-        // the paint callback. The returned handle does not destroy on drop.
-        unsafe { flux::CanvasCommands::borrow_raw(self.canvas) }
-    }
-
-    /// The single flux device iris owns, as a borrowed (non-owning)
-    /// `flux::Device`. Use it for any device-dependent context (samplers,
-    /// textures, a `glyph::Text` shaper, …) instead of opening a
-    /// second device — two devices in one process is unsupported. The
-    /// borrow is valid for the app's lifetime; iris releases the device at
-    /// shutdown.
-    ///
-    /// Same pointer contract as [`PaintHost::flux_canvas`]: the typed
-    /// `flux_device*` from iris's C callback, reinterpreted through the
-    /// `flux` crate's layout-identical bindgen view.
-    pub fn flux_device(&self) -> flux::Device {
-        // SAFETY: see the doc comment; mirrors `Device::borrow_raw`'s
-        // contract for sibling-binding pointers.
-        unsafe { flux::Device::borrow_raw(self.device) }
-    }
-
-    /// The current device-pixel ratio (Wayland
-    /// `wl_surface.preferred_buffer_scale`). Always ≥1; 1 on a 1:1 logical
-    /// display, 2 on a typical HiDPI laptop panel.
-    pub fn scale(&self) -> f32 {
-        self.scale
-    }
-}
-
-/// Alias kept for back-compat with the prior single-pointer signature; new
-/// code should use [`PaintHost`], which also exposes the device.
-pub type PaintCanvas = PaintHost;
-
 /// Borrowed handles passed to [`Application::run_with_record`] for decoupled host canvas recording (ADR-0127).
 pub struct RecordHost {
     encoder: *mut sys::flux_encoder,
@@ -146,9 +78,9 @@ impl RecordHost {
 /// The callback runs once — after iris has created its device, canvas and
 /// lens context, before the first frame — which makes it the right place to
 /// set up device-dependent resources (text shapers, image uploads) without
-/// installing a per-frame paint callback: a non-NULL `paint` disables the
-/// backend's idle frame-skip, a start hook costs nothing per frame. The same
-/// device-borrow rule as [`PaintHost::flux_device`] applies.
+/// installing a per-frame record callback: a start hook costs nothing per
+/// frame and does not defeat the backend's idle frame-skip. The same
+/// device-borrow rule as [`StartHost::flux_device`] applies.
 pub struct StartHost {
     ui: *mut sys::lens,
     device: *mut sys::flux_device,
@@ -168,7 +100,7 @@ impl StartHost {
     /// `flux::Device`. Borrow it — never open a second device in the same
     /// process.
     pub fn flux_device(&self) -> flux::Device {
-        // SAFETY: see [`PaintHost::flux_device`]; same contract, the start
+        // SAFETY: see [`StartHost::flux_device`]; same contract, the start
         // callback's device pointer lives until shutdown.
         unsafe { flux::Device::borrow_raw(self.device) }
     }
@@ -178,7 +110,7 @@ impl StartHost {
 /// as [`StartHost`], live one last time after the frame loop and before
 /// iris tears down lens, flux, and the device (ADR-0045). This is where
 /// hosts release every device-backed resource created from
-/// [`StartHost::flux_device`] / [`PaintHost::flux_device`].
+/// [`StartHost::flux_device`].
 pub type StopHost = StartHost;
 
 /// Errors returned by [`Application::run`].
@@ -260,15 +192,15 @@ impl Config {
 ///
 /// Wraps `iris_app_run`. `build` runs once per frame inside an open
 /// `lens_begin/end` pair, with `input` being the same [`Input`] snapshot
-/// lens is consuming this frame. `paint` (if `Some`) runs once per frame
-/// inside an open `flux_canvas_begin/end` pair, *before* lens renders its
-/// widget layer — so anything it draws lands under the chrome. Blocks the
-/// calling thread until the window is closed.
+/// lens is consuming this frame. `record` (if `Some`) records host canvas
+/// content into an immutable display list before the frame is submitted, so
+/// it lands under the chrome. Blocks the calling thread until the window is
+/// closed.
 pub struct Application;
 
 /// Request one more frame at Iris's active animation cadence.
 ///
-/// Call this during a build or paint callback while host-owned, time-based
+/// Call this during a build or record callback while host-owned, time-based
 /// content is moving. Repeating it every frame sustains the animation; once
 /// requests stop, Iris can return to its low-power idle cadence. Calls outside
 /// an active [`Application::run`] are harmless no-ops.
@@ -278,28 +210,28 @@ pub fn request_animation_frame() {
 
 /// Declare the current frame's host canvas content static.
 ///
-/// A paint callback's content is opaque to lens, so the backend normally
+/// Recorded host content is opaque to lens, so the backend normally
 /// keeps painting every scheduled frame — including a full clear to the
 /// theme background. When the host knows its scene is pixel-identical to
 /// what is already on screen (a paused animation, a settled audio
 /// visualizer), this call lets the backend skip the entire
-/// acquire → clear → paint → present cycle: no swapchain image is
+/// record → clear → submit → present cycle: no swapchain image is
 /// committed and the GPU does no host work, unloading the compositor
-/// exactly like a host without a paint callback.
+/// exactly like a host without a record callback.
 ///
 /// The declaration covers one frame only and must be re-issued every frame
 /// it applies to — call it from the **build** callback (build runs on every
-/// scheduled frame, including skipped ones; a declaration made in paint is
+/// scheduled frame, including skipped ones; a declaration made in record is
 /// cleared with the first skipped frame and the cadence bounces back).
 /// Any user input, a resize or buffer-scale change, a following
 /// [`request_animation_frame`], or lens-reported chrome damage forces the
-/// next frame to paint again.
+/// next frame to present again.
 ///
 /// While static, the backend keeps a low idle tick (~4 Hz) so build (and
-/// paint, when it chooses) still run and the host can resume animating on
-/// its own. No-op without an active app or without a paint callback.
-pub fn paint_mark_static() {
-    unsafe { sys::iris_paint_mark_static() };
+/// record, when it chooses) still run and the host can resume animating on
+/// its own. No-op without an active app or without a record callback.
+pub fn record_mark_static() {
+    unsafe { sys::iris_record_mark_static() };
 }
 
 /// Skips this frame's render/present while keeping the active-rate cadence.
@@ -308,18 +240,18 @@ pub fn paint_mark_static() {
 /// *presented* frame but is still streaming — the media-cadence pattern:
 /// a 30 fps visualizer on a 60 Hz display renders on its stage ticks and
 /// declares skip on the in-between frames while calling
-/// [`request_animation_frame`] as usual. Only the begin → clear → paint →
+/// [`request_animation_frame`] as usual. Only the begin → clear → record →
 /// present work for this frame is suppressed; the next deadline stays armed
 /// at the active rate (no decay to the ~4 Hz idle tick).
 ///
-/// Mutually exclusive per frame with [`paint_mark_static`] (skip wins for
+/// Mutually exclusive per frame with [`record_mark_static`] (skip wins for
 /// rendering only when the static path would also have skipped; prefer
-/// declaring exactly one). Unlike [`paint_mark_static`], a fresh
+/// declaring exactly one). Unlike [`record_mark_static`], a fresh
 /// [`request_animation_frame`] does **not** veto this declaration — the two
 /// together are precisely the streaming shape. Any user input, a resize or
 /// buffer-scale change, or lens-reported chrome damage still forces a real
-/// paint. Call from the **build** callback; consumed once, re-issue every
-/// frame it applies to. No-op without an active app or without a paint
+/// present. Call from the **build** callback; consumed once, re-issue every
+/// frame it applies to. No-op without an active app or without a record
 /// callback.
 pub fn request_frame_skip_render() {
     unsafe { sys::iris_request_frame_skip_render() };
@@ -329,17 +261,15 @@ impl Application {
     /// Run the application until the user closes the window. Blocks the
     /// calling thread; callbacks run on it. See [`Config`] for the setup
     /// surface and the crate docs for the callback model.
-    pub fn run<B, P>(config: Config, build: B, paint: Option<P>) -> Result<(), RunError>
+    pub fn run<B>(config: Config, build: B) -> Result<(), RunError>
     where
         B: FnMut(&mut Frame<'_>, &Input),
-        P: FnMut(PaintHost) + 'static,
     {
         Self::run_impl(
             config,
             None::<fn(StartHost) -> bool>,
             None::<fn(StopHost)>,
             build,
-            paint,
             None::<fn(RecordHost)>,
         )
     }
@@ -347,15 +277,9 @@ impl Application {
     /// Like [`Application::run`], plus a one-shot `start` callback that iris
     /// invokes after its device/canvas/lens setup and before the first frame
     /// (see [`StartHost`]). The callback returning `false` aborts the run.
-    pub fn run_with_start<B, P, S>(
-        config: Config,
-        start: S,
-        build: B,
-        paint: Option<P>,
-    ) -> Result<(), RunError>
+    pub fn run_with_start<B, S>(config: Config, start: S, build: B) -> Result<(), RunError>
     where
         B: FnMut(&mut Frame<'_>, &Input),
-        P: FnMut(PaintHost) + 'static,
         S: FnMut(StartHost) -> bool,
     {
         Self::run_impl(
@@ -363,7 +287,6 @@ impl Application {
             Some(start),
             None::<fn(StopHost)>,
             build,
-            paint,
             None::<fn(RecordHost)>,
         )
     }
@@ -372,28 +295,29 @@ impl Application {
     /// device/canvas/lens setup and before the first frame (returning
     /// `false` aborts the run); `stop` runs after the frame loop and before
     /// iris destroys the device, giving hosts a deterministic point to
-    /// release device-backed resources. Either may be `None`.
-    pub fn run_with_lifecycle<B, P, S, T>(
+    /// release device-backed resources. `record` is the optional host canvas
+    /// recorder. Either may be `None`.
+    pub fn run_with_lifecycle<B, S, T, R>(
         config: Config,
         start: Option<S>,
         stop: Option<T>,
         build: B,
-        paint: Option<P>,
+        record: Option<R>,
     ) -> Result<(), RunError>
     where
         B: FnMut(&mut Frame<'_>, &Input),
-        P: FnMut(PaintHost) + 'static,
         S: FnMut(StartHost) -> bool,
         T: FnMut(StopHost),
+        R: FnMut(RecordHost) + 'static,
     {
-        Self::run_impl(config, start, stop, build, paint, None::<fn(RecordHost)>)
+        Self::run_impl(config, start, stop, build, record)
     }
 
-    /// Run an application with a decoupled vector recording callback (ADR-0127).
+    /// Run an application with a host canvas recorder (ADR-0127).
     ///
-    /// The `record` closure records vector drawing into a CPU-bound [`flux::Encoder`].
-    /// The resulting immutable display list is submitted directly by the presentation
-    /// worker thread without stalls on the UI thread.
+    /// The `record` closure records vector drawing into a CPU-bound
+    /// [`flux::Encoder`]. The resulting immutable display list is submitted
+    /// by the same presentation pipeline as lens chrome, on every backend.
     pub fn run_with_record<B, R>(
         config: Config,
         build: B,
@@ -408,106 +332,65 @@ impl Application {
             None::<fn(StartHost) -> bool>,
             None::<fn(StopHost)>,
             build,
-            None::<fn(PaintHost)>,
             record,
         )
     }
 
-    fn run_impl<B, P, S, T, R>(
+    fn run_impl<B, S, T, R>(
         config: Config,
         start: Option<S>,
         stop: Option<T>,
         build: B,
-        paint: Option<P>,
         record: Option<R>,
     ) -> Result<(), RunError>
     where
         B: FnMut(&mut Frame<'_>, &Input),
-        P: FnMut(PaintHost) + 'static,
         S: FnMut(StartHost) -> bool,
         T: FnMut(StopHost),
         R: FnMut(RecordHost) + 'static,
     {
-        // Box the closures so they have a stable address to pass through the
-        // C trampoline. Each gets its own box; both share the `user` pointer
-        // via a small wrapper struct.
         let build_box: Box<B> = Box::new(build);
-        let paint_box: Option<Box<P>> = paint.map(Box::new);
         let start_box: Option<Box<S>> = start.map(Box::new);
         let stop_box: Option<Box<T>> = stop.map(Box::new);
         let record_box: Option<Box<R>> = record.map(Box::new);
 
-        // SAFETY: the trampolines cast `user` back to the right box type and
-        // call it. The boxes outlive `iris_app_run` (held by `run_state`
-        // until the call returns).
         let mut run_state = RunState {
             build: build_box,
-            paint: paint_box,
             start: start_box,
             stop: stop_box,
             record: record_box,
         };
 
-        extern "C" fn build_trampoline<B, P, S, T, R>(
+        extern "C" fn build_trampoline<B, S, T, R>(
             ui: *mut sys::lens,
             in_: *const sys::lens_input,
             user: *mut std::os::raw::c_void,
         ) where
             B: FnMut(&mut Frame<'_>, &Input),
-            P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
             R: FnMut(RecordHost),
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T, R>) };
-                // The shared native seam aliases these handles to the same
-                // generated types across the Iris and Lens bindings.
+                let run = unsafe { &mut *(user as *mut RunState<B, S, T, R>) };
                 let mut frame = unsafe { Frame::from_raw(ui) };
                 let input = unsafe { Input::from_raw_ref(in_) };
                 (run.build)(&mut frame, input);
-                // The backend follows the hovered widget's cursor hint
-                // natively once per frame — nothing to do here.
             }));
         }
 
-        extern "C" fn paint_trampoline<B, P, S, T, R>(
-            canvas: *mut sys::flux_canvas,
-            device: *mut sys::flux_device,
-            scale: f32,
-            user: *mut std::os::raw::c_void,
-        ) where
-            B: FnMut(&mut Frame<'_>, &Input),
-            P: FnMut(PaintHost),
-            S: FnMut(StartHost) -> bool,
-            T: FnMut(StopHost),
-            R: FnMut(RecordHost),
-        {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T, R>) };
-                if let Some(p) = run.paint.as_mut() {
-                    p(PaintHost {
-                        canvas,
-                        device,
-                        scale,
-                    });
-                }
-            }));
-        }
-
-        extern "C" fn record_trampoline<B, P, S, T, R>(
+        extern "C" fn record_trampoline<B, S, T, R>(
             enc: *mut sys::flux_encoder,
             scale: f32,
             user: *mut std::os::raw::c_void,
         ) where
             B: FnMut(&mut Frame<'_>, &Input),
-            P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
             R: FnMut(RecordHost),
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T, R>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, S, T, R>) };
                 if let Some(r) = run.record.as_mut() {
                     r(RecordHost {
                         encoder: enc,
@@ -517,20 +400,19 @@ impl Application {
             }));
         }
 
-        extern "C" fn start_trampoline<B, P, S, T, R>(
+        extern "C" fn start_trampoline<B, S, T, R>(
             ui: *mut sys::lens,
             device: *mut sys::flux_device,
             user: *mut std::os::raw::c_void,
         ) -> bool
         where
             B: FnMut(&mut Frame<'_>, &Input),
-            P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
             R: FnMut(RecordHost),
         {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T, R>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, S, T, R>) };
                 match run.start.as_mut() {
                     Some(s) => s(StartHost { ui, device }),
                     None => true,
@@ -539,44 +421,37 @@ impl Application {
             .unwrap_or(false)
         }
 
-        extern "C" fn stop_trampoline<B, P, S, T, R>(
+        extern "C" fn stop_trampoline<B, S, T, R>(
             ui: *mut sys::lens,
             device: *mut sys::flux_device,
             user: *mut std::os::raw::c_void,
         ) where
             B: FnMut(&mut Frame<'_>, &Input),
-            P: FnMut(PaintHost),
             S: FnMut(StartHost) -> bool,
             T: FnMut(StopHost),
             R: FnMut(RecordHost),
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, P, S, T, R>) };
+                let run = unsafe { &mut *(user as *mut RunState<B, S, T, R>) };
                 if let Some(t) = run.stop.as_mut() {
                     t(StartHost { ui, device });
                 }
             }));
         }
 
-        // Monomorphise the trampolines for the actual (B, P, S, T, R) tuple.
         let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
-        let paint_fn: sys::iris_paint_fn = if run_state.paint.is_some() {
-            Some(paint_trampoline::<B, P, S, T, R>)
-        } else {
-            None
-        };
         let record_fn: sys::iris_record_fn = if run_state.record.is_some() {
-            Some(record_trampoline::<B, P, S, T, R>)
+            Some(record_trampoline::<B, S, T, R>)
         } else {
             None
         };
         let start_fn: sys::iris_start_fn = if run_state.start.is_some() {
-            Some(start_trampoline::<B, P, S, T, R>)
+            Some(start_trampoline::<B, S, T, R>)
         } else {
             None
         };
         let stop_fn: sys::iris_stop_fn = if run_state.stop.is_some() {
-            Some(stop_trampoline::<B, P, S, T, R>)
+            Some(stop_trampoline::<B, S, T, R>)
         } else {
             None
         };
@@ -592,10 +467,9 @@ impl Application {
             on_event: None,
             start: start_fn,
             stop: stop_fn,
-            build: Some(build_trampoline::<B, P, S, T, R>),
+            build: Some(build_trampoline::<B, S, T, R>),
             record: record_fn,
             prepare: None,
-            paint: paint_fn,
             user: user_ptr,
         };
 
@@ -611,16 +485,14 @@ impl Application {
 /// and `T` so each trampoline can cast the opaque `user` pointer back to a
 /// type that knows the concrete closure shapes. When a slot is `None` the
 /// matching trampoline is never installed.
-struct RunState<B, P, S, T, R>
+struct RunState<B, S, T, R>
 where
     B: FnMut(&mut Frame<'_>, &Input),
-    P: FnMut(PaintHost),
     S: FnMut(StartHost) -> bool,
     T: FnMut(StopHost),
     R: FnMut(RecordHost),
 {
     build: Box<B>,
-    paint: Option<Box<P>>,
     start: Option<Box<S>>,
     stop: Option<Box<T>>,
     record: Option<Box<R>>,
@@ -986,12 +858,6 @@ pub fn window_create_activation_token(app_id: Option<&str>) -> Option<String> {
     } else {
         None
     }
-}
-
-/// Request an XDG activation token (xdg-activation-v1) on Wayland to pass
-/// to an external process. Compatibility alias for [`window_create_activation_token`].
-pub fn wayland_activation_token(app_id: Option<&str>) -> Option<String> {
-    window_create_activation_token(app_id)
 }
 
 // =====================================================================
@@ -1685,7 +1551,6 @@ mod tests {
         window_set_max_size(4096, 4096);
         assert_eq!(window_get_geometry(), None);
         assert_eq!(window_create_activation_token(None), None);
-        assert_eq!(wayland_activation_token(Some("org.example.App")), None);
     }
 
     #[test]
@@ -1878,7 +1743,7 @@ mod tests {
             None::<fn(StartHost) -> bool>,
             None::<fn(StopHost)>,
             |_f: &mut Frame<'_>, _i: &Input| {},
-            None::<fn(PaintHost)>,
+            None::<fn(RecordHost)>,
         );
     }
 }

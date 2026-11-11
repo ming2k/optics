@@ -61,19 +61,6 @@ typedef struct flux_rect {
 #define FLUX_NODISCARD
 #endif
 
-/* FLUX_DEPRECATED(msg): mark a public symbol as scheduled for removal. Expands
- * to the compiler attribute where available so call sites get a warning; the
- * fallback is empty so portability is never sacrificed. */
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
-#define FLUX_DEPRECATED(msg) [[deprecated(msg)]]
-#elif defined(_MSC_VER)
-#define FLUX_DEPRECATED(msg) __declspec(deprecated(msg))
-#elif defined(__GNUC__) || defined(__clang__)
-#define FLUX_DEPRECATED(msg) __attribute__((deprecated(msg)))
-#else
-#define FLUX_DEPRECATED(msg)
-#endif
-
 /* ================================================================== */
 /*  Versioning                                                        */
 /* ================================================================== */
@@ -314,6 +301,8 @@ typedef enum flux_struct_type {
     FLUX_TYPE_DEVICE_ALLOC_OPTS = 50,
     FLUX_TYPE_DEVICE_FREE_OPTS = 51,
     FLUX_TYPE_DEFERRED_PASS_DESC = 52,
+    FLUX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS = 53,
+    FLUX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS = 54,
     /* Append only. Never repurpose. */
 } flux_struct_type;
 
@@ -335,6 +324,10 @@ static_assert(FLUX_TYPE_OBSERVE_REPORT_OPTS == 49,
 static_assert(FLUX_TYPE_DEVICE_ALLOC_OPTS == 50, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_DEVICE_FREE_OPTS == 51, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_DEFERRED_PASS_DESC == 52, "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS == 53,
+              "flux_struct_type: append only — never renumber");
+static_assert(FLUX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS == 54,
+              "flux_struct_type: append only — never renumber");
 
 /* ================================================================== */
 /*  C23 Type-Safe Compound Literal Initializer (RFC-0094 / ADR-0087)  */
@@ -365,6 +358,8 @@ static_assert(FLUX_TYPE_DEFERRED_PASS_DESC == 52, "flux_struct_type: append only
 #define FLUX_TYPE_observe_report_opts FLUX_TYPE_OBSERVE_REPORT_OPTS
 #define FLUX_TYPE_device_alloc_opts FLUX_TYPE_DEVICE_ALLOC_OPTS
 #define FLUX_TYPE_device_free_opts FLUX_TYPE_DEVICE_FREE_OPTS
+#define FLUX_TYPE_display_list_serialize_opts FLUX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS
+#define FLUX_TYPE_display_list_deserialize_opts FLUX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS
 
 typedef struct flux_device_desc flux_DEVICE_DESC;
 typedef struct flux_surface_desc flux_SURFACE_DESC;
@@ -509,6 +504,21 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_create(flux_device *d, const flux
                                                       flux_image **out);
 FLUX_NODISCARD FLUX_API flux_image *flux_image_retain(flux_image *image);
 FLUX_API void flux_image_release(flux_image *image);
+/* Publish an immutable snapshot handle. The snapshot and the original share
+ * the current pixels until the original is updated; an update then copies the
+ * old version so the snapshot keeps rendering the content it captured. The
+ * snapshot itself rejects update_region. A borrowed dma-buf import cannot be
+ * snapshotted; bind it through a dynamic DisplayList input slot instead.
+ *
+ * Threading: snapshot and update_region* are serialized per device. A caller
+ * must own a reference for the duration of either call; releasing the last
+ * reference while another thread is using the handle is undefined. Releasing
+ * one of several references concurrently is safe. */
+FLUX_NODISCARD FLUX_API flux_result flux_image_snapshot(flux_image *image, flux_image **out);
+/* Content bytes described by the image extent and pixel format. This is the
+ * pinned-content accounting unit for display-list budgets, not the driver's
+ * allocation size. */
+FLUX_API size_t flux_image_size_bytes(const flux_image *image);
 FLUX_API uint32_t flux_image_width(const flux_image *image);
 FLUX_API uint32_t flux_image_height(const flux_image *image);
 FLUX_API flux_format flux_image_format(const flux_image *image);

@@ -1,8 +1,8 @@
-# Single first-party library: libflux. The C source tree sits at the repo
-# root (`src/`, `include/`, `tests/`, `examples/`). Content layers that feed
-# flux's draw primitives live in `libs/` as siblings (ADR-0016, ADR-0106): `glyph`
-# (HarfBuzz shaping, feeds flux_canvas_draw_glyph_run) and `vista`
-# (glTF, feeds flux_scene_draw_mesh). Rust bindings live under `bindings/`.
+#Single first - party library : libflux.The C source tree sits at the repo
+#root(`src /`, `include /`, `tests /`, `examples /`).Content layers that feed
+#flux's draw primitives live in `libs/` as siblings (ADR-0016, ADR-0106): `glyph`
+#(HarfBuzz shaping, feeds flux_canvas_draw_glyph_run) and `vista`
+#(glTF, feeds flux_scene_draw_mesh).Rust bindings live under `bindings /`.
 
 vulkan_dep  = dependency('vulkan',  version : '>=1.3', required : true)
 threads_dep = dependency('threads')
@@ -24,14 +24,14 @@ endif
 
 flux_inc = [include_directories('include'), include_directories('.')]
 
-# dma-buf (fd-based external memory import/export + sync_file fences) is
-# Linux-only. When off, src/core/dmabuf_stub.c replaces dmabuf.c and
-# answers every public entry point FLUX_ERROR_UNSUPPORTED. The sources are
-# core-level, NOT part of the canvas module gate: device.c / surface.c /
-# frame.c call the acquire-semaphore pool helpers and flux_dmabuf_supported
-# unconditionally (ADR-0052: no #ifdef at call sites), so a -Dcanvas=false
-# build must still link them. The one canvas-internal entry point lives in
-# src/canvas/dmabuf_acquire.c inside the canvas gate.
+#dma - buf(fd - based external memory import / export + sync_file fences) is
+#Linux - only.When off, src / core / dmabuf_stub.c replaces dmabuf.c and
+#answers every public entry point FLUX_ERROR_UNSUPPORTED.The sources are
+#core - level, NOT part of the canvas module gate : device.c / surface.c /
+#frame.c call the acquire - semaphore pool helpers and flux_dmabuf_supported
+#unconditionally(ADR - 0052 : no #ifdef at call sites), so a - Dcanvas = false
+#build must still link them.The one canvas - internal entry point lives in
+#src / canvas / dmabuf_acquire.c inside the canvas gate.
 have_dmabuf = host_machine.system() == 'linux'
 if have_dmabuf
   flux_c_args_dma = ['-DFLUX_HAVE_DMABUF=1']
@@ -47,6 +47,7 @@ flux_sources = files(
   'src/core/frame.c',
   'src/core/damage_history.c',
   'src/core/plan.c',
+  'src/core/render_plan.c',
   'src/core/result.c',
   'src/core/version.c',
   'src/core/log.c',
@@ -79,35 +80,35 @@ flux_extra_inputs = []
 
 flux_c_args = ['-DFLUX_BUILDING=1'] + flux_c_args_dma
 
-# Observation-plane attribution (ADR-0129). Off by default so a release
-# build carries no name/site machinery; ON is what makes FLUX_OBSERVE_NAMES,
-# FLUX_OBSERVE_PASS_LABELS and FLUX_OBSERVE_SITES cost anything. The absence
-# of the symbols in a default build is verified by ./tools/optics check
-# leaks, so "debug only" is a checked property rather than a promise.
+#Observation - plane attribution(ADR - 0129).Off by default so a release
+#build carries no name / site machinery; ON is what makes FLUX_OBSERVE_NAMES,
+#FLUX_OBSERVE_PASS_LABELS and FLUX_OBSERVE_SITES cost anything.The absence
+#of the symbols in a default build is verified by./ tools / optics check
+#leaks, so "debug only" is a checked property rather than a promise.
 opt_observe_attribution = get_option('observe_attribution')
 if opt_observe_attribution
   flux_c_args += '-DFLUX_OBSERVE_ATTRIBUTION=1'
 endif
 
-# C23 #embed bakes each compiled .spv into the binary (renderer.c /
-# effect.c / scene.c). Compilers without #embed (MSVC cl, Apple Clang)
-# take a generated-header path instead — the headers are produced from
-# the same .spv files by tools/build/spv2h.py further below. --embed-dir is
-# probed because MSVC rejects unknown options outright.
+#C23 #embed bakes each compiled.spv into the binary(renderer.c /
+#effect.c / scene.c).Compilers without #embed(MSVC cl, Apple Clang)
+#take a generated - header path instead — the headers are produced from
+#the same.spv files by tools / build / spv2h.py further below.--embed - dir is
+#probed because MSVC rejects unknown options outright.
 flux_embed_dir_arg = cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
 if opt_canvas or opt_scene or opt_effect
   flux_c_args += flux_embed_dir_arg
 endif
-# One Slang discovery for every shader-bearing module. Defining it here (not
-# inside the canvas block) keeps `-Dcanvas=false -Dscene=true` and
-# `-Dcanvas=false -Deffect=true` valid configurations: both compile shaders.
+#One Slang discovery for every shader - bearing module.Defining it here(not
+#inside the canvas block) keeps `- Dcanvas = false - Dscene = true` and
+# `- Dcanvas = false - Deffect = true` valid configurations : both compile shaders.
 if opt_canvas or opt_scene or opt_effect
   slangc = find_program('slangc', required : true)
   slangc_flags = ['-target', 'spirv', '-profile', 'spirv_1_6', '-Wno-41012']
 endif
 
-# Per-shader accumulators for the generated-header fallback; the
-# custom_target loop sits after the module blocks.
+#Per - shader accumulators for the generated - header fallback; the
+#custom_target loop sits after the module blocks.
 flux_shader_spvs = []
 flux_shader_names = []
 if opt_canvas
@@ -334,7 +335,7 @@ if opt_effect
     command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
                effect_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
-  # ADR-0069: rgba16f storage variants for working-space (16F) content.
+#ADR - 0069 : rgba16f storage variants for working - space(16F) content.
   effect_blur_16f_comp_spv = custom_target('effect_blur_16f.comp.spv',
     input   : 'src/effect/shaders/effect_blur.comp.slang',
     output  : 'effect_blur_16f.comp.spv',
@@ -347,7 +348,7 @@ if opt_effect
     command : [slangc, slangc_flags, '-entry', 'main', '-stage', 'compute',
                '-DEFFECT_STORAGE_RGBA16F', effect_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
-  # ADR-0074: drop-shadow operator (mask in, tinted premultiplied shadow out).
+#ADR - 0074 : drop - shadow operator(mask in, tinted premultiplied shadow out).
   effect_shadow_comp_spv = custom_target('effect_shadow.comp.spv',
     input   : 'src/effect/shaders/effect_shadow.comp.slang',
     output  : 'effect_shadow.comp.spv',
@@ -371,10 +372,10 @@ if opt_effect
                         'effect_shadow_spv', 'effect_shadow_16f_spv']
 endif
 
-# Generated shader headers for the no-#embed fallback (MSVC cl / Apple
-# Clang). The C sources pick per translation unit via __has_embed, so the
-# headers must exist regardless of host compiler; each is one small
-# script run over the matching .spv.
+#Generated shader headers for the no - #embed fallback(MSVC cl / Apple
+#Clang).The C sources pick per translation unit via __has_embed, so the
+#headers must exist regardless of host compiler; each is one small
+#script run over the matching.spv.
 if flux_shader_spvs.length() > 0
   spv2h_py = import('python').find_installation('python3')
   spv2h = files('../../tools/build/spv2h.py')
@@ -385,11 +386,11 @@ if flux_shader_spvs.length() > 0
       command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', flux_shader_names[i]],
     )
   endforeach
-  # ccache does not hash C23 #embed payloads (observed 4.13.6): without
-  # this, editing a shader silently reuses the previous object. The
-  # manifest header folds the .spv bytes' hash into the preprocessed
-  # source of every #embed-consuming TU (renderer.c / scene.c / effect.c
-  # include it unconditionally), so the cache key tracks shader content.
+#ccache does not hash C23 #embed payloads(observed 4.13.6) : without
+#this, editing a shader silently reuses the previous object.The
+#manifest header folds the.spv bytes' hash into the preprocessed
+#source of every #embed - consuming TU(renderer.c / scene.c / effect.c
+#include it unconditionally), so the cache key tracks shader content.
   flux_extra_inputs += custom_target('flux_shader_manifest.h',
     input   : flux_shader_spvs,
     output  : 'flux_shader_manifest.h',
@@ -397,21 +398,21 @@ if flux_shader_spvs.length() > 0
   )
 endif
 
-# Text shaping lives in the glyph sibling (ADR-0016, ADR-0106); libflux itself
-# depends on Vulkan + threads only. The glyph-blit primitive
-# flux_canvas_draw_glyph_run remains in the canvas module — glyph feeds it.
+#Text shaping lives in the glyph sibling(ADR - 0016, ADR - 0106); libflux itself
+#depends on Vulkan + threads only.The glyph - blit primitive
+#flux_canvas_draw_glyph_run remains in the canvas module — glyph feeds it.
 
-# SO versioning (libtool semantics, per docs/reference/api.md):
-#   - `soversion` (the SONAME) encodes the *compatibility boundary*. Pre-1.0
-#     this tree has appended descriptor fields and changed pass behavior on
-#     patch bumps, so the boundary is the full version (`0.0.76`). From 1.0 on
-#     it is `major.minor`; `optics_soname` is derived once in the top-level
-#     meson.build.
-#   - `version` (the real-name suffix) is the full X.Y.Z so each release is a
-#     distinct file on disk.
-# Keeping a binary linked to one pre-1.0 release from silently loading another
-# is the point: the SONAMEs differ and ld.so fails fast instead of reading a
-# descriptor whose layout changed.
+#SO versioning(libtool semantics, per docs / reference / api.md):
+#- `soversion` (the SONAME) encodes the * compatibility boundary *.Pre - 1.0
+#this tree has appended descriptor fields and changed pass behavior on
+#patch bumps, so the boundary is the full version(`0.0.76`).From 1.0 on
+#it is `major.minor`; `optics_soname` is derived once in the top - level
+#meson.build.
+#- `version` (the real - name suffix) is the full X.Y.Z so each release is a
+#distinct file on disk.
+#Keeping a binary linked to one pre - 1.0 release from silently loading another
+#is the point : the SONAMEs differ and ld.so fails fast instead of reading a
+#descriptor whose layout changed.
 
 flux_lib = library('flux',
   flux_sources,
@@ -438,8 +439,8 @@ install_headers(
   subdir : 'flux',
 )
 
-# The analytic distance field is defined once for Slang consumers too
-# (ADR-0118, ADR-0156); Prism's materials include it rather than keeping private copies.
+#The analytic distance field is defined once for Slang consumers too
+#(ADR - 0118, ADR - 0156); Prism's materials include it rather than keeping private copies.
 install_headers('include/flux/shaders/flux_sdf.slang',
                 'include/flux/shaders/flux_vector_eval.slang',
                 subdir : 'flux/shaders')
@@ -458,10 +459,10 @@ endif
 if opt_effect
   install_headers('include/flux/effect.h', subdir : 'flux')
 endif
-# Text header lives in the glyph sibling (ADR-0016, ADR-0106); not installed here.
+#Text header lives in the glyph sibling(ADR - 0016, ADR - 0106); not installed here.
 
-# Public defines propagated to every consumer so the umbrella header
-# (<flux/flux.h>) knows which optional module headers to pull in.
+#Public defines propagated to every consumer so the umbrella header
+#(<flux / flux.h>) knows which optional module headers to pull in.
 flux_public_defines = []
 if have_dmabuf
   flux_public_defines += '-DFLUX_HAVE_DMABUF=1'

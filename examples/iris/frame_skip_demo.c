@@ -88,10 +88,9 @@ static void build(lens *ui, const lens_input *in, void *user) {
     }
 }
 
-static void paint(flux_canvas *canvas, flux_device *device, float scale, void *user) {
+static void record(flux_encoder *enc, float scale, void *user) {
     skip_state *d = user;
-    (void)canvas;
-    (void)device;
+    (void)enc;
     (void)scale;
     d->paints++;
     d->phase_paints++;
@@ -111,7 +110,7 @@ int main(void) {
         .height = 180,
         .dark = true,
         .build = build,
-        .paint = paint,
+        .record = record,
         .user = &d,
     });
 }

@@ -769,7 +769,7 @@ pub struct Device {
     raw: *mut sys::flux_device,
     /// When `true`, this handle does **not** own a reference and must not
     /// release it on drop. Set by [`Device::borrow_raw`] for views over a
-    /// device another owner created (e.g. iris's `PaintHost::device`).
+    /// device another owner created (e.g. iris's `StartHost::flux_device`).
     borrowed: bool,
 }
 
@@ -884,10 +884,10 @@ impl Device {
 
     /// Wrap a raw `flux_device*` as a non-owning view. Use this to obtain a
     /// `&Device` for a device another owner created and retains — the
-    /// canonical case being iris's `PaintHost::device()`, which hands the
+    /// canonical case being iris's `StartHost::flux_device()`, which hands the
     /// app the device iris owns for its window. Opening a second device is
     /// unsupported and crashes, so a host that needs a `glyph::Text`
-    /// context (or any `&Device` consumer) inside iris's paint callback
+    /// context (or any `&Device` consumer) inside iris's lifecycle callbacks
     /// **must** borrow iris's device rather than creating its own.
     ///
     /// The returned `Device` does not release on drop: the borrow is valid
@@ -897,7 +897,7 @@ impl Device {
     /// # Safety
     /// `raw` must be a live `flux_device*` obtained from the flux C API (or
     /// from another binding's ABI-identical opaque pointer, such as iris's
-    /// `PaintHost::device()`), and must remain valid for as long as the
+    /// `StartHost::flux_device()`), and must remain valid for as long as the
     /// returned `Device` (or any `&Device` derived from it) is used.
     pub unsafe fn borrow_raw(raw: *mut sys::flux_device) -> Device {
         Device {
@@ -2670,6 +2670,31 @@ impl DisplayList {
             unsafe { sys::flux_display_list_size(self.raw) }
         }
     }
+
+    /// Bit set of dynamic image input slots this list (including children) uses.
+    pub fn input_mask(&self) -> u64 {
+        if self.raw.is_null() {
+            0
+        } else {
+            unsafe { sys::flux_display_list_input_mask(self.raw) }
+        }
+    }
+
+    /// Pinned image-content bytes retained by this list, including children.
+    pub fn retained_bytes(&self) -> usize {
+        if self.raw.is_null() {
+            0
+        } else {
+            unsafe { sys::flux_display_list_retained_bytes(self.raw) }
+        }
+    }
+}
+
+/// One execution binding for a dynamic image input slot (ADR-0090).
+pub struct DisplayListBinding<'a> {
+    pub slot: u32,
+    pub image: &'a Image,
+    pub sampler: Option<&'a Sampler>,
 }
 
 impl Clone for DisplayList {
@@ -2730,9 +2755,20 @@ impl Encoder {
     /// Bound owned storage and expanded execution, including shared children.
     /// A zero limit selects the C library default.
     pub fn with_limits(max_bytes: usize, max_commands: u32) -> Result<Self, Error> {
+        Self::with_budget(max_bytes, max_commands, 0)
+    }
+
+    /// As [`Encoder::with_limits`], plus the pinned image-content budget.
+    /// A zero retained budget is unbounded.
+    pub fn with_budget(
+        max_bytes: usize,
+        max_commands: u32,
+        max_retained_bytes: usize,
+    ) -> Result<Self, Error> {
         let desc = sys::flux_encoder_desc {
             max_bytes,
             max_commands,
+            max_retained_bytes,
         };
         let mut raw = std::ptr::null_mut();
         Error::check(unsafe { sys::flux_encoder_create(&desc, &mut raw) })?;
@@ -2744,6 +2780,59 @@ impl Encoder {
     pub fn draw_display_list(&mut self, list: &DisplayList) -> Result<(), Error> {
         // SAFETY: self uniquely owns the recorder; list is a live immutable owner.
         Error::check(unsafe { sys::flux_encoder_draw_display_list(self.raw, list.raw) })
+    }
+
+    /// Record a rectangle whose image is bound at execution time by `slot`.
+    /// The list carries no image reference for this draw.
+    pub fn draw_image_slot(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        slot: u32,
+        style: ImageStyle,
+    ) {
+        let geom = sys::flux_geometry {
+            kind: sys::flux_geom_kind::FLUX_GEOM_RECT,
+            _pad: [0; 3],
+            stroke: sys::flux_stroke_style {
+                width: 0.0,
+                ..Default::default()
+            },
+            __bindgen_anon_1: sys::flux_geometry__bindgen_ty_1 {
+                rect: sys::flux_geom_rect_data {
+                    rect: sys::flux_rect { x, y, w, h },
+                },
+            },
+        };
+        let brush = sys::flux_brush {
+            kind: sys::flux_brush_kind::FLUX_BRUSH_IMAGE_PATTERN,
+            blend: style.blend.raw(),
+            opacity: 1.0,
+            __bindgen_anon_1: sys::flux_brush__bindgen_ty_1 {
+                image: sys::flux_brush_image_data {
+                    image: std::ptr::null_mut(),
+                    sampler: std::ptr::null_mut(),
+                    src_rect: sys::flux_rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 0.0,
+                        h: 0.0,
+                    },
+                    opaque_only: false,
+                    tint: style.tint,
+                    clip_rect: sys::flux_rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 0.0,
+                        h: 0.0,
+                    },
+                    clip_radius: 0.0,
+                },
+            },
+        };
+        unsafe { sys::flux_encoder_draw_geometry_slot(self.raw, &geom, &brush, slot) };
     }
 
     /// Push canvas state (transform and scissor).
@@ -3722,6 +3811,19 @@ impl Image {
     pub fn format(&self) -> Format {
         Format::from_raw(unsafe { sys::flux_image_format(self.raw) })
     }
+
+    /// Content bytes described by extent and format (ADR-0090 accounting).
+    pub fn size_bytes(&self) -> usize {
+        unsafe { sys::flux_image_size_bytes(self.raw) }
+    }
+
+    /// Publish an immutable snapshot handle. The original may then be updated;
+    /// copy-on-write keeps this snapshot on its captured pixels.
+    pub fn snapshot(&self) -> Result<Image, Error> {
+        let mut out = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_image_snapshot(self.raw, &mut out) })?;
+        Ok(Image { raw: out })
+    }
 }
 
 impl Image {
@@ -4518,6 +4620,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn encoder_records_dynamic_slot_and_exposes_budget() {
+        let mut encoder = Encoder::new().unwrap();
+        encoder.draw_image_slot(0.0, 0.0, 8.0, 8.0, 3, ImageStyle::default());
+        let list = encoder.finish().unwrap();
+        assert_eq!(list.input_mask(), 1u64 << 3);
+        assert_eq!(list.retained_bytes(), 0);
+        assert_eq!(list.command_count(), 1);
+    }
+
+    #[test]
     fn frame_begin_desc_maps_timeout_and_non_blocking() {
         let desc_default = sys::flux_frame_begin_desc {
             type_: sys::flux_struct_type::FLUX_TYPE_FRAME_BEGIN_DESC,
@@ -5029,6 +5141,33 @@ impl CanvasCommands<'_> {
     /// Submit a compiled DisplayList for hardware execution (ADR-0088 / ADR-0090).
     pub fn submit_display_list(&self, list: &DisplayList) -> Result<(), Error> {
         Error::check(unsafe { sys::flux_canvas_submit_display_list(self.raw, list.as_raw()) })
+    }
+
+    /// Submit a DisplayList after binding every dynamic image input slot.
+    pub fn submit_display_list_bound(
+        &self,
+        list: &DisplayList,
+        bindings: &[DisplayListBinding<'_>],
+    ) -> Result<(), Error> {
+        let raw: Vec<sys::flux_display_list_binding> = bindings
+            .iter()
+            .map(|binding| sys::flux_display_list_binding {
+                slot: binding.slot,
+                image: binding.image.as_raw(),
+                sampler: binding
+                    .sampler
+                    .map(|sampler| sampler.as_raw())
+                    .unwrap_or(std::ptr::null_mut()),
+            })
+            .collect();
+        Error::check(unsafe {
+            sys::flux_canvas_submit_display_list_bound(
+                self.raw,
+                list.as_raw(),
+                raw.as_ptr(),
+                raw.len() as u32,
+            )
+        })
     }
 
     #[allow(clippy::too_many_arguments)]

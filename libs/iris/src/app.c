@@ -26,14 +26,27 @@ IRIS_API void iris_request_animation_frame(void) {
 #endif
 }
 
-IRIS_API void iris_paint_mark_static(void) {
+IRIS_API void iris_record_mark_static(void) {
 #if defined(IRIS_BACKEND_WAYLAND)
-    iris_paint_mark_static_wayland();
+    iris_record_mark_static_wayland();
 #elif defined(IRIS_BACKEND_WIN32)
-    iris_paint_mark_static_win32();
+    iris_record_mark_static_win32();
 #elif defined(IRIS_BACKEND_COCOA)
-    iris_paint_mark_static_cocoa();
+    iris_record_mark_static_cocoa();
 #endif
+}
+
+flux_display_list *iris_record_host_canvas(const iris_app_config *cfg, float scale) {
+    if (!cfg || !cfg->record)
+        return nullptr;
+    flux_encoder *enc = nullptr;
+    if (flux_encoder_create(&(flux_encoder_desc){}, &enc) != FLUX_OK)
+        return nullptr;
+    cfg->record(enc, scale, cfg->user);
+    flux_display_list *list = nullptr;
+    (void)flux_encoder_finish(enc, &list);
+    flux_encoder_destroy(enc);
+    return list;
 }
 
 IRIS_API void iris_request_frame_skip_render(void) {

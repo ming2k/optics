@@ -21,7 +21,6 @@
 
 typedef struct text_hello_app {
     glyph_ctx *text;
-    flux_arena arena;
 } text_hello_app;
 
 static bool on_start(lens *ui, flux_device *device, void *user) {
@@ -31,11 +30,6 @@ static bool on_start(lens *ui, flux_device *device, void *user) {
     glyph_desc tdesc = {.device = device, .scale = 1.0f};
     if (glyph_create(&tdesc, &app->text) != FLUX_OK) {
         fprintf(stderr, "glyph_create failed (is fontconfig available?)\n");
-        return false;
-    }
-
-    if (flux_arena_init(&app->arena, 1u << 20, nullptr) != FLUX_OK) {
-        glyph_release(app->text);
         return false;
     }
 
@@ -50,7 +44,6 @@ static void on_stop(lens *ui, flux_device *device, void *user) {
         glyph_release(app->text);
         app->text = nullptr;
     }
-    flux_arena_deinit(&app->arena);
 }
 
 static void on_build(lens *ui, const lens_input *in, void *user) {
@@ -65,16 +58,15 @@ static void on_build(lens *ui, const lens_input *in, void *user) {
     }
 }
 
-static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void *user) {
-    (void)device;
+static void on_record(flux_encoder *enc, float scale, void *user) {
     text_hello_app *app = user;
     if (!app->text)
         return;
 
     glyph_set_scale(app->text, scale);
 
-    flux_canvas_save(canvas);
-    flux_canvas_scale(canvas, scale, scale);
+    flux_encoder_save(enc);
+    flux_encoder_scale(enc, scale, scale);
 
     const char *s = "hello, glyph \xe4\xbd\xa0\xe5\xa5\xbd"; /* + "你好" */
     glyph_style style = {
@@ -83,7 +75,9 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         .color = flux_color_rgba(0xe8, 0xe8, 0xe8, 0xff),
         .family = GLYPH_FAMILY_SANS,
     };
-    glyph_draw(app->text, canvas, &app->arena, 40.0f, 80.0f, s, strlen(s), &style);
+    (void)glyph_record(
+        app->text, enc,
+        &(glyph_record_desc){.x = 40.0f, .y = 80.0f, .utf8 = s, .len = strlen(s), .style = style});
 
     const char *sub = "Native Optics Wayland stack (zero GLFW, HiDPI aware, Esc to quit)";
     glyph_style sub_style = {
@@ -92,10 +86,12 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         .color = flux_color_rgba(0x9a, 0xa0, 0xb4, 0xff),
         .family = GLYPH_FAMILY_SANS,
     };
-    glyph_draw(app->text, canvas, &app->arena, 40.0f, 130.0f, sub, strlen(sub), &sub_style);
+    (void)glyph_record(
+        app->text, enc,
+        &(glyph_record_desc){
+            .x = 40.0f, .y = 130.0f, .utf8 = sub, .len = strlen(sub), .style = sub_style});
 
-    flux_canvas_restore(canvas);
-    flux_arena_reset(&app->arena);
+    flux_encoder_restore(enc);
 }
 
 int main(void) {
@@ -110,7 +106,7 @@ int main(void) {
         .start = on_start,
         .stop = on_stop,
         .build = on_build,
-        .paint = on_paint,
+        .record = on_record,
         .user = &app,
     });
 }

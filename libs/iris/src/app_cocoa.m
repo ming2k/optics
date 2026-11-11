@@ -157,7 +157,7 @@ static int64_t cocoa_query_refresh_ns(NSWindow *window);
     bool running;
     bool resized;                   /* size or scale changed -> resize swap  */
     bool animation_frame_requested; /* host asked for active-rate follow-up */
-    bool paint_static;              /* host declared this frame's canvas static */
+    bool record_static;             /* host declared this frame's canvas static */
     bool frame_skip_render;         /* host asked to skip rendering but keep the active cadence */
     int64_t refresh_ns;             /* learned display period; 0 = unknown   */
     bool theme_watching;
@@ -215,10 +215,10 @@ void iris_request_animation_frame_cocoa(void) {
         pl->animation_frame_requested = true;
 }
 
-void iris_paint_mark_static_cocoa(void) {
+void iris_record_mark_static_cocoa(void) {
     IrisPlatform *pl = g_active_pl;
     if (pl)
-        pl->paint_static = true;
+        pl->record_static = true;
 }
 
 void iris_request_frame_skip_render_cocoa(void) {
@@ -428,11 +428,6 @@ IRIS_API int iris_window_create_activation_token(const char *app_id, char *out_b
     return -1;
 }
 
-IRIS_API int iris_wayland_create_activation_token(const char *app_id, char *out_buf,
-                                                  size_t out_cap) {
-    return iris_window_create_activation_token(app_id, out_buf, out_cap);
-}
-
 IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
     IrisPlatform *pl = g_active_pl;
     if (!pl || !pl->view || !source)
@@ -517,11 +512,9 @@ static bool cocoa_emit_pointer(IrisPlatform *pl, iris_event_type type, double x,
 }
 
 static bool cocoa_emit_button(IrisPlatform *pl, double x, double y, int lens_button, bool down) {
-    iris_event ev = {.type = IRIS_EVENT_POINTER_BUTTON,
-                     .button = {.x = (float)x,
-                                .y = (float)y,
-                                .button = lens_button,
-                                .pressed = down}};
+    iris_event ev = {
+        .type = IRIS_EVENT_POINTER_BUTTON,
+        .button = {.x = (float)x, .y = (float)y, .button = lens_button, .pressed = down}};
     if (!iris__event_seam_emit(&ev))
         return false;
     int i = ev.button.button;
@@ -539,8 +532,8 @@ static bool cocoa_emit_button(IrisPlatform *pl, double x, double y, int lens_but
 }
 
 static bool cocoa_emit_scroll(IrisPlatform *pl, double dx, double dy, bool continuous) {
-    iris_event ev = {
-        .type = IRIS_EVENT_SCROLL, .scroll = {.dx = (float)dx, .dy = (float)dy, .continuous = continuous}};
+    iris_event ev = {.type = IRIS_EVENT_SCROLL,
+                     .scroll = {.dx = (float)dx, .dy = (float)dy, .continuous = continuous}};
     if (!iris__event_seam_emit(&ev))
         return false;
     if (ev.scroll.dx != 0.0f)
@@ -558,9 +551,8 @@ static bool cocoa_emit_key(IrisPlatform *pl, int key, bool pressed, bool repeat,
     if (!iris__event_seam_emit(&ev))
         return false;
     if (ev.keyboard.key != 0 && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
-        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){.key = ev.keyboard.key,
-                                                             .pressed = ev.keyboard.pressed,
-                                                             .repeat = ev.keyboard.repeat};
+        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){
+            .key = ev.keyboard.key, .pressed = ev.keyboard.pressed, .repeat = ev.keyboard.repeat};
     return true;
 }
 
@@ -1569,8 +1561,7 @@ static void *cocoa_presenter_thread_main(void *arg) {
         if (wait_timeout_ns > 50000000LL)
             wait_timeout_ns = 50000000LL;
 
-        dispatch_time_t timeout =
-            dispatch_time(DISPATCH_TIME_NOW, wait_timeout_ns);
+        dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, wait_timeout_ns);
         (void)dispatch_semaphore_wait(pl->present_sem, timeout);
 
         if (!atomic_load_explicit(&pl->presenter_running, memory_order_acquire))
@@ -1626,8 +1617,8 @@ static void *cocoa_presenter_thread_main(void *arg) {
                         drew = true;
                     }
                     if (pkt->snapshot) {
-                        drew = (lens_snapshot_submit(pkt->snapshot, ctx->canvas) == FLUX_OK) ||
-                               drew;
+                        drew =
+                            (lens_snapshot_submit(pkt->snapshot, ctx->canvas) == FLUX_OK) || drew;
                     }
                     (void)flux_canvas_end(ctx->canvas);
                 }
@@ -1646,8 +1637,7 @@ static void *cocoa_presenter_thread_main(void *arg) {
     return nullptr;
 }
 
-static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t actions,
-                                      void *user) {
+static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t actions, void *user) {
     (void)user;
     iris_dnd_source src = {
         .actions = actions,
@@ -1807,18 +1797,18 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
             goto fail;
         }
 
-        if (lens_create(&(lens_desc){.device = device,
-                                     .theme = cfg->dark ? lens_theme_dark()
-                                                        : (iris_system_prefers_dark()
-                                                               ? lens_theme_dark()
-                                                               : lens_theme_default()),
-                                     .scale = pl->scale,
-                                     .clipboard = {.set_text = clip_set_text,
-                                                   .request_text = clip_request_text,
-                                                   .user = (__bridge void *)pl},
-                                     .dnd = {.start_drag = lens_host_start_drag_cocoa,
-                                             .user = (__bridge void *)pl}},
-                        &ui) != FLUX_OK) {
+        if (lens_create(
+                &(lens_desc){
+                    .device = device,
+                    .theme = cfg->dark ? lens_theme_dark()
+                                       : (iris_system_prefers_dark() ? lens_theme_dark()
+                                                                     : lens_theme_default()),
+                    .scale = pl->scale,
+                    .clipboard = {.set_text = clip_set_text,
+                                  .request_text = clip_request_text,
+                                  .user = (__bridge void *)pl},
+                    .dnd = {.start_drag = lens_host_start_drag_cocoa, .user = (__bridge void *)pl}},
+                &ui) != FLUX_OK) {
             fprintf(stderr, "lens_create failed\n");
             goto fail;
         }
@@ -1834,10 +1824,11 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         pctx.canvas = canvas;
         pctx.cfg = cfg;
 
-        /* Decoupled Presentation Engine (ADR-0124): for pure UI applications without
-         * custom immediate canvas painting, launch the dedicated presentation worker
-         * thread to asynchronously consume immutable scene snapshots. */
-        if (!cfg->paint && !cfg->prepare) {
+        /* Decoupled Presentation Engine (ADR-0124): launch the dedicated
+         * presentation worker thread for every host that does not need a
+         * main-thread prepare pass. Recorded host content travels through the
+         * mailbox as an immutable display list. */
+        if (!cfg->prepare) {
             iris_mailbox_init(&pl->mailbox);
             pl->present_sem = dispatch_semaphore_create(0);
             atomic_init(&pl->presenter_running, true);
@@ -1866,7 +1857,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
          *     timestamps (INV-PACE-04).
          *
          * A lens-only host reaches full quiescence (quiesced = true, blocking in
-         * nextEventMatchingMask with distantFuture); a host with cfg->paint keeps
+         * nextEventMatchingMask with distantFuture); a host with cfg->record keeps
          * the low idle tick alive so its cfg->build can observe state changes. */
         iris_pacer pacer;
         iris_pacer_init(&pacer);
@@ -1881,8 +1872,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         long long wait_ns = 0;
         long long last_sim_ns = 0;
         double prev_cx = pl->acc.cx, prev_cy = pl->acc.cy;
-        const bool has_custom_paint =
-        (cfg->paint != NULL || cfg->prepare != NULL || cfg->record != NULL);
+        const bool has_host_content = (cfg->prepare != NULL || cfg->record != NULL);
 
         pl->ui = ui;
 
@@ -1969,7 +1959,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                         .now_ns = now,
                         .refresh_ns = pl->refresh_ns,
                         .have_pulse_source = false,
-                        .has_custom_paint = has_custom_paint,
+                        .has_host_content = has_host_content,
                     };
                     iris_pace_decision idle_d = iris_pacer_tick(&pacer, &idle_in);
                     quiesced = (idle_d.action == IRIS_PACE_QUIESCE);
@@ -2003,7 +1993,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                  * predictable display refresh intervals rather than execution noise. */
                 long long sim_ns = now;
                 float dt = (float)((double)(pl->refresh_ns > 0 ? pl->refresh_ns
-                                                              : IRIS_PACE_DEFAULT_REFRESH_NS) *
+                                                               : IRIS_PACE_DEFAULT_REFRESH_NS) *
                                    1e-9);
                 if (last_sim_ns > 0 && sim_ns > last_sim_ns) {
                     dt = (float)((double)(sim_ns - last_sim_ns) * 1e-9);
@@ -2043,15 +2033,15 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     .input_active = input_active,
                     .host_animating = host_animating,
                     .host_skip_render = pl->frame_skip_render,
-                    .host_static = pl->paint_static,
-                    .has_custom_paint = has_custom_paint,
+                    .host_static = pl->record_static,
+                    .has_host_content = has_host_content,
                     .chrome_damaged = chrome_damaged,
                     .caret_ticking = lens_caret_clock_live(ui),
                     .surface_needs_paint = surface_forced,
                     .lens_animating = lens_anim_pending(ui),
                 };
                 pl->frame_skip_render = false;
-                pl->paint_static = false;
+                pl->record_static = false;
 
                 iris_pace_decision d = iris_pacer_tick(&pacer, &pace_in);
                 quiesced = (d.action == IRIS_PACE_QUIESCE);
@@ -2061,17 +2051,10 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     surface_needs_paint = true;
 
                     if (pl->has_presenter_thread) {
-                        /* Decoupled Presentation Engine (ADR-0124 & ADR-0127): hand off immutable snapshot
-                         * and optional host recorded display list to dedicated presentation worker thread. */
-                        flux_display_list *host_list = nullptr;
-                        if (cfg->record) {
-                            flux_encoder *enc = nullptr;
-                            if (flux_encoder_create(&(flux_encoder_desc){}, &enc) == FLUX_OK) {
-                                cfg->record(enc, pl->scale, cfg->user);
-                                (void)flux_encoder_finish(enc, &host_list);
-                                flux_encoder_destroy(enc);
-                            }
-                        }
+                        /* Decoupled Presentation Engine (ADR-0124 & ADR-0127): hand off immutable
+                         * snapshot and optional host recorded display list to dedicated
+                         * presentation worker thread. */
+                        flux_display_list *host_list = iris_record_host_canvas(cfg, pl->scale);
 
                         lens_scene_snapshot *snapshot = nullptr;
                         if (lens_snapshot_create(ui, &snapshot) == FLUX_OK ||
@@ -2085,11 +2068,10 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                                  * re-query lens, and the set has to travel with
                                  * the snapshot it describes. */
                                 pkt->damage_count = lens_damage_rects(
-                                    ui, &(lens_damage_opts){.rects = pkt->damage,
-                                                            .capacity =
-                                                                LENS_DAMAGE_RECTS_CAPACITY});
+                                    ui,
+                                    &(lens_damage_opts){.rects = pkt->damage,
+                                                        .capacity = LENS_DAMAGE_RECTS_CAPACITY});
                                 pkt->force_paint = surface_forced;
-                                pkt->has_custom_paint = false;
                                 lens_theme th = lens_get_theme(ui);
                                 pkt->clear_color = th.color_bg;
                                 pkt->has_clear = !cfg->no_clear;
@@ -2102,13 +2084,13 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                                     surface_needs_paint = false;
                                 }
                                 if (++frame_no == 1) {
-                                    fprintf(
-                                        stderr,
-                                        "first frame presented: %dx%d logical, %ux%u device (scale=%.2f)\n",
-                                        pl->width, pl->height,
-                                        (uint32_t)lroundf((float)pl->width * pl->scale),
-                                        (uint32_t)lroundf((float)pl->height * pl->scale),
-                                        pl->scale);
+                                    fprintf(stderr,
+                                            "first frame presented: %dx%d logical, %ux%u device "
+                                            "(scale=%.2f)\n",
+                                            pl->width, pl->height,
+                                            (uint32_t)lroundf((float)pl->width * pl->scale),
+                                            (uint32_t)lroundf((float)pl->height * pl->scale),
+                                            pl->scale);
                                 }
                             }
                             if (snapshot) {
@@ -2141,21 +2123,21 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     if (cfg->prepare)
                         cfg->prepare(frame, canvas, device, pl->scale, cfg->user);
 
-                    /* Clear to the current theme's body background; the
-                     * paint callback draws *under* lens's chrome (iris calls
-                     * it before snapshot publication). */
+                    /* Clear to the current theme's body background; recorded
+                     * host content draws *under* lens's chrome. */
                     lens_theme th = lens_get_theme(ui);
                     flux_color clear = th.color_bg;
                     flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
                     bool drew = false;
                     lens_scene_snapshot *snapshot = nullptr;
+                    flux_display_list *host_list = iris_record_host_canvas(cfg, pl->scale);
 
                     /* Damage scope for this surface (ADR-0149): the set travels
                      * intact to the pass, which scissors each rectangle. A host
                      * with opaque canvas content (or a forced repaint) asks for
                      * the full extent — its content is not lens-localisable. */
                     iris_frame_damage dmg = {0};
-                    const bool localize = !surface_forced && !has_custom_paint;
+                    const bool localize = !surface_forced && !has_host_content;
                     if (localize) {
                         dmg = iris_frame_lens_damage(ui, pl->scale, (int32_t)info.width,
                                                      (int32_t)info.height, /*force_full=*/false);
@@ -2176,14 +2158,16 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     };
 
                     if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {
-                        if (cfg->paint)
-                            cfg->paint(canvas, device, pl->scale, cfg->user);
+                        if (host_list) {
+                            drew = flux_canvas_submit_display_list(canvas, host_list) == FLUX_OK;
+                        }
                         if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
-                            drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK;
+                            drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK || drew;
                         }
                         if (flux_canvas_end(canvas) != FLUX_OK)
                             drew = false;
                     }
+                    flux_display_list_release(host_list);
 
                     if (!drew) {
                         lens_snapshot_release(snapshot);

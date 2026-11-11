@@ -1,6 +1,6 @@
-/* paint_static_demo.c — integration check for iris_paint_mark_static.
+/* paint_static_demo.c — integration check for iris_record_mark_static.
  *
- * Runs a real window for a fixed wall time with a paint callback that
+ * Runs a real window for a fixed wall time with a record callback that
  * declares itself static on a duty cycle (animate 1s, static 1s, ...), and
  * prints the presented-frame counters per phase. The static phases must
  * present far fewer frames than the animating phases (ideally zero beyond
@@ -38,7 +38,7 @@ static void build(lens *ui, const lens_input *in, void *user) {
     (void)in;
     double tb = now_s() - d->start;
     /* A trivial, non-animating tree: any chrome damage here is zero after
-     * the first frame, so the paint callback alone decides the cadence.
+     * the first frame, so the record callback alone decides the cadence.
      *
      * Note: iris already brackets this callback with lens_begin/lens_end —
      * a build must only *emit* widgets. Calling lens_begin again here would
@@ -57,7 +57,7 @@ static void build(lens *ui, const lens_input *in, void *user) {
      * cleared after the first skipped frame and bounce back to the active
      * cadence. */
     if ((int)(tb / 2.0) % 2 == 1) {
-        iris_paint_mark_static();
+        iris_record_mark_static();
         d->frames_static++;
     }
     if (tb - d->last_report >= 2.0) {
@@ -69,10 +69,9 @@ static void build(lens *ui, const lens_input *in, void *user) {
     }
 }
 
-static void paint(flux_canvas *canvas, flux_device *device, float scale, void *user) {
+static void record(flux_encoder *enc, float scale, void *user) {
     demo_state *d = user;
-    (void)canvas;
-    (void)device;
+    (void)enc;
     (void)scale;
     /* Animate: keep the active cadence alive. The static declaration is made
      * from build (see above); during animated phases this callback actually
@@ -80,7 +79,7 @@ static void paint(flux_canvas *canvas, flux_device *device, float scale, void *u
      *
      * The request is phase-gated on purpose. iris_request_animation_frame()
      * says "my content is about to change", which by contract outranks the
-     * static declaration — a paint callback that always requests would
+     * static declaration — a record callback that always requests would
      * therefore keep the window permanently animated and the static phase
      * could never be observed at all. */
     double tb = now_s() - d->start;
@@ -111,7 +110,7 @@ int main(void) {
     cfg.height = 180;
     cfg.dark = true;
     cfg.build = build;
-    cfg.paint = paint;
+    cfg.record = record;
     cfg.user = &d;
 
     /* Drive for ~8 seconds by asking the loop to stop: iris has no public

@@ -185,6 +185,14 @@ int main(void) {
                         if (sync_fd >= 0)
                             EXPECT(!fd_is_open(sync_fd));
 
+                        /* A borrowed import may be sampled now but must not be
+                         * frozen into a retained DisplayList; dynamic input
+                         * slots are the supported path. */
+                        flux_image *borrowed_snapshot = nullptr;
+                        EXPECT(flux_image_snapshot(sampled, &borrowed_snapshot) ==
+                               FLUX_ERROR_INVALID_STATE);
+                        EXPECT(borrowed_snapshot == nullptr);
+
                         flux_surface_desc consumer_desc = FLUX_SURFACE_DESC_INIT;
                         consumer_desc.width = 16;
                         consumer_desc.height = 16;

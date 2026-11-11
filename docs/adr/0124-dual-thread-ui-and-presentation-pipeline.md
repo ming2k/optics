@@ -131,3 +131,13 @@ Window destruction and application exit adhere to a fail-soft four-stage teardow
 - **Option C — Coarse-grained Mutex locking around the Swapchain.**
   *Why considered:* Simplifies data sharing between threads.
   *Why rejected:* Mutex contention between a 1000 Hz input pump and a 60/120 Hz presentation loop causes priority inversions and thread convoying. Any momentary lock contention freezes user interaction. Lockless atomic snapshot exchange is mandatory.
+
+## Amendment — 2026-11-10
+
+The legacy `iris_paint_fn` live-canvas path has been deleted. `iris_record_fn`
+is now the only host-canvas callback on every backend: the UI thread records
+an immutable `flux_display_list`, the presentation worker consumes it, and the
+no-presenter-thread fallback submits the same list through the Canvas instead
+of invoking a second, synchronous drawing path. `iris_paint_mark_static` was
+renamed to `iris_record_mark_static` because the declaration now covers
+recorded host content only.

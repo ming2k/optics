@@ -54,18 +54,10 @@ static bool atlas_page_create(glyph_ctx *t, uint8_t page) {
     if (page >= t->atlas_page_count)
         t->atlas_page_count = (uint8_t)(page + 1);
     t->atlas_page = page;
-    t->atlas = img; /* compatibility alias */
     t->atlas_page_cursor_x[page] = 0;
     t->atlas_page_cursor_y[page] = 0;
     t->atlas_page_row_height[page] = 0;
     t->atlas_page_dirty[page] = false;
-    /* Mirror into the legacy single-view fields so paths that still read
-     * them (and the mark-dirty compatibility view) observe page 0 state
-     * on first use. */
-    t->atlas_cursor_x = 0;
-    t->atlas_cursor_y = 0;
-    t->atlas_row_height = 0;
-    t->atlas_dirty = false;
     return true;
 }
 
@@ -77,11 +69,9 @@ bool txt_atlas_init(glyph_ctx *t) {
     memset(t->atlas_pages, 0, sizeof(t->atlas_pages));
     t->atlas_page_count = 0;
     t->atlas_page = 0;
-    t->atlas = NULL;
     if (t->dev && !atlas_page_create(t, 0)) {
         /* Measure-only degradation: no GPU pages; the host buffer still
          * serves the CPU canvas path. */
-        t->atlas = NULL;
         t->atlas_page_count = 0;
     }
     return true;
@@ -94,7 +84,6 @@ void txt_atlas_destroy(glyph_ctx *t) {
             t->atlas_pages[p] = NULL;
         }
     }
-    t->atlas = NULL;
     t->atlas_page_count = 0;
     t->atlas_page = 0;
     txt_free(t, t->atlas_pixels, "atlas");
@@ -106,9 +95,7 @@ void txt_atlas_destroy(glyph_ctx *t) {
 /* ------------------------------------------------------------------ */
 
 /* Reserve a w x h cell plus a 1px gutter on the right/bottom on the
- * current page. Mirrors the pack state into the legacy single-view fields
- * so mark_dirty/flush observe the current page without every caller
- * caring about paging. */
+ * current page. */
 static bool atlas_alloc(glyph_ctx *t, int w, int h, uint16_t *out_x, uint16_t *out_y) {
     if (w <= 0 || h <= 0) {
         *out_x = 0;
@@ -144,9 +131,6 @@ static bool atlas_alloc(glyph_ctx *t, int w, int h, uint16_t *out_x, uint16_t *o
     t->atlas_page_cursor_x[page] = cx;
     t->atlas_page_cursor_y[page] = cy;
     t->atlas_page_row_height[page] = rh;
-    t->atlas_cursor_x = cx;
-    t->atlas_cursor_y = cy;
-    t->atlas_row_height = rh;
     return true;
 }
 
@@ -250,7 +234,7 @@ static void blit_glyph(glyph_ctx *t, glyph_entry *e, FT_GlyphSlot g) {
  *     old image's bindless handle), and
  *   - the CPU-side dirty box, which still names regions of the old image.
  * The clear therefore (a) flushes any pending dirty box to the old image
- * so every quad emitted so far sees complete texels, (b) swaps t->atlas
+ * so every quad emitted so far sees complete texels, (b) swaps the page image
  * for a fresh GPU image, and (c) releases the old one — flux_image_release
  * parks it on the device retire queue (and recorded segments hold their
  * own retain), so old UVs stay self-consistent with old contents until
@@ -304,17 +288,12 @@ static void atlas_clear(glyph_ctx *t) {
     }
     t->atlas_page_count = t->atlas_pages[0] ? 1 : 0;
     t->atlas_page = 0;
-    t->atlas = t->atlas_pages[0];
     for (uint8_t p = 0; p < TXT_ATLAS_MAX_PAGES; p++) {
         t->atlas_page_cursor_x[p] = 0;
         t->atlas_page_cursor_y[p] = 0;
         t->atlas_page_row_height[p] = 0;
         t->atlas_page_dirty[p] = false;
     }
-    t->atlas_cursor_x = 0;
-    t->atlas_cursor_y = 0;
-    t->atlas_row_height = 0;
-    t->atlas_dirty = false;
     glyph_cache_clear(t->cache);
 }
 
@@ -350,13 +329,6 @@ void txt_atlas_mark_dirty(glyph_ctx *t, uint16_t x, uint16_t y, uint16_t w, uint
         if (y1 > t->atlas_page_dirty_y1[page])
             t->atlas_page_dirty_y1[page] = y1;
     }
-    /* Compatibility view: the legacy single dirty box follows the current
-     * page so external readers (stats) see something coherent. */
-    t->atlas_dirty = t->atlas_page_dirty[page];
-    t->atlas_dirty_x0 = t->atlas_page_dirty_x0[page];
-    t->atlas_dirty_y0 = t->atlas_page_dirty_y0[page];
-    t->atlas_dirty_x1 = t->atlas_page_dirty_x1[page];
-    t->atlas_dirty_y1 = t->atlas_page_dirty_y1[page];
 }
 
 void txt_atlas_flush(glyph_ctx *t) {
@@ -367,8 +339,6 @@ void txt_atlas_flush(glyph_ctx *t) {
         uint32_t h = (uint32_t)t->atlas_page_dirty_y1[p] - t->atlas_page_dirty_y0[p];
         atlas_upload_rect(t, p, t->atlas_page_dirty_x0[p], t->atlas_page_dirty_y0[p], w, h);
         t->atlas_page_dirty[p] = false;
-        if (p == t->atlas_page)
-            t->atlas_dirty = false;
     }
 }
 

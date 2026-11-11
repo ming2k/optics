@@ -25,7 +25,8 @@ static flux_color_space image_default_space(flux_format f) {
  * the profile, re-laid as a 2D (N² × N) image so the stock 2D bindless
  * heap serves it; the shader does the slice lerp. RGBA32F keeps the
  * upload a plain widening of the baked floats. */
-static flux_result image_create_lut(flux_device *d, flux_image *im, const float *lut, uint32_t n) {
+static flux_result image_create_lut(flux_device *d, flux_image_color *color, const float *lut,
+                                    uint32_t n) {
     uint32_t w = n * n, h = n;
     size_t texel_count = (size_t)w * h;
     float *rgba = flux_internal_alloc(d, texel_count * 4 * sizeof(float));
@@ -52,18 +53,18 @@ static flux_result image_create_lut(flux_device *d, flux_image *im, const float 
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
-    im->lut_bindless = FLUX_BINDLESS_INVALID;
-    r = flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &im->lut_image,
-                            &im->lut_alloc);
+    color->lut_bindless = FLUX_BINDLESS_INVALID;
+    r = flux_vk_alloc_image(d, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &color->lut_image,
+                            &color->lut_alloc);
     if (r != FLUX_OK)
         goto out_free;
-    r = flux_vk_upload_to_image(d, im->lut_image, 0, 0, w, h, VK_IMAGE_LAYOUT_UNDEFINED, rgba,
-                                texel_count * 4 * sizeof(float));
+    r = flux_vk_upload_to_image(d, nullptr, color->lut_image, 0, 0, w, h, VK_IMAGE_LAYOUT_UNDEFINED,
+                                rgba, texel_count * 4 * sizeof(float));
     if (r != FLUX_OK)
         goto out_free;
     VkImageViewCreateInfo ivci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = im->lut_image,
+        .image = color->lut_image,
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
         .format = VK_FORMAT_R32G32B32A32_SFLOAT,
         .subresourceRange =
@@ -73,28 +74,40 @@ static flux_result image_create_lut(flux_device *d, flux_image *im, const float 
                 .layerCount = 1,
             },
     };
-    if (vkCreateImageView(d->device, &ivci, nullptr, &im->lut_view) != VK_SUCCESS) {
+    if (vkCreateImageView(d->device, &ivci, nullptr, &color->lut_view) != VK_SUCCESS) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "ICC LUT view failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
         goto out_free;
     }
-    r = flux_bindless_register_image(d, im->lut_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                     &im->lut_bindless);
+    r = flux_bindless_register_image(d, color->lut_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     &color->lut_bindless);
 
 out_free:
     flux_internal_free(d, rgba);
     return r;
 }
 
-/* ADR-0069/0070: resolve the image's content color space from the
- * color-space desc on the creation desc's `next` chain (flux_image_desc
- * or flux_dmabuf_image_desc) and build the GPU-side parameter block when
- * the content leaves the format-derived fast path. */
+void flux_image_release_color(flux_device *d, flux_image_color *color) {
+    if (!color)
+        return;
+    if (atomic_fetch_sub_explicit(&color->refs, 1u, memory_order_acq_rel) != 1u)
+        return;
+    if (color->lut_image || color->lut_view)
+        flux_device_retire_image(d, color->lut_view, color->lut_image, &color->lut_alloc,
+                                 VK_NULL_HANDLE, 0, color->lut_bindless, FLUX_BINDLESS_INVALID);
+    if (color->color_params)
+        flux_buffer_release(color->color_params);
+    if (color->icc)
+        flux_icc_profile_release(color->icc);
+    flux_internal_free(d, color);
+}
+
 flux_result flux_image_init_color(flux_device *d, flux_image *im, const void *next_chain) {
     flux_color_space content = image_default_space(im->format);
     const float *lut = nullptr;
     uint32_t lut_size = 0;
     bool tagged = false;
+    flux_icc_profile *icc = nullptr;
 
     const struct {
         flux_struct_type type;
@@ -105,6 +118,8 @@ flux_result flux_image_init_color(flux_device *d, flux_image *im, const void *ne
             const flux_image_color_space_desc *cs = (const void *)extension;
             if (cs->space) {
                 if (!flux_color_space_is_valid(*cs->space)) {
+                    if (icc)
+                        flux_icc_profile_release(icc);
                     FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "image color space tag is invalid");
                     return FLUX_ERROR_INVALID_ARGUMENT;
                 }
@@ -114,13 +129,18 @@ flux_result flux_image_init_color(flux_device *d, flux_image *im, const void *ne
             if (cs->icc) {
                 flux_color_space extracted;
                 /* Profiles are immutable apart from the atomic refcount,
-                 * so retaining through the desc's const pointer is sound. */
-                im->icc = flux_icc_profile_retain((flux_icc_profile *)cs->icc);
-                if (flux_icc_profile_color_space(im->icc, &extracted)) {
+                 * so retaining through the desc's const pointer is sound.
+                 * A malformed chain with two ICC tags keeps only the last;
+                 * release the earlier retain instead of leaking it. */
+                if (icc)
+                    flux_icc_profile_release(icc);
+                icc = flux_icc_profile_retain((flux_icc_profile *)cs->icc);
+                if (flux_icc_profile_color_space(icc, &extracted)) {
                     content = extracted;
                 } else {
-                    lut = flux_icc_profile_lut(im->icc, &lut_size);
+                    lut = flux_icc_profile_lut(icc, &lut_size);
                     if (!lut) {
+                        flux_icc_profile_release(icc);
                         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "ICC profile carries no transform");
                         return FLUX_ERROR_INVALID_STATE;
                     }
@@ -131,16 +151,36 @@ flux_result flux_image_init_color(flux_device *d, flux_image *im, const void *ne
         extension = extension->next;
     }
 
-    if (!tagged)
+    if (!tagged) {
+        if (icc)
+            flux_icc_profile_release(icc);
         return FLUX_OK;
+    }
     /* An explicit tag equal to the format default needs no GPU state. */
-    if (!lut && flux_color_space_equal(content, image_default_space(im->format)))
+    if (!lut && flux_color_space_equal(content, image_default_space(im->format))) {
+        if (icc)
+            flux_icc_profile_release(icc);
         return FLUX_OK;
+    }
+
+    flux_image_color *color = flux_internal_alloc(d, sizeof(*color));
+    if (!color) {
+        if (icc)
+            flux_icc_profile_release(icc);
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    *color = (flux_image_color){
+        .lut_bindless = FLUX_BINDLESS_INVALID,
+        .icc = icc,
+    };
+    atomic_init(&color->refs, 1u);
 
     if (lut) {
-        flux_result r = image_create_lut(d, im, lut, lut_size);
-        if (r != FLUX_OK)
+        flux_result r = image_create_lut(d, color, lut, lut_size);
+        if (r != FLUX_OK) {
+            flux_image_release_color(d, color);
             return r;
+        }
     }
 
     flux_image_color_params params = {0};
@@ -154,7 +194,7 @@ flux_result flux_image_init_color(flux_device *d, flux_image *im, const void *ne
     }
     params.transfer = (uint32_t)content.transfer;
     params.gamma = content.gamma;
-    params.lut_handle = im->lut_bindless;
+    params.lut_handle = color->lut_bindless;
     params.lut_size = lut_size;
 
     flux_buffer_desc bd = FLUX_BUFFER_DESC_INIT;
@@ -163,14 +203,18 @@ flux_result flux_image_init_color(flux_device *d, flux_image *im, const void *ne
     bd.location = FLUX_BUFFER_HOST_VISIBLE;
     bd.device_address = true;
     bd.initial_data = &params;
-    flux_result r = flux_buffer_create(d, &bd, &im->color_params);
-    if (r != FLUX_OK)
+    flux_result r = flux_buffer_create(d, &bd, &color->color_params);
+    if (r != FLUX_OK) {
+        flux_image_release_color(d, color);
         return r;
-    im->color_params_address = flux_buffer_device_address(im->color_params);
-    if (im->color_params_address == 0) {
+    }
+    color->color_params_address = flux_buffer_device_address(color->color_params);
+    if (color->color_params_address == 0) {
+        flux_image_release_color(d, color);
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "color params buffer has no device address");
         return FLUX_ERROR_BACKEND_FAILURE;
     }
+    im->color = color;
     return FLUX_OK;
 }
 
@@ -213,13 +257,17 @@ flux_result flux_image_create(flux_device *d, const flux_image_desc *desc, flux_
     if (!im)
         return FLUX_ERROR_OUT_OF_MEMORY;
     atomic_init(&im->ref_count, 1u);
+    im->shared = nullptr;
+    im->mutable = true;
+    im->imported = false;
+    im->snapshot_allowed = true;
+    im->color = nullptr;
     im->device = flux_device_retain(d);
     im->width = desc->width;
     im->height = desc->height;
     im->format = desc->format;
     im->bindless = FLUX_BINDLESS_INVALID;
     im->bindless_storage = FLUX_BINDLESS_INVALID;
-    im->lut_bindless = FLUX_BINDLESS_INVALID;
     im->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     /* Image */
@@ -232,7 +280,8 @@ flux_result flux_image_create(flux_device *d, const flux_image_desc *desc, flux_
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                 VK_IMAGE_USAGE_SAMPLED_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
@@ -248,7 +297,7 @@ flux_result flux_image_create(flux_device *d, const flux_image_desc *desc, flux_
 
     if (desc->initial_data) {
         size_t bytes = (size_t)desc->width * desc->height * bpp;
-        r = flux_vk_upload_to_image(d, im->image, 0, 0, desc->width, desc->height,
+        r = flux_vk_upload_to_image(d, im, im->image, 0, 0, desc->width, desc->height,
                                     VK_IMAGE_LAYOUT_UNDEFINED, desc->initial_data, bytes);
         if (r != FLUX_OK)
             goto fail;
@@ -302,18 +351,8 @@ fail:
         flux_bindless_release(d, im->bindless);
     if (im->bindless_storage != FLUX_BINDLESS_INVALID)
         flux_bindless_release(d, im->bindless_storage);
-    if (im->lut_bindless != FLUX_BINDLESS_INVALID)
-        flux_bindless_release(d, im->lut_bindless);
-    if (im->lut_view)
-        vkDestroyImageView(d->device, im->lut_view, nullptr);
-    if (im->lut_image)
-        vkDestroyImage(d->device, im->lut_image, nullptr);
-    if (im->lut_alloc.memory)
-        flux_vk_deallocate(d, &im->lut_alloc);
-    if (im->color_params)
-        flux_buffer_release(im->color_params);
-    if (im->icc)
-        flux_icc_profile_release(im->icc);
+    flux_image_release_color(d, im->color);
+    im->color = nullptr;
     if (im->view)
         vkDestroyImageView(d->device, im->view, nullptr);
     if (im->image)
@@ -323,6 +362,236 @@ fail:
     flux_device_release(d);
     flux_internal_free(d, im);
     return r;
+}
+
+static flux_image_shared *image_shared_create(flux_image *im) {
+    flux_image_shared *sh = flux_internal_alloc(im->device, sizeof(*sh));
+    if (!sh)
+        return nullptr;
+    atomic_init(&sh->refs, 1u);
+    sh->image = im->image;
+    sh->alloc = im->alloc;
+    sh->imported_memory = im->imported_memory;
+    sh->imported_size = im->imported_size;
+    sh->view = im->view;
+    sh->bindless = im->bindless;
+    sh->bindless_storage = im->bindless_storage;
+    return sh;
+}
+
+flux_result flux_image_snapshot(flux_image *im, flux_image **out) {
+    if (!out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out = nullptr;
+    if (!im)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (!im->snapshot_allowed) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "borrowed dma-buf images cannot be snapshotted; bind a dynamic input slot");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+    flux_device *d = im->device;
+    flux_platform_mutex_lock(&d->image_version_lock);
+    if (!im->shared) {
+        im->shared = image_shared_create(im);
+        if (!im->shared) {
+            flux_platform_mutex_unlock(&d->image_version_lock);
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        }
+    }
+    flux_image *snap = flux_internal_alloc(d, sizeof(*snap));
+    if (!snap) {
+        flux_platform_mutex_unlock(&d->image_version_lock);
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    memcpy(snap, im, sizeof(*snap));
+    atomic_init(&snap->ref_count, 1u);
+    snap->device = flux_device_retain(d);
+    snap->device_weak = false;
+    snap->mutable = false;
+    if (im->color)
+        atomic_fetch_add_explicit(&im->color->refs, 1u, memory_order_relaxed);
+    atomic_fetch_add_explicit(&im->shared->refs, 1u, memory_order_relaxed);
+    flux_platform_mutex_unlock(&d->image_version_lock);
+    *out = snap;
+    return FLUX_OK;
+}
+
+/* Copy an image into a freshly allocated, owned image. Used only by COW when
+ * an update would otherwise mutate content a snapshot still references. */
+static flux_result image_copy_owned(flux_image *im, VkImage *out_image, flux_vk_alloc *out_alloc,
+                                    VkImageView *out_view, flux_bindless_handle *out_bindless,
+                                    flux_bindless_handle *out_storage) {
+    if (im->imported || im->foreign_owned)
+        return FLUX_ERROR_UNSUPPORTED;
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = flux_format_to_vk(im->format),
+        .extent = {im->width, im->height, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                 VK_IMAGE_USAGE_SAMPLED_BIT |
+                 (im->render_target ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0) |
+                 (im->bindless_storage != FLUX_BINDLESS_INVALID ? VK_IMAGE_USAGE_STORAGE_BIT : 0),
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    flux_result r = flux_vk_alloc_image(im->device, &ici, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                        out_image, out_alloc);
+    if (r != FLUX_OK)
+        return r;
+
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkResult vr = flux_vk_new_transient_cmd(im->device, im->device->graphics_family, &pool, &cmd);
+    if (vr != VK_SUCCESS) {
+        vkDestroyImage(im->device->device, *out_image, nullptr);
+        *out_image = VK_NULL_HANDLE;
+        flux_vk_deallocate(im->device, out_alloc);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+
+    VkImageMemoryBarrier2 barriers[2] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = im->image,
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = *out_image,
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+        },
+    };
+    VkDependencyInfo dep = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dep.imageMemoryBarrierCount = 2;
+    dep.pImageMemoryBarriers = barriers;
+    vkCmdPipelineBarrier2(cmd, &dep);
+
+    VkImageCopy region = {
+        .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .extent = {im->width, im->height, 1},
+    };
+    vkCmdCopyImage(cmd, im->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, *out_image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barriers[1].srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barriers[1].dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    barriers[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barriers[1].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier2(cmd, &dep);
+
+    vr = vkEndCommandBuffer(cmd);
+    if (vr == VK_SUCCESS)
+        vr = flux_vk_submit_one_shot_and_wait(im->device, cmd);
+    vkDestroyCommandPool(im->device->device, pool, nullptr);
+    if (vr != VK_SUCCESS) {
+        vkDestroyImage(im->device->device, *out_image, nullptr);
+        *out_image = VK_NULL_HANDLE;
+        flux_vk_deallocate(im->device, out_alloc);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+
+    VkImageView view = VK_NULL_HANDLE;
+    VkImageViewCreateInfo ivci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = *out_image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = flux_format_to_vk(im->format),
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+    };
+    if (vkCreateImageView(im->device->device, &ivci, nullptr, &view) != VK_SUCCESS) {
+        vkDestroyImage(im->device->device, *out_image, nullptr);
+        *out_image = VK_NULL_HANDLE;
+        flux_vk_deallocate(im->device, out_alloc);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+    flux_bindless_handle bindless = FLUX_BINDLESS_INVALID;
+    if (flux_bindless_register_image(im->device, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     &bindless) != FLUX_OK) {
+        vkDestroyImageView(im->device->device, view, nullptr);
+        vkDestroyImage(im->device->device, *out_image, nullptr);
+        *out_image = VK_NULL_HANDLE;
+        flux_vk_deallocate(im->device, out_alloc);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+    flux_bindless_handle storage = FLUX_BINDLESS_INVALID;
+    if (im->bindless_storage != FLUX_BINDLESS_INVALID &&
+        flux_bindless_register_storage_image(im->device, view, VK_IMAGE_LAYOUT_GENERAL, &storage) !=
+            FLUX_OK) {
+        flux_bindless_release(im->device, bindless);
+        vkDestroyImageView(im->device->device, view, nullptr);
+        vkDestroyImage(im->device->device, *out_image, nullptr);
+        *out_image = VK_NULL_HANDLE;
+        flux_vk_deallocate(im->device, out_alloc);
+        return FLUX_ERROR_BACKEND_FAILURE;
+    }
+    *out_view = view;
+    *out_bindless = bindless;
+    *out_storage = storage;
+    return FLUX_OK;
+}
+
+static flux_result image_cow(flux_image *im) {
+    if (!im->mutable)
+        return FLUX_ERROR_INVALID_STATE;
+    if (!im->shared || atomic_load_explicit(&im->shared->refs, memory_order_acquire) <= 1)
+        return FLUX_OK;
+    VkImage image = VK_NULL_HANDLE;
+    flux_vk_alloc alloc = {0};
+    VkImageView view = VK_NULL_HANDLE;
+    flux_bindless_handle bindless = FLUX_BINDLESS_INVALID;
+    flux_bindless_handle storage = FLUX_BINDLESS_INVALID;
+    flux_result r = image_copy_owned(im, &image, &alloc, &view, &bindless, &storage);
+    if (r != FLUX_OK)
+        return r;
+
+    flux_image_shared *old = im->shared;
+    im->shared = nullptr;
+    im->image = image;
+    im->alloc = alloc;
+    im->view = view;
+    im->bindless = bindless;
+    im->bindless_storage = storage;
+    im->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    im->imported_memory = VK_NULL_HANDLE;
+    im->imported_size = 0;
+    im->foreign_owned = false;
+    atomic_fetch_sub_explicit(&old->refs, 1u, memory_order_acq_rel);
+    return FLUX_OK;
+}
+
+size_t flux_image_size_bytes(const flux_image *im) {
+    if (!im)
+        return 0;
+    uint32_t bpp = bytes_per_pixel(im->format);
+    if (bpp == 0)
+        return 0;
+    size_t pixels = (size_t)im->width * (size_t)im->height;
+    if (pixels > SIZE_MAX / bpp)
+        return SIZE_MAX;
+    return pixels * bpp;
 }
 
 flux_image *flux_image_retain(flux_image *im) {
@@ -341,6 +610,8 @@ static flux_result update_region_validate(const flux_image *im, uint32_t x, uint
                                           size_t bytes, size_t *packed_bytes) {
     if (!im || !data)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    if (!im->mutable)
+        return FLUX_ERROR_INVALID_STATE;
     if (w == 0 || h == 0)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (x > im->width || y > im->height || x + w > im->width || y + h > im->height) {
@@ -379,34 +650,54 @@ static flux_result update_region_validate(const flux_image *im, uint32_t x, uint
 
 flux_result flux_image_update_region(flux_image *im, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                                      const void *data, size_t bytes) {
+    if (!im)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_device *d = im->device;
+    flux_platform_mutex_lock(&d->image_version_lock);
     size_t needed;
     flux_result v = update_region_validate(im, x, y, w, h, data, 0, bytes, &needed);
     if (v != FLUX_OK)
-        return v;
-
-    return flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
-                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, data, needed);
+        goto out;
+    v = image_cow(im);
+    if (v != FLUX_OK)
+        goto out;
+    v = flux_vk_upload_to_image(d, im, im->image, (int32_t)x, (int32_t)y, w, h,
+                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, data, needed);
+out:
+    flux_platform_mutex_unlock(&d->image_version_lock);
+    return v;
 }
 
 flux_result flux_image_update_region_strided(flux_image *im, uint32_t x, uint32_t y, uint32_t w,
                                              uint32_t h, const void *data, size_t row_bytes,
                                              size_t bytes) {
+    if (!im)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_device *d = im->device;
+    flux_platform_mutex_lock(&d->image_version_lock);
     size_t packed;
     flux_result v = update_region_validate(im, x, y, w, h, data, row_bytes, bytes, &packed);
     if (v != FLUX_OK)
-        return v;
+        goto out;
+    v = image_cow(im);
+    if (v != FLUX_OK)
+        goto out;
 
     size_t row_min = (size_t)w * bytes_per_pixel(im->format);
-    if (row_bytes == 0 || row_bytes == row_min)
-        return flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
-                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, data, packed);
+    if (row_bytes == 0 || row_bytes == row_min) {
+        v = flux_vk_upload_to_image(d, im, im->image, (int32_t)x, (int32_t)y, w, h,
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, data, packed);
+        goto out;
+    }
 
     /* Strided source: repack rows into a scratch buffer, then upload packed.
      * The scratch is sized to the tightly packed extent (not the strided
      * span) so the staging copy stays minimal. */
-    void *scratch = flux_internal_alloc(im->device, packed);
-    if (!scratch)
-        return FLUX_ERROR_OUT_OF_MEMORY;
+    void *scratch = flux_internal_alloc(d, packed);
+    if (!scratch) {
+        v = FLUX_ERROR_OUT_OF_MEMORY;
+        goto out;
+    }
     const uint8_t *src = data;
     uint8_t *dst = scratch;
     for (uint32_t row = 0; row < h; ++row) {
@@ -414,29 +705,39 @@ flux_result flux_image_update_region_strided(flux_image *im, uint32_t x, uint32_
         src += row_bytes;
         dst += row_min;
     }
-    flux_result r =
-        flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
+    v = flux_vk_upload_to_image(d, im, im->image, (int32_t)x, (int32_t)y, w, h,
                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, scratch, packed);
-    flux_internal_free(im->device, scratch);
-    return r;
+    flux_internal_free(d, scratch);
+out:
+    flux_platform_mutex_unlock(&d->image_version_lock);
+    return v;
 }
 
 flux_result flux_image_update_region_premultiply(flux_image *im, uint32_t x, uint32_t y, uint32_t w,
                                                  uint32_t h, const void *data, size_t row_bytes,
                                                  size_t bytes) {
-    if (im && im->format != FLUX_FORMAT_RGBA8_UNORM) {
+    if (!im)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (im->format != FLUX_FORMAT_RGBA8_UNORM) {
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "premultiply upload requires FLUX_FORMAT_RGBA8_UNORM");
         return FLUX_ERROR_UNSUPPORTED;
     }
+    flux_device *d = im->device;
+    flux_platform_mutex_lock(&d->image_version_lock);
     size_t packed;
     flux_result v = update_region_validate(im, x, y, w, h, data, row_bytes, bytes, &packed);
     if (v != FLUX_OK)
-        return v;
+        goto out;
+    v = image_cow(im);
+    if (v != FLUX_OK)
+        goto out;
 
     size_t stride = row_bytes ? row_bytes : (size_t)w * 4u;
-    uint8_t *scratch = flux_internal_alloc(im->device, packed);
-    if (!scratch)
-        return FLUX_ERROR_OUT_OF_MEMORY;
+    uint8_t *scratch = flux_internal_alloc(d, packed);
+    if (!scratch) {
+        v = FLUX_ERROR_OUT_OF_MEMORY;
+        goto out;
+    }
     const uint8_t *src = data;
     uint8_t *dst = scratch;
     for (uint32_t row = 0; row < h; ++row) {
@@ -455,11 +756,12 @@ flux_result flux_image_update_region_premultiply(flux_image *im, uint32_t x, uin
         }
         src += stride;
     }
-    flux_result r =
-        flux_vk_upload_to_image(im->device, im->image, (int32_t)x, (int32_t)y, w, h,
+    v = flux_vk_upload_to_image(d, im, im->image, (int32_t)x, (int32_t)y, w, h,
                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, scratch, packed);
-    flux_internal_free(im->device, scratch);
-    return r;
+    flux_internal_free(d, scratch);
+out:
+    flux_platform_mutex_unlock(&d->image_version_lock);
+    return v;
 }
 
 VkImage flux_image_vk_image(const flux_image *im) {
@@ -489,12 +791,7 @@ flux_device *flux_image_device(const flux_image *im) {
     return im ? im->device : nullptr;
 }
 
-void flux_image_release(flux_image *im) {
-    if (!im)
-        return;
-    if (atomic_fetch_sub_explicit(&im->ref_count, 1u, memory_order_acq_rel) != 1u)
-        return;
-    flux_device *d = im->device;
+static void image_retire_resources(flux_device *d, flux_image *im) {
     /* The image may still be sampled by batches in flight on the graphics
      * queue (frames recorded before this release). Destroying the view /
      * image or freeing the memory inline can fault the engine mid-batch —
@@ -505,15 +802,27 @@ void flux_image_release(flux_image *im) {
      * could reference them. */
     flux_device_retire_image(d, im->view, im->image, &im->alloc, im->imported_memory,
                              im->imported_size, im->bindless, im->bindless_storage);
-    if (im->lut_image || im->lut_view)
-        flux_device_retire_image(d, im->lut_view, im->lut_image, &im->lut_alloc, VK_NULL_HANDLE, 0,
-                                 im->lut_bindless, FLUX_BINDLESS_INVALID);
-    if (im->color_params)
-        flux_buffer_release(im->color_params);
-    if (im->icc)
-        flux_icc_profile_release(im->icc);
+}
+
+void flux_image_release(flux_image *im) {
+    if (!im)
+        return;
+    if (atomic_fetch_sub_explicit(&im->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return;
+    flux_device *d = im->device;
+    bool retire = true;
+    flux_image_shared *shared = im->shared;
+    if (shared) {
+        if (atomic_fetch_sub_explicit(&shared->refs, 1u, memory_order_acq_rel) != 1u)
+            retire = false;
+    }
+    if (retire)
+        image_retire_resources(d, im);
+    flux_image_release_color(d, im->color);
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", 0);
     bool weak = im->device_weak;
+    if (shared && retire)
+        flux_internal_free(d, shared);
     flux_internal_free(d, im);
     if (!weak)
         flux_device_release(d);
@@ -630,6 +939,11 @@ flux_result flux_image_create_compute_writable(flux_device *d, uint32_t width, u
     if (!im)
         return FLUX_ERROR_OUT_OF_MEMORY;
     atomic_init(&im->ref_count, 1u);
+    im->shared = nullptr;
+    im->mutable = true;
+    im->imported = false;
+    im->snapshot_allowed = true;
+    im->color = nullptr;
     /* Effect-pool transients are owned by the device's effect state
      * and released by effect_state_destroy inside flux_device_release;
      * a strong device ref here would cycle and keep the refcount from
@@ -838,6 +1152,11 @@ flux_result flux_image_create_render_target(flux_device *d, uint32_t width, uint
     if (!im)
         return FLUX_ERROR_OUT_OF_MEMORY;
     atomic_init(&im->ref_count, 1u);
+    im->shared = nullptr;
+    im->mutable = true;
+    im->imported = false;
+    im->snapshot_allowed = true;
+    im->color = nullptr;
     im->device = flux_device_retain(d);
     im->device_weak = false;
     im->width = width;
@@ -858,7 +1177,7 @@ flux_result flux_image_create_render_target(flux_device *d, uint32_t width, uint
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                 VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };

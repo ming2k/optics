@@ -32,7 +32,7 @@
 #define HZ144_NS 6944444LL
 
 /* A baseline "the window is alive" input. Overlays are applied per scenario.
- * Deliberately a *lens-only* host (no cfg->paint): that is the configuration
+ * Deliberately a *lens-only* host (no cfg->record): that is the configuration
  * that can reach full quiescence, so scenarios that want the low tick or the
  * pulse cadence opt in explicitly. */
 static iris_pace_inputs base_inputs(int64_t now) {
@@ -40,7 +40,7 @@ static iris_pace_inputs base_inputs(int64_t now) {
         .now_ns = now,
         .refresh_ns = 0,
         .have_pulse_source = true,
-        .has_custom_paint = false,
+        .has_host_content = false,
     };
 }
 
@@ -107,7 +107,7 @@ static void test_pulse_lockstep(void) {
             iris_pace_inputs in = base_inputs(t);
             in.refresh_ns = refresh;
             in.host_animating = true;
-            in.has_custom_paint = true;
+            in.has_host_content = true;
             in.input_active = (i == 0);
             in.pulse_fired = (i != 0);
             in.pulse_time_ns = (i != 0) ? t : 0;
@@ -165,7 +165,7 @@ static void test_skip_render_storm_never_spins(void) {
         /* The media-host pattern: the cadence must keep running, the canvas
          * content is declared unchanged, nothing is animating. */
         in.host_skip_render = true;
-        in.has_custom_paint = true;
+        in.has_host_content = true;
         in.have_pulse_source = true;
         in.pulse_pending = true; /* a subscription is outstanding */
         in.pulse_fired = (i % 2) == 0;
@@ -289,7 +289,7 @@ static void test_quiet_caret_quiesces(void) {
         iris_pace_inputs in = base_inputs(t);
         in.refresh_ns = HZ60_NS;
         in.caret_ticking = false;
-        in.has_custom_paint = false;
+        in.has_host_content = false;
         in.chrome_damaged = false;
         iris_pace_decision d = iris_pacer_tick(&p, &in);
         CHECK(d.action == IRIS_PACE_QUIESCE);
@@ -309,7 +309,7 @@ static void test_caret_clock_never_raises_the_cadence(void) {
     iris_pace_inputs in = base_inputs(0);
     in.refresh_ns = HZ60_NS;
     in.caret_ticking = true;
-    in.has_custom_paint = false;
+    in.has_host_content = false;
     in.chrome_damaged = false;
 
     iris_pace_decision d = iris_pacer_tick(&p, &in);
@@ -352,7 +352,7 @@ static void test_forced_paint_precedence(void) {
 
     /* host_skip_render alone: skip honoured, cadence kept. */
     iris_pace_inputs in = base_inputs(0);
-    in.has_custom_paint = true;
+    in.has_host_content = true;
     in.host_skip_render = true;
     in.host_animating = true; /* a stale request must not veto the skip  */
     in.pulse_fired = true;
@@ -383,7 +383,7 @@ static void test_forced_paint_precedence(void) {
     iris_pacer p2;
     iris_pacer_init(&p2);
     iris_pace_inputs st = base_inputs(0);
-    st.has_custom_paint = true;
+    st.has_host_content = true;
     st.host_static = true;
     st.pulse_fired = true;
     st.pulse_pending = false;
@@ -395,14 +395,14 @@ static void test_forced_paint_precedence(void) {
     CHECK(iris_pacer_tick(&p2, &st).action == IRIS_PACE_PAINT);
 }
 
-/* A lens-only host (no cfg->paint) paints on chrome damage and quiesces the
+/* A lens-only host (no cfg->record) paints on chrome damage and quiesces the
  * moment the chrome stops changing. */
 static void test_lens_only_host(void) {
     iris_pacer p;
     iris_pacer_init(&p);
 
     iris_pace_inputs in = base_inputs(0);
-    in.has_custom_paint = false;
+    in.has_host_content = false;
     in.chrome_damaged = true;
     in.pulse_fired = true;
     in.pulse_pending = false;
@@ -444,7 +444,7 @@ static void test_sim_clock_monotonic_under_stale_pulses(void) {
     }
 }
 
-/* The host's animation request is raised from cfg->paint, which a skip
+/* The host's animation request is raised from cfg->record, which a skip
  * iteration never runs. If the pacer treated it as edge-triggered, one
  * lockstep skip would look like "the host stopped animating" and the cadence
  * would collapse to the idle tick in the middle of an animation. */
@@ -456,9 +456,9 @@ static void test_animation_request_survives_skips(void) {
     int64_t t = 0;
 
     /* Frame 1: a grant is available, so the frame is produced. The host's
-     * paint callback asks for the next one. */
+     * record callback asks for the next one. */
     iris_pace_inputs in = base_inputs(t);
-    in.has_custom_paint = true;
+    in.has_host_content = true;
     in.host_animating = true; /* request raised by the previous paint */
     in.pulse_fired = true;
     in.pulse_time_ns = t;
@@ -471,7 +471,7 @@ static void test_animation_request_survives_skips(void) {
      * must engage. */
     in = base_inputs(t);
     in.refresh_ns = HZ120_NS;
-    in.has_custom_paint = true;
+    in.has_host_content = true;
     in.host_animating = true;
     in.pulse_fired = false;
     in.pulse_pending = true;
@@ -486,7 +486,7 @@ static void test_animation_request_survives_skips(void) {
     for (int i = 0; i < 8; i++) {
         iris_pace_inputs skip = base_inputs(t);
         skip.refresh_ns = HZ120_NS;
-        skip.has_custom_paint = true;
+        skip.has_host_content = true;
         skip.host_animating = false; /* paint did not run: no fresh request */
         skip.pulse_fired = false;
         skip.pulse_pending = true;
@@ -503,7 +503,7 @@ static void test_animation_request_survives_skips(void) {
      * latch. */
     in = base_inputs(t);
     in.refresh_ns = HZ120_NS;
-    in.has_custom_paint = true;
+    in.has_host_content = true;
     in.host_animating = false;
     in.pulse_fired = true;
     in.pulse_time_ns = t;
@@ -515,7 +515,7 @@ static void test_animation_request_survives_skips(void) {
      * the cadence drops to the display-aligned idle tick. */
     in = base_inputs(t);
     in.refresh_ns = HZ120_NS;
-    in.has_custom_paint = true;
+    in.has_host_content = true;
     d = iris_pacer_tick(&p, &in);
     CHECK_NO_SPIN(d);
     CHECK(!d.request_pulse);

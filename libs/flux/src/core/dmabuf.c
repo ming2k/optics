@@ -508,6 +508,11 @@ flux_result flux_image_import_dmabuf(flux_device *d, const flux_dmabuf_image_des
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "only single-plane dma-buf import supported");
         return FLUX_ERROR_UNSUPPORTED;
     }
+    if (desc->ownership != FLUX_DMABUF_OWNERSHIP_BORROWED &&
+        desc->ownership != FLUX_DMABUF_OWNERSHIP_EXCLUSIVE) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "dma-buf ownership value is invalid");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
     if (desc->has_acquire_sync_fd && desc->acquire_sync_fd < 0) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "dma-buf acquire_sync_fd is invalid");
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -590,13 +595,17 @@ flux_result flux_image_import_dmabuf(flux_device *d, const flux_dmabuf_image_des
         return FLUX_ERROR_OUT_OF_MEMORY;
     }
     atomic_init(&im->ref_count, 1u);
+    im->shared = nullptr;
+    im->mutable = false;
+    im->imported = true;
+    im->snapshot_allowed = desc->ownership == FLUX_DMABUF_OWNERSHIP_EXCLUSIVE;
+    im->color = nullptr;
     im->device = flux_device_retain(d);
     im->width = desc->width;
     im->height = desc->height;
     im->format = desc->format;
     im->bindless = FLUX_BINDLESS_INVALID;
     im->bindless_storage = FLUX_BINDLESS_INVALID;
-    im->lut_bindless = FLUX_BINDLESS_INVALID;
     im->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
     im->imported_memory = VK_NULL_HANDLE;
 
@@ -765,18 +774,8 @@ fail:
         close(import_fd);
     if (im->bindless != FLUX_BINDLESS_INVALID)
         flux_bindless_release(d, im->bindless);
-    if (im->lut_bindless != FLUX_BINDLESS_INVALID)
-        flux_bindless_release(d, im->lut_bindless);
-    if (im->lut_view)
-        vkDestroyImageView(d->device, im->lut_view, nullptr);
-    if (im->lut_image)
-        vkDestroyImage(d->device, im->lut_image, nullptr);
-    if (im->lut_alloc.memory)
-        flux_vk_deallocate(d, &im->lut_alloc);
-    if (im->color_params)
-        flux_buffer_release(im->color_params);
-    if (im->icc)
-        flux_icc_profile_release(im->icc);
+    flux_image_release_color(d, im->color);
+    im->color = nullptr;
     if (im->view)
         vkDestroyImageView(d->device, im->view, nullptr);
     if (im->image)

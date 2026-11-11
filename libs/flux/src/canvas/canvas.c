@@ -130,6 +130,7 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
     c->content_scale = (desc->scale > 0.0f) ? desc->scale : 1.0f;
     c->states[0].transform = flux_mat3x2_scale(c->content_scale, c->content_scale);
     c->state_top = 0;
+    c->plan_node = UINT32_MAX;
 
     /* Backend-private GPU state: pipeline-cache warm, colour/stencil formats,
      * and the owned MSAA/stencil targets. Kept entirely inside the backend so
@@ -367,6 +368,7 @@ flux_result flux_canvas_begin(flux_canvas *c, const flux_canvas_pass_desc *desc)
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas already recording");
         return FLUX_ERROR_INVALID_STATE;
     }
+    c->plan_node = UINT32_MAX;
     flux_image *image = nullptr;
     flux_target *target = nullptr;
     switch (desc->attachment.kind) {
@@ -404,8 +406,62 @@ flux_result flux_canvas_begin(flux_canvas *c, const flux_canvas_pass_desc *desc)
     if (desc->frame && desc->frame->surface)
         flux_plan_flush(&desc->frame->plan, flux_frame_vk_command_buffer(desc->frame));
     c->bound_cpu_target = target && target->is_cpu ? target : nullptr;
+    /* ADR-0089 1B-1: compile the Canvas pass into the frame's RenderPlan and
+     * validate its target/resource contract before the backend opens a pass.
+     * The backend remains authoritative until 1B-4; this is the compile gate,
+     * not a second executor. */
+    if (desc->frame && desc->frame->surface) {
+        flux_render_plan *plan = &desc->frame->render_plan;
+        plan->target.scale = c->content_scale;
+        const void *resource = image ? (const void *)image : (const void *)desc->frame->surface;
+        flux_render_region region = {.full = true};
+        if (!desc->clear_extent && desc->damage.count > 0 &&
+            desc->damage.count <= FLUX_RENDER_PLAN_MAX_REGION_RECTS) {
+            region.full = false;
+            region.count = desc->damage.count;
+            for (uint32_t i = 0; i < desc->damage.count; ++i)
+                region.rects[i] = desc->damage.rects[i];
+        }
+        flux_render_access access = {
+            .resource = {FLUX_RENDER_RESOURCE_IMAGE, resource, 0},
+            .mode = FLUX_RENDER_ACCESS_WRITE,
+            .region = region,
+        };
+        uint32_t deps[1] = {0};
+        uint32_t dep_count = plan->node_count ? 1u : 0u;
+        if (dep_count)
+            deps[0] = plan->node_count - 1u;
+        const flux_render_node_desc node = {
+            .kind = FLUX_RENDER_NODE_CANVAS,
+            .label = "canvas.pass",
+            .accesses = &access,
+            .access_count = 1,
+            .dependencies = deps,
+            .dependency_count = dep_count,
+            .required_capabilities = FLUX_RENDER_CAP_COLOR_ATTACHMENT,
+        };
+        uint32_t node_index = UINT32_MAX;
+        flux_result plan_result = flux_render_plan_add_node(plan, &node, &node_index);
+        if (plan_result == FLUX_OK)
+            plan_result = flux_render_plan_validate(plan);
+        if (plan_result != FLUX_OK) {
+            if (node_index != UINT32_MAX && plan->node_count == node_index + 1u)
+                plan->node_count = node_index;
+            c->bound_cpu_target = nullptr;
+            return plan_result;
+        }
+        c->plan_node = node_index;
+    }
     flux_result result = canvas_begin_pass_impl(c, desc->frame, image, desc);
     if (result != FLUX_OK) {
+        /* The compile gate admitted the node, but no pass was opened. Remove it
+         * rather than leaving the plan describing a pass that never recorded. */
+        if (c->plan_node != UINT32_MAX && desc->frame) {
+            flux_render_plan *plan = &desc->frame->render_plan;
+            if (plan->node_count == c->plan_node + 1u)
+                plan->node_count = c->plan_node;
+        }
+        c->plan_node = UINT32_MAX;
         c->bound_cpu_target = nullptr;
         return result;
     }
@@ -437,6 +493,19 @@ flux_result flux_canvas_end(flux_canvas *c) {
             flux_canvas_restore(c);
     }
     flux_result result = c->pass_error;
+    /* ADR-0089 1B-2B: draws may have appended sampled-image reads to this
+     * pass's node while it recorded. Re-validate before the output transform
+     * consumes the pass's write: a read the plan cannot order fails closed. */
+    if (c->plan_node != UINT32_MAX && c->frame && c->frame->surface) {
+        flux_result plan_result = flux_render_plan_validate(&c->frame->render_plan);
+        if (plan_result != FLUX_OK) {
+            if (c->pass_error == FLUX_OK)
+                c->pass_error = plan_result;
+            result = plan_result;
+            FLUX_FAIL(plan_result, "Canvas pass cannot be described by the RenderPlan");
+        }
+    }
+    c->plan_node = UINT32_MAX;
     c->backend->end_pass(c->backend, c);
 
     c->bound_cpu_target = nullptr;
@@ -774,12 +843,51 @@ static void frame_release_image(void *resource) {
     flux_image_release(resource);
 }
 
+/* ADR-0089 1B-2B: a Canvas draw that samples an image produced inside this
+ * plan (an UPLOAD node, an earlier Canvas target, an EFFECT output) must name
+ * that producer. External images have no writer in this plan and need no edge:
+ * their upload completed before the frame began (flux_surface_begin_frame
+ * flushes the upload batch). A pass that samples more than the node's access
+ * table can state fails closed; silently under-declaring is exactly the hidden
+ * read this stage exists to remove. */
+static bool canvas_plan_note_read(flux_canvas *c, flux_image *img) {
+    if (!c || !img || !c->frame || !c->frame->surface || c->plan_node == UINT32_MAX)
+        return true;
+    flux_render_plan *plan = &c->frame->render_plan;
+    if (c->plan_node >= plan->node_count)
+        return true;
+    uint32_t producer = flux_render_plan_last_writer(plan, (const void *)img);
+    if (producer == UINT32_MAX)
+        return true;
+    flux_render_node *node = &plan->nodes[c->plan_node];
+    for (uint32_t i = 0; i < node->access_count; ++i) {
+        if (node->accesses[i].resource.kind == FLUX_RENDER_RESOURCE_IMAGE &&
+            node->accesses[i].resource.handle == (const void *)img)
+            return true;
+    }
+    const flux_render_access access = {
+        .resource = {FLUX_RENDER_RESOURCE_IMAGE, (const void *)img, 0},
+        .mode = FLUX_RENDER_ACCESS_READ,
+        .region = {.full = true},
+    };
+    flux_result r = flux_render_plan_node_add_access(plan, c->plan_node, &access);
+    if (r == FLUX_OK && producer != c->plan_node)
+        r = flux_render_plan_node_add_dependency(plan, c->plan_node, producer);
+    if (r != FLUX_OK) {
+        canvas_fail(c, r, "Canvas sampled an image the RenderPlan cannot order");
+        return false;
+    }
+    return true;
+}
+
 bool canvas_track_foreign_image(flux_canvas *c, flux_image *img) {
     if (!c || !img)
         return false;
     bool *foreign_owned = img->imported_memory ? &img->foreign_owned : nullptr;
-    return flux_frame_track_foreign_image(c->frame, img->image, img, frame_retain_image,
-                                          frame_release_image, foreign_owned);
+    if (!flux_frame_track_foreign_image(c->frame, img->image, img, frame_retain_image,
+                                        frame_release_image, foreign_owned))
+        return false;
+    return canvas_plan_note_read(c, img);
 }
 
 static void *frame_retain_sampler(void *resource) {
@@ -874,8 +982,8 @@ void draw_image_with_sampler_handle(flux_canvas *c, flux_image *img, uint32_t im
      * images are decoded by the sampler hardware and 16F images are
      * already linear — both stay raw — and R8 coverage (kind 4) is not
      * a colour. */
-    pc.color_params_address = img ? img->color_params_address : 0;
-    if (img && img->color_params_address != 0)
+    pc.color_params_address = (img && img->color) ? img->color->color_params_address : 0;
+    if (img && img->color && img->color->color_params_address != 0)
         kind |= FLUX_CANVAS_PUSH_HAS_COLOR_PARAMS;
     else if (img && kind != 4u &&
              (img->format == FLUX_FORMAT_RGBA8_UNORM || img->format == FLUX_FORMAT_BGRA8_UNORM ||

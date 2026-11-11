@@ -156,7 +156,8 @@ typedef struct backdrop_layer_slot {
     bool initialized;
     /* Clear footprints: previous and current frost rects + glass bodies. */
     uint32_t previous_count;
-    liquid_glass_region previous[PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS];
+    liquid_glass_region
+        previous[PRISM_BACKDROP_MAX_BASE_MATERIALS + PRISM_BACKDROP_MAX_GLASS_GROUPS];
     flux_buffer *stats;
     bool stats_submitted;
     uint32_t stats_group_count;
@@ -579,8 +580,8 @@ static void layer_record_base_material(
             continue;
         const uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
         const uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-        for (uint32_t f = 0; f < desc->frost_count; ++f) {
-            const prism_base_material *plate = &desc->frost[f];
+        for (uint32_t f = 0; f < desc->base_material_count; ++f) {
+            const prism_base_material *plate = &desc->base_materials[f];
             backdrop_frost_push push = {
                 .input_handle = input_handle,
                 .blurred_handle = blurred_handle,
@@ -605,7 +606,7 @@ static void layer_record_base_material(
             };
             flux_compute_dispatch(command, pipeline, &push, sizeof(push), gx, gy, 1u);
             /* Each plate is read back by the next one. */
-            if (f + 1u < desc->frost_count || r + 1u < plate_region_count)
+            if (f + 1u < desc->base_material_count || r + 1u < plate_region_count)
                 layer_barrier_compute_write_to_read_write(command, dst_image);
         }
     }
@@ -617,8 +618,8 @@ static void layer_record_base_material(
 static bool valid_backdrop_layer_desc(const prism_backdrop_layer_desc *desc) {
     if (desc->type != PRISM_TYPE_BACKDROP_LAYER_DESC || !desc->input || !desc->blurred_input)
         return false;
-    if (desc->frost_count > PRISM_BACKDROP_MAX_FROST_RECTS ||
-        (desc->frost_count > 0u && !desc->frost))
+    if (desc->base_material_count > PRISM_BACKDROP_MAX_BASE_MATERIALS ||
+        (desc->base_material_count > 0u && !desc->base_materials))
         return false;
     if (desc->group_count > PRISM_BACKDROP_MAX_GLASS_GROUPS ||
         (desc->group_count > 0u && !desc->groups))
@@ -632,8 +633,8 @@ static bool valid_backdrop_layer_desc(const prism_backdrop_layer_desc *desc) {
         !isfinite(desc->curvature) || !isfinite(desc->contact_ao) ||
         !isfinite(desc->ambient_fresnel))
         return false;
-    for (uint32_t i = 0; i < desc->frost_count; ++i) {
-        const prism_backdrop_frost *frost = &desc->frost[i];
+    for (uint32_t i = 0; i < desc->base_material_count; ++i) {
+        const prism_base_material *frost = &desc->base_materials[i];
         if (!isfinite(frost->bounds.x) || !isfinite(frost->bounds.y) ||
             !isfinite(frost->bounds.w) || !isfinite(frost->bounds.h) ||
             !isfinite(frost->corner_radius) || !isfinite(frost->opacity) ||
@@ -647,7 +648,7 @@ static bool valid_backdrop_layer_desc(const prism_backdrop_layer_desc *desc) {
     return true;
 }
 
-static bool backdrop_frost_dispatch_bounds(const prism_backdrop_frost *frost, uint32_t image_width,
+static bool backdrop_frost_dispatch_bounds(const prism_base_material *frost, uint32_t image_width,
                                            uint32_t image_height, liquid_glass_region *out) {
     if (!frost || !out || image_width == 0u || image_height == 0u)
         return false;
@@ -745,8 +746,8 @@ void prism_backdrop_layer_filter_release(prism_backdrop_layer_filter *filter) {
  * every intermediate region and the prepared push arrays rather than recomputing
  * them — recomputation at replay time could disagree with what planning decided,
  * and those decisions are what the stages' barriers depend on. */
-#define LAYER_PLAN_MAX_REGIONS (PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS)
-#define LAYER_PLAN_MAX_PLATES PRISM_BACKDROP_MAX_FROST_RECTS
+#define LAYER_PLAN_MAX_REGIONS (PRISM_BACKDROP_MAX_BASE_MATERIALS + PRISM_BACKDROP_MAX_GLASS_GROUPS)
+#define LAYER_PLAN_MAX_PLATES PRISM_BACKDROP_MAX_BASE_MATERIALS
 
 typedef struct layer_plan {
     flux_device *device;
@@ -941,7 +942,7 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     uint32_t index = flux_frame_index(frame);
     if (index >= FLUX_MAX_FRAMES_IN_FLIGHT)
         return FLUX_ERROR_OUT_OF_RANGE;
-    const bool need_scratch = (desc->frost_count > 0u && desc->group_count > 0u);
+    const bool need_scratch = (desc->base_material_count > 0u && desc->group_count > 0u);
 
     const uint32_t capture_width = flux_image_width(input);
     const uint32_t capture_height = flux_image_height(input);
@@ -951,13 +952,14 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     /* 1. Footprints in capture space: plates first, then bodies — the same order
      * the passes run in, so the merged clear set covers exactly what this
      * submission writes. */
-    liquid_glass_region current[PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS];
+    liquid_glass_region
+        current[PRISM_BACKDROP_MAX_BASE_MATERIALS + PRISM_BACKDROP_MAX_GLASS_GROUPS];
     uint32_t current_count = 0u;
     uint32_t footprint_x0 = UINT32_MAX, footprint_y0 = UINT32_MAX;
     uint32_t footprint_x1 = 0u, footprint_y1 = 0u;
-    for (uint32_t i = 0; i < desc->frost_count; ++i) {
+    for (uint32_t i = 0; i < desc->base_material_count; ++i) {
         liquid_glass_region region;
-        if (!backdrop_frost_dispatch_bounds(&desc->frost[i], capture_width, capture_height,
+        if (!backdrop_frost_dispatch_bounds(&desc->base_materials[i], capture_width, capture_height,
                                             &region))
             continue;
         current[current_count++] = region;
@@ -1044,7 +1046,7 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
     }
 
     const uint32_t clear_capacity =
-        PRISM_BACKDROP_MAX_FROST_RECTS + PRISM_BACKDROP_MAX_GLASS_GROUPS;
+        PRISM_BACKDROP_MAX_BASE_MATERIALS + PRISM_BACKDROP_MAX_GLASS_GROUPS;
     liquid_glass_region clear_regions[clear_capacity];
     uint32_t clear_count = 0u;
     if (!liquid_glass_build_clear_regions(
@@ -1052,7 +1054,7 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
             current, current_count, clear_regions, clear_capacity, &clear_count))
         return FLUX_ERROR_INVALID_STATE;
 
-    result = layer_ensure_pipelines(filter, is16f, clear_count > 0u, desc->frost_count > 0u,
+    result = layer_ensure_pipelines(filter, is16f, clear_count > 0u, desc->base_material_count > 0u,
                                     current_group_count > 0u, desc->group_count > 0u);
     if (result != FLUX_OK)
         return result;
@@ -1074,7 +1076,7 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
         .is16f = is16f,
         .output_reuse_barrier = slot->initialized,
         .scratch_reuse_barrier = slot->initialized,
-        .draw_plates = desc->frost_count > 0u && current_count > 0u,
+        .draw_plates = desc->base_material_count > 0u && current_count > 0u,
         .clear_count = clear_count,
         .stats_group_count = desc->group_count,
         .stats_address = slot->stats ? flux_buffer_device_address(slot->stats) : 0u,
@@ -1107,10 +1109,10 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
 
     /* Plate footprints, translated into slab space exactly as before. */
     if (plan.draw_plates) {
-        for (uint32_t i = 0; i < desc->frost_count; ++i) {
+        for (uint32_t i = 0; i < desc->base_material_count; ++i) {
             liquid_glass_region region;
-            if (!backdrop_frost_dispatch_bounds(&desc->frost[i], capture_width, capture_height,
-                                                &region))
+            if (!backdrop_frost_dispatch_bounds(&desc->base_materials[i], capture_width,
+                                                capture_height, &region))
                 continue;
             region.x -= slab_x;
             region.y -= slab_y;

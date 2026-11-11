@@ -293,6 +293,16 @@ test_display_list = executable('test_display_list', 'test_display_list.c',
 )
 test('display_list', test_display_list, suite : 'unit')
 
+# ADR-0089/0092 RenderPlan IR: target contract, explicit resource versions,
+# dependency ordering, writer conflicts, capability subset, and budgets.
+# Pure CPU, no device.
+test_render_plan = executable('test_render_plan',
+  ['test_render_plan.c', '../../../libs/flux/src/core/render_plan.c'],
+  include_directories : [include_directories('../../../libs/flux/src/core')],
+  dependencies : [test_helpers_dep],
+)
+test('render_plan', test_render_plan, suite : 'unit')
+
 test_public_contracts = executable('test_public_contracts',
   'test_public_contracts.c', dependencies : [test_helpers_dep])
 test('public_contracts', test_public_contracts, suite : 'unit')

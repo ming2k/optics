@@ -246,8 +246,18 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
     }
 }
 
-static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void *user) {
-    (void)device;
+static void record_image(flux_encoder *enc, flux_image *image, flux_rect dst) {
+    flux_geometry geom = flux_geom_rect(dst);
+    flux_brush brush = {
+        .kind = FLUX_BRUSH_IMAGE_PATTERN,
+        .blend = FLUX_BLEND_SRC_OVER,
+        .opacity = 1.0f,
+        .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+    };
+    flux_encoder_draw_geometry(enc, &geom, &brush);
+}
+
+static void on_record(flux_encoder *enc, float scale, void *user) {
     (void)scale;
     gallery_app *app = user;
 
@@ -258,16 +268,15 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
 
     /* 1. Draw the sharp captured backdrop */
     if (app->capture)
-        flux_canvas_draw_image(canvas, app->capture, (flux_rect){0, 0, W, H}, nullptr);
+        record_image(enc, app->capture, (flux_rect){0, 0, W, H});
 
     /* 2. Composite active material layers in declaration order */
     for (uint32_t i = 0; i < app->output_count; ++i) {
         const prism_material_output *out = &app->outputs[i];
         if (out->image)
-            flux_canvas_draw_image(
-                canvas, out->image,
-                (flux_rect){out->origin_x, out->origin_y, (float)out->width, (float)out->height},
-                nullptr);
+            record_image(
+                enc, out->image,
+                (flux_rect){out->origin_x, out->origin_y, (float)out->width, (float)out->height});
     }
 }
 
@@ -317,7 +326,7 @@ int main(int argc, char **argv) {
         .stop = on_stop,
         .build = on_build,
         .prepare = on_prepare,
-        .paint = on_paint,
+        .record = on_record,
         .user = &app,
     });
 }

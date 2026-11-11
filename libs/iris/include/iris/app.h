@@ -9,9 +9,10 @@
  *   2. build(ui, in) — runs inside an open lens_begin/end pair. The host
  *      builds its chrome (immediate-mode lens widgets) and reads `in`, the
  *      same lens_input snapshot lens is consuming this frame.
- *   3. paint(canvas) — runs inside an open flux_canvas_begin_frame/end pair,
- *      *before* snapshot execution. Anything the host draws here lands *under*
- *      lens's chrome. Returning without drawing is fine.
+ *   3. record(enc, scale) — runs on the UI thread and records host canvas
+ *      content into an immutable DisplayList. The list is submitted under
+ *      lens's chrome by the presentation pipeline. Returning without drawing
+ *      is fine.
  *   4. stop(ui, device) — releases host resources before Iris tears down
  *      Lens, Flux, and the device.
  *
@@ -57,20 +58,6 @@ extern "C" {
 #define IRIS_API
 #endif
 
-/* IRIS_DEPRECATED(msg): mark a public symbol as scheduled for removal. Mirrors
- * FLUX_DEPRECATED in <flux/core.h>; compiles to the compiler attribute where
- * available so call sites get a warning, and stays empty otherwise so
- * portability is never sacrificed. */
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
-#define IRIS_DEPRECATED(msg) [[deprecated(msg)]]
-#elif defined(_MSC_VER)
-#define IRIS_DEPRECATED(msg) __declspec(deprecated(msg))
-#elif defined(__GNUC__) || defined(__clang__)
-#define IRIS_DEPRECATED(msg) __attribute__((deprecated(msg)))
-#else
-#define IRIS_DEPRECATED(msg)
-#endif
-
 #define IRIS_VERSION_MAJOR 0
 #define IRIS_VERSION_MINOR 0
 #define IRIS_VERSION_PATCH 76
@@ -103,40 +90,23 @@ IRIS_API const char *iris_version_string(void);
  *
  * This is where the host builds its chrome (immediate-mode lens widgets).
  * Drawing *canvas content* (e.g. a document surface the chrome sits over)
- * belongs in iris_paint_fn, which runs inside the canvas envelope. */
+ * belongs in iris_record_fn, which runs before the frame is submitted. */
 typedef void (*iris_build_fn)(lens *ui, const lens_input *in, void *user);
 
-/* Per-frame paint callback. `canvas` is live inside an open
- * flux_canvas_begin_frame/end pair, with the frame already cleared to the theme
- * background. `device` is the flux_device iris owns for this app —
- * hosts that need a device (e.g. to create a glyph context) must
- * borrow this one rather than opening their own, since two flux_devices
- * in one process is unsupported and crashes. `scale` is the current
- * device-pixel ratio (Wayland `wl_surface.preferred_buffer_scale`); hosts
- * painting canvas content directly should wrap their draw in
- * `flux_canvas_save / flux_canvas_scale(canvas, scale, scale) / ...
- * / flux_canvas_restore` and call `glyph_set_scale(text, scale)` so
- * glyphs rasterise crisply at the device resolution. lens applies the
- * same scale to its own chrome internally; hosts do not need to also
- * scale the chrome portion.
- *
- * Anything the host draws here lands *under* lens's chrome, because
- * iris calls lens_snapshot_submit(snapshot, canvas) after this returns.
- *
- * `user` is the same pointer passed to iris_build_fn. The host typically
- * captures it in the same closure context. */
-typedef void (*iris_paint_fn)(flux_canvas *canvas, flux_device *device, float scale, void *user);
-
-/* Per-frame decoupled host canvas recording callback (optional, ADR-0127).
+/* Per-frame host canvas recording callback (ADR-0127).
  *
  * Runs on the UI / main thread outside any open Vulkan frame. The host records
  * vector geometry, glyph runs, and brushes into `enc` using the immutable
- * display list recording model (ADR-0088).
+ * display list recording model (ADR-0088). `scale` is the current device-pixel
+ * ratio (Wayland `wl_surface.preferred_buffer_scale`); record in logical
+ * coordinates and wrap the drawing in `flux_encoder_scale(enc, scale, scale)`
+ * when the content must be crisp at device resolution. Glyph runs are recorded
+ * with `glyph_record` at the same scale.
  *
  * The recorded commands are compiled into an immutable flux_display_list and
- * transferred via the lockless frame mailbox to the presentation worker thread,
- * executing completely decoupled from the UI thread without Vulkan swapchain
- * stalls or thread affinity violations (INV-THREAD-01, INV-THREAD-03).
+ * submitted under lens's chrome. This is the only host canvas path: there is
+ * no live-canvas callback, so recording never touches a swapchain and every
+ * backend uses the same decoupled presentation pipeline (ADR-0124/ADR-0127).
  *
  * When both `record` and `build` are provided, iris runs in fully decoupled
  * dual-thread mode across all platforms (Wayland, Win32, Cocoa). */
@@ -151,7 +121,7 @@ typedef void (*iris_record_fn)(flux_encoder *enc, float scale, void *user);
  * This hook enables multi-pass workloads: offscreen render targets,
  * compute dispatch (e.g. blur filters, prism optical materials), or
  * scene graph passes that produce images consumed downstream by
- * `iris_paint_fn`. */
+ * `iris_record_fn`. */
 typedef void (*iris_prepare_fn)(flux_frame *frame, flux_canvas *canvas, flux_device *device,
                                 float scale, void *user);
 
@@ -192,9 +162,8 @@ typedef struct iris_app_opts {
     iris_start_fn start;     /* resource setup before first frame (optional) */
     iris_stop_fn stop;       /* resource teardown before iris GPU teardown (optional) */
     iris_build_fn build;     /* per-frame build callback (may be nullptr) */
-    iris_record_fn record;   /* decoupled host canvas recorder (optional, ADR-0127) */
+    iris_record_fn record;   /* host canvas recorder, the only canvas path (optional) */
     iris_prepare_fn prepare; /* pre-canvas frame compute/render pass (optional) */
-    iris_paint_fn paint;     /* legacy per-frame canvas paint (may be nullptr)   */
     void *user;              /* opaque pointer passed to callbacks */
 } iris_app_opts;
 
@@ -202,35 +171,34 @@ typedef iris_app_opts iris_app_config;
 
 /* Request one more frame at the backend's active animation cadence.
  *
- * Call this from a build or paint callback while time-based host content is
+ * Call this from a build or record callback while time-based host content is
  * still moving. Repeating the request every frame sustains the animation;
  * stopping lets the backend return to its low-power idle cadence. The call is
  * thread-affine to iris_app_run and is a no-op outside an active app. */
 IRIS_API void iris_request_animation_frame(void);
 
-/* Declare the current frame's host canvas content static.
+/* Declare the current frame's recorded host canvas content static.
  *
- * A paint callback's content is opaque to lens, so backends normally keep
- * painting every scheduled frame — including a full clear to the theme
+ * Recorded host content is opaque to lens, so backends normally keep
+ * presenting every scheduled frame — including a full clear to the theme
  * background. When the host knows its scene is pixel-identical to what is
  * already on screen (a paused animation, a settled audio visualizer), this
- * call lets the backend skip the entire acquire → clear → paint → present
+ * call lets the backend skip the entire record → clear → submit → present
  * cycle for this frame: no swapchain image is committed and the GPU does no
  * host work, which unloads the compositor exactly like a host without a
- * paint callback.
+ * record callback.
  *
  * The declaration covers one frame only. Any user input, a resize or buffer
  * scale change, a following iris_request_animation_frame, or lens-reported
- * chrome damage forces the next frame to paint again; hosts should keep
- * calling this every frame their scene is still static. Drawing inside the
- * paint callback after declaring it static is contradictory — the draws are
- * skipped along with the pass. No-op without an active app or without a
- * paint callback. */
-IRIS_API void iris_paint_mark_static(void);
-/* Zero-render skip for hosts with a paint callback: after a build in which
+ * chrome damage forces the next frame to present again; hosts should keep
+ * calling this every frame their scene is still static. Recording content
+ * after declaring it static is contradictory — the recording is skipped along
+ * with the pass. No-op without an active app or without a record callback. */
+IRIS_API void iris_record_mark_static(void);
+/* Zero-render skip for hosts with a record callback: after a build in which
  * the host knows the canvas content is unchanged *and* it still wants the
  * active-rate cadence to continue, call this instead of (not in addition
- * to) iris_paint_mark_static. The frame's begin_frame → clear → paint →
+ * to) iris_record_mark_static. The frame's begin_frame → clear → record →
  * snapshot publication → present sequence is skipped entirely — no swapchain image
  * is acquired and the previous buffer stays on screen — but the *scheduling*
  * branch sees an animation request as usual, so the loop keeps running at
@@ -239,7 +207,7 @@ IRIS_API void iris_paint_mark_static(void);
  * zero-render static in-between frames, no idle-drop to ~4 Hz.
  *
  * Semantics per frame, mutually exclusive:
- *   paint            → render this frame (default when neither is called)
+ *   record           → present this frame (default when neither is called)
  *   mark_static      → skip this frame AND decay toward idle pacing
  *   request+skip     → skip this frame AND keep active pacing
  *
@@ -247,10 +215,10 @@ IRIS_API void iris_paint_mark_static(void);
  * iris_request_animation_frame does NOT veto a same-frame skip — the skip
  * wins for rendering, while the request re-arms the active deadline. Any
  * input, resize/scale change, or lens-reported chrome damage forces a real
- * paint regardless of both declarations; those events invalidate what is on
- * screen and neither per-frame declaration can have accounted for them.
+ * present regardless of both declarations; those events invalidate what is
+ * on screen and neither per-frame declaration can have accounted for them.
  * The flag is consumed once and must be re-issued every frame. No-op
- * without an active app or without a paint callback. */
+ * without an active app or without a record callback. */
 IRIS_API void iris_request_frame_skip_render(void);
 
 /* ================================================================== */

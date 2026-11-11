@@ -1,20 +1,3 @@
-/*
- * plan.c — registration, on-demand building, boundary flushing, and pruning
- * of deferred passes (ADR-0147).
- *
- * Small on purpose. Each registered pass owns a secondary command buffer; its
- * body is built only when a consumer requires the output, and the secondary is
- * executed only at a pass boundary — the one place Vulkan allows compute to be
- * recorded alongside rendering. Passes nobody requires are neither built nor
- * executed, so pruning costs nothing beyond counting them.
- *
- * Dependency edges are stored as *prerequisites*: every pass records which
- * earlier passes it needs. Registration only ever resolves a token to an index
- * below its own, so the relation is acyclic by construction and the recursive
- * build terminates without a cycle guard. That is a structural guarantee, not a
- * runtime check, and it is why there is no `visiting` flag to forget to set.
- */
-
 #include "plan.h"
 
 #include "image_internal.h"
@@ -23,26 +6,24 @@
 #include <stdio.h>
 #include <string.h>
 
-/* The token is the pass slot's address, so no side table maps tokens to passes
- * and a stale token cannot silently address a different pass. `pass_count`
- * bounds every lookup, which is what rejects a token from an earlier frame. */
-
-void flux_plan_reset(flux_plan *p, struct flux_device *device, VkCommandPool pool) {
+void flux_plan_reset(flux_plan *p, struct flux_render_plan *render_plan, struct flux_device *device,
+                     VkCommandPool pool) {
     if (!p)
         return;
-    /* Clean up any lingering pending flags from an aborted/un-submitted frame
-     * so an image cannot remain indefinitely poisoned as 'pending'. */
-    for (uint32_t i = 0; i < p->pass_count; ++i) {
-        flux_plan_pass *pass = &p->passes[i];
-        for (uint32_t j = 0; j < pass->output_count; ++j) {
-            if (pass->outputs[j])
-                pass->outputs[j]->deferred_pending = false;
+    if (p->render_plan) {
+        for (uint32_t i = 0; i < p->render_plan->node_count; ++i) {
+            flux_render_node *n = &p->render_plan->nodes[i];
+            if (n->kind != FLUX_RENDER_NODE_EFFECT)
+                continue;
+            for (uint32_t j = 0; j < n->effect_output_count; ++j)
+                if (n->effect_outputs[j])
+                    n->effect_outputs[j]->deferred_pending = false;
         }
     }
     p->epoch++;
     if (p->epoch == 0)
         p->epoch = 1;
-
+    p->render_plan = render_plan;
     p->device = device;
     p->vk_device = device ? device->device : VK_NULL_HANDLE;
     p->pool = pool;
@@ -50,18 +31,20 @@ void flux_plan_reset(flux_plan *p, struct flux_device *device, VkCommandPool poo
     p->arena_used = 0;
     p->executed_total = 0;
     p->fallback_total = 0;
-    memset(p->passes, 0, sizeof(p->passes));
     memset(p->tokens, 0, sizeof(p->tokens));
 }
 
 void flux_plan_destroy(flux_plan *p) {
     if (!p)
         return;
-    for (uint32_t i = 0; i < p->pass_count; ++i) {
-        flux_plan_pass *pass = &p->passes[i];
-        for (uint32_t j = 0; j < pass->output_count; ++j) {
-            if (pass->outputs[j])
-                pass->outputs[j]->deferred_pending = false;
+    if (p->render_plan) {
+        for (uint32_t i = 0; i < p->render_plan->node_count; ++i) {
+            flux_render_node *n = &p->render_plan->nodes[i];
+            if (n->kind != FLUX_RENDER_NODE_EFFECT)
+                continue;
+            for (uint32_t j = 0; j < n->effect_output_count; ++j)
+                if (n->effect_outputs[j])
+                    n->effect_outputs[j]->deferred_pending = false;
         }
     }
     memset(p, 0, sizeof(*p));
@@ -77,19 +60,157 @@ void *flux_plan_alloc_params(flux_plan *p, size_t bytes, size_t alignment) {
         return nullptr;
     void *dst = &p->arena[base];
     memset(dst, 0, bytes);
-    /* Always resume at the slot's 16-aligned end, ignoring `alignment`.
-     * Rounding down to a smaller alignment would reopen bytes already handed
-     * out to the previous pass — two passes aliasing one parameter block,
-     * which is how a later registration would silently corrupt an earlier
-     * pass's parameters. */
     p->arena_used = base + bytes;
     size_t align16 = (p->arena_used + 15u) & ~(size_t)15u;
     p->arena_used = align16 <= FLUX_PLAN_ARENA_BYTES ? align16 : FLUX_PLAN_ARENA_BYTES;
     return dst;
 }
 
+flux_result flux_frame_plan_upload(flux_frame *f, struct flux_image *destination, int32_t x,
+                                   int32_t y, uint32_t width, uint32_t height,
+                                   const void *staging) {
+    if (!f || !destination || !staging)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (f->state != FLUX_FRAME_STATE_RECORDING)
+        return FLUX_ERROR_INVALID_STATE;
+    if (flux_plan_image_pending(&f->plan, destination)) {
+        FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
+                  "image upload targets a deferred pass output that has not executed (ADR-0147)");
+        return FLUX_ERROR_INVALID_STATE;
+    }
+
+    flux_render_region region = {.full = true};
+    if (width > 0 && height > 0 && x >= 0 && y >= 0) {
+        region.full = false;
+        region.count = 1;
+        region.rects[0] = (flux_rect){(float)x, (float)y, (float)width, (float)height};
+    }
+    flux_render_access accesses[2] = {
+        {
+            .resource = {FLUX_RENDER_RESOURCE_BUFFER, staging, 0},
+            .mode = FLUX_RENDER_ACCESS_READ,
+            .region = {.full = true},
+        },
+        {
+            .resource = {FLUX_RENDER_RESOURCE_IMAGE, destination, 0},
+            .mode = FLUX_RENDER_ACCESS_WRITE,
+            .region = region,
+        },
+    };
+
+    /* Upload submissions are recorded into their own command buffer while the
+     * frame is still recording, and the frame's command buffer is submitted
+     * afterwards. Every upload in this frame therefore executes *before* every
+     * Canvas/effect node in the plan. Model that explicitly:
+     *   - an upload orders itself after earlier UPLOAD writers of the same
+     *     destination (submission call order);
+     *   - every existing reader of the destination is ordered after this upload.
+     * A Canvas pass that writes the destination itself is a genuine conflict
+     * (one submission would have to be both before and after); validation
+     * rejects it rather than guessing. */
+    /* Any GPU-produced staging path must arrive here as a plan-owned producer
+     * identity and be ordered explicitly. Never infer it from the destination
+     * image, and do not accept a raw caller-supplied node index: an index is
+     * not a liveness claim, and a dependency the backend does not honour is
+     * worse than a missing one. No in-tree upload has a GPU producer today
+     * (glyph coverage, icon masks and caller pixels are CPU-owned); the
+     * submission owner introduces that identity together with the execution
+     * switch in 1B-3B/1B-4. */
+    uint32_t upload_dependency = UINT32_MAX;
+    for (uint32_t i = f->render_plan.node_count; i-- > 0;) {
+        const flux_render_node *n = &f->render_plan.nodes[i];
+        if (n->kind != FLUX_RENDER_NODE_UPLOAD)
+            continue;
+        for (uint32_t a = 0; a < n->access_count; ++a) {
+            const flux_render_access *access = &n->accesses[a];
+            if ((access->mode == FLUX_RENDER_ACCESS_WRITE ||
+                 access->mode == FLUX_RENDER_ACCESS_READ_WRITE) &&
+                access->resource.kind == FLUX_RENDER_RESOURCE_IMAGE &&
+                access->resource.handle == (const void *)destination) {
+                upload_dependency = i;
+                break;
+            }
+        }
+        if (upload_dependency != UINT32_MAX)
+            break;
+    }
+    uint32_t dependencies[1] = {0};
+    uint32_t dependency_count = 0;
+    if (upload_dependency != UINT32_MAX)
+        dependencies[dependency_count++] = upload_dependency;
+
+    /* Refuse before mutating the plan when an existing reader cannot hold the
+     * ordering edge this upload needs. */
+    for (uint32_t i = 0; i < f->render_plan.node_count; ++i) {
+        const flux_render_node *n = &f->render_plan.nodes[i];
+        for (uint32_t a = 0; a < n->access_count; ++a) {
+            const flux_render_access *access = &n->accesses[a];
+            if (access->mode != FLUX_RENDER_ACCESS_READ &&
+                access->mode != FLUX_RENDER_ACCESS_READ_WRITE)
+                continue;
+            if (access->resource.kind != FLUX_RENDER_RESOURCE_IMAGE ||
+                access->resource.handle != (const void *)destination)
+                continue;
+            if (n->dependency_count >= FLUX_RENDER_PLAN_MAX_DEPENDENCIES)
+                return FLUX_ERROR_OUT_OF_RANGE;
+            break;
+        }
+    }
+
+    const flux_render_node_desc node = {
+        .kind = FLUX_RENDER_NODE_UPLOAD,
+        .label = "image.upload",
+        .accesses = accesses,
+        .access_count = 2,
+        .dependencies = dependencies,
+        .dependency_count = dependency_count,
+        .required_capabilities = FLUX_RENDER_CAP_TRANSFER,
+    };
+    uint32_t index = 0;
+    flux_result r = flux_render_plan_add_node(&f->render_plan, &node, &index);
+    if (r != FLUX_OK)
+        return r;
+
+    for (uint32_t i = 0; i < index; ++i) {
+        const flux_render_node *n = &f->render_plan.nodes[i];
+        bool reads = false;
+        for (uint32_t a = 0; a < n->access_count; ++a) {
+            const flux_render_access *access = &n->accesses[a];
+            if ((access->mode == FLUX_RENDER_ACCESS_READ ||
+                 access->mode == FLUX_RENDER_ACCESS_READ_WRITE) &&
+                access->resource.kind == FLUX_RENDER_RESOURCE_IMAGE &&
+                access->resource.handle == (const void *)destination) {
+                reads = true;
+                break;
+            }
+        }
+        if (reads)
+            (void)flux_render_plan_node_add_dependency(&f->render_plan, i, index);
+    }
+
+    r = flux_render_plan_validate(&f->render_plan);
+    if (r != FLUX_OK) {
+        /* Remove the ordering edges that point at the rejected node before
+         * truncating it; a dangling dependency would poison every later
+         * validation of this frame. */
+        for (uint32_t i = 0; i < index; ++i) {
+            flux_render_node *n = &f->render_plan.nodes[i];
+            for (uint32_t d = 0; d < n->dependency_count;) {
+                if (n->dependencies[d] != index) {
+                    d++;
+                    continue;
+                }
+                n->dependencies[d] = n->dependencies[--n->dependency_count];
+            }
+        }
+        if (f->render_plan.node_count == index + 1u)
+            f->render_plan.node_count = index;
+    }
+    return r;
+}
+
 struct flux_deferred_token *flux_plan_token(flux_plan *p, uint32_t index) {
-    if (!p || index >= p->pass_count)
+    if (!p || !p->render_plan || index >= p->render_plan->node_count)
         return nullptr;
     struct flux_deferred_token *tok = &p->tokens[index];
     tok->pass_index = index;
@@ -98,67 +219,49 @@ struct flux_deferred_token *flux_plan_token(flux_plan *p, uint32_t index) {
 }
 
 uint32_t flux_plan_token_index(const flux_plan *p, const struct flux_deferred_token *token) {
-    if (!p || !token)
+    if (!p || !p->render_plan || !token)
         return UINT32_MAX;
-    /* Memory boundary check: token must point to one of the plan's own token slots */
     if (token < &p->tokens[0] || token >= &p->tokens[FLUX_PLAN_MAX_PASSES])
         return UINT32_MAX;
     uintptr_t offset = (uintptr_t)token - (uintptr_t)&p->tokens[0];
     if (offset % sizeof(struct flux_deferred_token) != 0)
         return UINT32_MAX;
-
-    /* Generational token validation (ADR-0147): safe to dereference */
-    if (token->epoch != p->epoch)
+    if (token->epoch != p->epoch || token->pass_index >= p->render_plan->node_count)
         return UINT32_MAX;
-    if (token->pass_index >= p->pass_count)
+    if (p->render_plan->nodes[token->pass_index].kind != FLUX_RENDER_NODE_EFFECT)
         return UINT32_MAX;
     return token->pass_index;
 }
 
-/* Build the pass body into its own command buffer. Called at most once, and
- * only outside a render pass. Prerequisites are built first and marked
- * required: a pass this one depends on is by definition live, and without that
- * propagation a chain (blur -> material) would execute the consumer while
- * pruning the producer it samples. */
 static bool plan_build_pass(flux_plan *p, uint32_t index) {
-    if (index >= p->pass_count)
+    if (!p || !p->render_plan || index >= p->render_plan->node_count)
         return false;
-    flux_plan_pass *pass = &p->passes[index];
-    if (pass->built)
+    flux_render_node *pass = &p->render_plan->nodes[index];
+    if (pass->kind != FLUX_RENDER_NODE_EFFECT || pass->effect_built)
         return true;
 
-    for (uint32_t i = 0; i < pass->provider_count; ++i) {
-        uint32_t dep = pass->provider[i];
-        if (dep == UINT32_MAX)
+    for (uint32_t i = 0; i < pass->dependency_count; ++i) {
+        uint32_t dep = pass->dependencies[i];
+        if (dep >= p->render_plan->node_count ||
+            p->render_plan->nodes[dep].kind != FLUX_RENDER_NODE_EFFECT)
             continue;
-        p->passes[dep].required = true;
-        (void)plan_build_pass(p, dep);
-    }
-    for (uint32_t i = 0; i < pass->requires_count; ++i) {
-        uint32_t dep = pass->requires[i];
-        if (dep == UINT32_MAX)
-            continue;
-        p->passes[dep].required = true;
+        p->render_plan->nodes[dep].effect_required = true;
         (void)plan_build_pass(p, dep);
     }
 
     if (!p->pool || !p->vk_device)
         return false;
-    if (pass->segment == VK_NULL_HANDLE) {
+    if (pass->effect_segment == VK_NULL_HANDLE) {
         VkCommandBufferAllocateInfo cbai = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             .commandPool = p->pool,
             .level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
             .commandBufferCount = 1,
         };
-        if (vkAllocateCommandBuffers(p->vk_device, &cbai, &pass->segment) != VK_SUCCESS)
+        if (vkAllocateCommandBuffers(p->vk_device, &cbai, &pass->effect_segment) != VK_SUCCESS)
             return false;
     }
 
-    /* Executed outside any render pass, so the secondary is standalone: no
-     * RENDER_PASS_CONTINUE_BIT. pInheritanceInfo is still required for a
-     * secondary buffer (drivers dereference it unconditionally); a zeroed one
-     * states exactly that — no render pass is inherited. */
     VkCommandBufferInheritanceInfo inherit = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
     };
@@ -167,169 +270,172 @@ static bool plan_build_pass(flux_plan *p, uint32_t index) {
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         .pInheritanceInfo = &inherit,
     };
-    if (vkBeginCommandBuffer(pass->segment, &bi) != VK_SUCCESS)
+    if (vkBeginCommandBuffer(pass->effect_segment, &bi) != VK_SUCCESS)
         return false;
 
-    if (pass->record) {
-        /* The label accepted at registration is finally useful here: a captured
-         * frame names the deferred work instead of an anonymous range. */
-        flux_vk_cmd_begin_label(p->device, pass->segment,
+    if (pass->effect_record) {
+        flux_vk_cmd_begin_label(p->device, pass->effect_segment,
                                 pass->label ? pass->label : "flux.plan.pass");
         FLUX_PROFILE_ZONE(z_pass, "flux.plan.pass");
-        pass->record(pass->params, pass->segment);
+        pass->effect_record(pass->effect_params, pass->effect_segment);
         FLUX_PROFILE_ZONE_END(z_pass);
-        flux_vk_cmd_end_label(p->device, pass->segment);
+        flux_vk_cmd_end_label(p->device, pass->effect_segment);
     }
-    if (vkEndCommandBuffer(pass->segment) != VK_SUCCESS)
+    if (vkEndCommandBuffer(pass->effect_segment) != VK_SUCCESS)
         return false;
 
-    pass->built = true;
-    for (uint32_t i = 0; i < pass->output_count; ++i)
-        if (pass->outputs[i])
-            pass->outputs[i]->deferred_pending = false;
+    pass->effect_built = true;
+    for (uint32_t i = 0; i < pass->effect_output_count; ++i)
+        if (pass->effect_outputs[i])
+            pass->effect_outputs[i]->deferred_pending = false;
     return true;
 }
 
 uint32_t flux_plan_register(flux_plan *p, const flux_plan_pass_desc *desc) {
-    if (!p || !desc)
+    if (!p || !p->render_plan || !desc)
         return UINT32_MAX;
-    if (p->pass_count >= FLUX_PLAN_MAX_PASSES)
-        return UINT32_MAX;
-    if (desc->input_count > FLUX_PLAN_MAX_PASS_INPUTS ||
-        desc->output_count > FLUX_PLAN_MAX_PASS_OUTPUTS)
+    if (p->pass_count >= FLUX_PLAN_MAX_PASSES || desc->input_count > FLUX_PLAN_MAX_PASS_INPUTS ||
+        desc->output_count > FLUX_PLAN_MAX_PASS_OUTPUTS ||
+        desc->input_count + desc->output_count > FLUX_RENDER_PLAN_MAX_ACCESSES)
         return UINT32_MAX;
 
-    /* Resolve every edge before claiming the slot, so a rejected descriptor
-     * leaves the plan untouched rather than half-registered. */
-    uint32_t provider[FLUX_PLAN_MAX_PASS_INPUTS] = {};
-    uint32_t requires[FLUX_PLAN_MAX_PASS_INPUTS] = {};
-    uint32_t provider_count = 0;
-    uint32_t requires_count = 0;
+    uint32_t dependencies[FLUX_PLAN_MAX_PASS_INPUTS] = {};
+    uint32_t dependency_count = 0;
     for (uint32_t i = 0; i < desc->input_count; ++i) {
-        /* An explicit token wins; otherwise fall back to "whoever declared this
-         * image as an output". The fallback matters for in-library callers that
-         * chain one effect onto another's output and have no token to pass — the
-         * registry already knows the answer, and inferring it cannot be fooled
-         * because a producer must be registered before its consumer. */
         uint32_t dep = UINT32_MAX;
         if (desc->input_tokens[i]) {
             dep = flux_plan_token_index(p, desc->input_tokens[i]);
         } else if (desc->inputs[i]) {
-            for (uint32_t k = 0; k < p->pass_count && dep == UINT32_MAX; ++k)
-                for (uint32_t o = 0; o < p->passes[k].output_count; ++o)
-                    if (p->passes[k].outputs[o] == desc->inputs[i]) {
+            /* Find the node that produced this image. Canvas target writes are
+             * providers too, not only deferred-effect outputs; an effect that
+             * samples a Canvas target must depend on that pass. */
+            for (uint32_t k = 0; k < p->render_plan->node_count && dep == UINT32_MAX; ++k) {
+                const flux_render_node *n = &p->render_plan->nodes[k];
+                for (uint32_t a = 0; a < n->access_count; ++a) {
+                    const flux_render_access *access = &n->accesses[a];
+                    if (access->mode != FLUX_RENDER_ACCESS_WRITE &&
+                        access->mode != FLUX_RENDER_ACCESS_READ_WRITE)
+                        continue;
+                    if (access->resource.kind == FLUX_RENDER_RESOURCE_IMAGE &&
+                        access->resource.handle == desc->inputs[i]) {
                         dep = k;
                         break;
                     }
+                }
+            }
         }
-        if (dep == UINT32_MAX) {
-            provider[provider_count++] = UINT32_MAX;
+        if (dep == UINT32_MAX)
             continue;
-        }
-        /* A token naming this pass or a later one cannot exist yet, because
-         * only earlier passes have tokens; a token from outside the plan is
-         * rejected rather than treated as "no dependency", which would silently
-         * unorder the work. */
-        provider[provider_count++] = dep;
-        requires[requires_count++] = dep;
+        bool duplicate = false;
+        for (uint32_t k = 0; k < dependency_count; ++k)
+            if (dependencies[k] == dep)
+                duplicate = true;
+        if (!duplicate)
+            dependencies[dependency_count++] = dep;
     }
 
-    uint32_t index = p->pass_count;
-    flux_plan_pass *dst = &p->passes[index];
-    *dst = (flux_plan_pass){
-        .record = desc->record,
-        .params = desc->params,
-        .label = desc->label,
-        .provider_count = provider_count,
-        .requires_count = requires_count,
-        .output_count = desc->output_count,
-    };
-    for (uint32_t i = 0; i < provider_count; ++i)
-        dst->provider[i] = provider[i];
-    for (uint32_t i = 0; i < requires_count; ++i)
-        dst->requires[i] = requires[i];
+    flux_render_access accesses[FLUX_RENDER_PLAN_MAX_ACCESSES] = {};
+    uint32_t access_count = 0;
+    for (uint32_t i = 0; i < desc->input_count; ++i) {
+        if (!desc->inputs[i])
+            continue;
+        accesses[access_count++] = (flux_render_access){
+            .resource = {FLUX_RENDER_RESOURCE_IMAGE, desc->inputs[i], 0},
+            .mode = FLUX_RENDER_ACCESS_READ,
+            .region = {.full = true},
+        };
+    }
     for (uint32_t i = 0; i < desc->output_count; ++i) {
-        dst->outputs[i] = desc->outputs[i];
-        /* The image's own flag is the frame-free view of the same fact; a raw
-         * recording path has no plan to consult. */
-        dst->outputs[i]->deferred_pending = true;
+        accesses[access_count++] = (flux_render_access){
+            .resource = {FLUX_RENDER_RESOURCE_IMAGE, desc->outputs[i], 0},
+            .mode = FLUX_RENDER_ACCESS_WRITE,
+            .region = {.full = true},
+        };
     }
-
+    flux_render_effect_desc effect = {
+        .record = desc->record, .params = desc->params, .output_count = desc->output_count};
+    for (uint32_t i = 0; i < desc->output_count; ++i)
+        effect.outputs[i] = desc->outputs[i];
+    flux_render_node_desc node = {
+        .kind = FLUX_RENDER_NODE_EFFECT,
+        .label = desc->label,
+        .accesses = accesses,
+        .access_count = access_count,
+        .dependencies = dependencies,
+        .dependency_count = dependency_count,
+        .required_capabilities = FLUX_RENDER_CAP_COMPUTE | FLUX_RENDER_CAP_STORAGE_IMAGE,
+        .effect = effect,
+    };
+    uint32_t index = 0;
+    if (flux_render_plan_add_node(p->render_plan, &node, &index) != FLUX_OK)
+        return UINT32_MAX;
+    for (uint32_t i = 0; i < desc->output_count; ++i)
+        p->render_plan->nodes[index].effect_outputs[i]->deferred_pending = true;
     p->pass_count++;
     return index;
 }
 
 void flux_plan_require_index(flux_plan *p, uint32_t index) {
-    if (!p || index >= p->pass_count)
+    if (!p || !p->render_plan || index >= p->render_plan->node_count ||
+        p->render_plan->nodes[index].kind != FLUX_RENDER_NODE_EFFECT)
         return;
-    p->passes[index].required = true;
+    p->render_plan->nodes[index].effect_required = true;
 }
 
 bool flux_plan_require_image(flux_plan *p, struct flux_image *image) {
-    if (!p || !image)
+    if (!p || !p->render_plan || !image)
         return true;
-    for (uint32_t i = 0; i < p->pass_count; ++i) {
-        flux_plan_pass *pass = &p->passes[i];
-        for (uint32_t j = 0; j < pass->output_count; ++j) {
-            if (pass->outputs[j] != image)
-                continue;
-            pass->required = true;
-            return true;
-        }
-    }
-    return true; /* not a plan output: its writer recorded eagerly */
-}
-
-/* Build and execute everything required, in registration order. */
-void flux_plan_flush(flux_plan *p, VkCommandBuffer cmd) {
-    if (!p || cmd == VK_NULL_HANDLE)
-        return;
-    /* Two phases, deliberately. Building first propagates liveness backwards
-     * (building a pass marks its prerequisites required), which can promote a
-     * pass registered earlier to required. Executing afterwards therefore walks
-     * an already-closed required set, and registration order — which is
-     * declaration order — puts every prerequisite before its consumer. A single
-     * fused loop cannot do this: it would have skipped a pass before the
-     * later-registered consumer that needs it had been built. */
-    for (uint32_t i = 0; i < p->pass_count; ++i) {
-        if (p->passes[i].required)
-            (void)plan_build_pass(p, i);
-    }
-    for (uint32_t i = 0; i < p->pass_count; ++i) {
-        flux_plan_pass *pass = &p->passes[i];
-        if (pass->executed || !pass->required)
+    for (uint32_t i = 0; i < p->render_plan->node_count; ++i) {
+        flux_render_node *n = &p->render_plan->nodes[i];
+        if (n->kind != FLUX_RENDER_NODE_EFFECT)
             continue;
-        if (!plan_build_pass(p, i))
-            continue;
-        vkCmdExecuteCommands(cmd, 1, &pass->segment);
-        pass->executed = true;
-        p->executed_total++;
+        for (uint32_t j = 0; j < n->effect_output_count; ++j)
+            if (n->effect_outputs[j] == image) {
+                n->effect_required = true;
+                return true;
+            }
     }
+    return true;
 }
 
 bool flux_plan_image_pending(const flux_plan *p, const struct flux_image *image) {
     (void)p;
-    /* One source of truth. The flag is maintained by registration, execution and
-     * pruning above, so this query answers the same for a caller holding the plan
-     * and for a raw path holding only the image. */
     return image ? image->deferred_pending : false;
 }
 
+void flux_plan_flush(flux_plan *p, VkCommandBuffer cmd) {
+    if (!p || !p->render_plan || cmd == VK_NULL_HANDLE)
+        return;
+    for (uint32_t i = 0; i < p->render_plan->node_count; ++i) {
+        flux_render_node *n = &p->render_plan->nodes[i];
+        if (n->kind == FLUX_RENDER_NODE_EFFECT && n->effect_required)
+            (void)plan_build_pass(p, i);
+    }
+    for (uint32_t i = 0; i < p->render_plan->node_count; ++i) {
+        flux_render_node *n = &p->render_plan->nodes[i];
+        if (n->kind != FLUX_RENDER_NODE_EFFECT || !n->effect_required || n->effect_executed)
+            continue;
+        if (!plan_build_pass(p, i))
+            continue;
+        vkCmdExecuteCommands(cmd, 1, &n->effect_segment);
+        n->effect_executed = true;
+        p->executed_total++;
+    }
+}
+
 uint32_t flux_plan_finalize(flux_plan *p, VkCommandBuffer cmd) {
-    if (!p)
+    if (!p || !p->render_plan)
         return 0;
     flux_plan_flush(p, cmd);
     uint32_t pruned = 0;
-    for (uint32_t i = 0; i < p->pass_count; ++i) {
-        flux_plan_pass *pass = &p->passes[i];
-        if (pass->executed)
+    for (uint32_t i = 0; i < p->render_plan->node_count; ++i) {
+        flux_render_node *n = &p->render_plan->nodes[i];
+        if (n->kind != FLUX_RENDER_NODE_EFFECT || n->effect_executed)
             continue;
         pruned++;
-        /* Pruned outputs were never written. Clearing keeps a later frame — or a
-         * raw path in this one — from treating this image as "waiting". */
-        for (uint32_t j = 0; j < pass->output_count; ++j)
-            if (pass->outputs[j])
-                pass->outputs[j]->deferred_pending = false;
+        for (uint32_t j = 0; j < n->effect_output_count; ++j)
+            if (n->effect_outputs[j])
+                n->effect_outputs[j]->deferred_pending = false;
     }
     return pruned;
 }

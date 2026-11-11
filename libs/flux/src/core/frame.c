@@ -20,6 +20,50 @@
 #include <math.h>
 #include <string.h>
 
+/* The recording frame stack for this thread (ADR-0089 1B-2B). Uploads are
+ * device-global and may run on any thread, so a device-level "current frame"
+ * would attach one surface's upload to another surface's plan. A thread-local
+ * stack follows the actual recording context instead: the frame a synchronous
+ * upload belongs to, if any. Work from a worker thread that is not recording a
+ * frame has no plan to join; the upload stays on the frame-independent path,
+ * and flux_surface_begin_frame has already flushed any open batch before a
+ * frame can sample it. */
+#define FLUX_CURRENT_FRAME_MAX 8u
+static thread_local flux_frame *g_current_frames[FLUX_CURRENT_FRAME_MAX];
+static thread_local uint32_t g_current_frame_count;
+
+static void current_frame_push(flux_frame *f) {
+    if (g_current_frame_count < FLUX_CURRENT_FRAME_MAX)
+        g_current_frames[g_current_frame_count++] = f;
+}
+
+static void current_frame_remove(flux_frame *f) {
+    for (uint32_t i = g_current_frame_count; i-- > 0;) {
+        if (g_current_frames[i] != f)
+            continue;
+        for (uint32_t j = i + 1; j < g_current_frame_count; ++j)
+            g_current_frames[j - 1] = g_current_frames[j];
+        g_current_frame_count--;
+        return;
+    }
+}
+
+flux_frame *flux_frame_current(void) {
+    return g_current_frame_count ? g_current_frames[g_current_frame_count - 1u] : nullptr;
+}
+
+/* Leave the RECORDING state, keeping the device's recording-frame count and
+ * this thread's current-frame stack honest. Every transition out of RECORDING
+ * goes through here, including resize/release teardown with no submit: a
+ * stale TLS entry would attach an unrelated upload to a freed frame (the
+ * malloc-perturbed image-retire lane caught exactly that). */
+void flux_frame_leave_recording(flux_frame *f) {
+    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
+        return;
+    current_frame_remove(f);
+    atomic_fetch_sub_explicit(&f->surface->device->recording_frames, 1u, memory_order_acq_rel);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Layout transitions (sync2 barriers)                               */
 /* ------------------------------------------------------------------ */
@@ -293,6 +337,61 @@ flux_result flux_surface_sync_content(flux_surface *s, flux_frame *f) {
             }
         }
     }
+    /* ADR-0089 1B-2B: the presentation blit is a managed write, so it is an
+     * OUTPUT node in the frame plan. It reads the persistent content image
+     * (whose identity in the plan is the surface that owns it) and writes the
+     * acquired presentation image; the Canvas node(s) that wrote the content
+     * image are its producers. An empty copy records no node: nothing is
+     * written, so there is no write to state. */
+    if (whole || n > 0) {
+        flux_render_region region = {.full = true};
+        if (!whole && n > 0 && n <= FLUX_RENDER_PLAN_MAX_REGION_RECTS) {
+            region.full = false;
+            region.count = n;
+            for (uint32_t i = 0; i < n; ++i) {
+                region.rects[i] = (flux_rect){(float)boxes[i].x0, (float)boxes[i].y0,
+                                              (float)(boxes[i].x1 - boxes[i].x0),
+                                              (float)(boxes[i].y1 - boxes[i].y0)};
+            }
+        }
+        flux_render_access accesses[2] = {
+            {
+                .resource = {FLUX_RENDER_RESOURCE_IMAGE, (const void *)s, 0},
+                .mode = FLUX_RENDER_ACCESS_READ,
+                .region = region,
+            },
+            {
+                .resource = {FLUX_RENDER_RESOURCE_IMAGE, (const void *)s->images[idx], 0},
+                .mode = FLUX_RENDER_ACCESS_WRITE,
+                .region = region,
+            },
+        };
+        uint32_t dependencies[1] = {0};
+        uint32_t dependency_count = 0;
+        uint32_t producer = flux_render_plan_last_writer(&f->render_plan, (const void *)s);
+        if (producer != UINT32_MAX)
+            dependencies[dependency_count++] = producer;
+        const flux_render_node_desc node = {
+            .kind = FLUX_RENDER_NODE_OUTPUT,
+            .label = "surface.present",
+            .accesses = accesses,
+            .access_count = 2,
+            .dependencies = dependencies,
+            .dependency_count = dependency_count,
+            .required_capabilities = FLUX_RENDER_CAP_TRANSFER,
+        };
+        uint32_t index = 0;
+        flux_result plan_result = flux_render_plan_add_node(&f->render_plan, &node, &index);
+        if (plan_result == FLUX_OK)
+            plan_result = flux_render_plan_validate(&f->render_plan);
+        if (plan_result != FLUX_OK) {
+            if (f->render_plan.node_count == index + 1u)
+                f->render_plan.node_count = index;
+            FLUX_FAIL(plan_result, "presentation blit cannot be described by the RenderPlan");
+            return plan_result;
+        }
+    }
+
     if (whole) {
         vkCmdCopyImage(cmd, s->content.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s->images[idx],
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &full);
@@ -853,7 +952,22 @@ acquired:
     /* ADR-0147: the plan recycles this slot's secondaries. The fence wait
      * for `slot` above already guarantees nothing the previous plan
      * recorded is still executing. */
-    flux_plan_reset(&s->frame_slot.plan, s->device, pf->pool);
+    flux_plan_reset(&s->frame_slot.plan, &s->frame_slot.render_plan, s->device, pf->pool);
+    flux_render_target render_target = {
+        .width = s->extent.width,
+        .height = s->extent.height,
+        .scale = 1.0f,
+        .format = flux_format_from_vk(s->format),
+        .color_space = s->content_space,
+        .sample_count = 1,
+        .load = true,
+        .store = true,
+        .capabilities = FLUX_RENDER_CAP_SAMPLED_IMAGE | FLUX_RENDER_CAP_STORAGE_IMAGE |
+                        FLUX_RENDER_CAP_STORAGE_BUFFER | FLUX_RENDER_CAP_TRANSFER |
+                        FLUX_RENDER_CAP_COLOR_ATTACHMENT | FLUX_RENDER_CAP_COMPUTE |
+                        FLUX_RENDER_CAP_SCENE,
+    };
+    flux_render_plan_init(&s->frame_slot.render_plan, &render_target);
     {
         const flux_damage damage = desc ? desc->damage : (flux_damage){0};
         const bool damage_full = desc ? desc->damage_full : true;
@@ -863,6 +977,7 @@ acquired:
     }
     s->frame_active = true;
     atomic_fetch_add_explicit(&s->device->recording_frames, 1u, memory_order_acq_rel);
+    current_frame_push(&s->frame_slot);
     *out = &s->frame_slot;
     return FLUX_OK;
 }
@@ -1094,18 +1209,6 @@ static bool restore_signalled_fence(flux_surface *s, flux_per_frame *pf) {
     return vkCreateFence(s->device->device, &fci, nullptr, &pf->in_flight) == VK_SUCCESS;
 }
 
-/* Leave the RECORDING state, keeping the device's recording-frame count honest.
- *
- * Called from every transition out of RECORDING so the counter can never drift:
- * a leaked count would make retire tags permanently conservative again (the
- * pre-existing behaviour), and a double decrement would let a release be tagged
- * with the current serial while a frame still references it. */
-static void flux_frame_leave_recording(flux_frame *f) {
-    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
-        return;
-    atomic_fetch_sub_explicit(&f->surface->device->recording_frames, 1u, memory_order_acq_rel);
-}
-
 static flux_result frame_submit_failure(flux_frame *f, VkResult vr, const char *message) {
     flux_surface *s = f->surface;
     flux_per_frame *pf = &s->frames[f->slot];
@@ -1248,6 +1351,7 @@ flux_result flux_frame_submit(flux_frame *f) {
 
     vr = vkResetFences(s->device->device, 1, &pf->in_flight);
     if (vr != VK_SUCCESS) {
+        flux_frame_leave_recording(f);
         f->state = FLUX_FRAME_STATE_INVALID;
         s->frame_active = false;
         if (!s->offscreen)

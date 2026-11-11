@@ -51,9 +51,9 @@ int main(void) {
      * exactly like a request made after the window has closed. */
     iris_request_animation_frame();
 
-    /* iris_paint_mark_static: same headless contract — a no-op without an
+    /* iris_record_mark_static: same headless contract — a no-op without an
      * active app, and never a crash. */
-    iris_paint_mark_static();
+    iris_record_mark_static();
 
     /* DnD safety outside a running app (ADR-0086) */
     CHECK(!iris_dnd_is_active());
@@ -89,7 +89,6 @@ int main(void) {
     CHECK(iris_window_create_activation_token(NULL, tok_buf, 0) != 0);
     CHECK(iris_window_create_activation_token(NULL, NULL, sizeof tok_buf) != 0);
     CHECK(iris_window_create_activation_token("org.example.App", tok_buf, sizeof tok_buf) != 0);
-    CHECK(iris_wayland_create_activation_token("org.example.App", tok_buf, sizeof tok_buf) != 0);
 
     return TEST_REPORT();
 }

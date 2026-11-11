@@ -906,9 +906,10 @@ static void record_image_upload(VkCommandBuffer cmd, VkBuffer staging, VkImage d
     vkCmdPipelineBarrier2(cmd, &di);
 }
 
-flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_x, int32_t offset_y,
-                                    uint32_t width, uint32_t height, VkImageLayout old_layout,
-                                    const void *data, size_t bytes) {
+flux_result flux_vk_upload_to_image(flux_device *d, struct flux_image *plan_destination,
+                                    VkImage dst, int32_t offset_x, int32_t offset_y, uint32_t width,
+                                    uint32_t height, VkImageLayout old_layout, const void *data,
+                                    size_t bytes) {
     if (bytes == 0)
         return FLUX_OK;
 
@@ -928,6 +929,11 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
     if (r != FLUX_OK)
         return r;
 
+    /* ADR-0089 1B-2B: the managed copy is an explicit UPLOAD node when a frame
+     * is recording on this thread. Record and validate it before any command
+     * is emitted: an upload the plan cannot describe must not become a hidden
+     * write. The staging buffer is the node's read side (version 0: buffers
+     * have no version identity yet). */
     if (!staging->alloc.mapped) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE,
                   "image staging allocation came back un-mapped (allocator invariant violated)");
@@ -935,6 +941,18 @@ flux_result flux_vk_upload_to_image(flux_device *d, VkImage dst, int32_t offset_
         goto fail;
     }
     memcpy(staging->alloc.mapped, data, bytes);
+
+    if (plan_destination) {
+        flux_frame *frame = flux_frame_current();
+        if (frame) {
+            flux_result pr = flux_frame_plan_upload(frame, plan_destination, offset_x, offset_y,
+                                                    width, height, staging->buffer);
+            if (pr != FLUX_OK) {
+                flux_vk_staging_release(d, staging);
+                return pr;
+            }
+        }
+    }
 
     /* Batch mode: record the full single-queue sequence into the open
      * batch; the staging buffer stays checked out until flush. */

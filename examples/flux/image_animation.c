@@ -111,9 +111,29 @@ static flux_image *make_image(flux_device *device, uint32_t width, uint32_t heig
     return flux_image_create(device, &desc, &image) == FLUX_OK ? image : NULL;
 }
 
-static void draw_panel(flux_canvas *canvas, flux_rect panel) {
-    flux_canvas_fill_rrect(canvas, panel, 22.0f, flux_color_rgba_premul(27, 31, 46, 245));
-    flux_canvas_stroke_rrect(canvas, panel, 22.0f, flux_color_rgba_premul(80, 92, 125, 160), 1.5f);
+static void record_image(flux_encoder *enc, flux_image *image, flux_rect dst, flux_rect src,
+                         float opacity) {
+    flux_geometry geom = flux_geom_rect(dst);
+    flux_brush brush = {
+        .kind = FLUX_BRUSH_IMAGE_PATTERN,
+        .blend = FLUX_BLEND_SRC_OVER,
+        .opacity = opacity,
+        .image = {.image = image,
+                  .src_rect = src,
+                  .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+    };
+    flux_encoder_draw_geometry(enc, &geom, &brush);
+}
+
+static void draw_panel(flux_encoder *enc, flux_rect panel) {
+    flux_geometry fill = flux_geom_rrect(panel, 22.0f);
+    flux_brush fill_brush = flux_brush_solid(flux_color_rgba_premul(27, 31, 46, 245));
+    flux_encoder_draw_geometry(enc, &fill, &fill_brush);
+
+    flux_geometry stroke = flux_geom_rrect(panel, 22.0f);
+    stroke.stroke.width = 1.5f;
+    flux_brush stroke_brush = flux_brush_solid(flux_color_rgba_premul(80, 92, 125, 160));
+    flux_encoder_draw_geometry(enc, &stroke, &stroke_brush);
 }
 
 static bool on_start(lens *ui, flux_device *device, void *user) {
@@ -162,8 +182,7 @@ static void on_build(lens *ui, const lens_input *in, void *user) {
     iris_request_animation_frame();
 }
 
-static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void *user) {
-    (void)device;
+static void on_record(flux_encoder *enc, float scale, void *user) {
     image_animation_app *app = user;
     app->time += 0.016f;
     float time = app->time;
@@ -173,8 +192,8 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
     float width = (float)log_w;
     float height = (float)log_h;
 
-    flux_canvas_save(canvas);
-    flux_canvas_scale(canvas, scale, scale);
+    flux_encoder_save(enc);
+    flux_encoder_scale(enc, scale, scale);
 
     float margin = 24.0f;
     float gap = 18.0f;
@@ -187,7 +206,7 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         {margin + panel_w + gap, margin + panel_h + gap, panel_w, panel_h},
     };
     for (int i = 0; i < 4; ++i)
-        draw_panel(canvas, panels[i]);
+        draw_panel(enc, panels[i]);
 
     /* Panel 0: Orbit & rotate */
     {
@@ -197,14 +216,13 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         float angle = time * 1.2f;
         float orbit = 40.0f;
 
-        flux_canvas_save(canvas);
-        flux_canvas_translate(canvas, cx + cosf(time * 0.8f) * orbit,
-                              cy + sinf(time * 0.8f) * orbit);
-        flux_canvas_rotate(canvas, angle);
-        flux_canvas_draw_image(
-            canvas, app->card_a,
-            (flux_rect){-CARD_SIZE * 0.5f, -CARD_SIZE * 0.5f, CARD_SIZE, CARD_SIZE}, NULL);
-        flux_canvas_restore(canvas);
+        flux_encoder_save(enc);
+        flux_encoder_translate(enc, cx + cosf(time * 0.8f) * orbit, cy + sinf(time * 0.8f) * orbit);
+        flux_encoder_rotate(enc, angle);
+        record_image(enc, app->card_a,
+                     (flux_rect){-CARD_SIZE * 0.5f, -CARD_SIZE * 0.5f, CARD_SIZE, CARD_SIZE},
+                     (flux_rect){0}, 1.0f);
+        flux_encoder_restore(enc);
     }
 
     /* Panel 1: Sprite strip animation */
@@ -216,9 +234,10 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         flux_rect src = {(float)frame / (float)SPRITE_FRAMES, 0.0f, 1.0f / (float)SPRITE_FRAMES,
                          1.0f};
         float dest_size = 140.0f;
-        flux_canvas_draw_image_sub(
-            canvas, app->sprites,
-            (flux_rect){cx - dest_size * 0.5f, cy - dest_size * 0.5f, dest_size, dest_size}, src);
+        record_image(
+            enc, app->sprites,
+            (flux_rect){cx - dest_size * 0.5f, cy - dest_size * 0.5f, dest_size, dest_size}, src,
+            1.0f);
     }
 
     /* Panel 2: Pulse & Crossfade */
@@ -229,16 +248,14 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         float s = 1.0f + 0.35f * sinf(time * 2.5f);
         float fade = 0.5f + 0.5f * sinf(time * 1.5f);
 
-        flux_canvas_save(canvas);
-        flux_canvas_translate(canvas, cx, cy);
-        flux_canvas_scale(canvas, s, s);
+        flux_encoder_save(enc);
+        flux_encoder_translate(enc, cx, cy);
+        flux_encoder_scale(enc, s, s);
 
-        flux_image_style opt_a = {.tint = 0xFFFFFFFFu, .opacity = 1.0f - fade};
-        flux_image_style opt_b = {.tint = 0xFFFFFFFFu, .opacity = fade};
         flux_rect dst = {-CARD_SIZE * 0.5f, -CARD_SIZE * 0.5f, CARD_SIZE, CARD_SIZE};
-        flux_canvas_draw_image(canvas, app->card_a, dst, &opt_a);
-        flux_canvas_draw_image(canvas, app->card_b, dst, &opt_b);
-        flux_canvas_restore(canvas);
+        record_image(enc, app->card_a, dst, (flux_rect){0}, 1.0f - fade);
+        record_image(enc, app->card_b, dst, (flux_rect){0}, fade);
+        flux_encoder_restore(enc);
     }
 
     /* Panel 3: Shear & Wobble */
@@ -249,17 +266,17 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         float shx = sinf(time * 2.0f) * 0.45f;
         float shy = cosf(time * 1.7f) * 0.25f;
 
-        flux_canvas_save(canvas);
-        flux_canvas_translate(canvas, cx, cy);
+        flux_encoder_save(enc);
+        flux_encoder_translate(enc, cx, cy);
         flux_mat3x2 skew_m = {.m = {1.0f, shy, shx, 1.0f, 0.0f, 0.0f}};
-        flux_canvas_transform(canvas, skew_m);
-        flux_canvas_draw_image(
-            canvas, app->card_b,
-            (flux_rect){-CARD_SIZE * 0.5f, -CARD_SIZE * 0.5f, CARD_SIZE, CARD_SIZE}, NULL);
-        flux_canvas_restore(canvas);
+        flux_encoder_transform(enc, skew_m);
+        record_image(enc, app->card_b,
+                     (flux_rect){-CARD_SIZE * 0.5f, -CARD_SIZE * 0.5f, CARD_SIZE, CARD_SIZE},
+                     (flux_rect){0}, 1.0f);
+        flux_encoder_restore(enc);
     }
 
-    flux_canvas_restore(canvas);
+    flux_encoder_restore(enc);
 }
 
 int main(void) {
@@ -274,7 +291,7 @@ int main(void) {
         .start = on_start,
         .stop = on_stop,
         .build = on_build,
-        .paint = on_paint,
+        .record = on_record,
         .user = &app,
     });
 }

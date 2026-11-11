@@ -5,6 +5,13 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **`BackdropFrost`.** The C `prism_backdrop_frost` alias is deleted; use
+  `BaseMaterial`. `BackdropLayerApplyOpts::frost` is renamed
+  `base_materials`, matching the C descriptor's `base_materials` /
+  `base_material_count` fields.
+
 ### Added
 
 - **Uncompromised physical dielectric optics and Contact AO (ADR-0102).**

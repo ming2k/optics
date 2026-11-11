@@ -57,6 +57,13 @@ fuzz_harnesses += {
     'corpus': 'corpus/glb_parse',
   }
 
+fuzz_harnesses += {
+  'name': 'fuzz_display_list_deserialize',
+  'src': files('fuzz_display_list_deserialize.c'),
+  'deps': [flux_dep],
+  'corpus': 'corpus/display_list_deserialize',
+}
+
 if get_option('glyph')
   # Text shaping: feed arbitrary / truncated UTF-8 through the measure-only
   # seam (no device needed): measure, caret mapping, bidi cursor moves, and

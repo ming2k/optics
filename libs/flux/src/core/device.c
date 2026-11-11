@@ -1116,6 +1116,12 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
         goto fail;
     }
     d->queue_lock_initialized = true;
+    if (!flux_platform_mutex_init(&d->image_version_lock)) {
+        FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "image version lock init failed");
+        r = FLUX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->image_version_lock_initialized = true;
     if (!flux_platform_mutex_init(&d->dmabuf_acquire_pool_lock)) {
         FLUX_FAIL(FLUX_ERROR_BACKEND_FAILURE, "dma-buf acquire semaphore pool lock init failed");
         r = FLUX_ERROR_BACKEND_FAILURE;
@@ -1213,6 +1219,10 @@ fail:
     if (d->pipeline_cache_lock_initialized) {
         flux_platform_mutex_destroy(&d->pipeline_cache_lock);
         d->pipeline_cache_lock_initialized = false;
+    }
+    if (d->image_version_lock_initialized) {
+        flux_platform_mutex_destroy(&d->image_version_lock);
+        d->image_version_lock_initialized = false;
     }
     if (d->queue_lock_initialized) {
         flux_platform_mutex_destroy(&d->queue_lock);
@@ -1371,6 +1381,10 @@ void flux_device_release(flux_device *d) {
     flux_observe_report_emit(d, FLUX_SCOPE_DEVICE);
     flux_observe_report_emit(d, FLUX_SCOPE_CONTEXT);
     flux_observe_destroy(d);
+    if (d->image_version_lock_initialized) {
+        flux_platform_mutex_destroy(&d->image_version_lock);
+        d->image_version_lock_initialized = false;
+    }
     if (d->queue_lock_initialized) {
         flux_platform_mutex_destroy(&d->queue_lock);
         d->queue_lock_initialized = false;

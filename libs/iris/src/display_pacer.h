@@ -121,12 +121,12 @@ typedef struct iris_pace_inputs {
      * (iris_request_frame_skip_render): canvas unchanged, cadence continues. */
     bool host_skip_render;
 
-    /* The host declared this frame's canvas static (iris_paint_mark_static). */
+    /* The host declared this frame's canvas static (iris_record_mark_static). */
     bool host_static;
 
-    /* The host supplies canvas content via cfg->paint / cfg->prepare. Hosts
-     * without one only ever paint on lens chrome damage. */
-    bool has_custom_paint;
+    /* The host supplies canvas or frame content via cfg->record / cfg->prepare.
+     * Hosts without one only ever paint on lens chrome damage. */
+    bool has_host_content;
 
     /* lens_frame_needs_repaint(): the UI chrome itself changed. This already
      * includes a caret blink *flip* (ADR-0151), because lens reports the
@@ -182,7 +182,7 @@ typedef struct iris_pacer {
     bool idle_armed;        /* idle_next_ns holds a valid deadline         */
     /* The host asked for another frame and has not been given one yet.
      * Latched rather than edge-triggered because the request normally comes
-     * from cfg->paint, which does not run on a skip iteration: without the
+     * from cfg->record, which does not run on a skip iteration: without the
      * latch a single lockstep skip would look like "the host stopped
      * animating" and drop the cadence to the idle tick mid-animation. */
     bool animating;

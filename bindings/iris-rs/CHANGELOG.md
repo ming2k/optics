@@ -5,6 +5,17 @@ follow [semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **`wayland_activation_token`.** Use `window_create_activation_token`; the C
+  `iris_wayland_create_activation_token` alias is gone.
+- **`PaintHost`, `PaintCanvas`, and every `paint` entry point.** The C
+  `iris_paint_fn` live-canvas callback is deleted; `Application::run` now
+  takes only the build closure, and host canvas content goes through
+  `Application::run_with_record` (`RecordHost`). `run_with_lifecycle` takes
+  an optional `RecordHost` closure instead of a paint closure, and
+  `paint_mark_static` is renamed `record_mark_static`.
+
 ### Fixed
 
 - **A following `iris_request_animation_frame` outranks a static

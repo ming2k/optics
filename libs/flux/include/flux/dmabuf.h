@@ -41,6 +41,21 @@ typedef struct flux_canvas flux_canvas;
 
 #define FLUX_DMABUF_MAX_PLANES 4
 
+/* What the producer transferred with the dma-buf.
+ *
+ * BORROWED is the safe default: the buffer may be sampled for the current
+ * frame/render pass, but the producer may reuse it after the acquire fence
+ * retires. Such an image cannot be snapshotted into a retained DisplayList;
+ * bind it through a dynamic display-list input slot instead.
+ *
+ * EXCLUSIVE means the producer has transferred ownership for the image's
+ * lifetime. The image may be snapshotted and retained across frames, but it is
+ * still immutable: flux never writes to imported memory. */
+typedef enum flux_dmabuf_ownership {
+    FLUX_DMABUF_OWNERSHIP_BORROWED = 0,
+    FLUX_DMABUF_OWNERSHIP_EXCLUSIVE = 1,
+} flux_dmabuf_ownership;
+
 /* One dma-buf plane. `fd` is a dma-buf file descriptor; flux duplicates
  * what Vulkan imports so the ownership rule above is upheld on failures. */
 typedef struct flux_dmabuf_plane {
@@ -61,7 +76,8 @@ typedef struct flux_dmabuf_image_desc {
     uint32_t plane_count;
     flux_dmabuf_plane planes[FLUX_DMABUF_MAX_PLANES];
     bool has_acquire_sync_fd;
-    int acquire_sync_fd; /* Linux sync_file fd */
+    int acquire_sync_fd;             /* Linux sync_file fd */
+    flux_dmabuf_ownership ownership; /* BORROWED (default) or EXCLUSIVE */
 } flux_dmabuf_image_desc;
 
 #define FLUX_DMABUF_IMAGE_DESC_INIT {.type = FLUX_TYPE_DMABUF_IMAGE_DESC}

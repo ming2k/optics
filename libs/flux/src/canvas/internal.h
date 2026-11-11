@@ -14,6 +14,7 @@ void canvas_fail(flux_canvas *c, flux_result result, const char *message);
 bool canvas_finite_rect(flux_rect r);
 bool canvas_valid_geometry(const flux_geometry *g);
 bool canvas_valid_brush(const flux_brush *b);
+bool canvas_valid_brush_slot(const flux_brush *b);
 
 /* Paint kind selects how the surface colour is computed.
  *   SOLID  - flat colour from `color`
@@ -282,6 +283,12 @@ struct flux_canvas {
     uint32_t layer_depth_peak;
     size_t transient_bytes_allocated;
     size_t transient_bytes_aliased_saved;
+
+    /* RenderPlan node for the active Canvas pass, or UINT32_MAX when the pass
+     * has no plan node (CPU canvas, no frame, or a failed compile gate).
+     * Sampled-image reads are appended to this node while the pass records;
+     * the node is validated again at end_pass before the output transform. */
+    uint32_t plan_node;
 
     /* Content scale (device-pixel ratio). The base transform at index 0 is
      * this scale, so callers draw in logical units; 1.0 means logical ==

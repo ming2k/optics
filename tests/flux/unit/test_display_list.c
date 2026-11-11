@@ -334,6 +334,96 @@ static void cropped_glyph_capture_and_execution_budget(void) {
     flux_display_list_release(child);
 }
 
+static void dynamic_image_inputs(void) {
+    flux_encoder *enc = nullptr;
+    EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
+    flux_geometry g = flux_geom_rect((flux_rect){2, 2, 8, 8});
+    flux_brush slot_brush = {
+        .kind = FLUX_BRUSH_IMAGE_PATTERN,
+        .blend = FLUX_BLEND_SRC_OVER,
+        .opacity = 1.0f,
+        .image = {.tint = 0xffffffffu},
+    };
+    flux_encoder_draw_geometry_slot(enc, &g, &slot_brush, 3);
+    EXPECT(flux_encoder_status(enc) == FLUX_OK);
+    flux_encoder_draw_geometry_slot(enc, &g, &slot_brush, FLUX_DISPLAY_LIST_MAX_INPUTS);
+    EXPECT(flux_encoder_status(enc) == FLUX_ERROR_INVALID_ARGUMENT);
+    /* The sticky failure keeps the invalid slot out of the published list. */
+    flux_display_list *list = nullptr;
+    EXPECT(flux_encoder_finish(enc, &list) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(list == nullptr);
+    flux_encoder_destroy(enc);
+
+    EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
+    flux_encoder_draw_geometry_slot(enc, &g, &slot_brush, 3);
+    EXPECT(flux_encoder_finish(enc, &list) == FLUX_OK);
+    flux_encoder_destroy(enc);
+    EXPECT(flux_display_list_input_mask(list) == (UINT64_C(1) << 3));
+
+    flux_canvas *c = canvas();
+    flux_color clear = 0;
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
+    EXPECT(flux_canvas_submit_display_list(c, list) == FLUX_ERROR_INVALID_STATE);
+    EXPECT(flux_canvas_submit_display_list_bound(c, list, nullptr, 0) == FLUX_ERROR_INVALID_STATE);
+    flux_display_list_binding missing = {.slot = 3, .image = nullptr};
+    EXPECT(flux_canvas_submit_display_list_bound(c, list, &missing, 1) ==
+           FLUX_ERROR_INVALID_ARGUMENT);
+    flux_display_list_binding unknown = {.slot = 4, .image = (flux_image *)1};
+    EXPECT(flux_canvas_submit_display_list_bound(c, list, &unknown, 1) ==
+           FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    flux_canvas_release(c);
+    flux_display_list_release(list);
+}
+
+static void serialized_round_trip(void) {
+    flux_encoder *enc = nullptr;
+    EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
+    flux_geometry g = flux_geom_rect((flux_rect){2, 2, 8, 8});
+    flux_brush white = flux_brush_solid(0xffffffff);
+    flux_encoder_draw_geometry(enc, &g, &white);
+    flux_encoder_translate(enc, 20, 0);
+    flux_encoder_draw_geometry(enc, &g, &white);
+    flux_display_list *list = nullptr;
+    EXPECT(flux_encoder_finish(enc, &list) == FLUX_OK);
+    flux_encoder_destroy(enc);
+
+    uint8_t *data = nullptr;
+    size_t size = 0;
+    EXPECT(flux_display_list_serialize(list, nullptr, &data, &size) == FLUX_OK);
+    EXPECT(data != nullptr && size > 24);
+
+    flux_display_list *loaded = nullptr;
+    EXPECT(flux_display_list_deserialize(data, size, nullptr, &loaded) == FLUX_OK);
+    EXPECT(loaded != nullptr);
+    flux_canvas *c = canvas();
+    flux_color clear = 0;
+    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == FLUX_OK);
+    EXPECT(flux_canvas_submit_display_list(c, loaded) == FLUX_OK);
+    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    EXPECT(alpha(c, 4, 4) == 255);
+    EXPECT(alpha(c, 24, 4) == 255);
+    EXPECT(alpha(c, 44, 4) == 0);
+    flux_canvas_release(c);
+
+    /* Malformed streams fail closed and publish nothing. */
+    flux_display_list *bad = nullptr;
+    uint8_t saved = data[0];
+    data[0] ^= 0xFFu;
+    EXPECT(flux_display_list_deserialize(data, size, nullptr, &bad) == FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(bad == nullptr);
+    data[0] = saved;
+    EXPECT(flux_display_list_deserialize(data, size - 1, nullptr, &bad) ==
+           FLUX_ERROR_INVALID_ARGUMENT);
+    EXPECT(bad == nullptr);
+
+    flux_display_list_serialized_free(data);
+    flux_display_list_release(loaded);
+    flux_display_list_release(list);
+}
+
 int main(void) {
     relocated_capture();
     captured_glyphs();
@@ -344,5 +434,7 @@ int main(void) {
     child_ownership_and_state();
     cropped_glyph_capture_and_execution_budget();
     child_nesting_and_sticky_failure();
+    dynamic_image_inputs();
+    serialized_round_trip();
     TEST_SUMMARY();
 }

@@ -49,6 +49,12 @@ test_image_update = executable('test_image_update',
 )
 test('image_update', test_image_update, suite : 'integration')
 
+test_render_plan_frame = executable('test_render_plan_frame',
+  'test_render_plan_frame.c',
+  dependencies : [test_helpers_dep],
+)
+test('render_plan_frame', test_render_plan_frame, suite : 'integration')
+
 if host_machine.system() == 'linux'
   test_dmabuf = executable('test_dmabuf',
     'test_dmabuf.c',

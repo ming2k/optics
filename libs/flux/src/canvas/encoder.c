@@ -32,6 +32,13 @@ typedef struct flux_cmd_draw_geom {
     flux_geometry geom;
     flux_brush brush;
     uint32_t path_seg_count;
+    uint32_t image_slot;
+    bool has_image_slot;
+    uint8_t _pad[3];
+    /* Logical resources the caller handed to the recorder, before the
+     * immutable snapshots replace them. Serialization IDs key on these. */
+    const void *image_key;
+    const void *sampler_key;
     /* Trailing flux_path_segment[], addressed relative to this command. */
 } flux_cmd_draw_geom;
 
@@ -40,6 +47,8 @@ typedef struct flux_cmd_glyph_run {
     flux_glyph_run_desc desc;
     uint32_t quad_count;
     size_t host_cov_bytes;
+    const void *atlas_key;
+    const void *sampler_key;
     /* Trailing flux_glyph_quad[], then coverage bytes. */
 } flux_cmd_glyph_run;
 
@@ -74,17 +83,52 @@ struct flux_display_list {
     atomic_uint refs;
     uint8_t *commands;
     size_t size;
+    size_t retained_bytes;
     uint32_t count;
     uint32_t max_depth, tree_depth;
+    uint64_t input_mask;
 };
 
 struct flux_encoder {
     uint8_t *buffer;
     size_t capacity, used, budget;
+    size_t retained_bytes, max_retained_bytes;
+    flux_image **retained_images;
+    uint32_t retained_image_count, retained_image_capacity;
     uint32_t count, depth, max_depth, tree_depth, command_budget;
+    uint64_t input_mask;
     bool finished;
     flux_result error;
 };
+
+static bool encoder_track_image(flux_encoder *enc, flux_image *image) {
+    if (!enc || !image)
+        return true;
+    for (uint32_t i = 0; i < enc->retained_image_count; ++i)
+        if (enc->retained_images[i] == image)
+            return true;
+    size_t bytes = flux_image_size_bytes(image);
+    if (bytes > SIZE_MAX - enc->retained_bytes ||
+        (enc->max_retained_bytes && bytes > enc->max_retained_bytes - enc->retained_bytes)) {
+        flux_encoder_fail(enc, FLUX_ERROR_OUT_OF_MEMORY);
+        return false;
+    }
+    if (enc->retained_image_count == enc->retained_image_capacity) {
+        uint32_t capacity = enc->retained_image_capacity ? enc->retained_image_capacity * 2u : 16u;
+        if (capacity < enc->retained_image_capacity)
+            capacity = UINT32_MAX;
+        flux_image **images = realloc(enc->retained_images, (size_t)capacity * sizeof(*images));
+        if (!images) {
+            flux_encoder_fail(enc, FLUX_ERROR_OUT_OF_MEMORY);
+            return false;
+        }
+        enc->retained_images = images;
+        enc->retained_image_capacity = capacity;
+    }
+    enc->retained_images[enc->retained_image_count++] = image;
+    enc->retained_bytes += bytes;
+    return true;
+}
 
 void flux_encoder_fail(flux_encoder *enc, flux_result error) {
     if (enc && enc->error == FLUX_OK)
@@ -134,6 +178,10 @@ static void *encoder_push(flux_encoder *enc, flux_cmd_kind kind, size_t bytes) {
         enc->buffer = buffer;
         enc->capacity = cap;
     }
+    if (!enc->buffer) {
+        flux_encoder_fail(enc, FLUX_ERROR_OUT_OF_MEMORY);
+        return nullptr;
+    }
     flux_cmd_header *h = (void *)(enc->buffer + enc->used);
     memset(h, 0, bytes);
     h->kind = kind;
@@ -151,7 +199,7 @@ static void commands_release(uint8_t *buffer, size_t size) {
             flux_display_list_release(cmd->list);
         } else if (h->kind == FLUX_CMD_DRAW_GEOM) {
             const flux_cmd_draw_geom *cmd = (const void *)h;
-            if (cmd->brush.kind == FLUX_BRUSH_IMAGE_PATTERN) {
+            if (cmd->brush.kind == FLUX_BRUSH_IMAGE_PATTERN && !cmd->has_image_slot) {
                 flux_image_release(cmd->brush.image.image);
                 flux_sampler_release(cmd->brush.image.sampler);
             }
@@ -174,6 +222,7 @@ flux_result flux_encoder_create(const flux_encoder_desc *desc, flux_encoder **ou
         return FLUX_ERROR_OUT_OF_MEMORY;
     enc->budget = desc && desc->max_bytes ? desc->max_bytes : (64u << 20);
     enc->command_budget = desc && desc->max_commands ? desc->max_commands : (1u << 20);
+    enc->max_retained_bytes = desc ? desc->max_retained_bytes : 0;
     *out = enc;
     return FLUX_OK;
 }
@@ -196,11 +245,13 @@ void flux_encoder_destroy(flux_encoder *enc) {
     if (!enc)
         return;
     commands_release(enc->buffer, enc->used);
+    free(enc->retained_images);
     free(enc);
 }
 
-void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
-                                const flux_brush *brush) {
+static void encoder_draw_geometry_impl(flux_encoder *enc, const flux_geometry *geom,
+                                       const flux_brush *brush, bool has_image_slot,
+                                       uint32_t image_slot) {
     if (!encoder_ready(enc))
         return;
     flux_brush b = brush ? *brush : flux_brush_solid(0xff000000u);
@@ -255,11 +306,16 @@ void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
         flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
         return;
     }
-    if (!canvas_valid_brush(&b)) {
+    if (!(has_image_slot ? canvas_valid_brush_slot(&b) : canvas_valid_brush(&b))) {
         FLUX_FAILF(FLUX_ERROR_INVALID_ARGUMENT,
                    "flux_encoder_draw_geometry: invalid brush opacity=%.3f (must be in [0, 1]) or "
                    "blend=%d",
                    (double)b.opacity, (int)b.blend);
+        flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
+        return;
+    }
+    if (has_image_slot &&
+        (b.kind != FLUX_BRUSH_IMAGE_PATTERN || image_slot >= FLUX_DISPLAY_LIST_MAX_INPUTS)) {
         flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
         return;
     }
@@ -274,16 +330,45 @@ void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
         return;
     cmd->geom = *geom;
     cmd->brush = b;
+    cmd->image_key = b.image.image;
+    cmd->sampler_key = b.image.sampler;
     cmd->path_seg_count = count;
+    cmd->image_slot = has_image_slot ? image_slot : 0u;
+    cmd->has_image_slot = has_image_slot;
+    if (has_image_slot) {
+        /* The list carries a slot reference, not a resource. The binding is
+         * validated and retained at execution. */
+        cmd->brush.image.image = nullptr;
+        cmd->brush.image.sampler = nullptr;
+        enc->input_mask |= UINT64_C(1) << image_slot;
+    }
     if (geom->kind == FLUX_GEOM_PATH) {
         cmd->geom.path.path = nullptr;
         if (count)
             memcpy(cmd + 1, geom->path.path->segments, (size_t)count * sizeof(flux_path_segment));
     }
-    if (b.kind == FLUX_BRUSH_IMAGE_PATTERN) {
-        (void)flux_image_retain(b.image.image);
+    if (b.kind == FLUX_BRUSH_IMAGE_PATTERN && !has_image_slot) {
+        cmd->brush.image.image = nullptr;
+        flux_image *snapshot = nullptr;
+        flux_result snap_result = flux_image_snapshot(b.image.image, &snapshot);
+        if (snap_result != FLUX_OK) {
+            flux_encoder_fail(enc, snap_result);
+            return;
+        }
+        cmd->brush.image.image = snapshot;
         (void)flux_sampler_retain(b.image.sampler);
+        (void)encoder_track_image(enc, snapshot);
     }
+}
+
+void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
+                                const flux_brush *brush) {
+    encoder_draw_geometry_impl(enc, geom, brush, false, 0u);
+}
+
+void flux_encoder_draw_geometry_slot(flux_encoder *enc, const flux_geometry *geom,
+                                     const flux_brush *brush, uint32_t slot) {
+    encoder_draw_geometry_impl(enc, geom, brush, true, slot);
 }
 
 void flux_encoder_draw_glyph_run(flux_encoder *enc, const flux_glyph_run_desc *desc) {
@@ -341,6 +426,8 @@ void flux_encoder_draw_glyph_run(flux_encoder *enc, const flux_glyph_run_desc *d
     if (!cmd)
         return;
     cmd->desc = *desc;
+    cmd->atlas_key = desc->atlas;
+    cmd->sampler_key = desc->sampler;
     cmd->desc.next = nullptr; /* Copied coverage has no external generation dependency. */
     cmd->desc.quads = nullptr;
     cmd->desc.host_coverage = nullptr;
@@ -362,7 +449,17 @@ void flux_encoder_draw_glyph_run(flux_encoder *enc, const flux_glyph_run_desc *d
             memcpy(payload + quads + (size_t)y * width,
                    desc->host_coverage + (size_t)(y + y0) * desc->host_atlas_w + x0, width);
     }
-    (void)flux_image_retain(desc->atlas);
+    cmd->desc.atlas = nullptr;
+    if (desc->atlas) {
+        flux_image *snapshot = nullptr;
+        flux_result snap_result = flux_image_snapshot(desc->atlas, &snapshot);
+        if (snap_result != FLUX_OK) {
+            flux_encoder_fail(enc, snap_result);
+            return;
+        }
+        cmd->desc.atlas = snapshot;
+        (void)encoder_track_image(enc, snapshot);
+    }
     (void)flux_sampler_retain(desc->sampler);
 }
 
@@ -493,11 +590,16 @@ flux_result flux_encoder_finish(flux_encoder *enc, flux_display_list **out) {
     atomic_init(&list->refs, 1);
     list->commands = enc->buffer;
     list->size = enc->used;
+    list->retained_bytes = enc->retained_bytes;
     list->count = enc->count;
     list->max_depth = enc->max_depth;
     list->tree_depth = enc->tree_depth;
+    list->input_mask = enc->input_mask;
     enc->buffer = nullptr;
     enc->used = enc->capacity = 0;
+    free(enc->retained_images);
+    enc->retained_images = nullptr;
+    enc->retained_image_count = enc->retained_image_capacity = 0;
     *out = list;
     return FLUX_OK;
 }
@@ -519,8 +621,30 @@ size_t flux_display_list_size(const flux_display_list *list) {
 uint32_t flux_display_list_command_count(const flux_display_list *list) {
     return list ? list->count : 0;
 }
+uint64_t flux_display_list_input_mask(const flux_display_list *list) {
+    return list ? list->input_mask : 0;
+}
+size_t flux_display_list_retained_bytes(const flux_display_list *list) {
+    return list ? list->retained_bytes : 0;
+}
 
-static void execute_commands(flux_canvas *c, const flux_display_list *list) {
+typedef struct display_list_bindings {
+    const flux_display_list_binding *items;
+    uint32_t count;
+} display_list_bindings;
+
+static const flux_display_list_binding *find_binding(const display_list_bindings *bindings,
+                                                     uint32_t slot) {
+    if (!bindings)
+        return nullptr;
+    for (uint32_t i = 0; i < bindings->count; ++i)
+        if (bindings->items[i].slot == slot)
+            return &bindings->items[i];
+    return nullptr;
+}
+
+static void execute_commands(flux_canvas *c, const flux_display_list *list,
+                             const display_list_bindings *bindings) {
     uint32_t entry_top = c->state_top;
     const uint8_t *ptr = list->commands;
     const uint8_t *end = ptr + list->size;
@@ -534,7 +658,7 @@ static void execute_commands(flux_canvas *c, const flux_display_list *list) {
         case FLUX_CMD_CHILD: {
             const flux_cmd_child *cmd = (const void *)ptr;
             flux_canvas_state saved_state = c->states[c->state_top];
-            execute_commands(c, cmd->list);
+            execute_commands(c, cmd->list, bindings);
             c->states[c->state_top] = saved_state;
             c->backend->set_scissor(c->backend, c, saved_state.scissor);
             break;
@@ -544,6 +668,16 @@ static void execute_commands(flux_canvas *c, const flux_display_list *list) {
             flux_geometry geom = cmd->geom;
             flux_brush brush = cmd->brush;
             const uint8_t *payload = (const uint8_t *)(cmd + 1);
+
+            if (cmd->has_image_slot) {
+                const flux_display_list_binding *binding = find_binding(bindings, cmd->image_slot);
+                if (!binding || !binding->image) {
+                    c->pass_error = FLUX_ERROR_INVALID_ARGUMENT;
+                    break;
+                }
+                brush.image.image = binding->image;
+                brush.image.sampler = binding->sampler;
+            }
 
             flux_path path = {};
             if (geom.kind == FLUX_GEOM_PATH) {
@@ -622,8 +756,32 @@ static void execute_commands(flux_canvas *c, const flux_display_list *list) {
 flux_result flux_canvas_submit_display_list(flux_canvas *c, const flux_display_list *list) {
     if (!c || !list)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    if (list->input_mask)
+        return FLUX_ERROR_INVALID_STATE;
+    return flux_canvas_submit_display_list_bound(c, list, nullptr, 0);
+}
+
+flux_result flux_canvas_submit_display_list_bound(flux_canvas *c, const flux_display_list *list,
+                                                  const flux_display_list_binding *bindings,
+                                                  uint32_t binding_count) {
+    if (!c || !list || (binding_count && !bindings))
+        return FLUX_ERROR_INVALID_ARGUMENT;
     if (!c->recording || c->pass_error != FLUX_OK)
         return FLUX_ERROR_INVALID_STATE;
+
+    uint64_t seen = 0;
+    for (uint32_t i = 0; i < binding_count; ++i) {
+        const flux_display_list_binding *binding = &bindings[i];
+        if (binding->slot >= FLUX_DISPLAY_LIST_MAX_INPUTS || !binding->image)
+            return FLUX_ERROR_INVALID_ARGUMENT;
+        uint64_t bit = UINT64_C(1) << binding->slot;
+        if ((seen & bit) || !(list->input_mask & bit))
+            return FLUX_ERROR_INVALID_ARGUMENT;
+        seen |= bit;
+    }
+    if (seen != list->input_mask)
+        return FLUX_ERROR_INVALID_STATE;
+
     if (list->size == 0)
         return FLUX_OK;
     for (uint32_t i = 0; i <= c->state_top; i++)
@@ -631,6 +789,11 @@ flux_result flux_canvas_submit_display_list(flux_canvas *c, const flux_display_l
             return FLUX_ERROR_INVALID_STATE;
     if (!canvas_track_display_list(c, list))
         return FLUX_ERROR_OUT_OF_MEMORY;
+
+    display_list_bindings bound = {
+        .items = bindings,
+        .count = binding_count,
+    };
 
     /* Lists execute in their own state domain. Target scale and the pass
      * render area are execution inputs; caller transform/clip are not. */
@@ -643,7 +806,7 @@ flux_result flux_canvas_submit_display_list(flux_canvas *c, const flux_display_l
         .scissor = c->pass_scissor,
     };
     c->backend->set_scissor(c->backend, c, c->states[0].scissor);
-    execute_commands(c, list);
+    execute_commands(c, list, &bound);
     flux_result result = c->pass_error;
     memcpy(c->states, saved, sizeof(saved));
     c->state_top = saved_top;
@@ -674,11 +837,839 @@ flux_result flux_encoder_draw_display_list(flux_encoder *enc, const flux_display
     flux_cmd_child *cmd = encoder_push(enc, FLUX_CMD_CHILD, sizeof(*cmd));
     if (!cmd)
         return enc->error;
+    if (list->retained_bytes > SIZE_MAX - enc->retained_bytes ||
+        (enc->max_retained_bytes &&
+         list->retained_bytes > enc->max_retained_bytes - enc->retained_bytes)) {
+        flux_encoder_fail(enc, FLUX_ERROR_OUT_OF_MEMORY);
+        return enc->error;
+    }
     cmd->list = flux_display_list_retain((flux_display_list *)list);
+    enc->retained_bytes += list->retained_bytes;
+    enc->input_mask |= list->input_mask;
     enc->count += list->count - 1u;
     if (depth > enc->max_depth)
         enc->max_depth = depth;
     if (list->tree_depth + 1u > enc->tree_depth)
         enc->tree_depth = list->tree_depth + 1u;
     return FLUX_OK;
+}
+
+/* ================================================================== */
+/*  DisplayList serialization (ADR-0157)                              */
+/*                                                                    */
+/*  Canonical little-endian wire format; never native struct bytes.   */
+/*  Header: magic u32, version u16, flags u16, resources u32,          */
+/*  command_bytes u32, total_size u32, reserved u32.                  */
+/*  Resource entry: kind u8, pad u8[3], id u32.                       */
+/*  Command: op u8, flags u8, reserved u16, payload_len u32, payload, */
+/*  zero padding to an 8-byte boundary.                               */
+/* ================================================================== */
+
+#define DL_MAGIC 0x4C445846u /* "FLXD" */
+#define DL_VERSION 1u
+#define DL_HEADER_BYTES 24u
+#define DL_RESOURCE_BYTES 8u
+
+typedef struct dl_bytes {
+    uint8_t *data;
+    size_t len, cap;
+} dl_bytes;
+
+typedef struct dl_serialized_resource {
+    flux_display_list_resource_kind kind;
+    const void *ptr;
+    uint32_t id;
+} dl_serialized_resource;
+
+typedef struct dl_serializer {
+    dl_bytes commands;
+    dl_serialized_resource *resources;
+    uint32_t resource_count, resource_capacity;
+    const flux_display_list_serialize_opts *opts;
+    flux_result error;
+    uint32_t depth;
+} dl_serializer;
+
+static bool dl_bytes_reserve(dl_bytes *b, size_t extra) {
+    if (extra > SIZE_MAX - b->len)
+        return false;
+    size_t need = b->len + extra;
+    if (need <= b->cap)
+        return true;
+    size_t cap = b->cap ? b->cap : 256;
+    while (cap < need) {
+        if (cap > SIZE_MAX / 2)
+            return false;
+        cap *= 2;
+    }
+    uint8_t *p = realloc(b->data, cap);
+    if (!p)
+        return false;
+    b->data = p;
+    b->cap = cap;
+    return true;
+}
+
+static bool dl_put(dl_bytes *b, const void *src, size_t n) {
+    if (!dl_bytes_reserve(b, n))
+        return false;
+    memcpy(b->data + b->len, src, n);
+    b->len += n;
+    return true;
+}
+static bool dl_u8(dl_bytes *b, uint8_t v) {
+    return dl_put(b, &v, 1);
+}
+static bool dl_u16(dl_bytes *b, uint16_t v) {
+    return dl_put(b, &v, 2);
+}
+static bool dl_u32(dl_bytes *b, uint32_t v) {
+    return dl_put(b, &v, 4);
+}
+static bool dl_f32(dl_bytes *b, float v) {
+    return dl_put(b, &v, 4);
+}
+static bool dl_pad8(dl_bytes *b) {
+    while (b->len & 7u)
+        if (!dl_u8(b, 0))
+            return false;
+    return true;
+}
+
+static bool dl_begin_command(dl_serializer *s, uint8_t op, uint8_t flags, size_t *start) {
+    *start = s->commands.len;
+    if (!dl_u8(&s->commands, op) || !dl_u8(&s->commands, flags) || !dl_u16(&s->commands, 0) ||
+        !dl_u32(&s->commands, 0))
+        return false;
+    return true;
+}
+static bool dl_end_command(dl_serializer *s, size_t start) {
+    size_t payload = s->commands.len - start - 8u;
+    if (payload > UINT32_MAX)
+        return false;
+    uint32_t n = (uint32_t)payload;
+    memcpy(s->commands.data + start + 4, &n, sizeof n);
+    return dl_pad8(&s->commands);
+}
+
+static uint32_t dl_resource_id(dl_serializer *s, flux_display_list_resource_kind kind,
+                               const void *ptr) {
+    if (!ptr)
+        return 0;
+    for (uint32_t i = 0; i < s->resource_count; ++i)
+        if (s->resources[i].kind == kind && s->resources[i].ptr == ptr)
+            return s->resources[i].id;
+    if (!s->opts || !s->opts->resource_id) {
+        s->error = FLUX_ERROR_INVALID_ARGUMENT;
+        return 0;
+    }
+    uint32_t id = s->opts->resource_id(s->opts->user, kind, ptr);
+    if (id == 0) {
+        s->error = FLUX_ERROR_INVALID_ARGUMENT;
+        return 0;
+    }
+    for (uint32_t i = 0; i < s->resource_count; ++i)
+        if (s->resources[i].id == id) {
+            s->error = FLUX_ERROR_INVALID_ARGUMENT;
+            return 0;
+        }
+    if (s->resource_count == s->resource_capacity) {
+        uint32_t cap = s->resource_capacity ? s->resource_capacity * 2u : 16u;
+        dl_serialized_resource *r = realloc(s->resources, (size_t)cap * sizeof(*r));
+        if (!r) {
+            s->error = FLUX_ERROR_OUT_OF_MEMORY;
+            return 0;
+        }
+        s->resources = r;
+        s->resource_capacity = cap;
+    }
+    s->resources[s->resource_count++] = (dl_serialized_resource){kind, ptr, id};
+    return id;
+}
+
+static bool dl_write_brush(dl_serializer *s, const flux_brush *brush, bool has_slot, uint32_t slot,
+                           const void *image_key, const void *sampler_key) {
+    dl_bytes *b = &s->commands;
+    if (!dl_u8(b, (uint8_t)brush->kind) || !dl_u8(b, (uint8_t)brush->blend) ||
+        !dl_u8(b, has_slot) || !dl_u8(b, 0) || !dl_f32(b, brush->opacity))
+        return false;
+    if (brush->kind == FLUX_BRUSH_SOLID)
+        return dl_u32(b, brush->solid.color);
+    if (brush->kind == FLUX_BRUSH_IMAGE_PATTERN) {
+        if (has_slot && !dl_u32(b, slot))
+            return false;
+        uint32_t image_id =
+            has_slot ? 0 : dl_resource_id(s, FLUX_DISPLAY_LIST_RESOURCE_IMAGE, image_key);
+        uint32_t sampler_id =
+            has_slot ? 0 : dl_resource_id(s, FLUX_DISPLAY_LIST_RESOURCE_SAMPLER, sampler_key);
+        if (s->error != FLUX_OK)
+            return false;
+        if (!dl_u32(b, image_id) || !dl_u32(b, sampler_id) || !dl_f32(b, brush->image.src_rect.x) ||
+            !dl_f32(b, brush->image.src_rect.y) || !dl_f32(b, brush->image.src_rect.w) ||
+            !dl_f32(b, brush->image.src_rect.h) || !dl_u8(b, brush->image.opaque_only) ||
+            !dl_u8(b, 0) || !dl_u8(b, 0) || !dl_u8(b, 0) || !dl_u32(b, brush->image.tint) ||
+            !dl_f32(b, brush->image.clip_rect.x) || !dl_f32(b, brush->image.clip_rect.y) ||
+            !dl_f32(b, brush->image.clip_rect.w) || !dl_f32(b, brush->image.clip_rect.h) ||
+            !dl_f32(b, brush->image.clip_radius))
+            return false;
+        return true;
+    }
+    const flux_brush_gradient_data *g = &brush->gradient;
+    if (!dl_u32(b, g->stops.count))
+        return false;
+    for (uint32_t i = 0; i < g->stops.count; ++i)
+        if (!dl_f32(b, g->stops.stops[i].t) || !dl_u32(b, g->stops.stops[i].color))
+            return false;
+    return dl_f32(b, g->start.x) && dl_f32(b, g->start.y) && dl_f32(b, g->end.x) &&
+           dl_f32(b, g->end.y) && dl_f32(b, g->radius);
+}
+
+static bool dl_write_geometry(dl_serializer *s, const flux_cmd_draw_geom *cmd) {
+    dl_bytes *b = &s->commands;
+    const flux_geometry *g = &cmd->geom;
+    if (!dl_u8(b, (uint8_t)g->kind) || !dl_u8(b, 0) || !dl_u8(b, 0) || !dl_u8(b, 0) ||
+        !dl_f32(b, g->stroke.width) || !dl_f32(b, g->stroke.miter_limit) ||
+        !dl_u8(b, (uint8_t)g->stroke.cap) || !dl_u8(b, (uint8_t)g->stroke.join) || !dl_u16(b, 0))
+        return false;
+    switch (g->kind) {
+    case FLUX_GEOM_RECT:
+        if (!dl_f32(b, g->rect.rect.x) || !dl_f32(b, g->rect.rect.y) ||
+            !dl_f32(b, g->rect.rect.w) || !dl_f32(b, g->rect.rect.h))
+            return false;
+        break;
+    case FLUX_GEOM_RRECT:
+        if (!dl_f32(b, g->rrect.rect.x) || !dl_f32(b, g->rrect.rect.y) ||
+            !dl_f32(b, g->rrect.rect.w) || !dl_f32(b, g->rrect.rect.h) ||
+            !dl_f32(b, g->rrect.radius))
+            return false;
+        break;
+    case FLUX_GEOM_SQUIRCLE:
+        if (!dl_f32(b, g->squircle.rect.x) || !dl_f32(b, g->squircle.rect.y) ||
+            !dl_f32(b, g->squircle.rect.w) || !dl_f32(b, g->squircle.rect.h) ||
+            !dl_f32(b, g->squircle.radius) || !dl_f32(b, g->squircle.curvature))
+            return false;
+        break;
+    case FLUX_GEOM_CIRCLE:
+        if (!dl_f32(b, g->circle.cx) || !dl_f32(b, g->circle.cy) || !dl_f32(b, g->circle.radius))
+            return false;
+        break;
+    case FLUX_GEOM_LINE:
+        if (!dl_f32(b, g->line.x0) || !dl_f32(b, g->line.y0) || !dl_f32(b, g->line.x1) ||
+            !dl_f32(b, g->line.y1))
+            return false;
+        break;
+    case FLUX_GEOM_PATH: {
+        uint32_t count = cmd->path_seg_count;
+        if (!dl_u32(b, count) || !dl_u8(b, (uint8_t)g->path.fill_rule) || !dl_u8(b, 0) ||
+            !dl_u8(b, 0) || !dl_u8(b, 0))
+            return false;
+        const flux_path_segment *segs = (const flux_path_segment *)(cmd + 1);
+        for (uint32_t i = 0; i < count; ++i) {
+            if (!dl_u32(b, segs[i].op))
+                return false;
+            for (uint32_t k = 0; k < 6; ++k)
+                if (!dl_f32(b, segs[i].pts[k]))
+                    return false;
+        }
+        break;
+    }
+    default:
+        return false;
+    }
+    return dl_write_brush(s, &cmd->brush, cmd->has_image_slot, cmd->image_slot, cmd->image_key,
+                          cmd->sampler_key);
+}
+
+static bool dl_write_commands(dl_serializer *s, const flux_display_list *list) {
+    if (!list || s->depth++ > 256u) {
+        s->error = FLUX_ERROR_OUT_OF_RANGE;
+        return false;
+    }
+    const uint8_t *ptr = list->commands;
+    const uint8_t *end = ptr + list->size;
+    while (ptr < end) {
+        const flux_cmd_header *h = (const void *)ptr;
+        if (h->size == 0 || ptr + h->size > end)
+            return false;
+        size_t start;
+        switch (h->kind) {
+        case FLUX_CMD_CHILD: {
+            const flux_cmd_child *c = (const void *)ptr;
+            if (!dl_begin_command(s, FLUX_CMD_SAVE, 0, &start) || !dl_end_command(s, start) ||
+                !dl_write_commands(s, c->list))
+                return false;
+            if (!dl_begin_command(s, FLUX_CMD_RESTORE, 0, &start) || !dl_end_command(s, start))
+                return false;
+            break;
+        }
+        case FLUX_CMD_DRAW_GEOM: {
+            const flux_cmd_draw_geom *c = (const void *)ptr;
+            if (!dl_begin_command(s, FLUX_CMD_DRAW_GEOM, 0, &start) || !dl_write_geometry(s, c) ||
+                !dl_end_command(s, start))
+                return false;
+            break;
+        }
+        case FLUX_CMD_DRAW_GLYPH_RUN: {
+            const flux_cmd_glyph_run *c = (const void *)ptr;
+            if (!dl_begin_command(s, FLUX_CMD_DRAW_GLYPH_RUN, 0, &start))
+                return false;
+            dl_bytes *b = &s->commands;
+            uint32_t atlas_id = dl_resource_id(s, FLUX_DISPLAY_LIST_RESOURCE_IMAGE, c->atlas_key);
+            uint32_t sampler_id =
+                dl_resource_id(s, FLUX_DISPLAY_LIST_RESOURCE_SAMPLER, c->sampler_key);
+            if (s->error != FLUX_OK || !dl_u32(b, atlas_id) || !dl_u32(b, sampler_id) ||
+                !dl_u32(b, c->quad_count) || !dl_u32(b, (uint32_t)c->host_cov_bytes) ||
+                !dl_u32(b, c->desc.host_atlas_w) || !dl_u32(b, c->desc.host_atlas_h))
+                return false;
+            const uint8_t *payload = (const uint8_t *)(c + 1);
+            for (uint32_t i = 0; i < c->quad_count; ++i) {
+                const flux_glyph_quad *q = (const flux_glyph_quad *)payload + i;
+                if (!dl_f32(b, q->sx) || !dl_f32(b, q->sy) || !dl_f32(b, q->sw) ||
+                    !dl_f32(b, q->sh) || !dl_u16(b, q->ax) || !dl_u16(b, q->ay) ||
+                    !dl_u16(b, q->aw) || !dl_u16(b, q->ah) || !dl_u32(b, q->color))
+                    return false;
+            }
+            if (c->host_cov_bytes &&
+                !dl_put(b, payload + (size_t)c->quad_count * sizeof(flux_glyph_quad),
+                        (size_t)c->host_cov_bytes))
+                return false;
+            if (!dl_end_command(s, start))
+                return false;
+            break;
+        }
+        case FLUX_CMD_SAVE:
+        case FLUX_CMD_RESTORE:
+            if (!dl_begin_command(s, h->kind, 0, &start) || !dl_end_command(s, start))
+                return false;
+            break;
+        case FLUX_CMD_CLIP_RECT: {
+            const flux_cmd_clip *c = (const void *)ptr;
+            if (!dl_begin_command(s, h->kind, 0, &start) || !dl_f32(&s->commands, c->rect.x) ||
+                !dl_f32(&s->commands, c->rect.y) || !dl_f32(&s->commands, c->rect.w) ||
+                !dl_f32(&s->commands, c->rect.h) || !dl_end_command(s, start))
+                return false;
+            break;
+        }
+        case FLUX_CMD_SAVE_LAYER: {
+            const flux_cmd_save_layer *c = (const void *)ptr;
+            if (!dl_begin_command(s, h->kind, 0, &start) || !dl_f32(&s->commands, c->bounds.x) ||
+                !dl_f32(&s->commands, c->bounds.y) || !dl_f32(&s->commands, c->bounds.w) ||
+                !dl_f32(&s->commands, c->bounds.h) || !dl_f32(&s->commands, c->opacity) ||
+                !dl_end_command(s, start))
+                return false;
+            break;
+        }
+        case FLUX_CMD_TRANSLATE:
+        case FLUX_CMD_SCALE: {
+            const flux_cmd_vec2 *c = (const void *)ptr;
+            if (!dl_begin_command(s, h->kind, 0, &start) || !dl_f32(&s->commands, c->x) ||
+                !dl_f32(&s->commands, c->y) || !dl_end_command(s, start))
+                return false;
+            break;
+        }
+        case FLUX_CMD_ROTATE: {
+            const flux_cmd_scalar *c = (const void *)ptr;
+            if (!dl_begin_command(s, h->kind, 0, &start) || !dl_f32(&s->commands, c->value) ||
+                !dl_end_command(s, start))
+                return false;
+            break;
+        }
+        case FLUX_CMD_TRANSFORM: {
+            const flux_cmd_transform *c = (const void *)ptr;
+            if (!dl_begin_command(s, h->kind, 0, &start))
+                return false;
+            for (int i = 0; i < 6; ++i)
+                if (!dl_f32(&s->commands, c->matrix.m[i]))
+                    return false;
+            if (!dl_end_command(s, start))
+                return false;
+            break;
+        }
+        default:
+            return false;
+        }
+        ptr += h->size;
+    }
+    s->depth--;
+    return true;
+}
+
+flux_result flux_display_list_serialize(const flux_display_list *list,
+                                        const flux_display_list_serialize_opts *opts,
+                                        uint8_t **out_data, size_t *out_size) {
+    if (!out_data || !out_size)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_data = nullptr;
+    *out_size = 0;
+    if (!list)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (opts && opts->type != FLUX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    dl_serializer s = {.opts = opts};
+    if (!dl_write_commands(&s, list)) {
+        free(s.commands.data);
+        free(s.resources);
+        return s.error != FLUX_OK ? s.error : FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    size_t total = DL_HEADER_BYTES + (size_t)s.resource_count * DL_RESOURCE_BYTES + s.commands.len;
+    if (total > UINT32_MAX) {
+        free(s.commands.data);
+        free(s.resources);
+        return FLUX_ERROR_OUT_OF_RANGE;
+    }
+    uint8_t *data = malloc(total);
+    if (!data) {
+        free(s.commands.data);
+        free(s.resources);
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    size_t off = 0;
+    uint32_t magic = DL_MAGIC;
+    uint16_t version = DL_VERSION;
+    uint16_t flags = 0;
+    uint32_t resource_count = s.resource_count;
+    uint32_t command_bytes = (uint32_t)s.commands.len;
+    uint32_t total_size = (uint32_t)total;
+    uint32_t reserved = 0;
+#define DL_PUT_FIELD(value)                                                                        \
+    do {                                                                                           \
+        memcpy(data + off, &(value), sizeof(value));                                               \
+        off += sizeof(value);                                                                      \
+    } while (0)
+    DL_PUT_FIELD(magic);
+    DL_PUT_FIELD(version);
+    DL_PUT_FIELD(flags);
+    DL_PUT_FIELD(resource_count);
+    DL_PUT_FIELD(command_bytes);
+    DL_PUT_FIELD(total_size);
+    DL_PUT_FIELD(reserved);
+    for (uint32_t i = 0; i < s.resource_count; ++i) {
+        uint8_t kind = (uint8_t)s.resources[i].kind;
+        uint8_t zero[3] = {0, 0, 0};
+        uint32_t id = s.resources[i].id;
+        DL_PUT_FIELD(kind);
+        DL_PUT_FIELD(zero);
+        DL_PUT_FIELD(id);
+    }
+#undef DL_PUT_FIELD
+    memcpy(data + off, s.commands.data, s.commands.len);
+    free(s.commands.data);
+    free(s.resources);
+    *out_data = data;
+    *out_size = total;
+    return FLUX_OK;
+}
+
+void flux_display_list_serialized_free(uint8_t *data) {
+    free(data);
+}
+
+typedef struct dl_reader {
+    const uint8_t *data;
+    size_t size, off;
+    bool bad;
+} dl_reader;
+
+static uint32_t dl_read_u32(dl_reader *r) {
+    if (r->bad || r->off + 4 > r->size) {
+        r->bad = true;
+        return 0;
+    }
+    uint32_t v;
+    memcpy(&v, r->data + r->off, 4);
+    r->off += 4;
+    return v;
+}
+static uint8_t dl_read_u8(dl_reader *r) {
+    if (r->bad || r->off + 1 > r->size) {
+        r->bad = true;
+        return 0;
+    }
+    return r->data[r->off++];
+}
+static uint16_t dl_read_u16(dl_reader *r) {
+    if (r->bad || r->off + 2 > r->size) {
+        r->bad = true;
+        return 0;
+    }
+    uint16_t v;
+    memcpy(&v, r->data + r->off, 2);
+    r->off += 2;
+    return v;
+}
+static float dl_read_f32(dl_reader *r) {
+    uint32_t v = dl_read_u32(r);
+    float f;
+    memcpy(&f, &v, 4);
+    return f;
+}
+static flux_rect dl_read_rect(dl_reader *r) {
+    flux_rect rect;
+    rect.x = dl_read_f32(r);
+    rect.y = dl_read_f32(r);
+    rect.w = dl_read_f32(r);
+    rect.h = dl_read_f32(r);
+    return rect;
+}
+static void dl_read_skip(dl_reader *r, size_t n) {
+    if (r->bad || n > r->size - r->off)
+        r->bad = true;
+    else
+        r->off += n;
+}
+
+typedef struct dl_resolved {
+    flux_display_list_resource_kind kind;
+    uint32_t id;
+    const void *ptr;
+} dl_resolved;
+
+static const void *dl_find_resource(const dl_resolved *res, uint32_t count, uint32_t id,
+                                    flux_display_list_resource_kind kind) {
+    if (id == 0)
+        return nullptr;
+    for (uint32_t i = 0; i < count; ++i)
+        if (res[i].id == id && res[i].kind == kind)
+            return res[i].ptr;
+    return nullptr;
+}
+
+static flux_result dl_read_brush(dl_reader *r, flux_brush *b, const dl_resolved *resources,
+                                 uint32_t resource_count, bool *has_slot, uint32_t *slot) {
+    memset(b, 0, sizeof(*b));
+    b->kind = (flux_brush_kind)dl_read_u8(r);
+    b->blend = (flux_blend_mode)dl_read_u8(r);
+    *has_slot = dl_read_u8(r) != 0;
+    dl_read_u8(r);
+    b->opacity = dl_read_f32(r);
+    if (r->bad)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (b->kind == FLUX_BRUSH_SOLID) {
+        b->solid.color = dl_read_u32(r);
+        return r->bad ? FLUX_ERROR_INVALID_ARGUMENT : FLUX_OK;
+    }
+    if (b->kind == FLUX_BRUSH_IMAGE_PATTERN) {
+        if (*has_slot)
+            *slot = dl_read_u32(r);
+        uint32_t image_id = dl_read_u32(r);
+        uint32_t sampler_id = dl_read_u32(r);
+        b->image.image = (flux_image *)dl_find_resource(resources, resource_count, image_id,
+                                                        FLUX_DISPLAY_LIST_RESOURCE_IMAGE);
+        b->image.sampler = (flux_sampler *)dl_find_resource(resources, resource_count, sampler_id,
+                                                            FLUX_DISPLAY_LIST_RESOURCE_SAMPLER);
+        if ((image_id && !b->image.image) || (sampler_id && !b->image.sampler))
+            return FLUX_ERROR_INVALID_ARGUMENT;
+        b->image.src_rect.x = dl_read_f32(r);
+        b->image.src_rect.y = dl_read_f32(r);
+        b->image.src_rect.w = dl_read_f32(r);
+        b->image.src_rect.h = dl_read_f32(r);
+        b->image.opaque_only = dl_read_u8(r) != 0;
+        dl_read_skip(r, 3);
+        b->image.tint = dl_read_u32(r);
+        b->image.clip_rect.x = dl_read_f32(r);
+        b->image.clip_rect.y = dl_read_f32(r);
+        b->image.clip_rect.w = dl_read_f32(r);
+        b->image.clip_rect.h = dl_read_f32(r);
+        b->image.clip_radius = dl_read_f32(r);
+        return r->bad ? FLUX_ERROR_INVALID_ARGUMENT : FLUX_OK;
+    }
+    if (b->kind != FLUX_BRUSH_LINEAR_GRADIENT && b->kind != FLUX_BRUSH_RADIAL_GRADIENT)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    uint32_t count = dl_read_u32(r);
+    if (count == 0 || count > FLUX_GRADIENT_MAX_STOPS)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    b->gradient.stops.count = count;
+    for (uint32_t i = 0; i < count; ++i) {
+        b->gradient.stops.stops[i].t = dl_read_f32(r);
+        b->gradient.stops.stops[i].color = dl_read_u32(r);
+    }
+    b->gradient.start.x = dl_read_f32(r);
+    b->gradient.start.y = dl_read_f32(r);
+    b->gradient.end.x = dl_read_f32(r);
+    b->gradient.end.y = dl_read_f32(r);
+    b->gradient.radius = dl_read_f32(r);
+    return r->bad ? FLUX_ERROR_INVALID_ARGUMENT : FLUX_OK;
+}
+
+flux_result flux_display_list_deserialize(const uint8_t *data, size_t size,
+                                          const flux_display_list_deserialize_opts *opts,
+                                          flux_display_list **out_list) {
+    if (!out_list)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_list = nullptr;
+    if (!data || size < DL_HEADER_BYTES ||
+        (opts && opts->type != FLUX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS))
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    dl_reader r = {.data = data, .size = size};
+    if (dl_read_u32(&r) != DL_MAGIC || dl_read_u16(&r) != DL_VERSION)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    uint16_t flags = dl_read_u16(&r);
+    uint32_t resource_count = dl_read_u32(&r);
+    uint32_t command_bytes = dl_read_u32(&r);
+    uint32_t total_size = dl_read_u32(&r);
+    uint32_t reserved = dl_read_u32(&r);
+    if (r.bad || flags != 0 || reserved != 0 || total_size != size ||
+        resource_count > (UINT32_MAX / DL_RESOURCE_BYTES) ||
+        DL_HEADER_BYTES + (size_t)resource_count * DL_RESOURCE_BYTES + command_bytes != size)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    dl_resolved *resources = resource_count ? calloc(resource_count, sizeof(*resources)) : nullptr;
+    if (resource_count && !resources)
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    flux_result result = FLUX_OK;
+    for (uint32_t i = 0; i < resource_count; ++i) {
+        flux_display_list_resource_kind kind = (flux_display_list_resource_kind)dl_read_u8(&r);
+        uint8_t pad0 = dl_read_u8(&r);
+        uint8_t pad1 = dl_read_u8(&r);
+        uint8_t pad2 = dl_read_u8(&r);
+        uint32_t id = dl_read_u32(&r);
+        if (r.bad || pad0 || pad1 || pad2 || id == 0 ||
+            (kind != FLUX_DISPLAY_LIST_RESOURCE_IMAGE &&
+             kind != FLUX_DISPLAY_LIST_RESOURCE_SAMPLER) ||
+            !opts || !opts->resolve) {
+            result = FLUX_ERROR_INVALID_ARGUMENT;
+            goto out;
+        }
+        for (uint32_t k = 0; k < i; ++k)
+            if (resources[k].id == id) {
+                result = FLUX_ERROR_INVALID_ARGUMENT;
+                goto out;
+            }
+        const void *ptr = opts->resolve(opts->user, kind, id);
+        if (!ptr) {
+            result = FLUX_ERROR_INVALID_ARGUMENT;
+            goto out;
+        }
+        resources[i] = (dl_resolved){kind, id, ptr};
+    }
+    flux_encoder *enc = nullptr;
+    result = flux_encoder_create(nullptr, &enc);
+    if (result != FLUX_OK)
+        goto out;
+    while (r.off < size && result == FLUX_OK) {
+        uint8_t op = dl_read_u8(&r);
+        uint8_t cmd_flags = dl_read_u8(&r);
+        uint16_t cmd_reserved = dl_read_u16(&r);
+        uint32_t payload = dl_read_u32(&r);
+        if (cmd_flags != 0 || cmd_reserved != 0) {
+            result = FLUX_ERROR_INVALID_ARGUMENT;
+            break;
+        }
+        if (r.bad || payload > size - r.off) {
+            result = FLUX_ERROR_INVALID_ARGUMENT;
+            break;
+        }
+        size_t next = r.off + payload;
+        switch (op) {
+        case FLUX_CMD_SAVE:
+            flux_encoder_save(enc);
+            break;
+        case FLUX_CMD_RESTORE:
+            flux_encoder_restore(enc);
+            break;
+        case FLUX_CMD_CLIP_RECT: {
+            flux_rect rect = dl_read_rect(&r);
+            flux_encoder_clip_rect(enc, rect);
+            break;
+        }
+        case FLUX_CMD_SAVE_LAYER: {
+            flux_rect b = dl_read_rect(&r);
+            float opacity = dl_read_f32(&r);
+            flux_encoder_save_layer(enc, &b, opacity);
+            break;
+        }
+        case FLUX_CMD_TRANSLATE: {
+            float x = dl_read_f32(&r);
+            float y = dl_read_f32(&r);
+            flux_encoder_translate(enc, x, y);
+            break;
+        }
+        case FLUX_CMD_SCALE: {
+            float x = dl_read_f32(&r);
+            float y = dl_read_f32(&r);
+            flux_encoder_scale(enc, x, y);
+            break;
+        }
+        case FLUX_CMD_ROTATE:
+            flux_encoder_rotate(enc, dl_read_f32(&r));
+            break;
+        case FLUX_CMD_TRANSFORM: {
+            flux_mat3x2 m;
+            for (int i = 0; i < 6; ++i)
+                m.m[i] = dl_read_f32(&r);
+            flux_encoder_transform(enc, m);
+            break;
+        }
+        case FLUX_CMD_DRAW_GEOM: {
+            flux_geometry g = {0};
+            g.kind = (flux_geom_kind)dl_read_u8(&r);
+            dl_read_skip(&r, 3);
+            g.stroke.width = dl_read_f32(&r);
+            g.stroke.miter_limit = dl_read_f32(&r);
+            g.stroke.cap = (flux_line_cap)dl_read_u8(&r);
+            g.stroke.join = (flux_line_join)dl_read_u8(&r);
+            dl_read_u16(&r);
+            switch (g.kind) {
+            case FLUX_GEOM_RECT:
+                g.rect.rect =
+                    (flux_rect){dl_read_f32(&r), dl_read_f32(&r), dl_read_f32(&r), dl_read_f32(&r)};
+                break;
+            case FLUX_GEOM_RRECT:
+                g.rrect.rect =
+                    (flux_rect){dl_read_f32(&r), dl_read_f32(&r), dl_read_f32(&r), dl_read_f32(&r)};
+                g.rrect.radius = dl_read_f32(&r);
+                break;
+            case FLUX_GEOM_SQUIRCLE:
+                g.squircle.rect =
+                    (flux_rect){dl_read_f32(&r), dl_read_f32(&r), dl_read_f32(&r), dl_read_f32(&r)};
+                g.squircle.radius = dl_read_f32(&r);
+                g.squircle.curvature = dl_read_f32(&r);
+                break;
+            case FLUX_GEOM_CIRCLE:
+                g.circle.cx = dl_read_f32(&r);
+                g.circle.cy = dl_read_f32(&r);
+                g.circle.radius = dl_read_f32(&r);
+                break;
+            case FLUX_GEOM_LINE:
+                g.line.x0 = dl_read_f32(&r);
+                g.line.y0 = dl_read_f32(&r);
+                g.line.x1 = dl_read_f32(&r);
+                g.line.y1 = dl_read_f32(&r);
+                break;
+            case FLUX_GEOM_PATH: {
+                uint32_t count = dl_read_u32(&r);
+                g.path.fill_rule = (flux_fill_rule)dl_read_u8(&r);
+                dl_read_skip(&r, 3);
+                if (count > (payload / (4u + 24u))) {
+                    result = FLUX_ERROR_INVALID_ARGUMENT;
+                    break;
+                }
+                flux_path_segment *segs = count ? malloc((size_t)count * sizeof(*segs)) : nullptr;
+                if (count && !segs) {
+                    result = FLUX_ERROR_OUT_OF_MEMORY;
+                    break;
+                }
+                for (uint32_t i = 0; i < count; ++i) {
+                    segs[i].op = dl_read_u32(&r);
+                    for (uint32_t k = 0; k < 6; ++k)
+                        segs[i].pts[k] = dl_read_f32(&r);
+                }
+                if (!r.bad) {
+                    flux_path path = {.segments = segs, .capacity = count, .count = count};
+                    g.path.path = &path;
+                    flux_brush b;
+                    bool has_slot = false;
+                    uint32_t slot = 0;
+                    result = dl_read_brush(&r, &b, resources, resource_count, &has_slot, &slot);
+                    if (result == FLUX_OK) {
+                        if (has_slot)
+                            flux_encoder_draw_geometry_slot(enc, &g, &b, slot);
+                        else
+                            flux_encoder_draw_geometry(enc, &g, &b);
+                        result = flux_encoder_status(enc);
+                    }
+                } else {
+                    result = FLUX_ERROR_INVALID_ARGUMENT;
+                }
+                free(segs);
+                break;
+            }
+            default:
+                result = FLUX_ERROR_INVALID_ARGUMENT;
+                break;
+            }
+            if (g.kind != FLUX_GEOM_PATH && result == FLUX_OK) {
+                flux_brush b;
+                bool has_slot = false;
+                uint32_t slot = 0;
+                result = dl_read_brush(&r, &b, resources, resource_count, &has_slot, &slot);
+                if (result == FLUX_OK) {
+                    if (has_slot)
+                        flux_encoder_draw_geometry_slot(enc, &g, &b, slot);
+                    else
+                        flux_encoder_draw_geometry(enc, &g, &b);
+                    result = flux_encoder_status(enc);
+                }
+            }
+            break;
+        }
+        case FLUX_CMD_DRAW_GLYPH_RUN: {
+            uint32_t atlas_id = dl_read_u32(&r);
+            uint32_t sampler_id = dl_read_u32(&r);
+            uint32_t quads_count = dl_read_u32(&r);
+            uint32_t cov_bytes = dl_read_u32(&r);
+            uint32_t host_w = dl_read_u32(&r);
+            uint32_t host_h = dl_read_u32(&r);
+            flux_image *atlas = (flux_image *)dl_find_resource(resources, resource_count, atlas_id,
+                                                               FLUX_DISPLAY_LIST_RESOURCE_IMAGE);
+            flux_sampler *sampler = (flux_sampler *)dl_find_resource(
+                resources, resource_count, sampler_id, FLUX_DISPLAY_LIST_RESOURCE_SAMPLER);
+            if (r.bad || (atlas_id && !atlas) || (sampler_id && !sampler) ||
+                quads_count > payload / 28u || cov_bytes > payload ||
+                (uint64_t)quads_count * 28u + cov_bytes > payload) {
+                result = FLUX_ERROR_INVALID_ARGUMENT;
+                break;
+            }
+            flux_glyph_quad *quads =
+                quads_count ? malloc((size_t)quads_count * sizeof(*quads)) : nullptr;
+            uint8_t *cov = cov_bytes ? malloc(cov_bytes) : nullptr;
+            if ((quads_count && !quads) || (cov_bytes && !cov)) {
+                free(quads);
+                free(cov);
+                result = FLUX_ERROR_OUT_OF_MEMORY;
+                break;
+            }
+            for (uint32_t i = 0; i < quads_count; ++i) {
+                quads[i].sx = dl_read_f32(&r);
+                quads[i].sy = dl_read_f32(&r);
+                quads[i].sw = dl_read_f32(&r);
+                quads[i].sh = dl_read_f32(&r);
+                quads[i].ax = dl_read_u16(&r);
+                quads[i].ay = dl_read_u16(&r);
+                quads[i].aw = dl_read_u16(&r);
+                quads[i].ah = dl_read_u16(&r);
+                quads[i].color = dl_read_u32(&r);
+            }
+            if (cov_bytes && !r.bad) {
+                memcpy(cov, data + r.off, cov_bytes);
+                r.off += cov_bytes;
+            }
+            if (!r.bad) {
+                flux_glyph_run_desc desc = FLUX_GLYPH_RUN_DESC_INIT;
+                desc.atlas = atlas;
+                desc.sampler = sampler;
+                desc.quads = quads;
+                desc.quad_count = quads_count;
+                desc.host_coverage = cov;
+                desc.host_atlas_w = host_w;
+                desc.host_atlas_h = host_h;
+                flux_encoder_draw_glyph_run(enc, &desc);
+                result = flux_encoder_status(enc);
+            } else {
+                result = FLUX_ERROR_INVALID_ARGUMENT;
+            }
+            free(quads);
+            free(cov);
+            break;
+        }
+        default:
+            result = FLUX_ERROR_INVALID_ARGUMENT;
+            break;
+        }
+        if (result != FLUX_OK)
+            break;
+        size_t aligned = (next + 7u) & ~(size_t)7u;
+        if (r.off > next || aligned > size) {
+            result = FLUX_ERROR_INVALID_ARGUMENT;
+            break;
+        }
+        r.off = aligned;
+    }
+    if (result == FLUX_OK && r.off != size)
+        result = FLUX_ERROR_INVALID_ARGUMENT;
+    if (result == FLUX_OK)
+        result = flux_encoder_finish(enc, out_list);
+    flux_encoder_destroy(enc);
+out:
+    free(resources);
+    return result;
 }

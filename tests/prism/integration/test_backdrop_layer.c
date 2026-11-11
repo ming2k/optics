@@ -100,7 +100,7 @@ int main(void) {
          * lens sampling the sharp capture shows pure black on the body's
          * dark half. That is precisely the layer relation this filter
          * exists to provide. */
-        prism_backdrop_frost frost = PRISM_BACKDROP_FROST_INIT;
+        prism_base_material frost = PRISM_BASE_MATERIAL_INIT;
         frost.bounds = (flux_rect){0.0f, 0.0f, (float)W, (float)H};
         prism_liquid_glass_shape body_shapes[1] = {
             {.bounds = {20, 24, 24, 16}, .corner_radius = 8},
@@ -111,8 +111,8 @@ int main(void) {
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
         ld.blurred_input = blurred;
-        ld.frost = &frost;
-        ld.frost_count = 1u;
+        ld.base_materials = &frost;
+        ld.base_material_count = 1u;
         ld.groups = &body;
         ld.group_count = 1u;
         ld.refraction = 0.0f;
@@ -160,7 +160,7 @@ int main(void) {
 
     /* --- footprint clearing across submissions on reused slots --- */
     {
-        prism_backdrop_frost frost = PRISM_BACKDROP_FROST_INIT;
+        prism_base_material frost = PRISM_BASE_MATERIAL_INIT;
         frost.bounds = (flux_rect){4.0f, 24.0f, 16.0f, 16.0f};
         prism_liquid_glass_shape body_shapes[1] = {
             {.bounds = {8.0f, 28.0f, 8.0f, 8.0f}, .corner_radius = 4.0f},
@@ -196,8 +196,8 @@ int main(void) {
             prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
             ld.input = target;
             ld.blurred_input = blurred;
-            ld.frost = &frost;
-            ld.frost_count = 1u;
+            ld.base_materials = &frost;
+            ld.base_material_count = 1u;
             ld.groups = &body;
             ld.group_count = 1u;
             ld.refraction = 0.0f;
@@ -252,8 +252,8 @@ int main(void) {
             prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
             ld.input = target;
             ld.blurred_input = blurred;
-            ld.frost = &frost;
-            ld.frost_count = 1u;
+            ld.base_materials = &frost;
+            ld.base_material_count = 1u;
             ld.groups = &body;
             ld.group_count = 1u;
             ld.refraction = 0.0f;
@@ -313,8 +313,8 @@ int main(void) {
          *   x1  .. x2 : half-opacity frost         (blend with sharp base)
          *   x2  .. x3 : full-opacity red-tinted    (opaque, red)
          */
-        prism_backdrop_frost frost[3] = {PRISM_BACKDROP_FROST_INIT, PRISM_BACKDROP_FROST_INIT,
-                                         PRISM_BACKDROP_FROST_INIT};
+        prism_base_material frost[3] = {PRISM_BASE_MATERIAL_INIT, PRISM_BASE_MATERIAL_INIT,
+                                        PRISM_BASE_MATERIAL_INIT};
         frost[0].bounds = (flux_rect){0.0f, 0.0f, (float)(W / 4), (float)H};
         frost[1].bounds = (flux_rect){(float)(W / 4), 0.0f, (float)(W / 4), (float)H};
         frost[1].opacity = 0.5f;
@@ -324,8 +324,8 @@ int main(void) {
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
         ld.blurred_input = blurred;
-        ld.frost = frost;
-        ld.frost_count = 3u;
+        ld.base_materials = frost;
+        ld.base_material_count = 3u;
         ld.group_count = 0u;
         prism_material_output layer = {0};
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
@@ -402,7 +402,7 @@ int main(void) {
          * PREMULTIPLIED layer write the left side's lens tap reads
          * rgb*frost_alpha — roughly half brightness — so the body's two
          * halves disagree loudly; under the opaque resolve they agree. */
-        prism_backdrop_frost frost = PRISM_BACKDROP_FROST_INIT;
+        prism_base_material frost = PRISM_BASE_MATERIAL_INIT;
         frost.bounds = (flux_rect){0.0f, 0.0f, (float)(W / 2), (float)H};
         frost.opacity = 0.5f;
         prism_liquid_glass_shape body_shapes[1] = {
@@ -414,8 +414,8 @@ int main(void) {
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
         ld.blurred_input = blurred;
-        ld.frost = &frost;
-        ld.frost_count = 1u;
+        ld.base_materials = &frost;
+        ld.base_material_count = 1u;
         ld.groups = &body;
         ld.group_count = 1u;
         ld.refraction = 0.0f;
@@ -488,7 +488,7 @@ int main(void) {
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
         ld.blurred_input = blurred;
-        ld.frost_count = 0u;
+        ld.base_material_count = 0u;
         ld.groups = &body;
         ld.group_count = 1u;
         ld.refraction = 0.0f;
@@ -542,7 +542,7 @@ int main(void) {
         flux_image *blurred = nullptr;
         EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
-        prism_base_material plates[2] = {PRISM_BACKDROP_FROST_INIT, PRISM_BACKDROP_FROST_INIT};
+        prism_base_material plates[2] = {PRISM_BASE_MATERIAL_INIT, PRISM_BASE_MATERIAL_INIT};
         plates[0].bounds = (flux_rect){8.0f, 8.0f, 32.0f, 32.0f}; /* A: x 8..40 */
         plates[0].opacity = 1.0f;
         plates[0].tint_color = 0xFF0000u;
@@ -555,8 +555,8 @@ int main(void) {
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
         ld.blurred_input = blurred;
-        ld.frost = plates;
-        ld.frost_count = 2u;
+        ld.base_materials = plates;
+        ld.base_material_count = 2u;
         ld.group_count = 0u;
         prism_material_output layer = {0};
         EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
@@ -624,7 +624,7 @@ int main(void) {
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
         ld.blurred_input = blurred;
-        ld.frost_count = 0u;
+        ld.base_material_count = 0u;
         ld.groups = bodies;
         ld.group_count = 3u;
         ld.refraction = 4.0f;
@@ -691,8 +691,8 @@ int main(void) {
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
         ld.blurred_input = blurred;
-        ld.frost = &frost;
-        ld.frost_count = 1u;
+        ld.base_materials = &frost;
+        ld.base_material_count = 1u;
         /* Opt into the cache for this scenario. */
         prism_backdrop_layer_revision rev = PRISM_BACKDROP_LAYER_REVISION_INIT;
         rev.revision = 42u;
@@ -778,15 +778,15 @@ int main(void) {
             flux_image *blurred = nullptr;
             EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
-            prism_base_material frost = PRISM_BACKDROP_FROST_INIT;
+            prism_base_material frost = PRISM_BASE_MATERIAL_INIT;
             frost.bounds = (flux_rect){0.0f, 0.0f, (float)W, (float)H};
             frost.opacity = 1.0f;
 
             prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
             ld.input = target;
             ld.blurred_input = blurred;
-            ld.frost = &frost;
-            ld.frost_count = 1u;
+            ld.base_materials = &frost;
+            ld.base_material_count = 1u;
             ld.groups = &body;
             ld.group_count = 1u;
             ld.refraction = 0.0f;

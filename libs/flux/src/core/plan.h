@@ -41,6 +41,8 @@
 #include <stdint.h>
 #include <vulkan/vulkan.h>
 
+#include "render_plan.h"
+
 struct flux_image;
 
 /* Deferred passes one frame can hold. Effects compose in ones and twos per
@@ -92,42 +94,8 @@ typedef struct flux_plan_pass_desc {
     uint32_t output_count;
 } flux_plan_pass_desc;
 
-/* One registered pass. */
-typedef struct flux_plan_pass {
-    flux_plan_record_fn record;
-    void *params;
-    const char *label; /* debug label emitted around the pass body, never owned */
-
-    /* Resolved prerequisites, in two kinds:
-     *
-     *   provider[i] — the pass that writes input i, or UINT32_MAX when the
-     *                 image comes from outside the plan. Builds before us.
-     *   requires[]  — passes this one declared as a prerequisite via a token
-     *                 without also sampling the image. Same effect on liveness.
-     *
-     * Both are resolved at registration and only ever point at *earlier*
-     * passes, which is why no cycle guard exists: an edge to a later pass is
-     * impossible by construction, so the dependency relation is a DAG of
-     * bounded depth and the recursive build cannot loop. */
-    uint32_t provider[FLUX_PLAN_MAX_PASS_INPUTS];
-    uint32_t provider_count;
-
-    uint32_t
-        requires[
-            FLUX_PLAN_MAX_PASS_INPUTS];
-    uint32_t requires_count;
-
-    struct flux_image *outputs[FLUX_PLAN_MAX_PASS_OUTPUTS];
-    uint32_t output_count;
-
-    VkCommandBuffer segment; /* owned by the frame slot's pool */
-    bool required;           /* a consumer asked for this pass's output */
-    bool built;              /* dispatches are recorded into `segment` */
-    bool executed;           /* vkCmdExecuteCommands was recorded for it */
-} flux_plan_pass;
-
 typedef struct flux_plan {
-    flux_plan_pass passes[FLUX_PLAN_MAX_PASSES];
+    struct flux_render_plan *render_plan;
     struct flux_deferred_token tokens[FLUX_PLAN_MAX_PASSES];
     uint32_t pass_count;
     uint64_t epoch;
@@ -146,7 +114,8 @@ typedef struct flux_plan {
 /* Empty the plan and adopt the frame slot's command pool. Called by
  * begin_frame after that slot's fence was waited and its pool reset, so no
  * secondary the previous plan allocated is still executing. */
-void flux_plan_reset(flux_plan *p, struct flux_device *device, VkCommandPool pool);
+void flux_plan_reset(flux_plan *p, struct flux_render_plan *render_plan, struct flux_device *device,
+                     VkCommandPool pool);
 
 /* Copy pass parameters out of caller stack memory into the plan's arena.
  * Returns nullptr when the arena is exhausted, so the caller can fall back

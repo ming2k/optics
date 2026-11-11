@@ -667,7 +667,7 @@ static flux_result draw_layout_pass(glyph_ctx *t, flux_canvas *canvas, flux_enco
      * content generation so the canvas can refuse a recorded segment whose
      * baked UVs predate a later atlas_clear (rearranged texels). */
     flux_glyph_run_host_atlas_desc host_atlas_gen = FLUX_GLYPH_RUN_HOST_ATLAS_DESC_INIT;
-    run.atlas = t->atlas;
+    run.atlas = t->atlas_pages[t->atlas_page];
     /* Hold a reference on the batch's atlas for the duration of the walk:
      * txt_glyph_get below can trigger atlas_clear (page cap reached),
      * which flux_image_release()s every page — and release frees the
@@ -678,7 +678,7 @@ static flux_result draw_layout_pass(glyph_ctx *t, flux_canvas *canvas, flux_enco
      * foreign-image tracking; this covers the not-yet-recorded batch.) */
     flux_image *batch_atlas = run.atlas ? flux_image_retain(run.atlas) : NULL;
     run.atlas = batch_atlas;
-    if (!t->atlas) {
+    if (!t->atlas_pages[t->atlas_page]) {
         /* Device-less CPU canvas (ADR-0019): feed the host R8 coverage buffer
          * straight to the CPU rasteriser instead of a GPU image. */
         run.host_coverage = t->atlas_pixels;
@@ -717,7 +717,7 @@ static flux_result draw_layout_pass(glyph_ctx *t, flux_canvas *canvas, flux_enco
 
         /* Capture pending host texels before fetching a glyph can recycle
          * their atlas storage. Recorder capture owns the cropped coverage. */
-        if (encoder && !t->atlas && n > 0) {
+        if (encoder && !t->atlas_pages[t->atlas_page] && n > 0) {
             run.quad_count = n;
             flux_encoder_draw_glyph_run(encoder, &run);
             result = flux_encoder_status(encoder);
@@ -778,7 +778,7 @@ static flux_result draw_layout_pass(glyph_ctx *t, flux_canvas *canvas, flux_enco
          * and retargets the run at the entry's page. Cache hits keep the
          * run on one page for whole spans; page changes cluster where the
          * packer rolled over. The batch retain swaps with the page. */
-        if (t->atlas && e->atlas_page != run_page) {
+        if (t->atlas_pages[t->atlas_page] && e->atlas_page != run_page) {
             if (n > 0) {
                 txt_atlas_flush(t);
                 run.quad_count = n;

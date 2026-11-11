@@ -14,6 +14,97 @@ silently reading a different descriptor layout.
 
 ## [Unreleased]
 
+### Added
+
+- **flux**: The first RenderPlan slice (ADR-0089/0092): a target contract,
+  explicit resource handle/version/access/region/dependency IR, and a pure
+  validator for cycles, unordered reads/writes, capability subsets, region
+  validity, and transient budgets. It is not yet wired into execution; the
+  direct Canvas path remains authoritative until the migration lands.
+- **flux**: Deferred effect passes now register as `EFFECT` nodes in the
+  frame's RenderPlan. Provider/requires edges are explicit node dependencies,
+  and `flux_plan` keeps only the parameter arena, token epoch, command pool,
+  and counters; the former `flux_plan_pass` liveness table is deleted.
+- **flux**: Canvas passes now compile into the frame's RenderPlan and are
+  validated before the backend opens a pass (ADR-0089 1B-1). The plan records
+  the target contract, target write access, damage region, and the sequential
+  pass dependency; the backend execution path is otherwise unchanged.
+- **tests**: DisplayList deserialization gained a libFuzzer harness and a
+  committed seed corpus (valid empty/solid/slot streams, truncation, bad
+  header fields, resource-ID faults, oversized payloads), wired into the
+  ci-fuzz matrix under ASan/UBSan.
+- **flux**: DisplayList serialization (ADR-0157). Lists can be written to a
+  canonical little-endian v1 stream with a caller-ID resource table and loaded
+  back through an explicit resolver. The wire contains no pointers or native
+  structs; child lists are flattened with SAVE/RESTORE isolation; malformed
+  headers, IDs, lengths, opcodes, and unresolved resources fail closed without
+  publishing a list or retaining a resource.
+- **flux**: DisplayLists may declare dynamic image input slots. A recorded
+  `flux_encoder_draw_geometry_slot` carries a slot index instead of a concrete
+  image; `flux_canvas_submit_display_list_bound` binds each slot exactly once
+  at execution. Missing, duplicate, out-of-range, or null bindings fail before
+  any pixels are written, so a list is never silently executed with an
+  unrelated image. `flux_display_list_input_mask` exposes the declared set.
+- **flux**: Imported dma-buf images now carry an explicit ownership lease.
+  `flux_dmabuf_ownership` distinguishes a borrowed buffer (default) from an
+  exclusive transfer. Borrowed images cannot be snapshotted into a retained
+  DisplayList and must use a dynamic input slot; exclusive images are
+  immutable and may be snapshotted. `flux_image_snapshot` now returns a
+  `flux_result` with an out-parameter so the refusal is explicit.
+- **flux**: Images gain immutable snapshot handles
+  (`flux_image_snapshot`). A composed display list records snapshots, not the
+  mutable image handle: updating the original while a snapshot exists copies
+  the old contents into a fresh owned image, so the list keeps rendering the
+  pixels it captured. Snapshot handles reject `flux_image_update_region`.
+  Imported dma-buf behavior follows the ownership lease below.
+- **flux**: Color-managed images share their immutable color state — ICC
+  profile, params buffer, and baked 3D LUT — across a snapshot/COW split.
+  A Display P3-, BT.2020-, or ICC-tagged image can now be snapshotted and
+  updated without duplicating or orphaning its color interpretation.
+- **flux**: Image snapshot creation and content updates serialize on a
+  per-device version lock. Concurrent snapshotting sees either the old or the
+  new version, never a half-swapped handle; readers keep the version they
+  retained. The hostile-allocator lane also drives a snapshot OOM and verifies
+  the source image remains usable.
+- **flux**: ICC LUT color management is covered end-to-end through a
+  snapshot/COW split: the old LUT-tagged list keeps its old pixels after the
+  original is updated, and a hostile-allocator sweep fails every successive
+  allocation in LUT image/view/bindless/params construction until the whole
+  path has been exercised, with no leaked live bytes.
+- **flux**: Sampler and buffer construction are added to the hostile-allocator
+  failure sweep. Together with the image, snapshot, and LUT lanes, every
+  allocation in those ownership paths is failed in turn and must unwind
+  without a live leak.
+- **flux**: DisplayLists account for pinned image content.
+  `flux_encoder_desc.max_retained_bytes` bounds the unique image bytes a list
+  retains (including shared child lists); exceeding it fails publication with
+  `FLUX_ERROR_OUT_OF_MEMORY` instead of pinning an unbounded working set.
+  `flux_display_list_retained_bytes` exposes the published total and
+  `flux_image_size_bytes` is the accounting unit.
+
+### Changed
+
+- **iris**: `iris_wayland_create_activation_token` is deleted.
+  `iris_window_create_activation_token` is the only public activation-token
+  entry point; the tree keeps no platform-prefixed forwarding alias.
+- **iris**: The legacy `iris_paint_fn` live-canvas callback and the
+  `iris_app_opts.paint` field are deleted. `iris_record_fn` is the only host
+  canvas path on every backend: the UI thread records an immutable
+  `flux_display_list`, the presentation worker consumes it, and the fallback
+  used when `prepare` needs the main thread submits the same list instead of
+  invoking a second synchronous drawing path. `iris_paint_mark_static` is
+  renamed to `iris_record_mark_static`.
+- **prism**: `prism_backdrop_frost` and its initializer aliases are deleted.
+  `prism_backdrop_layer_desc.frost`/`frost_count` are renamed to
+  `base_materials`/`base_material_count`; the layer descriptor already carried
+  `prism_base_material`, so the alias was only a second name for one type.
+- **public headers**: the unused `*_DEPRECATED` attribute macros are removed.
+  This tree does not keep deprecated forwarding symbols: a replacement lands
+  by migrating every caller in the same change.
+- **glyph**: the single-page atlas compatibility view is deleted. The current
+  page is `atlas_pages[atlas_page]`; the mirrored cursor and dirty-box fields
+  had no readers and could disagree with the per-page state they duplicated.
+
 ## [0.0.76] - 2026-11-10
 
 ### Added

@@ -78,8 +78,38 @@ static void on_build(lens *ui, const lens_input *in, void *user) {
     iris_request_animation_frame();
 }
 
-static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void *user) {
-    (void)device;
+static void record_rect_color(flux_encoder *enc, flux_rect rect, flux_color color) {
+    flux_geometry geom = flux_geom_rect(rect);
+    flux_brush brush = flux_brush_solid(color);
+    flux_encoder_draw_geometry(enc, &geom, &brush);
+}
+
+static void record_fill_path(flux_encoder *enc, const flux_path *path, flux_fill_rule rule,
+                             const flux_brush *brush) {
+    flux_geometry geom = flux_geom_path(path);
+    geom.path.fill_rule = rule;
+    flux_encoder_draw_geometry(enc, &geom, brush);
+}
+
+static void record_stroke_path(flux_encoder *enc, const flux_path *path,
+                               const flux_stroke_style *stroke, const flux_brush *brush) {
+    flux_geometry geom = flux_geom_path(path);
+    geom.stroke = stroke ? *stroke : (flux_stroke_style){.width = 1.0f};
+    flux_encoder_draw_geometry(enc, &geom, brush);
+}
+
+static void record_image(flux_encoder *enc, flux_image *image, flux_rect dst) {
+    flux_geometry geom = flux_geom_rect(dst);
+    flux_brush brush = {
+        .kind = FLUX_BRUSH_IMAGE_PATTERN,
+        .blend = FLUX_BLEND_SRC_OVER,
+        .opacity = 1.0f,
+        .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+    };
+    flux_encoder_draw_geometry(enc, &geom, &brush);
+}
+
+static void on_record(flux_encoder *enc, float scale, void *user) {
     canvas_hello_app *app = user;
     app->time += 0.016f;
     float t = app->time;
@@ -89,27 +119,25 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
     float W = (float)log_w;
     float H = (float)log_h;
 
-    flux_canvas_save(canvas);
-    flux_canvas_scale(canvas, scale, scale);
+    flux_encoder_save(enc);
+    flux_encoder_scale(enc, scale, scale);
 
     /* Backdrop tile pattern */
     for (int gy = 0; gy < 8; ++gy) {
         for (int gx = 0; gx < 14; ++gx) {
             float cell = W / 14.0f;
             uint8_t v = (uint8_t)(40 + 20 * ((gx + gy) & 1));
-            flux_canvas_fill_rect_color(canvas,
-                                        (flux_rect){gx * cell, gy * (H / 8.0f), cell, H / 8.0f},
-                                        flux_color_rgba_premul(v, v, v + 8, 255));
+            record_rect_color(enc, (flux_rect){gx * cell, gy * (H / 8.0f), cell, H / 8.0f},
+                              flux_color_rgba_premul(v, v, v + 8, 255));
         }
     }
 
     /* Three solid rectangles with translucent SRC_OVER */
-    flux_canvas_fill_rect_color(canvas, (flux_rect){80, 80, 280, 180},
-                                flux_color_rgba_premul(240, 80, 80, 200));
-    flux_canvas_fill_rect_color(canvas, (flux_rect){200, 160, 280, 180},
-                                flux_color_rgba_premul(80, 200, 90, 200));
-    flux_canvas_fill_rect_color(canvas, (flux_rect){320, 240, 280, 180},
-                                flux_color_rgba_premul(80, 130, 240, 200));
+    record_rect_color(enc, (flux_rect){80, 80, 280, 180}, flux_color_rgba_premul(240, 80, 80, 200));
+    record_rect_color(enc, (flux_rect){200, 160, 280, 180},
+                      flux_color_rgba_premul(80, 200, 90, 200));
+    record_rect_color(enc, (flux_rect){320, 240, 280, 180},
+                      flux_color_rgba_premul(80, 130, 240, 200));
 
     /* Linear gradient over a rect */
     {
@@ -120,7 +148,8 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         };
         flux_brush g =
             flux_brush_linear_gradient((flux_point){640, 80}, (flux_point){920, 280}, stops, 3);
-        flux_canvas_fill_rect(canvas, (flux_rect){640, 80, 280, 200}, &g);
+        flux_geometry geom = flux_geom_rect((flux_rect){640, 80, 280, 200});
+        flux_encoder_draw_geometry(enc, &geom, &g);
     }
 
     /* Radial gradient over a circle path */
@@ -136,7 +165,7 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
                 {1.0f, flux_color_rgba_premul(30, 10, 80, 200)},
             };
             flux_brush g = flux_brush_radial_gradient((flux_point){rcx, rcy}, 90.0f, stops, 3);
-            flux_canvas_fill_path(canvas, rcirc, FLUX_FILL_NON_ZERO, &g);
+            record_fill_path(enc, rcirc, FLUX_FILL_NON_ZERO, &g);
         }
     }
 
@@ -147,7 +176,7 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         flux_path_add_round_rect(rrect, (flux_rect){60, 360, 380, 140}, 32.0f);
         flux_brush p = flux_brush_solid(0xFF000000u);
         p.solid.color = flux_color_rgba_premul(255, 220, 120, 230);
-        flux_canvas_fill_path(canvas, rrect, FLUX_FILL_NON_ZERO, &p);
+        record_fill_path(enc, rrect, FLUX_FILL_NON_ZERO, &p);
     }
 
     /* Animated circle */
@@ -159,7 +188,7 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         flux_path_add_circle(circ, cx, cy, 90.0f);
         flux_brush p = flux_brush_solid(0xFF000000u);
         p.solid.color = flux_color_rgba_premul(220, 140, 240, 220);
-        flux_canvas_fill_path(canvas, circ, FLUX_FILL_NON_ZERO, &p);
+        record_fill_path(enc, circ, FLUX_FILL_NON_ZERO, &p);
     }
 
     /* Concave 5-point star */
@@ -181,7 +210,7 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         flux_path_close(star);
         flux_brush p = flux_brush_solid(0xFF000000u);
         p.solid.color = flux_color_rgba_premul(120, 240, 180, 240);
-        flux_canvas_fill_path(canvas, star, FLUX_FILL_NON_ZERO, &p);
+        record_fill_path(enc, star, FLUX_FILL_NON_ZERO, &p);
     }
 
     /* Stroked sine wave */
@@ -195,16 +224,16 @@ static void on_paint(flux_canvas *canvas, flux_device *device, float scale, void
         }
         flux_stroke_style st = {.width = 5.0f, .cap = FLUX_CAP_ROUND, .join = FLUX_JOIN_ROUND};
         flux_brush b = flux_brush_solid(flux_color_rgba_premul(255, 255, 255, 220));
-        flux_canvas_stroke_path(canvas, wave, &st, &b);
+        record_stroke_path(enc, wave, &st, &b);
     }
 
     /* Sampled checkerboard texture */
     if (app->checker) {
         flux_rect dst = {W - 180.0f, 40.0f, 140.0f, 140.0f};
-        flux_canvas_draw_image(canvas, app->checker, dst, nullptr);
+        record_image(enc, app->checker, dst);
     }
 
-    flux_canvas_restore(canvas);
+    flux_encoder_restore(enc);
     flux_arena_reset(&app->arena);
 }
 
@@ -220,7 +249,7 @@ int main(void) {
         .start = on_start,
         .stop = on_stop,
         .build = on_build,
-        .paint = on_paint,
+        .record = on_record,
         .user = &app,
     });
 }

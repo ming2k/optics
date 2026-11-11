@@ -38,7 +38,7 @@ We integrate complete desktop function keys, compositor-backed focus activation,
 ### 2. Window Activation Token Protocol (`xdg-activation-v1`)
 
 - **Public Platform Contract (`libs/iris/include/iris/window.h`)**:
-  Expose `iris_window_create_activation_token(const char *app_id, char *out_buf, size_t out_cap)` (with backward-compatible alias `iris_wayland_create_activation_token`).
+  Expose `iris_window_create_activation_token(const char *app_id, char *out_buf, size_t out_cap)`.
 - **Capability Discovery (`libs/iris/include/iris/capability.h`)**:
   Introduce `IRIS_CAP_ACTIVATION_TOKEN = 11`. Compile-time queries (`iris_supports(IRIS_CAP_ACTIVATION_TOKEN)`) report `1` on Wayland and `0` on Win32 and Cocoa.
 - **Wayland Implementation & Event Queue Isolation (`libs/iris/src/app_wayland.c`)**:
@@ -83,3 +83,10 @@ We integrate complete desktop function keys, compositor-backed focus activation,
 - ADR-0056: Win32, Cocoa backends and MoltenVK
 - ADR-0086: Cross-Platform Drag-and-Drop Subsystem
 - ADR-0098: Developer Tooling Taxonomy, Architecture Guardrails, and Unified Verification
+
+## Amendment — 2026-11-11
+
+The `iris_wayland_create_activation_token` compatibility alias is deleted.
+`iris_window_create_activation_token` is the only public spelling: it is a
+cross-platform activation-token entry point, not a Wayland-only operation, and
+the tree does not keep forwarding aliases for renamed public symbols.

@@ -444,6 +444,40 @@ int main(void) {
         EXPECT(centre[0] > 245 && centre[1] > 245 && centre[2] > 245);
         flux_image_release(lut_img);
 
+        /* 8c. Identity LUT image: a snapshot keeps its old pixels after the
+         * original is updated, proving color state and pixels COW together. */
+        len = icc_build_mab_identity(pdata, &defs[0], 3, 3);
+        size = icc_build_profile(profile, "mntr", "XYZ ", pdata, len, defs, 1);
+        flux_icc_profile *mab_icc = nullptr;
+        EXPECT(flux_icc_profile_create(profile, size, &mab_icc) == FLUX_OK);
+        const uint8_t red[4] = {255, 0, 0, 255};
+        const uint8_t blue[4] = {0, 0, 255, 255};
+        csd.icc = mab_icc;
+        idesc.initial_data = red;
+        flux_image *mab_img = nullptr;
+        EXPECT(flux_image_create(d, &idesc, &mab_img) == FLUX_OK);
+        flux_image *mab_snapshot = nullptr;
+        EXPECT(flux_image_snapshot(mab_img, &mab_snapshot) == FLUX_OK);
+        EXPECT(flux_image_update_region(mab_img, 0, 0, 1, 1, blue, sizeof blue) == FLUX_OK);
+
+        EXPECT(render_frame(s, canvas, black, draw_image_full, mab_snapshot) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        centre = px_at(px, W / 2, H / 2);
+        EXPECT(centre[0] > 200 && centre[2] < 80);
+
+        EXPECT(render_frame(s, canvas, black, draw_image_full, mab_img) == FLUX_OK);
+        memset(px, 0xCD, BYTES);
+        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        centre = px_at(px, W / 2, H / 2);
+        /* The synthetic mAB profile swaps the B/G basis; the point is that
+         * the new version differs from the snapshot's red. */
+        EXPECT(centre[1] > 200 && centre[0] < 80);
+
+        flux_image_release(mab_snapshot);
+        flux_image_release(mab_img);
+        flux_icc_profile_release(mab_icc);
+
         flux_icc_profile_release(srgb_icc);
         flux_icc_profile_release(lut_icc);
     }

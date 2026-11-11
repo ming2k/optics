@@ -59,6 +59,9 @@ jobs:
           - target: fuzz_glb_parse
             dir: tests/flux/fuzz
             corpus: tests/flux/fuzz/corpus/glb_parse
+          - target: fuzz_display_list_deserialize
+            dir: tests/flux/fuzz
+            corpus: tests/flux/fuzz/corpus/display_list_deserialize
           - target: fuzz_lens_store
             dir: tests/lens/fuzz
             corpus: tests/lens/fuzz/corpus/lens_store

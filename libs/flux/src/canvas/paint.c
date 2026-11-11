@@ -67,9 +67,18 @@ bool canvas_valid_geometry(const flux_geometry *g) {
     }
 }
 
+static bool brush_common_valid(const flux_brush *b) {
+    return isfinite(b->opacity) && b->opacity >= 0 && b->opacity <= 1 &&
+           b->blend >= FLUX_BLEND_SRC_OVER && b->blend <= FLUX_BLEND_MULTIPLY;
+}
+
+bool canvas_valid_brush_slot(const flux_brush *b) {
+    return brush_common_valid(b) && b->kind == FLUX_BRUSH_IMAGE_PATTERN &&
+           canvas_finite_rect(b->image.src_rect);
+}
+
 bool canvas_valid_brush(const flux_brush *b) {
-    if (!isfinite(b->opacity) || b->opacity < 0 || b->opacity > 1 ||
-        b->blend < FLUX_BLEND_SRC_OVER || b->blend > FLUX_BLEND_MULTIPLY)
+    if (!brush_common_valid(b))
         return false;
     if (b->kind == FLUX_BRUSH_SOLID)
         return true;
