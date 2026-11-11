@@ -505,7 +505,7 @@ apply to every library the consumer links.
 | `<prefix>_version_string()`     | `"M.m.p"` string for logging.                               |
 | `<prefix>_version_check(M, m, p)` | True iff this library is at least `M.m.p`.                |
 
-The lockstep is **machine-enforced**: `./tools/optics check lockstep`
+The lockstep is **machine-enforced**: `./tools/gate check lockstep`
 (CI step) parses every library's macros and fails the build when any of
 them differs from `meson.project_version()`, and bans hard-coded version
 string literals (they always drift — vista shipped a

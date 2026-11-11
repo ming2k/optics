@@ -232,7 +232,7 @@ FLUX_API uint64_t flux_device_labels_emitted(const flux_device *d);
 /* ================================================================== */
 
 /* Kind strings are a closed, library-owned vocabulary. A host may not mint
- * new kinds casually: `tools/optics check leaks` enumerates them from the
+ * new kinds casually: `tools/gate check leaks` enumerates them from the
  * tree and requires a leak lane per kind (ADR-0130). Owner strings name the
  * subsystem that owns the release, so a report row always answers "who
  * should have released this?" without a code search.

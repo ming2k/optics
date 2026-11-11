@@ -72,7 +72,7 @@ All software in Optics adheres to four non-negotiable architectural mandates:
 
 ### 3.1 Material Boundary Separation (ADR-0063)
 - **Red-Line**: `flux` (Layer 0) must NEVER reference named materials (`prism_`, `liquid_glass`, frosted glass, mica, acrylic) or higher-level material shaders.
-- **Enforcement**: Mechanically verified by `tools/optics check boundary` (via `tools/guardrails/boundary.py`) on every commit and CI run. `flux` exposes generic shader pipelines, bindless handles, and canvas render targets; high-level BRDF models belong exclusively to `prism`.
+- **Enforcement**: Mechanically verified by `tools/gate check boundary` (via `tools/guardrails/boundary.py`) on every commit and CI run. `flux` exposes generic shader pipelines, bindless handles, and canvas render targets; high-level BRDF models belong exclusively to `prism`.
 
 ### 3.2 Vulkan RHI Purity & Headless Software Fallback (ADR-0006, ADR-0019)
 - **Red-Line**: Optics maintains no runtime RHI abstraction layer. Vulkan 1.3 is the primary GPU backend.
@@ -84,7 +84,7 @@ All software in Optics adheres to four non-negotiable architectural mandates:
 
 ### 3.4 Library Stdout Hygiene
 - **Red-Line**: Shared library translation units under `libs/` must never write to `stdout` (`printf`, `puts`). Standard output is strictly reserved for application CLI or IPC wires. Diagnostic messages use `stderr`.
-- **Enforcement**: Mechanically asserted by `tools/optics check stdout` (via `tools/guardrails/stdout_purity.py`).
+- **Enforcement**: Mechanically asserted by `tools/gate check stdout` (via `tools/guardrails/stdout_purity.py`).
 
 ---
 

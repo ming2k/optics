@@ -34,7 +34,7 @@ jobs:
           sudo update-alternatives --set clang-format /usr/bin/clang-format-22
 
       - name: Format check
-        run: ./tools/optics check format
+        run: ./tools/gate check format
 
   workflow-lint:
     name: workflow lint (actionlint)
@@ -103,14 +103,14 @@ jobs:
       # Material boundary (ADR-0063): flux owns rendering mechanism and must
       # not reference any named material; materials live in prism.
       - name: Material boundary check
-        run: ./tools/optics check boundary
+        run: ./tools/gate check boundary
 
       # One release, one version: every library's *_VERSION_* macros
       # must equal meson.project_version(). (flux-scene-graph shipped
       # a hard-coded "0.0.29" string against 0.0.36 headers; anim sat
       # at 0.0.1 for seven months. Both invisible until this check.)
       - name: Version lockstep check
-        run: ./tools/optics check lockstep
+        run: ./tools/gate check lockstep
 
       # Static analysis (clang-tidy, clang + compile_commands). Baseline
       # policy: zero warnings; fix, don't silence. Platform TUs that only
@@ -119,12 +119,12 @@ jobs:
         run: |
           CC=clang meson setup build-tidy -Dtests=true -Dexamples=false \
             --buildtype=debug -Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled
-          ./tools/optics check tidy --build-dir build-tidy
+          ./tools/gate check tidy --build-dir build-tidy
 
       # Library stdout guardrail: diagnostics go to stderr, never stdout —
       # a consumer's stdout may be an IPC wire (e.g. the portal prompter).
       - name: No library stdout writes
-        run: ./tools/optics check stdout
+        run: ./tools/gate check stdout
 
       # Wayland listener contract (ADR-0145): libwayland abort()s the whole
       # process when the compositor sends an event whose slot in the wl_proxy
@@ -134,18 +134,18 @@ jobs:
       # contract in tools/config/wayland-listeners.toml, not the host's
       # protocol corpus — so it does not depend on installed Wayland headers.
       - name: Wayland listener contract
-        run: ./tools/optics check listeners
+        run: ./tools/gate check listeners
 
       # Symbol reference freshness: docs/reference/symbols.md is generated
       # from the installed headers (tools/guardrails/symbols.py). It drifted
       # silently before this check existed (removed symbols lingered,
       # new ones never appeared).
       - name: symbols.md freshness
-        run: ./tools/optics check symbols
+        run: ./tools/gate check symbols
 
       # Documentation integrity & audience firewall verification (ADR-0125)
       - name: Documentation integrity check
-        run: ./tools/optics check docs
+        run: ./tools/gate check docs
 
       - name: Configure (release)
         if: matrix.config == 'release'

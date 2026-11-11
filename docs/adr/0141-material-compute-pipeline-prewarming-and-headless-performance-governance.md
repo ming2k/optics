@@ -12,7 +12,7 @@ negative_knowledge: true
 
 - Status: Accepted
 - Date: 2026-11-03
-- Scope: `libs/prism/include/prism/{liquid_glass,frosted,acrylic,mica,backdrop_layer}.h`, `libs/prism/src/{liquid_glass,frosted,acrylic,mica,backdrop_layer}.c`, `tools/optics.py`, `tools/guardrails/bench_sla.py`.
+- Scope: `libs/prism/include/prism/{liquid_glass,frosted,acrylic,mica,backdrop_layer}.h`, `libs/prism/src/{liquid_glass,frosted,acrylic,mica,backdrop_layer}.c`, `tools/gate.py`, `tools/guardrails/bench_sla.py`.
 - Implementation: Landed. Closes the cold-start pipeline compilation hitch discovered via Tracy telemetry (ADR-0138). Extends all 5 Prism physical material filters with typed C23 warmup descriptors adhering to `[INV-ARCH-OPTS]`, moves `vkCreateComputePipelines` out of the frame walk hot-path, and establishes an automated headless SLA performance gate.
 - Depends on: [ADR-0138](0138-unified-tracy-profiler-telemetry-and-c23-facade.md), [ADR-0063](0063-liquid-glass-material-library.md), [ADR-0082](0082-lens-minimal-orthogonal-components-and-single-descriptor-api.md).
 
@@ -70,9 +70,9 @@ FLUX_PROFILE_ZONE(z_compile, "prism.liquid_glass.compile_pipelines");
 
 This isolates one-time compilation overhead from runtime compute dispatch in Tracy's timeline, allowing instant visual differentiation between driver compilation latency and GPU command recording.
 
-### 3. Headless Performance Governance (`tools/optics check bench`)
+### 3. Headless Performance Governance (`tools/gate check bench`)
 
-Optics integrates a headless performance guardrail into `./tools/optics check bench` backed by `tracy-capture` and `tracy-csvexport`. The guardrail mechanically verifies industrial-grade SLAs:
+Optics integrates a headless performance guardrail into `./tools/gate check bench` backed by `tracy-capture` and `tracy-csvexport`. The guardrail mechanically verifies industrial-grade SLAs:
 - **`iris.mailbox_publish` / `claim`**: P95 < 1.0 µs (lock-free communication).
 - **`lens.layout_solve`**: P95 < 100 µs (500-node UI tree).
 - **`lens.store_reap`**: P95 < 20 µs (retained state GC).
@@ -87,4 +87,4 @@ Any regression exceeding these limits immediately fails CI with a structured dia
 
 - **Zero First-Frame Jank**: Calling `prism_*_filter_warmup` at initialization reduces first-frame material execution from **13.56 ms to 0.55 ms** (a 24x speedup), comfortably fitting within 120Hz and 240Hz frame budgets.
 - **Architectural Symmetry**: All five material filters share uniform creation, warmup, apply, and release contracts without historical quirks or special-case laziness.
-- **Strict Invariant Compliance**: Enforced through `./tools/optics check` across boundary separation, symbol tables, and headless benchmark assertion gates.
+- **Strict Invariant Compliance**: Enforced through `./tools/gate check` across boundary separation, symbol tables, and headless benchmark assertion gates.

@@ -102,7 +102,7 @@ def run_format_check(repo_root: Path, fix: bool = False, cf_bin: str | None = No
     err_lines = ["code formatting check failed; the following files need formatting:"]
     for f in sorted(bad_files):
         err_lines.append(f"  {f}")
-    err_lines.append("run './tools/optics fix' to reformat in place.")
+    err_lines.append("run './tools/gate fix' to reformat in place.")
     return False, "", "\n".join(err_lines)
 
 

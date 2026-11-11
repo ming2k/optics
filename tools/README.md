@@ -2,37 +2,37 @@
 
 The `tools/` directory hosts the **machine-enforced architecture guardrails, build-time code generators, CI runners, and toolchain configurations** for the Optics monorepo.
 
-> **Architecture & Quality Policy:** `tools/` is strictly governed into structured domains. Every utility here is actively consumed by the unified developer CLI (`tools/optics`), GitHub Actions workflows (`.github/workflows/`), or the Meson build system (`meson.build`).
+> **Architecture & Quality Policy:** `tools/` is strictly governed into structured domains. Every utility here is actively consumed by the unified developer CLI (`tools/gate`), GitHub Actions workflows (`.github/workflows/`), or the Meson build system (`meson.build`).
 
 ---
 
-## 1. Unified Developer CLI (`tools/optics`)
+## 1. Unified Developer CLI (`tools/gate`)
 
 All local verification and automatic remediation workflow is consolidated under the unified cross-platform CLI:
 
 ```bash
 # Run the FULL gate set: 8 architecture guardrails + clang-tidy + the bench SLA.
 # This is the command AGENTS.md means by "verify through the unified gatekeeper".
-./tools/optics check
+./tools/gate check
 
 # Quick loop while iterating: the 8 architecture guardrails only.
 # Skips clang-tidy (~2 min) and the bench SLA. Do not declare a task complete
 # on --fast alone — that is the whole reason the two modes are named apart.
-./tools/optics check --fast
+./tools/gate check --fast
 
 # Run a specific guardrail check (format, boundary, lockstep, stdout, listeners,
 # symbols, leaks, docs, tidy, bench)
-./tools/optics check boundary
-./tools/optics check lockstep
+./tools/gate check boundary
+./tools/gate check lockstep
 
 # Run clang-tidy static analysis against library translation units
-./tools/optics check tidy
+./tools/gate check tidy
 
 # Automatically format C sources and synchronize public symbol documentation
-./tools/optics fix
+./tools/gate fix
 
 # List available guardrails, domains, and policy mapping
-./tools/optics list
+./tools/gate list
 ```
 
 ---
@@ -41,8 +41,8 @@ All local verification and automatic remediation workflow is consolidated under 
 
 ```text
 tools/
-├── optics                      # Executable CLI launcher
-├── optics.py                   # Pure Python 3 CLI runner (check, fix, list)
+├── gate                        # Executable CLI launcher
+├── gate.py                     # Pure Python 3 CLI runner (check, fix, list)
 ├── README.md                   # Tooling system documentation
 │
 ├── guardrails/                 # Domain: Architectural Invariants & Quality Enforcement
@@ -104,12 +104,12 @@ tools/
 |------|----------|-------------|
 | [`config/abi-supprs.abignore`](config/abi-supprs.abignore) | `libabigail` (CI) | ABI change suppression rules ensuring semver-compliant shared object compatibility. |
 | [`config/lsan.supp`](config/lsan.supp) | ASan / LSan | LeakSanitizer suppression list for known process-lifetime upstream allocations (e.g. fontconfig caches). |
-| [`config/wayland-listeners.toml`](config/wayland-listeners.toml) | `guardrails/listeners.py` (ADR-0145) | Pinned per-interface Wayland event contract. A reviewed artifact, not a suppression list: it records which events must have slots so the check never depends on the host's `wayland-protocols`. Regenerate with `./tools/optics fix listeners`. |
+| [`config/wayland-listeners.toml`](config/wayland-listeners.toml) | `guardrails/listeners.py` (ADR-0145) | Pinned per-interface Wayland event contract. A reviewed artifact, not a suppression list: it records which events must have slots so the check never depends on the host's `wayland-protocols`. Regenerate with `./tools/gate fix listeners`. |
 
 ---
 
 ## 4. Governance Rules
 
-1. **Single CLI Entrypoint:** All developer-facing verification and fixes run through `./tools/optics`. No detached wrapper scripts are allowed.
+1. **Single CLI Entrypoint:** All developer-facing verification and fixes run through `./tools/gate`. No detached wrapper scripts are allowed.
 2. **Domain Encapsulation:** Every file belongs to a domain subdirectory (`guardrails/`, `build/`, `ci/`, `config/`).
 3. **Deterministic & Fast:** Guardrails execute in milliseconds using Python 3 standard library and native compilers, with zero exotic package dependencies. **Python floor: 3.11** (`tomllib`) — declared here so the requirement is a documented contract rather than a discovery made on a contributor's first run.

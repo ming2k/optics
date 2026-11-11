@@ -80,7 +80,7 @@ reasons the author did not cause is a gate developers learn to route around.
 interface declares. It is checked in, reviewed like code, and its `corpus`
 key records which `wayland-protocols` version produced it. The guardrail reads
 only this file; the installed protocol corpus is consulted exclusively by
-`./tools/optics fix listeners`, which regenerates the contract and surfaces the
+`./tools/gate fix listeners`, which regenerates the contract and surfaces the
 change as a diff.
 
 This is the `symbols.md` pattern from
@@ -89,7 +89,7 @@ protocol surface rather than a C header: a generated, tracked artifact whose
 freshness is enforced, so drift is a reviewable one-line change instead of a
 host-dependent verdict.
 
-### 2. `./tools/optics check listeners` is hermetic
+### 2. `./tools/gate check listeners` is hermetic
 
 The check requires no Wayland installation, no network, and no build directory.
 It strips C comments (so a documented-but-absent handler still reads as absent),
@@ -125,7 +125,7 @@ to protect a backend; it must not outlive it.
 ### Positive
 
 - The 0.0.72 abort class cannot reach a release: a missing or extra slot fails
-  `./tools/optics check` in under 40 ms with the file, line, and variable.
+  `./tools/gate check` in under 40 ms with the file, line, and variable.
 - The verdict is identical on every developer machine and every CI runner,
   including hosts with no Wayland toolchain at all.
 - An upstream protocol addition arrives as a reviewed diff with a written

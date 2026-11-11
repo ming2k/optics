@@ -13,7 +13,7 @@
  *
  * The kind vocabulary is the one declared in <flux/observe.h>. Every row this
  * file touches must exist there — a kind that is missing is a coverage hole
- * the guardrail (tools/optics check leaks) reports independently.
+ * the guardrail (tools/gate check leaks) reports independently.
  */
 #include "test_helpers.h"
 

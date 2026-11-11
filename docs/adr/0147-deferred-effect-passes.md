@@ -262,7 +262,7 @@ instead of recording; `flux_blur_filter_current` refuses a pending slot),
 
 ### Known gap
 
-`./tools/optics check bench` (the Tracy-driven performance SLA gate) fails in
+`./tools/gate check bench` (the Tracy-driven performance SLA gate) fails in
 this environment: `tracy-capture -s 2` never receives a connection and the
 guardrail times out. Verified to fail identically on the **unmodified** tree
 with the change stashed, so it is a toolchain/environment condition rather than
@@ -273,11 +273,11 @@ is how a project learns to ignore its gates.
 ## Negative Knowledge
 
 - **Never claim a green tree from a gate set that silently omits gates.**
-  `./tools/optics check` ran only `QUALITY_GUARDRAILS` while its own `--help`
+  `./tools/gate check` ran only `QUALITY_GUARDRAILS` while its own `--help`
   advertised `all` as including `tidy` and `bench`. Two gates that were never
   executed were reported as passing by omission. `all` now means all ten, and a
   `--fast` flag names the quick subset explicitly, so "green" cannot be
-  ambiguous. `./tools/optics fix` forces the fast subset, because remediation is
+  ambiguous. `./tools/gate fix` forces the fast subset, because remediation is
   not verification and must not pay clang-tidy before touching a file.
 - **Never accept a symbol index that only regenerates a hand-maintained list.**
   The `symbols` guardrail verified that `docs/reference/symbols.md` matched the

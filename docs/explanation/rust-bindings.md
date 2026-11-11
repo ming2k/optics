@@ -27,7 +27,7 @@ RAII handles and Rust error types without duplicating the C implementation.
 
 Rust bindings workspaces and their inter-crate internal dependencies share
 the monorepo's single version number (`meson.project_version()`).
-This lockstep discipline is machine-enforced by `./tools/optics check lockstep`,
+This lockstep discipline is machine-enforced by `./tools/gate check lockstep`,
 which parses both the C header version macros and the Cargo manifests to ensure
 zero version drift between native binaries and language bindings.
 

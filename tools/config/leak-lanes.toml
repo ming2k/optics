@@ -3,7 +3,7 @@
 # Why this file exists: before it, leak coverage was re-derived by reading
 # test files during review. It could not be enumerated, so "is this kind
 # covered?" had no machine answer and drift was invisible. Here it is a fact:
-# `./tools/optics check leaks` derives the kind inventory from the public
+# `./tools/gate check leaks` derives the kind inventory from the public
 # headers and fails when a kind has neither a lane below nor a reasoned
 # exemption in leak-exempt.toml.
 #

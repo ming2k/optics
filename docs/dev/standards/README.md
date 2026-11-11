@@ -19,7 +19,7 @@ All engineering standards reside flatly in `docs/dev/standards/`:
 | **[`rfc.md`](rfc.md)** | **Request for Comments (RFC)**: Deliberation and consensus protocol for cross-cutting, high-reversal-cost subsystem redesigns prior to ADR ratification. |
 | **[`taxonomy.md`](taxonomy.md)** | **Documentation Taxonomy**: Four-quadrant Diátaxis layout, audience boundaries (public user vs contributor internal), and knowledge lifecycle. |
 | **[`style.md`](style.md)** | **Documentation & Markdown Style**: Canonical hyperlink conventions, relative routing, formatting consistency, and prose guidelines. |
-| **[`workflow.md`](workflow.md)** | **Engineering Workflow & PR Gates**: Review gates, `tools/optics check`, code-to-doc synchronization, and pre-release hygiene. |
+| **[`workflow.md`](workflow.md)** | **Engineering Workflow & PR Gates**: Review gates, `tools/gate check`, code-to-doc synchronization, and pre-release hygiene. |
 | **[`postmortems.md`](postmortems.md)** | **Blameless Incident Postmortems**: Root-cause analysis, timeline reconstruction, detection gap mitigation, and defense-in-depth principles. |
 
 For hands-on testing execution and QA runbooks, see [`docs/dev/testing.md`](../testing.md) and [`docs/dev/manual-testing.md`](../manual-testing.md).
@@ -29,7 +29,7 @@ For hands-on testing execution and QA runbooks, see [`docs/dev/testing.md`](../t
 ## Core Governance Philosophy
 
 1. **Mechanisms Over Exhortations**:
-   Rules and system boundaries must be enforced by concrete mechanisms: compiler attributes (`[[nodiscard]]`, C23 static assertions), link-time library separation, or deterministic automated test assertions (`tools/optics check`). Natural-language "swearing" in comments is forbidden.
+   Rules and system boundaries must be enforced by concrete mechanisms: compiler attributes (`[[nodiscard]]`, C23 static assertions), link-time library separation, or deterministic automated test assertions (`tools/gate check`). Natural-language "swearing" in comments is forbidden.
 2. **Anti-Inflation & Invariant Realism**:
    A sharp line separates **System Invariants** (non-negotiable structural red-lines with high blast radius), **Domain Contracts** (internal state machines and enums), **Design Specifications** (visual layout constants and tokens), and **Implementation Notes**.
 3. **Flat & Pragmatic**:

@@ -13,7 +13,7 @@ negative_knowledge: true
 - Status: Accepted
 - Date: 2026-11-02
 - Deciders: Optics Architecture Working Group
-- Consulted: CI, `tools/optics`
+- Consulted: CI, `tools/gate`
 - Informed: Core Engineering
 - Depends on: [ADR-0129](0129-observation-plane-and-resource-ledger.md)
 - Amends: [ADR-0098](0098-developer-tooling-and-architecture-guardrails.md)
@@ -53,10 +53,10 @@ during review, and the reader is the same person who is short of time.
 
 ## Architectural Decisions
 
-### 1. `tools/optics check leaks` is a guardrail domain
+### 1. `tools/gate check leaks` is a guardrail domain
 
 New guardrail `leaks` in `tools/guardrails/leaks.py`, registered in
-`tools/optics.py` alongside `boundary`/`lockstep`/`stdout`. It performs three
+`tools/gate.py` alongside `boundary`/`lockstep`/`stdout`. It performs three
 independent checks:
 
 **(a) Inventory.** Enumerate every public `*_create`, `*_retain`, `*_acquire`
@@ -94,7 +94,7 @@ mechanical enforcement path:
 
 | Invariant | Policy | Enforcement |
 |---|---|---|
-| `[INV-ARCH-LEDGER]` | Every public resource kind has a declared ledger scope and a leak lane (or a reasoned exemption). | `tools/optics check leaks` |
+| `[INV-ARCH-LEDGER]` | Every public resource kind has a declared ledger scope and a leak lane (or a reasoned exemption). | `tools/gate check leaks` |
 | `[INV-ARCH-SCOPEDRAIN]` | A scope's live count returns to zero at its declared drain point; `FLUX_LIFETIME_FRAME` kinds are enforced every frame in debug configurations. | `test_observe_scope` + frame-boundary assertion |
 
 Both satisfy the three admissibility criteria in `invariants.md`: high blast
@@ -150,7 +150,7 @@ affinity) — each with its reason written down.
   decision instead of an absence.
 - Symbol-absence checking retires a recurring class of "debug path leaked into
   release" regressions.
-- The guardrail reuses the existing `tools/optics` machinery (domain modules,
+- The guardrail reuses the existing `tools/gate` machinery (domain modules,
   `--fix` plumbing, exit-code conventions), so there is one tool, not two.
 
 ### Negative & Trade-offs
@@ -165,13 +165,13 @@ affinity) — each with its reason written down.
 
 ## Acceptance Criteria
 
-1. `./tools/optics check leaks` fails when a public `*_create`/`*_retain`
+1. `./tools/gate check leaks` fails when a public `*_create`/`*_retain`
    kind has no lane and no exemption, demonstrated by a negative test
    (`tests/optics/test_leaks_guardrail.py`).
 2. The guardrail passes on the tree at the end of this change.
 3. `[INV-ARCH-LEDGER]` and `[INV-ARCH-SCOPEDRAIN]` appear in
    `docs/dev/standards/invariants.md` with their enforcement mechanism.
-4. `./tools/optics check` (all domains) is green.
+4. `./tools/gate check` (all domains) is green.
 
 ## Links
 

@@ -7,7 +7,7 @@
  * comments admitting the hazard in prose ("or it leaks").
  *
  * The wrappers below are the only sanctioned way to open, duplicate or close
- * a descriptor in iris. `tools/optics check leaks` fails the build on a raw
+ * a descriptor in iris. `tools/gate check leaks` fails the build on a raw
  * `close(` / `dup(` / `eventfd(` / `timerfd_create(` in libs/iris outside
  * this header, because a leak detector that can be bypassed by the next
  * `#include <unistd.h>` is not a detector.

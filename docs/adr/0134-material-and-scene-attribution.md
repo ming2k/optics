@@ -159,7 +159,7 @@ deliberately not bundled into this one.
    material's kind, verified by `test_prism_material_leak` asserting the row
    directly.
 2. A leaked scene is reported with `owner=vista/scene`.
-3. `tools/optics check leaks` is green, with prism and vista lanes pointing at
+3. `tools/gate check leaks` is green, with prism and vista lanes pointing at
    exact-delta tests.
 4. The kind vocabulary in `<flux/observe.h>` lists the new kinds.
 

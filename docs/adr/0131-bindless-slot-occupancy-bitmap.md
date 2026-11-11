@@ -153,7 +153,7 @@ mechanical, neither relying on a comment.
    unchanged, error logged, no duplicate in the free stack).
 2. `flux_device_memory_stats` and the ledger agree on the live slot count after
    a soak of register/release pairs.
-3. `./tools/optics check` is green.
+3. `./tools/gate check` is green.
 
 ## Links
 

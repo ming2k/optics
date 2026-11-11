@@ -205,7 +205,7 @@ orderings, i.e. noise. That result is why the GPU harness exists.
 - **New public API in `<flux/sdf.h>`**: `flux_sdf_sample` (a `float distance` plus a unit
   `flux_point normal`), `flux_sdf_squircle_gradient`, `flux_sdf_squircle_sample`,
   `flux_sdf_smooth_union` and `flux_sdf_smooth_union_gradient`. The header is registered in
-  `tools/guardrails/symbols.py`, so `./tools/optics fix` lists them in
+  `tools/guardrails/symbols.py`, so `./tools/gate fix` lists them in
   `docs/reference/symbols.md`.
 - **The metaball composition moved out of the material.** `smooth_union` was a private
   function inside `liquid_glass.comp`. A fused body is one field, and a material carrying its

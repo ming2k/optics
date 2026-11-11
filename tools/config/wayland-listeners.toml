@@ -11,7 +11,7 @@
 # the version this tree binds: a slot left NULL passes today and aborts the
 # process the moment a bind version rises.
 #
-# Regenerate with:  ./tools/optics fix listeners
+# Regenerate with:  ./tools/gate fix listeners
 # Review the diff. A new event here means a new slot is required in the C
 # table — libwayland abort()s on an unimplemented event.
 

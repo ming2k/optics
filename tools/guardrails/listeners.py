@@ -46,7 +46,7 @@ never read from the installed protocol corpus at check time:
      is an error, so a new protocol adoption cannot silently escape
      verification by not being in the corpus yet.
 
-`./tools/optics fix listeners` regenerates the contract from the local corpus
+`./tools/gate fix listeners` regenerates the contract from the local corpus
 and records the corpus version it read, so staleness is visible in the diff.
 The check itself needs no Wayland installation.
 
@@ -304,7 +304,7 @@ def render_contract(events_by_iface: dict[str, list[str]], corpus: str) -> str:
         "# the version this tree binds: a slot left NULL passes today and aborts the",
         "# process the moment a bind version rises.",
         "#",
-        "# Regenerate with:  ./tools/optics fix listeners",
+        "# Regenerate with:  ./tools/gate fix listeners",
         "# Review the diff. A new event here means a new slot is required in the C",
         "# table — libwayland abort()s on an unimplemented event.",
         "",
@@ -322,7 +322,7 @@ def load_contract(repo_root: Path) -> tuple[dict[str, list[str]], list[str]]:
     if not path.is_file():
         return {}, [
             f"{CONTRACT_REL.as_posix()}: missing — regenerate with"
-            " './tools/optics fix listeners'"
+            " './tools/gate fix listeners'"
         ]
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -335,7 +335,7 @@ def load_contract(repo_root: Path) -> tuple[dict[str, list[str]], list[str]]:
     if not isinstance(interfaces, dict) or not interfaces:
         return {}, [
             f"{CONTRACT_REL.as_posix()}: declares no [interface.*] entries —"
-            " regenerate with './tools/optics fix listeners'"
+            " regenerate with './tools/gate fix listeners'"
         ]
     for iface, spec in interfaces.items():
         events = spec.get("events") if isinstance(spec, dict) else None
@@ -388,7 +388,7 @@ def check_listeners(repo_root: Path) -> list[str]:
                 f"{table.path}:{table.line}: {table.var} declares"
                 f" {table.struct} for interface '{table.iface}', which is not in"
                 f" {CONTRACT_REL.as_posix()} — regenerate with"
-                " './tools/optics fix listeners' and review the added events"
+                " './tools/gate fix listeners' and review the added events"
             )
             continue
 
@@ -406,7 +406,7 @@ def check_listeners(repo_root: Path) -> list[str]:
                 + ", ".join(f"'{slot}'" for slot in unknown)
                 + f", which {CONTRACT_REL.as_posix()} does not list as an event of"
                 f" '{table.iface}' — the contract is stale; regenerate with"
-                " './tools/optics fix listeners'"
+                " './tools/gate fix listeners'"
             )
 
     return violations

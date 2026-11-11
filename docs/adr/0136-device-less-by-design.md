@@ -163,9 +163,9 @@ gains one where it does not.
    icon, observable via `flux_observe_report(nullptr, scope=PROCESS)`.
 2. `icon_mask.c` and `replay.c` contain no raw allocation except lines carrying
    a marker from the closed vocabulary.
-3. `tools/optics check leaks` fails on a raw allocation in a context-bound file,
+3. `tools/gate check leaks` fails on a raw allocation in a context-bound file,
    demonstrated by a negative test.
-4. `./tools/optics check` is green.
+4. `./tools/gate check` is green.
 
 ## Links
 

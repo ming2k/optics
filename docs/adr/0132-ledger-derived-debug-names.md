@@ -122,7 +122,7 @@ ledger path. The stack-buffer pattern is deleted, not documented.
 
 `flux_observe_name_object` compiles to `return false` when
 `FLUX_OBSERVE_ATTRIBUTION` is absent, and the name-format template is behind
-the same guard. `tools/optics check leaks` already verifies the template is
+the same guard. `tools/gate check leaks` already verifies the template is
 absent from a non-attribution build; that check now covers a real,
 live implementation rather than a stub.
 
@@ -178,12 +178,12 @@ row agree.
 ## Acceptance Criteria
 
 1. `flux_observe_object_name` has a caller; `FLUX_OBSERVE_NAMES` has a consumer
-   outside the ledger, verified by `tools/optics check leaks`.
+   outside the ledger, verified by `tools/gate check leaks`.
 2. No call site passes a stack buffer to a debug-name function; `git grep`
    for the pattern is empty and the guardrail fails if it reappears.
 3. A capture from an attribution build shows distinct names for two objects of
    the same kind and shape.
-4. `tools/optics check leaks` is green, and the non-attribution build still
+4. `tools/gate check leaks` is green, and the non-attribution build still
    contains zero name-format machinery.
 
 ## Links

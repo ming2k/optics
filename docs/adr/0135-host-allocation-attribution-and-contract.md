@@ -170,7 +170,7 @@ existed.
 
 ### 6. The guardrail enforces the funnel
 
-`tools/optics check leaks` gains a check: outside the exempt platform TUs and
+`tools/gate check leaks` gains a check: outside the exempt platform TUs and
 outside `.c` files that own a device-less fallback (declared by an anchored
 comment marker), a raw `malloc`/`calloc`/`free` in `libs/{prism,lens,glyph}` is
 a failure. A new library cannot quietly join the non-compliant set.
@@ -231,9 +231,9 @@ a failure. A new library cannot quietly join the non-compliant set.
 3. A hostile-allocator test proves prism, lens and glyph each route their
    allocations through the caller's allocator, and that every byte returned came
    back, per (owner, kind).
-4. `tools/optics check leaks` fails on a raw libc allocation in a non-exempt
+4. `tools/gate check leaks` fails on a raw libc allocation in a non-exempt
    `libs/{prism,lens,glyph}` TU.
-5. `./tools/optics check` is green; the ABI baseline is regenerated with no new
+5. `./tools/gate check` is green; the ABI baseline is regenerated with no new
    suppression; `docs/reference/symbols.md` is regenerated.
 
 ## Links

@@ -14,6 +14,12 @@ silently reading a different descriptor layout.
 
 ## [Unreleased]
 
+### Changed
+
+- **tooling**: The unified developer CLI moved from `./tools/optics` to
+  `./tools/gate` so it is not mistaken for the product entry point. The
+  `check`, `fix`, and `list` subcommands are unchanged.
+
 ## [0.0.78] - 2026-11-11
 
 ### Added

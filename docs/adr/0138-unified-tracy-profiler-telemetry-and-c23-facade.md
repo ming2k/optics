@@ -127,4 +127,4 @@ typedef struct flux_profile_status {
 
 - **Developer Superpower**: Developers can connect the Tracy GUI (`tracy-profiler`) over localhost TCP port 8086 to inspect UI thread build passes, Mailbox snapshot exchange, and hardware presentation timing on the exact same nanosecond timeline.
 - **Zero Release Contamination**: In default builds (`-Dtracy=false`), the compiler encounters only empty macros. No extra link libraries, zero binary bloat, and zero ABI differences.
-- **Strict Invariant Compliance**: Verified through `tools/optics check` across boundary isolation, library stdout purity, version lockstep, and symbols synchronization.
+- **Strict Invariant Compliance**: Verified through `tools/gate check` across boundary isolation, library stdout purity, version lockstep, and symbols synchronization.

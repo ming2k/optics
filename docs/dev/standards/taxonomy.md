@@ -55,7 +55,7 @@ Documentation is structured into two distinct surfaces separated by a one-way vi
    - Links into `docs/adr/` remain permitted: a public reader may follow an architectural decision record, but not an internal contributor checklist or runbook.
 4. **Reverse Linking Permitted**: Internal developer documents may freely link outward to public reference and how-to guides.
 
-Enforcement is mechanical via `tools/optics check docs` (`tools/guardrails/doc_links.py`).
+Enforcement is mechanical via `tools/gate check docs` (`tools/guardrails/doc_links.py`).
 
 ---
 

@@ -16,6 +16,7 @@ negative_knowledge: true
 - Consulted: Platform Architecture, Engine Core, Tools Maintainers
 - Informed: Core Engineering
 - Amends: [ADR-0098](0098-developer-tooling-and-architecture-guardrails.md), [ADR-0125](0125-docgov-decoupling-standards-consolidation-and-documentation-modernization.md)
+- Amended: 2026-11-11 — launcher renamed from `./tools/optics` to `./tools/gate` to avoid confusion with the Optics product name; no behavior change.
 
 ---
 
@@ -39,17 +40,17 @@ ADR-0098 previously consolidated scattered pre-commit checks into `./tools/check
    - `tools/ci/`: Dedicated CI runners and platform cross-compilation harnesses (`zig-win32-check.sh`).
    - `tools/config/`: Toolchain suppressions and sanitizer definitions (`abi-supprs.abignore`, `lsan.supp`).
 
-2. **Unified Cross-Platform CLI (`tools/optics`)**:
-   Implement a single-entry Python CLI (`tools/optics.py` with executable launcher `tools/optics`) as the sole public gateway for developer verification:
-   - `./tools/optics check [target]` (default: all core quality guardrails; supports granular targets like `boundary`, `lockstep`, `tidy`).
-   - `./tools/optics fix` (automated code reformatting and symbol table synchronization).
-   - `./tools/optics list` (self-documenting tool metadata and invariant mapping).
+2. **Unified Cross-Platform CLI (`tools/gate`)**:
+   Implement a single-entry Python CLI (`tools/gate.py` with executable launcher `tools/gate`) as the sole public gateway for developer verification:
+   - `./tools/gate check [target]` (default: all core quality guardrails; supports granular targets like `boundary`, `lockstep`, `tidy`).
+   - `./tools/gate fix` (automated code reformatting and symbol table synchronization).
+   - `./tools/gate list` (self-documenting tool metadata and invariant mapping).
 
 3. **Syntax-Aware Comment Stripping**:
    Guardrails parse tokens outside C/GLSL comments and string literals, preventing false-positive rejections on architectural prose.
 
 4. **Zero Historical Baggage**:
-   Prune all legacy flat shims (`tools/check-all.sh`, `check-material-boundary.sh`, `check-version-lockstep.sh`, `check-no-library-stdout.sh`, `check-format.sh`, `check-tidy.sh`, `verify.sh`, `check-doc-links.py`, `gen_symbols.py`). CI workflows and documentation update directly to `./tools/optics`.
+   Prune all legacy flat shims (`tools/check-all.sh`, `check-material-boundary.sh`, `check-version-lockstep.sh`, `check-no-library-stdout.sh`, `check-format.sh`, `check-tidy.sh`, `verify.sh`, `check-doc-links.py`, `gen_symbols.py`). CI workflows and documentation update directly to `./tools/gate`.
 
 ---
 
@@ -62,6 +63,6 @@ ADR-0098 previously consolidated scattered pre-commit checks into `./tools/check
 
 ## Consequences
 
-- The `tools/` root directory is clean, containing only `optics` CLI, `optics.py`, `README.md`, and four domain subdirectories.
+- The `tools/` root directory is clean, containing only the `gate` CLI, `gate.py`, `README.md`, and four domain subdirectories.
 - Developer verification runs in milliseconds across all platforms with clear terminal diagnostics and granular subcommands.
 - Architectural invariant enforcement is resilient to comment prose and free of legacy wrappers.

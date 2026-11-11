@@ -120,8 +120,8 @@ Acceptance:
 ```bash
 meson compile -C build
 meson test -C build --no-suite bench     # 256 tests currently green
-./tools/optics check --fast              # 8 guardrails
-./tools/optics check tidy
+./tools/gate check --fast              # 8 guardrails
+./tools/gate check tidy
 
 # DisplayList wire fuzz. The default `build/` uses the standalone driver:
 # one seed file per invocation (or stdin).

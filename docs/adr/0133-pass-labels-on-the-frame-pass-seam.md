@@ -116,7 +116,7 @@ through a null pointer.
 ## Acceptance Criteria
 
 1. `FLUX_OBSERVE_PASS_LABELS` has a consumer outside the ledger, verified by
-   `tools/optics check leaks`.
+   `tools/gate check leaks`.
 2. An attribution build with the capability set emits
    `vkCmdBeginDebugUtilsLabelEXT`/`End` around each pass; without the capability
    it does not, and without `VK_EXT_debug_utils` the calls are no-ops.

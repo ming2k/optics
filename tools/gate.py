@@ -5,9 +5,9 @@ Provides single-entry architecture governance, verification, and automated remed
 for the Optics monorepo (ADR-0098, ADR-0125).
 
 Usage:
-  ./tools/optics check [name]  # Run all guardrails or a specific one (format, boundary, lockstep, stdout, symbols, leaks, docs, tidy)
-  ./tools/optics fix           # Auto-format C sources and regenerate symbols.md
-  ./tools/optics list          # List available guardrails, domains, and policy mapping
+  ./tools/gate check [name]  # Run all guardrails or a specific one (format, boundary, lockstep, stdout, symbols, leaks, docs, tidy)
+  ./tools/gate fix           # Auto-format C sources and regenerate symbols.md
+  ./tools/gate list          # List available guardrails, domains, and policy mapping
 """
 
 import argparse
@@ -240,7 +240,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             elif stdout_msg:
                 sys.stderr.write(stdout_msg + "\n")
             if not fix and g["supports_fix"]:
-                sys.stderr.write(f"\n{YELLOW}hint: run './tools/optics fix' to automatically remediate.{RESET}\n")
+                sys.stderr.write(f"\n{YELLOW}hint: run './tools/gate fix' to automatically remediate.{RESET}\n")
             return 1
 
     total_ms = (time.perf_counter() - start_all) * 1000
@@ -251,7 +251,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 def cmd_fix(args: argparse.Namespace) -> int:
     args.fix = True
     # fix is a formatting/symbol remediation pass, not a verification pass: it
-    # must stay on the fast subset or every `./tools/optics fix` would pay for
+    # must stay on the fast subset or every `./tools/gate fix` would pay for
     # clang-tidy and the bench SLA before touching a source file.
     args.fast = True
     args.target = "all"
@@ -265,15 +265,15 @@ def cmd_list(args: argparse.Namespace) -> int:
     for g in ALL_GUARDRAILS:
         fixable = " (auto-fixable)" if g["supports_fix"] else ""
         print(f"{g['id']:<12} {g['name'] + fixable:<50} {g['policy']:<30}")
-    print("\nRun './tools/optics check' to verify core quality guardrails.")
-    print("Run './tools/optics check tidy' to run clang-tidy static analysis.")
-    print("Run './tools/optics check bench' to run headless performance SLA verification.")
+    print("\nRun './tools/gate check' to verify core quality guardrails.")
+    print("Run './tools/gate check tidy' to run clang-tidy static analysis.")
+    print("Run './tools/gate check bench' to run headless performance SLA verification.")
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        prog="optics",
+        prog="gate",
         description="Unified developer tooling and architecture guardrail CLI for Optics.",
     )
     subparsers = parser.add_subparsers(dest="subcommand")

@@ -191,7 +191,7 @@ Scopes declare their drain point as data, and the runtime enforces it:
   debug configurations. Any non-zero live count after that boundary is a bug,
   not a statistic.
 - `FLUX_LIFETIME_CONTEXT`: asserted at context teardown.
-- `FLUX_LIFETIME_PROCESS`: asserted only by `tools/optics check leaks`.
+- `FLUX_LIFETIME_PROCESS`: asserted only by `tools/gate check leaks`.
 
 This ordering matters because the frame scope is the only one that can be
 enforced continuously without stalls, and it catches the largest class of
@@ -295,7 +295,7 @@ following are the gate conditions, not aspirations:
    `(scope, kind, owner)` before `vkDestroyDevice`.
 2. Release build with `FLUX_OBSERVE_COUNTS` only exports no
    `flux_observe_name*` / `flux_observe_site*` / pass-label symbols,
-   verified by `tools/optics check leaks`.
+   verified by `tools/gate check leaks`.
 3. `tests/flux/integration/test_text_atlas_leak.c` asserts exact equality
    (`== baseline`) rather than `<= baseline + 2`.
 4. A lens-scope leak test exists and fails when the store is deliberately
