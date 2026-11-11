@@ -71,14 +71,14 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "flux"
-version = "0.0.77"
+version = "0.0.78"
 dependencies = [
  "flux-sys",
 ]
 
 [[package]]
 name = "flux-sys"
-version = "0.0.77"
+version = "0.0.78"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -220,7 +220,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "svg"
-version = "0.0.77"
+version = "0.0.78"
 dependencies = [
  "flux",
  "svg-sys",
@@ -228,7 +228,7 @@ dependencies = [
 
 [[package]]
 name = "svg-sys"
-version = "0.0.77"
+version = "0.0.78"
 dependencies = [
  "bindgen",
  "flux-sys",

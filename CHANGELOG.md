@@ -14,7 +14,7 @@ silently reading a different descriptor layout.
 
 ## [Unreleased]
 
-## [0.0.77] - 2026-11-11
+## [0.0.78] - 2026-11-11
 
 ### Added
 

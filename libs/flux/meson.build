@@ -405,7 +405,7 @@ endif
 #SO versioning(libtool semantics, per docs / reference / api.md):
 #- `soversion` (the SONAME) encodes the * compatibility boundary *.Pre - 1.0
 #this tree has appended descriptor fields and changed pass behavior on
-#patch bumps, so the boundary is the full version(`0.0.77`).From 1.0 on
+#patch bumps, so the boundary is the full version(`0.0.78`).From 1.0 on
 #it is `major.minor`; `optics_soname` is derived once in the top - level
 #meson.build.
 #- `version` (the real - name suffix) is the full X.Y.Z so each release is a
