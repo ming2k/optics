@@ -14,6 +14,8 @@ silently reading a different descriptor layout.
 
 ## [Unreleased]
 
+## [0.0.77] - 2026-11-11
+
 ### Added
 
 - **flux**: The first RenderPlan slice (ADR-0089/0092): a target contract,

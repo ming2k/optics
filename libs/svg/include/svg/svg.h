@@ -51,7 +51,7 @@ extern "C" {
 
 #define SVG_VERSION_MAJOR 0
 #define SVG_VERSION_MINOR 0
-#define SVG_VERSION_PATCH 76
+#define SVG_VERSION_PATCH 77
 
 /* Packed integer version, monotonic — identical layout to FLUX_VERSION_NUMBER. */
 #define SVG_VERSION_NUMBER                                                                         \

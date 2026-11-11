@@ -16,4 +16,4 @@ pkg-config = "0.3"
 # flux-sys is re-exported so the flux handles and value types svg speaks
 # (flux_canvas, flux_encoder, flux_color, ...) have ONE Rust definition across
 # the stack, with no casts at the crate seam.
-flux-sys = { path = "../../../flux-rs/crates/flux-sys", version = "0.0.76" }
+flux-sys = { path = "../../../flux-rs/crates/flux-sys", version = "0.0.77" }
