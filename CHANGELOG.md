@@ -12,7 +12,7 @@ pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
 
-## [Unreleased]
+## [0.0.79] - 2026-11-12
 
 ### Changed
 

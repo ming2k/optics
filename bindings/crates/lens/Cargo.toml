@@ -8,5 +8,5 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-lens-sys = { path = "../lens-sys", version = "0.0.78" }
-flux = { path = "../flux", version = "0.0.78" }
+lens-sys = { path = "../lens-sys", version = "0.0.79" }
+flux = { path = "../flux", version = "0.0.79" }

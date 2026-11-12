@@ -9,10 +9,10 @@ rust-version.workspace = true
 links = "iris_rs"
 
 [dependencies]
-iris-sys = { path = "../iris-sys", version = "0.0.78" }
-lens = { path = "../lens", version = "0.0.78" }
-lens-sys = { path = "../lens-sys", version = "0.0.78" }
-flux = { path = "../flux", version = "0.0.78" }
+iris-sys = { path = "../iris-sys", version = "0.0.79" }
+lens = { path = "../lens", version = "0.0.79" }
+lens-sys = { path = "../lens-sys", version = "0.0.79" }
+flux = { path = "../flux", version = "0.0.79" }
 
 [[example]]
 name = "hello"

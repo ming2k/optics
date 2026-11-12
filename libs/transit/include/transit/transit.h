@@ -40,7 +40,7 @@ extern "C" {
 
 #define TRANSIT_VERSION_MAJOR 0
 #define TRANSIT_VERSION_MINOR 0
-#define TRANSIT_VERSION_PATCH 78
+#define TRANSIT_VERSION_PATCH 79
 
 /* Packed integer version, monotonic — identical layout to
  * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7). */

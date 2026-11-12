@@ -8,14 +8,14 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-flux = { path = "../flux", version = "0.0.78", optional = true }
-glyph = { path = "../glyph", version = "0.0.78", optional = true }
-lens = { path = "../lens", version = "0.0.78", optional = true }
-iris = { path = "../iris", version = "0.0.78", optional = true }
-prism = { path = "../prism", version = "0.0.78", optional = true }
-reticle = { path = "../reticle", version = "0.0.78", optional = true }
-vista = { path = "../vista", version = "0.0.78", optional = true }
-transit = { path = "../transit", version = "0.0.78", optional = true }
+flux = { path = "../flux", version = "0.0.79", optional = true }
+glyph = { path = "../glyph", version = "0.0.79", optional = true }
+lens = { path = "../lens", version = "0.0.79", optional = true }
+iris = { path = "../iris", version = "0.0.79", optional = true }
+prism = { path = "../prism", version = "0.0.79", optional = true }
+reticle = { path = "../reticle", version = "0.0.79", optional = true }
+vista = { path = "../vista", version = "0.0.79", optional = true }
+transit = { path = "../transit", version = "0.0.79", optional = true }
 
 [features]
 default = ["ui", "platform", "motion"]

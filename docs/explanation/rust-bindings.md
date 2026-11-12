@@ -15,13 +15,13 @@ are guarded by additive Cargo feature flags:
 ```toml
 [dependencies]
 # Full desktop application (defaults to ui + platform + motion)
-optics = "0.0.78"
+optics = "0.0.79"
 
 # Headless rendering foundation only (zero Wayland/windowing/UI dependencies)
-optics = { version = "0.0.78", default-features = false, features = ["canvas"] }
+optics = { version = "0.0.79", default-features = false, features = ["canvas"] }
 
 # Headless UI layout and state machine (no OS window system)
-optics = { version = "0.0.78", default-features = false, features = ["ui"] }
+optics = { version = "0.0.79", default-features = false, features = ["ui"] }
 ```
 
 ### Feature Flags & Architectural Layer Mapping
@@ -53,7 +53,7 @@ Under `bindings/crates/`, the internal `-sys` crates manage low-level FFI and na
 
 ## Version Lockstep
 
-All crates within `bindings/` share the root workspace version (`0.0.78`) declared in `bindings/Cargo.toml`. Version drift between language bindings and C libraries is mechanically prohibited.
+All crates within `bindings/` share the root workspace version (`0.0.79`) declared in `bindings/Cargo.toml`. Version drift between language bindings and C libraries is mechanically prohibited.
 
 ## Development Linking & Testing
 

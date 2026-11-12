@@ -9,5 +9,5 @@ rust-version.workspace = true
 build = "build.rs"
 
 [dependencies]
-reticle-sys = { path = "../reticle-sys", version = "0.0.78" }
-flux = { path = "../flux", version = "0.0.78" }
+reticle-sys = { path = "../reticle-sys", version = "0.0.79" }
+flux = { path = "../flux", version = "0.0.79" }

@@ -9,7 +9,7 @@
 
 pub const VERSION_MAJOR: u32 = 0;
 pub const VERSION_MINOR: u32 = 0;
-pub const VERSION_PATCH: u32 = 78;
+pub const VERSION_PATCH: u32 = 79;
 
 pub const VERSION_NUMBER: u32 = (VERSION_MAJOR << 16) | (VERSION_MINOR << 8) | VERSION_PATCH;
 
@@ -18,7 +18,7 @@ pub const DT_MAX: f32 = 1.0 / 30.0;
 
 /// Library version string.
 pub fn version() -> &'static str {
-    "0.0.78"
+    "0.0.79"
 }
 
 /// Packed integer version of the library.
