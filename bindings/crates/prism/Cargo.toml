@@ -1,0 +1,13 @@
+[package]
+name = "prism"
+description = "Safe Rust bindings to prism: liquid-glass materials on the flux effect runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+prism-sys = { path = "../prism-sys", version = "0.0.78" }
+flux = { path = "../flux", version = "0.0.78" }
+flux-sys = { path = "../flux-sys", version = "0.0.78" }

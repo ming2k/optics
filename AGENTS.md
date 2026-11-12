@@ -12,6 +12,7 @@
   - `vista`: Scene graph orchestration, cameras, hierarchical transforms, and spatial bounds.
   - `prism`: Physical surface materials: dielectric Liquid Glass (refraction, dispersion, contact AO), Frosted Glass, Acrylic, and Mica.
   - `transit`: Provable motion physics, closed-form analytic spring integration, and parametric easing.
+  - `reticle`: Vector-art document compiler (SVG path grammar, shape decomposition, gradient resolution, headless rasterization).
   - `lens`: Immediate-mode UI engine, layout (Grid/Flex/Flow), retained store state machines, and accessibility tree export (A11y).
   - `iris`: Native OS windowing, event pump, display pacing (Wayland, Win32, Cocoa), pre-lens event seam (ADR-0107), and dual-thread pipeline (ADR-0124).
 - **Pure C23 Baseline**: Idiomatic modern C (`-std=c23`) across all modules:
@@ -21,15 +22,14 @@
   - Attributes: Standard C23 `[[nodiscard]]`, `[[reproducible]]`, `[[unsequenced]]`.
   - Assertions: Standard C23 `static_assert(cond, msg)`.
 - **Single Opts Descriptor Paradigm**: Every public functional entry point accepts **exactly one** typed descriptor pointer (`const module_<item>_opts *opts`) and returns a structured response. Dual API tiers (`_ex`), parameter suffixes (`_wrapped`, `_primary`), and floating state modifiers are strictly forbidden.
-- **Material Boundary Separation (ADR-0063)**: `flux` (Layer 0) must NEVER reference named materials (`prism_`, `liquid_glass`) or higher-level shaders. Enforced mechanically by `tools/gate check boundary`.
+- **Material Boundary Separation (ADR-0063)**: `flux` (Layer 0) must NEVER reference named materials (`prism_`, `liquid_glass`) or higher-level shaders. Enforced natively by linker and build-system dependency isolation.
 - **Zero-Alloc Frame Walk**: Render walk and widget layout passes (`lens_begin` ➔ `lens_end`) must never invoke libc `malloc`/`calloc`/`realloc`/`free`. Memory borrows strictly from the per-frame arena (`ui->arena`).
 - **Library Stdout Purity**: Shared library TUs must never write to `stdout` (`printf`, `puts`), reserving stdout for IPC. Use `stderr` for diagnostics.
 
 ## 3. Engineering Discipline
 - **Mechanisms Over Exhortations**: Rely on C23 compiler attributes (`[[nodiscard]]`, `static_assert`), link-time library separation, and automated tests to guarantee invariants. Never rely on natural-language comments alone.
 - **Anti-Inflation**: Do not mint pseudo-invariant tags. Model states via typed enums, and layout metrics via design constants (`docs/dev/standards/invariants.md`).
-- **Audience Firewall**: Public documentation (`docs/{tutorials,how-to,reference,explanation}/`) MUST NEVER link to internal contributor docs (`docs/dev/**`). Links into `docs/adr/` remain permitted.
-- **Atomic Verification**: Always verify changes through the unified gatekeeper `./tools/gate check` before declaring tasks complete.
+- **Verification**: Verify changes through `meson test -C build` and `./tools/format.sh --check` before declaring tasks complete.
 - **Clean Epistemic Lineage**: References must resolve to canonical in-repo ADRs (`docs/adr/0001`+).
 
 ## 4. On-Demand Standards Routing

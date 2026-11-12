@@ -37,16 +37,6 @@ test_version_lockstep = executable('test_version_lockstep',
 )
 test('version_lockstep', test_version_lockstep, suite : 'unit')
 
-# Deviceless GLB parse stage (ADR-0016): container validation, the
-# documented out-handle contract, truncation at every boundary, hostile
-# headers/bodies, and garbage sweeps — all without a Vulkan device.
-# (The GPU build stage is covered by the scene_graph integration suite.)
-test_glb_parse = executable('test_glb_parse',
-  'test_glb_parse.c',
-  dependencies : [test_helpers_dep, vista_dep],
-)
-test('glb_parse', test_glb_parse, suite : 'unit')
-
 test_math = executable('test_math',
   'test_math.c',
   dependencies : [test_helpers_dep],

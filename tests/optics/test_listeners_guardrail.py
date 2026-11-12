@@ -19,7 +19,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools.guardrails import listeners  # noqa: E402
+import tools.check_listeners as listeners  # noqa: E402
 
 CONTRACT = """
 corpus = "wayland-protocols test"

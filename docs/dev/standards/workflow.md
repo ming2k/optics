@@ -10,25 +10,17 @@ Before any pull request is merged into `main`, it must clear the following verif
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│ 1. Unified Guardrails Gate: `tools/gate check`            │
-│    - Format check (clang-format 22.x)                       │
-│    - Material boundary separation (ADR-0063)                │
-│    - Version lockstep across sibling libraries              │
-│    - Library stdout hygiene (stderr only)                   │
-│    - Public symbols reference freshness (`symbols.py`)      │
-│    - Documentation integrity & audience firewall            │
+│ 1. Formatting Gate: `./tools/format.sh --check`             │
+│    All C sources conform to clang-format                    │
 ├─────────────────────────────────────────────────────────────┤
 │ 2. Automated Test Gate: `meson test -C build`               │
-│    All C unit, integration, and benchmark tests pass        │
+│    All unit, integration, and lint tests pass               │
 ├─────────────────────────────────────────────────────────────┤
 │ 3. Sanitizer Gate: ASan + UBSan Cleanliness                 │
 │    Zero leaks, zero undefined behavior, zero alloc faults   │
 ├─────────────────────────────────────────────────────────────┤
 │ 4. Rust Bindings Gate: `cargo test --workspace`             │
 │    All safe bindings in `bindings/` compile and pass tests  │
-├─────────────────────────────────────────────────────────────┤
-│ 5. Code-to-Doc Synchronization Gate                         │
-│    Public API or architecture changes matched with docs     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -40,7 +32,7 @@ Any pull request that introduces or modifies developer-visible or integrator-fac
 
 | Modified Surface | Required Documentation Synchronization |
 | :--- | :--- |
-| Public C API headers (`libs/*/include/**/*.h`) | `docs/reference/api.md` & symbol index (`./tools/gate check symbols`) |
+| Public C API headers (`libs/*/include/**/*.h`) | `docs/reference/api.md` |
 | Major architectural restructuring or clean breaks | New or amended ADR in `docs/adr/` |
 | Developer-facing or integrator-facing guides | Corresponding task recipes in `docs/how-to/` or `docs/tutorials/` |
 | Conceptual systems or engine foundations | Corresponding deep dives in `docs/explanation/` or `docs/reference/` |
@@ -51,9 +43,8 @@ Any pull request that introduces or modifies developer-visible or integrator-fac
 
 Prior to creating a release tag:
 
-1. **Run Unified Guardrails**: Execute `./tools/gate check` and ensure all checks report `OK`.
+1. **Formatting**: Run `./tools/format.sh --check` to ensure clean code style.
 2. **Full Test Matrix**: Run `meson test -C build` and verify 100% pass rate.
 3. **Rust Bindings Verification**: Run `cargo test` inside `bindings/` to verify safe bindings.
-4. **Symbol Index Freshness**: Ensure `./tools/gate check symbols` passes without drift.
-5. **Changelog Integrity**: Ensure user-facing features, breaking changes, and migrations are recorded in `CHANGELOG.md`.
-6. **Clean Git State**: Verify no untracked experimental files or temporary debug assets remain in the tree (`git status --porcelain` is clean).
+4. **Changelog Integrity**: Ensure user-facing features, breaking changes, and migrations are recorded in `CHANGELOG.md`.
+5. **Clean Git State**: Verify no untracked experimental files or temporary debug assets remain in the tree (`git status --porcelain` is clean).

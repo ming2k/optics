@@ -109,7 +109,7 @@ see [Interactive examples showcase](../how-to/run-and-explore-examples.md).
 
 Meson enforces out-of-tree builds. Adhere to these conventions to keep the repository root orderly:
 
-- `build/`: The **canonical local development directory** (Debug + tests + examples). Rust binding workspaces (`bindings/*-rs`) probe this directory automatically.
+- `build/`: The **canonical local development directory** (Debug + tests + examples). Rust bindings (`bindings/`) probe this directory automatically.
 - `build-tidy/`: Dedicated build tree for `tools/check-tidy.sh` (created automatically on demand).
 - **Ephemeral matrix builds (`build-fuzz*`, `build-release*`, `build-api*`, etc.)**: Temporary directories created when reproducing CI matrices locally. Treat them as disposable and clean them up after testing:
   ```bash

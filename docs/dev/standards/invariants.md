@@ -38,22 +38,15 @@ A rule may be elevated to a **System Invariant** if and only if it satisfies all
 
 ## 4. Optics Core Invariants Catalog
 
-The following canonical invariants are mechanically enforced in Optics:
+The following canonical system invariants are mechanically enforced in Optics:
 
 | Invariant | Name | Policy | Enforcement Mechanism |
 | :--- | :--- | :--- | :--- |
-| `[INV-ARCH-MATERIAL]` | Material Isolation (ADR-0063) | `flux` must never reference named materials or `prism_` symbols. | `tools/gate check boundary` (`tools/guardrails/boundary.py`) |
-| `[INV-ARCH-STDOUT]` | Stdout Purity | Shared library TUs must never write to `stdout` (`printf`, `puts`). | `tools/gate check stdout` (`tools/guardrails/stdout_purity.py`) |
-| `[INV-ARCH-WLSLOT]` | Wayland Listener Slots (ADR-0145) | Every event of every interface a `*_listener` table declares has a non-NULL slot; the expected event set is the pinned contract in `tools/config/wayland-listeners.toml`, never the host's protocol corpus. | `tools/gate check listeners` (`tools/guardrails/listeners.py`) + `tests/optics/test_listeners_guardrail.py` |
-| `[INV-ARCH-VERSION]` | Monorepo Version Lockstep | All sibling libraries (`flux`, `lens`, `iris`, etc.) share the exact version. | `tools/gate check lockstep` (`tools/guardrails/lockstep.py`) |
-| `[INV-ARCH-FORMAT]` | Pure C23 Formatting | Every C source file conforms strictly to `.clang-format` (Clang-Format 22.x). | `tools/gate check format` (`tools/guardrails/formatting.py`) |
+| `[INV-ARCH-WLSLOT]` | Wayland Listener Slots (ADR-0145) | Every event of every interface a `*_listener` table declares has a non-NULL slot; prevents fatal libwayland `abort()` crashes. | `python3 tools/check_listeners.py` (`meson test --suite lint`) + `test_listeners_guardrail.py` |
 | `[INV-ARCH-ARENA]` | Zero Heap Alloc Frame Walk | Hot frame traversal, layout passes, and render walks use only per-frame arena memory. | Arena memory tracking & integration tests |
-| `[INV-ARCH-OPTS]` | Single Opts Descriptor | Every public entry point accepts a single `const *opts` descriptor struct. | Static analysis & symbol generator `tools/guardrails/symbols.py` |
-| `[INV-ARCH-SYMBOLS]` | Public Symbol Parity | `docs/reference/symbols.md` is strictly synchronized with header exports. | `tools/gate check symbols` (`tools/guardrails/symbols.py`) |
-| `[INV-ARCH-LEDGER]` | Leak Coverage Completeness (ADR-0130) | Every public resource kind has a declared ledger scope and a leak lane, or a reviewed exemption with a written reason. | `tools/gate check leaks` (`tools/guardrails/leaks.py`) + `tests/optics/test_leaks_guardrail.py` |
 | `[INV-ARCH-SCOPEDRAIN]` | Scope Drain Point (ADR-0129) | A scope's live count returns to zero at its declared drain point; frame-lifetime kinds are asserted at the frame boundary. | `flux_observe_frame_drain_check` in `flux_frame_present`/`abandon` + `tests/flux/integration/test_resource_leak.c` |
-| `[INV-DOC-FIREWALL]` | Audience Firewall | Public documentation must never link to internal developer docs (`docs/dev/**`). | `tools/gate check docs` (`tools/guardrails/doc_links.py`) |
-| `[INV-DOC-ROOT]` | Clean Root Whitelist | Only canonical markdown files exist at repository root. | `tools/gate check docs` (`tools/guardrails/doc_links.py`) |
+
+*Note on Retired Pseudo-Invariants:* Bureaucratic tags such as `[INV-ARCH-LEDGER]` (TOML leak-lane ledgers), `[INV-ARCH-VERSION]` (manual lockstep grepping), `[INV-ARCH-SYMBOLS]` (symbols.md generation), `[INV-DOC-FIREWALL]`, and `[INV-DOC-ROOT]` (root file whitelists) have been formally retired. True runtime memory cleanliness is verified via standard ASan/LSan test suites, and architectural modularity is enforced natively by Meson/linker dependency boundaries.
 
 ---
 

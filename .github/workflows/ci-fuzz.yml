@@ -57,17 +57,17 @@ jobs:
             dir: tests/flux/fuzz
             corpus: tests/flux/fuzz/corpus/coverage_raster
           - target: fuzz_glb_parse
-            dir: tests/flux/fuzz
-            corpus: tests/flux/fuzz/corpus/glb_parse
+            dir: tests/vista/fuzz
+            corpus: tests/vista/fuzz/corpus/glb_parse
           - target: fuzz_display_list_deserialize
             dir: tests/flux/fuzz
             corpus: tests/flux/fuzz/corpus/display_list_deserialize
           - target: fuzz_lens_store
             dir: tests/lens/fuzz
             corpus: tests/lens/fuzz/corpus/lens_store
-          - target: fuzz_svg_parse
-            dir: tests/svg/fuzz
-            corpus: tests/svg/fuzz/corpus/svg_parse
+          - target: fuzz_reticle_parse
+            dir: tests/reticle/fuzz
+            corpus: tests/reticle/fuzz/corpus/reticle_parse
     steps:
       - uses: actions/checkout@v4
 

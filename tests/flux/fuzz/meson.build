@@ -47,16 +47,6 @@ fuzz_harnesses += {
   'corpus': 'corpus/coverage_raster',
 }
 
-  # GLB parser: feed arbitrary bytes through the deviceless parse seam
-  # (vista_parse_glb, ADR-0016). Public API; libfuzzer-built via the
-  # ci-fuzz workflow (see .github/workflows/ci-fuzz.yml matrix).
-  fuzz_harnesses += {
-    'name': 'fuzz_glb_parse',
-    'src': files('fuzz_glb_parse.c'),
-    'deps': [vista_dep, m_dep],
-    'corpus': 'corpus/glb_parse',
-  }
-
 fuzz_harnesses += {
   'name': 'fuzz_display_list_deserialize',
   'src': files('fuzz_display_list_deserialize.c'),

@@ -3,8 +3,7 @@
 ## Scope
 
 The root Meson build owns all C tests for the libraries under `libs/`.
-The Rust bindings are one in-tree Cargo workspace per library, each with its own
-tests.
+The Rust bindings live in a unified Cargo workspace under `bindings/` (ADR-0159).
 Windowed examples remain manual checks because they need a compositor and GPU
 surface.
 
@@ -17,7 +16,7 @@ surface.
 | `flux` benchmarks | `tests/flux/bench/` | CPU timing; registered under the `bench` suite. |
 | `lens` tests | `tests/lens/` | Headless and deterministic. |
 | `iris` tests | `tests/iris/` | Headless API, theme, version, and accessibility helpers. |
-| Rust tests | `bindings/*-rs/` | A configured C build tree or installed C libraries. |
+| Rust tests | `bindings/` | A configured C build tree or installed C libraries. |
 | Interactive checks | `examples/` | Depends on the example; `iris` and most `flux` demos need Wayland/GLFW. |
 | Windows TU compile check | `tools/zig-win32-check.sh` | Cross-compiles Windows-only sources with zig cc + MinGW-w64 headers; no Windows host needed. |
 
@@ -94,16 +93,8 @@ Configure and build the C stack first, then point each binding workspace at
 the same source and build roots:
 
 ```bash
-export FLUX_SOURCE_DIR="$PWD/libs/flux"
-export LENS_SOURCE_DIR="$PWD"
-export IRIS_SOURCE_DIR="$PWD"
-export FLUX_BUILD_DIR="$PWD/build"
-export LENS_BUILD_DIR="$PWD/build"
-export IRIS_BUILD_DIR="$PWD/build"
-
-cargo test --manifest-path bindings/flux-rs/Cargo.toml --workspace
-cargo test --manifest-path bindings/lens-rs/Cargo.toml --workspace
-cargo test --manifest-path bindings/iris-rs/Cargo.toml --workspace
+cargo test --manifest-path bindings/Cargo.toml --workspace
+cargo clippy --manifest-path bindings/Cargo.toml --workspace --all-targets -- -D warnings
 ```
 
 The build scripts use `build/meson-uninstalled/*.pc`, so no local install is

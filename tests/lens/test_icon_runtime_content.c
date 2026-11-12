@@ -49,8 +49,8 @@ int main(void) {
     CHECK(desc != NULL);
 
     /* Both shapes survive: exactly two MOVE verbs (circle subpath + line
-     * subpath), and no all-coincident cubic anywhere. */
-    uint32_t moves = 0, degenerate = 0, cubics = 0;
+     * subpath), 4 cubic arcs for the circle, 1 line verb for the line, and no degenerate cubics. */
+    uint32_t moves = 0, lines = 0, degenerate = 0, cubics = 0;
     float px = 0.0f, py = 0.0f;
     float min_x = 1e30f, min_y = 1e30f, max_x = -1e30f, max_y = -1e30f;
 #define TRACK(x, y)                                                                                \
@@ -71,6 +71,11 @@ int main(void) {
             px = cmd->params[0];
             py = cmd->params[1];
             TRACK(px, py);
+        } else if (cmd->type == 1) {
+            lines++;
+            TRACK(cmd->params[0], cmd->params[1]);
+            px = cmd->params[0];
+            py = cmd->params[1];
         } else if (cmd->type == 2) {
             cubics++;
             float d1 = (cmd->params[0] - px) * (cmd->params[0] - px) +
@@ -93,8 +98,9 @@ int main(void) {
 #undef TRACK
     CHECK(moves == 2);
     CHECK(degenerate == 0);
-    /* circle = 4 arcs (+ skipped trailing duplicate), line = 1 cubic */
-    CHECK(cubics >= 5 && cubics <= 6);
+    /* circle = 4 cubic arcs, line = 1 line verb */
+    CHECK(cubics == 4);
+    CHECK(lines == 1);
     /* 24-box normalization: r=9 circle centred at 12 spans 3..21. */
     CHECK(min_x > 2.9f && min_x < 3.1f);
     CHECK(max_x > 20.9f && max_x < 21.1f);

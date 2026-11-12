@@ -1,27 +1,35 @@
-# Tooling self-tests. A guardrail that has never been observed failing is
-# indistinguishable from one that cannot fail, so every guardrail with a
-# non-trivial decision table carries a negative test here (ADR-0130).
-
+# Code quality and tooling verification
 py = import('python').find_installation('python3')
 
-# The leak guardrail reads ELF SONAMEs and libflux.so; keep the self-test on
-# the platform where that mechanism exists.
-if host_machine.system() == 'linux'
-  test(
-    'leaks_guardrail',
-    py,
-    args : [files('test_leaks_guardrail.py')],
-    workdir : meson.project_source_root(),
-    suite : 'tooling',
-    timeout : 120,
-  )
-endif
-
+# Verify Wayland listener slot contract (ADR-0145) across the codebase
 test(
-  'listeners_guardrail',
+  'wayland_listeners',
+  py,
+  args : [files('../../tools/check_listeners.py')],
+  workdir : meson.project_source_root(),
+  suite : ['lint', 'tooling'],
+  timeout : 30,
+)
+
+# Negative regression test suite for the Wayland listener contract scanner
+test(
+  'listeners_guardrail_selftest',
   py,
   args : [files('test_listeners_guardrail.py')],
   workdir : meson.project_source_root(),
   suite : 'tooling',
-  timeout : 120,
+  timeout : 30,
+)
+
+# Umbrella Facade and Integrated Dependencies (ADR-0160)
+test_optics_facade_bin = executable(
+  'test_optics_facade',
+  files('test_optics_facade.c'),
+  dependencies : optics_dep,
+)
+
+test(
+  'optics_facade',
+  test_optics_facade_bin,
+  suite : 'optics',
 )

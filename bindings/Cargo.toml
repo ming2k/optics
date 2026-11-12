@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/optics",
+  "crates/flux-sys",
+  "crates/flux",
+  "crates/glyph-sys",
+  "crates/glyph",
+  "crates/iris-sys",
+  "crates/iris",
+  "crates/lens-sys",
+  "crates/lens",
+  "crates/prism-sys",
+  "crates/prism",
+  "crates/reticle-sys",
+  "crates/reticle",
+  "crates/transit",
+  "crates/vista-sys",
+  "crates/vista",
+]
+
+[workspace.package]
+version = "0.0.78"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/ming2k/optics"
+rust-version = "1.85"
+
+[profile.dev]
+opt-level = 0

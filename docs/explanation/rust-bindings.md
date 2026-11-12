@@ -1,92 +1,84 @@
 # Rust Bindings
 
-The Rust bindings live under `bindings/` in the Optics monorepo. They remain
-separate Cargo workspaces so each library can keep a focused dependency graph
-and package surface, while C and Rust changes can land atomically.
+The Rust bindings live under `bindings/` in the Optics monorepo. They are organized
+as a single, unified Cargo workspace ([ADR-0159](../adr/0159-unified-cargo-workspace-and-optics-facade-bindings.md))
+anchored by the canonical `optics` facade crate.
 
 The root Meson build does not invoke Cargo. C-only consumers therefore do not
 need a Rust toolchain.
 
-## Workspaces and Crates
+## The Canonical Facade: `optics`
 
-| Workspace | Crates | Role |
-|-----------|--------|------|
-| `bindings/flux-rs/` | `flux-sys`, `flux` | Raw FFI and safe rendering API. |
-| `bindings/glyph-rs/` | `glyph-sys`, `glyph` | Text shaping, metrics, and glyph atlas runtime. |
-| `bindings/vista-rs/` | `vista-sys`, `vista` | 3D scene hierarchy and glTF asset runtime. |
-| `bindings/prism-rs/` | `prism-sys`, `prism` | Raw FFI and physical material wrapper. |
-| `bindings/transit-rs/` | `transit-sys`, `transit` | Closed-form springs and motion vocabulary. |
-| `bindings/lens-rs/` | `lens-sys`, `lens` | Raw FFI and safe UI wrapper. |
-| `bindings/iris-rs/` | `iris-sys`, `iris` | Raw FFI and safe application-host wrapper. |
-| `bindings/svg-rs/` | `svg-sys`, `svg` | Raw FFI and safe SVG document-compiler wrapper. |
+External consumers depend on a single crate: `optics`. Architectural layers and capabilities
+are guarded by additive Cargo feature flags:
 
-The `*-sys` crates own native linking and bindgen output. Safe crates expose
-RAII handles and Rust error types without duplicating the C implementation.
+```toml
+[dependencies]
+# Full desktop application (defaults to ui + platform + motion)
+optics = "0.0.78"
+
+# Headless rendering foundation only (zero Wayland/windowing/UI dependencies)
+optics = { version = "0.0.78", default-features = false, features = ["canvas"] }
+
+# Headless UI layout and state machine (no OS window system)
+optics = { version = "0.0.78", default-features = false, features = ["ui"] }
+```
+
+### Feature Flags & Architectural Layer Mapping
+
+| Feature | Layer / Subsystem | Re-exported Module | Underlying C Library |
+| :--- | :--- | :--- | :--- |
+| `canvas` | Layer 0: Rendering & RHI | `optics::canvas` | `libflux.so` |
+| `typography` | Layer 1: HarfBuzz Text Shaping | `optics::typography` | `libglyph.so` |
+| `ui` | Layer 3: Headless Immediate UI | `optics::ui` | `liblens.so` |
+| `platform` | Layer 3: Native OS Window Shell | `optics::platform` | `libiris.so` |
+| `materials` | Layer 2: Liquid Glass & Physical BRDFs | `optics::materials` | `libprism.so` |
+| `scene` | Layer 2: 3D Scene Graph & Cameras | `optics::scene` | `libvista.so` |
+| `reticle` | Document: Vector Art Compiler (SVG) | `optics::reticle` | `libreticle.so` |
+| `motion` | Layer 2: Closed-Form Motion Math | `optics::motion` | Pure Safe Rust ([ADR-0158](../adr/0158-transit-header-only-and-zero-so-motion-vocabulary.md)) |
+
+## Workspace Structure (`bindings/crates/`)
+
+Under `bindings/crates/`, the internal `-sys` crates manage low-level FFI and native dynamic library linkage, while safe wrapper crates provide idiomatic C23-safe abstractions:
+
+- `optics`: The top-level canonical facade crate.
+- `flux-sys` / `flux`: Vulkan 1.3 RHI, 2D vector canvas, CPU fallback.
+- `glyph-sys` / `glyph`: HarfBuzz text layout and glyph atlas.
+- `lens-sys` / `lens`: Declarative immediate-mode UI, Flex/Grid layout, retained state machine.
+- `iris-sys` / `iris`: Native Wayland, Win32, and Cocoa windowing and display pacing.
+- `prism-sys` / `prism`: Refractive Liquid Glass, Frosted Glass, Acrylic, and Mica shaders.
+- `reticle-sys` / `reticle`: Vector-art document compiler (ADR-0161).
+- `vista-sys` / `vista`: 3D scene hierarchy and glTF runtime.
+- `transit`: Pure Safe Rust closed-form harmonic springs, smoothing, and easing formulas.
 
 ## Version Lockstep
 
-Rust bindings workspaces and their inter-crate internal dependencies share
-the monorepo's single version number (`meson.project_version()`).
-This lockstep discipline is machine-enforced by `./tools/gate check lockstep`,
-which parses both the C header version macros and the Cargo manifests to ensure
-zero version drift between native binaries and language bindings.
+All crates within `bindings/` share the root workspace version (`0.0.78`) declared in `bindings/Cargo.toml`. Version drift between language bindings and C libraries is mechanically prohibited.
 
-## Thread Safety and Invariants
-
-Safe wrapper crates uphold the thread-safety contracts documented in
-[`docs/reference/thread-safety.md`](../reference/thread-safety.md):
-
-- Thread-safe C handles (`flux_device`, `flux_sampler`, `flux_material`, `flux_icc_profile`, `lens_scene_snapshot`) implement `Send` and `Sync`.
-- Single-threaded recording contexts (`flux_canvas`, `flux_arena`, `lens_ui`) are strictly thread-confined and unmovable across threads.
-- Native trampolines wrapping Rust callbacks across the FFI boundary guard against unwinding using `std::panic::catch_unwind` to prevent undefined behavior across foreign C frames.
-
-## Development Linking
+## Development Linking & Testing
 
 Build the C stack first:
 
 ```bash
-meson setup build -Dtests=true
+meson setup build -Dexamples=true -Dtests=true
 meson compile -C build
 ```
 
-Then point the binding build scripts at this checkout and its one Meson build
-tree:
+Then run cargo from the unified workspace:
 
 ```bash
-export FLUX_SOURCE_DIR="$PWD/libs/flux"
-export LENS_SOURCE_DIR="$PWD"
-export IRIS_SOURCE_DIR="$PWD"
-export FLUX_BUILD_DIR="$PWD/build"
-export LENS_BUILD_DIR="$PWD/build"
-export IRIS_BUILD_DIR="$PWD/build"
-
-cargo test --manifest-path bindings/flux-rs/Cargo.toml --workspace
-cargo test --manifest-path bindings/lens-rs/Cargo.toml --workspace
-cargo test --manifest-path bindings/iris-rs/Cargo.toml --workspace
+cargo test --manifest-path bindings/Cargo.toml --workspace
+cargo clippy --manifest-path bindings/Cargo.toml --workspace --all-targets -- -D warnings
 ```
 
-The build scripts prepend `build/meson-uninstalled/` to `PKG_CONFIG_PATH` and
-read public headers from `libs/`. This keeps bindgen and native linking on the
-same checkout without running `meson install`.
-
-Linking is per-platform: Linux uses `-Wl,-rpath` into the build/install lib
-dir; macOS does the same (the C libraries carry `@rpath/` install names, so
-the rpath is recorded as `LC_RPATH`); Windows has no rpath, so the build
-scripts copy the dependent DLLs (`flux.dll`, `lens.dll`, …) next to the cargo
-profile output (`target/<profile>/`, `deps/`, `examples/`) where the loader
-finds them, and print a `cargo:warning` telling you to extend `PATH` if a DLL
-cannot be staged.
-
-For an installed stack, leave the source/build variables unset and make the
-installed `.pc` files visible through the normal pkg-config search path.
+The `-sys` build scripts automatically probe `build/meson-uninstalled/*.pc` and read headers from `libs/`.
+Linux uses `-Wl,-rpath` into the local build tree, macOS injects `LC_RPATH`, and Windows stages dependent DLLs adjacent to target binaries.
 
 ## Change Workflow
 
 When a public C API changes:
 
-1. Update the owning header, implementation, and C test.
+1. Update the owning C header, implementation, and C test.
 2. Update the matching `*-sys` declarations or bindgen allowlist.
-3. Update the safe wrapper and add a Rust test.
-4. Run the C suite and every affected Cargo workspace before committing.
-
-The workspace READMEs contain crate-specific examples and feature notes.
+3. Update the safe wrapper and corresponding tests.
+4. Verify via `cargo test --manifest-path bindings/Cargo.toml --workspace`.

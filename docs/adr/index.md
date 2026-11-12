@@ -191,3 +191,7 @@ silent fallback. Its primitives have landed.
 | 0155 | [Frame damage is a native epoch ledger, not a caller-side per-image history](0155-frame-damage-is-a-native-epoch-ledger.md) | Accepted |
 | 0156 | [Slang-first shader architecture — retiring GLSL, modular device code, and clean-break SPIR-V compilation](0156-slang-first-shader-architecture.md) | Accepted |
 | 0157 | [DisplayList serialization is a versioned byte protocol with caller-owned resource IDs](0157-display-list-serialization-protocol.md) | Accepted |
+| 0158 | [Transit is a header-only vocabulary — zero shared object, pure inline math, and FFI elimination](0158-transit-header-only-and-zero-so-motion-vocabulary.md) | Accepted |
+| 0159 | [Unified Cargo Workspace and Optics Facade Bindings](0159-unified-cargo-workspace-and-optics-facade-bindings.md) | Accepted |
+| 0160 | [Unified Optics C Facade and Umbrella Distribution](0160-unified-optics-c-facade-and-umbrella-distribution.md) | Accepted |
+| 0161 | [Reticle Vector Compiler and Vista Subsystem Boundary](0161-reticle-vector-compiler-and-vista-boundary.md) | Accepted |

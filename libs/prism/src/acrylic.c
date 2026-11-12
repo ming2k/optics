@@ -17,14 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__has_embed) && !defined(PRISM_SHADER_NO_EMBED)
-#if __has_embed("acrylic.comp.spv") && __has_embed("acrylic_16f.comp.spv") &&                      \
-    __has_embed("storage_clear.comp.spv") && __has_embed("storage_clear_16f.comp.spv")
-#define PRISM_ACRYLIC_SHADERS_EMBED 1
-#endif
-#endif
-
-#ifdef PRISM_ACRYLIC_SHADERS_EMBED
+/* Shader bytecode embedded via native C23 #embed. */
 alignas(uint32_t) static const unsigned char acrylic_spv[] = {
 #embed "acrylic.comp.spv"
 };
@@ -37,12 +30,6 @@ alignas(uint32_t) static const unsigned char storage_clear_spv[] = {
 alignas(uint32_t) static const unsigned char storage_clear_16f_spv[] = {
 #embed "storage_clear_16f.comp.spv"
 };
-#else
-#include "acrylic_16f_spv.h"
-#include "acrylic_spv.h"
-#include "storage_clear_16f_spv.h"
-#include "storage_clear_spv.h"
-#endif
 
 #define ACRYLIC_MAX_GROUPS 64u
 

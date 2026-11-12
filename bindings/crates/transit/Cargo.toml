@@ -1,0 +1,10 @@
+[package]
+name = "transit"
+description = "Safe Rust implementation of transit — closed-form analytic springs and motion vocabulary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]

@@ -18,7 +18,7 @@ option('glyph',    type : 'boolean', value : true,  description : 'Build the gly
 option('vista',    type : 'boolean', value : true,  description : 'Build the vista 3D scene-graph library (ADR-0106)')
 option('prism',    type : 'boolean', value : true,  description : 'Build the prism material library (liquid glass)')
 option('transit',  type : 'boolean', value : true,  description : 'Build the transit motion vocabulary library (ADR-0077, ADR-0106)')
-option('svg',      type : 'boolean', value : true,  description : 'Build the SVG vector-document compiler (ADR-0150)')
+option('reticle',  type : 'boolean', value : true,  description : 'Build the reticle vector-art document compiler (ADR-0150, ADR-0161)')
 
 option('examples', type : 'boolean', value : false, description : 'Build all C examples across all modules')
 option('tests',    type : 'boolean', value : false, description : 'Build all C tests across all modules')

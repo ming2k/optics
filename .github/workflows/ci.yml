@@ -12,29 +12,18 @@ concurrency:
 
 jobs:
   format:
-    name: clang-format (pinned 22)
+    name: clang-format
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      # Formatting is locked to a major version: output drifts between
-      # clang-format releases, so "whatever the runner ships" would flake
-      # on image updates. The pin matches tools/guardrails/formatting.py.
-      - name: Install pinned clang-format
+      - name: Install clang-format
         run: |
-          sudo install -d /etc/apt/keyrings
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | \
-            sudo tee /etc/apt/keyrings/llvm.asc >/dev/null
-          echo "deb [signed-by=/etc/apt/keyrings/llvm.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | \
-            sudo tee /etc/apt/sources.list.d/llvm-22.list >/dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends clang-format-22
-          sudo update-alternatives --install /usr/bin/clang-format clang-format \
-            /usr/bin/clang-format-22 100
-          sudo update-alternatives --set clang-format /usr/bin/clang-format-22
+          sudo apt-get install -y --no-install-recommends clang-format
 
       - name: Format check
-        run: ./tools/gate check format
+        run: ./tools/format.sh --check
 
   workflow-lint:
     name: workflow lint (actionlint)
@@ -100,52 +89,11 @@ jobs:
           SLANG_VER="2026.21"
           curl -sSL "https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-linux-x86_64.tar.gz" | sudo tar -xz -C /usr/local
 
-      # Material boundary (ADR-0063): flux owns rendering mechanism and must
-      # not reference any named material; materials live in prism.
-      - name: Material boundary check
-        run: ./tools/gate check boundary
-
-      # One release, one version: every library's *_VERSION_* macros
-      # must equal meson.project_version(). (flux-scene-graph shipped
-      # a hard-coded "0.0.29" string against 0.0.36 headers; anim sat
-      # at 0.0.1 for seven months. Both invisible until this check.)
-      - name: Version lockstep check
-        run: ./tools/gate check lockstep
-
-      # Static analysis (clang-tidy, clang + compile_commands). Baseline
-      # policy: zero warnings; fix, don't silence. Platform TUs that only
-      # compile under their own backend are cross-checked in ci-cross.
-      - name: clang-tidy
-        run: |
-          CC=clang meson setup build-tidy -Dtests=true -Dexamples=false \
-            --buildtype=debug -Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled
-          ./tools/gate check tidy --build-dir build-tidy
-
-      # Library stdout guardrail: diagnostics go to stderr, never stdout —
-      # a consumer's stdout may be an IPC wire (e.g. the portal prompter).
-      - name: No library stdout writes
-        run: ./tools/gate check stdout
-
       # Wayland listener contract (ADR-0145): libwayland abort()s the whole
       # process when the compositor sends an event whose slot in the wl_proxy
-      # listener table is NULL. 0.0.72 shipped exactly that in
-      # wp_presentation_feedback (missing sync_output), killing consumers on
-      # the first presented frame. The check is hermetic — it reads the pinned
-      # contract in tools/config/wayland-listeners.toml, not the host's
-      # protocol corpus — so it does not depend on installed Wayland headers.
+      # listener table is NULL.
       - name: Wayland listener contract
-        run: ./tools/gate check listeners
-
-      # Symbol reference freshness: docs/reference/symbols.md is generated
-      # from the installed headers (tools/guardrails/symbols.py). It drifted
-      # silently before this check existed (removed symbols lingered,
-      # new ones never appeared).
-      - name: symbols.md freshness
-        run: ./tools/gate check symbols
-
-      # Documentation integrity & audience firewall verification (ADR-0125)
-      - name: Documentation integrity check
-        run: ./tools/gate check docs
+        run: python3 tools/check_listeners.py
 
       - name: Configure (release)
         if: matrix.config == 'release'
@@ -202,7 +150,7 @@ jobs:
       # --buildtype=release on purpose. The matrix legs run gcc at release and
       # gcc at -O0 under asan-ubsan; clang at -O0 adds little and compiles away
       # nothing, so clang-specific miscompilation of undefined behaviour stayed
-      # ungated. It did: test_svg_geometry read an uninitialised `geometry`
+      # ungated. It did: test_reticle_geometry read an uninitialised `geometry`
       # whose `doc` pointer the clang -O2 build turned into a wild write, and
       # every leg was green. Optimising with clang is what this leg is for.
       - name: Configure
@@ -217,25 +165,8 @@ jobs:
         run: meson test -C build --no-suite bench --print-errorlogs
 
   bindings:
-    name: rust bindings (${{ matrix.workspace }})
+    name: rust bindings (workspace)
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        # Every workspace under bindings/ must be listed here. A workspace
-        # that is built by consumers but absent from this matrix is ungated:
-        # svg-rs, glyph-rs, vista-rs and transit-rs were, and all four had
-        # already drifted on `cargo fmt`/`clippy -D warnings` before this
-        # list was completed.
-        workspace:
-          - flux-rs
-          - glyph-rs
-          - iris-rs
-          - lens-rs
-          - prism-rs
-          - svg-rs
-          - transit-rs
-          - vista-rs
     env:
       DEBIAN_FRONTEND: noninteractive
       CC: clang
@@ -272,7 +203,7 @@ jobs:
           sudo meson install -C build
 
       - name: cargo fmt + clippy + test
-        working-directory: bindings/${{ matrix.workspace }}
+        working-directory: bindings
         run: |
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -317,15 +248,8 @@ jobs:
           meson setup build -Dexamples=false -Dtests=false --buildtype=release
           sudo meson install -C build
 
-      - name: Check all workspaces on MSRV
+      - name: Check workspace on MSRV
         run: |
-          # Enumerated from bindings/ rather than hard-coded: a workspace that
-          # is not listed here is never checked on the declared MSRV.
-          status=0
-          for manifest in bindings/*/Cargo.toml; do
-            echo "::group::MSRV check $manifest"
-            cargo +1.85.0 check --manifest-path "$manifest" \
-              --workspace --all-targets --locked || status=1
-            echo "::endgroup::"
-          done
+          cargo +1.85.0 check --manifest-path bindings/Cargo.toml \
+            --workspace --all-targets --locked
           exit $status

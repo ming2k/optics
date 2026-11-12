@@ -82,10 +82,10 @@ else
   transit_dep = declare_dependency()
 endif
 
-if get_option('svg')
-  subdir('libs/svg')
+if get_option('reticle')
+  subdir('libs/reticle')
 else
-  svg_dep = declare_dependency()
+  reticle_dep = declare_dependency()
 endif
 
 if get_option('prism')
@@ -98,6 +98,56 @@ endif
 
 subdir('libs/lens')
 subdir('libs/iris')
+
+# ====================================================================
+# Optics Umbrella Facade & Dependencies (ADR-0160)
+# ====================================================================
+optics_inc = include_directories('include')
+
+optics_deps = [flux_dep, lens_dep, iris_dep]
+optics_requires = [
+  'flux = ' + meson.project_version(),
+  'lens = ' + meson.project_version(),
+  'iris = ' + meson.project_version(),
+]
+
+if opt_transit
+  optics_deps += [transit_dep]
+  optics_requires += ['transit = ' + meson.project_version()]
+endif
+
+if opt_glyph
+  optics_deps += [glyph_dep]
+  optics_requires += ['glyph = ' + meson.project_version()]
+endif
+if opt_vista
+  optics_deps += [vista_dep]
+  optics_requires += ['vista = ' + meson.project_version()]
+endif
+if get_option('reticle')
+  optics_deps += [reticle_dep]
+  optics_requires += ['reticle = ' + meson.project_version()]
+endif
+if get_option('prism')
+  optics_deps += [prism_dep]
+  optics_requires += ['prism = ' + meson.project_version()]
+endif
+
+install_headers('include/optics/optics.h', subdir : 'optics')
+
+optics_dep = declare_dependency(
+  include_directories : optics_inc,
+  dependencies        : optics_deps,
+)
+
+pkg.generate(
+  libraries   : optics_dep,
+  name        : 'optics',
+  filebase    : 'optics',
+  description : 'High-performance C23 graphics and UI stack (umbrella facade)',
+  version     : meson.project_version(),
+  requires    : optics_requires,
+)
 
 if get_option('examples')
   subdir('examples/flux')
@@ -194,7 +244,10 @@ if get_option('tests')
   subdir('tests/flux')
   subdir('tests/prism')
   subdir('tests/transit')
-  subdir('tests/svg')
+  subdir('tests/vista')
+  if get_option('reticle')
+    subdir('tests/reticle')
+  endif
   subdir('tests/lens')
   subdir('tests/iris')
   subdir('tests/optics')

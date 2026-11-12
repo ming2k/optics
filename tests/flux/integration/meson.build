@@ -110,16 +110,6 @@ if opt_scene
   test('scene_render', test_scene_render, suite : 'integration')
 endif
 
-# A generated, tiny VRM + VRMA pair keeps humanoid retargeting and animation
-# sampling under CI without committing developer avatar assets.
-if get_option('vista')
-  test_scene_graph_animation = executable('test_scene_graph_animation',
-    'test_scene_graph_animation.c',
-    dependencies : [test_helpers_dep, vista_dep],
-  )
-  test('scene_graph_animation', test_scene_graph_animation, suite : 'integration')
-endif
-
 test_allocator = executable('test_allocator',
   'test_allocator.c',
   dependencies : [test_helpers_dep],
@@ -337,9 +327,15 @@ if opt_canvas
   test('tile_b5_renderplan', test_tile_b5_renderplan, suite : 'integration')
 
   # Real-driver GPU Tile-Compute rasterizer execution (Phase B hardware execution)
+  canvas_tile_raster_comp_spv_h = custom_target('canvas_tile_raster_comp_spv.h',
+    input   : canvas_tile_raster_comp_spv,
+    output  : 'canvas_tile_raster_comp_spv.h',
+    command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'canvas_tile_raster_comp_spv'],
+  )
   test_tile_gpu_compute = executable('test_tile_gpu_compute',
     'test_tile_gpu_compute.c',
     '../../../libs/flux/src/canvas/canvas_tile.c',
+    canvas_tile_raster_comp_spv_h,
     dependencies : [test_helpers_dep],
   )
   test('tile_gpu_compute', test_tile_gpu_compute, suite : 'integration')

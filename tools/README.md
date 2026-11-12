@@ -1,115 +1,46 @@
-# Optics Developer Tooling & Guardrails
+# Optics Developer Tooling
 
-The `tools/` directory hosts the **machine-enforced architecture guardrails, build-time code generators, CI runners, and toolchain configurations** for the Optics monorepo.
-
-> **Architecture & Quality Policy:** `tools/` is strictly governed into structured domains. Every utility here is actively consumed by the unified developer CLI (`tools/gate`), GitHub Actions workflows (`.github/workflows/`), or the Meson build system (`meson.build`).
+The `tools/` directory hosts developer convenience scripts, CI runners, and toolchain configurations for the Optics repository.
 
 ---
 
-## 1. Unified Developer CLI (`tools/gate`)
+## 1. Developer Workflows
 
-All local verification and automatic remediation workflow is consolidated under the unified cross-platform CLI:
-
+### Code Formatting
+Format all C sources in-place using standard `clang-format`:
 ```bash
-# Run the FULL gate set: 8 architecture guardrails + clang-tidy + the bench SLA.
-# This is the command AGENTS.md means by "verify through the unified gatekeeper".
-./tools/gate check
+./tools/format.sh          # format in place
+./tools/format.sh --check  # check without modifying
+```
 
-# Quick loop while iterating: the 8 architecture guardrails only.
-# Skips clang-tidy (~2 min) and the bench SLA. Do not declare a task complete
-# on --fast alone — that is the whole reason the two modes are named apart.
-./tools/gate check --fast
+### Running Tests & Quality Verification
+Optics uses the native Meson test runner. Quality checks are integrated directly as test suites:
+```bash
+meson test -C build                    # Run all test suites
+meson test -C build --suite unit       # Unit tests
+meson test -C build --suite lint       # Code quality & contract checks
+```
 
-# Run a specific guardrail check (format, boundary, lockstep, stdout, listeners,
-# symbols, leaks, docs, tidy, bench)
-./tools/gate check boundary
-./tools/gate check lockstep
-
-# Run clang-tidy static analysis against library translation units
-./tools/gate check tidy
-
-# Automatically format C sources and synchronize public symbol documentation
-./tools/gate fix
-
-# List available guardrails, domains, and policy mapping
-./tools/gate list
+### Wayland Listener Slot Contract (ADR-0145)
+Run the hermetic Wayland listener verification directly:
+```bash
+python3 tools/check_listeners.py
 ```
 
 ---
 
-## 2. Tooling Directory Structure & Taxonomy
+## 2. Tooling Directory Structure
 
 ```text
 tools/
-├── gate                        # Executable CLI launcher
-├── gate.py                     # Pure Python 3 CLI runner (check, fix, list)
-├── README.md                   # Tooling system documentation
+├── format.sh               # Fast in-place code formatting wrapper
+├── check_listeners.py      # Wayland listener-slot safety check (ADR-0145)
+├── README.md               # Tooling documentation
 │
-├── guardrails/                 # Domain: Architectural Invariants & Quality Enforcement
-│   ├── boundary.py             # Layer 0 flux isolation check (syntax-aware, ADR-0063)
-│   ├── doc_links.py            # Hyperlinks, Audience Firewall & ADR lineage check (ADR-0125)
-│   ├── formatting.py           # Pinned clang-format 22.x verification and in-place fix
-│   ├── lockstep.py             # Monorepo version lockstep verification (ADR-0098)
-│   ├── listeners.py            # Wayland listener-slot contract check (ADR-0145)
-│   ├── stdout_purity.py        # Library diagnostics purity check (syntax-aware)
-│   ├── symbols.py              # Exported public symbols tracker & docs generator
-│   └── tidy.py                 # Clang-tidy static analysis runner (zero-warning policy)
+├── ci/                     # CI Runners & Platform Emulation
+│   └── zig-win32-check.sh  # Win32 cross-compilation smoke runner via Zig
 │
-├── build/                      # Domain: Build System Code Generators (consumed by Meson)
-│   ├── spv2h.py                # SPIR-V to C header byte array generator (ADR-0053)
-│   └── shader_manifest.py      # Shader content-hash manifest generator (ccache tracking)
-│
-├── ci/                         # Domain: CI Runners & Platform Emulation
-│   └── zig-win32-check.sh      # Win32 cross-compilation smoke runner via Zig
-│
-└── config/                     # Domain: Toolchain Configuration & Suppression Lists
-    ├── abi-supprs.abignore     # Libabigail ABI suppression rules
-    ├── lsan.supp               # LeakSanitizer suppression list
-    └── wayland-listeners.toml  # Pinned Wayland event contract (ADR-0145)
+└── config/                 # Toolchain Configuration & Suppression Lists
+    ├── lsan.supp           # LeakSanitizer suppression list
+    └── wayland-listeners.toml # Pinned Wayland event contract (ADR-0145)
 ```
-
----
-
-## 3. Domain Catalog
-
-### A. Architecture & Quality Guardrails (`guardrails/`)
-
-| Tool | Enforced Policy | Description |
-|------|-----------------|-------------|
-| [`guardrails/boundary.py`](guardrails/boundary.py) | ADR-0063 | Syntax-aware check asserting `flux` never references named materials (`prism_`, `liquid_glass`). |
-| [`guardrails/lockstep.py`](guardrails/lockstep.py) | Monorepo lockstep | Asserts all sibling libraries and bindings share the exact project version from `meson.build`. |
-| [`guardrails/stdout_purity.py`](guardrails/stdout_purity.py) | Library hygiene | Asserts shared library TUs never write to `stdout` (`printf`), reserving stdout for IPC wires. |
-| [`guardrails/formatting.py`](guardrails/formatting.py) | Clang-Format 22.x | Asserts every C source file is byte-identical to root `.clang-format` output (`--fix` to reformat). |
-| [`guardrails/listeners.py`](guardrails/listeners.py) | INV-ARCH-WLSLOT (ADR-0145) | Asserts every event of every Wayland interface a listener table declares has a slot — libwayland `abort()`s the process on a NULL one. Verdict is a pure function of the repo: it reads the pinned contract in `config/wayland-listeners.toml`, never the host's protocol corpus. |
-| [`guardrails/symbols.py`](guardrails/symbols.py) | ADR-0098 | Extracts exported C symbols from public headers into `docs/reference/symbols.md`. |
-| [`guardrails/doc_links.py`](guardrails/doc_links.py) | ADR-0125 | Verifies documentation hyperlinks, anchor resolution, Audience Firewall, and ADR lineage. |
-| [`guardrails/tidy.py`](guardrails/tidy.py) | Zero-warning policy | Runs `clang-tidy` against all shipped library translation units; zero-warning baseline. |
-
-### B. Build Infrastructure (`build/`)
-
-| Tool | Consumed By | Description |
-|------|-------------|-------------|
-| [`build/spv2h.py`](build/spv2h.py) | `meson.build` | Converts `.spv` SPIR-V binary files into `.h` C byte arrays for compilers lacking C23 `#embed`. |
-| [`build/shader_manifest.py`](build/shader_manifest.py) | `libs/flux/meson.build` | Generates shader byte-hash manifest headers so `ccache` reliably invalidates cache on shader edits. |
-
-### C. CI Infrastructure (`ci/`)
-
-| Tool | Consumed By | Description |
-|------|-------------|-------------|
-| [`ci/zig-win32-check.sh`](ci/zig-win32-check.sh) | `.github/workflows/ci-cross.yml` | Cross-compiles Win32 C sources using Zig (`x86_64-windows-gnu`) without requiring a Windows runner. |
-
-### D. Toolchain Configuration Files (`config/`)
-
-| File | Consumer | Description |
-|------|----------|-------------|
-| [`config/abi-supprs.abignore`](config/abi-supprs.abignore) | `libabigail` (CI) | ABI change suppression rules ensuring semver-compliant shared object compatibility. |
-| [`config/lsan.supp`](config/lsan.supp) | ASan / LSan | LeakSanitizer suppression list for known process-lifetime upstream allocations (e.g. fontconfig caches). |
-| [`config/wayland-listeners.toml`](config/wayland-listeners.toml) | `guardrails/listeners.py` (ADR-0145) | Pinned per-interface Wayland event contract. A reviewed artifact, not a suppression list: it records which events must have slots so the check never depends on the host's `wayland-protocols`. Regenerate with `./tools/gate fix listeners`. |
-
----
-
-## 4. Governance Rules
-
-1. **Single CLI Entrypoint:** All developer-facing verification and fixes run through `./tools/gate`. No detached wrapper scripts are allowed.
-2. **Domain Encapsulation:** Every file belongs to a domain subdirectory (`guardrails/`, `build/`, `ci/`, `config/`).
-3. **Deterministic & Fast:** Guardrails execute in milliseconds using Python 3 standard library and native compilers, with zero exotic package dependencies. **Python floor: 3.11** (`tomllib`) — declared here so the requirement is a documented contract rather than a discovery made on a contributor's first run.

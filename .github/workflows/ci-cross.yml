@@ -78,7 +78,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install meson ninja \
+          brew install meson ninja llvm \
             molten-vk vulkan-loader vulkan-headers \
             freetype harfbuzz fribidi
 
@@ -94,8 +94,10 @@ jobs:
       # Homebrew's vulkan-loader ships vulkan.pc; MoltenVK is plugged in as
       # the ICD. flux auto-enables VK_KHR_portability_enumeration /
       # VK_KHR_portability_subset when advertised (required by MoltenVK).
+      # Use Homebrew LLVM clang for native C23 #embed support.
       - name: Configure
         run: |
+          export CC="$(brew --prefix llvm)/bin/clang"
           meson setup build -Dexamples=false -Dtests=true \
             -Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled
 

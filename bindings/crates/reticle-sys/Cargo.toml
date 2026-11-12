@@ -1,0 +1,19 @@
+[package]
+name = "reticle-sys"
+description = "Raw FFI bindings to reticle (libreticle), the Optics vector-document compiler"
+links = "reticle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[build-dependencies]
+bindgen = "0.72"
+pkg-config = "0.3"
+
+[dependencies]
+# flux-sys is re-exported so the flux handles and value types reticle speaks
+# (flux_canvas, flux_encoder, flux_color, ...) have ONE Rust definition across
+# the stack, with no casts at the crate seam.
+flux-sys = { path = "../flux-sys", version = "0.0.78" }

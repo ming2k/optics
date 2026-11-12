@@ -16,9 +16,9 @@ silently reading a different descriptor layout.
 
 ### Changed
 
-- **tooling**: The unified developer CLI moved from `./tools/optics` to
-  `./tools/gate` so it is not mistaken for the product entry point. The
-  `check`, `fix`, and `list` subcommands are unchanged.
+- **reticle**: Renamed vector document compiler from `svg` (`libsvg.so`) to `reticle` (`libreticle.so`) across C headers (`<reticle/reticle.h>`), symbols (`reticle_*`), and Rust bindings (`reticle-sys` / `reticle`) to harmonize with Optics physical/optical naming metaphor (ADR-0161).
+- **lens**: Eliminated the legacy 1,350-line duplicate tag scanner in `libs/lens/src/icon_svg.c`; wired `lens_icon_register_svg` directly into `reticle_parse` and `reticle_shape_at` with true line-command mapping and zero redundant allocations (ADR-0161).
+- **vista**: Fully decoupled glTF 2.0 / GLB 3D scene graph, animation, benchmark, and fuzzing suites from `tests/flux/` into dedicated `tests/vista/` and `tests/vista/fuzz/`, restoring absolute Layer 0 RHI purity (ADR-0161).
 
 ## [0.0.78] - 2026-11-11
 

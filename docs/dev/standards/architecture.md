@@ -13,9 +13,9 @@ Optics is organized into seven focused, orthogonal C23 runtime libraries under `
 │  Application Layer / Integrators / Examples                         │
 ├──────────────────────────────────────────────────────────────────────┤
 │  Document Layer (format → primitives; not a runtime layer)           │
-│  - `libs/svg`:  SVG static-art compiler — path grammar, shape        │
-│                 decomposition, paint resolution, gradient baking,    │
-│                 fit-and-paint, headless rasterization (ADR-0150)     │
+│  - `libs/reticle`: Vector document compiler (SVG art) — path grammar,│
+│                 shape decomposition, paint resolution, gradient      │
+│                 baking, fit-and-paint, rasterization (ADR-0161)      │
 ├──────────────────────────────────────────────────────────────────────┤
 │  Layer 3: UI State & Platform Shell                                  │
 │  - `libs/lens`: Immediate-mode UI engine, layout (Grid/Flex/Flow),   │
@@ -42,10 +42,10 @@ Optics is organized into seven focused, orthogonal C23 runtime libraries under `
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-`libs/svg` sits beside the runtime layers rather than inside them: it links
+`libs/reticle` sits beside the runtime layers rather than inside them: it links
 `flux` and nothing else, is device-less by design (ADR-0136), and exists so
-that a *document format* — a parser — never has to live in the engine
-(ADR-0150). Consumers that do not read SVG never link it.
+that a *document format* — a parser — never has to live in the engine core
+(ADR-0150, ADR-0161). Consumers that do not compile vector art never link it.
 
 Dependencies flow strictly inward from higher layers to lower layers. Reverse dependencies across layer boundaries are prohibited.
 

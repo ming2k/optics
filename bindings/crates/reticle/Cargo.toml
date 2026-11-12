@@ -1,0 +1,13 @@
+[package]
+name = "reticle"
+description = "Safe idiomatic Rust bindings to reticle, the Optics vector-document compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[dependencies]
+reticle-sys = { path = "../reticle-sys", version = "0.0.78" }
+flux = { path = "../flux", version = "0.0.78" }

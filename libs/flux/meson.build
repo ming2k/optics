@@ -90,11 +90,8 @@ if opt_observe_attribution
   flux_c_args += '-DFLUX_OBSERVE_ATTRIBUTION=1'
 endif
 
-#C23 #embed bakes each compiled.spv into the binary(renderer.c /
-#effect.c / scene.c).Compilers without #embed(MSVC cl, Apple Clang)
-#take a generated - header path instead — the headers are produced from
-#the same.spv files by tools / build / spv2h.py further below.--embed - dir is
-#probed because MSVC rejects unknown options outright.
+# C23 #embed bakes each compiled .spv directly into the binary (renderer.c /
+# effect.c / scene.c). --embed-dir points the compiler to the build directory.
 flux_embed_dir_arg = cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
 if opt_canvas or opt_scene or opt_effect
   flux_c_args += flux_embed_dir_arg
@@ -107,10 +104,6 @@ if opt_canvas or opt_scene or opt_effect
   slangc_flags = ['-target', 'spirv', '-profile', 'spirv_1_6', '-Wno-41012']
 endif
 
-#Per - shader accumulators for the generated - header fallback; the
-#custom_target loop sits after the module blocks.
-flux_shader_spvs = []
-flux_shader_names = []
 if opt_canvas
   flux_sources += files(
     'src/canvas/canvas.c',
@@ -215,16 +208,6 @@ if opt_canvas
                         canvas_glyph_frag_spv, canvas_sdf_frag_spv,
                         canvas_output_vert_spv, canvas_output_frag_spv,
                         canvas_tile_raster_comp_spv, canvas_vector_frag_spv]
-  flux_shader_spvs += [canvas_solid_vert_spv, canvas_solid_frag_spv,
-                       canvas_gradient_frag_spv, canvas_image_frag_spv,
-                       canvas_glyph_frag_spv, canvas_sdf_frag_spv,
-                       canvas_output_vert_spv, canvas_output_frag_spv,
-                       canvas_tile_raster_comp_spv, canvas_vector_frag_spv]
-  flux_shader_names += ['canvas_solid_vert_spv', 'canvas_solid_frag_spv',
-                        'canvas_gradient_frag_spv', 'canvas_image_frag_spv',
-                        'canvas_glyph_frag_spv', 'canvas_sdf_frag_spv',
-                        'canvas_output_vert_spv', 'canvas_output_frag_spv',
-                        'canvas_tile_raster_comp_spv', 'canvas_vector_frag_spv']
 endif
 if opt_scene
   flux_sources += files('src/scene/scene.c')
@@ -301,14 +284,6 @@ if opt_scene
                         scene_phong_vert_spv, scene_phong_frag_spv,
                         scene_unlit_skin_vert_spv, scene_phong_skin_vert_spv,
                         scene_vector_vert_spv, scene_vector_frag_spv]
-  flux_shader_spvs += [scene_unlit_vert_spv, scene_unlit_frag_spv,
-                       scene_phong_vert_spv, scene_phong_frag_spv,
-                       scene_unlit_skin_vert_spv, scene_phong_skin_vert_spv,
-                       scene_vector_vert_spv, scene_vector_frag_spv]
-  flux_shader_names += ['scene_unlit_vert_spv', 'scene_unlit_frag_spv',
-                        'scene_phong_vert_spv', 'scene_phong_frag_spv',
-                        'scene_unlit_skin_vert_spv', 'scene_phong_skin_vert_spv',
-                        'scene_vector_vert_spv', 'scene_vector_frag_spv']
 endif
 if opt_compute
   flux_sources += files('src/compute/compute.c')
@@ -364,39 +339,9 @@ if opt_effect
   flux_extra_inputs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
                         effect_blur_16f_comp_spv, effect_backdrop_16f_comp_spv,
                         effect_shadow_comp_spv, effect_shadow_16f_comp_spv]
-  flux_shader_spvs += [effect_blur_comp_spv, effect_backdrop_comp_spv,
-                       effect_blur_16f_comp_spv, effect_backdrop_16f_comp_spv,
-                       effect_shadow_comp_spv, effect_shadow_16f_comp_spv]
-  flux_shader_names += ['effect_blur_spv', 'effect_backdrop_spv',
-                        'effect_blur_16f_spv', 'effect_backdrop_16f_spv',
-                        'effect_shadow_spv', 'effect_shadow_16f_spv']
 endif
 
-#Generated shader headers for the no - #embed fallback(MSVC cl / Apple
-#Clang).The C sources pick per translation unit via __has_embed, so the
-#headers must exist regardless of host compiler; each is one small
-#script run over the matching.spv.
-if flux_shader_spvs.length() > 0
-  spv2h_py = import('python').find_installation('python3')
-  spv2h = files('../../tools/build/spv2h.py')
-  foreach i : range(flux_shader_spvs.length())
-    flux_extra_inputs += custom_target(flux_shader_names[i] + '.h',
-      input   : flux_shader_spvs[i],
-      output  : flux_shader_names[i] + '.h',
-      command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', flux_shader_names[i]],
-    )
-  endforeach
-#ccache does not hash C23 #embed payloads(observed 4.13.6) : without
-#this, editing a shader silently reuses the previous object.The
-#manifest header folds the.spv bytes' hash into the preprocessed
-#source of every #embed - consuming TU(renderer.c / scene.c / effect.c
-#include it unconditionally), so the cache key tracks shader content.
-  flux_extra_inputs += custom_target('flux_shader_manifest.h',
-    input   : flux_shader_spvs,
-    output  : 'flux_shader_manifest.h',
-    command : [spv2h_py, files('../../tools/build/shader_manifest.py'), '@OUTPUT@', '@INPUT@'],
-  )
-endif
+
 
 #Text shaping lives in the glyph sibling(ADR - 0016, ADR - 0106); libflux itself
 #depends on Vulkan + threads only.The glyph - blit primitive

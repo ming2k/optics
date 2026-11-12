@@ -28,17 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Shader bytecode: C23 #embed, or generated headers (tools/build/spv2h.py). */
-#if defined(__has_embed) && !defined(PRISM_SHADER_NO_EMBED)
-#if __has_embed("liquid_glass.comp.spv") && __has_embed("storage_clear.comp.spv") &&               \
-    __has_embed("backdrop_stats.comp.spv") && __has_embed("backdrop_frost.comp.spv") &&            \
-    __has_embed("liquid_glass_16f.comp.spv") && __has_embed("storage_clear_16f.comp.spv") &&       \
-    __has_embed("backdrop_frost_16f.comp.spv")
-#define PRISM_LAYER_SHADERS_EMBED 1
-#endif
-#endif
-
-#ifdef PRISM_LAYER_SHADERS_EMBED
+/* Shader bytecode embedded via native C23 #embed. */
 alignas(uint32_t) static const unsigned char liquid_glass_spv[] = {
 #embed "liquid_glass.comp.spv"
 };
@@ -60,15 +50,6 @@ alignas(uint32_t) static const unsigned char storage_clear_16f_spv[] = {
 alignas(uint32_t) static const unsigned char backdrop_frost_16f_spv[] = {
 #embed "backdrop_frost_16f.comp.spv"
 };
-#else
-#include "backdrop_frost_16f_spv.h"
-#include "backdrop_frost_spv.h"
-#include "backdrop_stats_spv.h"
-#include "liquid_glass_16f_spv.h"
-#include "liquid_glass_spv.h"
-#include "storage_clear_16f_spv.h"
-#include "storage_clear_spv.h"
-#endif
 
 /* Push-constant block — must match storage_clear.comp exactly. */
 typedef struct storage_clear_push {

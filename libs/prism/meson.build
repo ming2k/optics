@@ -108,56 +108,8 @@ backdrop_stats_comp_spv = custom_target('backdrop_stats.comp.spv',
              flux_sdf_inc, '@INPUT@', '-o', '@OUTPUT@'],
 )
 
-prism_c_args = ['-DPRISM_BUILDING=1', '-DPRISM_SHADER_NO_EMBED=1']
+prism_c_args = ['-DPRISM_BUILDING=1']
 prism_c_args += cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
-
-spv2h_py = import('python').find_installation('python3')
-spv2h = files('../../tools/build/spv2h.py')
-
-# Headers for fallback (no-#embed)
-liquid_glass_spv_h = custom_target('liquid_glass_spv.h',
-  input   : liquid_glass_comp_spv,
-  output  : 'liquid_glass_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'liquid_glass_spv'],
-)
-liquid_glass_16f_spv_h = custom_target('liquid_glass_16f_spv.h',
-  input   : liquid_glass_16f_comp_spv,
-  output  : 'liquid_glass_16f_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'liquid_glass_16f_spv'],
-)
-
-frosted_spv_h = custom_target('frosted_spv.h',
-  input   : frosted_comp_spv,
-  output  : 'frosted_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'frosted_spv'],
-)
-frosted_16f_spv_h = custom_target('frosted_16f_spv.h',
-  input   : frosted_16f_comp_spv,
-  output  : 'frosted_16f_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'frosted_16f_spv'],
-)
-
-acrylic_spv_h = custom_target('acrylic_spv.h',
-  input   : acrylic_comp_spv,
-  output  : 'acrylic_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'acrylic_spv'],
-)
-acrylic_16f_spv_h = custom_target('acrylic_16f_spv.h',
-  input   : acrylic_16f_comp_spv,
-  output  : 'acrylic_16f_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'acrylic_16f_spv'],
-)
-
-mica_spv_h = custom_target('mica_spv.h',
-  input   : mica_comp_spv,
-  output  : 'mica_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'mica_spv'],
-)
-mica_16f_spv_h = custom_target('mica_16f_spv.h',
-  input   : mica_16f_comp_spv,
-  output  : 'mica_16f_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'mica_16f_spv'],
-)
 
 backdrop_frost_comp_spv = custom_target('backdrop_frost.comp.spv',
   input   : 'src/shaders/backdrop_frost.comp.slang',
@@ -174,32 +126,6 @@ backdrop_frost_16f_comp_spv = custom_target('backdrop_frost_16f.comp.spv',
              flux_sdf_inc, '-DPRISM_STORAGE_RGBA16F', '@INPUT@', '-o', '@OUTPUT@'],
 )
 
-storage_clear_spv_h = custom_target('storage_clear_spv.h',
-  input   : storage_clear_comp_spv,
-  output  : 'storage_clear_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'storage_clear_spv'],
-)
-storage_clear_16f_spv_h = custom_target('storage_clear_16f_spv.h',
-  input   : storage_clear_16f_comp_spv,
-  output  : 'storage_clear_16f_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'storage_clear_16f_spv'],
-)
-backdrop_stats_spv_h = custom_target('backdrop_stats_spv.h',
-  input   : backdrop_stats_comp_spv,
-  output  : 'backdrop_stats_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'backdrop_stats_spv'],
-)
-backdrop_frost_spv_h = custom_target('backdrop_frost_spv.h',
-  input : backdrop_frost_comp_spv,
-  output : 'backdrop_frost_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'backdrop_frost_spv'],
-)
-backdrop_frost_16f_spv_h = custom_target('backdrop_frost_16f_spv.h',
-  input : backdrop_frost_16f_comp_spv,
-  output : 'backdrop_frost_16f_spv.h',
-  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'backdrop_frost_16f_spv'],
-)
-
 prism_lib = library('prism',
   'src/liquid_glass.c',
   'src/frosted.c',
@@ -213,12 +139,6 @@ prism_lib = library('prism',
   mica_comp_spv, mica_16f_comp_spv,
   backdrop_frost_comp_spv, backdrop_frost_16f_comp_spv,
   storage_clear_comp_spv, storage_clear_16f_comp_spv, backdrop_stats_comp_spv,
-  liquid_glass_spv_h, liquid_glass_16f_spv_h,
-  frosted_spv_h, frosted_16f_spv_h,
-  acrylic_spv_h, acrylic_16f_spv_h,
-  mica_spv_h, mica_16f_spv_h,
-  backdrop_frost_spv_h, backdrop_frost_16f_spv_h,
-  storage_clear_spv_h, storage_clear_16f_spv_h, backdrop_stats_spv_h,
   include_directories   : prism_inc,
   c_args                : prism_c_args,
   dependencies          : [flux_dep, m_dep],

@@ -14,7 +14,7 @@ The repository contains related but distinct versions:
 |---------|-------------------|
 | Root Meson distribution, C shared objects, and `.pc` files | `project(version:)` in `meson.build` |
 | C API compile-time/runtime version helpers | `*_VERSION_MAJOR`, `*_MINOR`, and `*_PATCH` in public headers |
-| Rust crates | `[workspace.package].version` in each `bindings/*-rs/Cargo.toml` |
+| Rust crates | `[workspace.package].version` in `bindings/Cargo.toml` |
 
 Choose which surfaces are part of the release and update them intentionally.
 Do not assume changing the root Meson version updates public header macros or
